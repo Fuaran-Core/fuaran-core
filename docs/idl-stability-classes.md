@@ -50,28 +50,72 @@ the compiler output.
 What each change class carries on each axis. Where the two columns differ, the difference is the
 point.
 
-| Change | Wire severity | F# consequence |
-|---|---|---|
-| a **required** field added | `breaking-for-emitters` | `full-literal-construction` |
-| an **optional** field added | `additive` | `full-literal-construction` |
-| a **host-only** field added | `host-surface-only` | `full-literal-construction` |
-| a field removed, or its type moved | wire-dependent | `full-literal-construction` |
-| a field's type **widened from `int` to `float`** (anywhere in it — a list element, a map value, a union argument) | `additive` | `full-literal-construction` |
-| a `fn` slot's `hostSurface` block moved | `host-surface-only` | `full-literal-construction` when its `fsharp` signature moved, else `no-generated-shape-change` |
-| a **hosted** slot's `hostSurface` block moved — its host type, its `encode` or its `decode` | `undecided` | `full-literal-construction` when its `fsharp` type moved, else `no-generated-shape-change` |
-| a field's optionality moved **into or out of** `optional` | wire-dependent | `full-literal-construction` |
-| a field's optionality moved **between** `required` and `omitDefault` | `breaking-wire` (omit-at-default is wire-visible) | `no-generated-shape-change` |
-| a node kind added or removed | `additive` / `breaking-wire` | `exhaustive-match` (a kind is a case of the generated node-kind DU) |
-| a union case added or removed | `additive` / `breaking-wire` | `exhaustive-match` |
-| an enum case added or removed | `additive` / `breaking-wire` | `exhaustive-match` |
-| an enum's **host** case names moved | `host-surface-only` | `exhaustive-match` |
-| a union, enum or record removed | wire-dependent | `type-name-reference` |
-| a union's type parameters moved | `breaking-wire` | `type-name-reference` |
-| a union, enum or record added | `additive` | `no-generated-shape-change` |
-| a tree-op added or removed | `additive` / `breaking-wire` | `no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (Phase 703). **This row changes the day that leg lands.** |
-| the declared wire shape, the hardening vocabulary, a transparent case, a kind's category, an authoring default | wire-dependent | `no-generated-shape-change` |
-| any annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape |
-| anything crossing an erased slot | `undecided` | `generated-shape-unreadable` |
+<!-- BEGIN GENERATED (Phase 293): rendered by `Diff.mappingTable` from the classifier's descriptor table.
+     Do not hand-edit — the test suite holds this section byte-equal to that string; change the rule
+     in `Diff.fs` and paste the rendered table. -->
+| Change | Wire severity | F# consequence | Classifier case |
+|---|---|---|---|
+| the artifact's own encoding version | `host-surface-only` | `no-generated-shape-change` | `ArtifactVersionChanged` |
+| the declared wire shape | `breaking-wire` | `no-generated-shape-change` | `WireShapeChanged` |
+| the hardening vocabulary | `host-surface-only` | `no-generated-shape-change` | `HardenPolicyChanged` |
+| a node kind added | `additive` | `exhaustive-match` (a kind is a case of the generated node-kind DU) | `KindAdded` |
+| a node kind removed | `breaking-wire` | `exhaustive-match` | `KindRemoved` |
+| a node kind renamed (inferred, reported beside the add and the remove it explains) | `breaking-wire` | `no-generated-shape-change` — the add and the remove carry the consequence | `KindRenamed` |
+| a kind's category | `host-surface-only` | `no-generated-shape-change` | `KindCategoryChanged` |
+| a kind's or a tree-op's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `KindAnnotationsChanged` |
+| a tree-op added | `additive` | `no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (Phase 703). **This row changes the day that leg lands.** | `OpAdded` |
+| a tree-op removed | `breaking-wire` | `no-generated-shape-change` — as for a tree-op added | `OpRemoved` |
+| a union added | `additive` | `no-generated-shape-change` — nothing could have referenced it | `UnionAdded` |
+| a union removed | `breaking-wire` | `type-name-reference` | `UnionRemoved` |
+| a union case added | `additive` | `exhaustive-match` | `UnionCaseAdded` |
+| a union case removed | `breaking-wire` | `exhaustive-match` | `UnionCaseRemoved` |
+| a union's type parameters moved | `host-surface-only` — the wire carries no type arguments | `type-name-reference` (the wrong arity) | `UnionParamsChanged` |
+| a union's transparent case | `breaking-wire` | `no-generated-shape-change` | `UnionTransparencyChanged` |
+| an enum added | `additive` | `no-generated-shape-change` | `EnumAdded` |
+| an enum removed | `breaking-wire` | `type-name-reference` | `EnumRemoved` |
+| an enum case added | `additive` | `exhaustive-match` | `EnumCaseAdded` |
+| an enum case removed | `breaking-wire` | `exhaustive-match` | `EnumCaseRemoved` |
+| an enum's **host** case names moved | `host-surface-only` | `exhaustive-match` | `EnumHostMappingChanged` |
+| an enum case's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `EnumCaseAnnotationsChanged` |
+| a record added | `additive` | `no-generated-shape-change` | `RecordAdded` |
+| a record removed | `breaking-wire` | `type-name-reference` | `RecordRemoved` |
+| a **required** field added | `breaking-for-emitters` | `full-literal-construction` | `FieldAdded` |
+| an **optional** field added | `additive` | `full-literal-construction` | `FieldAdded` |
+| a **host-only** field added | `host-surface-only` | `full-literal-construction` | `FieldAdded` |
+| a field removed | `breaking-wire`; `host-surface-only` for a host-only field | `full-literal-construction` | `FieldRemoved` |
+| a field's type moved | `breaking-wire` | `full-literal-construction` | `FieldTypeChanged` |
+| a field's type **widened from `int` to `float`** (anywhere in it — a list element, a map value, a union argument) | `additive` | `full-literal-construction` | `FieldTypeChanged` |
+| a field's type moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth — a list element, a map value, a union argument | `undecided` | `generated-shape-unreadable` | `FieldTypeChanged` |
+| a field's optionality moved **into or out of** `optional` | `breaking-for-emitters` when it became required, else `breaking-wire` | `full-literal-construction` | `FieldOptionalityChanged` |
+| a field's optionality moved **between** `required` and `omitDefault`, or its identity default moved | `breaking-for-emitters` when it became required (an emitter that omitted it now produces an invalid document); `breaking-wire` otherwise (omit-at-default is wire-visible) | `full-literal-construction` on a kind field with no authoring default — `mk<Kind>` takes a parameter for every required field, so the parameter leaves or arrives — else `no-generated-shape-change` | `FieldOptionalityChanged` |
+| a field crossed the **host-only** boundary | `breaking-wire` | `full-literal-construction` when it crossed `optional` too, else `no-generated-shape-change` | `FieldOptionalityChanged` |
+| a `fn` slot's `hostSurface` block moved | `host-surface-only` | `full-literal-construction` when its `fsharp` signature moved, else `no-generated-shape-change` | `FieldHostSurfaceChanged` |
+| a **hosted** slot's `hostSurface` block moved — its host type, its `encode` or its `decode` | `undecided` | `full-literal-construction` when its `fsharp` type moved, else `no-generated-shape-change` | `FieldHostSurfaceChanged` |
+| a field's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `FieldAnnotationsChanged` |
+| a union case's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `UnionCaseAnnotationsChanged` |
+| an authoring default added | `additive` | `full-literal-construction` when the field is required — `mk<Kind>` loses the parameter, so every call site moves — else `no-generated-shape-change` | `DefaultAdded` |
+| an authoring default removed | `breaking-for-emitters` | `full-literal-construction` when the field is required — `mk<Kind>` gains the parameter — else `no-generated-shape-change` | `DefaultRemoved` |
+| an authoring default changed | `breaking-for-emitters` | `no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not | `DefaultChanged` |
+<!-- END GENERATED -->
+
+**The table is the classifier's own (Phase 293).** Every row above is rendered from the one
+descriptor table in `Fuaran.Core.Idl.Diff` that `classify`, `consequences`, the report's sort order,
+its one-line summaries and the three §11 family predicates are all projections of — so a rule
+corrected once is corrected everywhere it is read, and a row this document shows cannot say
+something the code does not decide. Three rows read differently from the hand-copied table that
+preceded it, and in each the code was right and the copy had drifted: a union's type parameters
+moving is `host-surface-only` (the wire carries no type arguments), an `omitDefault` field becoming
+`required` is `breaking-for-emitters` (the emitter that omitted it is the one that breaks), and a
+type change across an erased slot is `undecided` at ANY depth — the rule used to test the
+top-level tag alone, so a `list` of `hosted` values reported `breaking-wire` where this document
+said undecided. Two consequence rows are new rather than corrected: an authoring default added to
+or removed from a **required** field moves `mk<Kind>`'s parameter list — the generated smart
+constructor takes a parameter for every required field with no default — so it is a construction
+break at every call site, where the axis used to read `no-generated-shape-change` for every
+default change — and a kind field moving into or out of `required` with no default to stand in is the
+same parameter arriving or leaving, which the property found the moment it read the constructors. The property test that holds the consequence axis to the generator's output
+reads the emitter that emits the constructors (`Gen.fsharpModule`), not the type emitter alone,
+which emits none.
 
 **The two corrected rules (Phase 252).**
 

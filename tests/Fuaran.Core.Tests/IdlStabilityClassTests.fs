@@ -116,6 +116,24 @@ module private Fixtures =
             [ fld "body" TStr (OmitDefault(VStr ""))
               fld "loudness" (TEnum "Loudness") Optional ]
 
+    /// Phase 293 — an authoring default on the REQUIRED `body`: `mkNote` loses its `body`
+    /// parameter, a construction break at every call site, with no record member moved.
+    let defaultOnRequired: Idl =
+        { baseIdl with
+            Defaults =
+                [ { Kind = "Note"
+                    Field = "body"
+                    Value = VStr "" } ] }
+
+    /// Phase 293 — an authoring default on the OPTIONAL `loudness`: the constructor's body
+    /// moves (`Some Plain` where it wrote `None`), its parameter list does not.
+    let defaultOnOptional: Idl =
+        { baseIdl with
+            Defaults =
+                [ { Kind = "Note"
+                    Field = "loudness"
+                    Value = VEnum "Plain" } ] }
+
 let private verdict (before: Idl) (after: Idl) : Diff.Verdict =
     match Diff.classifyDiff before after with
     | Ok v -> v
@@ -206,6 +224,22 @@ let private types (idl: Idl) : string =
     match Gen.fsharpTypes idl with
     | Ok s -> s
     | Error e -> failtestf "the type emitter refused a revision under test: %A" e
+
+/// Phase 293 — the generated MODULE for one revision: the layer that carries the `mk<Kind>`
+/// smart constructors, which the type emitter alone does not. The consequence property reads
+/// the constructors' parameter lists off this text.
+let private generatedModule (idl: Idl) : string =
+    match Gen.fsharpModule "Generated" idl (idl.Kinds |> List.map _.Tag) with
+    | Ok s -> s
+    | Error e -> failtestf "the module emitter refused a revision under test: %A" e
+
+/// The smart constructors' heads — `let mk<Kind> <params> : Node<args> =` — as the emitted
+/// source spells them.
+let private constructorHeads (src: string) =
+    src.Replace("\r\n", "\n").Split('\n')
+    |> Array.map (fun l -> l.Trim())
+    |> Array.filter (fun l -> l.StartsWith "let mk")
+    |> Set.ofArray
 
 // ---------------------------------------------------------------------------
 // The command, exercised as a command.
@@ -337,19 +371,26 @@ let tests =
                   Diff.ExhaustiveMatch
                   "a kind is a case of the generated node-kind DU")
 
-          testCase "an optionality move that keeps the F# type reports NO shape change" (fun _ ->
-              // required -> omitDefault is wire-visible (the omit-at-default bytes
-              // move) and emits the same non-`option` member, so the two axes part
-              // company in the other direction. Decidable from the artifact, so
-              // decided — not reported conservatively.
+          testCase "an optionality move that keeps the record member still moves the smart constructor" (fun _ ->
+              // required -> omitDefault is wire-visible (the omit-at-default bytes move) and
+              // emits the same non-`option` RECORD member — and until Phase 293 this test
+              // asserted no shape change on that basis. The consequence property, once it read
+              // the emitter that emits the constructors, refuted it: `mkNote` takes a parameter
+              // for every required field with no default, so `body` leaving `required` shortens
+              // the constructor and breaks every call site. Decidable from the artifact, so
+              // decided — against the whole generated layer, not the record alone.
               let v = verdict Fixtures.baseIdl Fixtures.omitDefaultInstead
 
               Expect.isNonEmpty v.Changes "the wire axis reports the change"
 
-              Expect.equal
+              Expect.contains
                   v.FSharpConsequences
-                  [ Diff.NoGeneratedShapeChange ]
-                  "and the F# axis reports that no declaration moved")
+                  Diff.FullLiteralConstruction
+                  "the F# axis reports the construction break at `mkNote`'s call sites"
+
+              Expect.isFalse
+                  (List.contains Diff.NoGeneratedShapeChange v.FSharpConsequences)
+                  "and does not also claim nothing moved")
 
           testCase "an identical pair is unchanged, with no consequences at all" (fun _ ->
               let v = verdict Fixtures.baseIdl Fixtures.baseIdl
@@ -453,9 +494,13 @@ let tests =
                     "an optional field added", Fixtures.optionalFieldAdded
                     "a union case added", Fixtures.unionCaseAdded
                     "an enum case added", Fixtures.enumCaseAdded
-                    "an optionality move that keeps the type", Fixtures.omitDefaultInstead ]
+                    "an optionality move that keeps the type", Fixtures.omitDefaultInstead
+                    // Phase 293 — the two default shapes: a parameter leaves `mkNote`, or nothing moves.
+                    "an authoring default on a required field", Fixtures.defaultOnRequired
+                    "an authoring default on an optional field", Fixtures.defaultOnOptional ]
 
               let before = types Fixtures.baseIdl
+              let beforeHeads = constructorHeads (generatedModule Fixtures.baseIdl)
 
               /// The generated record MEMBERS and DU CASES, as the emitted source
               /// spells them — read off the text, never re-derived from the IDL.
@@ -477,10 +522,17 @@ let tests =
                   let membersMoved = members before <> members afterSrc
                   let casesMoved = duCases before <> duCases afterSrc
 
+                  // Phase 293 — a construction site is a record literal OR a smart-constructor
+                  // call: the property reads the emitter that emits the constructors, because
+                  // the type emitter alone cannot exhibit a `mk<Kind>` parameter leaving.
+                  let headsMoved = beforeHeads <> constructorHeads (generatedModule after)
+
                   Expect.equal
                       (List.contains Diff.FullLiteralConstruction cs)
-                      membersMoved
-                      (sprintf "%s: the construction consequence tracks the emitted record members" name)
+                      (membersMoved || headsMoved)
+                      (sprintf
+                          "%s: the construction consequence tracks the emitted record members and the smart constructors' parameter lists"
+                          name)
 
                   Expect.equal
                       (List.contains Diff.ExhaustiveMatch cs)
@@ -599,6 +651,34 @@ let tests =
 
               for c in Diff.allClasses do
                   Expect.stringContains text (Diff.classLabel c) "and the verdict class")
+
+          testCase
+              "the docs mapping table IS the classifier's descriptor table, byte for byte, and names every Change case"
+              (fun _ ->
+                  // Phase 293. The hand-copied table drifted three rows from the code; the section
+                  // between the markers is now `Diff.mappingTable` verbatim, so the next drift fails
+                  // here with the rendered table in the message, ready to paste.
+                  let doc = Snapshots.repoFile "docs/idl-stability-classes.md"
+                  let text = (File.ReadAllText doc).Replace("\r\n", "\n")
+                  let beginMarker = "<!-- BEGIN GENERATED"
+                  let endMarker = "<!-- END GENERATED -->"
+                  let i = text.IndexOf beginMarker
+                  let j = text.IndexOf endMarker
+                  Expect.isTrue (i >= 0 && j > i) "the document carries the generated section's markers"
+                  // The marker comment runs to its own `-->`; the table starts on the next line.
+                  let afterBegin = text.IndexOf("-->\n", i) + 4
+                  let section = text.Substring(afterBegin, j - afterBegin)
+
+                  Expect.equal
+                      section
+                      (Diff.mappingTable.Replace("\r\n", "\n"))
+                      "docs/idl-stability-classes.md's generated section is stale — paste `Diff.mappingTable` between the markers"
+
+                  for case in Microsoft.FSharp.Reflection.FSharpType.GetUnionCases typeof<Diff.Change> do
+                      Expect.stringContains
+                          Diff.mappingTable
+                          (sprintf "`%s`" case.Name)
+                          (sprintf "the table has a row for every classifier case — %s" case.Name))
 
           // -----------------------------------------------------------------
           // The command, over the committed fixtures. Both calling shapes, both

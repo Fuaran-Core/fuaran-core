@@ -554,167 +554,6 @@ module Diff =
                       yield make (oldName, newName)
                   | _ -> () ]
 
-    /// Deterministic ordering. Sorted by a per-case rank then by the change's own
-    /// key, so identical inputs produce byte-identical output regardless of map
-    /// enumeration order.
-    let private sortKey (c: Change) : string * string =
-        let k rank key = (rank: string), (key: string)
-
-        match c with
-        | ArtifactVersionChanged _ -> k "00" ""
-        | WireShapeChanged _ -> k "01" ""
-        | HardenPolicyChanged _ -> k "02" ""
-        | KindAdded t -> k "10" t
-        | KindRemoved t -> k "11" t
-        | KindRenamed(o, n) -> k "12" (o + ">" + n)
-        | KindCategoryChanged(t, _, _) -> k "13" t
-        | KindAnnotationsChanged(o, _, _) -> k "14" o.Key
-        | OpAdded t -> k "20" t
-        | OpRemoved t -> k "21" t
-        | UnionAdded n -> k "30" n
-        | UnionRemoved n -> k "31" n
-        | UnionCaseAdded(u, c) -> k "32" (u + "." + c)
-        | UnionCaseRemoved(u, c) -> k "33" (u + "." + c)
-        | UnionParamsChanged(n, _, _) -> k "34" n
-        | UnionTransparencyChanged(n, _, _) -> k "35" n
-        | EnumAdded n -> k "40" n
-        | EnumRemoved n -> k "41" n
-        | EnumCaseAdded(e, w) -> k "42" (e + "." + w)
-        | EnumCaseRemoved(e, w) -> k "43" (e + "." + w)
-        | EnumHostMappingChanged(n, _, _) -> k "44" n
-        | EnumCaseAnnotationsChanged(e, w, _, _) -> k "45" (e + "." + w)
-        | RecordAdded n -> k "50" n
-        | RecordRemoved n -> k "51" n
-        | FieldAdded(o, f) -> k "60" (o.Key + "/" + f.Name)
-        | FieldRemoved(o, n, _) -> k "61" (o.Key + "/" + n)
-        | FieldTypeChanged(o, n, _, _) -> k "62" (o.Key + "/" + n)
-        | FieldOptionalityChanged(o, n, _, _) -> k "63" (o.Key + "/" + n)
-        | FieldHostSurfaceChanged(o, n, _, _) -> k "64" (o.Key + "/" + n)
-        | FieldAnnotationsChanged(o, n, _, _) -> k "65" (o.Key + "/" + n)
-        | UnionCaseAnnotationsChanged(u, c, _, _) -> k "66" (u + "." + c)
-        | DefaultAdded(kd, f, _) -> k "70" (kd + "/" + f)
-        | DefaultRemoved(kd, f, _) -> k "71" (kd + "/" + f)
-        | DefaultChanged(kd, f, _, _) -> k "72" (kd + "/" + f)
-
-    let changes (before: Snapshot) (after: Snapshot) : Change list =
-        let unordered =
-            [ if before.Version <> after.Version then
-                  ArtifactVersionChanged(before.Version, after.Version)
-
-              if before.Wire <> after.Wire then
-                  WireShapeChanged(before.Wire, after.Wire)
-
-              if before.Harden <> after.Harden then
-                  HardenPolicyChanged(before.Harden, after.Harden)
-
-              yield!
-                  diffNamed KindAdded KindRemoved (fun tag b a -> diffFields (OKind tag) b a) before.Kinds after.Kinds
-
-              yield! renamePairs KindRenamed before.Kinds after.Kinds
-
-              for KeyValue(tag, cat) in after.KindCategory do
-                  match Map.tryFind tag before.KindCategory with
-                  | Some old when old <> cat -> KindCategoryChanged(tag, old, cat)
-                  | _ -> ()
-
-              // Phase 119 — a kind's own annotations, reported only for a tag both
-              // revisions carry: a kind that arrived or left is already `KindAdded` /
-              // `KindRemoved`, and saying it also gained annotations adds nothing.
-              for KeyValue(tag, ann) in after.KindAnnotations do
-                  match Map.tryFind tag before.KindAnnotations with
-                  | Some old when old <> ann -> KindAnnotationsChanged(OKind tag, old, ann)
-                  | _ -> ()
-
-              yield! diffNamed OpAdded OpRemoved (fun tag b a -> diffFields (OOp tag) b a) before.Ops after.Ops
-
-              for KeyValue(tag, ann) in after.OpAnnotations do
-                  match Map.tryFind tag before.OpAnnotations with
-                  | Some old when old <> ann -> KindAnnotationsChanged(OOp tag, old, ann)
-                  | _ -> ()
-
-              yield!
-                  diffNamed
-                      UnionAdded
-                      UnionRemoved
-                      (fun name b a ->
-                          [ if b.Params <> a.Params then
-                                UnionParamsChanged(name, b.Params, a.Params)
-
-                            if b.TransparentCase <> a.TransparentCase then
-                                UnionTransparencyChanged(name, b.TransparentCase, a.TransparentCase)
-
-                            yield!
-                                diffNamed
-                                    (fun c -> UnionCaseAdded(name, c))
-                                    (fun c -> UnionCaseRemoved(name, c))
-                                    (fun c bf af ->
-                                        [ if bf.Annotations <> af.Annotations then
-                                              UnionCaseAnnotationsChanged(name, c, bf.Annotations, af.Annotations)
-
-                                          yield! diffFields (OUnionCase(name, c)) bf.Fields af.Fields ])
-                                    b.Cases
-                                    a.Cases ])
-                      before.Unions
-                      after.Unions
-
-              yield!
-                  diffNamed
-                      EnumAdded
-                      EnumRemoved
-                      (fun name b a ->
-                          [ for w in a.WireCases do
-                                if not (List.contains w b.WireCases) then
-                                    EnumCaseAdded(name, w)
-
-                            for w in b.WireCases do
-                                if not (List.contains w a.WireCases) then
-                                    EnumCaseRemoved(name, w)
-
-                            if b.HostCases <> a.HostCases then
-                                EnumHostMappingChanged(name, b.HostCases, a.HostCases)
-
-                            // Phase 119 — per-case annotations, over the cases both
-                            // revisions carry. A case that arrived or left is already
-                            // `EnumCaseAdded` / `EnumCaseRemoved`; an absent entry on
-                            // either side reads as `""`, so a first marking and a full
-                            // withdrawal both surface here, which is what the classifier
-                            // grades `Additive` and `HostSurfaceOnly` respectively.
-                            for w in a.WireCases do
-                                if List.contains w b.WireCases then
-                                    let bw = b.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
-                                    let aw = a.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
-
-                                    if bw <> aw then
-                                        EnumCaseAnnotationsChanged(name, w, bw, aw) ])
-                      before.Enums
-                      after.Enums
-
-              yield!
-                  diffNamed
-                      RecordAdded
-                      RecordRemoved
-                      (fun name b a -> diffFields (ORecord name) b a)
-                      before.Records
-                      after.Records
-
-              yield! diffFields ONodeEnvelope before.NodeFields after.NodeFields
-
-              for KeyValue((kd, f), v) in after.Defaults do
-                  match Map.tryFind (kd, f) before.Defaults with
-                  | None -> DefaultAdded(kd, f, v)
-                  | Some old when old <> v -> DefaultChanged(kd, f, old, v)
-                  | Some _ -> ()
-
-              for KeyValue((kd, f), v) in before.Defaults do
-                  if not (Map.containsKey (kd, f) after.Defaults) then
-                      DefaultRemoved(kd, f, v) ]
-
-        unordered |> List.sortBy sortKey
-
-    // -----------------------------------------------------------------------
-    // Classification — `STABILITY.md` + `VOCABULARY.md` §4, applied.
-    // -----------------------------------------------------------------------
-
     type Severity =
         /// Every previously-valid document stays valid and every
         /// previously-conformant emitter stays conformant.
@@ -750,8 +589,6 @@ module Diff =
           Severity: Severity
           Rationale: string
           Citation: string }
-
-    let private describeOpt (f: FieldSnap) = f.Opt
 
     /// A field added to an existing owner. The optionality class decides
     /// everything: `required` is the one that breaks emitters, and it is the one
@@ -942,317 +779,1340 @@ module Diff =
         | Ok b, Ok a -> widensIntToFloat b a = Some true
         | _ -> false
 
+    /// What a classified change does to a CONSUMER'S F# SOURCE compiled against the
+    /// generated structural layer. A different question from what it does to a
+    /// document, and the two answers diverge routinely — which is the whole reason
+    /// this axis is reported beside `Severity` rather than derived from it.
+    ///
+    /// Each case is named for the SITE that stops working, because that is what a
+    /// consumer reads in the compiler output.
+    type FSharpConsequence =
+        /// **Construction sites.** `Gen.fsharpTypes` emits a kind, a record and a
+        /// union case as F# RECORDS, and a record literal must name every field —
+        /// so a field arriving, leaving or changing type breaks every full literal
+        /// that builds one: `FS0764` ("No assignment given for field") on an
+        /// arrival, `FS1129` (no such field) on a departure, `FS0001` on a type
+        /// move.
+        ///
+        /// **Independent of optionality.** `string option` is still a field the
+        /// literal must name, so an OPTIONAL field added lands here too while its
+        /// wire severity is `Additive`. That divergence is the row this table
+        /// exists for: reading the wire verdict alone says a consumer repins
+        /// without source changes, and it does not.
+        | FullLiteralConstruction
+        /// **Match sites.** An enum, a value-union and the per-vocabulary node-kind
+        /// discriminator each emit as a closed F# DU, so a case arriving makes every
+        /// exhaustive `match` incomplete — `FS0025`, a WARNING under this repo's
+        /// `TreatWarningsAsErrors=false` and an error wherever a consumer sets it,
+        /// and a `MatchFailureException` at run time on the first value carrying the
+        /// new case — and a case leaving makes the arm naming it undefined
+        /// (`FS0039`).
+        | ExhaustiveMatch
+        /// **Reference sites.** A whole generated TYPE left, or its type parameters
+        /// moved, so a consumer naming it no longer resolves (`FS0039`) or applies
+        /// the wrong arity. A type ARRIVING is not this: nothing could have
+        /// referenced it.
+        | TypeNameReference
+        /// **Neither — until the package slot is reused.** The generated shape
+        /// moved, so a consumer whose extracted package cache still holds the
+        /// previous assembly for the SAME version compiles against one shape and
+        /// runs against the other. It surfaces as an `InvalidCastException` thrown
+        /// from code that type-checked, at the first value crossing the boundary,
+        /// with nothing in the source to read.
+        ///
+        /// It ACCOMPANIES the three classes above rather than replacing them: those
+        /// are what a clean rebuild reports, this is what a stale restore reports
+        /// instead of them. Which is why a shape change wants a fresh version
+        /// rather than a repack of a slot consumers already hold.
+        | StalePackageSlot
+        /// The generated shape did not move: the change is on the wire only, in the
+        /// host-surface declarations, in an annotation, or in an authoring default.
+        | NoGeneratedShapeChange
+        /// The change crosses an ERASED slot (`hosted` / `json` / `opaque`), so
+        /// nothing in the artifact says whether the generated shape moved.
+        /// Reported, never guessed — `Unclassifiable`'s counterpart on this axis,
+        /// and for the same reason: a confident wrong answer on the commonest kind
+        /// of IDL tidy-up gets the whole report skimmed.
+        | GeneratedShapeUnreadable
+
+    /// The stable label of a consequence class. A contract: these strings are what
+    /// an external gate greps and what the `docs/` table names.
+    let consequenceLabel =
+        function
+        | FullLiteralConstruction -> "full-literal-construction"
+        | ExhaustiveMatch -> "exhaustive-match"
+        | TypeNameReference -> "type-name-reference"
+        | StalePackageSlot -> "stale-package-slot"
+        | NoGeneratedShapeChange -> "no-generated-shape-change"
+        | GeneratedShapeUnreadable -> "generated-shape-unreadable"
+
+    /// One sentence per consequence class — the reason it applies, for a report that
+    /// has to stand on its own beside a compiler message.
+    let consequenceWhy =
+        function
+        | FullLiteralConstruction ->
+            "every full record literal that builds this owner stops compiling — FS0764 on an added field, FS1129 on a removed one, FS0001 on a moved type. True for an OPTIONAL field too: a literal must name it."
+        | ExhaustiveMatch ->
+            "every exhaustive match over the generated DU stops being exhaustive — FS0025 (a warning by default, an error under TreatWarningsAsErrors, a MatchFailureException at run time) on an added case, FS0039 on a removed one."
+        | TypeNameReference ->
+            "a generated type name no longer resolves, or no longer takes the arity a consumer applies — FS0039."
+        | StalePackageSlot ->
+            "no compile event at all if the package slot was REPACKED rather than advanced: a consumer restoring the same version from a warm cache compiles against the new shape and runs against the old one, and the mismatch arrives as an InvalidCastException from code that type-checked."
+        | NoGeneratedShapeChange ->
+            "the generated declarations are unchanged, so no construction, match or reference site moves."
+        | GeneratedShapeUnreadable ->
+            "the change crosses an erased slot whose admitted values the artifact does not state, so whether the generated shape moved cannot be read off it."
+
+    /// Every consequence class, in report order — so a renderer and a document
+    /// enumerate the table rather than each restating it.
+    let allConsequences: FSharpConsequence list =
+        [ FullLiteralConstruction
+          ExhaustiveMatch
+          TypeNameReference
+          StalePackageSlot
+          NoGeneratedShapeChange
+          GeneratedShapeUnreadable ]
+
+    // -----------------------------------------------------------------------
+    // Phase 293 — THE DESCRIPTOR TABLE. One row per case of the `Change` union, carrying
+    // everything the classifier used to decide in seven parallel matches: the sort rank, the
+    // §11 family the change reaches, the wire verdict (severity, rationale, citation), the F#
+    // consequence, the one-line summary, and the rows the `docs/` table shows for it. `classify`,
+    // `consequences`, `sortKey`, `summarise`, the three family predicates and `mappingTable` are
+    // all projections of `rules` — so a rule corrected once is corrected everywhere it is read,
+    // which is what Phase 252's two corrections needed and did not have.
+    // -----------------------------------------------------------------------
+
+    /// Which `WIRE_FORMAT.md` §11 strand a change reaches — the three predicates the host-roster
+    /// join reads.
+    type private Family =
+        /// Alters the NodeKind set: reaches the authoring veneers, the analyzer vocabulary, the
+        /// native render arms and `manifest.kinds`.
+        | KindSet
+        /// Alters a `$type` discriminator family OTHER than NodeKind.
+        | DiscriminatorFamily
+        /// Alters a closed string set.
+        | EnumSet
+        | NoFamily
+
+    /// One row of the `docs/` mapping table.
+    type private DocRow =
+        { Subject: string
+          Wire: string
+          FSharp: string }
+
+    /// What a snapshot pair knows about a kind's field that the `Change` does not carry: its
+    /// optionality class (`Some optClass` when a snapshot has the field), and whether an
+    /// authoring default is declared for it on either side.
+    type private Context =
+        { Optionality: string -> string -> string option
+          HasDefault: string -> string -> bool }
+
+    /// The context-free reading — no snapshot to ask.
+    let private noContext: Context =
+        { Optionality = fun _ _ -> None
+          HasDefault = fun _ _ -> false }
+
+    type private Rule =
+        {
+            /// The `Change` case this rule is about — the join key, read off the value by reflection.
+            Case: string
+            Rank: string
+            Family: Family
+            /// The change's own sort key within its rank.
+            Key: Change -> string
+            /// The wire verdict: severity, rationale, citation.
+            Verdict: Change -> Severity * string * string
+            /// The F# consequence set, given the kind-field optionality lookup a snapshot pair supplies.
+            Consequence: Context -> Change -> FSharpConsequence list
+            Summary: Change -> string
+            Doc: DocRow list
+        }
+
+    let private misapplied (rule: string) (c: Change) : 'a =
+        invalidArg "c" (sprintf "rule %s applied to %A" rule c)
+
+    let private construction = [ FullLiteralConstruction; StalePackageSlot ]
+    let private matching = [ ExhaustiveMatch; StalePackageSlot ]
+    let private reference = [ TypeNameReference; StalePackageSlot ]
+    let private noShape = [ NoGeneratedShapeChange ]
+
+    let private erasedTag (t: string) =
+        t = "hosted" || t = "json" || t = "opaque"
+
+    /// Phase 293 — the erased-slot rule walks NESTED slots: a list element, a map value or a
+    /// union argument that is `hosted` / `json` / `opaque` is as undecidable as a bare one, and
+    /// the rule used to test the top-level tag alone, so a nested crossing read as `breaking-wire`
+    /// where the document said undecided. Returns the first erased tag met, outermost first.
+    let rec private erasedWithin (v: JVal) : string option =
+        match v with
+        | JObj fs ->
+            let own =
+                fs
+                |> List.tryPick (fun (k, x) ->
+                    match k, x with
+                    | "$type", JStr t when erasedTag t -> Some t
+                    | _ -> None)
+
+            match own with
+            | Some t -> Some t
+            | None -> fs |> List.tryPick (fun (_, x) -> erasedWithin x)
+        | JArr xs -> xs |> List.tryPick erasedWithin
+        | _ -> None
+
+    let private erasedIn (f: FieldSnap) : string option =
+        if erasedTag f.TypeTag then
+            Some f.TypeTag
+        else
+            match Json.parse f.TypeWire with
+            | Ok v -> erasedWithin v
+            | Error _ -> None
+
+    let private rule
+        (case: string)
+        (rank: string)
+        (family: Family)
+        (key: Change -> string)
+        (verdict: Change -> Severity * string * string)
+        (consequence: Context -> Change -> FSharpConsequence list)
+        (summary: Change -> string)
+        (doc: DocRow list)
+        : Rule =
+        { Case = case
+          Rank = rank
+          Family = family
+          Key = key
+          Verdict = verdict
+          Consequence = consequence
+          Summary = summary
+          Doc = doc }
+
+    let private row (subject: string) (wire: string) (fsharp: string) =
+        { Subject = subject
+          Wire = wire
+          FSharp = fsharp }
+
+    let private always (cs: FSharpConsequence list) : Context -> Change -> FSharpConsequence list = fun _ _ -> cs
+
+    /// The annotation rows share one verdict and one documented shape.
+    let private annotationRow (subject: string) =
+        row
+            subject
+            "`additive` on a first marking, `host-surface-only` otherwise"
+            "`no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape"
+
+    /// A `mk<Kind>` smart constructor takes a parameter for every REQUIRED field with no
+    /// authoring default (`Gen.fsharpModuleWith`'s `defaultsDecl`), so a default added to or
+    /// removed from such a field moves the constructor's parameter list — a construction break
+    /// at every call site. On any other optionality the constructor's BODY moves and its shape
+    /// does not. Without a snapshot to ask (the context-free `consequences`), the field is read
+    /// as required: the answer that costs a consumer a rebuild rather than a surprise.
+    let private defaultConsequence (ctx: Context) (kind: string) (field: string) =
+        match ctx.Optionality kind field with
+        | Some "required"
+        | None -> construction
+        | Some _ -> noShape
+
+    /// The same parameter rule from the OPTIONALITY side: a kind field moving into or out of
+    /// `required` (with no authoring default to stand in for the parameter) is a parameter
+    /// arriving at or leaving `mk<Kind>`, whichever class is on the other side. Found by the
+    /// consequence property (Phase 293): `required -> omitDefault` emits the same record member
+    /// and a shorter constructor, which the axis used to read as no shape change.
+    let private requiredFlipped (ctx: Context) (owner: Owner) (field: string) (before: FieldSnap) (after: FieldSnap) =
+        match owner with
+        | OKind tag ->
+            (before.OptClass = "required") <> (after.OptClass = "required")
+            && not (ctx.HasDefault tag field)
+        | _ -> false
+
+    let private rules: Rule list =
+        [ rule
+              "ArtifactVersionChanged"
+              "00"
+              NoFamily
+              (fun _ -> "")
+              (function
+              | ArtifactVersionChanged(b, a) ->
+                  HostSurfaceOnly,
+                  sprintf
+                      "the artifact ENCODING version moved %d → %d. This describes the shape of idl.json itself, not the vocabulary it carries — reconcile the two revisions' encodings before trusting any other row."
+                      b
+                      a,
+                  "Artifact.version"
+              | c -> misapplied "ArtifactVersionChanged" c)
+              (always noShape)
+              (function
+              | ArtifactVersionChanged(b, a) -> sprintf "artifact encoding version %d -> %d" b a
+              | c -> misapplied "ArtifactVersionChanged" c)
+              [ row "the artifact's own encoding version" "`host-surface-only`" "`no-generated-shape-change`" ]
+
+          rule
+              "WireShapeChanged"
+              "01"
+              NoFamily
+              (fun _ -> "")
+              (function
+              | WireShapeChanged(b, a) ->
+                  BreakingWire,
+                  sprintf
+                      "the declared WIRE SHAPE moved %s → %s — the discriminator key, the node-envelope nesting and/or the canonical key order relocate every tag or every byte on the wire, so every document's bytes move. A `/v2/` major event by definition."
+                      b
+                      a,
+                  "Idl.WireShape (Phases 108/109/111); VOCABULARY.md §4.2"
+              | c -> misapplied "WireShapeChanged" c)
+              (always noShape)
+              (function
+              | WireShapeChanged(b, a) -> sprintf "wire shape changed: %s -> %s" b a
+              | c -> misapplied "WireShapeChanged" c)
+              [ row "the declared wire shape" "`breaking-wire`" "`no-generated-shape-change`" ]
+
+          rule
+              "HardenPolicyChanged"
+              "02"
+              NoFamily
+              (fun _ -> "")
+              (function
+              | HardenPolicyChanged(b, a) ->
+                  HostSurfaceOnly,
+                  sprintf
+                      "the declared HARDENING vocabulary moved %s → %s — the codegen trust boundary now gates a different kind, or mints a different placeholder, or matches a different literal case. Nothing here moves a document's bytes BY ITSELF: the one wire-visible member is the transparent-case set, whose effect is reported per union as its own row. What changes is what SCAFFOLDED source contains, so re-scaffold anything generated against the old declaration."
+                      b
+                      a,
+                  "Idl.HardenPolicy (Phase 116); STABILITY.md the IDL engine"
+              | c -> misapplied "HardenPolicyChanged" c)
+              (always noShape)
+              (function
+              | HardenPolicyChanged(b, a) -> sprintf "harden policy changed: %s -> %s" b a
+              | c -> misapplied "HardenPolicyChanged" c)
+              [ row "the hardening vocabulary" "`host-surface-only`" "`no-generated-shape-change`" ]
+
+          rule
+              "KindAdded"
+              "10"
+              KindSet
+              (function
+              | KindAdded t -> t
+              | c -> misapplied "KindAdded" c)
+              (function
+              | KindAdded t ->
+                  Additive,
+                  sprintf
+                      "kind `%s` added — a new `$type` branch on the schema's top-level `oneOf`; every previously-valid document stays valid."
+                      t,
+                  "VOCABULARY.md §4.1 (additive `core@1.(x+1)` profile minor); STABILITY.md (NodeKind addition = minor)"
+              | c -> misapplied "KindAdded" c)
+              (always matching)
+              (function
+              | KindAdded t -> sprintf "kind added: %s" t
+              | c -> misapplied "KindAdded" c)
+              [ row
+                    "a node kind added"
+                    "`additive`"
+                    "`exhaustive-match` (a kind is a case of the generated node-kind DU)" ]
+
+          rule
+              "KindRemoved"
+              "11"
+              KindSet
+              (function
+              | KindRemoved t -> t
+              | c -> misapplied "KindRemoved" c)
+              (function
+              | KindRemoved t ->
+                  BreakingWire,
+                  sprintf
+                      "kind `%s` REMOVED — retiring a `$type` discriminator invalidates every document that used it. A `/v2/` major event, and per §4.2 a thing to do before publication or not at all."
+                      t,
+                  "VOCABULARY.md §4.2 (removal / rename = a `v2` major)"
+              | c -> misapplied "KindRemoved" c)
+              (always matching)
+              (function
+              | KindRemoved t -> sprintf "kind removed: %s" t
+              | c -> misapplied "KindRemoved" c)
+              [ row "a node kind removed" "`breaking-wire`" "`exhaustive-match`" ]
+
+          rule
+              "KindRenamed"
+              "12"
+              KindSet
+              (function
+              | KindRenamed(o, n) -> o + ">" + n
+              | c -> misapplied "KindRenamed" c)
+              (function
+              | KindRenamed(o, n) ->
+                  BreakingWire,
+                  sprintf
+                      "INFERRED rename `%s` → `%s` (identical field signature, unique on both sides). Inference, not a declaration — the wire records no identity beyond the `$type` string. The add + remove above stand on their own; this row only explains them."
+                      o
+                      n,
+                  "VOCABULARY.md §4.2 (a `$type` rename is a breaking wire change)"
+              | c -> misapplied "KindRenamed" c)
+              // Reported ALONGSIDE the add + remove that explain it, and those two rows carry
+              // the consequence; claiming it again here would double-count.
+              (always noShape)
+              (function
+              | KindRenamed(o, n) -> sprintf "kind renamed (inferred): %s -> %s" o n
+              | c -> misapplied "KindRenamed" c)
+              [ row
+                    "a node kind renamed (inferred, reported beside the add and the remove it explains)"
+                    "`breaking-wire`"
+                    "`no-generated-shape-change` — the add and the remove carry the consequence" ]
+
+          rule
+              "KindCategoryChanged"
+              "13"
+              NoFamily
+              (function
+              | KindCategoryChanged(t, _, _) -> t
+              | c -> misapplied "KindCategoryChanged" c)
+              (function
+              | KindCategoryChanged(t, b, a) ->
+                  HostSurfaceOnly,
+                  sprintf
+                      "kind `%s` re-categorised %s → %s. `Category` is metadata and is never serialised (Idl.IdlKind) — no document changes."
+                      t
+                      b
+                      a,
+                  "Idl.IdlKind (`Category` is metadata, not serialised)"
+              | c -> misapplied "KindCategoryChanged" c)
+              (always noShape)
+              (function
+              | KindCategoryChanged(t, b, a) -> sprintf "kind %s category %s -> %s" t b a
+              | c -> misapplied "KindCategoryChanged" c)
+              [ row "a kind's category" "`host-surface-only`" "`no-generated-shape-change`" ]
+
+          rule
+              "KindAnnotationsChanged"
+              "14"
+              NoFamily
+              (function
+              | KindAnnotationsChanged(o, _, _) -> o.Key
+              | c -> misapplied "KindAnnotationsChanged" c)
+              (function
+              // Phase 119 — the same three grades, for the same reason: a kind-level or
+              // enum-case marking is no more on the wire than a field's, so marking a whole
+              // node kind for retirement costs no breaking bump and the two-release
+              // retirement path the charter needs is affordable.
+              | KindAnnotationsChanged(owner, b, a) -> classifyAnnotations owner.Describe b a
+              | c -> misapplied "KindAnnotationsChanged" c)
+              (always noShape)
+              (function
+              | KindAnnotationsChanged(o, b, _) ->
+                  sprintf "annotations %s: %s" (if b = "" then "declared" else "changed") o.Describe
+              | c -> misapplied "KindAnnotationsChanged" c)
+              [ annotationRow "a kind's or a tree-op's annotation set" ]
+
+          rule
+              "OpAdded"
+              "20"
+              DiscriminatorFamily
+              (function
+              | OpAdded t -> t
+              | c -> misapplied "OpAdded" c)
+              (function
+              | OpAdded t ->
+                  Additive,
+                  sprintf "op `%s` added — a new `$type` branch on the TreeOp union; existing op streams stay valid." t,
+                  "WIRE_FORMAT.md §3.4; VOCABULARY.md §4.1 by the same additive argument"
+              | c -> misapplied "OpAdded" c)
+              // The op vocabulary has no generated F# shape at all — the F# type emitter leaves
+              // that leg unshipped (Phase 703) — so an op change moves no declaration. This row
+              // changes the day that leg lands.
+              (always noShape)
+              (function
+              | OpAdded t -> sprintf "op added: %s" t
+              | c -> misapplied "OpAdded" c)
+              [ row
+                    "a tree-op added"
+                    "`additive`"
+                    "`no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (Phase 703). **This row changes the day that leg lands.**" ]
+
+          rule
+              "OpRemoved"
+              "21"
+              DiscriminatorFamily
+              (function
+              | OpRemoved t -> t
+              | c -> misapplied "OpRemoved" c)
+              (function
+              | OpRemoved t ->
+                  BreakingWire,
+                  sprintf
+                      "op `%s` REMOVED — every persisted op stream carrying it becomes undecodable, and an op stream is a hash-chained archive, not a live message. Strictly worse than retiring a kind."
+                      t,
+                  "VOCABULARY.md §4.2; STABILITY.md (op-stream wire shape)"
+              | c -> misapplied "OpRemoved" c)
+              (always noShape)
+              (function
+              | OpRemoved t -> sprintf "op removed: %s" t
+              | c -> misapplied "OpRemoved" c)
+              [ row "a tree-op removed" "`breaking-wire`" "`no-generated-shape-change` — as for a tree-op added" ]
+
+          rule
+              "UnionAdded"
+              "30"
+              NoFamily
+              (function
+              | UnionAdded n -> n
+              | c -> misapplied "UnionAdded" c)
+              (function
+              | UnionAdded n ->
+                  Additive,
+                  sprintf "value-union `%s` introduced — reachable only from a field that also changed." n,
+                  "—"
+              | c -> misapplied "UnionAdded" c)
+              // A type arriving breaks nothing: no source could have named it.
+              (always noShape)
+              (function
+              | UnionAdded n -> sprintf "union added: %s" n
+              | c -> misapplied "UnionAdded" c)
+              [ row "a union added" "`additive`" "`no-generated-shape-change` — nothing could have referenced it" ]
+
+          rule
+              "UnionRemoved"
+              "31"
+              NoFamily
+              (function
+              | UnionRemoved n -> n
+              | c -> misapplied "UnionRemoved" c)
+              (function
+              | UnionRemoved n ->
+                  BreakingWire,
+                  sprintf "value-union `%s` removed — every document carrying one of its cases is invalidated." n,
+                  "VOCABULARY.md §4.2"
+              | c -> misapplied "UnionRemoved" c)
+              (always reference)
+              (function
+              | UnionRemoved n -> sprintf "union removed: %s" n
+              | c -> misapplied "UnionRemoved" c)
+              [ row "a union removed" "`breaking-wire`" "`type-name-reference`" ]
+
+          rule
+              "UnionCaseAdded"
+              "32"
+              DiscriminatorFamily
+              (function
+              | UnionCaseAdded(u, c) -> u + "." + c
+              | c -> misapplied "UnionCaseAdded" c)
+              (function
+              | UnionCaseAdded(u, c) ->
+                  Additive,
+                  sprintf
+                      "case `%s` added to `%s` — a `$type`-discriminator family (WIRE_FORMAT.md §11), so the wire-coupling cost is IDENTICAL to a new kind's; only the confusion cost is smaller. Governed: it still cites §1.1 demand evidence and acknowledges the §11 cost."
+                      c
+                      u,
+                  "VOCABULARY.md §2 (the quiet-churn caveat); WIRE_FORMAT.md §11 (discriminator families)"
+              | c -> misapplied "UnionCaseAdded" c)
+              (always matching)
+              (function
+              | UnionCaseAdded(u, c) -> sprintf "union case added: %s.%s" u c
+              | c -> misapplied "UnionCaseAdded" c)
+              [ row "a union case added" "`additive`" "`exhaustive-match`" ]
+
+          rule
+              "UnionCaseRemoved"
+              "33"
+              DiscriminatorFamily
+              (function
+              | UnionCaseRemoved(u, c) -> u + "." + c
+              | c -> misapplied "UnionCaseRemoved" c)
+              (function
+              | UnionCaseRemoved(u, c) ->
+                  BreakingWire,
+                  sprintf "case `%s` REMOVED from `%s` — a retired `$type` in a discriminator family." c u,
+                  "VOCABULARY.md §4.2"
+              | c -> misapplied "UnionCaseRemoved" c)
+              (always matching)
+              (function
+              | UnionCaseRemoved(u, c) -> sprintf "union case removed: %s.%s" u c
+              | c -> misapplied "UnionCaseRemoved" c)
+              [ row "a union case removed" "`breaking-wire`" "`exhaustive-match`" ]
+
+          rule
+              "UnionParamsChanged"
+              "34"
+              NoFamily
+              (function
+              | UnionParamsChanged(n, _, _) -> n
+              | c -> misapplied "UnionParamsChanged" c)
+              (function
+              | UnionParamsChanged(n, b, a) ->
+                  HostSurfaceOnly,
+                  sprintf
+                      "`%s` type parameters %A → %A — generic arity is a host-declaration property; the wire carries no type arguments."
+                      n
+                      b
+                      a,
+                  "Idl.IdlUnion.Params"
+              | c -> misapplied "UnionParamsChanged" c)
+              (always reference)
+              (function
+              | UnionParamsChanged(n, _, _) -> sprintf "union %s type parameters changed" n
+              | c -> misapplied "UnionParamsChanged" c)
+              // The document used to say `breaking-wire` here (Phase 293 corrected it to what the
+              // classifier has always decided): the wire carries no type arguments.
+              [ row
+                    "a union's type parameters moved"
+                    "`host-surface-only` — the wire carries no type arguments"
+                    "`type-name-reference` (the wrong arity)" ]
+
+          rule
+              "UnionTransparencyChanged"
+              "35"
+              DiscriminatorFamily
+              (function
+              | UnionTransparencyChanged(n, _, _) -> n
+              | c -> misapplied "UnionTransparencyChanged" c)
+              (function
+              | UnionTransparencyChanged(n, b, a) ->
+                  BreakingWire,
+                  sprintf
+                      "`%s` transparent case %A → %A — a transparent case encodes as a BARE value rather than a `$type`-tagged object, so this moves the bytes of every document using it."
+                      n
+                      b
+                      a,
+                  "Idl.TransparentUnion; STABILITY.md wire-format section"
+              | c -> misapplied "UnionTransparencyChanged" c)
+              (always noShape)
+              (function
+              | UnionTransparencyChanged(n, _, _) -> sprintf "union %s transparent case changed" n
+              | c -> misapplied "UnionTransparencyChanged" c)
+              [ row "a union's transparent case" "`breaking-wire`" "`no-generated-shape-change`" ]
+
+          rule
+              "EnumAdded"
+              "40"
+              NoFamily
+              (function
+              | EnumAdded n -> n
+              | c -> misapplied "EnumAdded" c)
+              (function
+              | EnumAdded n -> Additive, sprintf "closed set `%s` introduced." n, "—"
+              | c -> misapplied "EnumAdded" c)
+              (always noShape)
+              (function
+              | EnumAdded n -> sprintf "closed set added: %s" n
+              | c -> misapplied "EnumAdded" c)
+              [ row "an enum added" "`additive`" "`no-generated-shape-change`" ]
+
+          rule
+              "EnumRemoved"
+              "41"
+              NoFamily
+              (function
+              | EnumRemoved n -> n
+              | c -> misapplied "EnumRemoved" c)
+              (function
+              | EnumRemoved n ->
+                  BreakingWire, sprintf "closed set `%s` removed — its field must have changed type or gone." n, "—"
+              | c -> misapplied "EnumRemoved" c)
+              (always reference)
+              (function
+              | EnumRemoved n -> sprintf "closed set removed: %s" n
+              | c -> misapplied "EnumRemoved" c)
+              [ row "an enum removed" "`breaking-wire`" "`type-name-reference`" ]
+
+          rule
+              "EnumCaseAdded"
+              "42"
+              EnumSet
+              (function
+              | EnumCaseAdded(e, w) -> e + "." + w
+              | c -> misapplied "EnumCaseAdded" c)
+              (function
+              | EnumCaseAdded(e, w) ->
+                  Additive,
+                  sprintf
+                      "wire string `\"%s\"` added to closed set `%s` — additive on the wire, but a decoder that predates it REJECTS the value (`UNKNOWN_DU_CASE`), so the host-lag commitment applies exactly as it does to a kind."
+                      w
+                      e,
+                  "VOCABULARY.md §4.3 (unknown-discriminator behaviour + host-lag)"
+              | c -> misapplied "EnumCaseAdded" c)
+              (always matching)
+              (function
+              | EnumCaseAdded(e, w) -> sprintf "enum case added: %s.\"%s\"" e w
+              | c -> misapplied "EnumCaseAdded" c)
+              [ row "an enum case added" "`additive`" "`exhaustive-match`" ]
+
+          rule
+              "EnumCaseRemoved"
+              "43"
+              EnumSet
+              (function
+              | EnumCaseRemoved(e, w) -> e + "." + w
+              | c -> misapplied "EnumCaseRemoved" c)
+              (function
+              | EnumCaseRemoved(e, w) ->
+                  BreakingWire,
+                  sprintf
+                      "wire string `\"%s\"` REMOVED from closed set `%s` — documents carrying it no longer validate."
+                      w
+                      e,
+                  "VOCABULARY.md §4.2"
+              | c -> misapplied "EnumCaseRemoved" c)
+              (always matching)
+              (function
+              | EnumCaseRemoved(e, w) -> sprintf "enum case removed: %s.\"%s\"" e w
+              | c -> misapplied "EnumCaseRemoved" c)
+              [ row "an enum case removed" "`breaking-wire`" "`exhaustive-match`" ]
+
+          rule
+              "EnumHostMappingChanged"
+              "44"
+              NoFamily
+              (function
+              | EnumHostMappingChanged(n, _, _) -> n
+              | c -> misapplied "EnumHostMappingChanged" c)
+              (function
+              | EnumHostMappingChanged(n, _, _) ->
+                  HostSurfaceOnly,
+                  sprintf
+                      "`%s` host case names changed with its wire strings unchanged — `hostCases` is a hostSurface key (WIRE_FORMAT.md §13), carrying nothing observable on the wire. A source-compat event for F# consumers, not a wire one."
+                      n,
+                  "WIRE_FORMAT.md §13; Artifact.json (`hostCases` is hostSurface)"
+              | c -> misapplied "EnumHostMappingChanged" c)
+              // The host-side case NAMES moved: every arm that spelled one is now undefined,
+              // and the set is no longer covered.
+              (always matching)
+              (function
+              | EnumHostMappingChanged(n, _, _) -> sprintf "enum %s host case names changed" n
+              | c -> misapplied "EnumHostMappingChanged" c)
+              [ row "an enum's **host** case names moved" "`host-surface-only`" "`exhaustive-match`" ]
+
+          rule
+              "EnumCaseAnnotationsChanged"
+              "45"
+              NoFamily
+              (function
+              | EnumCaseAnnotationsChanged(e, w, _, _) -> e + "." + w
+              | c -> misapplied "EnumCaseAnnotationsChanged" c)
+              (function
+              | EnumCaseAnnotationsChanged(e, w, b, a) ->
+                  classifyAnnotations (sprintf "case `\"%s\"` of enum `%s`" w e) b a
+              | c -> misapplied "EnumCaseAnnotationsChanged" c)
+              (always noShape)
+              (function
+              | EnumCaseAnnotationsChanged(e, w, b, _) ->
+                  sprintf "enum case annotations %s: %s.\"%s\"" (if b = "" then "declared" else "changed") e w
+              | c -> misapplied "EnumCaseAnnotationsChanged" c)
+              [ annotationRow "an enum case's annotation set" ]
+
+          rule
+              "RecordAdded"
+              "50"
+              NoFamily
+              (function
+              | RecordAdded n -> n
+              | c -> misapplied "RecordAdded" c)
+              (function
+              | RecordAdded n ->
+                  Additive,
+                  sprintf "non-discriminated record `%s` introduced — reachable only from a field that also changed." n,
+                  "—"
+              | c -> misapplied "RecordAdded" c)
+              (always noShape)
+              (function
+              | RecordAdded n -> sprintf "record added: %s" n
+              | c -> misapplied "RecordAdded" c)
+              [ row "a record added" "`additive`" "`no-generated-shape-change`" ]
+
+          rule
+              "RecordRemoved"
+              "51"
+              NoFamily
+              (function
+              | RecordRemoved n -> n
+              | c -> misapplied "RecordRemoved" c)
+              (function
+              | RecordRemoved n -> BreakingWire, sprintf "record `%s` removed." n, "VOCABULARY.md §4.2"
+              | c -> misapplied "RecordRemoved" c)
+              (always reference)
+              (function
+              | RecordRemoved n -> sprintf "record removed: %s" n
+              | c -> misapplied "RecordRemoved" c)
+              [ row "a record removed" "`breaking-wire`" "`type-name-reference`" ]
+
+          rule
+              "FieldAdded"
+              "60"
+              NoFamily
+              (function
+              | FieldAdded(o, f) -> o.Key + "/" + f.Name
+              | c -> misapplied "FieldAdded" c)
+              (function
+              | FieldAdded(owner, f) -> classifyFieldAdd owner f
+              | c -> misapplied "FieldAdded" c)
+              // A field on any owner is a record member.
+              (always construction)
+              (function
+              | FieldAdded(o, f) -> sprintf "field added: %s.%s : %s (%s)" o.Describe f.Name f.Label f.OptClass
+              | c -> misapplied "FieldAdded" c)
+              [ row "a **required** field added" "`breaking-for-emitters`" "`full-literal-construction`"
+                row "an **optional** field added" "`additive`" "`full-literal-construction`"
+                row "a **host-only** field added" "`host-surface-only`" "`full-literal-construction`" ]
+
+          rule
+              "FieldRemoved"
+              "61"
+              NoFamily
+              (function
+              | FieldRemoved(o, n, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldRemoved" c)
+              (function
+              | FieldRemoved(owner, n, was) ->
+                  (match was.OptClass with
+                   | "hostOnly" ->
+                       HostSurfaceOnly,
+                       sprintf
+                           "host-only field `%s` removed from %s — never on the wire, so no document changes."
+                           n
+                           owner.Describe,
+                       "WIRE_FORMAT.md §9"
+                   | _ ->
+                       BreakingWire,
+                       sprintf
+                           "field `%s` REMOVED from %s — a slot that was on the wire is gone. Decoders that read it break; emitters that write it produce an unknown key."
+                           n
+                           owner.Describe,
+                       "STABILITY.md wire-format section (removal is a major event)")
+              | c -> misapplied "FieldRemoved" c)
+              (always construction)
+              (function
+              | FieldRemoved(o, n, _) -> sprintf "field removed: %s.%s" o.Describe n
+              | c -> misapplied "FieldRemoved" c)
+              [ row
+                    "a field removed"
+                    "`breaking-wire`; `host-surface-only` for a host-only field"
+                    "`full-literal-construction`" ]
+
+          rule
+              "FieldTypeChanged"
+              "62"
+              NoFamily
+              (function
+              | FieldTypeChanged(o, n, _, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldTypeChanged" c)
+              (function
+              | FieldTypeChanged(owner, n, b, a) ->
+                  match erasedIn b |> Option.orElse (erasedIn a) with
+                  | Some tag ->
+                      Unclassifiable,
+                      sprintf
+                          "field `%s` on %s changed type across an ERASED slot: %s → %s. The artifact does not state what a `%s` slot admits — that is the host codec's business, by design — so nothing here can say whether the admitted value sets differ, and a nested erased slot (a list element, a map value, a union argument) is as undecidable as a bare one. CHECK: does every value the old side accepted still decode, and does the corpus come back byte-identical? If both, this is a modelling improvement and not a wire event; if either fails, it is BREAKING (wire)."
+                          n
+                          owner.Describe
+                          b.Label
+                          a.Label
+                          tag,
+                      "Idl.THosted / TJson / TOpaque (content carried verbatim; not described by the artifact)"
+                  | None when isIntToFloatWidening b a ->
+                      // Phase 252 — a float slot admits every integer literal and a whole float
+                      // renders as the same digits, so every old document decodes and re-encodes
+                      // byte-identically, and an old emitter (writing integers) stays conformant.
+                      // That is the table's definition of additive; the cost is host lag, as for
+                      // a new enum case: a decoder that predates the widening refuses `2.5`.
+                      Additive,
+                      sprintf
+                          "field `%s` on %s WIDENED: %s → %s. A float slot admits every integer, and a whole float renders as the same digits, so every existing document decodes and re-encodes byte-identically and every previously-conformant emitter stays conformant. Not breaking-for-emitters: no old emitter's output became invalid. The cost is host lag — a decoder that predates the widening refuses a fractional value such as `2.5` — exactly as for a new enum case."
+                          n
+                          owner.Describe
+                          b.Label
+                          a.Label,
+                      "docs/idl-stability-classes.md (int → float widening, Phase 252); VOCABULARY.md §4.3 (host-lag)"
+                  | None ->
+                      BreakingWire,
+                      sprintf
+                          "field `%s` on %s changed type: %s → %s. A value that decoded no longer does."
+                          n
+                          owner.Describe
+                          b.Label
+                          a.Label,
+                      "STABILITY.md wire-format section"
+              | c -> misapplied "FieldTypeChanged" c)
+              (fun _ c ->
+                  match c with
+                  | FieldTypeChanged(_, _, b, a) ->
+                      if (erasedIn b).IsSome || (erasedIn a).IsSome then
+                          [ GeneratedShapeUnreadable ]
+                      else
+                          construction
+                  | c -> misapplied "FieldTypeChanged" c)
+              (function
+              | FieldTypeChanged(o, n, b, a) ->
+                  sprintf "field type changed: %s.%s : %s -> %s" o.Describe n b.Label a.Label
+              | c -> misapplied "FieldTypeChanged" c)
+              [ row "a field's type moved" "`breaking-wire`" "`full-literal-construction`"
+                row
+                    "a field's type **widened from `int` to `float`** (anywhere in it — a list element, a map value, a union argument)"
+                    "`additive`"
+                    "`full-literal-construction`"
+                row
+                    "a field's type moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth — a list element, a map value, a union argument"
+                    "`undecided`"
+                    "`generated-shape-unreadable`" ]
+
+          rule
+              "FieldOptionalityChanged"
+              "63"
+              NoFamily
+              (function
+              | FieldOptionalityChanged(o, n, _, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldOptionalityChanged" c)
+              (function
+              | FieldOptionalityChanged(owner, n, b, a) ->
+                  let d = owner.Describe
+
+                  (match b.OptClass, a.OptClass with
+                   | "optional", "required"
+                   | "omitDefault", "required" ->
+                       BreakingForEmitters,
+                       sprintf
+                           "field `%s` on %s became REQUIRED (%s → %s) — an emitter that legitimately omitted it now produces an invalid document."
+                           n
+                           d
+                           b.Opt
+                           a.Opt,
+                       "the 0.2.0 / orchestration-0.1.3 required-field lesson"
+                   | "required", _ ->
+                       BreakingWire,
+                       sprintf
+                           "field `%s` on %s stopped being required (%s → %s) — old documents stay valid, but a consumer that relied on presence now faces absence, and the absence is not distinguishable from an old emitter's."
+                           n
+                           d
+                           b.Opt
+                           a.Opt,
+                       "STABILITY.md wire-format section"
+                   | "omitDefault", "omitDefault" ->
+                       BreakingWire,
+                       sprintf
+                           "field `%s` on %s moved its identity default (%s → %s) — omit-at-default is WIRE-VISIBLE: every document sitting on the old default changes bytes, and every document carrying the new one loses a key. The single most easily mis-declared change in this table."
+                           n
+                           d
+                           b.Opt
+                           a.Opt,
+                       "Idl.Optionality.OmitDefault (omit-at-default is wire-visible)"
+                   | "hostOnly", _
+                   | _, "hostOnly" ->
+                       BreakingWire,
+                       sprintf
+                           "field `%s` on %s crossed the host-only boundary (%s → %s) — a slot appeared on, or vanished from, the wire."
+                           n
+                           d
+                           b.Opt
+                           a.Opt,
+                       "WIRE_FORMAT.md §9"
+                   | _ ->
+                       BreakingWire,
+                       sprintf "field `%s` on %s changed optionality (%s → %s)." n d b.Opt a.Opt,
+                       "STABILITY.md wire-format section")
+              | c -> misapplied "FieldOptionalityChanged" c)
+              // Only the `optional` class emits an F# `option`, so the generated type moves
+              // exactly when one side is optional and the other is not. Every other optionality
+              // move (required <-> omitDefault) changes the ENCODER body and leaves the record
+              // member's type where it was — decidable, so decided, rather than reported
+              // conservatively.
+              (fun ctx c ->
+                  match c with
+                  | FieldOptionalityChanged(owner, name, before, after) ->
+                      if
+                          (before.OptClass = "optional") <> (after.OptClass = "optional")
+                          || requiredFlipped ctx owner name before after
+                      then
+                          construction
+                      else
+                          noShape
+                  | c -> misapplied "FieldOptionalityChanged" c)
+              (function
+              | FieldOptionalityChanged(o, n, b, a) ->
+                  sprintf "field optionality changed: %s.%s : %s -> %s" o.Describe n b.Opt a.Opt
+              | c -> misapplied "FieldOptionalityChanged" c)
+              // The document used to say `breaking-wire` for every required <-> omitDefault
+              // move (Phase 293 corrected it to what the classifier decides): becoming required
+              // is the emitter break, the other direction and a moved identity default are wire.
+              [ row
+                    "a field's optionality moved **into or out of** `optional`"
+                    "`breaking-for-emitters` when it became required, else `breaking-wire`"
+                    "`full-literal-construction`"
+                row
+                    "a field's optionality moved **between** `required` and `omitDefault`, or its identity default moved"
+                    "`breaking-for-emitters` when it became required (an emitter that omitted it now produces an invalid document); `breaking-wire` otherwise (omit-at-default is wire-visible)"
+                    "`full-literal-construction` on a kind field with no authoring default — `mk<Kind>` takes a parameter for every required field, so the parameter leaves or arrives — else `no-generated-shape-change`"
+                row
+                    "a field crossed the **host-only** boundary"
+                    "`breaking-wire`"
+                    "`full-literal-construction` when it crossed `optional` too, else `no-generated-shape-change`" ]
+
+          rule
+              "FieldHostSurfaceChanged"
+              "64"
+              NoFamily
+              (function
+              | FieldHostSurfaceChanged(o, n, _, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldHostSurfaceChanged" c)
+              (function
+              | FieldHostSurfaceChanged(owner, n, b, a) when hostedSlotMoved b a ->
+                  Unclassifiable,
+                  sprintf
+                      "field `%s` on %s changed a HOSTED slot's declaration (its host type or its codec). A hosted slot's codec IS its wire form, and the artifact does not state what the codec writes, so nothing here can say whether a document's bytes moved. CHECK: does every value the old codec wrote still decode under the new one, and does every document come back byte-identical? If both, this is host-surface only; if either fails, it is BREAKING (wire)."
+                      n
+                      owner.Describe,
+                  "Idl.THosted (the codec is the wire form; Phase 252); docs/idl-stability-classes.md (anything crossing an erased slot)"
+              | FieldHostSurfaceChanged(owner, n, _, _) ->
+                  HostSurfaceOnly,
+                  sprintf
+                      "field `%s` on %s changed its hostSurface declaration only — the generated F#/TS signature moved, the wire did not. A recompile event for the reference host; invisible to every third-party codec."
+                      n
+                      owner.Describe,
+                  "WIRE_FORMAT.md §13 (hostSurface is host-language spec, not wire spec)"
+              | c -> misapplied "FieldHostSurfaceChanged" c)
+              // The generated DECLARATION is readable whatever the wire verdict: a `hostSurface`
+              // block states the F# host type outright (Phase 252). Only the `fsharp` member is
+              // spelled by the generated record, so a codec or placeholder expression moving
+              // alone leaves every site where it was — decidable, so decided, including on a
+              // hosted slot whose WIRE verdict is undecided.
+              (fun _ c ->
+                  match c with
+                  | FieldHostSurfaceChanged(_, _, before, after) ->
+                      if hostTypeMoved before after then construction else noShape
+                  | c -> misapplied "FieldHostSurfaceChanged" c)
+              (function
+              | FieldHostSurfaceChanged(o, n, _, _) -> sprintf "field hostSurface changed: %s.%s" o.Describe n
+              | c -> misapplied "FieldHostSurfaceChanged" c)
+              [ row
+                    "a `fn` slot's `hostSurface` block moved"
+                    "`host-surface-only`"
+                    "`full-literal-construction` when its `fsharp` signature moved, else `no-generated-shape-change`"
+                row
+                    "a **hosted** slot's `hostSurface` block moved — its host type, its `encode` or its `decode`"
+                    "`undecided`"
+                    "`full-literal-construction` when its `fsharp` type moved, else `no-generated-shape-change`" ]
+
+          rule
+              "FieldAnnotationsChanged"
+              "65"
+              NoFamily
+              (function
+              | FieldAnnotationsChanged(o, n, _, _) -> o.Key + "/" + n
+              | c -> misapplied "FieldAnnotationsChanged" c)
+              (function
+              | FieldAnnotationsChanged(owner, n, b, a) ->
+                  classifyAnnotations (sprintf "field `%s` on %s" n owner.Describe) b a
+              | c -> misapplied "FieldAnnotationsChanged" c)
+              (always noShape)
+              (function
+              | FieldAnnotationsChanged(o, n, b, _) ->
+                  sprintf "field annotations %s: %s.%s" (if b = "" then "declared" else "changed") o.Describe n
+              | c -> misapplied "FieldAnnotationsChanged" c)
+              [ annotationRow "a field's annotation set" ]
+
+          rule
+              "UnionCaseAnnotationsChanged"
+              "66"
+              NoFamily
+              (function
+              | UnionCaseAnnotationsChanged(u, c, _, _) -> u + "." + c
+              | c -> misapplied "UnionCaseAnnotationsChanged" c)
+              (function
+              | UnionCaseAnnotationsChanged(u, c, b, a) -> classifyAnnotations (sprintf "case `%s` of `%s`" c u) b a
+              | c -> misapplied "UnionCaseAnnotationsChanged" c)
+              (always noShape)
+              (function
+              | UnionCaseAnnotationsChanged(u, c, b, _) ->
+                  sprintf "union case annotations %s: %s.%s" (if b = "" then "declared" else "changed") u c
+              | c -> misapplied "UnionCaseAnnotationsChanged" c)
+              [ annotationRow "a union case's annotation set" ]
+
+          rule
+              "DefaultAdded"
+              "70"
+              NoFamily
+              (function
+              | DefaultAdded(kd, f, _) -> kd + "/" + f
+              | c -> misapplied "DefaultAdded" c)
+              (function
+              | DefaultAdded(kd, f, _) ->
+                  Additive,
+                  sprintf
+                      "smart-constructor default added for `%s.%s` — an AUTHORING default (Idl.IdlDefault), not the wire-visible omit-at-default. It changes what a host author gets when they say nothing; it does not change what the wire admits."
+                      kd
+                      f,
+                  "Idl.IdlDefault (applied by the generated smart constructors)"
+              | c -> misapplied "DefaultAdded" c)
+              (fun ctx c ->
+                  match c with
+                  | DefaultAdded(kd, f, _) -> defaultConsequence ctx kd f
+                  | c -> misapplied "DefaultAdded" c)
+              (function
+              | DefaultAdded(k, f, _) -> sprintf "authoring default added: %s.%s" k f
+              | c -> misapplied "DefaultAdded" c)
+              [ row
+                    "an authoring default added"
+                    "`additive`"
+                    "`full-literal-construction` when the field is required — `mk<Kind>` loses the parameter, so every call site moves — else `no-generated-shape-change`" ]
+
+          rule
+              "DefaultRemoved"
+              "71"
+              NoFamily
+              (function
+              | DefaultRemoved(kd, f, _) -> kd + "/" + f
+              | c -> misapplied "DefaultRemoved" c)
+              (function
+              | DefaultRemoved(kd, f, _) ->
+                  BreakingForEmitters,
+                  sprintf
+                      "smart-constructor default REMOVED for `%s.%s` — host authoring code that relied on it now emits a different document (or fails to compile). Authoring-surface break; the wire contract is unchanged."
+                      kd
+                      f,
+                  "Idl.IdlDefault"
+              | c -> misapplied "DefaultRemoved" c)
+              (fun ctx c ->
+                  match c with
+                  | DefaultRemoved(kd, f, _) -> defaultConsequence ctx kd f
+                  | c -> misapplied "DefaultRemoved" c)
+              (function
+              | DefaultRemoved(k, f, _) -> sprintf "authoring default removed: %s.%s" k f
+              | c -> misapplied "DefaultRemoved" c)
+              [ row
+                    "an authoring default removed"
+                    "`breaking-for-emitters`"
+                    "`full-literal-construction` when the field is required — `mk<Kind>` gains the parameter — else `no-generated-shape-change`" ]
+
+          rule
+              "DefaultChanged"
+              "72"
+              NoFamily
+              (function
+              | DefaultChanged(kd, f, _, _) -> kd + "/" + f
+              | c -> misapplied "DefaultChanged" c)
+              (function
+              | DefaultChanged(kd, f, b, a) ->
+                  BreakingForEmitters,
+                  sprintf
+                      "smart-constructor default for `%s.%s` moved (%s → %s) — every authoring site that omitted the field now emits a different document. The wire contract is unchanged; the emitted bytes are not."
+                      kd
+                      f
+                      b
+                      a,
+                  "Idl.IdlDefault"
+              | c -> misapplied "DefaultChanged" c)
+              (always noShape)
+              (function
+              | DefaultChanged(k, f, b, a) -> sprintf "authoring default changed: %s.%s : %s -> %s" k f b a
+              | c -> misapplied "DefaultChanged" c)
+              [ row
+                    "an authoring default changed"
+                    "`breaking-for-emitters`"
+                    "`no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not" ] ]
+
+    /// The rule for a change, by its union case name. Built once; a `Change` case with no rule
+    /// is a defect this table reports at first use rather than a silent default.
+    let private ruleOf: Change -> Rule =
+        let byCase = rules |> List.map (fun r -> r.Case, r) |> Map.ofList
+
+        let cases =
+            Microsoft.FSharp.Reflection.FSharpType.GetUnionCases(typeof<Change>, System.Reflection.BindingFlags.Public)
+            |> Array.map (fun c -> c.Name)
+
+        let missing = cases |> Array.filter (fun n -> not (byCase.ContainsKey n))
+
+        if missing.Length > 0 then
+            failwithf "the descriptor table has no rule for: %s" (String.concat ", " missing)
+
+        fun (c: Change) ->
+            let case, _ =
+                Microsoft.FSharp.Reflection.FSharpValue.GetUnionFields(
+                    c,
+                    typeof<Change>,
+                    System.Reflection.BindingFlags.Public
+                )
+
+            byCase[case.Name]
+
+    /// Deterministic ordering. Sorted by a per-case rank then by the change's own
+    /// key, so identical inputs produce byte-identical output regardless of map
+    /// enumeration order. Both come off the descriptor table.
+    let private sortKey (c: Change) : string * string =
+        let r = ruleOf c
+        r.Rank, r.Key c
+
+    let changes (before: Snapshot) (after: Snapshot) : Change list =
+        let unordered =
+            [ if before.Version <> after.Version then
+                  ArtifactVersionChanged(before.Version, after.Version)
+
+              if before.Wire <> after.Wire then
+                  WireShapeChanged(before.Wire, after.Wire)
+
+              if before.Harden <> after.Harden then
+                  HardenPolicyChanged(before.Harden, after.Harden)
+
+              yield!
+                  diffNamed KindAdded KindRemoved (fun tag b a -> diffFields (OKind tag) b a) before.Kinds after.Kinds
+
+              yield! renamePairs KindRenamed before.Kinds after.Kinds
+
+              for KeyValue(tag, cat) in after.KindCategory do
+                  match Map.tryFind tag before.KindCategory with
+                  | Some old when old <> cat -> KindCategoryChanged(tag, old, cat)
+                  | _ -> ()
+
+              // Phase 119 — a kind's own annotations, reported only for a tag both
+              // revisions carry: a kind that arrived or left is already `KindAdded` /
+              // `KindRemoved`, and saying it also gained annotations adds nothing.
+              for KeyValue(tag, ann) in after.KindAnnotations do
+                  match Map.tryFind tag before.KindAnnotations with
+                  | Some old when old <> ann -> KindAnnotationsChanged(OKind tag, old, ann)
+                  | _ -> ()
+
+              yield! diffNamed OpAdded OpRemoved (fun tag b a -> diffFields (OOp tag) b a) before.Ops after.Ops
+
+              for KeyValue(tag, ann) in after.OpAnnotations do
+                  match Map.tryFind tag before.OpAnnotations with
+                  | Some old when old <> ann -> KindAnnotationsChanged(OOp tag, old, ann)
+                  | _ -> ()
+
+              yield!
+                  diffNamed
+                      UnionAdded
+                      UnionRemoved
+                      (fun name b a ->
+                          [ if b.Params <> a.Params then
+                                UnionParamsChanged(name, b.Params, a.Params)
+
+                            if b.TransparentCase <> a.TransparentCase then
+                                UnionTransparencyChanged(name, b.TransparentCase, a.TransparentCase)
+
+                            yield!
+                                diffNamed
+                                    (fun c -> UnionCaseAdded(name, c))
+                                    (fun c -> UnionCaseRemoved(name, c))
+                                    (fun c bf af ->
+                                        [ if bf.Annotations <> af.Annotations then
+                                              UnionCaseAnnotationsChanged(name, c, bf.Annotations, af.Annotations)
+
+                                          yield! diffFields (OUnionCase(name, c)) bf.Fields af.Fields ])
+                                    b.Cases
+                                    a.Cases ])
+                      before.Unions
+                      after.Unions
+
+              yield!
+                  diffNamed
+                      EnumAdded
+                      EnumRemoved
+                      (fun name b a ->
+                          [ for w in a.WireCases do
+                                if not (List.contains w b.WireCases) then
+                                    EnumCaseAdded(name, w)
+
+                            for w in b.WireCases do
+                                if not (List.contains w a.WireCases) then
+                                    EnumCaseRemoved(name, w)
+
+                            if b.HostCases <> a.HostCases then
+                                EnumHostMappingChanged(name, b.HostCases, a.HostCases)
+
+                            // Phase 119 — per-case annotations, over the cases both
+                            // revisions carry. A case that arrived or left is already
+                            // `EnumCaseAdded` / `EnumCaseRemoved`; an absent entry on
+                            // either side reads as `""`, so a first marking and a full
+                            // withdrawal both surface here, which is what the classifier
+                            // grades `Additive` and `HostSurfaceOnly` respectively.
+                            for w in a.WireCases do
+                                if List.contains w b.WireCases then
+                                    let bw = b.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
+                                    let aw = a.CaseAnnotations |> Map.tryFind w |> Option.defaultValue ""
+
+                                    if bw <> aw then
+                                        EnumCaseAnnotationsChanged(name, w, bw, aw) ])
+                      before.Enums
+                      after.Enums
+
+              yield!
+                  diffNamed
+                      RecordAdded
+                      RecordRemoved
+                      (fun name b a -> diffFields (ORecord name) b a)
+                      before.Records
+                      after.Records
+
+              yield! diffFields ONodeEnvelope before.NodeFields after.NodeFields
+
+              for KeyValue((kd, f), v) in after.Defaults do
+                  match Map.tryFind (kd, f) before.Defaults with
+                  | None -> DefaultAdded(kd, f, v)
+                  | Some old when old <> v -> DefaultChanged(kd, f, old, v)
+                  | Some _ -> ()
+
+              for KeyValue((kd, f), v) in before.Defaults do
+                  if not (Map.containsKey (kd, f) after.Defaults) then
+                      DefaultRemoved(kd, f, v) ]
+
+        unordered |> List.sortBy sortKey
+
+    // -----------------------------------------------------------------------
+    // Classification — `STABILITY.md` + `VOCABULARY.md` §4, applied.
+    // -----------------------------------------------------------------------
+
     let classify (c: Change) : Classification =
-        let sev, why, cite =
-            match c with
-            | ArtifactVersionChanged(b, a) ->
-                HostSurfaceOnly,
-                sprintf
-                    "the artifact ENCODING version moved %d → %d. This describes the shape of idl.json itself, not the vocabulary it carries — reconcile the two revisions' encodings before trusting any other row."
-                    b
-                    a,
-                "Artifact.version"
-
-            | WireShapeChanged(b, a) ->
-                BreakingWire,
-                sprintf
-                    "the declared WIRE SHAPE moved %s → %s — the discriminator key, the node-envelope nesting and/or the canonical key order relocate every tag or every byte on the wire, so every document's bytes move. A `/v2/` major event by definition."
-                    b
-                    a,
-                "Idl.WireShape (Phases 108/109/111); VOCABULARY.md §4.2"
-
-            | HardenPolicyChanged(b, a) ->
-                HostSurfaceOnly,
-                sprintf
-                    "the declared HARDENING vocabulary moved %s → %s — the codegen trust boundary now gates a different kind, or mints a different placeholder, or matches a different literal case. Nothing here moves a document's bytes BY ITSELF: the one wire-visible member is the transparent-case set, whose effect is reported per union as its own row. What changes is what SCAFFOLDED source contains, so re-scaffold anything generated against the old declaration."
-                    b
-                    a,
-                "Idl.HardenPolicy (Phase 116); STABILITY.md the IDL engine"
-
-            | KindAdded t ->
-                Additive,
-                sprintf
-                    "kind `%s` added — a new `$type` branch on the schema's top-level `oneOf`; every previously-valid document stays valid."
-                    t,
-                "VOCABULARY.md §4.1 (additive `core@1.(x+1)` profile minor); STABILITY.md (NodeKind addition = minor)"
-            | KindRemoved t ->
-                BreakingWire,
-                sprintf
-                    "kind `%s` REMOVED — retiring a `$type` discriminator invalidates every document that used it. A `/v2/` major event, and per §4.2 a thing to do before publication or not at all."
-                    t,
-                "VOCABULARY.md §4.2 (removal / rename = a `v2` major)"
-            | KindRenamed(o, n) ->
-                BreakingWire,
-                sprintf
-                    "INFERRED rename `%s` → `%s` (identical field signature, unique on both sides). Inference, not a declaration — the wire records no identity beyond the `$type` string. The add + remove above stand on their own; this row only explains them."
-                    o
-                    n,
-                "VOCABULARY.md §4.2 (a `$type` rename is a breaking wire change)"
-            | KindCategoryChanged(t, b, a) ->
-                HostSurfaceOnly,
-                sprintf
-                    "kind `%s` re-categorised %s → %s. `Category` is metadata and is never serialised (Idl.IdlKind) — no document changes."
-                    t
-                    b
-                    a,
-                "Idl.IdlKind (`Category` is metadata, not serialised)"
-
-            | OpAdded t ->
-                Additive,
-                sprintf "op `%s` added — a new `$type` branch on the TreeOp union; existing op streams stay valid." t,
-                "WIRE_FORMAT.md §3.4; VOCABULARY.md §4.1 by the same additive argument"
-            | OpRemoved t ->
-                BreakingWire,
-                sprintf
-                    "op `%s` REMOVED — every persisted op stream carrying it becomes undecodable, and an op stream is a hash-chained archive, not a live message. Strictly worse than retiring a kind."
-                    t,
-                "VOCABULARY.md §4.2; STABILITY.md (op-stream wire shape)"
-
-            | UnionAdded n ->
-                Additive, sprintf "value-union `%s` introduced — reachable only from a field that also changed." n, "—"
-            | UnionRemoved n ->
-                BreakingWire,
-                sprintf "value-union `%s` removed — every document carrying one of its cases is invalidated." n,
-                "VOCABULARY.md §4.2"
-            | UnionCaseAdded(u, c) ->
-                Additive,
-                sprintf
-                    "case `%s` added to `%s` — a `$type`-discriminator family (WIRE_FORMAT.md §11), so the wire-coupling cost is IDENTICAL to a new kind's; only the confusion cost is smaller. Governed: it still cites §1.1 demand evidence and acknowledges the §11 cost."
-                    c
-                    u,
-                "VOCABULARY.md §2 (the quiet-churn caveat); WIRE_FORMAT.md §11 (discriminator families)"
-            | UnionCaseRemoved(u, c) ->
-                BreakingWire,
-                sprintf "case `%s` REMOVED from `%s` — a retired `$type` in a discriminator family." c u,
-                "VOCABULARY.md §4.2"
-            | UnionParamsChanged(n, b, a) ->
-                HostSurfaceOnly,
-                sprintf
-                    "`%s` type parameters %A → %A — generic arity is a host-declaration property; the wire carries no type arguments."
-                    n
-                    b
-                    a,
-                "Idl.IdlUnion.Params"
-            | UnionTransparencyChanged(n, b, a) ->
-                BreakingWire,
-                sprintf
-                    "`%s` transparent case %A → %A — a transparent case encodes as a BARE value rather than a `$type`-tagged object, so this moves the bytes of every document using it."
-                    n
-                    b
-                    a,
-                "Idl.TransparentUnion; STABILITY.md wire-format section"
-
-            | EnumAdded n -> Additive, sprintf "closed set `%s` introduced." n, "—"
-            | EnumRemoved n ->
-                BreakingWire, sprintf "closed set `%s` removed — its field must have changed type or gone." n, "—"
-            | EnumCaseAdded(e, w) ->
-                Additive,
-                sprintf
-                    "wire string `\"%s\"` added to closed set `%s` — additive on the wire, but a decoder that predates it REJECTS the value (`UNKNOWN_DU_CASE`), so the host-lag commitment applies exactly as it does to a kind."
-                    w
-                    e,
-                "VOCABULARY.md §4.3 (unknown-discriminator behaviour + host-lag)"
-            | EnumCaseRemoved(e, w) ->
-                BreakingWire,
-                sprintf
-                    "wire string `\"%s\"` REMOVED from closed set `%s` — documents carrying it no longer validate."
-                    w
-                    e,
-                "VOCABULARY.md §4.2"
-            | EnumHostMappingChanged(n, _, _) ->
-                HostSurfaceOnly,
-                sprintf
-                    "`%s` host case names changed with its wire strings unchanged — `hostCases` is a hostSurface key (WIRE_FORMAT.md §13), carrying nothing observable on the wire. A source-compat event for F# consumers, not a wire one."
-                    n,
-                "WIRE_FORMAT.md §13; Artifact.json (`hostCases` is hostSurface)"
-
-            | RecordAdded n ->
-                Additive,
-                sprintf "non-discriminated record `%s` introduced — reachable only from a field that also changed." n,
-                "—"
-            | RecordRemoved n -> BreakingWire, sprintf "record `%s` removed." n, "VOCABULARY.md §4.2"
-
-            | FieldAdded(owner, f) -> classifyFieldAdd owner f
-            | FieldRemoved(owner, n, was) ->
-                (match was.OptClass with
-                 | "hostOnly" ->
-                     HostSurfaceOnly,
-                     sprintf
-                         "host-only field `%s` removed from %s — never on the wire, so no document changes."
-                         n
-                         owner.Describe,
-                     "WIRE_FORMAT.md §9"
-                 | _ ->
-                     BreakingWire,
-                     sprintf
-                         "field `%s` REMOVED from %s — a slot that was on the wire is gone. Decoders that read it break; emitters that write it produce an unknown key."
-                         n
-                         owner.Describe,
-                     "STABILITY.md wire-format section (removal is a major event)")
-            | FieldTypeChanged(owner, n, b, a) ->
-                let erased t =
-                    t = "hosted" || t = "json" || t = "opaque"
-
-                if erased b.TypeTag || erased a.TypeTag then
-                    Unclassifiable,
-                    sprintf
-                        "field `%s` on %s changed type across an ERASED slot: %s → %s. The artifact does not state what a `%s` slot admits — that is the host codec's business, by design — so nothing here can say whether the admitted value sets differ. CHECK: does every value the old side accepted still decode, and does the corpus come back byte-identical? If both, this is a modelling improvement and not a wire event; if either fails, it is BREAKING (wire)."
-                        n
-                        owner.Describe
-                        b.Label
-                        a.Label
-                        (if erased b.TypeTag then b.TypeTag else a.TypeTag),
-                    "Idl.THosted / TJson / TOpaque (content carried verbatim; not described by the artifact)"
-                elif isIntToFloatWidening b a then
-                    // Phase 252 — a float slot admits every integer literal and a whole float
-                    // renders as the same digits, so every old document decodes and re-encodes
-                    // byte-identically, and an old emitter (writing integers) stays conformant.
-                    // That is the table's definition of additive; the cost is host lag, as for
-                    // a new enum case: a decoder that predates the widening refuses `2.5`.
-                    Additive,
-                    sprintf
-                        "field `%s` on %s WIDENED: %s → %s. A float slot admits every integer, and a whole float renders as the same digits, so every existing document decodes and re-encodes byte-identically and every previously-conformant emitter stays conformant. Not breaking-for-emitters: no old emitter's output became invalid. The cost is host lag — a decoder that predates the widening refuses a fractional value such as `2.5` — exactly as for a new enum case."
-                        n
-                        owner.Describe
-                        b.Label
-                        a.Label,
-                    "docs/idl-stability-classes.md (int → float widening, Phase 252); VOCABULARY.md §4.3 (host-lag)"
-                else
-                    BreakingWire,
-                    sprintf
-                        "field `%s` on %s changed type: %s → %s. A value that decoded no longer does."
-                        n
-                        owner.Describe
-                        b.Label
-                        a.Label,
-                    "STABILITY.md wire-format section"
-            | FieldAnnotationsChanged(owner, n, b, a) ->
-                classifyAnnotations (sprintf "field `%s` on %s" n owner.Describe) b a
-            | UnionCaseAnnotationsChanged(u, c, b, a) -> classifyAnnotations (sprintf "case `%s` of `%s`" c u) b a
-            // Phase 119 — the same three grades, for the same reason: a kind-level or
-            // enum-case marking is no more on the wire than a field's, so marking a whole
-            // node kind for retirement costs no breaking bump and the two-release
-            // retirement path the charter needs is affordable.
-            | KindAnnotationsChanged(owner, b, a) -> classifyAnnotations owner.Describe b a
-            | EnumCaseAnnotationsChanged(e, w, b, a) ->
-                classifyAnnotations (sprintf "case `\"%s\"` of enum `%s`" w e) b a
-
-            | FieldHostSurfaceChanged(owner, n, b, a) when hostedSlotMoved b a ->
-                Unclassifiable,
-                sprintf
-                    "field `%s` on %s changed a HOSTED slot's declaration (its host type or its codec). A hosted slot's codec IS its wire form, and the artifact does not state what the codec writes, so nothing here can say whether a document's bytes moved. CHECK: does every value the old codec wrote still decode under the new one, and does every document come back byte-identical? If both, this is host-surface only; if either fails, it is BREAKING (wire)."
-                    n
-                    owner.Describe,
-                "Idl.THosted (the codec is the wire form; Phase 252); docs/idl-stability-classes.md (anything crossing an erased slot)"
-            | FieldHostSurfaceChanged(owner, n, _, _) ->
-                HostSurfaceOnly,
-                sprintf
-                    "field `%s` on %s changed its hostSurface declaration only — the generated F#/TS signature moved, the wire did not. A recompile event for the reference host; invisible to every third-party codec."
-                    n
-                    owner.Describe,
-                "WIRE_FORMAT.md §13 (hostSurface is host-language spec, not wire spec)"
-            | FieldOptionalityChanged(owner, n, b, a) ->
-                let d = owner.Describe
-
-                (match b.OptClass, a.OptClass with
-                 | "optional", "required"
-                 | "omitDefault", "required" ->
-                     BreakingForEmitters,
-                     sprintf
-                         "field `%s` on %s became REQUIRED (%s → %s) — an emitter that legitimately omitted it now produces an invalid document."
-                         n
-                         d
-                         (describeOpt b)
-                         (describeOpt a),
-                     "the 0.2.0 / orchestration-0.1.3 required-field lesson"
-                 | "required", _ ->
-                     BreakingWire,
-                     sprintf
-                         "field `%s` on %s stopped being required (%s → %s) — old documents stay valid, but a consumer that relied on presence now faces absence, and the absence is not distinguishable from an old emitter's."
-                         n
-                         d
-                         (describeOpt b)
-                         (describeOpt a),
-                     "STABILITY.md wire-format section"
-                 | "omitDefault", "omitDefault" ->
-                     BreakingWire,
-                     sprintf
-                         "field `%s` on %s moved its identity default (%s → %s) — omit-at-default is WIRE-VISIBLE: every document sitting on the old default changes bytes, and every document carrying the new one loses a key. The single most easily mis-declared change in this table."
-                         n
-                         d
-                         (describeOpt b)
-                         (describeOpt a),
-                     "Idl.Optionality.OmitDefault (omit-at-default is wire-visible)"
-                 | "hostOnly", _
-                 | _, "hostOnly" ->
-                     BreakingWire,
-                     sprintf
-                         "field `%s` on %s crossed the host-only boundary (%s → %s) — a slot appeared on, or vanished from, the wire."
-                         n
-                         d
-                         (describeOpt b)
-                         (describeOpt a),
-                     "WIRE_FORMAT.md §9"
-                 | _ ->
-                     BreakingWire,
-                     sprintf "field `%s` on %s changed optionality (%s → %s)." n d (describeOpt b) (describeOpt a),
-                     "STABILITY.md wire-format section")
-
-            | DefaultAdded(kd, f, _) ->
-                Additive,
-                sprintf
-                    "smart-constructor default added for `%s.%s` — an AUTHORING default (Idl.IdlDefault), not the wire-visible omit-at-default. It changes what a host author gets when they say nothing; it does not change what the wire admits."
-                    kd
-                    f,
-                "Idl.IdlDefault (applied by the generated smart constructors)"
-            | DefaultRemoved(kd, f, _) ->
-                BreakingForEmitters,
-                sprintf
-                    "smart-constructor default REMOVED for `%s.%s` — host authoring code that relied on it now emits a different document (or fails to compile). Authoring-surface break; the wire contract is unchanged."
-                    kd
-                    f,
-                "Idl.IdlDefault"
-            | DefaultChanged(kd, f, b, a) ->
-                BreakingForEmitters,
-                sprintf
-                    "smart-constructor default for `%s.%s` moved (%s → %s) — every authoring site that omitted the field now emits a different document. The wire contract is unchanged; the emitted bytes are not."
-                    kd
-                    f
-                    b
-                    a,
-                "Idl.IdlDefault"
+        let sev, why, cite = (ruleOf c).Verdict c
 
         { Change = c
           Severity = sev
           Rationale = why
           Citation = cite }
 
+    /// Phase 293 — ONE precedence over the severities, read by `stabilityImpact`,
+    /// `profileBump` and `verdictClass` alike: an undecided row dominates, because
+    /// reporting the decidable remainder as the answer is how a `/v2/` event gets
+    /// published as a minor; then the wire break, the emitter break, the addition,
+    /// and last the host-surface move.
+    let private precedence: Severity list =
+        [ Unclassifiable; BreakingWire; BreakingForEmitters; Additive; HostSurfaceOnly ]
+
+    /// The severity that heads a classification list under [[precedence]] — `None` for
+    /// an empty list.
+    let private headline (cs: Classification list) : Severity option =
+        precedence
+        |> List.tryFind (fun s -> cs |> List.exists (fun c -> c.Severity = s))
+
+    /// The headline over the DECIDED rows alone — what the verdict becomes once every
+    /// undecided row has been checked and found absorbable.
+    let private decidedHeadline (cs: Classification list) : Severity option =
+        headline (cs |> List.filter (fun c -> c.Severity <> Unclassifiable))
+
     /// The draft `stability_impact:` value — the roadmap front-matter vocabulary
     /// is `additive` / `breaking` / `null`, so this emits one of the first two.
     let internal stabilityImpact (cs: Classification list) : string =
-        if
-            cs
-            |> List.exists (fun c -> c.Severity = BreakingWire || c.Severity = BreakingForEmitters)
-        then
-            "breaking"
-        elif cs |> List.exists (fun c -> c.Severity = Unclassifiable) then
-            "additive   ← ONLY IF every unclassifiable row below checks out; `breaking` otherwise"
-        else
-            "additive"
+        match headline cs with
+        | Some BreakingWire
+        | Some BreakingForEmitters -> "breaking"
+        | Some Unclassifiable ->
+            (match decidedHeadline cs with
+             | Some BreakingWire
+             | Some BreakingForEmitters -> "breaking"
+             | _ -> "additive   ← ONLY IF every unclassifiable row below checks out; `breaking` otherwise")
+        | _ -> "additive"
 
     /// The wire-profile recommendation. `core@1.x` is the profile-id grammar
     /// (`STABILITY.md` §15 sentinel strings); `/v1/` is the schema `$id` major.
     let internal profileBump (cs: Classification list) : string =
-        if cs |> List.exists (fun c -> c.Severity = BreakingWire) then
+        let major =
             "`/v2/` MAJOR — the schema `$id` major segment moves. VOCABULARY.md §4.2 says avoid this after publication; do it pre-launch or not at all."
-        elif cs |> List.exists (fun c -> c.Severity = Unclassifiable) then
-            "UNDECIDED — at least one change crosses an erased slot the artifact does not describe. `core@1.(x+1)` if the checks below pass; `/v2/` MAJOR if any of them fails."
-        elif cs |> List.exists (fun c -> c.Severity = BreakingForEmitters) then
+
+        match headline cs with
+        | Some BreakingWire -> major
+        | Some Unclassifiable ->
+            (match decidedHeadline cs with
+             | Some BreakingWire -> major
+             | _ ->
+                 "UNDECIDED — at least one change crosses an erased slot the artifact does not describe. `core@1.(x+1)` if the checks below pass; `/v2/` MAJOR if any of them fails.")
+        | Some BreakingForEmitters ->
             "`core@1.(x+1)` profile MINOR on paper — but at least one change breaks EMITTERS, so the minor understates it. Treat every downstream emitter as needing a coordinated bump."
-        elif cs |> List.exists (fun c -> c.Severity = Additive) then
-            "`core@1.(x+1)` profile minor — the `/v1/` major segment does not move (VOCABULARY.md §4.1)."
-        else
-            "no wire-profile movement — every change is host-surface only."
+        | Some Additive -> "`core@1.(x+1)` profile minor — the `/v1/` major segment does not move (VOCABULARY.md §4.1)."
+        | Some HostSurfaceOnly
+        | None -> "no wire-profile movement — every change is host-surface only."
 
     // -----------------------------------------------------------------------
     // The host-strand report — `WIRE_FORMAT.md` §11 obligations per host class.
@@ -1340,32 +2200,19 @@ module Diff =
         | HostSurfaceOnly -> false
         | _ -> true
 
+    /// The §11 family a change reaches, off the descriptor table.
+    let private familyOf (c: Change) = (ruleOf c).Family
+
     /// Does this change alter the NodeKind set? That is the one class that
     /// reaches the authoring veneers, the analyzer vocabulary, the native render
     /// arms and `manifest.kinds`.
-    let private isKindSetChange (c: Change) =
-        match c with
-        | KindAdded _
-        | KindRemoved _
-        | KindRenamed _ -> true
-        | _ -> false
+    let private isKindSetChange (c: Change) = familyOf c = KindSet
 
     /// Does it alter a `$type` discriminator family OTHER than NodeKind
     /// (`FormFieldKind`, `ChartKind`, `Binding`, `Action`, `TreeOp` …)?
-    let private isFamilyChange (c: Change) =
-        match c with
-        | UnionCaseAdded _
-        | UnionCaseRemoved _
-        | UnionTransparencyChanged _
-        | OpAdded _
-        | OpRemoved _ -> true
-        | _ -> false
+    let private isFamilyChange (c: Change) = familyOf c = DiscriminatorFamily
 
-    let private isEnumSetChange (c: Change) =
-        match c with
-        | EnumCaseAdded _
-        | EnumCaseRemoved _ -> true
-        | _ -> false
+    let private isEnumSetChange (c: Change) = familyOf c = EnumSet
 
     /// The obligation set for one change, joined against the roster.
     ///
@@ -1545,47 +2392,7 @@ module Diff =
         | Check -> "CHECK"
         | NotBound -> "n/a"
 
-    let private summarise (c: Change) : string =
-        match c with
-        | ArtifactVersionChanged(b, a) -> sprintf "artifact encoding version %d -> %d" b a
-        | WireShapeChanged(b, a) -> sprintf "wire shape changed: %s -> %s" b a
-        | HardenPolicyChanged(b, a) -> sprintf "harden policy changed: %s -> %s" b a
-        | KindAdded t -> sprintf "kind added: %s" t
-        | KindRemoved t -> sprintf "kind removed: %s" t
-        | KindRenamed(o, n) -> sprintf "kind renamed (inferred): %s -> %s" o n
-        | KindCategoryChanged(t, b, a) -> sprintf "kind %s category %s -> %s" t b a
-        | OpAdded t -> sprintf "op added: %s" t
-        | OpRemoved t -> sprintf "op removed: %s" t
-        | UnionAdded n -> sprintf "union added: %s" n
-        | UnionRemoved n -> sprintf "union removed: %s" n
-        | UnionCaseAdded(u, c) -> sprintf "union case added: %s.%s" u c
-        | UnionCaseRemoved(u, c) -> sprintf "union case removed: %s.%s" u c
-        | UnionParamsChanged(n, _, _) -> sprintf "union %s type parameters changed" n
-        | UnionTransparencyChanged(n, _, _) -> sprintf "union %s transparent case changed" n
-        | EnumAdded n -> sprintf "closed set added: %s" n
-        | EnumRemoved n -> sprintf "closed set removed: %s" n
-        | EnumCaseAdded(e, w) -> sprintf "enum case added: %s.\"%s\"" e w
-        | EnumCaseRemoved(e, w) -> sprintf "enum case removed: %s.\"%s\"" e w
-        | EnumHostMappingChanged(n, _, _) -> sprintf "enum %s host case names changed" n
-        | RecordAdded n -> sprintf "record added: %s" n
-        | RecordRemoved n -> sprintf "record removed: %s" n
-        | FieldAdded(o, f) -> sprintf "field added: %s.%s : %s (%s)" o.Describe f.Name f.Label f.OptClass
-        | FieldRemoved(o, n, _) -> sprintf "field removed: %s.%s" o.Describe n
-        | FieldTypeChanged(o, n, b, a) -> sprintf "field type changed: %s.%s : %s -> %s" o.Describe n b.Label a.Label
-        | FieldHostSurfaceChanged(o, n, _, _) -> sprintf "field hostSurface changed: %s.%s" o.Describe n
-        | FieldOptionalityChanged(o, n, b, a) ->
-            sprintf "field optionality changed: %s.%s : %s -> %s" o.Describe n b.Opt a.Opt
-        | FieldAnnotationsChanged(o, n, b, _) ->
-            sprintf "field annotations %s: %s.%s" (if b = "" then "declared" else "changed") o.Describe n
-        | UnionCaseAnnotationsChanged(u, c, b, _) ->
-            sprintf "union case annotations %s: %s.%s" (if b = "" then "declared" else "changed") u c
-        | KindAnnotationsChanged(o, b, _) ->
-            sprintf "annotations %s: %s" (if b = "" then "declared" else "changed") o.Describe
-        | EnumCaseAnnotationsChanged(e, w, b, _) ->
-            sprintf "enum case annotations %s: %s.\"%s\"" (if b = "" then "declared" else "changed") e w
-        | DefaultAdded(k, f, _) -> sprintf "authoring default added: %s.%s" k f
-        | DefaultRemoved(k, f, _) -> sprintf "authoring default removed: %s.%s" k f
-        | DefaultChanged(k, f, b, a) -> sprintf "authoring default changed: %s.%s : %s -> %s" k f b a
+    let private summarise (c: Change) : string = (ruleOf c).Summary c
 
     /// The advisory report. Deterministic — byte-identical for identical inputs,
     /// which is what makes it diffable and what its test asserts.
@@ -1734,101 +2541,9 @@ module Diff =
     // classification unfalsifiable.
     // -----------------------------------------------------------------------
 
-    /// What a classified change does to a CONSUMER'S F# SOURCE compiled against the
-    /// generated structural layer. A different question from what it does to a
-    /// document, and the two answers diverge routinely — which is the whole reason
-    /// this axis is reported beside `Severity` rather than derived from it.
-    ///
-    /// Each case is named for the SITE that stops working, because that is what a
-    /// consumer reads in the compiler output.
-    type FSharpConsequence =
-        /// **Construction sites.** `Gen.fsharpTypes` emits a kind, a record and a
-        /// union case as F# RECORDS, and a record literal must name every field —
-        /// so a field arriving, leaving or changing type breaks every full literal
-        /// that builds one: `FS0764` ("No assignment given for field") on an
-        /// arrival, `FS1129` (no such field) on a departure, `FS0001` on a type
-        /// move.
-        ///
-        /// **Independent of optionality.** `string option` is still a field the
-        /// literal must name, so an OPTIONAL field added lands here too while its
-        /// wire severity is `Additive`. That divergence is the row this table
-        /// exists for: reading the wire verdict alone says a consumer repins
-        /// without source changes, and it does not.
-        | FullLiteralConstruction
-        /// **Match sites.** An enum, a value-union and the per-vocabulary node-kind
-        /// discriminator each emit as a closed F# DU, so a case arriving makes every
-        /// exhaustive `match` incomplete — `FS0025`, a WARNING under this repo's
-        /// `TreatWarningsAsErrors=false` and an error wherever a consumer sets it,
-        /// and a `MatchFailureException` at run time on the first value carrying the
-        /// new case — and a case leaving makes the arm naming it undefined
-        /// (`FS0039`).
-        | ExhaustiveMatch
-        /// **Reference sites.** A whole generated TYPE left, or its type parameters
-        /// moved, so a consumer naming it no longer resolves (`FS0039`) or applies
-        /// the wrong arity. A type ARRIVING is not this: nothing could have
-        /// referenced it.
-        | TypeNameReference
-        /// **Neither — until the package slot is reused.** The generated shape
-        /// moved, so a consumer whose extracted package cache still holds the
-        /// previous assembly for the SAME version compiles against one shape and
-        /// runs against the other. It surfaces as an `InvalidCastException` thrown
-        /// from code that type-checked, at the first value crossing the boundary,
-        /// with nothing in the source to read.
-        ///
-        /// It ACCOMPANIES the three classes above rather than replacing them: those
-        /// are what a clean rebuild reports, this is what a stale restore reports
-        /// instead of them. Which is why a shape change wants a fresh version
-        /// rather than a repack of a slot consumers already hold.
-        | StalePackageSlot
-        /// The generated shape did not move: the change is on the wire only, in the
-        /// host-surface declarations, in an annotation, or in an authoring default.
-        | NoGeneratedShapeChange
-        /// The change crosses an ERASED slot (`hosted` / `json` / `opaque`), so
-        /// nothing in the artifact says whether the generated shape moved.
-        /// Reported, never guessed — `Unclassifiable`'s counterpart on this axis,
-        /// and for the same reason: a confident wrong answer on the commonest kind
-        /// of IDL tidy-up gets the whole report skimmed.
-        | GeneratedShapeUnreadable
-
-    /// The stable label of a consequence class. A contract: these strings are what
-    /// an external gate greps and what the `docs/` table names.
-    let consequenceLabel =
-        function
-        | FullLiteralConstruction -> "full-literal-construction"
-        | ExhaustiveMatch -> "exhaustive-match"
-        | TypeNameReference -> "type-name-reference"
-        | StalePackageSlot -> "stale-package-slot"
-        | NoGeneratedShapeChange -> "no-generated-shape-change"
-        | GeneratedShapeUnreadable -> "generated-shape-unreadable"
-
-    /// One sentence per consequence class — the reason it applies, for a report that
-    /// has to stand on its own beside a compiler message.
-    let consequenceWhy =
-        function
-        | FullLiteralConstruction ->
-            "every full record literal that builds this owner stops compiling — FS0764 on an added field, FS1129 on a removed one, FS0001 on a moved type. True for an OPTIONAL field too: a literal must name it."
-        | ExhaustiveMatch ->
-            "every exhaustive match over the generated DU stops being exhaustive — FS0025 (a warning by default, an error under TreatWarningsAsErrors, a MatchFailureException at run time) on an added case, FS0039 on a removed one."
-        | TypeNameReference ->
-            "a generated type name no longer resolves, or no longer takes the arity a consumer applies — FS0039."
-        | StalePackageSlot ->
-            "no compile event at all if the package slot was REPACKED rather than advanced: a consumer restoring the same version from a warm cache compiles against the new shape and runs against the old one, and the mismatch arrives as an InvalidCastException from code that type-checked."
-        | NoGeneratedShapeChange ->
-            "the generated declarations are unchanged, so no construction, match or reference site moves."
-        | GeneratedShapeUnreadable ->
-            "the change crosses an erased slot whose admitted values the artifact does not state, so whether the generated shape moved cannot be read off it."
-
-    /// Every consequence class, in report order — so a renderer and a document
-    /// enumerate the table rather than each restating it.
-    let allConsequences: FSharpConsequence list =
-        [ FullLiteralConstruction
-          ExhaustiveMatch
-          TypeNameReference
-          StalePackageSlot
-          NoGeneratedShapeChange
-          GeneratedShapeUnreadable ]
-
-    /// The F# consequence set of one classified change.
+    /// The F# consequence set of one classified change, given the kind-field optionality
+    /// lookup the snapshot pair supplies (Phase 293: an authoring default's consequence
+    /// depends on whether the field is required, which the `Change` does not carry).
     ///
     /// Keyed on the CHANGE rather than on its severity, because the two axes are
     /// independent by construction: `FieldHostSurfaceChanged` is `HostSurfaceOnly`
@@ -1837,87 +2552,13 @@ module Diff =
     ///
     /// `StalePackageSlot` rides every shape change rather than standing alone — see
     /// its own note.
-    let consequences (c: Classification) : FSharpConsequence list =
-        let construction = [ FullLiteralConstruction; StalePackageSlot ]
-        let matching = [ ExhaustiveMatch; StalePackageSlot ]
-        let reference = [ TypeNameReference; StalePackageSlot ]
+    let private consequencesWith (ctx: Context) (c: Classification) : FSharpConsequence list =
+        (ruleOf c.Change).Consequence ctx c.Change
 
-        match c.Severity, c.Change with
-        // The generated DECLARATION is readable whatever the wire verdict: a
-        // `hostSurface` block states the F# host type outright (Phase 252). Only the
-        // `fsharp` member is spelled by the generated record, so a codec or
-        // placeholder expression moving alone leaves every site where it was —
-        // decidable, so decided, including on a hosted slot whose WIRE verdict is
-        // undecided.
-        | _, FieldHostSurfaceChanged(_, _, before, after) ->
-            if hostTypeMoved before after then
-                construction
-            else
-                [ NoGeneratedShapeChange ]
-        | Unclassifiable, _ -> [ GeneratedShapeUnreadable ]
-        | _ ->
-            match c.Change with
-            // A field on any owner is a record member.
-            | FieldAdded _
-            | FieldRemoved _
-            | FieldTypeChanged _ -> construction
-            // (`FieldHostSurfaceChanged` is decided above, from the blocks themselves.)
-            | FieldHostSurfaceChanged _ -> construction
-            // Only the `optional` class emits an F# `option`, so the generated type
-            // moves exactly when one side is optional and the other is not. Every
-            // other optionality move (required <-> omitDefault) changes the ENCODER
-            // body and leaves the record member's type where it was — decidable, so
-            // decided, rather than reported conservatively.
-            | FieldOptionalityChanged(_, _, before, after) ->
-                if (before.OptClass = "optional") <> (after.OptClass = "optional") then
-                    construction
-                else
-                    [ NoGeneratedShapeChange ]
-            // A kind is a case of the generated node-kind DU, and gains or loses its
-            // own spec record alongside (which breaks no existing site on arrival).
-            | KindAdded _
-            | KindRemoved _ -> matching
-            | UnionCaseAdded _
-            | UnionCaseRemoved _
-            | EnumCaseAdded _
-            | EnumCaseRemoved _ -> matching
-            // The host-side case NAMES moved: every arm that spelled one is now
-            // undefined, and the set is no longer covered.
-            | EnumHostMappingChanged _ -> matching
-            | UnionRemoved _
-            | EnumRemoved _
-            | RecordRemoved _ -> reference
-            | UnionParamsChanged _ -> reference
-            // A type arriving breaks nothing: no source could have named it.
-            | UnionAdded _
-            | EnumAdded _
-            | RecordAdded _ -> [ NoGeneratedShapeChange ]
-            // The op vocabulary has no generated F# shape at all — the F# type
-            // emitter leaves that leg unshipped (Phase 703) — so an op change moves
-            // no declaration. This row changes the day that leg lands.
-            | OpAdded _
-            | OpRemoved _ -> [ NoGeneratedShapeChange ]
-            // Reported ALONGSIDE the add + remove that explain it, and those two
-            // rows carry the consequence; claiming it again here would double-count.
-            | KindRenamed _ -> [ NoGeneratedShapeChange ]
-            // Wire-only or metadata-only: the discriminator key and envelope
-            // nesting, the trust-boundary vocabulary, a transparent case's encoding,
-            // a kind's category, the artifact's own encoding version, the authoring
-            // defaults, and every annotation set (which moves an `Obsolete`
-            // attribute, and therefore which warnings a consumer sees — not a
-            // shape).
-            | WireShapeChanged _
-            | HardenPolicyChanged _
-            | UnionTransparencyChanged _
-            | KindCategoryChanged _
-            | ArtifactVersionChanged _
-            | DefaultAdded _
-            | DefaultRemoved _
-            | DefaultChanged _
-            | FieldAnnotationsChanged _
-            | UnionCaseAnnotationsChanged _
-            | KindAnnotationsChanged _
-            | EnumCaseAnnotationsChanged _ -> [ NoGeneratedShapeChange ]
+    /// The F# consequence set of one classified change, with no snapshot to ask: an
+    /// authoring default is read as a required field's, and a required-ness move as one
+    /// with no default to stand in (see `defaultConsequence` / `requiredFlipped`).
+    let consequences (c: Classification) : FSharpConsequence list = consequencesWith noContext c
 
     /// The `Versioning.Evolution` a classification list amounts to.
     ///
@@ -1986,7 +2627,24 @@ module Diff =
     let verdictOf (before: Snapshot) (after: Snapshot) : Verdict =
         let cs = changes before after |> List.map classify
 
-        let exhibited = cs |> List.collect consequences |> Set.ofList
+        // Phase 293 — an authoring default's F# consequence depends on the field's
+        // optionality (a `mk<Kind>` parameter exists for a required field with no default),
+        // which the `Change` does not carry and the snapshots do.
+        let ctx: Context =
+            { Optionality =
+                fun kind fieldName ->
+                    [ after; before ]
+                    |> List.tryPick (fun snap ->
+                        snap.Kinds
+                        |> Map.tryFind kind
+                        |> Option.bind (fun fs -> fs |> List.tryFind (fun f -> f.Name = fieldName))
+                        |> Option.map (fun f -> f.OptClass))
+              HasDefault =
+                fun kind fieldName ->
+                    [ after; before ]
+                    |> List.exists (fun snap -> snap.Defaults.ContainsKey(kind, fieldName)) }
+
+        let exhibited = cs |> List.collect (consequencesWith ctx) |> Set.ofList
 
         { Changes = cs
           Evolution = evolution cs
@@ -2039,19 +2697,14 @@ module Diff =
         | Undecided
 
     let verdictClass (v: Verdict) : VerdictClass =
-        if not v.Undecided.IsEmpty then
-            VerdictClass.Undecided
-        elif v.Changes.IsEmpty then
-            VerdictClass.Unchanged
-        elif
-            v.BreaksEmitters
-            || v.Changes |> List.exists (fun c -> c.Severity = BreakingWire)
-        then
-            VerdictClass.Breaking
-        elif v.Changes |> List.exists (fun c -> c.Severity = Severity.Additive) then
-            VerdictClass.Additive
-        else
-            VerdictClass.HostSurface
+        // Phase 293 — the ONE precedence `stabilityImpact` and `profileBump` read too.
+        match headline v.Changes with
+        | Some Unclassifiable -> VerdictClass.Undecided
+        | None -> VerdictClass.Unchanged
+        | Some BreakingWire
+        | Some BreakingForEmitters -> VerdictClass.Breaking
+        | Some Severity.Additive -> VerdictClass.Additive
+        | Some HostSurfaceOnly -> VerdictClass.HostSurface
 
     /// The stable label of a verdict class — the CLI's `--expect` vocabulary. A
     /// contract: a spec home's gate passes or greps these strings.
@@ -2108,6 +2761,23 @@ module Diff =
             sb.Append(consequenceWhy c).Append("\n") |> ignore
 
         sb.ToString()
+
+    /// Phase 293 — the mapping table `docs/idl-stability-classes.md` carries, RENDERED from the
+    /// descriptor table the classifier runs on, so the document and the code cannot drift: the
+    /// test suite holds the document's generated section byte-equal to this string. One row per
+    /// documented shape of each `Change` case, in the classifier's own rank order, with the case
+    /// name beside it so a reader can go from a report line to the rule and back.
+    let mappingTable: string =
+        let header =
+            [ "| Change | Wire severity | F# consequence | Classifier case |"
+              "|---|---|---|---|" ]
+
+        let rows =
+            [ for r in rules do
+                  for d in r.Doc do
+                      sprintf "| %s | %s | %s | `%s` |" d.Subject d.Wire d.FSharp r.Case ]
+
+        String.concat "\n" (header @ rows) + "\n"
 
     /// The branchable block the CLI prints under the advisory report: the class, the
     /// wire evolution, the emitter warning the minor cannot carry, and the F#

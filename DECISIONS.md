@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D92: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table; `Codegen.fs` splits behind a facade or not at all
+
+**Recorded by Phase 293. `Fuaran.Core.Idl.Codegen` (`FStarTarget`, `Diff`, `Gen`); rides the `0.34.0`
+draft (STABILITY.md, "The F\* target encodes the wire shape it declares").** Three decisions, each
+the kind a later reader reaches for again.
+
+*The F\* target's refusal is for a COLLIDING KEY, and the four shape combinations are all modelled.*
+The phase asked that "any combination the model cannot express" be refused by name. Laid out as
+entries of one literal in the declared key order — fixed keys merged among the members under
+`Sorted`, leading them under `Declared`; the flat node as one constructor per kind — every
+combination of `NodeEnvelopeShape` and `KeyOrder` is expressible, so the refusal set is exactly the
+documents the literal cannot carry: two entries under one key, which `find_field` reads as one. That
+is a flat kind member named `id` or the discriminator or sharing an envelope member's key, a nested
+envelope member named `kind`, a kind member named the discriminator under the nested shape, and a
+union case member named the discriminator. `Declare.wireShapeErrors` refuses most of these at
+declaration; the target refuses them again because it is handed an `Idl` value, not a declaration
+that was checked, and a theorem over a silently de-duplicated object would be the "document nobody
+sends" the target's header names as the thing its typed refusal exists to prevent. What is NOT
+modelled is unchanged and stated in every header: a `TMap` is an association list in authored order,
+where the interpreter Ordinal-sorts map entries at encode under both key orders.
+
+*The classifier's rules are ONE table, and the document is rendered from it.* Seven parallel
+matches over a 34-case union — `classify`, `consequences`, `sortKey`, `summarise` and three
+predicates — plus a hand-copied document table had drifted in three rows, and Phase 252's two
+corrections had nowhere to land once. `Diff.rules` is the single source: a `Change` case is joined
+to its row by reflection on its case name at first use, a case with no row fails there rather than
+defaulting, and `docs/idl-stability-classes.md`'s mapping table is a generated section a test holds
+byte-equal to `Diff.mappingTable`. The alternative — a doc test that merely checks each label is
+mentioned — is what allowed the drift; equality on the rendered rows is the only form that fails on
+the next one. One consequence of reading the table against the EMITTER that emits the constructors
+(not the type emitter, which emits none): a required-ness move and a default add/remove on a required
+kind field are construction breaks, because `mk<Kind>`'s parameter list is exactly the required
+fields without defaults. The context-free `consequences` cannot see a field's optionality (the
+`Change` payloads are published shapes), so it reads a default as a required field's — the answer
+that costs a rebuild rather than a surprise — and `classifyDiff` / `classifyArtifacts`, which hold
+the snapshots, decide exactly.
+
+*The `Codegen.fs` split is deferred WHOLE, under the facade rule it would ship under.* The split the
+phase names — `Emit/Core.fs`, `Emit/Reach.fs`, `Emit/Annotations.fs`, the F\# defaults / types /
+codec, JSON schema, TypeScript and scaffold files behind a one-line-forward `Gen` facade, with one
+type emitter and one monomorphising walk shared with the JSON schema and the F\* target — is a
+phase-sized refactor of a 4,600-line file whose byte-identical API baseline is the only thing that
+holds it honest, and it was not started here rather than landed half-way: a partial split is the
+debt the posture forbids, and "one type emitter" changes `fsharpTypes`' output, which consumers
+compare goldens against and which wants its own entry. The rule it ships under when it does: every
+public type and entry point stays declared in the facade (`Gen`) as a one-line forward, the `Emit.*`
+modules are `internal`, the baseline moves by zero lines, and `FStar.fs` consumes `Emit/Core.fs`
+rather than keeping a second `substType` / sequencer / mangler. The dead code the split would have
+swept is removed now (`reachesDeclared`, the ignored `bindNode`, the alias `defaultExpr`), the
+emitted header names the package version, and the suffix-chain fold is linear — so the split, when
+it comes, is motion and nothing else.
+
+*What was NOT done, and why it is named here.* `support.json` does not yet join the classifier's
+inputs: a projection or case-refine edit still classifies `unchanged`. Carrying it needs a `Change`
+case and a `Snapshot` member — both published shapes with a baseline of their own — and a flag on
+the `classify` command, which is a different package's surface; it is a successor's, not a residue.
+
 ## 2026-10-01 — D91: a generated record holding a host-only closure takes WIRE equality; the conformance families keep their equality constraint
 
 **Recorded by Phase 252. `Fuaran.Core.Idl.Codegen` (`Gen.fsharpModule`'s output); rides the `0.34.0`
