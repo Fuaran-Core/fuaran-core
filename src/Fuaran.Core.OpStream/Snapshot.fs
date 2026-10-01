@@ -71,6 +71,27 @@ module internal OpStreamSnapshot =
                 + "}"
             | SnapshotMode.ChainOnly -> "{\"snapshot\":true,\"seq\":" + string snap.Seq + ",\"stateHashed\":false}"
 
+        /// The snapshot of `state` at boundary `seq` whose boundary hash is `prevHash`, hashed by
+        /// `mode` — the one sealing step `take` and the compacted stream's `compactFrom` (Phase 301)
+        /// share, so a re-compaction mints the same snapshot a compaction of the full stream does.
+        let seal
+            (mode: SnapshotMode)
+            (hashFn: HashFn)
+            (stateEncode: 'State -> string)
+            (seq: int)
+            (state: 'State)
+            (prevHash: string)
+            : Snapshot<'State> =
+            let snap0 =
+                { Seq = seq
+                  State = state
+                  PrevHash = prevHash
+                  Hash = ""
+                  Mode = mode }
+
+            { snap0 with
+                Hash = hashFn prevHash (payload stateEncode snap0) }
+
         let take
             (mode: SnapshotMode)
             (cfg: StreamConfig)
@@ -95,16 +116,7 @@ module internal OpStreamSnapshot =
                         else
                             (List.item (atSeq - 1) records).Hash
 
-                    let snap0 =
-                        { Seq = atSeq
-                          State = state
-                          PrevHash = prevHash
-                          Hash = ""
-                          Mode = mode }
-
-                    Ok
-                        { snap0 with
-                            Hash = hashFn prevHash (payload stateEncode snap0) }
+                    Ok(seal mode hashFn stateEncode atSeq state prevHash)
 
         let compact
             (mode: SnapshotMode)
@@ -157,11 +169,11 @@ module internal OpStreamSnapshot =
                 | Ok st -> Ok st
                 | Error(i, e) -> Error(SnapshotFault.TailRejected(i, e))
 
-        let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
+        let private lineOf (snap: Snapshot<'State>) (stateJson: string) : string =
             "{\"snapshot\":true,\"seq\":"
             + string snap.Seq
             + ",\"state\":"
-            + stateEncode snap.State
+            + stateJson
             + (match snap.Mode with
                | SnapshotMode.Strict -> ""
                | SnapshotMode.ChainOnly -> ",\"stateHashed\":false")
@@ -170,6 +182,12 @@ module internal OpStreamSnapshot =
             + ",\"hash\":"
             + jstr snap.Hash
             + "}"
+
+        let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
+            lineOf snap (stateEncode snap.State)
+
+        let tryToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : Result<string, JsonlWriteFault> =
+            checkedLines "state" (fun (s: Snapshot<'State>) -> stateEncode s.State) lineOf [ snap ]
 
         let ofJsonl (stateDecode: string -> Result<'State, string>) (line: string) : Result<Snapshot<'State>, string> =
             Jsonl.parseLine 1 line

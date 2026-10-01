@@ -48,6 +48,29 @@ type IAttestationSink =
     /// not check out (or for the no-op sink, which never issued one).
     abstract member Verify: attestation: Attestation -> head: string -> bool
 
+/// Why STRICT replay refused a request (Phase 301, `OpStream.replayEffectStrict`). The lenient
+/// `replayEffect` falls back to the live source when the journal is exhausted, so a journal whose
+/// tail was cut off still replays — with live values leaking in and no signal. The strict form names
+/// every way the journal can fail to answer, and evaluates the live source only for the
+/// `deterministic` label, which never journals.
+[<RequireQualifiedAccess>]
+type CaptureReplayFault =
+    /// The journal holds nothing more and a non-deterministic effect asked: replay ran past the end of
+    /// what was recorded — a truncated journal, or a session doing more than the recorded one did.
+    | Exhausted of eff: string
+    /// The next capture is for another effect identity (the Phase 40 guard, typed): the effect
+    /// requested, and the one the capture records.
+    | IdentityMismatch of requested: string * recorded: string
+    /// The next capture was journalled under another determinism label: the label requested, and the
+    /// one recorded. Compared exactly, case included.
+    | LabelMismatch of requested: string * recorded: string
+    /// The requested label is not a canonical determinism label — `deterministic`, or one or more of
+    /// `clock`, `random`, `network` in that order joined by `+` — compared exactly, case included, so
+    /// `Deterministic` or `Clock` is refused rather than read as some other label.
+    | LabelNotCanonical of label: string
+    /// The captured value did not decode: the domain codec's reason.
+    | Undecodable of reason: string
+
 /// The bodies of the `OpStream` capture and attestation members (Phase 332): determinism capture /
 /// replay and the attestation seam's default sink, signer and verifier. Internal: a consumer reaches
 /// each one through its forward in `OpStream` (OpStream.fs), which carries the member's contract
@@ -147,6 +170,53 @@ module internal OpStreamCapture =
             | c :: rest -> decode c.Value |> Result.map (fun v -> v, rest)
             | [] -> Ok(effect (), [])
 
+    /// The factors of a non-deterministic label, in canonical order. A DELIBERATE COPY of the
+    /// vocabulary `Fuaran.Core.Function`'s `Effect.determinismTag` renders (this package sits below
+    /// `Function` and cannot reference it); `OpStreamTests` holds the two equal over a label corpus.
+    let private labelFactors = [ "clock"; "random"; "network" ]
+
+    let isCanonicalLabel (det: string) : bool =
+        if det = deterministicTag then
+            true
+        else
+            let parts = det.Split('+') |> Array.toList
+
+            let rec ordered (from: int) =
+                function
+                | [] -> true
+                | (p: string) :: rest ->
+                    match List.tryFindIndex (fun f -> f = p) labelFactors with
+                    | Some i when i >= from -> ordered (i + 1) rest
+                    | _ -> false
+
+            ordered 0 parts
+
+    let replayEffectStrict
+        (decode: string -> Result<'v, string>)
+        (eff: string)
+        (det: string)
+        (effect: unit -> 'v)
+        (captures: EffectCapture list)
+        : Result<'v * EffectCapture list, CaptureReplayFault> =
+        if not (isCanonicalLabel det) then
+            Error(CaptureReplayFault.LabelNotCanonical det)
+        elif det = deterministicTag then
+            Ok(effect (), captures)
+        else
+            match captures with
+            | [] -> Error(CaptureReplayFault.Exhausted eff)
+            | c :: _ when c.Eff <> eff -> Error(CaptureReplayFault.IdentityMismatch(eff, c.Eff))
+            | c :: _ when c.Determinism <> det -> Error(CaptureReplayFault.LabelMismatch(det, c.Determinism))
+            | c :: rest ->
+                match decode c.Value with
+                | Ok v -> Ok(v, rest)
+                | Error reason -> Error(CaptureReplayFault.Undecodable reason)
+
+    let captureHeadWith (cfg: StreamConfig) (captures: EffectCapture list) : string =
+        match List.tryLast captures with
+        | Some c -> c.Hash
+        | None -> cfg.Genesis
+
     let capturedSeed (eff: string) (captures: EffectCapture list) : string option =
         captures |> List.tryPick (fun c -> if c.Eff = eff then Some c.Value else None)
 
@@ -167,23 +237,30 @@ module internal OpStreamCapture =
     let verifyCaptures (hashFn: HashFn) (captures: EffectCapture list) : bool =
         firstCaptureBreak hashFn captures |> Option.isNone
 
+    let verifyCapturesAtWith (cfg: StreamConfig) (hashFn: HashFn) (head: string) (captures: EffectCapture list) : bool =
+        firstCaptureBreakWith cfg hashFn captures |> Option.isNone
+        && captureHeadWith cfg captures = head
+
+    let private captureLine (c: EffectCapture) (value: string) : string =
+        "{\"capture\":true,\"seq\":"
+        + string c.Seq
+        + ",\"eff\":"
+        + jstr c.Eff
+        + ",\"det\":"
+        + jstr c.Determinism
+        + ",\"value\":"
+        + value
+        + ",\"prevHash\":"
+        + jstr c.PrevHash
+        + ",\"hash\":"
+        + jstr c.Hash
+        + "}"
+
     let captureToJsonl (captures: EffectCapture list) : string =
-        captures
-        |> List.map (fun c ->
-            "{\"capture\":true,\"seq\":"
-            + string c.Seq
-            + ",\"eff\":"
-            + jstr c.Eff
-            + ",\"det\":"
-            + jstr c.Determinism
-            + ",\"value\":"
-            + c.Value
-            + ",\"prevHash\":"
-            + jstr c.PrevHash
-            + ",\"hash\":"
-            + jstr c.Hash
-            + "}")
-        |> String.concat "\n"
+        captures |> List.map (fun c -> captureLine c c.Value) |> String.concat "\n"
+
+    let tryCaptureToJsonl (captures: EffectCapture list) : Result<string, JsonlWriteFault> =
+        checkedLines "value" (fun (c: EffectCapture) -> c.Value) captureLine captures
 
     let captureFromJsonl (text: string) : Result<EffectCapture list, string> =
         text

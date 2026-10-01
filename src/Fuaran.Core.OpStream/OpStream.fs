@@ -238,6 +238,18 @@ module OpStream =
     let toJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : string =
         OpStreamJsonl.toJsonl w records
 
+    /// `toJsonl` that refuses what the reader cannot read back (Phase 301). Every op's encoding is
+    /// checked before a line is built (`Jsonl.checkRaw`): one carrying a line break, whitespace either
+    /// side of the value, or anything but one JSON value would read back changed — split across lines,
+    /// or trimmed — and the read-back chain would fail `verifyChain`. The first such record is the
+    /// `Error`, by its 1-based line and member (`op`). On `Ok` the text is `toJsonl`'s, byte for byte,
+    /// and `fromJsonl` reads it back to records that `toJsonl` writes identically.
+    let tryToJsonl
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (records: OpRecord<'Op> list)
+        : Result<string, JsonlWriteFault> =
+        OpStreamJsonl.tryToJsonl w records
+
     /// THE JSONL line scanner (Phase 296) — the one scanner in the repository. Every reader in this
     /// package (`fromJsonl`, `captureFromJsonl`, `snapshotFromJsonlResult`,
     /// `Attributed.decodeEnvelope`) and the DAG package's `Dag.fromJsonl` read through it; until
@@ -325,6 +337,14 @@ module OpStream =
         /// scanner's or the decoder's — is the result.
         let scanRecords (decode: JsonlLine -> Result<'T, JsonlFault>) (text: string) : Result<'T list, JsonlFault> =
             OpStreamJsonl.Jsonl.scanRecords decode text
+
+        /// Will `raw`, embedded verbatim as a member's value, read back as exactly `raw` (Phase 301)?
+        /// It must carry no line break (`\n` / `\r`), begin with no whitespace, and be ONE JSON value
+        /// this scanner reads to its last character — so the member's span is `raw` byte for byte. A
+        /// line or paragraph separator (U+2028 / U+2029) inside a string passes: the canonical escaper
+        /// emits it raw, and this reader splits lines on `\n` alone. The check every `try…ToJsonl`
+        /// writer applies, public so a writer outside this package (the DAG's) applies the same one.
+        let checkRaw (raw: string) : Result<unit, JsonlWriteFaultReason> = OpStreamJsonl.Jsonl.checkRaw raw
 
     /// Parse JSONL into `(records, rawSnapshotLines)` (Phase 16) — the snapshot-aware reader. The
     /// records are decoded by the witness; the snapshot line, when there is one, is returned verbatim
@@ -474,12 +494,140 @@ module OpStream =
         let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string =
             OpStreamSnapshot.Snapshots.toJsonl stateEncode snap
 
+        /// `toJsonl` that refuses a state encoding the reader cannot read back (Phase 301) — the
+        /// `Jsonl.checkRaw` check over `stateEncode snap.State`, refused as line 1, member `state`. On
+        /// `Ok` the line is `toJsonl`'s, byte for byte.
+        let tryToJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : Result<string, JsonlWriteFault> =
+            OpStreamSnapshot.Snapshots.tryToJsonl stateEncode snap
+
         /// Parse a snapshot line through the one scanner, the mode read from the line: `ChainOnly`
         /// when it carries `"stateHashed":false`, `Strict` when the member is absent or `true`
         /// (every pre-Phase-258 line is strict), a refusal for any other value. The `state` span is
         /// handed to `stateDecode`, whose `Error` is threaded through.
         let ofJsonl (stateDecode: string -> Result<'State, string>) (line: string) : Result<Snapshot<'State>, string> =
             OpStreamSnapshot.Snapshots.ofJsonl stateDecode line
+
+    // ---- the compacted stream (Phase 301) (bodies in Compacted.fs) ----
+
+    /// A compacted stream that keeps going (Phase 301): append, compare-and-append, idempotent append,
+    /// re-compaction, the head and the key index, each reading the snapshot's BOUNDARY rather than
+    /// the tail's length — the next record's sequence is `Snapshot.Seq` plus the tail's length, the
+    /// head of an empty tail is `Snapshot.PrevHash`, and the key index is `Keys` plus the tail's. The
+    /// plain `append` / `head` / `KeyIndex.ofStream` are unchanged and remain the forms for a stream
+    /// that starts at its genesis; handed a tail they number it from zero and link it to nothing.
+    ///
+    /// **The algebra** (`proofs/Chain.fst` §7, Phase 301): `appendTo` onto `compactAt rs n` mints
+    /// exactly the record `append` mints onto `rs`, and the original-plus-record verifies exactly when
+    /// its discarded prefix does and the compacted-plus-record verifies across
+    /// (`append_after_compact`); `compactFrom (compactAt rs n) m = compactAt rs m` for every
+    /// `n <= m` in range (`compact_compose`); and `keyIndex keyOf (compactAt … keyOf rs n)` is
+    /// `KeyIndex.ofStream` over the whole stream (`key_index_compact_parity`).
+    module Compacted =
+
+        /// Compact `records` at `atSeq` (`Snapshots.compact`, same refusals) into a compacted stream
+        /// whose `Keys` is the index `keyOf` builds over the discarded prefix — first-wins, an op
+        /// `keyOf` answers `None` for carries no key. A stream that keys nothing passes
+        /// `fun _ -> None`. Verify, then compact: the prefix is folded and discarded unchecked.
+        let compactAt
+            (mode: SnapshotMode)
+            (cfg: StreamConfig)
+            (hashFn: HashFn)
+            (stateEncode: 'State -> string)
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (keyOf: 'Op -> string option)
+            (state0: 'State)
+            (records: OpRecord<'Op> list)
+            (atSeq: int)
+            : Result<Compacted<'Op, 'State>, SnapshotFault<'Rej>> =
+            OpStreamCompacted.compactAt mode cfg hashFn stateEncode w keyOf state0 records atSeq
+
+        /// Compact AGAIN at `atSeq`, counted in the ORIGIN's numbering (`Snapshot.Seq` up to
+        /// `Snapshot.Seq` plus the tail's length) — the snapshot sealed in the stream's own mode, the
+        /// cut tail records indexed onto `Keys`. Exactly the compacted stream `compactAt` takes of the
+        /// full history at `atSeq` (`compact_compose`), refusals included: `SeqOutOfRange` names
+        /// `atSeq` and the origin length, and `PrefixRejected` the ORIGIN index of the op the domain
+        /// refused. A tail that does not start at the boundary is `TailSeqMismatch`.
+        let compactFrom
+            (hashFn: HashFn)
+            (stateEncode: 'State -> string)
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (keyOf: 'Op -> string option)
+            (c: Compacted<'Op, 'State>)
+            (atSeq: int)
+            : Result<Compacted<'Op, 'State>, SnapshotFault<'Rej>> =
+            OpStreamCompacted.compactFrom hashFn stateEncode w keyOf c atSeq
+
+        /// The head — the tail's last hash, or the snapshot's `PrevHash` (the boundary record's hash,
+        /// the configured genesis at sequence zero) on an empty tail. What `appendIfTo` compares and
+        /// what an attestation of a compacted stream signs: the same head the full stream has.
+        let head (c: Compacted<'Op, 'State>) : string = OpStreamCompacted.head c
+
+        /// Append onto a compacted stream: the record at sequence `Snapshot.Seq` plus the tail's
+        /// length, linked to `head c`, hashed under `cfg.Payload`. A domain rejection is the `Error`.
+        let appendTo
+            (cfg: StreamConfig)
+            (hashFn: HashFn)
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (actor: Actor)
+            (op: 'Op)
+            (state: 'State)
+            (c: Compacted<'Op, 'State>)
+            : Result<'State * Compacted<'Op, 'State>, 'Rej> =
+            OpStreamCompacted.appendTo cfg hashFn w actor op state c
+
+        /// Compare-and-append onto a compacted stream (`appendIf`'s contract): `StaleHead` when
+        /// `expectedHead` is not `head c`, nothing written; otherwise `appendTo`, a domain rejection
+        /// as `Domain`.
+        let appendIfTo
+            (cfg: StreamConfig)
+            (hashFn: HashFn)
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (expectedHead: string)
+            (actor: Actor)
+            (op: 'Op)
+            (state: 'State)
+            (c: Compacted<'Op, 'State>)
+            : Result<'State * Compacted<'Op, 'State>, AppendRejection<'Rej>> =
+            OpStreamCompacted.appendIfTo cfg hashFn w expectedHead actor op state c
+
+        /// Idempotent append onto a compacted stream (`appendIdempotent`'s contract): a key `index`
+        /// already holds is `Duplicate` naming the entry it produced — before or after the boundary,
+        /// so a retry of a pre-compaction key converges — and nothing is written; otherwise `appendTo`
+        /// and the index extended. Thread `keyIndex keyOf c` as the first `index`.
+        let appendIdempotentTo
+            (cfg: StreamConfig)
+            (hashFn: HashFn)
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (key: string)
+            (actor: Actor)
+            (op: 'Op)
+            (state: 'State)
+            (index: KeyIndex)
+            (c: Compacted<'Op, 'State>)
+            : Result<CompactedOutcome<'Op, 'State>, 'Rej> =
+            OpStreamCompacted.appendIdempotentTo cfg hashFn w key actor op state index c
+
+        /// The key index of the whole history: `Keys` (the discarded prefix's) with the tail's keys
+        /// folded on, first-wins — `KeyIndex.ofStream` of the uncompacted stream, rebuilt without it.
+        let keyIndex (keyOf: 'Op -> string option) (c: Compacted<'Op, 'State>) : KeyIndex =
+            OpStreamCompacted.keyIndex keyOf c
+
+        /// `Snapshots.verify` over the snapshot and the tail, under the snapshot's own mode.
+        let verify
+            (cfg: StreamConfig)
+            (hashFn: HashFn)
+            (stateEncode: 'State -> string)
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (c: Compacted<'Op, 'State>)
+            : bool =
+            OpStreamCompacted.verify cfg hashFn stateEncode w c
+
+        /// `Snapshots.replayFrom` over the snapshot and the tail — the seam checked.
+        let replayFrom
+            (w: StreamWitness<'Op, 'State, 'Rej>)
+            (c: Compacted<'Op, 'State>)
+            : Result<'State, SnapshotFault<'Rej>> =
+            OpStreamCompacted.replayFrom w c
 
     // ---- the pre-Phase-296 snapshot matrix: forwards over `Snapshots`, kept for the 0.33.0 draft ----
     //
@@ -742,6 +890,49 @@ module OpStream =
         : Result<'v * EffectCapture list, string> =
         OpStreamCapture.replayEffect decode eff det effect captures
 
+    /// Is `det` a canonical determinism label (Phase 301)? `deterministicTag`, or one or more of
+    /// `clock`, `random`, `network` in that order joined by `+` — compared exactly, case included —
+    /// the vocabulary `Fuaran.Core.Function`'s `Effect.determinismTag` renders.
+    let isDeterminismLabel (det: string) : bool = OpStreamCapture.isCanonicalLabel det
+
+    /// STRICT replay (Phase 301): `replayEffect` with every silent fallback a typed refusal. A label
+    /// that is not canonical is `LabelNotCanonical`; the `deterministicTag` label re-evaluates `effect`
+    /// and consumes nothing, as `replayEffect` does; any other label is answered from the journal ONLY
+    /// — an exhausted journal is `Exhausted` (never the live source), the next capture for another
+    /// effect `IdentityMismatch`, one journalled under another label `LabelMismatch`, a value the codec
+    /// refuses `Undecodable`. Over a complete journal it answers exactly what `replayEffect` answers.
+    /// A journal cut short where the session stops early is not reached by replay at all: anchor its
+    /// head (`captureHead`, recorded in the op stream or signed by an `IAttestationSink`) and check it
+    /// with `verifyCapturesAt`.
+    let replayEffectStrict
+        (decode: string -> Result<'v, string>)
+        (eff: string)
+        (det: string)
+        (effect: unit -> 'v)
+        (captures: EffectCapture list)
+        : Result<'v * EffectCapture list, CaptureReplayFault> =
+        OpStreamCapture.replayEffectStrict decode eff det effect captures
+
+    /// The head of a capture journal under `cfg` (Phase 301) — the last capture's `Hash`, or
+    /// `cfg.Genesis` for an empty journal. The chain binds every capture's sequence, so the head
+    /// fixes the journal's LENGTH: a journal with its tail cut off has a different head.
+    let captureHeadWith (cfg: StreamConfig) (captures: EffectCapture list) : string =
+        OpStreamCapture.captureHeadWith cfg captures
+
+    /// `captureHeadWith` under the canonical genesis `""`.
+    let captureHead (captures: EffectCapture list) : string =
+        OpStreamCapture.captureHeadWith canonicalConfig captures
+
+    /// `verifyCaptures` against an ANCHORED head (Phase 301), under `cfg`: the chain is intact and its
+    /// head is `head` — the value a host recorded when the session closed. A journal truncated at the
+    /// tail still verifies on its own; against its anchor it does not.
+    let verifyCapturesAtWith (cfg: StreamConfig) (hashFn: HashFn) (head: string) (captures: EffectCapture list) : bool =
+        OpStreamCapture.verifyCapturesAtWith cfg hashFn head captures
+
+    /// `verifyCapturesAtWith` under the canonical genesis `""`.
+    let verifyCapturesAt (hashFn: HashFn) (head: string) (captures: EffectCapture list) : bool =
+        OpStreamCapture.verifyCapturesAtWith canonicalConfig hashFn head captures
+
     /// The seed-injection helper (Phase 27) — surface the recorded value of the first capture for
     /// an effect identity. An effect that reads non-determinism *internally* (a seeded RNG whose
     /// individual draws are not captured) records its seed as the capture value; a well-behaved
@@ -774,6 +965,13 @@ module OpStream =
     /// persist its captures alongside its ops, so "replay exactly what happened" holds *from the
     /// file*.
     let captureToJsonl (captures: EffectCapture list) : string = OpStreamCapture.captureToJsonl captures
+
+    /// `captureToJsonl` that refuses a captured value the reader cannot read back (Phase 301) — the
+    /// `Jsonl.checkRaw` check over each `Value` (member `value`). A capture's value is hashed raw, so
+    /// a value with a line break or whitespace either side read back changed and failed
+    /// `verifyCaptures`. On `Ok` the text is `captureToJsonl`'s, byte for byte.
+    let tryCaptureToJsonl (captures: EffectCapture list) : Result<string, JsonlWriteFault> =
+        OpStreamCapture.tryCaptureToJsonl captures
 
     /// Parse a capture log back from JSONL (Phase 27) — the `value` raw span is preserved
     /// byte-for-byte (the domain decoder receives exactly what `Codec` produced), so a round-trip

@@ -4,7 +4,8 @@ namespace Fuaran.Core
 module internal StreamLaws =
 
     /// The op-stream laws: `verifyChain` accepts an intact chain and rejects a tampered
-    /// op; `replay` re-derives the live state from the base state.
+    /// op; `replay` re-derives the live state from the base state; and (Phase 301) the chain's JSONL,
+    /// written by the checked `tryToJsonl`, reads back to records that verify and re-write identically.
     ///
     /// Phase 245 — `Guarded [ "accepted"; "tampered chain" ]`. Every chain is built from ops the
     /// caller's generator DRAWS, and a drawn op the domain refuses does not extend it. A generator
@@ -26,6 +27,13 @@ module internal StreamLaws =
         let tamper =
             LawKit.LawCell("verifyChain detects a tampered op", Some "tampered chain")
 
+        // Phase 301 — linear persistence is part of the base contract: the checked writer accepts
+        // every chain the domain builds, and what it writes reads back to records that verify and
+        // re-write byte-identically. A domain whose `Encode` emits a line break or whitespace around
+        // its value cannot persist linearly, and this cell is where that surfaces.
+        let jsonl =
+            LawKit.LawCell "the JSONL round trip verifies (tryToJsonl, fromJsonl, verifyChain)"
+
         let mutable accepted = 0
         let mutable tampered = 0
 
@@ -35,6 +43,21 @@ module internal StreamLaws =
             accepted <- accepted + acceptedHere
 
             verify.Check(OpStream.verifyChain hashFn sw recs, fun () -> at "an intact chain failed verifyChain")
+
+            match OpStream.tryToJsonl sw recs with
+            | Error f ->
+                jsonl.Check(
+                    false,
+                    fun () -> at ("the checked writer refused the chain: " + JsonlWriteFault.toString f)
+                )
+            | Ok text ->
+                match OpStream.fromJsonl sw text with
+                | Ok back ->
+                    jsonl.Check(
+                        OpStream.verifyChain hashFn sw back && OpStream.toJsonl sw back = text,
+                        fun () -> at "the chain read back from its JSONL does not verify or re-write identically"
+                    )
+                | Error e -> jsonl.Check(false, fun () -> at ("the written JSONL did not read back: " + e))
 
             match OpStream.replay sw gen.State0 recs with
             | Ok s when s = state -> replay.Saw()
@@ -59,7 +82,7 @@ module internal StreamLaws =
                         fun () -> at "a tampered op was not detected"
                     ))
 
-        LawKit.results [ verify; replay; tamper ]
+        LawKit.results [ verify; replay; tamper; jsonl ]
         @ [ SampleAdequacy.reached "Conformance.streamLaws" "accepted op" seed [ "accepted", accepted ]
             SampleAdequacy.reached "Conformance.streamLaws" "tampered chain" seed [ "tampered", tampered ] ]
 
@@ -1254,7 +1277,9 @@ module internal StreamLaws =
     ///    re-reading the source;
     ///  - **deterministic pass-through** — a `Deterministic` effect emits no capture and replay
     ///    re-evaluates the live source (the journal is untouched);
-    ///  - **tamper-evidence** — a tampered captured value fails `verifyCaptures`.
+    ///  - **tamper-evidence** — a tampered captured value fails `verifyCaptures`;
+    ///  - **persistence** (Phase 301) — the journal's JSONL, written by the checked
+    ///    `tryCaptureToJsonl`, reads back to a journal that `verifyCaptures` and re-writes identically.
     ///
     /// `'v` needs equality (it compares recorded vs replayed values). Opt-in like `snapshotLaws` /
     /// `dagLaws` — it carries a value codec + generator the base `certify` does not, so a domain
@@ -1278,6 +1303,12 @@ module internal StreamLaws =
 
         let multiIdentity =
             LawKit.LawCell "replayEffect enforces effect-identity order (a misordered replay is a named error)"
+
+        // Phase 301 — the journal persists: the checked writer accepts it, and what it writes reads
+        // back to a journal that verifies and re-writes byte-identically. A value codec whose output
+        // carries a line break or whitespace around the value fails here.
+        let jsonl =
+            LawKit.LawCell "the capture JSONL round trip verifies (tryCaptureToJsonl, captureFromJsonl, verifyCaptures)"
         // The tamper arm runs only when the fresh draw encodes differently from the capture it
         // replaces — a `draw` that keeps yielding the same value never tampers.
         let mutable tampered = 0
@@ -1322,6 +1353,21 @@ module internal StreamLaws =
                 ),
                 fun () -> at "replay-with-capture ≠ recorded session"
             )
+
+            match OpStream.tryCaptureToJsonl captures with
+            | Error f ->
+                jsonl.Check(
+                    false,
+                    fun () -> at ("the checked writer refused the journal: " + JsonlWriteFault.toString f)
+                )
+            | Ok text ->
+                match OpStream.captureFromJsonl text with
+                | Ok back ->
+                    jsonl.Check(
+                        OpStream.verifyCaptures hashFn back && OpStream.captureToJsonl back = text,
+                        fun () -> at "the journal read back from its JSONL does not verify or re-write identically"
+                    )
+                | Error e -> jsonl.Check(false, fun () -> at ("the written journal did not read back: " + e))
 
             // deterministic pass-through: no capture emitted, replay re-evaluates live, journal intact.
             let dv = rng.Draw draw
@@ -1387,7 +1433,7 @@ module internal StreamLaws =
             fun () -> sprintf "seed=%d: replayEffect did not enforce effect-identity order" seed
         )
 
-        LawKit.results [ exact; deterministic; tamper; multiIdentity ]
+        LawKit.results [ exact; deterministic; tamper; multiIdentity; jsonl ]
         @ [ SampleAdequacy.reached "Conformance.captureReplayLaws" "tampered" seed [ "tampered", tampered ] ]
 
     /// The compare-and-append (CAS) laws (Phase 79) — certify `OpStream.appendIf` is a sound

@@ -981,3 +981,388 @@ let snapshotFamilyTests =
                   "the index and the domain's own rejection"
 
               Expect.equal (take 2) (Error(SnapshotFault.SeqOutOfRange(2, 1))) "a boundary past the end" ]
+
+// ---- Phase 301: the compacted stream lives on, the checked writers, strict effect replay ----
+
+let private keyOf (op: CounterOp) : string option = Some(encodeOp op)
+
+let private fullStream (ops: CounterOp list) =
+    (Ok(0, OpStream.empty), ops)
+    ||> List.fold (fun acc op ->
+        acc
+        |> Result.bind (fun (st, recs) -> OpStream.append OpStream.defaultHash sw (Human "tester") op st recs))
+
+let private compactedAt mode recs n =
+    OpStream.Compacted.compactAt mode OpStream.canonicalConfig OpStream.defaultHash enc sw keyOf 0 recs n
+
+/// A witness whose op IS its encoding, so a test can hand the writers any span it likes.
+let private rawWitness: StreamWitness<string, int, string> =
+    { Apply = fun _ s -> Ok(s + 1)
+      Encode = id
+      Decode = Ok }
+
+let private rawChain (encodings: string list) =
+    (OpStream.empty, encodings)
+    ||> List.fold (fun recs e -> OpStream.appendChainOnly OpStream.defaultHash id (Human "t") e recs)
+
+[<Tests>]
+let compactedTests =
+    testList
+        "OpStream.Compacted (Phase 301)"
+        [ testCase "compact at any boundary, append, re-compact, and a pre-compaction key retries as Duplicate"
+          <| fun _ ->
+              let ops = [ Inc 5; Inc 3; Dec 2; Inc 1 ]
+
+              match fullStream ops, fullStream (ops @ [ Inc 7 ]) with
+              | Ok(st, recs), Ok(st', recs') ->
+                  for n in 0 .. List.length recs do
+                      match compactedAt SnapshotMode.Strict recs n with
+                      | Error e -> failtestf "compact at %d failed: %A" n e
+                      | Ok c ->
+                          Expect.equal
+                              (OpStream.Compacted.keyIndex keyOf c)
+                              (KeyIndex.ofStream encodeOp recs)
+                              (sprintf "at %d the key index is the whole stream's" n)
+
+                          Expect.equal
+                              (OpStream.Compacted.head c)
+                              (OpStream.head recs)
+                              (sprintf "at %d the head is the full stream's" n)
+
+                          match
+                              OpStream.Compacted.appendTo
+                                  OpStream.canonicalConfig
+                                  OpStream.defaultHash
+                                  sw
+                                  (Human "tester")
+                                  (Inc 7)
+                                  st
+                                  c
+                          with
+                          | Error e -> failtestf "appendTo at %d failed: %A" n e
+                          | Ok(stA, cA) ->
+                              Expect.equal stA st' "the state the full append reaches"
+                              Expect.equal cA.Tail (List.skip n recs') "the record the full append mints"
+
+                              Expect.isTrue
+                                  (OpStream.Compacted.verify OpStream.canonicalConfig OpStream.defaultHash enc sw cA)
+                                  (sprintf "at %d the appended compacted stream verifies across" n)
+
+                              for m in n .. List.length recs' do
+                                  Expect.equal
+                                      (OpStream.Compacted.compactFrom OpStream.defaultHash enc sw keyOf cA m)
+                                      (compactedAt SnapshotMode.Strict recs' m)
+                                      (sprintf "re-compacting %d at %d is compacting the full stream at %d" n m m)
+
+                              let index = OpStream.Compacted.keyIndex keyOf cA
+
+                              for r in List.truncate n recs do
+                                  match
+                                      OpStream.Compacted.appendIdempotentTo
+                                          OpStream.canonicalConfig
+                                          OpStream.defaultHash
+                                          sw
+                                          (encodeOp r.Op)
+                                          (Human "tester")
+                                          r.Op
+                                          stA
+                                          index
+                                          cA
+                                  with
+                                  | Ok(CompactedOutcome.Duplicate e) ->
+                                      Expect.equal e { Seq = r.Seq; Hash = r.Hash } "the entry the key produced"
+                                  | other -> failtestf "a pre-compaction key at %d must be a Duplicate, got %A" n other
+              | other -> failtestf "build failed: %A" other
+
+          testCase "the defect this closes: the plain append onto a compacted tail does not verify across"
+          <| fun _ ->
+              match fullStream [ Inc 5; Inc 3; Dec 2; Inc 1 ] with
+              | Ok(st, recs) ->
+                  match compactedAt SnapshotMode.Strict recs 2 with
+                  | Ok c ->
+                      match OpStream.append OpStream.defaultHash sw (Human "tester") (Inc 7) st c.Tail with
+                      | Ok(_, tail') ->
+                          Expect.equal (List.last tail').Seq 2 "numbered from the tail's length"
+
+                          Expect.isFalse
+                              (OpStream.Snapshots.verify
+                                  OpStream.canonicalConfig
+                                  OpStream.defaultHash
+                                  enc
+                                  sw
+                                  c.Snapshot
+                                  tail')
+                              "and no verifier accepts it"
+                      | Error e -> failtestf "append failed: %A" e
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "an empty tail links to the boundary: appendIfTo compares the boundary hash"
+          <| fun _ ->
+              match fullStream [ Inc 5; Inc 3 ] with
+              | Ok(st, recs) ->
+                  match compactedAt SnapshotMode.ChainOnly recs 2 with
+                  | Ok c ->
+                      Expect.isEmpty c.Tail "compacted at the end"
+                      Expect.equal (OpStream.Compacted.head c) (OpStream.head recs) "the head is the last record's"
+
+                      let cas expected =
+                          OpStream.Compacted.appendIfTo
+                              OpStream.canonicalConfig
+                              OpStream.defaultHash
+                              sw
+                              expected
+                              (Human "tester")
+                              (Inc 1)
+                              st
+                              c
+
+                      match cas "" with
+                      | Error(AppendRejection.StaleHead(e, a)) ->
+                          Expect.equal (e, a) ("", OpStream.head recs) "the genesis is not this stream's head"
+                      | other -> failtestf "expected StaleHead, got %A" other
+
+                      match cas (OpStream.head recs) with
+                      | Ok(_, c') ->
+                          let r = List.exactlyOne c'.Tail
+                          Expect.equal (r.Seq, r.PrevHash) (2, OpStream.head recs) "sequence and link from the boundary"
+                      | Error e -> failtestf "the matching head must append: %A" e
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "compactFrom refuses by name, in the origin's numbering"
+          <| fun _ ->
+              match fullStream [ Inc 5; Inc 3; Dec 2; Inc 1 ] with
+              | Ok(_, recs) ->
+                  match compactedAt SnapshotMode.ChainOnly recs 2 with
+                  | Ok c ->
+                      let from = OpStream.Compacted.compactFrom OpStream.defaultHash enc sw keyOf
+                      Expect.equal (from c 1) (Error(SnapshotFault.SeqOutOfRange(1, 4))) "behind the boundary"
+                      Expect.equal (from c 5) (Error(SnapshotFault.SeqOutOfRange(5, 4))) "past the end"
+
+                      let starved =
+                          { c with
+                              Snapshot = { c.Snapshot with State = 0 } }
+
+                      Expect.equal
+                          (from starved 3)
+                          (Error(SnapshotFault.PrefixRejected(2, "would go negative")))
+                          "the ORIGIN index of the refused op"
+
+                      Expect.equal
+                          (from { c with Tail = List.tail c.Tail } 3)
+                          (Error(SnapshotFault.TailSeqMismatch(2, 3)))
+                          "a tail that does not start at the boundary"
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e ]
+
+[<Tests>]
+let checkedWriterTests =
+    let refusedBy (expected: JsonlWriteFaultReason) (raw: string) =
+        Expect.equal (OpStream.Jsonl.checkRaw raw) (Error expected) (sprintf "%A" raw)
+
+    testList
+        "OpStream checked JSONL writers (Phase 301)"
+        [ testCase "checkRaw names each way an embedded span would read back changed"
+          <| fun _ ->
+              refusedBy (JsonlWriteFaultReason.MultiLine 1) "1\n2"
+              refusedBy (JsonlWriteFaultReason.MultiLine 3) "\"a\"\r\n"
+              refusedBy JsonlWriteFaultReason.NotTrimStable "5 "
+              refusedBy JsonlWriteFaultReason.NotTrimStable " 5"
+              refusedBy JsonlWriteFaultReason.NotTrimStable " "
+              refusedBy (JsonlWriteFaultReason.Unreadable JsonlFaultReason.Truncated) ""
+              refusedBy (JsonlWriteFaultReason.Unreadable JsonlFaultReason.TrailingContent) "5 6"
+              refusedBy (JsonlWriteFaultReason.Unreadable(JsonlFaultReason.InvalidLiteral "abc")) "abc"
+
+              for ok in [ "5"; "\"a b\""; "{\"a\":[1,2]}"; "\"a\u2028b\""; "null" ] do
+                  Expect.equal (OpStream.Jsonl.checkRaw ok) (Ok()) (sprintf "%A embeds faithfully" ok)
+
+          testCase "the op writer refuses what the unchecked round trip breaks, and writes what it does not"
+          <| fun _ ->
+              for bad in [ "5 "; " 5"; "\"a\"\n" ] do
+                  let recs = rawChain [ "1"; bad ]
+
+                  let unchecked =
+                      OpStream.fromJsonl rawWitness (OpStream.toJsonl rawWitness recs)
+                      |> Result.map (OpStream.verifyChain OpStream.defaultHash rawWitness)
+
+                  Expect.notEqual unchecked (Ok true) (sprintf "the unchecked round trip of %A does not verify" bad)
+
+                  match OpStream.tryToJsonl rawWitness recs with
+                  | Error f -> Expect.equal (f.Line, f.Member) (2, "op") "the record and member refused"
+                  | Ok _ -> failtestf "%A must be refused" bad
+
+              let good = rawChain [ "1"; "\"a\u2028b\""; "{\"k\":[true]}" ]
+
+              match OpStream.tryToJsonl rawWitness good with
+              | Ok text ->
+                  Expect.equal text (OpStream.toJsonl rawWitness good) "byte for byte the unchecked writer's"
+
+                  match OpStream.fromJsonl rawWitness text with
+                  | Ok back ->
+                      Expect.equal back good "reads back to the same records"
+                      Expect.isTrue (OpStream.verifyChain OpStream.defaultHash rawWitness back) "and verifies"
+                  | Error e -> failtestf "read-back failed: %s" e
+              | Error f -> failtestf "refused a faithful chain: %s" (JsonlWriteFault.toString f)
+
+          testCase "the capture writer refuses a value the round trip would trim"
+          <| fun _ ->
+              let _, caps =
+                  OpStream.captureEffect OpStream.defaultHash id "clock" "t" (fun () -> "5 ") []
+
+              let unchecked =
+                  OpStream.captureFromJsonl (OpStream.captureToJsonl caps)
+                  |> Result.map (OpStream.verifyCaptures OpStream.defaultHash)
+
+              Expect.equal unchecked (Ok false) "the trimmed value no longer verifies"
+
+              Expect.equal
+                  (OpStream.tryCaptureToJsonl caps
+                   |> Result.mapError (fun f -> f.Line, f.Member, f.Reason))
+                  (Error(1, "value", JsonlWriteFaultReason.NotTrimStable))
+                  "refused at the write"
+
+          testCase "the snapshot and DAG writers refuse the same spans"
+          <| fun _ ->
+              match fullStream [ Inc 5 ] with
+              | Ok(_, recs) ->
+                  match compactedAt SnapshotMode.Strict recs 1 with
+                  | Ok c ->
+                      Expect.equal
+                          (OpStream.Snapshots.tryToJsonl (fun (s: int) -> string s + "\n") c.Snapshot
+                           |> Result.mapError (fun f -> f.Line, f.Member))
+                          (Error(1, "state"))
+                          "a state with a line break"
+
+                      Expect.equal
+                          (OpStream.Snapshots.tryToJsonl enc c.Snapshot)
+                          (Ok(OpStream.Snapshots.toJsonl enc c.Snapshot))
+                          "a faithful state writes the unchecked line"
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+              match Dag.append OpStream.defaultHash rawWitness (Human "t") " 5" "" Dag.empty with
+              | Ok(_, dag) ->
+                  Expect.equal
+                      (Dag.tryToJsonl id dag |> Result.mapError (fun f -> f.Line, f.Member, f.Reason))
+                      (Error(1, "op", JsonlWriteFaultReason.NotTrimStable))
+                      "a node whose encoding the reader would trim"
+              | Error e -> failtestf "dag append failed: %A" e
+
+              match Dag.append OpStream.defaultHash rawWitness (Human "t") "5" "" Dag.empty with
+              | Ok(_, dag) ->
+                  Expect.equal (Dag.tryToJsonl id dag) (Ok(Dag.toJsonl id dag)) "a faithful DAG writes unchanged"
+              | Error e -> failtestf "dag append failed: %A" e
+
+          testCase "streamLaws' JSONL cell is red for a domain whose encoding the reader would trim"
+          <| fun _ ->
+              let trailing: StreamWitness<int, int, string> =
+                  { Apply = fun op s -> Ok(s + op)
+                    Encode = fun op -> string op + " "
+                    Decode = fun s -> Ok(int (s.Trim())) }
+
+              let gen: StreamGen<int, int> = { State0 = 0; Op = fun rng -> 1, rng }
+
+              let cell =
+                  Conformance.streamLaws trailing gen OpStream.defaultHash 7 20
+                  |> List.find (fun r -> r.Law.Contains "JSONL round trip")
+
+              Expect.isFalse cell.Passed "the law refuses the domain's persistence" ]
+
+[<Tests>]
+let strictReplayTests =
+    let record (values: (string * string * int) list) =
+        (([]: EffectCapture list), values)
+        ||> List.fold (fun caps (eff, det, v) ->
+            snd (OpStream.captureEffect OpStream.defaultHash encInt det eff (fun () -> v) caps))
+
+    testList
+        "OpStream.replayEffectStrict (Phase 301)"
+        [ testCase "over a complete journal strict replay is the lenient one"
+          <| fun _ ->
+              let caps = record [ "a", "clock", 1; "b", "random", 2 ]
+
+              let strict =
+                  OpStream.replayEffectStrict decInt "a" "clock" (fun () -> 99) caps
+                  |> Result.bind (fun (x, rest) ->
+                      OpStream.replayEffectStrict decInt "b" "random" (fun () -> 99) rest
+                      |> Result.map (fun (y, rest') -> x, y, rest'))
+
+              Expect.equal strict (Ok(1, 2, [])) "both recorded values, the journal consumed"
+
+          testCase "a tail-truncated journal is Exhausted, never replayed live"
+          <| fun _ ->
+              let caps = record [ "a", "clock", 1; "a", "clock", 2 ]
+              let truncated = List.truncate 1 caps
+              Expect.isTrue (OpStream.verifyCaptures OpStream.defaultHash truncated) "the cut journal still verifies"
+
+              match OpStream.replayEffect decInt "a" "clock" (fun () -> 99) [] with
+              | Ok(v, _) -> Expect.equal v 99 "the lenient form leaks the live value"
+              | Error e -> failtestf "lenient replay: %s" e
+
+              let _, rest =
+                  OpStream.replayEffectStrict decInt "a" "clock" (fun () -> 99) truncated
+                  |> Result.defaultWith (fun f -> failtestf "%A" f)
+
+              Expect.equal
+                  (OpStream.replayEffectStrict decInt "a" "clock" (fun () -> 99) rest)
+                  (Error(CaptureReplayFault.Exhausted "a"))
+                  "the strict form refuses"
+
+              let anchor = OpStream.captureHead caps
+
+              Expect.isTrue
+                  (OpStream.verifyCapturesAt OpStream.defaultHash anchor caps)
+                  "the whole journal at its anchor"
+
+              Expect.isFalse
+                  (OpStream.verifyCapturesAt OpStream.defaultHash anchor truncated)
+                  "the cut journal against the anchor"
+
+          testCase "the label is checked at replay, exactly"
+          <| fun _ ->
+              let caps = record [ "a", "clock", 1 ]
+
+              Expect.equal
+                  (OpStream.replayEffectStrict decInt "a" "random" (fun () -> 99) caps)
+                  (Error(CaptureReplayFault.LabelMismatch("random", "clock")))
+                  "another label"
+
+              Expect.equal
+                  (OpStream.replayEffectStrict decInt "b" "clock" (fun () -> 99) caps)
+                  (Error(CaptureReplayFault.IdentityMismatch("b", "a")))
+                  "another effect"
+
+              for bad in [ "Deterministic"; "Clock"; "random+clock"; "clock+clock"; ""; "clock+" ] do
+                  Expect.equal
+                      (OpStream.replayEffectStrict decInt "a" bad (fun () -> 99) caps)
+                      (Error(CaptureReplayFault.LabelNotCanonical bad))
+                      (sprintf "%A is not a label" bad)
+
+          testCase "the label vocabulary is Function's, held equal over a corpus"
+          <| fun _ ->
+              let factors = [ "clock"; "random"; "network" ]
+
+              let corpus =
+                  [ "deterministic"
+                    "Deterministic"
+                    "DETERMINISTIC"
+                    ""
+                    "+"
+                    "clock+"
+                    "deterministic+clock" ]
+                  @ [ for a in factors do
+                          yield a
+                          yield a.ToUpperInvariant()
+
+                          for b in factors do
+                              yield a + "+" + b
+
+                              for c in factors do
+                                  yield a + "+" + b + "+" + c ]
+
+              for label in corpus do
+                  Expect.equal
+                      (OpStream.isDeterminismLabel label)
+                      (Effect.tryDeterminismOfTag label |> Option.isSome)
+                      (sprintf "%A" label) ]
