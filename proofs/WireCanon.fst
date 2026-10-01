@@ -99,10 +99,19 @@
        written down as `bridged` and proved to be what makes the spelling injective
        (`denot_injective_on_bridged`), rather than left in prose.
 
-     - `Canon.renderOrdered` IS NOT MODELLED. It is the declared-key-order leg, where the ENCODER
-       is the order authority and no sort runs; every theorem here is about `render` specifically.
-       Its canonicity rests on a different argument (the IDL's `WireShape.KeyOrder`), and asserting
-       this one carries to it would be exactly the over-reading this header exists to prevent.
+     - `Canon.renderOrdered` WAS NOT MODELLED UNTIL PHASE 306, and is now: section 15. It is the
+       declared-key-order leg, where the ENCODER is the order authority and no sort runs. The
+       theorems of sections 5-13 are about `render` specifically and do NOT carry to it — asserting
+       that would be exactly the over-reading this header exists to prevent — which is why it has
+       a section and a theorem of its own (`render_ordered_injective`, the literal injectivity
+       `render` does not have).
+
+     - THE BYTES. Sections 5-14 are about CHARACTERS. A digest is taken over the UTF-8 bytes of
+       the rendering, and two different strings can share those bytes when one holds an unpaired
+       surrogate. Section 16 (Phase 306) carries the canonical form to the bytes, over
+       `Utf8.fst`'s model of the encoder, on the values whose strings have code points — which is
+       what the guard of section 13 now also asks, and what `JsonParse.fst` proves of everything
+       the parser returns.
 
    A FINDING ABOUT THE SHIPPED CODE, recorded because refutation 1 is the only one of the four that
    is not a documented design choice: `Json.render` has a guarded companion, `Json.tryRender`, which
@@ -121,8 +130,10 @@
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. Sections 0-3
    are the model, 4 the reader, 5-6 the theorems, 7 the refutations. (Those are the header's own
-   groupings; the file's numbered sections run 0-13, with the refutations at 11, Phase 153's
-   no-null lemma at 12 and Phase 165's guard at 13.) Helpers are defined here rather
+   groupings; the file's numbered sections run 0-16, with the refutations at 11, Phase 153's
+   no-null lemma at 12, Phase 165's guard at 13 — restated over a second refusal by Phase 306 —
+   Phase 170's bridge to the parser at 14, and Phase 306's ordered renderer and digest theorem at
+   15 and 16.) Helpers are defined here rather
    than taken from `FStar.List.Tot` so that the extracted oracle depends on `Prims` alone.
 
    Apache-2.0, like everything beside it.
@@ -361,6 +372,11 @@ type wire (num flt: eqtype) = {
      wire denotes. A parameter for the reason `float_read` is one in theorem 4 — the numeral is
      .NET's to compute, and the differential compares it there. *)
   tok_read  : list ch -> outcome (jval num flt);
+  (* F#: `Json.isWellFormedUtf16` (Phase 306) — is this string well-formed UTF-16? A parameter
+     because this model's alphabet does not distinguish a surrogate from any other ordinary
+     character (`CPlain` carries it verbatim): which strings have code points is the host's to
+     say. Only the guard of section 13 reads it; `render` does not. *)
+  str_ok    : list ch -> bool;
 }
 
 let key_lt (#num #flt: eqtype) (w: wire num flt) (a b: list ch) : Tot bool =
@@ -1513,10 +1529,18 @@ type scan (flt: eqtype) =
   | AllFinite : scan flt
   | NonFinite : path:list pstep -> f:flt -> scan flt
 
-(* F#: `Canon.tryRender`'s `Result` — the rendering, or the refusal's path and the float it names. *)
+(* F#: `Json.firstIllFormedString`'s `option` (Phase 306) — the first string that is not
+   well-formed UTF-16, with its path and whether it is a member KEY (whose path is the member's). *)
+type sscan =
+  | AllStringsOk : sscan
+  | IllFormed    : path:list pstep -> s:list ch -> is_key:bool -> sscan
+
+(* F#: `Canon.tryRender`'s `Result` — the rendering, or one of its two refusals: the path and the
+   non-finite float it names, or (Phase 306) the path and the ill-formed string it names. *)
 type guarded (flt: eqtype) =
-  | Rendered : bytes:list ch -> guarded flt
-  | Refused  : path:list pstep -> f:flt -> guarded flt
+  | Rendered      : bytes:list ch -> guarded flt
+  | Refused       : path:list pstep -> f:flt -> guarded flt
+  | RefusedString : path:list pstep -> s:list ch -> is_key:bool -> guarded flt
 
 (* F#: `firstNonFinite`. The guard `System.Double.IsNaN f || System.Double.IsInfinity f` is
    `w.fclass f <> FFinite` — the negation of `float_canonical`'s first clause, and of nothing more. *)
@@ -1546,12 +1570,47 @@ and first_nonfinite_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch
        | NonFinite p f -> NonFinite (PMember k :: p) f
        | AllFinite -> first_nonfinite_kvs w t)
 
-(* F#: `Canon.tryRender`. `render` is called, never re-implemented: the guard adds a refusal and
-   changes no byte. *)
+(* F#: `Json.firstIllFormedString` (Phase 306). Document order, as the float scan's is — an array
+   by index, an object's members in AUTHORED order — and within a member the KEY before its value:
+   a key that is not well-formed is the finding, at the member's own path. *)
+let rec first_ill_formed (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot sscan (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s -> if w.str_ok s then AllStringsOk else IllFormed [] s false
+  | JArr xs -> first_ill_formed_items w 0 xs
+  | JObj fs -> first_ill_formed_kvs w fs
+  | _ -> AllStringsOk
+
+and first_ill_formed_items (#num #flt: eqtype) (w: wire num flt) (i: nat) (xs: list (jval num flt))
+  : Tot sscan (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> AllStringsOk
+  | x :: t ->
+      (match first_ill_formed w x with
+       | IllFormed p s k -> IllFormed (PItem i :: p) s k
+       | AllStringsOk -> first_ill_formed_items w (i + 1) t)
+
+and first_ill_formed_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot sscan (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> AllStringsOk
+  | (k, v) :: t ->
+      if not (w.str_ok k) then IllFormed [PMember k] k true
+      else
+        (match first_ill_formed w v with
+         | IllFormed p s isk -> IllFormed (PMember k :: p) s isk
+         | AllStringsOk -> first_ill_formed_kvs w t)
+
+(* F#: `Canon.tryRender`. `render` is called, never re-implemented: the guard adds its refusals
+   and changes no byte. The non-finite float is looked for FIRST, as in production, so every
+   refusal the Phase 165 guard made is the refusal this one makes. *)
 let try_render (#num #flt: eqtype) (w: wire num flt) (v: jval num flt) : Tot (guarded flt) =
   match first_nonfinite w v with
   | NonFinite p f -> Refused p f
-  | AllFinite -> Rendered (render w v)
+  | AllFinite ->
+      (match first_ill_formed w v with
+       | IllFormed p s k -> RefusedString p s k
+       | AllStringsOk -> Rendered (render w v))
 
 (* ---- the predicate, stated independently of the scan ---- *)
 
@@ -1577,6 +1636,63 @@ and finite_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval n
   match fs with
   | [] -> true
   | (_, v) :: t -> finite_all w v && finite_kvs w t
+
+(* Every string and every member key is well-formed UTF-16 — the second thing the guard asks. *)
+[@@ noextract_to "FSharp"]
+let rec strings_ok (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s -> w.str_ok s
+  | JArr xs -> strings_ok_items w xs
+  | JObj fs -> strings_ok_kvs w fs
+  | _ -> true
+
+and strings_ok_items (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> true
+  | x :: t -> strings_ok w x && strings_ok_items w t
+
+and strings_ok_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> true
+  | (k, v) :: t -> w.str_ok k && strings_ok w v && strings_ok_kvs w t
+
+(* The string scan decides `strings_ok`, and what it names is a string the test refuses. *)
+[@@ noextract_to "FSharp"]
+let rec scan_decides_strings_ok (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (ensures (AllStringsOk? (first_ill_formed w v) == strings_ok w v) /\
+                   (match first_ill_formed w v with
+                    | AllStringsOk -> True
+                    | IllFormed _ s _ -> not (w.str_ok s)))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> scan_items_decides_strings_ok w 0 xs
+  | JObj fs -> scan_kvs_decides_strings_ok w fs
+  | _ -> ()
+
+and scan_items_decides_strings_ok (#num #flt: eqtype) (w: wire num flt) (i: nat)
+                                  (xs: list (jval num flt))
+  : Lemma (ensures (AllStringsOk? (first_ill_formed_items w i xs) == strings_ok_items w xs) /\
+                   (match first_ill_formed_items w i xs with
+                    | AllStringsOk -> True
+                    | IllFormed _ s _ -> not (w.str_ok s)))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t -> scan_decides_strings_ok w x; scan_items_decides_strings_ok w (i + 1) t
+
+and scan_kvs_decides_strings_ok (#num #flt: eqtype) (w: wire num flt)
+                                (fs: list (list ch & jval num flt))
+  : Lemma (ensures (AllStringsOk? (first_ill_formed_kvs w fs) == strings_ok_kvs w fs) /\
+                   (match first_ill_formed_kvs w fs with
+                    | AllStringsOk -> True
+                    | IllFormed _ s _ -> not (w.str_ok s)))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (_, v) :: t -> scan_decides_strings_ok w v; scan_kvs_decides_strings_ok w t
 
 (* What it means for a path to point at something. A RELATION rather than a lookup, on purpose:
    `JObj` is an association LIST, a repeated key is representable, and a by-key lookup would find
@@ -1757,14 +1873,31 @@ let alias_token (c: fcls) : Tot (list ch) =
    `float_canonical` describes, which is what makes the corollary below a corollary. *)
 [@@ noextract_to "FSharp"]
 let tryrender_is_render_on_finite (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
-  : Lemma (requires finite_all w v) (ensures try_render w v == Rendered (render w v)) =
-  scan_decides_finite w v
+  : Lemma (requires finite_all w v /\ strings_ok w v)
+          (ensures try_render w v == Rendered (render w v)) =
+  scan_decides_finite w v;
+  scan_decides_strings_ok w v
 
 [@@ noextract_to "FSharp"]
 let tryrender_is_render_on_canonical (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
-  : Lemma (requires canonical w v) (ensures try_render w v == Rendered (render w v)) =
+  : Lemma (requires canonical w v /\ strings_ok w v)
+          (ensures try_render w v == Rendered (render w v)) =
   canonical_is_finite w v;
   tryrender_is_render_on_finite w v
+
+(* THE GUARD ACCEPTS EXACTLY THE VALUES WITH NO NON-FINITE FLOAT AND NO ILL-FORMED STRING
+   (Phase 306) — and a string refusal is made only where every float is finite, and names a string
+   the well-formedness test refuses. The two refusals are ordered, not merged: a value with both
+   faults is refused for its float, so nothing the Phase 165 guard said has changed. *)
+[@@ noextract_to "FSharp"]
+let tryrender_refuses_exactly_ill_formed (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (ensures (Rendered? (try_render w v) == (finite_all w v && strings_ok w v)) /\
+                   (RefusedString? (try_render w v) == (finite_all w v && not (strings_ok w v))) /\
+                   (match try_render w v with
+                    | RefusedString _ s _ -> not (w.str_ok s)
+                    | _ -> True)) =
+  scan_decides_finite w v;
+  scan_decides_strings_ok w v
 
 (* THE GUARD REFUSES EXACTLY THE ALIASING FLOATS. It refuses iff some float is not finite; and what
    a refusal names is a float that is really at that path, whose class is one of the three
@@ -1776,6 +1909,7 @@ let tryrender_refuses_exactly_aliasing (#num #flt: eqtype) (w: wire num flt) (v:
   : Lemma (ensures (Refused? (try_render w v) == not (finite_all w v)) /\
                    (match try_render w v with
                     | Rendered _ -> True
+                    | RefusedString _ _ _ -> True
                     | Refused p f ->
                         w.fclass f <> FFinite /\
                         reaches v p (JFloat f) /\
@@ -1804,7 +1938,8 @@ let tryrender_keeps_the_documented_normalisations (#num #flt: eqtype) (w: wire n
                 try_render w (JFloat f) == Rendered (render w (JInt #num #flt i))) /\
             ((w.fclass f == FFinite /\ w.fclass g == FFinite /\ w.is_zero f /\ w.is_zero g) ==>
                 try_render w (JFloat #num #flt f) == Rendered (render w (JFloat #num #flt g))) /\
-            (try_render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)]) ==
+            ((w.str_ok k1 /\ w.str_ok k2) ==>
+                try_render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)]) ==
                 Rendered (render w (JObj #num #flt [(k2, JBool true); (k1, JBool false)])))) = ()
 
 (* ======================================================================================
@@ -1909,11 +2044,20 @@ let pc_spells_the_literals (_: unit)
 
 (* A character that is neither of rule 6's two escaped ones is an ORDINARY character to the
    parser's string loop: it closes no literal and starts no escape. This is what makes the last
-   arm of `string_body` the one a rendered body's characters take. *)
+   arm of `string_body` the one a rendered body's characters take.
+
+   AND IT IS NEVER A SURROGATE TO IT (Phase 306). Since Phase 299 the parser's string loop refuses
+   a lone surrogate, and it knows a raw one by its constructor (`JP.CHiSur` / `JP.CLoSur`). `pc`
+   has no clause that produces either: this model's alphabet does not distinguish a surrogate from
+   any other ordinary character, so every `CPlain` crosses the bridge as a non-surrogate. That is
+   a statement about `pc`, not about strings — a value holding an unpaired surrogate is outside
+   what this bridge can express, and it is the guarded renderer of section 13 and the digest
+   theorem of section 16 that say what happens to one. *)
 [@@ noextract_to "FSharp"]
 let pc_is_ordinary (c: ch)
   : Lemma (requires ~(CQuote? c) /\ ~(CBackslash? c))
-          (ensures pc c <> JP.CQuote /\ pc c <> JP.CBackslash) = ()
+          (ensures pc c <> JP.CQuote /\ pc c <> JP.CBackslash /\
+                   JP.lit_class (pc c) == JP.SNone) = ()
 
 (* Every hex nibble is a hex digit to the parser — what the `\u00XX` arm tests before it accepts
    the escape rule 6 emits. *)
@@ -1963,7 +2107,7 @@ let rec pstr (s: list ch) : Tot (list JP.och) (decreases s) =
    induction step reuse the statement — `parse_string` enters the loop at `[]`. *)
 [@@ noextract_to "FSharp"]
 let rec string_body_reads_escape (s rest: list ch) (acc: list JP.och)
-  : Lemma (ensures JP.string_body acc (pcs (app (escape s) (CQuote :: rest)))
+  : Lemma (ensures JP.string_body false acc (pcs (app (escape s) (CQuote :: rest)))
                      == JP.POk (JP.rev_app acc (pstr s)) (pcs rest))
           (decreases s) =
   match s with
@@ -2387,6 +2531,7 @@ let witness_wire : wire unit unit = {
   tok_read  = (fun t -> if t = witness_int_layout then Ok (JInt ())
                         else if t = witness_float_layout then Ok (JFloat ())
                         else Error "not a token this wire emits");
+  str_ok    = (fun _ -> true);
 }
 
 [@@ noextract_to "FSharp"]
@@ -2420,3 +2565,619 @@ let numerals_bridge_is_satisfiable (_: unit)
         (app (pcs (canonical_float witness_wire ())) (pcs rest))
         == JP.POk (JP.JFloat (pcs (canonical_float witness_wire ()))) (pcs rest)
   with (introduce _ ==> _ with witness_float_parses rest)
+
+(* ======================================================================================
+   15. THE DECLARED-KEY-ORDER RENDERER (Phase 306) — `Canon.renderOrdered`, which is `render`
+       minus rule 2, and is INJECTIVE outright on the canonical subset.
+
+       The header said of Phase 149 that `Canon.renderOrdered` was not modelled, and that
+       asserting `render`'s theorems carry to it would be an over-reading. This section models
+       it and states what is true of it — which is MORE than is true of `render`, not less.
+
+       `renderOrdered` is the leg for a vocabulary whose canonical form is DECLARATION order: the
+       encoder constructs each object's members in the declared order and the renderer keeps
+       them, so no sort runs. Every other clause is `render`'s. With no sort there is nothing to
+       normalise away: the reader of section 6 returns members in the order the bytes carry
+       them, which is now the order they were authored in, so it is a left inverse on the nose —
+       `read (render_ordered v ++ rest) == Ok (v, rest)` — and equal bytes are equal VALUES, with
+       no `normalise` on either side. Of section 11's four refutations the fourth (member order)
+       is simply gone; the other three are the numeric normalisations `canonical` excludes, here
+       as there.
+
+       `render_is_render_ordered_of_the_normal_form` is the sentence that ties the two renderers
+       together: `render v` is `render_ordered` of `v`'s normal form. Rule 2 is the WHOLE
+       difference.
+
+       WHAT IS NOT CLAIMED: that a given encoder constructs its members in one order. That is
+       the vocabulary's declaration and the generated encoder's to keep; what is proved here is
+       that IF two values render alike under this renderer they are the same value, member order
+       included.
+
+       The three renderer functions EXTRACT — the differential runs them beside production's
+       `Canon.renderOrdered`. The lemmas are PROOF-ONLY.
+   ====================================================================================== *)
+
+(* F#: `Canon.renderOrdered` — `Json.writeWith false canonicalFloat`. `render`'s clauses, with the
+   members in AUTHORED order. *)
+let rec render_ordered (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Tot (list ch) (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s   -> quoted s
+  | JInt i   -> w.int_str i
+  | JBool b  -> if b then true_chars else false_chars
+  | JFloat f -> canonical_float w f
+  | JArr xs  -> CLBrack :: render_ordered_items w xs
+  | JObj fs  -> CLBrace :: render_ordered_kvs w fs
+
+and render_ordered_items (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+  : Tot (list ch) (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> [CRBrack]
+  | [x] -> app (render_ordered w x) [CRBrack]
+  | x :: t -> app (render_ordered w x) (CComma :: render_ordered_items w t)
+
+and render_ordered_kvs (#num #flt: eqtype) (w: wire num flt) (fs: list (list ch & jval num flt))
+  : Tot (list ch) (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> [CRBrace]
+  | [(k, v)] -> app (quoted k) (CColon :: app (render_ordered w v) [CRBrace])
+  | (k, v) :: t ->
+      app (quoted k) (CColon :: app (render_ordered w v) (CComma :: render_ordered_kvs w t))
+
+(* `render_total`'s statement, for this renderer: a rendering is never empty and never begins with
+   a closing or separating character — what the reader's container loops turn on. *)
+[@@ noextract_to "FSharp"]
+let render_ordered_head (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+  : Lemma (requires tok_read_ok w /\ canonical w v)
+          (ensures Cons? (render_ordered w v) /\
+                   (let h = Cons?.hd (render_ordered w v) in
+                    ~(CRBrack? h) /\ ~(CRBrace? h) /\ ~(CComma? h) /\ ~(CColon? h))) =
+  match v with
+  | JStr _ -> ()
+  | JBool _ -> ()
+  | JArr _ -> ()
+  | JObj _ -> ()
+  | JInt i -> num_head_is_not_structural (Cons?.hd (w.int_str i))
+  | JFloat f -> num_head_is_not_structural (Cons?.hd (canonical_float w f))
+
+(* THE ROUND TRIP, ON THE NOSE. Section 9's induction with the sort taken out: the reader returns
+   exactly the value that was rendered, members in their authored order. *)
+[@@ noextract_to "FSharp"]
+let rec read_render_ordered_roundtrip (#num #flt: eqtype) (w: wire num flt) (v: jval num flt)
+                                      (rest: list ch)
+  : Lemma (requires tok_read_ok w /\ canonical w v /\ sep_ok rest)
+          (ensures read w (app (render_ordered w v) rest) == Ok (v, rest))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s ->
+      app_assoc (escape s) [CQuote] rest;
+      read_str_inverts_escape s rest
+  | JBool b -> if b then strip_app true_chars rest else strip_app false_chars rest
+  | JInt i ->
+      num_head_is_not_structural (Cons?.hd (w.int_str i));
+      app_head (w.int_str i) rest;
+      span_num_app (w.int_str i) rest
+  | JFloat f ->
+      num_head_is_not_structural (Cons?.hd (canonical_float w f));
+      app_head (canonical_float w f) rest;
+      span_num_app (canonical_float w f) rest
+  | JArr xs -> read_ordered_items_roundtrip w xs rest
+  | JObj fs -> read_ordered_kvs_roundtrip w fs rest
+
+and read_ordered_items_roundtrip (#num #flt: eqtype) (w: wire num flt) (xs: list (jval num flt))
+                                 (rest: list ch)
+  : Lemma (requires tok_read_ok w /\ canonical_items w xs)
+          (ensures read_items w (app (render_ordered_items w xs) rest) == Ok (xs, rest))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | [x] ->
+      render_ordered_head w x;
+      app_assoc (render_ordered w x) [CRBrack] rest;
+      app_head (render_ordered w x) (CRBrack :: rest);
+      read_render_ordered_roundtrip w x (CRBrack :: rest)
+  | x :: t ->
+      render_ordered_head w x;
+      app_assoc (render_ordered w x) (CComma :: render_ordered_items w t) rest;
+      app_head (render_ordered w x) (CComma :: app (render_ordered_items w t) rest);
+      read_render_ordered_roundtrip w x (CComma :: app (render_ordered_items w t) rest);
+      read_ordered_items_roundtrip w t rest
+
+and read_ordered_kvs_roundtrip (#num #flt: eqtype) (w: wire num flt)
+                               (fs: list (list ch & jval num flt)) (rest: list ch)
+  : Lemma (requires tok_read_ok w /\ canonical_kvs w fs)
+          (ensures read_kvs w (app (render_ordered_kvs w fs) rest) == Ok (fs, rest))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | [(k, v)] ->
+      app_assoc (quoted k) (CColon :: app (render_ordered w v) [CRBrace]) rest;
+      app_assoc (escape k) [CQuote] (CColon :: app (app (render_ordered w v) [CRBrace]) rest);
+      read_str_inverts_escape k (CColon :: app (app (render_ordered w v) [CRBrace]) rest);
+      app_assoc (render_ordered w v) [CRBrace] rest;
+      read_render_ordered_roundtrip w v (CRBrace :: rest)
+  | (k, v) :: t ->
+      app_assoc (quoted k)
+                (CColon :: app (render_ordered w v) (CComma :: render_ordered_kvs w t)) rest;
+      app_assoc (escape k) [CQuote]
+                (CColon :: app (app (render_ordered w v) (CComma :: render_ordered_kvs w t)) rest);
+      read_str_inverts_escape k
+                (CColon :: app (app (render_ordered w v) (CComma :: render_ordered_kvs w t)) rest);
+      app_assoc (render_ordered w v) (CComma :: render_ordered_kvs w t) rest;
+      read_render_ordered_roundtrip w v (CComma :: app (render_ordered_kvs w t) rest);
+      read_ordered_kvs_roundtrip w t rest
+
+(* THE THEOREM. Equal bytes are equal VALUES — the literal injectivity section 11 refutes of
+   `render`, true of this renderer because rule 2 is the one clause it does not have. *)
+[@@ noextract_to "FSharp"]
+let render_ordered_injective (#num #flt: eqtype) (w: wire num flt) (a b: jval num flt)
+  : Lemma (requires tok_read_ok w /\ canonical w a /\ canonical w b /\
+                    render_ordered w a == render_ordered w b)
+          (ensures a == b) =
+  app_nil (render_ordered w a);
+  app_nil (render_ordered w b);
+  read_render_ordered_roundtrip w a [];
+  read_render_ordered_roundtrip w b []
+
+(* RULE 2 IS THE WHOLE DIFFERENCE. `render` is `render_ordered` of the normal form: sort the
+   members, recursively, and the two renderers write the same bytes. *)
+[@@ noextract_to "FSharp"]
+let rec render_is_render_ordered_of_the_normal_form (#num #flt: eqtype) (w: wire num flt)
+                                                    (v: jval num flt)
+  : Lemma (ensures render w v == render_ordered w (normalise w v))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> render_items_is_ordered_of_normal w xs
+  | JObj fs -> render_kvs_is_ordered_of_normal w (sort_kvs w fs)
+  | _ -> ()
+
+and render_items_is_ordered_of_normal (#num #flt: eqtype) (w: wire num flt)
+                                      (xs: list (jval num flt))
+  : Lemma (ensures render_items w xs == render_ordered_items w (normalise_items w xs))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | [x] -> render_is_render_ordered_of_the_normal_form w x
+  | x :: t ->
+      render_is_render_ordered_of_the_normal_form w x;
+      render_items_is_ordered_of_normal w t
+
+and render_kvs_is_ordered_of_normal (#num #flt: eqtype) (w: wire num flt)
+                                    (fs: list (list ch & jval num flt))
+  : Lemma (ensures render_kvs w fs == render_ordered_kvs w (normalise_kvs w fs))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | [(k, v)] -> render_is_render_ordered_of_the_normal_form w v
+  | (k, v) :: t ->
+      render_is_render_ordered_of_the_normal_form w v;
+      render_kvs_is_ordered_of_normal w t
+
+(* ======================================================================================
+   16. THE DIGEST (Phase 306) — canonical injectivity carried to the UTF-8 BYTES a hash is
+       actually taken over.
+
+       Section 10 says equal RENDERINGS are equal normal forms. A rendering is a string; a digest
+       is taken over its UTF-8 bytes; and two different strings can share those bytes, because a
+       string may hold a surrogate with no partner and every encoder substitutes for one
+       (`Utf8.fst`, `replacement_is_not_injective`). So the statement every attested head rests
+       on was one step short of the thing it is read as. This section is the step.
+
+       THE THEOREM. `canonical_digest_preimage_injective`: for two canonical values whose strings
+       and member keys are all well-formed UTF-16, equal UTF-8 bytes of the two renderings imply
+       equal normal forms. `tryrender_digest_injective` is the same sentence in the shape a caller
+       holds — two values `Canon.tryRender` ACCEPTED — since the guard of section 13 refuses
+       exactly the strings this theorem excludes.
+
+       HOW. `render_good` shows the rendering of such a value is itself well-formed: it is a
+       concatenation of structural characters, numerals, the two literals and escaped strings,
+       rule 6's escape rewrites only characters that are not surrogates, and well-formedness is
+       closed under concatenation. `Utf8.utf8_injective` then gives equal UNITS from equal bytes;
+       the unit spelling is injective, which gives equal characters; and section 10 does the rest.
+
+       THE SPELLING IS A PARAMETER, as the numerals and the comparator are. This model's alphabet
+       is one constructor per character the encoder distinguishes, with `CPlain` carrying every
+       other character verbatim, so which UTF-16 unit a character IS belongs to the host. A
+       `spelling` is that map, with the set of characters the host's bridge produces (`in_dom`),
+       and `spelling_ok` says the three things the argument uses: every character is a unit, the
+       map is injective on the bridged characters, and no character the encoder itself emits —
+       the punctuation, the numerals' characters, the letters of `true` and `false` — is a
+       surrogate. Injectivity is asked on the bridged characters only, deliberately: asked of
+       every `CPlain` it would be unsatisfiable (there are more strings than code units), and a
+       premise nothing satisfies proves everything. `spelling_ok_is_satisfiable` exhibits one that
+       holds.
+
+       WHAT IS NOT PROVED HERE. That SHA-256 separates different byte strings — collision
+       resistance, a premise wherever a digest is read as an identity. That the host's bridge IS
+       a `spelling_ok` spelling and that its well-formedness test is this one — the bridge's
+       faithfulness, an assumed row like `bridged`, with the independent-oracle differential
+       beside it. And nothing about `Json.render`, which is author-ordered and has its own
+       consumers.
+
+       Everything in this section is PROOF-ONLY.
+   ====================================================================================== *)
+
+module U = Utf8
+
+noeq
+type spelling = {
+  (* The UTF-16 code unit a character is. F#: `int c`. *)
+  unit_of : ch -> int;
+  (* The characters the host's bridge produces — its image. Injectivity is claimed there. *)
+  in_dom  : ch -> bool;
+}
+
+[@@ noextract_to "FSharp"]
+let rec units (sp: spelling) (s: list ch) : Tot (list int) (decreases s) =
+  match s with
+  | [] -> []
+  | c :: t -> sp.unit_of c :: units sp t
+
+[@@ noextract_to "FSharp"]
+let rec all_dom (sp: spelling) (s: list ch) : Tot bool (decreases s) =
+  match s with
+  | [] -> true
+  | c :: t -> sp.in_dom c && all_dom sp t
+
+(* The `CPlain` characters the encoder itself emits: the letters of rule 7's two literals that
+   the alphabet has no constructor for. (The non-finite tokens' letters are not here — a value
+   holding a non-finite float is outside the canonical subset.) *)
+[@@ noextract_to "FSharp"]
+let literal_letters : list ch = [CPlain "t"; CPlain "r"; CPlain "l"; CPlain "s"]
+
+[@@ noextract_to "FSharp"]
+let spelling_ok (sp: spelling) : prop =
+  (forall (c: ch). U.is_unit (sp.unit_of c)) /\
+  (forall (c d: ch). (sp.in_dom c /\ sp.in_dom d /\ sp.unit_of c == sp.unit_of d) ==> c == d) /\
+  (forall (c: ch). (~(CPlain? c) \/ mem c literal_letters) ==>
+                   (sp.in_dom c /\ not (U.is_surrogate (sp.unit_of c))))
+
+(* What the argument needs of a character list: every character is one the bridge produces, and
+   the units are a well-formed string. *)
+[@@ noextract_to "FSharp"]
+let good (sp: spelling) (l: list ch) : Tot bool = all_dom sp l && U.well_formed (units sp l)
+
+[@@ noextract_to "FSharp"]
+let rec units_app (sp: spelling) (a b: list ch)
+  : Lemma (ensures units sp (app a b) == U.app (units sp a) (units sp b)) (decreases a) =
+  match a with
+  | [] -> ()
+  | _ :: t -> units_app sp t b
+
+[@@ noextract_to "FSharp"]
+let rec all_dom_app (sp: spelling) (a b: list ch)
+  : Lemma (ensures all_dom sp (app a b) == (all_dom sp a && all_dom sp b)) (decreases a) =
+  match a with
+  | [] -> ()
+  | _ :: t -> all_dom_app sp t b
+
+[@@ noextract_to "FSharp"]
+let good_app (sp: spelling) (a b: list ch)
+  : Lemma (requires good sp a /\ good sp b) (ensures good sp (app a b)) =
+  units_app sp a b;
+  all_dom_app sp a b;
+  U.well_formed_app (units sp a) (units sp b)
+
+(* A bridged character that is not a surrogate, in front of a good list, is a good list. *)
+[@@ noextract_to "FSharp"]
+let good_cons (sp: spelling) (c: ch) (t: list ch)
+  : Lemma (requires spelling_ok sp /\ sp.in_dom c /\ not (U.is_surrogate (sp.unit_of c)) /\
+                    good sp t)
+          (ensures good sp (c :: t)) = ()
+
+[@@ noextract_to "FSharp"]
+let rec plain_free (l: list ch) : Tot bool (decreases l) =
+  match l with
+  | [] -> true
+  | c :: t -> not (CPlain? c) && plain_free t
+
+(* Anything written only in the alphabet's own constructors is good: none of them is a surrogate. *)
+[@@ noextract_to "FSharp"]
+let rec plain_free_good (sp: spelling) (l: list ch)
+  : Lemma (requires spelling_ok sp /\ plain_free l) (ensures good sp l) (decreases l) =
+  match l with
+  | [] -> ()
+  | c :: t -> plain_free_good sp t; good_cons sp c t
+
+[@@ noextract_to "FSharp"]
+let rec all_num_plain_free (t: list ch)
+  : Lemma (requires all_num t) (ensures plain_free t) (decreases t) =
+  match t with
+  | [] -> ()
+  | _ :: r -> all_num_plain_free r
+
+[@@ noextract_to "FSharp"]
+let literals_good (sp: spelling)
+  : Lemma (requires spelling_ok sp) (ensures good sp true_chars /\ good sp false_chars) =
+  assert_norm (mem (CPlain "t") literal_letters /\ mem (CPlain "r") literal_letters /\
+               mem (CPlain "l") literal_letters /\ mem (CPlain "s") literal_letters);
+  good_cons sp (CHexCh HDe) [];
+  good_cons sp CLu [CHexCh HDe];
+  good_cons sp (CPlain "r") [CLu; CHexCh HDe];
+  good_cons sp (CPlain "t") [CPlain "r"; CLu; CHexCh HDe];
+  good_cons sp (CPlain "s") [CHexCh HDe];
+  good_cons sp (CPlain "l") [CPlain "s"; CHexCh HDe];
+  good_cons sp (CHexCh HDa) [CPlain "l"; CPlain "s"; CHexCh HDe];
+  good_cons sp (CHexCh HDf) [CHexCh HDa; CPlain "l"; CPlain "s"; CHexCh HDe]
+
+(* Rule 6 on one character that is not a surrogate: what it writes is good. *)
+[@@ noextract_to "FSharp"]
+let esc_ch_good (sp: spelling) (c: ch)
+  : Lemma (requires spelling_ok sp /\ sp.in_dom c /\ not (U.is_surrogate (sp.unit_of c)))
+          (ensures good sp (esc_ch c)) =
+  match c with
+  | CQuote -> plain_free_good sp (esc_ch c)
+  | CBackslash -> plain_free_good sp (esc_ch c)
+  | CCtrl _ _ -> plain_free_good sp (esc_ch c)
+  | other -> good_cons sp other []
+
+(* RULE 6 KEEPS A STRING WELL-FORMED. The escape rewrites `"`, `\` and the controls, none of
+   which is a surrogate, and copies every other character through — so a pair stays a pair, with
+   nothing put between its halves. *)
+#push-options "--fuel 3 --ifuel 2 --z3rlimit 80"
+[@@ noextract_to "FSharp"]
+let rec escape_good (sp: spelling) (s: list ch)
+  : Lemma (requires spelling_ok sp /\ good sp s) (ensures good sp (escape s)) (decreases s) =
+  match s with
+  | [] -> ()
+  | c :: t ->
+      if U.is_high (sp.unit_of c) then
+        (match t with
+         | c2 :: t2 ->
+             escape_good sp t2;
+             assert (CPlain? c /\ CPlain? c2);
+             assert (escape s == c :: c2 :: escape t2)
+         | [] -> ())
+      else begin
+        escape_good sp t;
+        esc_ch_good sp c;
+        good_app sp (esc_ch c) (escape t)
+      end
+#pop-options
+
+[@@ noextract_to "FSharp"]
+let quoted_good (sp: spelling) (s: list ch)
+  : Lemma (requires spelling_ok sp /\ good sp s) (ensures good sp (quoted s)) =
+  escape_good sp s;
+  plain_free_good sp [CQuote];
+  good_app sp (escape s) [CQuote];
+  good_cons sp CQuote (app (escape s) [CQuote])
+
+(* A value the theorem speaks of: every string and every member key is bridged and well-formed. *)
+[@@ noextract_to "FSharp"]
+let rec digestible (#num #flt: eqtype) (sp: spelling) (v: jval num flt)
+  : Tot bool (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s -> good sp s
+  | JArr xs -> digestible_items sp xs
+  | JObj fs -> digestible_kvs sp fs
+  | _ -> true
+
+and digestible_items (#num #flt: eqtype) (sp: spelling) (xs: list (jval num flt))
+  : Tot bool (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> true
+  | x :: t -> digestible sp x && digestible_items sp t
+
+and digestible_kvs (#num #flt: eqtype) (sp: spelling) (fs: list (list ch & jval num flt))
+  : Tot bool (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> true
+  | (k, v) :: t -> good sp k && digestible sp v && digestible_kvs sp t
+
+(* Sorting moves members, never characters — `insert_preserves_canonical`'s sentence again. *)
+[@@ noextract_to "FSharp"]
+let rec insert_preserves_digestible (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                                    (kv: (list ch & jval num flt))
+                                    (l: list (list ch & jval num flt))
+  : Lemma (requires good sp (fst kv) /\ digestible sp (snd kv) /\ digestible_kvs sp l)
+          (ensures digestible_kvs sp (insert_kv w kv l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> insert_preserves_digestible w sp kv t
+
+[@@ noextract_to "FSharp"]
+let rec sort_preserves_digestible (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                                  (fs: list (list ch & jval num flt))
+  : Lemma (requires digestible_kvs sp fs)
+          (ensures digestible_kvs sp (sort_kvs w fs)) (decreases fs) =
+  match fs with
+  | [] -> ()
+  | kv :: t ->
+      sort_preserves_digestible w sp t;
+      insert_preserves_digestible w sp kv (sort_kvs w t)
+
+(* THE RENDERING OF SUCH A VALUE IS WELL-FORMED. Clause by clause over `render`: a concatenation
+   of good pieces. *)
+[@@ noextract_to "FSharp"]
+let rec render_good (#num #flt: eqtype) (w: wire num flt) (sp: spelling) (v: jval num flt)
+  : Lemma (requires spelling_ok sp /\ layouts_numeric w /\ canonical w v /\ digestible sp v)
+          (ensures good sp (render w v))
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JStr s -> quoted_good sp s
+  | JInt i -> all_num_plain_free (w.int_str i); plain_free_good sp (w.int_str i)
+  | JBool _ -> literals_good sp
+  | JFloat f ->
+      let x = (if w.is_zero f then w.pos_zero else f) in
+      all_num_plain_free (w.float_str x);
+      plain_free_good sp (w.float_str x)
+  | JArr xs ->
+      render_items_good w sp xs;
+      good_cons sp CLBrack (render_items w xs)
+  | JObj fs ->
+      sort_preserves_canonical w fs;
+      sort_preserves_digestible w sp fs;
+      render_kvs_good w sp (sort_kvs w fs);
+      good_cons sp CLBrace (render_kvs w (sort_kvs w fs))
+
+and render_items_good (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                      (xs: list (jval num flt))
+  : Lemma (requires spelling_ok sp /\ layouts_numeric w /\ canonical_items w xs /\
+                    digestible_items sp xs)
+          (ensures good sp (render_items w xs))
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> plain_free_good sp [CRBrack]
+  | [x] ->
+      render_good w sp x;
+      plain_free_good sp [CRBrack];
+      good_app sp (render w x) [CRBrack]
+  | x :: t ->
+      render_good w sp x;
+      render_items_good w sp t;
+      good_cons sp CComma (render_items w t);
+      good_app sp (render w x) (CComma :: render_items w t)
+
+and render_kvs_good (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                    (fs: list (list ch & jval num flt))
+  : Lemma (requires spelling_ok sp /\ layouts_numeric w /\ canonical_kvs w fs /\
+                    digestible_kvs sp fs)
+          (ensures good sp (render_kvs w fs))
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> plain_free_good sp [CRBrace]
+  | [(k, v)] ->
+      quoted_good sp k;
+      render_good w sp v;
+      plain_free_good sp [CRBrace];
+      good_app sp (render w v) [CRBrace];
+      good_cons sp CColon (app (render w v) [CRBrace]);
+      good_app sp (quoted k) (CColon :: app (render w v) [CRBrace])
+  | (k, v) :: t ->
+      quoted_good sp k;
+      render_good w sp v;
+      render_kvs_good w sp t;
+      good_cons sp CComma (render_kvs w t);
+      good_app sp (render w v) (CComma :: render_kvs w t);
+      good_cons sp CColon (app (render w v) (CComma :: render_kvs w t));
+      good_app sp (quoted k) (CColon :: app (render w v) (CComma :: render_kvs w t))
+
+(* The spelling is injective on bridged characters, so it is injective on strings of them. *)
+[@@ noextract_to "FSharp"]
+let rec units_injective (sp: spelling) (a b: list ch)
+  : Lemma (requires spelling_ok sp /\ all_dom sp a /\ all_dom sp b /\ units sp a == units sp b)
+          (ensures a == b) (decreases a) =
+  match a, b with
+  | _ :: ta, _ :: tb -> units_injective sp ta tb
+  | _ -> ()
+
+(* THE THEOREM. Equal BYTES imply equal normal forms — canonical injectivity at the pre-image a
+   digest is actually taken over, on the values whose strings have code points. *)
+[@@ noextract_to "FSharp"]
+let canonical_digest_preimage_injective (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                                        (a b: jval num flt)
+  : Lemma (requires tok_read_ok w /\ layouts_numeric w /\ spelling_ok sp /\
+                    canonical w a /\ canonical w b /\ digestible sp a /\ digestible sp b /\
+                    U.utf8 (units sp (render w a)) == U.utf8 (units sp (render w b)))
+          (ensures normalise w a == normalise w b) =
+  render_good w sp a;
+  render_good w sp b;
+  U.utf8_injective (units sp (render w a)) (units sp (render w b));
+  units_injective sp (render w a) (render w b);
+  render_injective_up_to_key_order w a b
+
+(* ---- the same sentence, about what `Canon.tryRender` accepted ---- *)
+
+(* The bridge between the guard's test and this section's predicate: a string the host's
+   well-formedness test accepts is bridged and well-formed. F#: `Json.isWellFormedUtf16`, at the
+   host's own spelling. *)
+[@@ noextract_to "FSharp"]
+let str_ok_is_good (#num #flt: eqtype) (w: wire num flt) (sp: spelling) : prop =
+  forall (s: list ch). w.str_ok s ==> good sp s
+
+[@@ noextract_to "FSharp"]
+let rec strings_ok_digestible (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                              (v: jval num flt)
+  : Lemma (requires str_ok_is_good w sp /\ strings_ok w v) (ensures digestible sp v)
+          (decreases %[(jsize v <: nat); 0]) =
+  match v with
+  | JArr xs -> strings_ok_items_digestible w sp xs
+  | JObj fs -> strings_ok_kvs_digestible w sp fs
+  | _ -> ()
+
+and strings_ok_items_digestible (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                                (xs: list (jval num flt))
+  : Lemma (requires str_ok_is_good w sp /\ strings_ok_items w xs)
+          (ensures digestible_items sp xs)
+          (decreases %[(jsizes xs <: nat); 1]) =
+  match xs with
+  | [] -> ()
+  | x :: t -> strings_ok_digestible w sp x; strings_ok_items_digestible w sp t
+
+and strings_ok_kvs_digestible (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                              (fs: list (list ch & jval num flt))
+  : Lemma (requires str_ok_is_good w sp /\ strings_ok_kvs w fs)
+          (ensures digestible_kvs sp fs)
+          (decreases %[(fsize fs <: nat); 1]) =
+  match fs with
+  | [] -> ()
+  | (_, v) :: t -> strings_ok_digestible w sp v; strings_ok_kvs_digestible w sp t
+
+(* WHAT THE GUARD BUYS. Two canonical values `Canon.tryRender` accepted, whose renderings have
+   the same UTF-8 bytes, have the same normal form. The guard's two refusals are exactly the two
+   ways a canonical rendering's bytes could have named a second value: a non-finite float
+   (section 11's first refutation) and a string with no code points (`Utf8.fst`'s). *)
+[@@ noextract_to "FSharp"]
+let tryrender_digest_injective (#num #flt: eqtype) (w: wire num flt) (sp: spelling)
+                               (a b: jval num flt) (ra rb: list ch)
+  : Lemma (requires tok_read_ok w /\ layouts_numeric w /\ spelling_ok sp /\ str_ok_is_good w sp /\
+                    canonical w a /\ canonical w b /\
+                    try_render w a == Rendered ra /\ try_render w b == Rendered rb /\
+                    U.utf8 (units sp ra) == U.utf8 (units sp rb))
+          (ensures normalise w a == normalise w b) =
+  tryrender_refuses_exactly_ill_formed w a;
+  tryrender_refuses_exactly_ill_formed w b;
+  tryrender_is_render_on_canonical w a;
+  tryrender_is_render_on_canonical w b;
+  strings_ok_digestible w sp a;
+  strings_ok_digestible w sp b;
+  canonical_digest_preimage_injective w sp a b
+
+(* ---- the premise is SATISFIABLE ---- *)
+
+(* A spelling that satisfies `spelling_ok`, exhibited for the reason section 14 exhibits a wire:
+   the premise is a statement about a parameter, and one that nothing satisfied would make the
+   theorems above true and worthless. Each constructor is given its own ASCII code, a control its
+   code point, and the four literal letters theirs; the bridged characters are those and no
+   others, so injectivity is a finite check. Not a claim about any host's bridge — only that the
+   premise has a model. *)
+[@@ noextract_to "FSharp"]
+let hexd_code (d: hexd) : Tot int =
+  match d with
+  | HD0 -> 48 | HD1 -> 49 | HD2 -> 50 | HD3 -> 51 | HD4 -> 52 | HD5 -> 53 | HD6 -> 54 | HD7 -> 55
+  | HD8 -> 56 | HD9 -> 57 | HDa -> 97 | HDb -> 98 | HDc -> 99 | HDd -> 100 | HDe -> 101 | HDf -> 102
+
+[@@ noextract_to "FSharp"]
+let hexd_nibble (d: hexd) : Tot int =
+  match d with
+  | HD0 -> 0 | HD1 -> 1 | HD2 -> 2 | HD3 -> 3 | HD4 -> 4 | HD5 -> 5 | HD6 -> 6 | HD7 -> 7
+  | HD8 -> 8 | HD9 -> 9 | HDa -> 10 | HDb -> 11 | HDc -> 12 | HDd -> 13 | HDe -> 14 | HDf -> 15
+
+[@@ noextract_to "FSharp"]
+let witness_spelling : spelling = {
+  unit_of = (fun c ->
+    match c with
+    | CQuote -> 34 | CBackslash -> 92
+    | CLBrace -> 123 | CRBrace -> 125 | CLBrack -> 91 | CRBrack -> 93
+    | CColon -> 58 | CComma -> 44
+    | CMinus -> 45 | CPlus -> 43 | CDot -> 46 | CUpE -> 69
+    | CHexCh d -> hexd_code d
+    | CLu -> 117
+    | CCtrl hi lo -> (if hi then 16 else 0) + hexd_nibble lo
+    | CPlain s ->
+        if s = "t" then 116 else if s = "r" then 114
+        else if s = "l" then 108 else if s = "s" then 115
+        else 0x100);
+  in_dom = (fun c ->
+    match c with
+    | CPlain s -> s = "t" || s = "r" || s = "l" || s = "s"
+    | _ -> true);
+}
+
+#push-options "--fuel 8 --ifuel 3 --z3rlimit 200"
+[@@ noextract_to "FSharp"]
+let spelling_ok_is_satisfiable (_: unit) : Lemma (ensures spelling_ok witness_spelling) =
+  assert_norm (mem (CPlain "t") literal_letters /\ mem (CPlain "r") literal_letters /\
+               mem (CPlain "l") literal_letters /\ mem (CPlain "s") literal_letters)
+#pop-options

@@ -74,6 +74,12 @@ $ErrorActionPreference = 'Stop'
 #                nothing else: eight constants with their captions, and the two relations the
 #                specification's own argument uses. It models no enforcement and opens nothing;
 #                it is here because `WireCanon` imports it, which is why it precedes it.
+#   Utf8       — Phase 306, the UTF-8 ENCODER the digests hash through: `Hash.utf8Bytes` clause for
+#                clause, with `Hash.tryUtf8Bytes` beside it, and the encoding proved INJECTIVE on
+#                well-formed UTF-16 — the step that carries `WireCanon`'s canonical form from
+#                characters to the bytes a hash is taken over. Opens nothing; it precedes
+#                `WireCanon`, which reads it for section 16. CHECKED AND NOT EXTRACTED (see
+#                `$proofOnly`): its units are integers, which do not survive this extraction.
 #   WireCanon  — Phase 149, the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and
 #                `Canon.render` clause for clause, with a reader for exactly the grammar they
 #                emit, and the canonical form proved in both directions: equal bytes imply equal
@@ -87,6 +93,14 @@ $ErrorActionPreference = 'Stop'
 #                transport-only `Unknown` proved un-constructible from an encoder. It `open`s
 #                `WireCanon` — the byte claim is stated against Phase 149's renderer rather than
 #                a second one — so it follows it.
+#   WireColumn — Phase 306, the COLUMNAR CODEC: `Table.validate`, `ColumnCodec.encodeJson` /
+#                `decodeJson` / `tryEncode` and the decimal canonicaliser, clause for clause at the
+#                `JVal`, with the codec's image proved to lie inside what `validate` accepts and
+#                the round trip proved up to a NORMAL FORM (columns in schema order, an `Int`
+#                widened into its column's type) — the literal round trip refuted three ways
+#                beside it. `Fuaran.Core.Column`'s first model: its coverage exclusion is gone.
+#                Opens `WireCanon` for the value type the renderer is proved about, so it follows
+#                it; named with the prefix for the reason `WireVersioning` is.
 #   Vocabulary — Phase 150, re-sourced by Phase 173: the GENERATED model of the engine's own
 #                REFERENCE vocabulary (`tests/Fuaran.Core.Tests/ReferenceIdl.fs`) — its types, its
 #                discriminated encoder and its tag-dispatch decoder — emitted by
@@ -142,7 +156,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'WireCanon', 'WireVersioning', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
@@ -184,7 +198,16 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # The exemption is NARROW and it is not a hole in the discipline: what step 2 buys for the other
 # models — "the artefact is the model, byte for byte" — these get from the GENERATION diff in the
 # host step instead, one level further up, against the vocabularies they are generated from.
-$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs')
+#
+# Phase 306 adds `Utf8` to the list, for a different reason and it is said separately so the two
+# are not confused. The generated modules are exempt because nothing here runs beside them. `Utf8`
+# HAS production code beside it — `Hash.utf8Bytes` — but its units and bytes are INTEGERS, and F*'s
+# `int` does not survive the extraction this leg uses (README, finding 2): an extracted `Utf8.fs`
+# would compute in a type the oracle project cannot run at production's values. Its bridge is the
+# independent-oracle differential instead (the Proofs.Oracle family holds `Hash.utf8Bytes` to the
+# platform's own encoder over every code unit), and the ladder records the model-to-code step as
+# assumed, with that differential as its evidence.
+$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8')
 
 # The host step, in this order. Separate invocations rather than one prefix filter, so each failure
 # reads as what it is rather than as one red suite.

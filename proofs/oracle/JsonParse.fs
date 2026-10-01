@@ -57,6 +57,8 @@ type ch =
 | CUe
 | CUf
 | COther of Prims.string
+| CHiSur of Prims.string
+| CLoSur of Prims.string
 
 
 let uu___is_CSpace : ch  ->  Prims.bool = (fun ( projectee  :  ch ) -> (match (projectee) with
@@ -470,6 +472,36 @@ let __proj__COther__item__c : ch  ->  Prims.string = (fun ( projectee  :  ch ) -
      end))
 
 
+let uu___is_CHiSur : ch  ->  Prims.bool = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CHiSur (c) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CHiSur__item__c : ch  ->  Prims.string = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CHiSur (c) -> begin
+     c
+     end))
+
+
+let uu___is_CLoSur : ch  ->  Prims.bool = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CLoSur (c) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__CLoSur__item__c : ch  ->  Prims.string = (fun ( projectee  :  ch ) -> (match (projectee) with
+| CLoSur (c) -> begin
+     c
+     end))
+
+
 let ch_str : ch  ->  Prims.string = (fun ( c  :  ch ) -> (match (c) with
 | CSpace -> begin
      " "
@@ -604,6 +636,12 @@ let ch_str : ch  ->  Prims.string = (fun ( c  :  ch ) -> (match (c) with
      "F"
      end
 | COther (s) -> begin
+     s
+     end
+| CHiSur (s) -> begin
+     s
+     end
+| CLoSur (s) -> begin
      s
      end))
 
@@ -1055,6 +1093,12 @@ let msg_bad_escape : ch  ->  Prims.string = (fun ( e  :  ch ) -> (Prims.strcat "
 let msg_malformed : Prims.list<ch>  ->  Prims.string = (fun ( tok  :  Prims.list<ch> ) -> (Prims.strcat "malformed number: " (chs_str tok)))
 
 
+let msg_lone_high : Prims.string = "ill-formed string: a high surrogate not followed by a low surrogate"
+
+
+let msg_lone_low : Prims.string = "ill-formed string: a low surrogate with no high surrogate before it"
+
+
 let msg_nonfinite : Prims.list<ch>  ->  Prims.string = (fun ( tok  :  Prims.list<ch> ) -> (Prims.strcat "number outside the finite double range; it cannot round-trip on the wire: " (chs_str tok)))
 
 
@@ -1231,13 +1275,105 @@ if (Prims.op_Equals x c) then begin
      PErr (ExpectedToken, (msg_expect_char c), s)
      end))
 
+type sclass =
+| SNone
+| SHigh
+| SLow
 
-let rec string_body : Prims.list<och>  ->  Prims.list<ch>  ->  pres<Prims.list<och>> = (fun ( acc  :  Prims.list<och> ) ( s  :  Prims.list<ch> ) -> (match (s) with
+
+let uu___is_SNone : sclass  ->  Prims.bool = (fun ( projectee  :  sclass ) -> (match (projectee) with
+| SNone -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_SHigh : sclass  ->  Prims.bool = (fun ( projectee  :  sclass ) -> (match (projectee) with
+| SHigh -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_SLow : sclass  ->  Prims.bool = (fun ( projectee  :  sclass ) -> (match (projectee) with
+| SLow -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let lit_class : ch  ->  sclass = (fun ( c  :  ch ) -> (match (c) with
+| CHiSur (uu___) -> begin
+     SHigh
+     end
+| CLoSur (uu___) -> begin
+     SLow
+     end
+| uu___ -> begin
+     SNone
+     end))
+
+
+let uni_class : ch  ->  ch  ->  sclass = (fun ( a  :  ch ) ( b  :  ch ) ->  
+if ((Prims.op_Equals a CLd) || (Prims.op_Equals a CUd)) then begin
+      
+if ((((((Prims.op_Equals b CD8) || (Prims.op_Equals b CD9)) || (Prims.op_Equals b CLa)) || (Prims.op_Equals b CLb)) || (Prims.op_Equals b CUa)) || (Prims.op_Equals b CUb)) then begin
+     SHigh
+     end else begin
+      
+if ((((((((Prims.op_Equals b CLc) || (Prims.op_Equals b CLd)) || (Prims.op_Equals b CLe)) || (Prims.op_Equals b CLf)) || (Prims.op_Equals b CUc)) || (Prims.op_Equals b CUd)) || (Prims.op_Equals b CUe)) || (Prims.op_Equals b CUf)) then begin
+     SLow
+     end else begin
+     SNone
+     end
+     end
+     end else begin
+     SNone
+     end)
+
+
+let och_class : och  ->  sclass = (fun ( o  :  och ) -> (match (o) with
+| OLit (c) -> begin
+     (lit_class c)
+     end
+| OEsc (uu___) -> begin
+     SNone
+     end
+| OUni (a, b, uu___, uu___1) -> begin
+     (uni_class a b)
+     end))
+
+
+let sur_fault : Prims.bool  ->  sclass  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( pending  :  Prims.bool ) ( cls  :  sclass ) ->  
+if (pending && (Prims.op_Less_Greater cls SLow)) then begin
+     FStar_Pervasives_Native.Some (msg_lone_high)
+     end else begin
+      
+if ((not (pending)) && (Prims.op_Equals cls SLow)) then begin
+     FStar_Pervasives_Native.Some (msg_lone_low)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end)
+
+
+let rec string_body : Prims.bool  ->  Prims.list<och>  ->  Prims.list<ch>  ->  pres<Prims.list<och>> = (fun ( pending  :  Prims.bool ) ( acc  :  Prims.list<och> ) ( s  :  Prims.list<ch> ) -> (match (s) with
 | [] -> begin
      PErr (UnterminatedString, "unterminated string", [])
      end
 | (CQuote)::t -> begin
+      
+if pending then begin
+     PErr (BadEscape, msg_lone_high, t)
+     end else begin
      POk ((rev acc), t)
+     end
      end
 | (CBackslash)::t -> begin
      (match (t) with
@@ -1249,7 +1385,13 @@ let rec string_body : Prims.list<och>  ->  Prims.list<ch>  ->  pres<Prims.list<o
 | (a)::(b)::(c)::(d)::r -> begin
       
 if ((((is_hex a) && (is_hex b)) && (is_hex c)) && (is_hex d)) then begin
-     (string_body ((OUni (a, b, c, d))::acc) r)
+     (match ((sur_fault pending (uni_class a b))) with
+| FStar_Pervasives_Native.Some (m) -> begin
+     PErr (BadEscape, m, r)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (string_body (Prims.op_Equals (uni_class a b) SHigh) ((OUni (a, b, c, d))::acc) r)
+     end)
      end else begin
      PErr (BadHexDigit, "bad hex digit in \\u escape", u)
      end
@@ -1261,14 +1403,26 @@ if ((((is_hex a) && (is_hex b)) && (is_hex c)) && (is_hex d)) then begin
 | (e)::u -> begin
       
 if (is_short_escape e) then begin
-     (string_body ((OEsc (e))::acc) u)
+     (match ((sur_fault pending SNone)) with
+| FStar_Pervasives_Native.Some (m) -> begin
+     PErr (BadEscape, m, u)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (string_body false ((OEsc (e))::acc) u)
+     end)
      end else begin
      PErr (BadEscape, (msg_bad_escape e), u)
      end
      end)
      end
 | (c)::t -> begin
-     (string_body ((OLit (c))::acc) t)
+     (match ((sur_fault pending (lit_class c))) with
+| FStar_Pervasives_Native.Some (m) -> begin
+     PErr (BadEscape, m, t)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (string_body (Prims.op_Equals (lit_class c) SHigh) ((OLit (c))::acc) t)
+     end)
      end))
 
 
@@ -1277,7 +1431,7 @@ let parse_string : Prims.list<ch>  ->  pres<Prims.list<och>> = (fun ( s  :  Prim
      PErr (k, m, a)
      end
 | POk (uu___, t) -> begin
-     (string_body [] t)
+     (string_body false [] t)
      end))
 
 
@@ -1421,6 +1575,130 @@ let uu___is_FUnparsable : freadv  ->  Prims.bool = (fun ( projectee  :  freadv )
      end))
 
 
+let after_int : Prims.list<ch>  ->  FStar_Pervasives_Native.option<Prims.list<ch>> = (fun ( s  :  Prims.list<ch> ) -> (match (s) with
+| (CD0)::t -> begin
+     FStar_Pervasives_Native.Some (t)
+     end
+| (d)::uu___ -> begin
+      
+if (is_digit d) then begin
+     FStar_Pervasives_Native.Some ((FStar_Pervasives_Native.snd (take_digits s)))
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let after_frac : Prims.list<ch>  ->  FStar_Pervasives_Native.option<Prims.list<ch>> = (fun ( s  :  Prims.list<ch> ) -> (match (s) with
+| (CDot)::t -> begin
+     (
+
+let uu___ = (take_digits t)
+in (match (uu___) with
+| (ds, r) -> begin
+      
+if (match (ds) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___1 -> begin
+     false
+     end) then begin
+     FStar_Pervasives_Native.Some (r)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end))
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.Some (s)
+     end))
+
+
+let after_exp : Prims.list<ch>  ->  FStar_Pervasives_Native.option<Prims.list<ch>> = (fun ( s  :  Prims.list<ch> ) -> (match (s) with
+| (e)::t -> begin
+      
+if (is_exp e) then begin
+     (
+
+let u = (match (t) with
+| (sg)::v -> begin
+      
+if ((Prims.op_Equals sg CPlus) || (Prims.op_Equals sg CMinus)) then begin
+     v
+     end else begin
+     t
+     end
+     end
+| [] -> begin
+     t
+     end)
+in (
+
+let uu___ = (take_digits u)
+in (match (uu___) with
+| (ds, r) -> begin
+      
+if (match (ds) with
+| (hd)::tl -> begin
+     true
+     end
+| uu___1 -> begin
+     false
+     end) then begin
+     FStar_Pervasives_Native.Some (r)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end)))
+     end else begin
+     FStar_Pervasives_Native.Some (s)
+     end
+     end
+| [] -> begin
+     FStar_Pervasives_Native.Some (s)
+     end))
+
+
+let is_json_number : Prims.list<ch>  ->  Prims.bool = (fun ( tok  :  Prims.list<ch> ) -> (
+
+let start = (match (tok) with
+| (CMinus)::t -> begin
+     t
+     end
+| uu___ -> begin
+     tok
+     end)
+in (match ((after_int start)) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (s1) -> begin
+     (match ((after_frac s1)) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (s2) -> begin
+     (match ((after_exp s2)) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (s3) -> begin
+     (match (s3) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end)
+     end)
+     end)))
+
+
 let classify_number : (Prims.list<ch>  ->  freadv)  ->  Prims.list<ch>  ->  Prims.bool  ->  pres<jval> = (fun ( float_read  :  Prims.list<ch>  ->  freadv ) ( tok  :  Prims.list<ch> ) ( isf  :  Prims.bool ) -> (
 
 let uu___ = (match (tok) with
@@ -1432,6 +1710,10 @@ let uu___ = (match (tok) with
      end)
 in (match (uu___) with
 | (neg, digits) -> begin
+      
+if (not ((is_json_number tok))) then begin
+     PErr (MalformedNumber, (msg_malformed tok), [])
+     end else begin
       
 if isf then begin
      (match ((float_read tok)) with
@@ -1460,6 +1742,7 @@ if (int53_safe digits) then begin
      end)
      end else begin
      PErr (MalformedNumber, (msg_int53 tok), [])
+     end
      end
      end
      end
@@ -1743,6 +2026,53 @@ if (match (r1) with
      RErr (TrailingCharacters, "trailing characters", r1)
      end)
      end)))
+
+
+let rec fwd_state : Prims.bool  ->  Prims.list<och>  ->  FStar_Pervasives_Native.option<Prims.bool> = (fun ( p  :  Prims.bool ) ( l  :  Prims.list<och> ) -> (match (l) with
+| [] -> begin
+     FStar_Pervasives_Native.Some (p)
+     end
+| (o)::t -> begin
+     (match ((sur_fault p (och_class o))) with
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     FStar_Pervasives_Native.None
+     end
+| FStar_Pervasives_Native.None -> begin
+     (fwd_state (Prims.op_Equals (och_class o) SHigh) t)
+     end)
+     end))
+
+
+let ochs_well_formed : Prims.list<och>  ->  Prims.bool = (fun ( l  :  Prims.list<och> ) -> (Prims.op_Equals (fwd_state false l) (FStar_Pervasives_Native.Some (false))))
+
+
+let rec jval_wf : jval  ->  Prims.bool = (fun ( v  :  jval ) -> (match (v) with
+| JStr (s) -> begin
+     (ochs_well_formed s)
+     end
+| JArr (xs) -> begin
+     (jvals_wf xs)
+     end
+| JObj (fs) -> begin
+     (fields_wf fs)
+     end
+| uu___ -> begin
+     true
+     end))
+and jvals_wf : Prims.list<jval>  ->  Prims.bool = (fun ( xs  :  Prims.list<jval> ) -> (match (xs) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     ((jval_wf x) && (jvals_wf t))
+     end))
+and fields_wf : Prims.list<(Prims.list<och> * jval)>  ->  Prims.bool = (fun ( fs  :  Prims.list<(Prims.list<och> * jval)> ) -> (match (fs) with
+| [] -> begin
+     true
+     end
+| ((k, v))::t -> begin
+     (((ochs_well_formed k) && (jval_wf v)) && (fields_wf t))
+     end))
 
 
 

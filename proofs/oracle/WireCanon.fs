@@ -691,48 +691,54 @@ let uu___is_FFinite : fcls  ->  Prims.bool = (fun ( projectee  :  fcls ) -> (mat
      false
      end))
 
-type wire<'num, 'flt> = {int_str : 'num  ->  Prims.list<ch>; float_str : 'flt  ->  Prims.list<ch>; fclass : 'flt  ->  fcls; is_zero : 'flt  ->  Prims.bool; pos_zero : 'flt; key_le : Prims.list<ch>  ->  Prims.list<ch>  ->  Prims.bool; tok_read : Prims.list<ch>  ->  outcome<jval<'num, 'flt>>}
+type wire<'num, 'flt> = {int_str : 'num  ->  Prims.list<ch>; float_str : 'flt  ->  Prims.list<ch>; fclass : 'flt  ->  fcls; is_zero : 'flt  ->  Prims.bool; pos_zero : 'flt; key_le : Prims.list<ch>  ->  Prims.list<ch>  ->  Prims.bool; tok_read : Prims.list<ch>  ->  outcome<jval<'num, 'flt>>; str_ok : Prims.list<ch>  ->  Prims.bool}
 
 
 let __proj__Mkwire__item__int_str = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      int_str
      end))
 
 
 let __proj__Mkwire__item__float_str = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      float_str
      end))
 
 
 let __proj__Mkwire__item__fclass = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      fclass
      end))
 
 
 let __proj__Mkwire__item__is_zero = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      is_zero
      end))
 
 
 let __proj__Mkwire__item__pos_zero = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      pos_zero
      end))
 
 
 let __proj__Mkwire__item__key_le = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      key_le
      end))
 
 
 let __proj__Mkwire__item__tok_read = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
-| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read} -> begin
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
      tok_read
+     end))
+
+
+let __proj__Mkwire__item__str_ok = (fun ( projectee  :  wire<'num, 'flt> ) -> (match (projectee) with
+| {int_str = int_str; float_str = float_str; fclass = fclass; is_zero = is_zero; pos_zero = pos_zero; key_le = key_le; tok_read = tok_read; str_ok = str_ok} -> begin
+     str_ok
      end))
 
 
@@ -1346,9 +1352,50 @@ let __proj__NonFinite__item__f = (fun ( projectee  :  scan<'flt> ) -> (match (pr
      f
      end))
 
+type sscan =
+| AllStringsOk
+| IllFormed of Prims.list<pstep> * Prims.list<ch> * Prims.bool
+
+
+let uu___is_AllStringsOk : sscan  ->  Prims.bool = (fun ( projectee  :  sscan ) -> (match (projectee) with
+| AllStringsOk -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_IllFormed : sscan  ->  Prims.bool = (fun ( projectee  :  sscan ) -> (match (projectee) with
+| IllFormed (path, s, is_key) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__IllFormed__item__path : sscan  ->  Prims.list<pstep> = (fun ( projectee  :  sscan ) -> (match (projectee) with
+| IllFormed (path, s, is_key) -> begin
+     path
+     end))
+
+
+let __proj__IllFormed__item__s : sscan  ->  Prims.list<ch> = (fun ( projectee  :  sscan ) -> (match (projectee) with
+| IllFormed (path, s, is_key) -> begin
+     s
+     end))
+
+
+let __proj__IllFormed__item__is_key : sscan  ->  Prims.bool = (fun ( projectee  :  sscan ) -> (match (projectee) with
+| IllFormed (path, s, is_key) -> begin
+     is_key
+     end))
+
 type guarded<'flt> =
 | Rendered of Prims.list<ch>
 | Refused of Prims.list<pstep> * 'flt
+| RefusedString of Prims.list<pstep> * Prims.list<ch> * Prims.bool
 
 
 let uu___is_Rendered = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
@@ -1384,6 +1431,33 @@ let __proj__Refused__item__path = (fun ( projectee  :  guarded<'flt> ) -> (match
 let __proj__Refused__item__f = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
 | Refused (path, f) -> begin
      f
+     end))
+
+
+let uu___is_RefusedString = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedString (path, s, is_key) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RefusedString__item__path = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedString (path, s, is_key) -> begin
+     path
+     end))
+
+
+let __proj__RefusedString__item__s = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedString (path, s, is_key) -> begin
+     s
+     end))
+
+
+let __proj__RefusedString__item__is_key = (fun ( projectee  :  guarded<'flt> ) -> (match (projectee) with
+| RefusedString (path, s, is_key) -> begin
+     is_key
      end))
 
 
@@ -1433,12 +1507,129 @@ and first_nonfinite_kvs = (fun ( w  :  wire<'num, 'flt> ) ( fs  :  Prims.list<(P
      end))
 
 
+let rec first_ill_formed = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match (v) with
+| JStr (s) -> begin
+      
+if (w.str_ok s) then begin
+     AllStringsOk
+     end else begin
+     IllFormed ([], s, false)
+     end
+     end
+| JArr (xs) -> begin
+     (first_ill_formed_items w (Prims.parse_int "0") xs)
+     end
+| JObj (fs) -> begin
+     (first_ill_formed_kvs w fs)
+     end
+| uu___ -> begin
+     AllStringsOk
+     end))
+and first_ill_formed_items = (fun ( w  :  wire<'num, 'flt> ) ( i  :  Prims.nat ) ( xs  :  Prims.list<jval<'num, 'flt>> ) -> (match (xs) with
+| [] -> begin
+     AllStringsOk
+     end
+| (x)::t -> begin
+     (match ((first_ill_formed w x)) with
+| IllFormed (p, s, k) -> begin
+     IllFormed ((PItem (i))::p, s, k)
+     end
+| AllStringsOk -> begin
+     (first_ill_formed_items w (i + (Prims.parse_int "1")) t)
+     end)
+     end))
+and first_ill_formed_kvs = (fun ( w  :  wire<'num, 'flt> ) ( fs  :  Prims.list<(Prims.list<ch> * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     AllStringsOk
+     end
+| ((k, v))::t -> begin
+      
+if (not ((w.str_ok k))) then begin
+     IllFormed ((PMember (k))::[], k, true)
+     end else begin
+     (match ((first_ill_formed w v)) with
+| IllFormed (p, s, isk) -> begin
+     IllFormed ((PMember (k))::p, s, isk)
+     end
+| AllStringsOk -> begin
+     (first_ill_formed_kvs w t)
+     end)
+     end
+     end))
+
+
 let try_render = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match ((first_nonfinite w v)) with
 | NonFinite (p, f) -> begin
      Refused (p, f)
      end
 | AllFinite -> begin
+     (match ((first_ill_formed w v)) with
+| IllFormed (p, s, k) -> begin
+     RefusedString (p, s, k)
+     end
+| AllStringsOk -> begin
      Rendered ((render w v))
+     end)
+     end))
+
+
+let rec render_ordered = (fun ( w  :  wire<'num, 'flt> ) ( v  :  jval<'num, 'flt> ) -> (match (v) with
+| JStr (s) -> begin
+     (quoted s)
+     end
+| JInt (i) -> begin
+     (w.int_str i)
+     end
+| JBool (b) -> begin
+      
+if b then begin
+     true_chars
+     end else begin
+     false_chars
+     end
+     end
+| JFloat (f) -> begin
+     (canonical_float w f)
+     end
+| JArr (xs) -> begin
+     (CLBrack)::(render_ordered_items w xs)
+     end
+| JObj (fs) -> begin
+     (CLBrace)::(render_ordered_kvs w fs)
+     end))
+and render_ordered_items = (fun ( w  :  wire<'num, 'flt> ) ( xs  :  Prims.list<jval<'num, 'flt>> ) -> (match (xs) with
+| [] -> begin
+     (CRBrack)::[]
+     end
+| (x)::[] -> begin
+     (app (render_ordered w x) ((CRBrack)::[]))
+     end
+| (x)::t -> begin
+     (app (render_ordered w x) ((CComma)::(render_ordered_items w t)))
+     end))
+and render_ordered_kvs = (fun ( w  :  wire<'num, 'flt> ) ( fs  :  Prims.list<(Prims.list<ch> * jval<'num, 'flt>)> ) -> (match (fs) with
+| [] -> begin
+     (CRBrace)::[]
+     end
+| ((k, v))::[] -> begin
+     (app (quoted k) ((CColon)::(app (render_ordered w v) ((CRBrace)::[]))))
+     end
+| ((k, v))::t -> begin
+     (app (quoted k) ((CColon)::(app (render_ordered w v) ((CComma)::(render_ordered_kvs w t)))))
+     end))
+
+type spelling = {unit_of : ch  ->  Prims.int; in_dom : ch  ->  Prims.bool}
+
+
+let __proj__Mkspelling__item__unit_of : spelling  ->  ch  ->  Prims.int = (fun ( projectee  :  spelling ) -> (match (projectee) with
+| {unit_of = unit_of; in_dom = in_dom} -> begin
+     unit_of
+     end))
+
+
+let __proj__Mkspelling__item__in_dom : spelling  ->  ch  ->  Prims.bool = (fun ( projectee  :  spelling ) -> (match (projectee) with
+| {unit_of = unit_of; in_dom = in_dom} -> begin
+     in_dom
      end))
 
 

@@ -14,6 +14,8 @@ model to the validator 137 fixed), the diff's refusal characterisation and emiss
 (141, with its positional facts about `after` added by 162), and the canonical form's injectivity
 (149, which also brings the §21 resource limits into the models as named premises).** Each carries
 its own claims ladder in its own section below; the "Next" section at the foot is the live list.
+(The count in this paragraph is the header's as it was last levelled; theorems 8 to 15 below have
+shipped since, and each section says what it added.)
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -40,6 +42,9 @@ as a theorem, and the theorem's model run as a sixth host through the same diffe
 | `Limits.fst` | The WIRE_FORMAT §21 resource limits as NAMED PREMISES and nothing else (Phase 149): eight constants with their captions, and the two relations the section's own argument uses. It models no enforcement — §21.2's host obligations are about code it does not describe — and it exists so that a changed limit moves one constant rather than a paragraph of prose, and so the ladder can say which theorem depends on which bound. `WireCanon.fst` is the first consumer and takes one of the eight. |
 | `WireCanon.fst` | The eighth model (Phase 149): the CANONICAL ENCODER — `Canon.escape`, `Canon.canonicalFloat` and `Canon.render` clause for clause, a READER for exactly the grammar they emit, and the canonical form proved in BOTH directions. Named `WireCanon` and not `Canon` for the reason `TreeOps.fst` is not called `Ops`: the extracted oracle is a top-level F# module and the differential host opens `Fuaran.Core`, which already carries a `Canon`. It `open`s `Limits`; otherwise it shares nothing with the models above but `oracle/Prims.fs`. Since Phase 170 its section 14 is the BRIDGE to `JsonParse.fst` — the alphabet and value correspondences between the two models, and the proof that section 6's reader and theorem 4's parser agree on everything `render` emits — so it also references `JsonParse`, which the leg already checks before it. The reference is proof-only: every definition in that section is `noextract_to "FSharp"`, and the extraction is unchanged. |
 | `oracle/Limits.fs`, `oracle/WireCanon.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
+| `Utf8.fst` | The UTF-8 ENCODER the digests hash through (Phase 306): `Hash.utf8Bytes` and `Hash.tryUtf8Bytes` clause for clause over integer code units, with the encoding proved INJECTIVE on well-formed UTF-16 and the unguarded path's collisions proved as refutations. **Checked and not extracted** — its integers do not survive the extraction — so its bridge to the code is an independent-oracle differential against the platform's encoder. See theorem 15. |
+| `WireColumn.fst` | The COLUMNAR CODEC (Phase 306): `Table.validate`, `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` and the decimal canonicaliser at the `JVal`, with the codec's image proved inside what `validate` accepts and the round trip proved up to a normal form — the literal round trip refuted three ways. `Fuaran.Core.Column`'s first model. See theorem 15. |
+| `oracle/WireColumn.fs` | **Generated** — the same extractor, the same byte-for-byte diff, the same suite. |
 | `Vocabulary.fst`, `DocVocabulary.fst`, `ScoreVocabulary.fst` and their `…Proofs.fst` | **Generated** — the other way round: not extracted FROM a model but emitted AS one, by `Fuaran.Core.Idl.Codegen`'s F\* target (Phase 150) from the three vocabularies the engine is certified on (Phase 173: `tests/Fuaran.Core.Tests/ReferenceIdl.fs`, `SecondDomainSpike.fs`, `ScoreDomainSpike.fs`). Each model carries a vocabulary's types, encoder and tag-dispatch decoder over `WireDecode`; each `…Proofs` carries the round trip `dec_node (enc_node x) == Ok x` over it. Held to a fresh generation by the `Proofs.Vocabulary` family; checked, not extracted. See theorem 1's generated-vocabulary section. |
 | `oracle/Prims.fs` | The `Prims` names the F# backend emits and the release does not ship. |
 | `oracle/Fuaran.Core.Proofs.Oracle.fsproj` | The oracle assembly. Never packed; nothing extracted enters the shipped kernel. |
@@ -600,7 +605,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 23 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 27 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -616,7 +621,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 14 rows.
+  `unscheduled` where something could and nobody has. 18 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -652,6 +657,10 @@ over-read.
 | `propagation-prior-blind` | `domain-obligation` | `Conformance.propagationEvaluatorLawsWith` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
+| `utf8-model-is-the-encoder` | `model-bridge` | `permanent` |
+| `canon-unit-spelling` | `model-bridge` | `permanent` |
+| `column-int-layouts` | `model-bridge` | `permanent` |
+| `column-codec-abstractions` | `model-bridge` | `permanent` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -781,14 +790,14 @@ deletes an exclusion — at which point the gate names the gap, and keeps naming
 exists. That is the whole mechanism: the exclusions are not a way of avoiding proofs, they are the
 list of proofs nobody has asked for, written down where deleting a line is how you ask.
 
-### The seven exclusions, and the two reasons that were not carried
+### The six exclusions, and the two reasons that were not carried
 
-The seven packages with no model are `Fuaran.Core.Idl.Cli` (**`facade`** — a surface over modelled
+The six packages with no model are `Fuaran.Core.Idl.Cli` (**`facade`** — a surface over modelled
 packages, whose every claim is its callee's restated in a second syntax);
 `Fuaran.Core.Conformance`, `Fuaran.Core.Validator` and `Fuaran.Core.Observer`
 (**`content-free-seam`** — generic seams whose content is supplied entirely by the domain, so there
-is no concrete computation here for a theorem to be about); and `Fuaran.Core.Projection`,
-`Fuaran.Core.AiSurface` and `Fuaran.Core.Column`
+is no concrete computation here for a theorem to be about); and `Fuaran.Core.Projection` and
+`Fuaran.Core.AiSurface`
 (**`law-tested-by-design`** — real computation, theorem declined in favour of a named `Conformance`
 family, which the entry cites and the gate holds to the shipped roster). Each entry's own prose is
 in `coverage-exclusions.json`; it is the decision, and the token is only its kind. There were nine
@@ -804,7 +813,9 @@ entry was. Phase 258 then moved the package itself, with both compute models and
 exclusions Phase 257 had filed for `Fuaran.Core.DataFrame.CSharp` and
 `Fuaran.Core.DataFrame.Conformance`: the eight left were this repository's whole list again. Phase 231
 then removed `Fuaran.Core.CSharp`, the other `facade` entry, with the package itself (DECISIONS.md D28),
-which leaves the seven above.
+which left seven. Phase 306 retired `Fuaran.Core.Column`'s — the entry said an operator who wanted the
+codec proved would delete it, and `WireColumn.fst` is that theorem (theorem 15) — which leaves the six
+above. What the entry cited is unchanged: `Column.aggregate` is still held by its law family.
 
 Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
 recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s
@@ -2188,8 +2199,9 @@ extraction diff says so. No file under `src/` moved, no host does anything.
      as `unit` encoding to the fixed sentinel (above); that those generated decoders never read the
      slot is a property of the generator's emitted text, which the `Proofs.Vocabulary` family holds
      to a fresh generation — not something these lemmas prove.
-   - **`Canon.renderOrdered`**, which theorem 7 does not model; and any JSON a host writes by a
-     route other than `Canon.render`.
+   - **`Canon.renderOrdered`** (modelled since Phase 306, theorem 15, with its own injectivity; the
+     no-null lemma here is still stated of `render` alone); and any JSON a host writes by a route
+     other than `Canon.render`.
    - **That the byte sequence `null` never appears.** It does, inside string literals, and that is
      correct.
 
@@ -3316,7 +3328,14 @@ Five things are proved:
   which the section after the finding below is about — that assumption was this theorem's one
   `unscheduled` ladder row and is now a row of its own at level 1.
 
-### The finding: the int53 guard is SOUND and CONSERVATIVE, not exact
+### The finding: the int53 guard is SOUND and CONSERVATIVE, not exact — CLOSED on the grammar (Phases 299, 306)
+
+_**Closed.** Phase 299 held `parseNumber` to the JSON number grammar, which has no leading zero, and
+Phase 306 restated the model: a padded token never reaches the guard, so on the tokens the parser
+reads the lexical test and the test on the value are one test (`int53_guard_exact_on_the_grammar`,
+theorem 15). What follows is the finding as it stood, and it is still true of the PREDICATE —
+`int53_guard_conservative` is still a lemma — but no longer of the parser: the witness below is now
+refused as a malformed number (`padded_token_is_refused_by_the_grammar`)._
 
 `Wire.fs` justifies comparing the digit string lexically with "JSON forbids leading zeros, so for
 equal length that IS the numeric order". **This parser does not enforce that.** `parseNumber`'s
@@ -4211,7 +4230,8 @@ document order — is modelled clause for clause and measured by the differentia
 theorem that every position before it is finite. *Document-level aliasing* — that a refused
 document renders identically to the document with the named float replaced by its string — is not
 proved either; it is a congruence through `sort_kvs`, and a guard whose job is to refuse does not
-need it. `Canon.renderOrdered` is not modelled and has no guarded companion.
+need it. `Canon.renderOrdered` has no guarded companion (it is modelled since Phase 306 — theorem 15 — and
+the guard gained a second refusal there, an ill-formed string, looked for after the float).
 
 **One thing the shard asked for that is not there, and why.** It asked for "a guarded digest
 companion where a digest wraps the renderer". None does: `Fuaran.Core.Wire` references nothing that
@@ -4320,7 +4340,8 @@ maximum the sort permutes. `budget_covers_depth` converts it, so both theorems a
 
 **What is NOT claimed, and it is the same boundary theorem 4 draws.** Nothing about the parser's
 behaviour on input `render` never emits — its refusals are theorem 4's subject and the two
-theorems here are about acceptance. Nothing about `Canon.renderOrdered`, which is not modelled.
+theorems here are about acceptance. Nothing about `Canon.renderOrdered`, whose model (Phase 306,
+theorem 15) is joined to section 6's reader and not to theorem 4's parser.
 And nothing about the digits of either numeral layout, which is the premise above.
 
 **One thing the shard asked for that does not exist**, recorded because a later reader will look
@@ -4442,7 +4463,8 @@ fixture it would have dropped first is the deepest one.
      it says so or not, and the two families it has to exclude are named above.
    - **`Canon.renderOrdered`.** It is the declared-key-order leg, where the ENCODER is the order
      authority and no sort runs; its canonicity rests on a different argument (the IDL's
-     `WireShape.KeyOrder`), and nothing here carries to it.
+     `WireShape.KeyOrder`), and nothing in THIS theorem carries to it. Phase 306 modelled it and
+     proved it injective outright (theorem 15, `render_ordered_injective`).
    - **That a non-finite float cannot reach `Canon.render`.** It can, and `render` still refuses
      nothing — its bytes are pinned. What Phase 165 added is the entry point that DOES refuse; a
      caller still holding `render` is exactly where it was.
@@ -5663,6 +5685,196 @@ model (`Pipeline.fst`, which opens `Limits.fst` — that module stays here, beca
 (`pipeline-*`) are carried and checked by [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute), which produces the package
 from `0.33.0`; the section that stood here is in that repository's `proofs/README.md`, and in this
 file's history.
+
+## Theorem 15 — the digest's pre-image is injective, and the columnar codec round-trips to a normal form (Phase 306)
+
+Theorems 4, 7 and 8 were each true of their model and each one step short of the machine. Theorem
+7 proved the canonical form over CHARACTERS, and no digest is taken over characters. Theorem 4
+modelled a parser that read tokens the JSON grammar does not have. Theorem 8 modelled a profile's
+counters as naturals, where `+ 1` is total. And `Fuaran.Core.Column` had no model at all. This
+phase closes each, with two new models and three restated ones.
+
+### `Utf8.fst` — the UTF-8 encoding is injective on well-formed UTF-16
+
+`Utf8.fst` models `Hash.utf8Bytes` clause for clause — one byte below U+0080, two below U+0800,
+the four-byte arm for a high surrogate followed AT ONCE by a low one, the three replacement bytes
+for any other surrogate, three bytes for the rest of the BMP — and `Hash.firstIllFormedUnit` /
+`Hash.tryUtf8Bytes` beside it.
+
+- **`utf8_injective`.** Two WELL-FORMED unit strings with one byte string are one string. Proved by
+  exhibiting a left inverse (`unread`, with `unread_utf8`), the way theorem 7 proves its own
+  injectivity, rather than by case analysis on pairs of strings.
+- **`try_utf8_is_utf8_on_well_formed` / `try_utf8_refuses_exactly_ill_formed`.** The guard IS the
+  encoder wherever the string is well-formed, refuses exactly where it is not, and names a unit that
+  is a surrogate and is at the index it gives. `guarded_utf8_injective` is the two together, in the
+  shape a caller holds.
+- **`replacement_is_not_injective` / `unpaired_pair_collides`.** The refutations: the unguarded
+  encoder maps `[D800]`, `[DFFF]` and `[FFFD]` to `EF BF BD`, and `[D801; D800]` to the bytes of two
+  replacement characters. Not defects of this encoder — the platform's answers, which the unguarded
+  path is pinned to — and the reason "injective" is claimed of the guarded form only.
+
+**It is checked and not extracted.** Its units and bytes are integers, and F\*'s `int` does not
+survive the extraction this directory uses (finding 2), so it sits in `check.ps1`'s `$proofOnly`
+list for a reason of its own, recorded there. What stands beside `Hash.utf8Bytes` is therefore not
+an oracle but **the programme's first INDEPENDENT-oracle differential**: the platform's own
+`System.Text.Encoding.UTF8` over every code unit, every high surrogate against the units that bound
+the low range, every low surrogate after a high one, an ordinary unit and nothing, and a seeded
+sample of longer strings — with the guarded form held to the platform's STRICT encoder, which
+throws on exactly the strings that have no code points. Its go-red is the encoder this repository
+shipped until Phase 290, which reads an unchecked low half: it loses on every high surrogate
+followed by a non-low unit and on no well-formed pair. The model-to-code step is the assumed row
+`utf8-model-is-the-encoder`; the differential is its evidence.
+
+**A finding about the test bed, not the encoder.** The F# compiler replaces an unpaired surrogate
+written as a `\u` escape in a string LITERAL with U+FFFD. Phase 290's ill-formed rows were written
+that way, so on .NET they encoded replacement characters — to the same `EF BF BD` a correct encoder
+gives a surrogate — and passed without ever handing the encoder an ill-formed unit. They are built
+from `char` values now, here and in the parity table.
+
+### `WireCanon.fst` — the canonical form, carried to the bytes; and the ordered renderer
+
+**Section 16, the digest.** `canonical_digest_preimage_injective`: for two canonical values whose
+strings and member keys are all well-formed, equal UTF-8 BYTES of the two renderings imply equal
+normal forms. `render_good` shows the rendering of such a value is itself well-formed — a
+concatenation of structural characters, numerals, the two literals and escaped strings, where rule
+6's escape rewrites only characters that are not surrogates (`escape_good`) and well-formedness is
+closed under concatenation — then `Utf8.utf8_injective` gives equal units, the spelling's
+injectivity equal characters, and theorem 7 the rest. `tryrender_digest_injective` is the same
+sentence about two values `Canon.tryRender` ACCEPTED.
+
+The unit a character IS belongs to the host, as the numerals and the comparator do, so it is a
+parameter: a `spelling` is the map and the set of characters the host's bridge produces, and
+`spelling_ok` says the three things the argument uses. Injectivity is asked on the bridged
+characters only — asked of every `CPlain` it would be unsatisfiable, there being more strings than
+code units — and `spelling_ok_is_satisfiable` exhibits a spelling that holds, for the reason section
+14 exhibits a wire.
+
+**Section 13, the guard, restated.** `Canon.tryRender` refuses a second class since this phase: a
+string or a member key that is not well-formed. The model's alphabet does not distinguish a
+surrogate from any other ordinary character, so the test is a field of the `wire` record (`str_ok`)
+and the host supplies it. `tryrender_refuses_exactly_ill_formed` is the new half: the guard renders
+exactly the values with no non-finite float and no ill-formed string; a string refusal is made only
+where every float is finite; and it names a string the test refuses. The Phase 165 theorems stand,
+each with the hypothesis it now needs.
+
+**Section 15, `Canon.renderOrdered`.** The header said for eleven phases that the declared-key-order
+renderer was not modelled. It is `render` minus rule 2, and more is true of it than of `render`:
+with no sort there is nothing to normalise away, so the reader of section 6 is a left inverse on the
+nose and **`render_ordered_injective`** is the LITERAL statement theorem 7 refutes of `render` —
+equal bytes, equal values, member order included. `render_is_render_ordered_of_the_normal_form` ties
+the two renderers together: rule 2 is the whole difference. What is not claimed is that an encoder
+constructs its members in one order; that is the vocabulary's declaration.
+
+### `JsonParse.fst` — restated to the grammar, and the finding it closes
+
+Phase 299 held `parseNumber` to the JSON number grammar and made `parseString` refuse a lone or
+ill-ordered surrogate, and left the model reading the old scanner behind a carve-out in the
+differential. The model is restated and the carve-out is deleted.
+
+- **The grammar.** `is_json_number` is `Json.isJsonNumber` in production's own three steps, and
+  `classify_number` tests it first. `number_grammar_is_checked_first` says a token outside it is
+  `malformed number: <tok>` whatever the two guards would have said of its digits.
+- **The int53 guard is EXACT on the grammar** — which closes theorem 4's finding.
+  `int53_guard_conservative` is still true of the PREDICATE (on a zero-padded digit string the
+  lexical test refuses a safe value), and is no longer true of the PARSER, because a padded token
+  never reaches the guard: `json_integer_is_unpadded` shows an integer token of the grammar is `0`
+  or begins with a non-zero digit, so the lexical test and the test on the value are one test, and
+  `int53_guard_exact_on_the_grammar` states the acceptance as an iff. `padded_token_is_refused_by_
+  the_grammar` shows the old witness is now refused as a malformed number, not as an unsafe integer.
+- **Well-formed strings.** The model has no code points and needs none: whether a unit is a
+  surrogate is decided by what SPELLS it — a raw unit by its constructor (two new ones, `CHiSur`
+  and `CLoSur`), a `\uXXXX` escape by its first two hex digits, a short escape never.
+  `string_body` carries production's `pendingHigh`, and each refusal's suffix is the one
+  production's `i` points at. **`parse_accepts_only_well_formed_strings`**: whatever document it is
+  given, under either null policy and at any cap, a value the parser returns holds no string and no
+  member key that is not well-formed UTF-16 — the hypothesis of section 16's theorem, proved of
+  everything the parser admits. `surrogate_refusals` pins seven witnesses with their kind, message
+  and position.
+
+### `WireVersioning.fst` — the bump, over the refusal
+
+A counter is an `Int32`. The model's `minor + 1` was total where production's wrapped negative at
+`Int32.MaxValue`, so each theorem about a bump held of the model and was false of the code at one
+value. `max_counter` is in the model now, `try_bump` refuses at it as `Versioning.tryBump` does,
+`bump` saturates as `Versioning.bump` does, and the five theorems that need the bump to have
+happened say so. `try_bump_refuses_exactly_at_the_edge` and `bump_stays_in_range` are the two new
+statements; `saturated_breaking_bump_is_not_foreign` exhibits what saturation costs — at the limit a
+breaking change mints no new major, and the verdict `breaking_bump_is_foreign` promises is not
+delivered, which is why the refusing form exists.
+
+### `WireColumn.fst` — the columnar codec's image, and its round trip to a normal form
+
+`Fuaran.Core.Column` was a `law-tested-by-design` exclusion; this is its first model, and the
+exclusion is deleted. `Table.validate`, `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` and
+`DecimalText.tryCanonical` are modelled clause for clause at the `JVal`.
+
+- **The image.** `decode_image_is_valid`: whatever `decode_json` answers `Embedded t` for is a table
+  `validate` accepts. That is true by the last line of production's decode, so the half with content
+  is `encode_image_revalidates`: the table decode REBUILDS from the encoding of a validated table is
+  itself one `validate` accepts.
+- **The round trip, to a normal form.** `round_trip`: for every table `validate` accepts,
+  `decode_json (encode_json (Embedded t)) == Good (Embedded (normal_table t))`.
+- **The literal round trip is FALSE, three ways**, each a refutation in the file: an `Int` in a
+  float column comes back a `Float` (`literal_round_trip_fails_on_a_widened_float`); an `Int` in a
+  decimal column comes back a `Decimal` (`…_on_a_widened_decimal`); and `validate` checks that the
+  schema's names and the columns' names are the same SET, never that they are in the same order, so
+  a table whose columns are in another order comes back in schema order (`…_on_column_order`).
+  `normal_table` is the fixed point (`normal_table_is_idempotent`), everything the decoder produces
+  is already normal (`decoded_table_is_normal`), and from the first decode on the round trip is the
+  literal one (`decoded_round_trip_is_exact`).
+- **What decode accepts that encode never writes** is exhibited rather than left to be found: a
+  `columns` member outside the schema is read past where `validate` refuses the table it would have
+  meant; a masked slot is never read; `ref` wins over `columns`; under an empty schema `columns` need
+  not be an object.
+
+Two facts about .NET's `Int32` are NAMED HYPOTHESES (`int_text_canonical`, `int_floats_finite`),
+each shown necessary. The calendar (`TemporalText`) is abstract — the theorems need `validate` and
+decode to ask the SAME predicate, not what it computes. The five lenient-ingest arms (an omitted
+schema, a bare-array column, an omitted validity mask, an epoch number, a whole-valued float in a
+decimal column) answer `OutOfModel`; the encoder's image never reaches them, and `round_trip`
+concluding `Good` is the proof of that. The string level joins theorem 7 through
+`round_trip_through_normalise` and, on WireCanon's canonical subset, `string_round_trip`; a float
+column holding a whole value or a null is outside that subset, which the header says.
+
+**Two findings about the code, both settled in DECISIONS.md D84.** `validate` does not check column
+ORDER, where the type's doc said order follows the schema: the code is kept and the doc corrected —
+the schema is the order authority, and a table built in another order encodes correctly. And the
+suite's generative codec law asserts the literal round trip and passes because its generator only
+builds tables already in normal form: this model's differential samples OUTSIDE the normal form and
+holds production to `normal_table`, with the literal comparison as its go-red.
+
+### The claims ladder, for this theorem
+
+| Row | Level | What it says |
+|---|---|---|
+| `utf8-injective-on-well-formed` | proved | `utf8_injective` |
+| `utf8-guard-refuses-exactly-ill-formed` | proved | `try_utf8_refuses_exactly_ill_formed` |
+| `utf8-replacement-not-injective` | proved | `replacement_is_not_injective` — the unguarded path's second pre-images |
+| `utf8-independent-oracle` | tested | `Hash.utf8Bytes` beside the platform's encoder; the guard beside the strict one |
+| `utf8-model-is-the-encoder` | assumed (model-bridge, permanent) | the unextracted model describes the shipped encoder |
+| `canonical-digest-preimage-injective` | proved | `canonical_digest_preimage_injective` |
+| `canonical-render-guard-strings` | proved | `tryrender_refuses_exactly_ill_formed` |
+| `canon-unit-spelling` | assumed (model-bridge, permanent) | the host's bridge is a `spelling_ok` spelling, and `str_ok` is well-formedness there |
+| `canon-guard-strings-differential` | tested | the extracted guard beside `Canon.tryRender` over ill-formed strings |
+| `render-ordered-injective` | proved | `render_ordered_injective` |
+| `render-ordered-differential` | tested | the extracted `render_ordered` beside `Canon.renderOrdered` |
+| `parser-accepts-only-well-formed-strings` | proved | `parse_accepts_only_well_formed_strings` |
+| `int53-guard-exact-on-the-grammar` | proved | `int53_guard_exact_on_the_grammar` |
+| `evolution-bump-refuses-at-the-edge` | proved | `try_bump_refuses_exactly_at_the_edge` |
+| `evolution-bump-differential` | tested | the extracted `try_bump` / `bump` beside production at the counter's edge |
+| `column-codec-image-valid` | proved | `encode_image_revalidates` |
+| `column-codec-round-trip` | proved | `round_trip` |
+| `column-codec-literal-round-trip-false` | proved | `literal_round_trip_fails_on_column_order` |
+| `column-codec-differential` | tested | the extracted codec beside `Table.validate` and `ColumnCodec` |
+| `column-int-layouts` | assumed (model-bridge, permanent) | `int_text_canonical`, `int_floats_finite` — two facts about `Int32` |
+| `column-codec-abstractions` | assumed (model-bridge, permanent) | the calendar predicate, three reversal loops and the dropped error prose are as the model takes them |
+| `parser-number-grammar` | proved | `number_grammar_is_checked_first` |
+
+**Not claimed.** That SHA-256 separates different byte strings — collision resistance, a premise
+wherever a digest is read as an identity. Anything about `Json.render`'s injectivity: it is
+author-ordered and keeps a negative zero's sign. That the stack is deep enough for anything: the
+renderers' totality against the machine is a property of the code (they are iterative) held by a
+test on a 1 MB thread, and no model here has a stack to prove it over.
 
 ## Next
 

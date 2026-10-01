@@ -3405,9 +3405,19 @@ module private JsonParseDiff =
         | 'D' -> JsonParse.CUd
         | 'E' -> JsonParse.CUe
         | 'F' -> JsonParse.CUf
+        // A RAW surrogate unit is one of the model's two surrogate constructors (Phase 306): the
+        // parser distinguishes them — a string is well-formed UTF-16 or it is refused — and which
+        // class a raw unit is in is this bridge's to say.
+        | other when int other >= 0xD800 && int other <= 0xDBFF -> JsonParse.CHiSur(string other)
+        | other when int other >= 0xDC00 && int other <= 0xDFFF -> JsonParse.CLoSur(string other)
         | other -> JsonParse.COther(string other)
 
     let toChs (s: string) : JsonParse.ch list = s |> Seq.map toCh |> List.ofSeq
+
+    /// A string from its UTF-16 units. An unpaired surrogate is built this way and never written
+    /// as a `\u` escape in an F# literal, which the compiler replaces with U+FFFD.
+    let units (codes: int list) : string =
+        System.String(codes |> List.map char |> Array.ofList)
 
     /// The BLIND bridge — the go-red instrument for the comparison itself, and this family's
     /// counterpart to the decode family's blind integer bridge. It hides the two container
@@ -3521,31 +3531,11 @@ module private JsonParseDiff =
         | JsonParse.ROk v -> "ok " + renderModel v
         | JsonParse.RErr(k, m, at) -> sprintf "err %A @%d %s" k (input.Length - List.length at) m
 
-    /// THE PHASE 299 CARVE-OUT — the refusals production makes that the extracted model does not
-    /// make yet. Phase 299 held `parseNumber` to the JSON number grammar (`Json.isJsonNumber`) and
-    /// made `parseString` refuse a lone or ill-ordered surrogate; `proofs/JsonParse.fst` still
-    /// models the pre-299 scanner, and its extraction lives in a directory another phase of the
-    /// same tier owned, so the model is restated by Phase 306 (which owns `JsonParse.fst`), and
-    /// this carve-out is DELETED there. It is recognised on production's OWN answer, and only
-    /// there: a `MalformedNumber` whose message is exactly `malformed number: <tok>` over a token
-    /// the grammar refuses, or a `BadEscape` whose message is the surrogate refusal's. A
-    /// disagreement of any other shape — the model refusing where production accepts, a
-    /// different kind, position or message on any other input — is still a failure.
-    let isPhase299Refusal (prod: string) : bool =
-        let number =
-            System.Text.RegularExpressions.Regex.Match(
-                prod,
-                "^err MalformedNumber @\\d+ malformed number: (.*)$",
-                System.Text.RegularExpressions.RegexOptions.Singleline
-            )
-
-        (number.Success && not (Json.isJsonNumber number.Groups.[1].Value))
-        || System.Text.RegularExpressions.Regex.IsMatch(prod, "^err BadEscape @\\d+ ill-formed string: ")
-
     /// Every way the two disagree over one pool, plus how many inputs reached each outcome class —
     /// a run that only ever refused has compared twelve error messages and measured no parse at
-    /// all, and a run that only ever accepted has measured none of the classification. A
-    /// disagreement inside the Phase 299 carve-out (`isPhase299Refusal`) is not counted as one.
+    /// all, and a run that only ever accepted has measured none of the classification. EVERY
+    /// disagreement counts: Phase 299's grammar and surrogate refusals were carved out of this
+    /// comparison until Phase 306 restated the model to make them, and the carve-out is gone.
     let sweep (policy: NullPolicy) (maxDepth: int) (inputs: (string * string) list) =
         let mutable accepted = 0
         let mutable refused = 0
@@ -3560,7 +3550,7 @@ module private JsonParseDiff =
             else
                 refused <- refused + 1
 
-            if p <> m && not (isPhase299Refusal p) then
+            if p <> m then
                 bad.Add(sprintf "%s: input %s\n    production %s\n    model      %s" name input p m)
 
         List.ofSeq bad, accepted, refused
@@ -3652,7 +3642,38 @@ module private JsonParseDiff =
           "unicode key", "{\"kéy\":1}"
           "colon only", ":"
           "comma only", ","
-          "close brace only", "}" ]
+          "close brace only", "}"
+          // Phase 306 — well-formed UTF-16 or refused, in every spelling a unit can arrive in. The
+          // raw units are built, never written as escapes in this file (`units`).
+          "raw lone high", "\"" + units [ 0xD83D ] + "\""
+          "raw lone low", "\"" + units [ 0xDE00 ] + "\""
+          "raw high then ascii", "\"" + units [ 0xD83D ] + "z\""
+          "raw low then high", "\"" + units [ 0xDE00; 0xD83D ] + "\""
+          "raw high then high", "\"" + units [ 0xD801; 0xD800 ] + "\""
+          "raw pair", "\"" + units [ 0xD83D; 0xDE00 ] + "\""
+          "raw pair then stray low", "\"" + units [ 0xD83D; 0xDE00; 0xDE00 ] + "\""
+          "raw high at end of input", "\"" + units [ 0xD83D ]
+          "escaped lone high", "\"\\uD800\""
+          "escaped lone low", "\"\\uDFFF\""
+          "escaped lone low lower-case", "\"\\udfff\""
+          "escaped high then high", "\"\\uD801\\uD800\""
+          "escaped pair", "\"\\uD83D\\uDE00\""
+          "escaped pair lower-case", "\"\\ud83d\\ude00\""
+          "raw high then escaped low", "\"" + units [ 0xD83D ] + "\\uDE00\""
+          "escaped high then raw low", "\"\\uD83D" + units [ 0xDE00 ] + "\""
+          "escaped high then short escape", "\"\\uD83D\\n\""
+          "escaped high then bad escape", "\"\\uD83D\\q\""
+          "escaped high then bad hex", "\"\\uD83D\\uzzzz\""
+          "lone high in a key", "{\"" + units [ 0xD800 ] + "\":1}"
+          "escaped boundary below the surrogates", "\"\\uD7FF\""
+          "escaped boundary above the surrogates", "\"\\uE000\""
+          // The number grammar's boundary, beside the entries above that already reach it.
+          "leading zero then fraction", "01.5"
+          "point without integer", "-.5"
+          "point before exponent", "1.e5"
+          "negative leading zero", "-01"
+          "zero fraction", "0.5"
+          "zero exponent", "0e0" ]
 
     /// A nesting of exactly `k` arrays around a scalar — the family the model's `depth_bound_exact`
     /// is stated over, built here so the theorem's instance and the differential's input are the
@@ -3666,7 +3687,11 @@ module private JsonParseDiff =
     /// Deterministic character soup over the parser's own alphabet — most of it malformed, which is
     /// the point: it is the only pool that reaches failure positions nobody thought to write down.
     let soup (seed: int) (count: int) : (string * string) list =
-        let alphabet = "{}[]\",:0123456789-+.eE\\ \ttnrufalse\u00e9%"
+        // The two surrogate halves are in the alphabet since Phase 306 (built, not written): a
+        // soup string holds them lone, paired and reversed, which nothing hand-written enumerates.
+        let alphabet =
+            "{}[]\",:0123456789-+.eE\\ \ttnrufalse\u00e9%dD8" + units [ 0xD83D; 0xDE00 ]
+
         let mutable state = uint64 seed * 6364136223846793005UL + 1442695040888963407UL
 
         let next () =
@@ -5817,6 +5842,23 @@ let rec private canonOfModel (v: WireCanon.jval<int, float>) : JVal =
 /// claim that this function inverts the two layouts above — which is what rule 5 means by "the
 /// shortest digit sequence that ROUND-TRIPS", so the premise is the layout's definition rather
 /// than an extra assumption about it.
+/// Is `s` well-formed UTF-16 — by the PLATFORM's own strict encoder, which throws on a string it
+/// cannot encode. An independent oracle for the model's `str_ok` parameter (Phase 306): handing
+/// the model production's own scan would compare `Json.isWellFormedUtf16` with itself.
+let private strictUtf8 = System.Text.UTF8Encoding(false, true)
+
+let private strictlyEncodable (s: string) : bool =
+    try
+        strictUtf8.GetBytes s |> ignore
+        true
+    with :? System.Text.EncoderFallbackException ->
+        false
+
+/// A string from its UTF-16 units — the way an unpaired surrogate is built in this file. A `\u`
+/// escape of one in an F# string literal is replaced by the compiler with U+FFFD.
+let private units16 (codes: int list) : string =
+    System.String(codes |> List.map char |> Array.ofList)
+
 let private canonWire: WireCanon.wire<int, float> =
     { int_str = fun i -> canonToChs (string i)
       float_str = fun f -> canonToChs (f.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
@@ -5837,7 +5879,8 @@ let private canonWire: WireCanon.wire<int, float> =
         fun t ->
             match Json.parse (canonFromChs t) with
             | Result.Ok v -> WireCanon.Ok(canonToModel v)
-            | Result.Error m -> WireCanon.Error m }
+            | Result.Error m -> WireCanon.Error m
+      str_ok = fun s -> strictlyEncodable (canonFromChs s) }
 
 /// The GO-RED instrument, and this family's counterpart to the fold family's blind footprint and
 /// the decode family's blind integer bridge: rule 2's comparator REVERSED, so the sort the rule
@@ -6128,6 +6171,44 @@ let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<st
             + " at "
             + guardPathOfModel p
         )
+    | WireCanon.RefusedString(p, s, isKey) ->
+        // Phase 306. The model names the STRING and whether it is a member key; which unit of it
+        // is unpaired is read off the string here, by a scan that is this host's own, so the
+        // message compared is the one production emits and neither side is asked to agree with
+        // itself about the index.
+        let text = canonFromChs s
+
+        let isHigh (c: char) = int c >= 0xD800 && int c <= 0xDBFF
+        let isLow (c: char) = int c >= 0xDC00 && int c <= 0xDFFF
+
+        let rec firstUnpaired (k: int) : int =
+            if k >= text.Length then
+                -1
+            elif isHigh text.[k] then
+                (if k + 1 < text.Length && isLow text.[k + 1] then
+                     firstUnpaired (k + 2)
+                 else
+                     k)
+            elif isLow text.[k] then
+                k
+            else
+                firstUnpaired (k + 1)
+
+        let k = firstUnpaired 0
+
+        if k < 0 then
+            Result.Error "<the model refused a string this host finds well-formed>"
+        else
+            Result.Error(
+                "ill-formed string has no canonical rendering of its own: "
+                + (if isKey then "a member key" else "a string")
+                + " holds the unpaired surrogate U+"
+                + (int text.[k]).ToString("X4")
+                + " at unit "
+                + string k
+                + " at "
+                + guardPathOfModel p
+            )
 
 /// The guard's predicate, written a THIRD time and independently of both sides: does the value
 /// hold a non-finite float anywhere. "Refuses exactly" is a claim about this set, and asking
@@ -6137,6 +6218,15 @@ let rec private holdsNonFinite (v: JVal) : bool =
     | JFloat f -> not (System.Double.IsFinite f)
     | JArr xs -> xs |> List.exists holdsNonFinite
     | JObj fs -> fs |> List.exists (snd >> holdsNonFinite)
+    | _ -> false
+
+/// The guard's SECOND predicate (Phase 306), written the same way: does the value hold a string or
+/// a member key that is not well-formed UTF-16 — by the platform's strict encoder.
+let rec private holdsIllFormed (v: JVal) : bool =
+    match v with
+    | JStr s -> not (strictlyEncodable s)
+    | JArr xs -> xs |> List.exists holdsIllFormed
+    | JObj fs -> fs |> List.exists (fun (k, x) -> not (strictlyEncodable k) || holdsIllFormed x)
     | _ -> false
 
 type private GuardTally =
@@ -6154,6 +6244,11 @@ type private GuardTally =
         /// ACCEPTED documents carrying a float outside the canonical subset — an integer-shaped
         /// token or a zero — which is the set the guard must not refuse.
         AcceptedNormalised: int
+        /// Refusals naming an ill-formed STRING (Phase 306), and those of them naming a member key.
+        StringRefusals: int
+        KeyRefusals: int
+        /// Documents holding BOTH faults, refused — for the float, which is looked for first.
+        BothFaults: int
     }
 
 let private emptyGuardTally =
@@ -6164,7 +6259,10 @@ let private emptyGuardTally =
       NaNs = 0
       PosInfs = 0
       NegInfs = 0
-      AcceptedNormalised = 0 }
+      AcceptedNormalised = 0
+      StringRefusals = 0
+      KeyRefusals = 0
+      BothFaults = 0 }
 
 /// One document, asked of production's guard and of the model's. Three comparisons, each of which
 /// can lose on its own: the two `Result`s agree (message and path included); an `Ok` is exactly
@@ -6201,17 +6299,33 @@ let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal)
             else
                 t
 
+        let t =
+            if holdsIllFormed v then
+                diff "production ACCEPTED a value holding an ill-formed string" t
+            else
+                t
+
         if isCanonicalValue v then
             t
         else
             { t with
                 AcceptedNormalised = t.AcceptedNormalised + 1 }
     | Result.Error m ->
+        let forString = m.StartsWith "ill-formed string"
+
         let t =
-            if holdsNonFinite v then
+            if holdsNonFinite v || holdsIllFormed v then
                 t
             else
-                diff "production REFUSED a value holding no non-finite float" t
+                diff "production REFUSED a value holding no non-finite float and no ill-formed string" t
+
+        // The two refusals are ORDERED: a value holding a non-finite float is refused for it,
+        // whatever its strings are.
+        let t =
+            if holdsNonFinite v && forString then
+                diff "a value holding a non-finite float was refused for a string" t
+            else
+                t
 
         let steps = m |> Seq.filter (fun c -> c = '[') |> Seq.length
 
@@ -6220,7 +6334,15 @@ let private guardProbe (w: WireCanon.wire<int, float>) (label: string) (v: JVal)
             DeepRefusals = t.DeepRefusals + (if steps >= 2 then 1 else 0)
             NaNs = t.NaNs + (if m.Contains ": NaN at " then 1 else 0)
             PosInfs = t.PosInfs + (if m.Contains ": Infinity at " then 1 else 0)
-            NegInfs = t.NegInfs + (if m.Contains ": -Infinity at " then 1 else 0) }
+            NegInfs = t.NegInfs + (if m.Contains ": -Infinity at " then 1 else 0)
+            StringRefusals = t.StringRefusals + (if forString then 1 else 0)
+            KeyRefusals =
+                t.KeyRefusals
+                + (if forString && m.Contains ": a member key holds " then
+                       1
+                   else
+                       0)
+            BothFaults = t.BothFaults + (if holdsNonFinite v && holdsIllFormed v then 1 else 0) }
 
 /// The Phase 149 pool carries no non-finite float — it was built to measure the renderer, which
 /// has nothing to say about one. This walks a drawn value and replaces roughly one numeric leaf in
@@ -6277,6 +6399,191 @@ let private guardWireGoRed: WireCanon.wire<int, float> =
                     WireCanon.FFinite
                 else
                     canonWire.fclass f }
+
+// ---- the guard's second refusal (Phase 306): ill-formed strings, as values and as keys ----
+
+/// The strings the pool is poisoned with: a lone high, a lone low after text, a high followed by a
+/// high (the pair that encoded as U+10000 until Phase 290), a well-formed pair with a stray low
+/// after it — and a well-formed pair alone, which is a character and must NOT be refused.
+let private surrogateStrings: string[] =
+    [| units16 [ 0xD800 ]
+       "a" + units16 [ 0xDFFF ]
+       units16 [ 0xD801; 0xD800 ]
+       units16 [ 0xD83D; 0xDE00; 0xDE00 ]
+       units16 [ 0xD83D; 0xDE00 ] |]
+
+/// Replaces roughly one string in four and one member key in six with one of `surrogateStrings`,
+/// so an ill-formed string lands at every depth and in both positions.
+let private poisonCanonStrings (r: int ref) (v: JVal) : JVal =
+    let draw (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        r.Value % n
+
+    let pick () =
+        surrogateStrings[draw surrogateStrings.Length]
+
+    let rec go (v: JVal) : JVal =
+        match v with
+        | JStr _ when draw 4 = 0 -> JStr(pick ())
+        | JArr xs -> JArr(xs |> List.map go)
+        | JObj fs -> JObj(fs |> List.map (fun (k, x) -> (if draw 6 = 0 then pick () else k), go x))
+        | other -> other
+
+    go v
+
+/// The Phase 165 pool, with its strings poisoned and — one document in three — its floats too, so
+/// the order of the two refusals is measured as well as each on its own.
+let private guardGeneratedIllFormed (w: WireCanon.wire<int, float>) (seed: int) (trials: int) : GuardTally =
+    let r = ref seed
+    let mutable t = emptyGuardTally
+
+    for i in 1..trials do
+        let v = poisonCanonStrings r (genCanonValue r 3)
+        let v = if i % 3 = 0 then poisonCanonValue r v else v
+        t <- guardProbe w (sprintf "generated seed=%d iteration=%d" seed i) v t
+
+    t
+
+/// The GO-RED instrument for the string refusal: a wire whose well-formedness test accepts every
+/// string. The model then renders, or names a later float, wherever production refuses for a
+/// string — and agrees on every other document.
+let private guardWireStringBlind: WireCanon.wire<int, float> =
+    { canonWire with
+        str_ok = fun _ -> true }
+
+// ---- the declared-key-order renderer (Phase 306): `WireCanon.render_ordered` beside
+//      `Canon.renderOrdered` ----
+
+type private OrderedTally =
+    {
+        Docs: int
+        Diffs: string list
+        /// Documents whose ordered rendering is NOT `Canon.render`'s — an object authored out of
+        /// key order somewhere — without which this would be the Phase 149 differential again.
+        Unsorted: int
+        /// Canonical documents the model's reader returned EXACTLY, members in authored order.
+        ReadBack: int
+    }
+
+let private orderedProbe
+    (render: WireCanon.jval<int, float> -> WireCanon.ch list)
+    (label: string)
+    (v: JVal)
+    (t: OrderedTally)
+    : OrderedTally =
+    let production = Canon.renderOrdered v
+    let m = canonToModel v
+    let model = canonFromChs (render m)
+
+    let t =
+        { t with
+            Docs = t.Docs + 1
+            Unsorted = t.Unsorted + (if production <> Canon.render v then 1 else 0) }
+
+    let t =
+        if production = model then
+            t
+        else
+            { t with
+                Diffs =
+                    sprintf "%s: the renderers disagree\n  production: %s\n  the model:  %s" label production model
+                    :: t.Diffs }
+
+    // `render_ordered_injective`'s engine, measured: on the canonical subset the reader returns
+    // the value itself — no normal form, the members where the author put them.
+    if isCanonicalValue v && not (holdsNonFinite v) then
+        match WireCanon.read canonWire (WireCanon.render_ordered canonWire m) with
+        | WireCanon.Ok(back, []) when back = m -> { t with ReadBack = t.ReadBack + 1 }
+        | other ->
+            { t with
+                Diffs =
+                    sprintf "%s: the reader did not return the value it was rendered from: %A" label other
+                    :: t.Diffs }
+    else
+        t
+
+let private orderedGenerated
+    (render: WireCanon.jval<int, float> -> WireCanon.ch list)
+    (seed: int)
+    (trials: int)
+    : OrderedTally =
+    let r = ref seed
+
+    let mutable t =
+        { Docs = 0
+          Diffs = []
+          Unsorted = 0
+          ReadBack = 0 }
+
+    for i in 1..trials do
+        t <- orderedProbe render (sprintf "generated seed=%d iteration=%d" seed i) (genCanonValue r 3) t
+
+    t
+
+// ---- the UTF-8 encoder (Phase 306): `Hash.utf8Bytes` beside the PLATFORM's encoder ----
+//
+// The first INDEPENDENT-oracle differential in this family. Every other case here runs an
+// extracted model beside production; `proofs/Utf8.fst` is checked and not extracted (its units
+// are integers, which do not survive the extraction), so what stands beside `Hash.utf8Bytes` is
+// `System.Text.Encoding.UTF8` — an implementation that shares no line with it and no author. The
+// model's theorem is about the encoder the model describes; this is what says the shipped encoder
+// computes those bytes.
+
+/// The unguarded encoder against the platform's replacing encoder, and the guarded one against the
+/// platform's strict encoder, on one string. Returns the disagreements.
+let private utf8Probe (s: string) : string list =
+    let describe (x: string) =
+        x |> Seq.map (fun c -> (int c).ToString "X4") |> String.concat " "
+
+    let unguarded =
+        if Hash.utf8Bytes s = System.Text.Encoding.UTF8.GetBytes s then
+            []
+        else
+            [ sprintf "utf8Bytes [%s] is not the platform's bytes" (describe s) ]
+
+    let guarded =
+        match Hash.tryUtf8Bytes s, strictlyEncodable s with
+        | Result.Ok bytes, true when bytes = strictUtf8.GetBytes s -> []
+        | Result.Error bad, false when bad.Index < s.Length && int s.[bad.Index] = bad.Unit -> []
+        | got, strict ->
+            [ sprintf
+                  "tryUtf8Bytes [%s] = %A where the strict encoder %s"
+                  (describe s)
+                  got
+                  (if strict then "encodes" else "refuses") ]
+
+    unguarded @ guarded
+
+/// The encoder as it stood before Phase 290 — the go-red instrument: a high surrogate consumes the
+/// NEXT unit as its low half without checking that it is one.
+let private utf8ReadingAnUncheckedLowHalf (s: string) : byte[] =
+    let out = ResizeArray<byte>()
+    let mutable i = 0
+
+    while i < s.Length do
+        let c = int s.[i]
+
+        if c < 0x80 then
+            out.Add(byte c)
+        elif c < 0x800 then
+            out.Add(byte (0xC0 ||| (c >>> 6)))
+            out.Add(byte (0x80 ||| (c &&& 0x3F)))
+        elif c >= 0xD800 && c <= 0xDBFF && i + 1 < s.Length then
+            let lo = int s.[i + 1]
+            let cp = 0x10000 + ((c - 0xD800) <<< 10) + (lo - 0xDC00)
+            out.Add(byte (0xF0 ||| (cp >>> 18)))
+            out.Add(byte (0x80 ||| ((cp >>> 12) &&& 0x3F)))
+            out.Add(byte (0x80 ||| ((cp >>> 6) &&& 0x3F)))
+            out.Add(byte (0x80 ||| (cp &&& 0x3F)))
+            i <- i + 1
+        else
+            out.Add(byte (0xE0 ||| (c >>> 12)))
+            out.Add(byte (0x80 ||| ((c >>> 6) &&& 0x3F)))
+            out.Add(byte (0x80 ||| (c &&& 0x3F)))
+
+        i <- i + 1
+
+    out.ToArray()
 
 // ---------------------------------------------------------------------------
 //  Phase 151 — the EVOLUTION POLICY: `WireVersioning` beside `Versioning`.
@@ -8714,6 +9021,483 @@ let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (
       "duplicate head", d1, g, [ ha; ha ]
       "criss-cross", d7, mb, [ h1; h2 ] ]
 
+// ---------------------------------------------------------------------------
+//  Phase 306 — the COLUMNAR CODEC: `WireColumn` beside `Table.validate` and `ColumnCodec`.
+// ---------------------------------------------------------------------------
+//
+// `proofs/WireColumn.fst` models the codec at the `JVal`: `validate`, `encode_json`,
+// `decode_json`, and the NORMAL FORM its round-trip theorem is stated up to (columns in schema
+// order, an `Int` widened into its float or decimal column). What runs here is each of those
+// beside the shipped function, over tables drawn INSIDE and OUTSIDE the normal form — which is the
+// half the suite's own generative codec law never sampled: its generator builds tables already in
+// normal form, so it could assert the literal round trip and pass.
+//
+// The model declines the decoder's lenient-ingest arms (it answers `OutOfModel`), so a decode
+// probe skips a document the model answers that for, and counts it.
+
+module private ColumnDiff =
+
+    /// The model's host record: what a host computes about a number and about temporal text.
+    /// `finite` is `System.Double.IsFinite`, not production's `JVal.nonFiniteToken`, so the model
+    /// is not handed the function it is compared with.
+    let host: WireColumn.host<int, float> =
+        { to_float = float
+          int_text = fun i -> canonToChs (string i)
+          finite = System.Double.IsFinite
+          zero_int = 0
+          zero_float = 0.0
+          is_date = fun s -> TemporalText.isCanonicalDate (canonFromChs s)
+          is_timestamp = fun s -> TemporalText.isCanonicalTimestamp (canonFromChs s) }
+
+    let toModelType (t: ColumnType) : WireColumn.column_type =
+        match t with
+        | IntType -> WireColumn.IntType
+        | FloatType -> WireColumn.FloatType
+        | BoolType -> WireColumn.BoolType
+        | StringType -> WireColumn.StringType
+        | DateType -> WireColumn.DateType
+        | TimestampType -> WireColumn.TimestampType
+        | DecimalType -> WireColumn.DecimalType
+
+    let ofModelType (t: WireColumn.column_type) : ColumnType =
+        match t with
+        | WireColumn.IntType -> IntType
+        | WireColumn.FloatType -> FloatType
+        | WireColumn.BoolType -> BoolType
+        | WireColumn.StringType -> StringType
+        | WireColumn.DateType -> DateType
+        | WireColumn.TimestampType -> TimestampType
+        | WireColumn.DecimalType -> DecimalType
+
+    let toModelCell (c: Cell) : WireColumn.cell<int, float> =
+        match c with
+        | Int i -> WireColumn.Int i
+        | Float f -> WireColumn.Float f
+        | Bool b -> WireColumn.Bool b
+        | Str s -> WireColumn.Str(canonToChs s)
+        | Date s -> WireColumn.Date(canonToChs s)
+        | Timestamp s -> WireColumn.Timestamp(canonToChs s)
+        | Null -> WireColumn.Null
+        | Decimal s -> WireColumn.Decimal(canonToChs s)
+
+    let ofModelCell (c: WireColumn.cell<int, float>) : Cell =
+        match c with
+        | WireColumn.Int i -> Int i
+        | WireColumn.Float f -> Float f
+        | WireColumn.Bool b -> Bool b
+        | WireColumn.Str s -> Str(canonFromChs s)
+        | WireColumn.Date s -> Date(canonFromChs s)
+        | WireColumn.Timestamp s -> Timestamp(canonFromChs s)
+        | WireColumn.Null -> Null
+        | WireColumn.Decimal s -> Decimal(canonFromChs s)
+
+    let toModelTable (t: Table) : WireColumn.table<int, float> =
+        { schema = t.Schema |> List.map (fun (n, ty) -> canonToChs n, toModelType ty)
+          columns =
+            t.Columns
+            |> List.map (fun c ->
+                ({ name = canonToChs c.Name
+                   ctype = toModelType c.Type
+                   cells = c.Cells |> List.map toModelCell }
+                : WireColumn.column<int, float>)) }
+
+    let ofModelTable (t: WireColumn.table<int, float>) : Table =
+        { Schema = t.schema |> List.map (fun (n, ty) -> canonFromChs n, ofModelType ty)
+          Columns =
+            t.columns
+            |> List.map (fun c ->
+                { Name = canonFromChs c.name
+                  Type = ofModelType c.ctype
+                  Cells = c.cells |> List.map ofModelCell }) }
+
+    let toModelSource (src: DataSource) : WireColumn.data_source<int, float> =
+        match src with
+        | Embedded t -> WireColumn.Embedded(toModelTable t)
+        | Ref r -> WireColumn.Ref(canonToChs r)
+
+    let ofModelSource (src: WireColumn.data_source<int, float>) : DataSource =
+        match src with
+        | WireColumn.Embedded t -> Embedded(ofModelTable t)
+        | WireColumn.Ref r -> Ref(canonFromChs r)
+
+    /// A refusal as the CLASS the model keeps: the case, the column where the case names one, and
+    /// for a `Malformed` which of the five faults it is. The model drops production's prose and its
+    /// counts (it carries no integers), so that is what the two sides can be held to.
+    let prodClass (e: ColumnError) : string =
+        match e with
+        | NotJson _ -> "NotJson"
+        | MissingField f -> "MissingField " + f
+        | MalformedShape _ -> "MalformedShape"
+        | UnknownType(got, _) -> "UnknownType " + got
+        | TypeMismatch(col, expected, _) -> "TypeMismatch " + col + " " + expected
+        | LengthMismatch(col, _, _) -> "LengthMismatch " + col
+        | NonFiniteFloat(col, _) -> "NonFiniteFloat " + col
+        | RaggedColumns(col, _, _) -> "RaggedColumns " + col
+        | Malformed d ->
+            if d.StartsWith "duplicate schema name: " then
+                "Malformed " + d
+            elif d.StartsWith "duplicate column name: " then
+                "Malformed " + d
+            elif d.StartsWith "duplicate column key in \"columns\": " then
+                "Malformed " + d
+            elif d.StartsWith "schema names with no column: " then
+                "Malformed schema names with no column"
+            elif d.StartsWith "columns absent from the schema: " then
+                "Malformed columns absent from the schema"
+            else
+                "Malformed <unrecognised: " + d + ">"
+
+    let modelClass (e: WireColumn.column_error) : string =
+        match e with
+        | WireColumn.MissingField f -> "MissingField " + canonFromChs f
+        | WireColumn.MissingColumn c -> "MissingField columns." + canonFromChs c
+        | WireColumn.MalformedShape -> "MalformedShape"
+        | WireColumn.UnknownType got -> "UnknownType " + canonFromChs got
+        | WireColumn.TypeMismatch(col, expected) ->
+            "TypeMismatch " + canonFromChs col + " " + ColumnType.tag (ofModelType expected)
+        | WireColumn.LengthMismatch col -> "LengthMismatch " + canonFromChs col
+        | WireColumn.NonFiniteFloat col -> "NonFiniteFloat " + canonFromChs col
+        | WireColumn.RaggedColumns col -> "RaggedColumns " + canonFromChs col
+        | WireColumn.OutOfModel -> "OutOfModel"
+        | WireColumn.Malformed fault ->
+            match fault with
+            | WireColumn.DuplicateSchemaName n -> "Malformed duplicate schema name: " + canonFromChs n
+            | WireColumn.DuplicateColumnName n -> "Malformed duplicate column name: " + canonFromChs n
+            | WireColumn.DuplicateColumnKey k -> "Malformed duplicate column key in \"columns\": " + canonFromChs k
+            | WireColumn.SchemaNameWithoutColumn -> "Malformed schema names with no column"
+            | WireColumn.ColumnOutsideSchema -> "Malformed columns absent from the schema"
+
+    /// A decoded source as text, a float by its canonical layout — so two sources are compared as
+    /// what they hold and a `Float -0.0` beside a `Float 0.0` is not a disagreement the wire could
+    /// carry (both are the token `0`).
+    let showSource (src: DataSource) : string =
+        match src with
+        | Ref r -> "ref " + r
+        | Embedded t ->
+            let cell (c: Cell) =
+                match c with
+                | Float f -> "Float " + Canon.canonicalFloat f
+                | other -> sprintf "%A" other
+
+            let column (c: Column) =
+                c.Name
+                + ":"
+                + ColumnType.tag c.Type
+                + "["
+                + (c.Cells |> List.map cell |> String.concat ";")
+                + "]"
+
+            (t.Schema
+             |> List.map (fun (n, ty) -> n + ":" + ColumnType.tag ty)
+             |> String.concat ",")
+            + " | "
+            + (t.Columns |> List.map column |> String.concat " ")
+
+    let showProd (r: Result<DataSource, ColumnError>) : string =
+        match r with
+        | Result.Ok src -> "ok " + showSource src
+        | Result.Error e -> "refused " + prodClass e
+
+    let showModel (r: WireColumn.res<WireColumn.data_source<int, float>>) : string =
+        match r with
+        | WireColumn.Good src -> "ok " + showSource (ofModelSource src)
+        | WireColumn.Bad e -> "refused " + modelClass e
+
+    // ---- the pool ----
+
+    let private names = [| "a"; "b"; "c"; "k\"q"; "é" |]
+
+    let private texts =
+        [| "1.5"
+           "1.50"
+           "-0"
+           "007"
+           "x"
+           ""
+           "12"
+           "2026-02-28"
+           "2026-02-30"
+           "2026-06-22T17:00:00Z"
+           "nope" |]
+
+    /// One drawn table. `wild` is how far outside what `validate` accepts the draw may wander:
+    /// at 0 the table is valid but NOT necessarily in normal form (its columns may be in another
+    /// order than its schema, and an int may sit in a float or a decimal column); above 0 it may
+    /// also carry a duplicate name, a missing or an extra column, a column of another type, a
+    /// ragged length, a cell outside its column's type, a non-finite float and non-canonical text.
+    let genTable (r: int ref) (wild: int) : Table =
+        let draw (n: int) =
+            r.Value <- nextCanonSeed r.Value
+            r.Value % n
+
+        let chance (n: int) = wild > 0 && draw n = 0
+
+        let ncols = draw 4
+        let rows = draw 4
+
+        let picked =
+            [ for i in 0 .. ncols - 1 ->
+                  (if chance 8 then names[0] else names[i]), ColumnType.all[draw ColumnType.all.Length] ]
+
+        let cellOf (ty: ColumnType) : Cell =
+            if draw 5 = 0 then
+                Null
+            elif chance 9 then
+                [| Bool true
+                   Float 1.5
+                   Str "x"
+                   Int 3
+                   Float nan
+                   Decimal "1.50"
+                   Date "2026-02-30" |][draw 7]
+            else
+                match ty with
+                | IntType -> Int(draw 2001 - 1000)
+                | FloatType ->
+                    match draw 4 with
+                    | 0 -> Int(draw 50 - 25)
+                    | 1 -> Float(float (draw 40 - 20))
+                    | 2 -> Float -0.0
+                    | _ -> Float(float (draw 4000 - 2000) / 8.0)
+                | BoolType -> Bool(draw 2 = 0)
+                | StringType -> Str texts[draw texts.Length]
+                | DateType -> Date(sprintf "2026-01-%02d" (1 + draw 28))
+                | TimestampType -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60))
+                | DecimalType ->
+                    match draw 3 with
+                    | 0 -> Int(draw 50 - 25)
+                    | 1 -> Decimal(sprintf "%d.%d" (draw 90 - 45) (1 + draw 9))
+                    | _ -> Decimal(string (draw 2000 - 1000))
+
+        let columns =
+            picked
+            |> List.map (fun (n, ty) ->
+                let ty' =
+                    if chance 10 then
+                        ColumnType.all[draw ColumnType.all.Length]
+                    else
+                        ty
+
+                let len = if chance 10 then rows + 1 else rows
+                Column.create n ty' [ for _ in 1..len -> cellOf ty ])
+
+        let columns =
+            if chance 10 then
+                columns @ [ Column.create "zz" IntType [ for _ in 1..rows -> Int 1 ] ]
+            elif chance 10 && not columns.IsEmpty then
+                List.tail columns
+            else
+                columns
+
+        // Out of schema order one draw in three — valid, and outside the normal form.
+        let columns = if draw 3 = 0 then List.rev columns else columns
+
+        { Schema = picked; Columns = columns }
+
+    type Tally =
+        {
+            Tables: int
+            Diffs: string list
+            /// Tables `validate` accepted, and of those the ones NOT in normal form.
+            Valid: int
+            OutsideNormalForm: int
+            /// Refusals reached, by class name (the first word of the class).
+            Refusals: Set<string>
+            /// Decode probes the model declined as a lenient-ingest arm.
+            OutOfModel: int
+            /// Decode probes compared.
+            Decoded: int
+        }
+
+    let empty =
+        { Tables = 0
+          Diffs = []
+          Valid = 0
+          OutsideNormalForm = 0
+          Refusals = Set.empty
+          OutOfModel = 0
+          Decoded = 0 }
+
+    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
+                :: t.Diffs }
+
+    /// One table, asked of production and of the model: `validate`; `encodeJson`; `decodeJson` of
+    /// that encoding; and — for a table `validate` accepts — the round trip against the model's
+    /// NORMAL FORM, at the `JVal` and through the canonical string and the parser. `expected`
+    /// chooses what the round trip is held to: the normal form (the theorem), or the table itself
+    /// (the literal form the theorem refutes — the go-red).
+    let probe (literal: bool) (label: string) (table: Table) (t: Tally) : Tally =
+        let m = toModelTable table
+        let t = { t with Tables = t.Tables + 1 }
+
+        // validate
+        let prodValid = Table.validate table
+        let modelValid = WireColumn.validate host m
+
+        let prodV =
+            match prodValid with
+            | Result.Ok() -> "ok"
+            | Result.Error e -> "refused " + prodClass e
+
+        let modelV =
+            match modelValid with
+            | WireColumn.Good _ -> "ok"
+            | WireColumn.Bad e -> "refused " + modelClass e
+
+        let t =
+            if prodV = modelV then
+                t
+            else
+                diff label "validate" prodV modelV t
+
+        let t =
+            match prodValid with
+            | Result.Error e ->
+                { t with
+                    Refusals = t.Refusals.Add((prodClass e).Split(' ').[0]) }
+            | Result.Ok() -> { t with Valid = t.Valid + 1 }
+
+        // encode — of ANY table, valid or not: `encodeJson` is total and papers over a malformed one
+        let prodJson = ColumnCodec.encodeJson (Embedded table)
+        let modelJson = WireColumn.encode_json host (WireColumn.Embedded m)
+
+        let t =
+            if Json.render prodJson = Json.render (canonOfModel modelJson) then
+                t
+            else
+                diff label "encodeJson" (Json.render prodJson) (Json.render (canonOfModel modelJson)) t
+
+        // decode of the encoding. A NaN the encoder wrote is a `JFloat nan`, which the model's
+        // decoder is handed as it is.
+        let prodBack = ColumnCodec.decodeJson prodJson
+        let modelBack = WireColumn.decode_json host modelJson
+
+        // (An INVALID table can encode to a document the model declines — a float in a timestamp
+        // or a decimal column is one of its lenient-ingest arms — and that one is skipped.)
+        let t =
+            match modelBack with
+            | WireColumn.Bad WireColumn.OutOfModel -> { t with OutOfModel = t.OutOfModel + 1 }
+            | _ ->
+                if showProd prodBack = showModel modelBack then
+                    { t with Decoded = t.Decoded + 1 }
+                else
+                    diff label "decodeJson (encodeJson t)" (showProd prodBack) (showModel modelBack) t
+
+        // the round trip, for a table validate accepts
+        match prodValid with
+        | Result.Error _ -> t
+        | Result.Ok() ->
+            let normal = ofModelTable (WireColumn.normal_table host m)
+
+            let t =
+                if showSource (Embedded normal) = showSource (Embedded table) then
+                    t
+                else
+                    { t with
+                        OutsideNormalForm = t.OutsideNormalForm + 1 }
+
+            let expected = "ok " + showSource (Embedded(if literal then table else normal))
+
+            let t =
+                if showProd prodBack = expected then
+                    t
+                else
+                    diff label "the round trip at the JVal" (showProd prodBack) expected t
+
+            // … and the round trip a consumer performs: the canonical string, then the parser.
+            let viaString = ColumnCodec.decode (ColumnCodec.encode (Embedded table))
+
+            if showProd viaString = expected then
+                t
+            else
+                diff label "the round trip through the canonical string" (showProd viaString) expected t
+
+    let generated (literal: bool) (seed: int) (trials: int) (wild: int) : Tally =
+        let r = ref seed
+        let mutable t = empty
+
+        for i in 1..trials do
+            t <- probe literal (sprintf "generated seed=%d iteration=%d" seed i) (genTable r wild) t
+
+        t
+
+    /// Documents no encoder writes, each decoded by production and by the model: the decode-only
+    /// acceptances the model's own lemmas name, and the lenient-ingest arms it declines.
+    let handWritten: (string * string) list =
+        [ "surplus root member",
+          """{"$type":"x","schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[true]}}}"""
+          "surplus column",
+          """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[true]},"zz":{"values":[true],"validity":[true]}}}"""
+          "ref beside columns", """{"ref":"orders","schema":[],"columns":{"a":{"values":[1],"validity":[true]}}}"""
+          "ref alone", """{"ref":"orders"}"""
+          "ref not a string", """{"ref":3}"""
+          "masked slot holds anything",
+          """{"schema":[{"name":"a","type":"date"}],"columns":{"a":{"values":["","not a date"],"validity":[false,false]}}}"""
+          "empty schema, columns not an object", """{"schema":[],"columns":true}"""
+          "no columns member", """{"schema":[]}"""
+          "missing column", """{"schema":[{"name":"a","type":"int"}],"columns":{}}"""
+          "duplicate column key",
+          """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[true]},"a":{"values":[2],"validity":[true]}}}"""
+          "duplicate schema name",
+          """{"schema":[{"name":"a","type":"int"},{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[true]}}}"""
+          "unknown type",
+          """{"schema":[{"name":"a","type":"money"}],"columns":{"a":{"values":[1],"validity":[true]}}}"""
+          "schema not an array", """{"schema":{},"columns":{}}"""
+          "schema entry without a type", """{"schema":[{"name":"a"}],"columns":{}}"""
+          "values and validity disagree",
+          """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1,2],"validity":[true]}}}"""
+          "validity not a bool",
+          """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1],"validity":[1]}}}"""
+          "bool in an int column",
+          """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[true],"validity":[true]}}}"""
+          "int token in a float column",
+          """{"schema":[{"name":"a","type":"float"}],"columns":{"a":{"values":[2],"validity":[true]}}}"""
+          "int token in a decimal column",
+          """{"schema":[{"name":"a","type":"decimal"}],"columns":{"a":{"values":[12],"validity":[true]}}}"""
+          "decimal text normalised",
+          """{"schema":[{"name":"a","type":"decimal"}],"columns":{"a":{"values":["12.50"],"validity":[true]}}}"""
+          "decimal text not decimal",
+          """{"schema":[{"name":"a","type":"decimal"}],"columns":{"a":{"values":["1e3"],"validity":[true]}}}"""
+          "impossible date",
+          """{"schema":[{"name":"a","type":"date"}],"columns":{"a":{"values":["2026-02-30"],"validity":[true]}}}"""
+          "ragged columns",
+          """{"schema":[{"name":"a","type":"int"},{"name":"b","type":"int"}],"columns":{"a":{"values":[1,2],"validity":[true,true]},"b":{"values":[3],"validity":[true]}}}"""
+          // the lenient-ingest arms — the model answers OutOfModel, and the probe skips them
+          "lenient: no schema", """{"columns":{"a":[1,2]}}"""
+          "lenient: bare array column", """{"schema":[{"name":"a","type":"int"}],"columns":{"a":[1,2]}}"""
+          "lenient: no validity mask", """{"schema":[{"name":"a","type":"int"}],"columns":{"a":{"values":[1,2]}}}"""
+          "lenient: epoch in a timestamp column",
+          """{"schema":[{"name":"a","type":"timestamp"}],"columns":{"a":{"values":[1752000000],"validity":[true]}}}"""
+          "lenient: whole float in a decimal column",
+          """{"schema":[{"name":"a","type":"decimal"}],"columns":{"a":{"values":[3000000000],"validity":[true]}}}""" ]
+
+    let decodeProbe (label: string) (text: string) (t: Tally) : Tally =
+        match Json.parse text with
+        | Result.Error m -> failtestf "%s did not parse: %s" label m
+        | Result.Ok el ->
+            let model = WireColumn.decode_json host (canonToModel el)
+
+            match model with
+            | WireColumn.Bad WireColumn.OutOfModel -> { t with OutOfModel = t.OutOfModel + 1 }
+            | _ ->
+                let prod = ColumnCodec.decodeJson el
+
+                let t =
+                    match prod with
+                    | Result.Error e ->
+                        { t with
+                            Refusals = t.Refusals.Add((prodClass e).Split(' ').[0]) }
+                    | Result.Ok _ -> t
+
+                if showProd prod = showModel model then
+                    { t with Decoded = t.Decoded + 1 }
+                else
+                    diff label "decodeJson" (showProd prod) (showModel model) t
+
+
 [<Tests>]
 let proofOracleTests =
     testList
@@ -10567,33 +11351,6 @@ let proofOracleTests =
           <| fun _ ->
               JsonParseDiff.sweep RejectNull 512 JsonParseDiff.nearMisses
               |> JsonParseDiff.expectAgreement "near misses, strict"
-
-          // The carve-out's extent, pinned: over the near-miss table it holds EXACTLY the three
-          // tokens the pre-299 model reads and the grammar refuses, and each is a disagreement — so
-          // the carve-out is neither vacuous nor wider than Phase 299's refusals. Phase 306
-          // restates the model and deletes this test with the carve-out.
-          testCase
-              "the Phase 299 carve-out of the parser differential is exactly the grammar refusals the model does not yet make"
-          <| fun _ ->
-              let carved =
-                  [ for (name, input) in JsonParseDiff.nearMisses do
-                        let p = JsonParseDiff.prodAnswer RejectNull 512 input
-
-                        let m =
-                            JsonParseDiff.modelAnswer
-                                JsonParseDiff.toChs
-                                RejectNull
-                                512
-                                (JsonParseDiff.budget 512)
-                                input
-
-                        if p <> m && JsonParseDiff.isPhase299Refusal p then
-                            yield name ]
-
-              Expect.equal
-                  carved
-                  [ "leading zeros small"; "leading zeros int53"; "trailing dot" ]
-                  "the carved near misses"
 
           // Phase 299 — the integer reader is the invariant one, so the differential answers the
           // same under a culture whose negative sign is not U+002D. Before, `-5` fell to the float
@@ -12887,6 +13644,351 @@ let proofOracleTests =
                       (List.length t.Diffs)
                       t.NaNs)
 
+          // ---- the guard's second refusal: ill-formed strings (Phase 306) ----
+
+          testCase "the guard oracle agrees with Canon.tryRender over a generated pool carrying ill-formed strings"
+          <| fun _ ->
+              let t = onBigStack (fun () -> guardGeneratedIllFormed canonWire 3060 2400)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the guard oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy — each class the refusal has, reached: a string refusal, one naming a
+              // member key, one two or more steps deep, a document holding BOTH faults (refused for
+              // its float, which `guardProbe` checks), and documents still accepted.
+              Expect.isGreaterThan t.StringRefusals 150 (sprintf "refusals naming a string (%d)" t.StringRefusals)
+              Expect.isGreaterThan t.KeyRefusals 20 (sprintf "… of them naming a member key (%d)" t.KeyRefusals)
+              Expect.isGreaterThan t.BothFaults 20 (sprintf "documents holding both faults (%d)" t.BothFaults)
+              Expect.isGreaterThan t.DeepRefusals 40 (sprintf "refusals two or more steps deep (%d)" t.DeepRefusals)
+
+              Expect.isGreaterThan
+                  (t.Docs - t.Refused)
+                  200
+                  (sprintf "documents the guard accepted (%d)" (t.Docs - t.Refused))
+
+          testCase "a guard model that cannot see an ill-formed string loses — on exactly the documents one decides"
+          <| fun _ ->
+              // The go-red. The instrument's well-formedness test accepts everything, so it must
+              // disagree on every document production refuses FOR A STRING and on no other — a
+              // refusal for a float, in a document that also holds an ill-formed string, included.
+              let t =
+                  onBigStack (fun () -> guardGeneratedIllFormed guardWireStringBlind 3060 2400)
+
+              Expect.isGreaterThan
+                  t.StringRefusals
+                  150
+                  (sprintf "the go-red run reached string refusals (%d)" t.StringRefusals)
+
+              Expect.equal
+                  (List.length t.Diffs)
+                  t.StringRefusals
+                  (sprintf
+                      "the string-blind model disagreed on %d documents and production refused %d for a string — they must be the same documents"
+                      (List.length t.Diffs)
+                      t.StringRefusals)
+
+          // ---- the declared-key-order renderer (Phase 306) ----
+
+          testCase "the ordered-render oracle agrees with Canon.renderOrdered, and its reader returns the value"
+          <| fun _ ->
+              let t =
+                  onBigStack (fun () -> orderedGenerated (WireCanon.render_ordered canonWire) 3061 2400)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the ordered-render oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan
+                  t.Unsorted
+                  200
+                  (sprintf "documents authored out of key order — where this renderer is not `render` (%d)" t.Unsorted)
+
+              Expect.isGreaterThan
+                  t.ReadBack
+                  500
+                  (sprintf "canonical documents the reader returned exactly, members in authored order (%d)" t.ReadBack)
+
+          testCase
+              "a model that SORTS loses against Canon.renderOrdered — on exactly the documents authored out of order"
+          <| fun _ ->
+              // The go-red: `WireCanon.render` — rule 2 included — standing in for the ordered
+              // renderer. It must lose wherever production's two renderers differ, and nowhere else.
+              let r = ref 3061
+              let mutable unsorted = 0
+              let mutable lost = 0
+
+              for _ in 1..2400 do
+                  let v = genCanonValue r 3
+                  let production = Canon.renderOrdered v
+                  let sorting = canonFromChs (WireCanon.render canonWire (canonToModel v))
+
+                  if production <> Canon.render v then
+                      unsorted <- unsorted + 1
+
+                  if production <> sorting then
+                      lost <- lost + 1
+
+              Expect.isGreaterThan unsorted 200 "the pool carries documents authored out of key order"
+              Expect.equal lost unsorted "the sorting model lost on those documents and on no other"
+
+          // ---- the UTF-8 encoder against the platform's (Phase 306) ----
+
+          testCase
+              "Hash.utf8Bytes is the platform encoder's bytes over every code unit and every surrogate boundary pair"
+          <| fun _ ->
+              let bad = ResizeArray<string>()
+              let mutable strings = 0
+              let mutable illFormed = 0
+
+              let probe (s: string) =
+                  strings <- strings + 1
+
+                  if not (strictlyEncodable s) then
+                      illFormed <- illFormed + 1
+
+                  bad.AddRange(utf8Probe s)
+
+              // Every code unit, alone.
+              for u in 0..0xFFFF do
+                  probe (units16 [ u ])
+
+              // Every high surrogate against the units that bound the low range and a non-surrogate
+              // each side of it; and every low surrogate after a high one, an ordinary unit and
+              // nothing — the pairs, the near-pairs and the reversed pairs.
+              for hi in 0xD800..0xDBFF do
+                  for next in [ 0xDBFF; 0xDC00; 0xDFFF; 0xE000; 0x41 ] do
+                      probe (units16 [ hi; next ])
+
+              for lo in 0xDC00..0xDFFF do
+                  for before in [ 0xD800; 0xDBFF; 0x41 ] do
+                      probe (units16 [ before; lo ])
+
+              // And a seeded sample of longer strings over the boundary units.
+              let boundary =
+                  [| 0x00
+                     0x41
+                     0x7F
+                     0x80
+                     0x7FF
+                     0x800
+                     0xD7FF
+                     0xD800
+                     0xDBFF
+                     0xDC00
+                     0xDFFF
+                     0xE000
+                     0xFFFD
+                     0xFFFF |]
+
+              let mutable st = 3062u
+
+              let pick (n: int) =
+                  st <- (st * 1664525u) + 1013904223u
+                  int (st >>> 1) % n
+
+              for _ in 1..20000 do
+                  probe (units16 [ for _ in 0 .. pick 6 -> boundary[pick boundary.Length] ])
+
+              Expect.isEmpty
+                  bad
+                  (sprintf
+                      "the encoder disagreed with the platform on %d string(s). First 5:\n%s"
+                      bad.Count
+                      (bad |> Seq.truncate 5 |> String.concat "\n"))
+
+              Expect.isGreaterThan strings 90000 (sprintf "strings compared (%d)" strings)
+
+              Expect.isGreaterThan
+                  illFormed
+                  10000
+                  (sprintf "… of them ill-formed, where the guard must refuse (%d)" illFormed)
+
+          testCase "an encoder that reads an unchecked low half loses to the platform — the comparison can fail"
+          <| fun _ ->
+              // The go-red, and it is the encoder this repository shipped until Phase 290. It
+              // agrees with the platform on every well-formed string, and loses on a high
+              // surrogate followed by a unit that is not a low one — the units D801 D800 become
+              // the four bytes of U+10000.
+              Expect.equal
+                  (utf8ReadingAnUncheckedLowHalf (units16 [ 0xD801; 0xD800 ]))
+                  (System.Text.Encoding.UTF8.GetBytes(units16 [ 0xD800; 0xDC00 ]))
+                  "the unchecked reading gives the ill-formed pair the bytes of a well-formed astral character"
+
+              let mutable lost = 0
+              let mutable wellFormedLost = 0
+
+              for hi in 0xD800..0xDBFF do
+                  for next in [ 0xDBFF; 0xDC00; 0xDFFF; 0xE000; 0x41 ] do
+                      let s = units16 [ hi; next ]
+
+                      if utf8ReadingAnUncheckedLowHalf s <> System.Text.Encoding.UTF8.GetBytes s then
+                          lost <- lost + 1
+
+                          if strictlyEncodable s then
+                              wellFormedLost <- wellFormedLost + 1
+
+              Expect.equal lost (1024 * 3) "it loses on every high surrogate followed by a non-low unit"
+              Expect.equal wellFormedLost 0 "and on no well-formed pair"
+
+          // ---- the columnar codec (Phase 306) ----
+
+          testCase
+              "the column oracle agrees with Table.validate, encodeJson and decodeJson, and the round trip is the model's normal form"
+          <| fun _ ->
+              // Two pools. The first holds only tables `validate` accepts — and NOT only tables in
+              // normal form: a third have their columns out of schema order, and a float or a
+              // decimal column may hold an int. The second wanders outside what `validate` accepts.
+              // MEASURED at seed 3063, 2,000 tables: 355 outside the normal form. The threshold sits
+              // under it with headroom and well above zero.
+              let valid = onBigStack (fun () -> ColumnDiff.generated false 3063 2000 0)
+              let wild = onBigStack (fun () -> ColumnDiff.generated false 3064 3000 1)
+
+              for (name, t) in [ "the valid pool", valid; "the wild pool", wild ] do
+                  Expect.isEmpty
+                      t.Diffs
+                      (sprintf "%s: the column oracle disagreed with production:\n%s" name (renderCanonDiffs t.Diffs))
+
+              Expect.equal valid.Valid valid.Tables "every table of the first pool is one validate accepts"
+
+              Expect.isGreaterThan
+                  valid.OutsideNormalForm
+                  250
+                  (sprintf
+                      "valid tables OUTSIDE the normal form — where the round trip is not the literal one (%d)"
+                      valid.OutsideNormalForm)
+
+              Expect.isGreaterThan
+                  (valid.Valid - valid.OutsideNormalForm)
+                  200
+                  "and valid tables already in it, where it is"
+
+              for cls in
+                  [ "Malformed"
+                    "TypeMismatch"
+                    "RaggedColumns"
+                    "NonFiniteFloat"
+                    "MalformedShape" ] do
+                  Expect.isTrue
+                      (wild.Refusals.Contains cls)
+                      (sprintf "the wild pool reached a %s refusal (reached: %A)" cls wild.Refusals)
+
+              Expect.isGreaterThan wild.Valid 200 (sprintf "the wild pool still holds valid tables (%d)" wild.Valid)
+
+          testCase
+              "… and over documents no encoder writes — the decode-only acceptances, and the arms the model declines"
+          <| fun _ ->
+              let t =
+                  ColumnDiff.handWritten
+                  |> List.fold (fun acc (label, text) -> ColumnDiff.decodeProbe label text acc) ColumnDiff.empty
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the column oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // The five lenient-ingest arms are the model's `OutOfModel` and nothing else is: a
+              // probe that skipped more would be comparing less than it says.
+              Expect.equal t.OutOfModel 5 "exactly the five lenient-ingest documents are declined"
+              Expect.equal t.Decoded (ColumnDiff.handWritten.Length - 5) "and every other is compared"
+
+              for cls in
+                  [ "Malformed"
+                    "TypeMismatch"
+                    "RaggedColumns"
+                    "MalformedShape"
+                    "MissingField"
+                    "UnknownType"
+                    "LengthMismatch" ] do
+                  Expect.isTrue
+                      (t.Refusals.Contains cls)
+                      (sprintf "a %s refusal was reached (reached: %A)" cls t.Refusals)
+
+          testCase "a comparison against the table ITSELF loses — on exactly the tables outside the normal form"
+          <| fun _ ->
+              // The go-red, and it is the law the suite's generative codec test asserts: the
+              // LITERAL round trip. `literal_round_trip_fails_on_*` refute it on the model; here
+              // it loses on production, twice per table (at the JVal, and through the string) and
+              // on no table already in normal form.
+              let t = onBigStack (fun () -> ColumnDiff.generated true 3063 2000 0)
+
+              Expect.isGreaterThan t.OutsideNormalForm 250 "the pool holds tables outside the normal form"
+
+              Expect.equal
+                  (List.length t.Diffs)
+                  (2 * t.OutsideNormalForm)
+                  "the literal comparison lost on those tables, at both levels, and on no other"
+
+          testCase
+              "the two facts about Int32 the round trip assumes hold over the pool, and the decimal canonicaliser agrees"
+          <| fun _ ->
+              // `int_text_canonical` and `int_floats_finite` are HYPOTHESES of `round_trip`, each
+              // proved necessary. They are facts about .NET's Int32; this samples them.
+              for i in
+                  [ 0
+                    1
+                    -1
+                    9
+                    10
+                    -10
+                    1000
+                    -1000
+                    2147483647
+                    -2147483648
+                    123456789
+                    -987654321 ]
+                  @ [ for k in 0..200 -> k * 7919 - 800000 ] do
+                  Expect.isTrue
+                      (WireColumn.is_canonical (canonToChs (string i)))
+                      (sprintf "the text of %d is canonical decimal text" i)
+
+                  Expect.isTrue (System.Double.IsFinite(float i)) (sprintf "the float of %d is finite" i)
+
+              // `DecimalText.tryCanonical`, which the model carries clause for clause.
+              let texts =
+                  [ "0"
+                    "-0"
+                    "00"
+                    "007"
+                    "7"
+                    "-7"
+                    "1.5"
+                    "1.50"
+                    "01.50"
+                    "-0.0"
+                    "0.05"
+                    ".5"
+                    "5."
+                    "+5"
+                    "1e3"
+                    ""
+                    "-"
+                    "--1"
+                    "1.2.3"
+                    " 1"
+                    "1 "
+                    "12345678901234567890.000100"
+                    "-000.000"
+                    "x" ]
+
+              let mutable canonicalised = 0
+              let mutable refused = 0
+
+              for s in texts do
+                  let model =
+                      match WireColumn.try_canonical (canonToChs s) with
+                      | FStar_Pervasives_Native.Some c -> Some(canonFromChs c)
+                      | FStar_Pervasives_Native.None -> None
+
+                  Expect.equal model (DecimalText.tryCanonical s) (sprintf "tryCanonical %A" s)
+
+                  if model.IsSome then
+                      canonicalised <- canonicalised + 1
+                  else
+                      refused <- refused + 1
+
+              Expect.isGreaterThan canonicalised 8 "texts the canonicaliser read"
+              Expect.isGreaterThan refused 8 "and texts it refused"
+
           // ---- the evolution policy, over the envelope family and perturbed IDL pairs (Phase 151) ----
 
           testCase "the versioning oracle agrees with Versioning.classify over perturbed idl.json pairs"
@@ -13071,6 +14173,53 @@ let proofOracleTests =
                   (sprintf
                       "fixtures carrying a tag the consumer does NOT know (%d) — preservation is unobservable without one"
                       (List.length unknowns))
+
+          testCase "the versioning oracle agrees with Versioning.tryBump and bump at the edge of the counter range"
+          <| fun _ ->
+              // Phase 306. A counter is an Int32; at its last value the bump has no successor.
+              // The model refuses there (`try_bump`) and saturates (`bump`), as production does —
+              // where `minor + 1` used to wrap negative and the model, over `nat`, could not see it.
+              let counters = [ 0; 1; System.Int32.MaxValue - 1; System.Int32.MaxValue ]
+
+              let evolutions =
+                  [ Versioning.Additive [], WireVersioning.Additive []
+                    Versioning.Additive [ "x" ], WireVersioning.Additive [ canonToChs "x" ]
+                    Versioning.Breaking([ "x" ], [ "y" ]),
+                    WireVersioning.Breaking([ canonToChs "x" ], [ canonToChs "y" ]) ]
+
+              let mutable refused = 0
+              let mutable bumped = 0
+
+              for major in counters do
+                  for minor in counters do
+                      let p: Versioning.Profile =
+                          { Name = "core"
+                            Major = major
+                            Minor = minor }
+
+                      for (ev, modelEv) in evolutions do
+                          match Versioning.tryBump p ev, WireVersioning.try_bump (toModelProfile p) modelEv with
+                          | Result.Ok q, FStar_Pervasives_Native.Some q' ->
+                              bumped <- bumped + 1
+                              Expect.equal (toModelProfile q) q' (sprintf "tryBump %A %A" p ev)
+                          | Result.Error _, FStar_Pervasives_Native.None -> refused <- refused + 1
+                          | got, model -> failtestf "tryBump %A %A: production %A, the model %A" p ev got model
+
+                          let saturated = Versioning.bump p ev
+
+                          Expect.equal
+                              (toModelProfile saturated)
+                              (WireVersioning.bump (toModelProfile p) modelEv)
+                              (sprintf "bump %A %A" p ev)
+
+                          Expect.isTrue
+                              (saturated.Major >= 0 && saturated.Minor >= 0)
+                              (sprintf "bump %A %A stays a profile the wire can carry" p ev)
+
+              // An additive step is refused at each of the four majors where the minor is at the
+              // limit, a breaking one at each of the four minors where the major is: eight.
+              Expect.equal refused 8 "the refusals are exactly the edge"
+              Expect.equal bumped 40 "and every other step bumps"
 
           testCase "a model whose classify IGNORES REMOVALS loses — the comparison can fail"
           <| fun _ ->

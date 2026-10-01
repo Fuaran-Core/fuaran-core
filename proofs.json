@@ -1013,7 +1013,7 @@
     {
       "id": "int53-guard-conservative",
       "level": "proved",
-      "claim": "The int53 guard is NOT exact, and cannot be as written: Wire.fs justifies its lexical comparison with 'JSON forbids leading zeros', which this parser's digit loop does not enforce, so 0009007199254740992 — exactly 2^53, the largest int53-safe integer there is — is refused as MalformedNumber because its STRING is 19 characters. Proved as a witness rather than described, so that anyone who 'fixes' the guard to match its own comment reddens a lemma and is told the parser's behaviour changed. The error only ever runs this way; soundness above is the other half.",
+      "claim": "ON A ZERO-PADDED DIGIT STRING the int53 guard's lexical comparison refuses a safe value: 0009007199254740992 — exactly 2^53, the largest int53-safe integer there is — fails the test because its STRING is 19 characters. Proved as a witness rather than described. Until Phase 299 this was also a fact about the PARSER, whose digit loop read such a token; it is now a fact about the PREDICATE alone. The parser holds every token to the JSON number grammar before the guard reads it, the grammar has no leading zero, and the guard is therefore never handed a padded string: `int53-guard-exact-on-the-grammar` is the consequence, and `padded_token_is_refused_by_the_grammar` shows this very witness is now refused as a malformed number rather than as an unsafe integer. The row stays because the lemma does — anyone who changes the comparison reddens it and is told what moved. The error only ever ran this way; soundness above is the other half.",
       "phase": "fuaran-core#146",
       "evidence": {
         "theorem": "int53_guard_conservative",
@@ -1035,7 +1035,7 @@
     {
       "id": "parser-differential",
       "level": "tested",
-      "claim": "The extracted model agrees with Json.parseDetailedWithPolicy over a 55-input near-miss table under both read policies, every wire-corpus nodes/ and ops/ fixture as raw text, both nesting families at every depth 0-8 under every cap 0-8, arrays and objects up to 64 members, and 4,000 seed-replayable generated inputs — comparing the outcome class, the decoded value, and on a failure the KIND, the POSITION and the MESSAGE at once. Two go-red cases: a model holding a cap production has already spent must accept what production refuses by name, and a blind bridge hiding the two container characters must break every structured document while leaving a scalar in agreement. The member-null fork is asserted to have FIRED, because two parsers that never met a member null agree about a policy neither exercised.",
+      "claim": "The extracted model agrees with Json.parseDetailedWithPolicy over a 85-input near-miss table under both read policies — every classified failure, the number grammar's boundary, and since Phase 306 every surrogate class in every spelling a unit can arrive in, raw and escaped, every wire-corpus nodes/ and ops/ fixture as raw text, both nesting families at every depth 0-8 under every cap 0-8, arrays and objects up to 64 members, and 4,000 seed-replayable generated inputs — comparing the outcome class, the decoded value, and on a failure the KIND, the POSITION and the MESSAGE at once. Two go-red cases: a model holding a cap production has already spent must accept what production refuses by name, and a blind bridge hiding the two container characters must break every structured document while leaving a scalar in agreement. The member-null fork is asserted to have FIRED, because two parsers that never met a member null agree about a policy neither exercised. Since Phase 306 the comparison has NO carve-out: the model makes Phase 299's grammar and surrogate refusals itself, the bridge classifies a raw surrogate unit as the high or the low half, and the generated soup's alphabet carries both halves, so a lone, a paired and a reversed surrogate are each reached.",
       "phase": "fuaran-core#146",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -1066,7 +1066,7 @@
     {
       "id": "parser-alphabet-bridge",
       "level": "assumed",
-      "claim": "That the model's character list IS the production string. A character is a constructor of the model's alphabet — one per character the parser distinguishes, plus a catch-all carrying the character verbatim, so two different characters are never identified — and the host's one-line-per-character bridge is what makes the correspondence. The bridge is not itself proved. The value of a \\uXXXX escape is on the same footing: the model carries the four hex digits symbolically because the extraction carries no integers, and the host resolves the code point, so the decoded character is compared but the transliteration is sampled rather than proved.",
+      "claim": "That the model's character list IS the production string. A character is a constructor of the model's alphabet — one per character the parser distinguishes, plus a catch-all carrying the character verbatim, so two different characters are never identified — and the host's one-line-per-character bridge is what makes the correspondence. The bridge is not itself proved. The value of a \\uXXXX escape is on the same footing: the model carries the four hex digits symbolically because the extraction carries no integers, and the host resolves the code point, so the decoded character is compared but the transliteration is sampled rather than proved. Since Phase 306 the bridge also CLASSIFIES a raw surrogate code unit — into the model's high-half or low-half constructor — because the parser distinguishes them and the model has no code points to do it with; that classification is the bridge's, on the same footing as the rest of it, and `parser-accepts-only-well-formed-strings` is stated over it.",
       "phase": "fuaran-core#146",
       "class": "model-bridge",
       "closes": "permanent",
@@ -1562,7 +1562,7 @@
     {
       "id": "canonical-render-guard",
       "level": "proved",
-      "claim": "THE GUARD BESIDE THE RENDERER. `Canon.tryRender` is `Canon.render` with a refusal beside it, and the refusal's predicate is the FIRST clause of `float_canonical` — finiteness — and nothing else. Proved on the model, for every instantiation: wherever every float in a value is finite the guard IS the renderer (`tryrender_is_render_on_finite`), so in particular on the whole canonical subset the rows above are stated over (`tryrender_is_render_on_canonical`); the guard refuses IF AND ONLY IF some float is not finite, and what a refusal names is a float that is really at the path it gives, whose class is one of the three non-finite ones and whose own rendering is — by `render_aliases_nan` and its two siblings, restated at the class the refusal carries — byte for byte the rendering of a string it is not equal to (`tryrender_refuses_exactly_aliasing`); a non-finite float reachable by ANY path is refused, so no position in a document hides one (`nonfinite_anywhere_is_refused`); and the three aliasing families the format DOCUMENTS — an integer-shaped finite float, the two zeroes, authored member order — are accepted and rendered to `render`'s own bytes (`tryrender_keeps_the_documented_normalisations`). Path reachability is a RELATION rather than a by-key lookup because an object is an association list and a repeated key is representable. NOT proved, and said so in the model: MINIMALITY — that the path named is the first offender in document order — is modelled clause for clause and measured by `canon-guard-differential`, with no theorem that everything before it is finite; and DOCUMENT-level aliasing — that a refused document renders identically to the one with the named float replaced by its string — which is a congruence through the sort that a guard whose job is to refuse does not need. `Canon.renderOrdered` has no guarded companion and is not modelled. `Canon.render`'s bytes did not move, so `canonical-render-not-injective` stands exactly as written.",
+      "claim": "THE GUARD BESIDE THE RENDERER. `Canon.tryRender` is `Canon.render` with a refusal beside it, and the refusal's predicate is the FIRST clause of `float_canonical` — finiteness — and nothing else. Proved on the model, for every instantiation: wherever every float in a value is finite the guard IS the renderer (`tryrender_is_render_on_finite`), so in particular on the whole canonical subset the rows above are stated over (`tryrender_is_render_on_canonical`); the guard refuses IF AND ONLY IF some float is not finite, and what a refusal names is a float that is really at the path it gives, whose class is one of the three non-finite ones and whose own rendering is — by `render_aliases_nan` and its two siblings, restated at the class the refusal carries — byte for byte the rendering of a string it is not equal to (`tryrender_refuses_exactly_aliasing`); a non-finite float reachable by ANY path is refused, so no position in a document hides one (`nonfinite_anywhere_is_refused`); and the three aliasing families the format DOCUMENTS — an integer-shaped finite float, the two zeroes, authored member order — are accepted and rendered to `render`'s own bytes (`tryrender_keeps_the_documented_normalisations`). Path reachability is a RELATION rather than a by-key lookup because an object is an association list and a repeated key is representable. NOT proved, and said so in the model: MINIMALITY — that the path named is the first offender in document order — is modelled clause for clause and measured by `canon-guard-differential`, with no theorem that everything before it is finite; and DOCUMENT-level aliasing — that a refused document renders identically to the one with the named float replaced by its string — which is a congruence through the sort that a guard whose job is to refuse does not need. `Canon.renderOrdered` has no guarded companion; it is modelled since Phase 306 (`render-ordered-injective`). `Canon.render`'s bytes did not move, so `canonical-render-not-injective` stands exactly as written. SINCE PHASE 306 the guard has a second refusal — a string or member key that is not well-formed UTF-16, looked for AFTER the float (`canonical-render-guard-strings`). Everything this row says of the float refusal stands as written, because the float is found first; what moved is that \"the guard IS the renderer\" now also needs every string well-formed, a hypothesis `tryrender_is_render_on_finite` and `tryrender_is_render_on_canonical` carry.",
       "phase": "fuaran-core#165",
       "evidence": {
         "theorem": "tryrender_refuses_exactly_aliasing",
@@ -2201,6 +2201,264 @@
       "closes": "permanent",
       "evidence": {
         "assumption": "the int and float renderers, the hash, the name comparator and the field escaper behind invocationKey are host functions the model takes as parameters; the comparator is assumed a total order, the escaper is assumed to be esc-then-terminator over a symbol reading of strings, and the int and float renderers are assumed injective on carriers, where a theorem needs each (the float one fails at -0/0, a pair production's Cell equality identifies)"
+      }
+    },
+    {
+      "id": "utf8-injective-on-well-formed",
+      "level": "proved",
+      "claim": "THE DIGEST'S LAST STEP. `Hash.utf8Bytes`, modelled clause for clause over integer code units, is INJECTIVE on well-formed UTF-16: two strings in which every high surrogate is followed at once by a low one and every low one follows a high one, with one byte string, are one string. Proved by exhibiting a left inverse (`unread`, with `unread_utf8`) rather than by case analysis on pairs. It is the step that carries the canonical form from characters to the bytes a hash is taken over; `canonical-digest-preimage-injective` is where it is used. Nothing is claimed of SHA-256: that two different byte strings have different digests is the hash's collision resistance, a premise wherever a digest is read as an identity.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "utf8_injective",
+        "model": "proofs/Utf8.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "utf8-guard-refuses-exactly-ill-formed",
+      "level": "proved",
+      "claim": "The guarded encoder `Hash.tryUtf8Bytes` IS the encoder wherever the string is well-formed (`try_utf8_is_utf8_on_well_formed`) and refuses exactly where it is not, naming a unit that is a surrogate and is at the index it gives (`try_utf8_refuses_exactly_ill_formed`); so two strings the guard accepted, with equal bytes, are equal (`guarded_utf8_injective`). The scan it refuses on is `Hash.firstIllFormedUnit`, modelled clause for clause.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "try_utf8_refuses_exactly_ill_formed",
+        "model": "proofs/Utf8.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "utf8-replacement-not-injective",
+      "level": "proved",
+      "claim": "THE REFUTATION the guard exists for. The UNGUARDED encoder maps a lone high surrogate, a lone low one and the replacement character itself to one byte string, `EF BF BD` (`replacement_is_not_injective`), and the units D801 D800 to the bytes of two replacement characters (`unpaired_pair_collides`) — where until Phase 290 it gave them the four bytes of U+10000. These are the platform encoder's own answers and the unguarded path is pinned to them; the row is here so that \"injective\" is read as a claim about the guarded form and nothing else.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "replacement_is_not_injective",
+        "model": "proofs/Utf8.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "utf8-independent-oracle",
+      "level": "tested",
+      "claim": "The programme's first INDEPENDENT-oracle differential. `proofs/Utf8.fst` is checked and not extracted — its units are integers, which do not survive the extraction — so what runs beside `Hash.utf8Bytes` is not the model but the platform's own `System.Text.Encoding.UTF8`, an implementation that shares no line with it: over every one of the 65,536 code units alone, every high surrogate against the units that bound the low range and a non-surrogate each side of it, every low surrogate after a high one, an ordinary unit and nothing, and 20,000 seeded strings over the boundary units. On each string the unguarded encoder is held to the platform's replacing encoder byte for byte, and the guarded one to the platform's STRICT encoder, which throws on exactly the strings that have no code points — the refusal's index and unit included. Asserted reached: more than 90,000 strings, more than 10,000 of them ill-formed. The go-red is the encoder this repository shipped until Phase 290, which reads an unchecked low half: it gives the units D801 D800 the bytes of U+10000, loses on every one of the 3,072 high-then-non-low pairs probed, and on no well-formed pair. The strings are BUILT from code units: an F# string literal's unpaired `\\u` surrogate is compiled as U+FFFD, which is how Phase 290's rows passed on .NET without measuring an ill-formed unit.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Utf8.fst",
+        "cases": [
+          "Hash.utf8Bytes is the platform encoder's bytes over every code unit and every surrogate boundary pair",
+          "an encoder that reads an unchecked low half loses to the platform — the comparison can fail"
+        ]
+      }
+    },
+    {
+      "id": "utf8-model-is-the-encoder",
+      "level": "assumed",
+      "claim": "That `proofs/Utf8.fst` describes the shipped `Hash.utf8Bytes` and `Hash.tryUtf8Bytes`. Every other model in this directory is EXTRACTED and run beside production; this one cannot be — a unit and a byte are integers there, and F*'s `int` does not survive the extraction (README, finding 2) — so the step from the model to the code is read, not run. What stands in its place is `utf8-independent-oracle`: the shipped encoder held to the platform's over every code unit. That measures the code against a third party, not against the model, which is why this is an assumed row with a tested one beside it rather than a tested row.",
+      "phase": "fuaran-core#306",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the unextracted UTF-8 model is the shipped encoder, clause for clause — production's shifts and masks are the model's divisions and remainders on a non-negative unit"
+      }
+    },
+    {
+      "id": "canonical-digest-preimage-injective",
+      "level": "proved",
+      "claim": "CANONICAL INJECTIVITY, AT THE BYTES A DIGEST IS TAKEN OVER. For two canonical values whose strings and member keys are all well-formed UTF-16, equal UTF-8 bytes of the two canonical renderings imply equal normal forms (`canonical_digest_preimage_injective`); and the same sentence about two values `Canon.tryRender` accepted (`tryrender_digest_injective`), since the guard refuses exactly the strings this excludes. The rendering of such a value is itself well-formed (`render_good`: a concatenation of structural characters, numerals, the two literals and escaped strings, where rule 6 rewrites only characters that are not surrogates — `escape_good`); `Utf8.utf8_injective` then gives equal units, the unit spelling's injectivity equal characters, and `canonical-form-injective` the rest. The spelling — which UTF-16 unit a character is — is a parameter with its premises named (`spelling_ok`: every character a unit, injective on the bridged characters, no surrogate among the characters the encoder itself emits), and `spelling_ok_is_satisfiable` exhibits one that holds, so the theorem is not vacuous. NOT proved: SHA-256's collision resistance; and nothing about `Json.render`.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "canonical_digest_preimage_injective",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canonical-render-guard-strings",
+      "level": "proved",
+      "claim": "THE GUARD'S SECOND REFUSAL. Since Phase 306 `Canon.tryRender` also refuses a value holding a string or a member key that is not well-formed UTF-16. Proved on the model, for every instantiation: the guard RENDERS exactly the values with no non-finite float and no ill-formed string; a string refusal is made only where every float is finite — the two refusals are ordered, the float looked for first, so every refusal `canonical-render-guard` describes is still the refusal made — and it names a string the well-formedness test refuses (`tryrender_refuses_exactly_ill_formed`, over `scan_decides_strings_ok`). The scan is `Json.firstIllFormedString`, clause for clause: document order, a member's KEY before its value, at the member's own path. The test itself is a field of the model's wire (`str_ok`), because the model's alphabet does not distinguish a surrogate from any other ordinary character; `canon-unit-spelling` is that bridge. NOT proved: minimality of the path named, as for the float scan.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "tryrender_refuses_exactly_ill_formed",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "canon-unit-spelling",
+      "level": "assumed",
+      "claim": "THE UNIT SPELLING. `canonical-digest-preimage-injective` is stated over a `spelling` — the UTF-16 code unit each character of the model's alphabet IS, and the set of characters the host's bridge produces — and over a well-formedness test (`str_ok`) the model takes as a parameter. What is assumed is that the host's character bridge is such a spelling: one constructor, one unit; distinct bridged characters, distinct units; no surrogate among the punctuation, the numerals' characters and the letters of `true` and `false`; and that `Json.isWellFormedUtf16` is well-formedness at that spelling. Each is true of the bridge by construction (a `ch` is built from one .NET `char`, and its unit is that char's code), and none is proved: the correspondence between a `ch` and a `char` is the same one-line-per-class bridge `canon-character-bridge` records.",
+      "phase": "fuaran-core#306",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the host's character bridge is a spelling_ok spelling, and its well-formedness test is well-formedness at that spelling"
+      }
+    },
+    {
+      "id": "canon-guard-strings-differential",
+      "level": "tested",
+      "claim": "The extracted guard agrees with the shipped `Canon.tryRender` as the `Result` a caller receives over a generated pool in which roughly one string in four and one member key in six has been replaced by a string of surrogates — a lone high, a lone low after text, a high followed by a high, a pair with a stray low after it, and a well-formed pair that must NOT be refused — and one document in three also carries non-finite floats, so the ORDER of the two refusals is measured as well as each alone. The model is handed the platform's strict encoder as its well-formedness test, not production's scan, and names the string; the host finds the unpaired unit in it with a scan of its own and spells the message, so neither side is asked to agree with itself. Per document: the two results agree, message and path included; an accept is `Canon.render`'s bytes; the verdict is a refusal precisely when an independent predicate finds a non-finite float or an ill-formed string; and a value holding a non-finite float is never refused for a string. Asserted reached: string refusals, refusals naming a member key, refusals two or more steps deep, documents holding both faults, and accepts. The go-red is a model whose test accepts every string: it must disagree on exactly the documents production refuses FOR A STRING and on no other.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/WireCanon.fst",
+        "cases": [
+          "the guard oracle agrees with Canon.tryRender over a generated pool carrying ill-formed strings",
+          "a guard model that cannot see an ill-formed string loses — on exactly the documents one decides"
+        ]
+      }
+    },
+    {
+      "id": "render-ordered-injective",
+      "level": "proved",
+      "claim": "`Canon.renderOrdered` — the declared-key-order renderer, `render` minus rule 2 — is INJECTIVE OUTRIGHT on the canonical subset: equal bytes are equal VALUES, member order included, with no normal form on either side (`render_ordered_injective`). It is the literal statement `canonical-render-not-injective` refutes of `Canon.render`, and it is true here because with no sort there is nothing to normalise away: section 6's reader returns members in the order the bytes carry them, which is the order they were authored in, so it is a left inverse on the nose (`read_render_ordered_roundtrip`). `render_is_render_ordered_of_the_normal_form` ties the two renderers together — `render v` is `render_ordered` of `v`'s normal form, so rule 2 is the whole difference. NOT claimed: that an encoder constructs its members in one order — that is the vocabulary's declaration and the generated encoder's to keep. The three numeric normalisations (`canonical`) are excluded here as there.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "render_ordered_injective",
+        "model": "proofs/WireCanon.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "render-ordered-differential",
+      "level": "tested",
+      "claim": "The extracted `render_ordered` agrees with the shipped `Canon.renderOrdered` byte for byte over a generated pool, and — on the canonical subset — the model's reader returns exactly the value that was rendered, members in authored order, which is the theorem's engine measured. Asserted reached: documents authored out of key order, where this renderer is NOT `Canon.render` and without which the case would be the Phase 149 differential again; and canonical documents read back exactly. The go-red is the model's own sorting `render` standing in for the ordered one: it must lose on exactly the documents where production's two renderers differ, and on no other.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/WireCanon.fst",
+        "cases": [
+          "the ordered-render oracle agrees with Canon.renderOrdered, and its reader returns the value",
+          "a model that SORTS loses against Canon.renderOrdered — on exactly the documents authored out of order"
+        ]
+      }
+    },
+    {
+      "id": "parser-accepts-only-well-formed-strings",
+      "level": "proved",
+      "claim": "WHAT THE PARSER ADMITS IS WELL-FORMED UTF-16. Whatever document it is given, under either null policy and at any cap, a value `Json.parse` returns holds no string and no member key in which a high surrogate is not followed at once by a low one or a low one does not follow a high one (`parse_accepts_only_well_formed_strings`, a mutual induction over the descent; `parse_string_accepts_only_well_formed` at one string). It is the hypothesis of `canonical-digest-preimage-injective`, proved of everything the parser admits. The model has no code points and needs none: whether a unit is a surrogate is read off what SPELLS it — a raw unit by its constructor, a `\\uXXXX` escape by its first two hex digits, a short escape never — and `string_body` carries production's `pendingHigh`. `surrogate_refusals` pins seven witnesses with the kind, the message and the position production reports. That a raw unit's class is what the host's bridge says it is rides `parser-alphabet-bridge`.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "parse_accepts_only_well_formed_strings",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "parser-number-grammar",
+      "level": "proved",
+      "claim": "THE JSON NUMBER GRAMMAR IS TESTED FIRST. `is_json_number` is `Json.isJsonNumber` in production's own three steps — an optional minus; `0`, or a non-zero digit and the digits after it; an optional point and at least one digit; an optional exponent, sign and at least one digit — and `classify_number` consults it before either numeric guard: a token outside it is `malformed number: <tok>` whatever its digits denote, and every token the parser accepts is inside it (`number_grammar_is_checked_first`). `number_grammar_boundary` pins the tokens the scanner collects and the grammar refuses (`01`, `1.`, `-.5`, `1.e5`, `1e`, `1e+`, `-`) beside the ones it reads. Grammar conformance for the rest of RFC 8259 — whitespace, the literals, the string escapes — is what the rest of the model already carries clause for clause; nothing here is a proof that the parser accepts every RFC 8259 document, and the nesting cap alone means it does not.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "number_grammar_is_checked_first",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "int53-guard-exact-on-the-grammar",
+      "level": "proved",
+      "claim": "THE INT53 FINDING, CLOSED. `int53-guard-conservative` records that the guard's lexical comparison refuses a zero-padded safe integer. That is still true of the PREDICATE and is no longer true of the PARSER: since Phase 299 a token is held to the JSON number grammar before either guard reads it, the grammar has no leading zero, and an integer token of the grammar is `0` or begins with a non-zero digit (`json_integer_is_unpadded`) — so on the tokens the parser reads the lexical test and the test on the value are ONE test, and the token is accepted exactly when its value is in the Int32 range, or is int53-safe and the float reader reads it (`int53_guard_exact_on_the_grammar`, an iff). `padded_token_is_refused_by_the_grammar` shows the old witness is now refused as a malformed number, not as an unsafe integer. This is the exactness the phase that wrote the guard asked for, and what the comment in Wire.fs justifying the lexical comparison always assumed.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "int53_guard_exact_on_the_grammar",
+        "model": "proofs/JsonParse.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "evolution-bump-refuses-at-the-edge",
+      "level": "proved",
+      "claim": "THE COUNTER HAS A LARGEST VALUE. A profile counter is an Int32; the model held it as a natural, where `+ 1` is total, so every theorem about a bump was true of the model and false of the code at `Int32.MaxValue`, where `Minor + 1` wrapped negative. The limit is in the model now (`max_counter`): `try_bump` — `Versioning.tryBump` — refuses EXACTLY at the edge, an additive step with something added and the minor at the limit or a breaking step with the major at the limit (`try_bump_refuses_exactly_at_the_edge`); neither form leaves the range (`bump_stays_in_range`); and `saturated_breaking_bump_is_not_foreign` exhibits what saturation costs — at the limit a breaking change mints no new major and a consumer on the old one negotiates `Current`, which is why the refusing form exists. The five theorems that need the bump to have happened (`breaking_bump_is_foreign`, `additive_bump_is_behind` and the three field-add rows) now carry that as a hypothesis rather than leaving it in the type.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "try_bump_refuses_exactly_at_the_edge",
+        "model": "proofs/WireVersioning.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "evolution-bump-differential",
+      "level": "tested",
+      "claim": "The extracted `try_bump` and `bump` agree with the shipped `Versioning.tryBump` and `Versioning.bump` over every profile whose two counters are each 0, 1, `Int32.MaxValue - 1` or `Int32.MaxValue`, under a no-op additive, an additive and a breaking evolution: the same profile where both bump, a refusal on both where either refuses, and the same saturated profile from `bump`. Asserted: exactly eight refusals — the additive step at each of the four majors where the minor is at the limit, the breaking one at each of the four minors where the major is — and forty bumps, so a run in which nothing reached the edge fails rather than passing; and every profile `bump` returns has non-negative counters, which is the property the wrapped counter broke.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/WireVersioning.fst",
+        "cases": [
+          "the versioning oracle agrees with Versioning.tryBump and bump at the edge of the counter range"
+        ]
+      }
+    },
+    {
+      "id": "column-codec-image-valid",
+      "level": "proved",
+      "claim": "THE CODEC'S IMAGE LIES INSIDE WHAT `Table.validate` ACCEPTS. Whatever `ColumnCodec.decodeJson` answers `Embedded t` for is a table `validate` accepts (`decode_image_is_valid`) — true by the last line of production's decode, so the half with content is the other one: the table decode REBUILDS from the encoding of a validated table — schema order, schema names, widened cells — is itself one `validate` accepts (`encode_image_revalidates`), without which the final `validate` could refuse the encoder's own output and the round trip would be an error. Modelled at the `JVal`, clause for clause: `Table.validate` with `firstUncarriableCell`, `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` with every private function those reach, and `DecimalText.tryCanonical`. `Fuaran.Core.Column`'s first model; its coverage exclusion is retired.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "encode_image_revalidates",
+        "model": "proofs/WireColumn.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-codec-round-trip",
+      "level": "proved",
+      "claim": "THE ROUND TRIP, TO A NORMAL FORM. For every table `Table.validate` accepts, `decodeJson (encodeJson (Embedded t))` is `Embedded (normal_table t)` — the table with its columns in schema order and each `Int` cell widened into its float or decimal column (`round_trip`); a `Ref` round-trips exactly and unconditionally (`ref_round_trip`). `normal_table` is a fixed point (`normal_table_is_idempotent`), every table the decoder produces for ANY document is already normal (`decoded_table_is_normal`), and so from the first decode on the round trip is the literal one (`decoded_round_trip_is_exact`). The string level joins the canonical renderer through `round_trip_through_normalise` and, on that renderer's canonical subset, `string_round_trip`; a float column holding a whole value or a null is outside that subset and the model's header says so. Two facts about Int32 are named hypotheses, each proved NECESSARY (`column-int-layouts`). NOT modelled: the decoder's five lenient-ingest arms, which the encoder's image never reaches — `round_trip` concluding `Good` is the proof of that — the aggregates, `Schema.*`, and `DecimalText`'s arithmetic.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "round_trip",
+        "model": "proofs/WireColumn.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-codec-literal-round-trip-false",
+      "level": "proved",
+      "claim": "THE LITERAL ROUND TRIP IS FALSE of the shipped codec, three ways, each a refutation for every host and every name: an `Int` in a float column is accepted by `validate`, written as a JSON float and read back a `Float` (`literal_round_trip_fails_on_a_widened_float`); an `Int` in a decimal column comes back a `Decimal` (`literal_round_trip_fails_on_a_widened_decimal`); and `validate` holds the schema's names and the columns' names equal as SETS and does not ask for one order, so a table whose columns are in another order comes back in schema order (`literal_round_trip_fails_on_column_order`). None is a defect: the first two are the widenings `ColumnType.widens` pins, and the third is the schema being the order authority, which the type's doc now says. The row exists so that `decode (encode t) = Ok t` is not read into `column-codec-round-trip`, and because the suite's generative codec law asserted exactly that and passed by sampling only inside the normal form. Also proved, about what decode accepts that encode never writes: a `columns` member outside the schema is read past where `validate` refuses the table it would have meant, a masked slot is never read, and `ref` wins over `columns`.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "theorem": "literal_round_trip_fails_on_column_order",
+        "model": "proofs/WireColumn.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "column-codec-differential",
+      "level": "tested",
+      "claim": "The extracted codec agrees with the shipped one over two generated pools and a table of hand-written documents. Per generated table: `Table.validate` (the verdict and, on a refusal, the class, the column and which of the five malformations it is); `ColumnCodec.encodeJson` (the `JVal`, of ANY table, valid or not); `decodeJson` of that encoding; and — for a table `validate` accepts — production's round trip held to the MODEL's `normal_table`, both at the `JVal` and through `Canon.render` and the parser, which is the round trip a consumer performs. The first pool holds only valid tables and NOT only normal ones: a third have their columns out of schema order and a float or decimal column may hold an int, so the round trip is measured where it is not the literal one (355 of 2,000 at the pinned seed) as well as where it is. The second wanders outside what `validate` accepts and is asserted to reach five refusal classes. The hand-written documents are the decode-only acceptances the model's lemmas name and the five lenient-ingest arms, which the model declines as `OutOfModel` — asserted to be exactly five, so a probe that skipped more would say so. The go-red is the LITERAL comparison: held to the table itself rather than its normal form, production loses on exactly the tables outside the normal form, at both levels, and on no other. A last case samples the two `Int32` hypotheses and holds the modelled `DecimalText.tryCanonical` to production over a pool of decimal texts. The model drops production's error prose and its counts, so a refusal is compared by class and column, never by message.",
+      "phase": "fuaran-core#306",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/WireColumn.fst",
+        "cases": [
+          "the column oracle agrees with Table.validate, encodeJson and decodeJson, and the round trip is the model's normal form",
+          "… and over documents no encoder writes — the decode-only acceptances, and the arms the model declines",
+          "a comparison against the table ITSELF loses — on exactly the tables outside the normal form",
+          "the two facts about Int32 the round trip assumes hold over the pool, and the decimal canonicaliser agrees"
+        ]
+      }
+    },
+    {
+      "id": "column-int-layouts",
+      "level": "assumed",
+      "claim": "THE TWO FACTS ABOUT Int32 the codec's round trip takes as hypotheses: the decimal text of an int is canonical decimal text (`int_text_canonical` — what makes an `Int` in a decimal column decode at all), and the float of an int is finite (`int_floats_finite` — what lets the widened cell through the `validate` decode ends in). Both are true of every Int32 value and neither is proved here: the model is parametric in its number carriers, as the canonical renderer's is, and what a host computes about a number is a field of a record. Each is shown NECESSARY in the model (`int_text_canonical_is_necessary`, `int_floats_finite_is_necessary`): a host where one fails is a host where the round trip is an error. Sampled by `column-codec-differential`.",
+      "phase": "fuaran-core#306",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the text of an Int32 is canonical decimal text, and the float of an Int32 is finite"
+      }
+    },
+    {
+      "id": "column-codec-abstractions",
+      "level": "assumed",
+      "claim": "WHAT THE CODEC MODEL IS HANDED RATHER THAN DERIVES. The calendar: `TemporalText.isCanonicalDate` / `isCanonicalTimestamp` are fields of the model's host record, because the theorems need `validate` and the decoder to ask the SAME predicate of the same text — which the model reproduces — and not what the predicate computes. The loops: production's three accumulate-and-reverse `go` loops are written as the direct recursion they are equal to, a claim about `List.rev` rather than about the codec. The envelope: a refusal keeps its class and column and loses its prose and its counts, the extraction carrying no integers. And `Table.firstDuplicate`'s `Set` is a list asked for membership. Each is sampled by `column-codec-differential` and none is proved.",
+      "phase": "fuaran-core#306",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the temporal-text predicates, the reversal of three accumulator loops and the dropped error prose are as the model takes them"
       }
     }
   ]

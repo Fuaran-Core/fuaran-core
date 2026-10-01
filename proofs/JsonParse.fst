@@ -4,12 +4,14 @@
    Phase 135's theorem 1 named and left open).
 
    WHAT IS MODELLED. `Fuaran.Core.Json.parseDetailedWithPolicy` (src/Fuaran.Core.Wire/Wire.fs),
-   clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes and the
-   `\uXXXX` path, `parseNumber` with the Int32 and int53 token guards, `parseLiteral`, and the
-   mutual `parseValue` / `parseObject` / `parseArray` with the explicit depth counter — including
-   the `EraseMemberNull` fork, which lives in the member loop and nowhere else. The entry point's
-   trailing-input check is modelled too, because `TrailingCharacters` is the one classified failure
-   the parser does NOT raise through its internal exception.
+   clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes, the
+   `\uXXXX` path and — since Phase 306 — its refusal of a lone or ill-ordered surrogate,
+   `parseNumber` with the JSON number grammar (`Json.isJsonNumber`, also since Phase 306) and the
+   Int32 and int53 token guards behind it, `parseLiteral`, and the mutual `parseValue` /
+   `parseObject` / `parseArray` with the explicit depth counter — including the `EraseMemberNull`
+   fork, which lives in the member loop and nowhere else. The entry point's trailing-input check is
+   modelled too, because `TrailingCharacters` is the one classified failure the parser does NOT
+   raise through its internal exception.
 
    WHAT IS PROVED.
      - `parse_total` — the parser reaches exactly one outcome on every input: an accepted value or
@@ -29,6 +31,11 @@
        raise them (again in the return types, so the confinement is checked at every call site
        rather than asserted once) and every one of the twelve is REACHABLE, by a witness input.
        A classification with a dead case is not exhaustive, it is merely closed.
+     - `number_grammar_is_checked_first` / `int53_guard_exact_on_the_grammar` — Phase 306, section
+       8: a token outside the JSON number grammar is a malformed number before either guard reads
+       it, and ON the grammar the int53 guard is exact. See the finding below, which this closes.
+     - `parse_accepts_only_well_formed_strings` — Phase 306, section 12: every string and every
+       member key in a value the parser returns is well-formed UTF-16.
 
    WHAT IS NOT MODELLED, AND WHY — the theorem's boundary.
 
@@ -61,8 +68,16 @@
        chosen is the guard under test and is modelled exactly; the numeral's value is .NET's to
        compute, and the differential compares it there.
 
-   A FINDING, recorded here because the phase's own task list assumes otherwise: THE INT53 GUARD IS
-   NOT EXACT, AND CANNOT BE, BECAUSE THIS PARSER DOES NOT REJECT LEADING ZEROS. Wire.fs justifies
+   A FINDING, AS IT STOOD UNTIL PHASE 299 — AND NOW CLOSED. What follows was true of the parser
+   this model was first written against. Phase 299 held `parseNumber` to the JSON number grammar,
+   which has no leading zero, and Phase 306 restated the model: a padded token is refused BY THE
+   GRAMMAR before the guard reads it, so over the tokens the parser reads the guard IS exact
+   (`int53_guard_exact_on_the_grammar`). The paragraph is kept because `int53_guard_conservative`
+   is still a lemma — it is a fact about the predicate now, not about the parser — and because the
+   reasoning is what a reader needs to see why the grammar closes it.
+
+   The finding, recorded here because the phase's own task list assumed otherwise: THE INT53 GUARD
+   WAS NOT EXACT, AND COULD NOT BE, BECAUSE THE PARSER DID NOT REJECT LEADING ZEROS. Wire.fs justifies
    comparing the digit string lexically with "JSON forbids leading zeros, so for equal length that
    IS the numeric order" — but `parseNumber`'s digit loop accepts `007`, and for a token `Int32`
    refuses, padding lengthens the string without changing the value. So `0009007199254740992` — 19
@@ -88,7 +103,7 @@
 *)
 module JsonParse
 
-(* The parser is a large mutual group over a 45-constructor alphabet, so the default context makes
+(* The parser is a large mutual group over a 47-constructor alphabet, so the default context makes
    the depth induction's queries expensive — 128s for the module, against 72s with upstream's
    context pruning, which is the successor to the proof hints the pinned release removed (README
    finding 1). The leg runs `--quake 3` three times from a cold cache, so that difference is worth
@@ -142,6 +157,12 @@ type ch =
   | CUa | CUb | CUc | CUd | CUe | CUf
   (* every other character, carried verbatim *)
   | COther : c:string -> ch
+  (* a RAW surrogate code unit — U+D800-U+DBFF and U+DC00-U+DFFF — carried verbatim (Phase 306).
+     The two are constructors rather than `COther`s because `parseString` distinguishes them: a
+     string is well-formed UTF-16 or it is refused. Which class a raw unit is in is the bridge's
+     to say, exactly as which character a `COther` carries is. *)
+  | CHiSur : c:string -> ch
+  | CLoSur : c:string -> ch
 
 (* The one-character spelling, for the messages that name a character. F#: `string c`. *)
 let ch_str (c: ch) : Tot string =
@@ -157,6 +178,8 @@ let ch_str (c: ch) : Tot string =
   | CLl -> "l" | CLn -> "n" | CLr -> "r" | CLs -> "s" | CLt -> "t" | CLu -> "u"
   | CUa -> "A" | CUb -> "B" | CUc -> "C" | CUd -> "D" | CUe -> "E" | CUf -> "F"
   | COther s -> s
+  | CHiSur s -> s
+  | CLoSur s -> s
 
 let rec chs_str (l: list ch) : Tot string (decreases l) =
   match l with
@@ -247,6 +270,10 @@ let msg_expect_lit (l: string) : Tot string = "expected '" ^ l ^ "'"
 let msg_unexpected_char (c: ch) : Tot string = "unexpected character '" ^ ch_str c ^ "'"
 let msg_bad_escape (e: ch) : Tot string = "bad escape '\\" ^ ch_str e ^ "'"
 let msg_malformed (tok: list ch) : Tot string = "malformed number: " ^ chs_str tok
+
+(* F#: the two refusals of `parseString`'s `append` (and of its closing quote), verbatim. *)
+let msg_lone_high: string = "ill-formed string: a high surrogate not followed by a low surrogate"
+let msg_lone_low: string = "ill-formed string: a low surrogate with no high surrogate before it"
 
 let msg_nonfinite (tok: list ch) : Tot string =
   "number outside the finite double range; it cannot round-trip on the wire: " ^ chs_str tok
@@ -350,8 +377,13 @@ let int53_safe (d: list ch) : Tot bool =
    and that difference is `int53_guard_conservative` below. *)
 let int53_safe_value (d: list ch) : Tot bool = int53_safe (strip0 d)
 
-(* F#: `System.Int32.TryParse tok`, at the level this model works: does the token name a value in
-   the Int32 range? A token with no digit at all (`-`) does not. *)
+(* F#: `Json.readInt32 tok` — `Int32.TryParse` under the INVARIANT culture with a leading sign and
+   digits and nothing else (Phase 299) — at the level this model works: does the token name a
+   value in the Int32 range? A token with no digit at all (`-`) does not. The test is LEXICAL and
+   so culture-free by construction; until Phase 299 production's reader was the ambient-culture
+   one, which under a culture whose negative sign is not U+002D refused `-5`, and this definition
+   then described a function production was not running. The differential's fa-IR and he-IL leg
+   is what holds the two together. *)
 let int32_fits (neg: bool) (d: list ch) : Tot bool =
   let s = strip0 d in
   let lim = if neg then lim_i32_neg else lim_i32_pos in
@@ -384,17 +416,64 @@ let expect (c: ch) (s: list ch)
   | x :: t -> if x = c then POk () t else PErr ExpectedToken (msg_expect_char c) s
   | [] -> PErr ExpectedToken (msg_expect_char c) s
 
+(* ---- well-formed UTF-16, without integers (Phase 299's refusal; modelled by Phase 306) ----
+
+   F#: `isHighSurrogate` / `isLowSurrogate`, on the unit `append` is handed. The model has no code
+   points, and does not need them: whether a unit is a surrogate is decided by what SPELLS it. A
+   raw unit is one of the two surrogate constructors or it is not. A `\uXXXX` escape is a
+   surrogate exactly when its first hex digit is `D` and its second is `8`-`F` — `8`-`B` the high
+   half, `C`-`F` the low — which is the range test read off the digits. A short escape is never
+   one: the eight it can spell are all below U+0080. *)
+type sclass =
+  | SNone
+  | SHigh
+  | SLow
+
+let lit_class (c: ch) : Tot sclass =
+  match c with
+  | CHiSur _ -> SHigh
+  | CLoSur _ -> SLow
+  | _ -> SNone
+
+let uni_class (a b: ch) : Tot sclass =
+  if a = CLd || a = CUd then
+    (if b = CD8 || b = CD9 || b = CLa || b = CLb || b = CUa || b = CUb then SHigh
+     else if b = CLc || b = CLd || b = CLe || b = CLf ||
+             b = CUc || b = CUd || b = CUe || b = CUf then SLow
+     else SNone)
+  else SNone
+
+(* The class of a DECODED character — what `append` saw when it was handed this one. *)
+let och_class (o: och) : Tot sclass =
+  match o with
+  | OLit c -> lit_class c
+  | OEsc _ -> SNone
+  | OUni a b _ _ -> uni_class a b
+
+(* F#: the two tests `append` opens with. `pending` is `pendingHigh` — the last unit appended was
+   a high surrogate still waiting for its low half. `Some` is the refusal's message. *)
+let sur_fault (pending: bool) (cls: sclass) : Tot (option string) =
+  if pending && cls <> SLow then Some msg_lone_high
+  else if not pending && cls = SLow then Some msg_lone_low
+  else None
+
 (* F#: the body of `parseString`'s `while not fin` loop. The escape arms are in production's own
    order, and each failure's suffix is the one production's `i` pointed at when it raised: the
    truncated-escape and bad-hex-digit failures are AFTER `\u` (the two characters are consumed
-   before the length test), and `BadEscape` is after the escape letter too. *)
-let rec string_body (acc: list och) (s: list ch)
+   before the length test), and `BadEscape` is after the escape letter too.
+
+   THE SURROGATE REFUSAL (Phase 299) is `append`'s, and it fires AFTER the unit is consumed — a raw
+   character after `i <- i + 1`, a short escape after its letter, a `\u` escape after `i <- i + 4`
+   — so its suffix is what follows the unit. A closing quote met while a high surrogate is pending
+   is the same refusal, after the quote. The end-of-input test runs first in production's loop, so
+   an unterminated string is `UnterminatedString` whatever is pending. *)
+let rec string_body (pending: bool) (acc: list och) (s: list ch)
   : Tot (r: pres (list och) { (POk? r ==> llen (POk?.rest r) < llen s) /\
                               (PErr? r ==> str_kind (PErr?.k r)) })
         (decreases s) =
   match s with
   | [] -> PErr UnterminatedString "unterminated string" []
-  | CQuote :: t -> POk (rev acc) t
+  | CQuote :: t -> if pending then PErr BadEscape msg_lone_high t else POk (rev acc) t
   | CBackslash :: t ->
     (match t with
      | [] -> PErr UnterminatedEscape "unterminated escape" []
@@ -402,7 +481,9 @@ let rec string_body (acc: list och) (s: list ch)
        (match u with
         | a :: b :: c :: d :: r ->
           if is_hex a && is_hex b && is_hex c && is_hex d then
-            string_body (OUni a b c d :: acc) r
+            (match sur_fault pending (uni_class a b) with
+             | Some m -> PErr BadEscape m r
+             | None -> string_body (uni_class a b = SHigh) (OUni a b c d :: acc) r)
           else
             (* F# evaluates the four `hexDigit` calls left to right and `fail` captures `i`, which
                `i <- i + 4` has not yet advanced — so the position is the FIRST hex digit whichever
@@ -410,17 +491,23 @@ let rec string_body (acc: list och) (s: list ch)
             PErr BadHexDigit "bad hex digit in \\u escape" u
         | _ -> PErr TruncatedUnicodeEscape "truncated \\u escape" u)
      | e :: u ->
-       if is_short_escape e then string_body (OEsc e :: acc) u
+       if is_short_escape e then
+         (match sur_fault pending SNone with
+          | Some m -> PErr BadEscape m u
+          | None -> string_body false (OEsc e :: acc) u)
        else PErr BadEscape (msg_bad_escape e) u)
-  | c :: t -> string_body (OLit c :: acc) t
+  | c :: t ->
+    (match sur_fault pending (lit_class c) with
+     | Some m -> PErr BadEscape m t
+     | None -> string_body (lit_class c = SHigh) (OLit c :: acc) t)
 
-(* F#: `parseString`. *)
+(* F#: `parseString`. `pendingHigh` starts false. *)
 let parse_string (s: list ch)
   : Tot (r: pres (list och) { (POk? r ==> llen (POk?.rest r) < llen s) /\
                               (PErr? r ==> str_kind (PErr?.k r)) }) =
   match expect CQuote s with
   | PErr k m a -> PErr k m a
-  | POk _ t -> string_body [] t
+  | POk _ t -> string_body false [] t
 
 (* F#: the three `while … digit` loops of `parseNumber`. *)
 let rec take_digits (s: list ch)
@@ -473,12 +560,57 @@ type freadv =
   | FNonFinite
   | FUnparsable
 
-(* What `parseNumber` decides once the token is scanned, in production's own branch order. This is
-   the whole of the two numeric guards. *)
+(* F#: `Json.isJsonNumber` (Phase 299) — the JSON number grammar, exactly (RFC 8259 §6): an
+   optional `-`; then `0`, or a non-zero digit and any digits after it; then, optionally, a `.`
+   and at least one digit; then, optionally, `e` or `E`, an optional sign and at least one digit —
+   in production's own three steps. (The grammar is not written here as a regular expression: its
+   star-then-parenthesis would close this comment.) `after_int` is the integer part: a lone `0`, or a non-zero
+   digit and the digits after it — so a leading zero leaves digits unread and the token fails the
+   final `k = n`. `after_frac` and `after_exp` each take their optional part and at least one
+   digit of it. *)
+let after_int (s: list ch) : Tot (option (list ch)) =
+  match s with
+  | CD0 :: t -> Some t
+  | d :: _ -> if is_digit d then Some (snd (take_digits s)) else None
+  | [] -> None
+
+let after_frac (s: list ch) : Tot (option (list ch)) =
+  match s with
+  | CDot :: t -> let (ds, r) = take_digits t in if Cons? ds then Some r else None
+  | _ -> Some s
+
+let after_exp (s: list ch) : Tot (option (list ch)) =
+  match s with
+  | e :: t ->
+    if is_exp e then
+      (let u = (match t with
+                | sg :: v -> if sg = CPlus || sg = CMinus then v else t
+                | [] -> t) in
+       let (ds, r) = take_digits u in
+       if Cons? ds then Some r else None)
+    else Some s
+  | [] -> Some s
+
+let is_json_number (tok: list ch) : Tot bool =
+  let start = (match tok with CMinus :: t -> t | _ -> tok) in
+  match after_int start with
+  | None -> false
+  | Some s1 ->
+    (match after_frac s1 with
+     | None -> false
+     | Some s2 ->
+       (match after_exp s2 with
+        | None -> false
+        | Some s3 -> Nil? s3))
+
+(* What `parseNumber` decides once the token is scanned, in production's own branch order: the
+   grammar first (Phase 299 — a token outside it is `malformed number: <tok>` before anything
+   reads it), then the two numeric guards. *)
 let classify_number (float_read: list ch -> freadv) (tok: list ch) (isf: bool)
   : Tot (r: pres jval { PErr? r ==> PErr?.k r == MalformedNumber }) =
   let (neg, digits) = (match tok with CMinus :: t -> (true, t) | _ -> (false, tok)) in
-  if isf then
+  if not (is_json_number tok) then PErr MalformedNumber (msg_malformed tok) []
+  else if isf then
     (match float_read tok with
      | FFinite -> POk (JFloat tok) []
      | FNonFinite -> PErr MalformedNumber (msg_nonfinite tok) []
@@ -851,14 +983,108 @@ let int53_guard_exact (float_read: list ch -> freadv) (tok: list ch)
   int32_within_int53 neg digits;
   int53_guard_sound digits
 
-(* … and the refusal is classified: an integer token that is not int53-safe is refused, by name. *)
+(* … and the refusal is classified: an integer token of the grammar that is not int53-safe is
+   refused, by name. (A token OUTSIDE the grammar is refused before the guard reads it, in other
+   words — `number_grammar_is_checked_first` below.) *)
 let int53_guard_refuses (float_read: list ch -> freadv) (tok: list ch)
   : Lemma (ensures (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
                     let neg = (match tok with CMinus :: _ -> true | _ -> false) in
-                    (not (int32_fits neg digits) /\ not (int53_safe digits)) ==>
+                    (is_json_number tok /\ not (int32_fits neg digits) /\ not (int53_safe digits)) ==>
                     (let r = classify_number float_read tok false in
                      PErr? r /\ PErr?.k r == MalformedNumber /\ PErr?.msg r == msg_int53 tok)))
   = ()
+
+(* ---- THE GRAMMAR CLOSES THE FINDING (Phases 299 and 306) ----
+
+   `int53_guard_conservative` above is a fact about the PREDICATE: on a zero-padded digit string
+   the lexical test refuses a value that is safe. Until Phase 299 it was also a fact about the
+   PARSER, which read such a token. It no longer is. `parseNumber` now holds every token to the
+   JSON number grammar before either guard sees it, the grammar has no leading zero, and on an
+   unpadded digit string the lexical test and the test on the value are one test. So over the
+   tokens the parser reads, the guard is EXACT — which is what the phase that wrote it asked for,
+   and what the comment in Wire.fs justifying the lexical comparison always assumed. *)
+
+[@@ noextract_to "FSharp"]
+let rec all_digits (d: list ch) : Tot bool (decreases d) =
+  match d with
+  | [] -> true
+  | c :: t -> is_digit c && all_digits t
+
+(* An integer token of the grammar carries no padding: it is `0`, or it begins with a non-zero
+   digit. So stripping leading zeros — what reading the VALUE does — changes nothing. *)
+[@@ noextract_to "FSharp"]
+let json_integer_is_unpadded (d: list ch)
+  : Lemma (requires all_digits d /\ is_json_number d) (ensures strip0 d == d) =
+  match d with
+  | CD0 :: t -> (match t with
+                 | [] -> ()
+                 | _ :: _ -> ())
+  | _ -> ()
+
+(* The grammar is tested FIRST: a token outside it is `malformed number: <tok>`, whatever the two
+   guards would have said of its digits. *)
+let number_grammar_is_checked_first (float_read: list ch -> freadv) (tok: list ch) (isf: bool)
+  : Lemma (ensures (not (is_json_number tok) ==>
+                      classify_number float_read tok isf
+                      == PErr MalformedNumber (msg_malformed tok) []) /\
+                   (POk? (classify_number float_read tok isf) ==> is_json_number tok))
+  = ()
+
+(* THE GUARD IS EXACT ON THE GRAMMAR. For an integer token the parser's grammar admits: the
+   lexical test IS the test on the value, and the token is accepted exactly when its value is in
+   the Int32 range, or is int53-safe and the float reader reads it. *)
+let int53_guard_exact_on_the_grammar (float_read: list ch -> freadv) (tok: list ch)
+  : Lemma (requires (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
+                     is_json_number tok /\ all_digits digits))
+          (ensures (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
+                    let neg = (match tok with CMinus :: _ -> true | _ -> false) in
+                    int53_safe digits == int53_safe_value digits /\
+                    (POk? (classify_number float_read tok false) <==>
+                       (int32_fits neg digits \/
+                        (int53_safe_value digits /\ float_read tok <> FUnparsable)))))
+  =
+  let digits = (match tok with CMinus :: t -> t | _ -> tok) in
+  json_integer_is_unpadded digits
+
+(* … and the padded witness of `int53_guard_conservative` is refused BY THE GRAMMAR, as a malformed
+   number, not by the guard as an unsafe integer. The value it denotes was never the problem. *)
+let padded_token_is_refused_by_the_grammar (float_read: list ch -> freadv)
+  : Lemma (ensures classify_number float_read int53_conservative_witness false
+                   == PErr MalformedNumber (msg_malformed int53_conservative_witness) [])
+  =
+  assert_norm (is_json_number int53_conservative_witness == false)
+
+(* The grammar's boundary, by witness: the tokens the scanner collects that the grammar refuses —
+   `01`, `1.`, `-.5`, `1.e5`, `1e`, `1e+`, `-` — beside the ones it reads — `0`, `-0`, `0.5`,
+   `1E+2`, `-0.5e-3`. *)
+let number_grammar_boundary (_: unit)
+  : Lemma (ensures
+      not (is_json_number [CD0; CD1]) /\
+      not (is_json_number [CD1; CDot]) /\
+      not (is_json_number [CMinus; CDot; CD5]) /\
+      not (is_json_number [CD1; CDot; CLe; CD5]) /\
+      not (is_json_number [CD1; CLe]) /\
+      not (is_json_number [CD1; CLe; CPlus]) /\
+      not (is_json_number [CMinus]) /\
+      is_json_number [CD0] /\
+      is_json_number [CMinus; CD0] /\
+      is_json_number [CD0; CDot; CD5] /\
+      is_json_number [CD1; CUe; CPlus; CD2] /\
+      is_json_number [CMinus; CD0; CDot; CD5; CLe; CMinus; CD3])
+  =
+  assert_norm (
+      not (is_json_number [CD0; CD1]) /\
+      not (is_json_number [CD1; CDot]) /\
+      not (is_json_number [CMinus; CDot; CD5]) /\
+      not (is_json_number [CD1; CDot; CLe; CD5]) /\
+      not (is_json_number [CD1; CLe]) /\
+      not (is_json_number [CD1; CLe; CPlus]) /\
+      not (is_json_number [CMinus]) /\
+      is_json_number [CD0] /\
+      is_json_number [CMinus; CD0] /\
+      is_json_number [CD0; CDot; CD5] /\
+      is_json_number [CD1; CUe; CPlus; CD2] /\
+      is_json_number [CMinus; CD0; CDot; CD5; CLe; CMinus; CD3])
 
 (* ======================================================================================
    9. THEOREM — THE ERROR CLASSIFICATION IS EXHAUSTIVE.
@@ -1044,9 +1270,12 @@ let rec skip_ws_idem (s: list ch) : Lemma (ensures skip_ws (skip_ws s) == skip_w
 (* ---- the key, spelt out, so the absorbed member's key can be ANY key ---- *)
 
 (* A character a string literal carries through unchanged. `parse_string`'s only two structural
-   characters are the quote that ends it and the backslash that opens an escape. *)
+   characters are the quote that ends it and the backslash that opens an escape; a raw surrogate
+   is excluded too, because the loop tracks those (it copies a well-formed PAIR through, and
+   refuses a lone one). *)
 [@@ noextract_to "FSharp"]
-let plain (c: ch) : Tot bool = c <> CQuote && c <> CBackslash
+let plain (c: ch) : Tot bool =
+  c <> CQuote && c <> CBackslash && not (CHiSur? c) && not (CLoSur? c)
 
 [@@ noextract_to "FSharp"]
 let rec plain_all (l: list ch) : Tot bool (decreases l) =
@@ -1065,7 +1294,8 @@ let rec olit_onto (key: list ch) (acc: list och) : Tot (list och) (decreases key
 [@@ noextract_to "FSharp"]
 let rec string_body_plain (acc: list och) (key: list ch) (tail: list ch)
   : Lemma (requires plain_all key)
-          (ensures string_body acc (app key (CQuote :: tail)) == POk (rev (olit_onto key acc)) tail)
+          (ensures string_body false acc (app key (CQuote :: tail))
+                   == POk (rev (olit_onto key acc)) tail)
           (decreases key) =
   match key with
   | [] -> ()
@@ -1351,3 +1581,288 @@ let null_absorption_is_erasure_witness (float_read: list ch -> freadv) (cap: str
          == parse float_read cap RejectNull [(); ()] (CLBrace :: rest))) =
   null_absorption_is_erasure
     float_read cap [(); ()] [[CLa]] [CQuote; CLb; CQuote; CColon; CLt; CLr; CLu; CLe; CRBrace]
+
+(* ======================================================================================
+   12. THEOREM — WHAT THE PARSER ACCEPTS IS WELL-FORMED UTF-16 (Phase 299's refusal, proved
+       by Phase 306).
+
+       Phase 299 made `parseString` refuse a lone or ill-ordered surrogate. This section says
+       what that buys, at the level a digest consumer needs: EVERY string and EVERY member key in
+       a value the parser returns is well-formed UTF-16 — each high surrogate is followed at once
+       by a low one, and each low one follows a high one, whichever spelling each unit arrived in.
+       `Utf8.fst` proves the UTF-8 encoding injective on exactly those strings, so over what this
+       parser admits a canonical rendering's bytes name one value.
+
+       The model has no code points (header), so well-formedness is stated over the surrogate
+       CLASS of each decoded character, which `och_class` reads off the spelling: a raw unit by
+       its constructor, a `\uXXXX` escape by its first two hex digits, a short escape never. That
+       classification is production's range test on the unit, and its agreement with production
+       is the differential's to measure — a raw unit's class is the bridge's (level 3).
+   ====================================================================================== *)
+
+(* The state `pendingHigh` is in after `append` has been handed each character of `l` in turn,
+   starting from `p` — or `None` where one of them was refused. *)
+let rec fwd_state (p: bool) (l: list och) : Tot (option bool) (decreases l) =
+  match l with
+  | [] -> Some p
+  | o :: t ->
+    (match sur_fault p (och_class o) with
+     | Some _ -> None
+     | None -> fwd_state (och_class o = SHigh) t)
+
+(* WELL-FORMED UTF-16, for a decoded string: every unit was accepted, and no high surrogate is
+   left waiting at the end. *)
+let ochs_well_formed (l: list och) : Tot bool = fwd_state false l = Some false
+
+(* The same state, read off the ACCUMULATOR — which holds the decoded characters newest first. *)
+[@@ noextract_to "FSharp"]
+let rec racc_state (acc: list och) : Tot (option bool) (decreases acc) =
+  match acc with
+  | [] -> Some false
+  | o :: rest ->
+    (match racc_state rest with
+     | None -> None
+     | Some p ->
+       (match sur_fault p (och_class o) with
+        | Some _ -> None
+        | None -> Some (och_class o = SHigh)))
+
+[@@ noextract_to "FSharp"]
+let rec fwd_rev_app (acc l: list och)
+  : Lemma (ensures fwd_state false (rev_app acc l)
+                   == (match racc_state acc with
+                       | None -> None
+                       | Some p -> fwd_state p l))
+          (decreases acc) =
+  match acc with
+  | [] -> ()
+  | o :: rest -> fwd_rev_app rest (o :: l)
+
+(* The loop's invariant: `pending` IS the state of the accumulator, at every step, so a string the
+   loop closes is one whose every unit was accepted and whose last unit left nothing pending. *)
+[@@ noextract_to "FSharp"]
+let rec string_body_keeps_well_formed (pending: bool) (acc: list och) (s: list ch)
+  : Lemma (requires racc_state acc == Some pending)
+          (ensures (match string_body pending acc s with
+                    | POk cs _ -> ochs_well_formed cs
+                    | PErr _ _ _ -> True))
+          (decreases s) =
+  match s with
+  | [] -> ()
+  | CQuote :: _ -> if pending then () else fwd_rev_app acc []
+  | CBackslash :: t ->
+    (match t with
+     | [] -> ()
+     | CLu :: u ->
+       (match u with
+        | a :: b :: c :: d :: r ->
+          if is_hex a && is_hex b && is_hex c && is_hex d then
+            (match sur_fault pending (uni_class a b) with
+             | Some _ -> ()
+             | None -> string_body_keeps_well_formed (uni_class a b = SHigh) (OUni a b c d :: acc) r)
+          else ()
+        | _ -> ())
+     | e :: u ->
+       if is_short_escape e then
+         (match sur_fault pending SNone with
+          | Some _ -> ()
+          | None -> string_body_keeps_well_formed false (OEsc e :: acc) u)
+       else ())
+  | c :: t ->
+    (match sur_fault pending (lit_class c) with
+     | Some _ -> ()
+     | None -> string_body_keeps_well_formed (lit_class c = SHigh) (OLit c :: acc) t)
+
+(* A STRING THE PARSER ACCEPTS IS WELL-FORMED. *)
+let parse_string_accepts_only_well_formed (s: list ch)
+  : Lemma (ensures (match parse_string s with
+                    | POk cs _ -> ochs_well_formed cs
+                    | PErr _ _ _ -> True)) =
+  match expect CQuote s with
+  | PErr _ _ _ -> ()
+  | POk _ t -> string_body_keeps_well_formed false [] t
+
+(* ---- lifted over a value: every string, and every member key ---- *)
+
+let rec jval_wf (v: jval) : Tot bool =
+  match v with
+  | JStr s -> ochs_well_formed s
+  | JArr xs -> jvals_wf xs
+  | JObj fs -> fields_wf fs
+  | _ -> true
+
+and jvals_wf (xs: list jval) : Tot bool =
+  match xs with
+  | [] -> true
+  | x :: t -> jval_wf x && jvals_wf t
+
+and fields_wf (fs: list (list och & jval)) : Tot bool =
+  match fs with
+  | [] -> true
+  | (k, v) :: t -> ochs_well_formed k && jval_wf v && fields_wf t
+
+[@@ noextract_to "FSharp"]
+let rec rev_app_vals_wf (acc l: list jval)
+  : Lemma (requires jvals_wf acc /\ jvals_wf l) (ensures jvals_wf (rev_app acc l))
+          (decreases acc) =
+  match acc with
+  | [] -> ()
+  | x :: rest -> rev_app_vals_wf rest (x :: l)
+
+[@@ noextract_to "FSharp"]
+let rec rev_app_fields_wf (acc l: list (list och & jval))
+  : Lemma (requires fields_wf acc /\ fields_wf l) (ensures fields_wf (rev_app acc l))
+          (decreases acc) =
+  match acc with
+  | [] -> ()
+  | kv :: rest -> rev_app_fields_wf rest (kv :: l)
+
+(* One lemma per member of the mutual group, in the group's own termination order, as section
+   11's `policies_agree_*` are and for the same reason: the claim is about a recursive descent and
+   the induction has to follow the descent. The two loops carry their accumulators' invariant. *)
+[@@ noextract_to "FSharp"]
+let rec parsed_value_wf
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit) (s: list ch)
+  : Lemma (ensures (match parse_value float_read cap tol b s with
+                    | POk v _ -> jval_wf v
+                    | PErr _ _ _ -> True))
+          (decreases %[llen s; 2]) =
+  let w = skip_ws s in
+  match w with
+  | CQuote :: _ -> parse_string_accepts_only_well_formed w
+  | CLBrace :: _ -> parsed_object_wf float_read cap tol b w
+  | CLBrack :: _ -> parsed_array_wf float_read cap tol b w
+  | _ -> ()
+
+and parsed_object_wf
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures (match parse_object float_read cap tol b w with
+                    | POk v _ -> jval_wf v
+                    | PErr _ _ _ -> True))
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrace w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrace :: _ -> ()
+        | _ -> parsed_members_wf float_read cap tol b' [] t1))
+
+and parsed_array_wf
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (w: list ch { starts_container w })
+  : Lemma (ensures (match parse_array float_read cap tol b w with
+                    | POk v _ -> jval_wf v
+                    | PErr _ _ _ -> True))
+          (decreases %[llen w; 1]) =
+  match b with
+  | [] -> ()
+  | _ :: b' ->
+    (match expect CLBrack w with
+     | PErr _ _ _ -> ()
+     | POk _ t ->
+       let t1 = skip_ws t in
+       (match t1 with
+        | CRBrack :: _ -> ()
+        | _ -> parsed_items_wf float_read cap tol b' [] t1))
+
+and parsed_members_wf
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (acc: list (list och & jval)) (s: list ch)
+  : Lemma (requires fields_wf acc)
+          (ensures (match parse_members float_read cap tol b acc s with
+                    | POk fs _ -> fields_wf fs
+                    | PErr _ _ _ -> True))
+          (decreases %[llen s; 0]) =
+  let w = skip_ws s in
+  parse_string_accepts_only_well_formed w;
+  match parse_string w with
+  | PErr _ _ _ -> ()
+  | POk key t ->
+    let t1 = skip_ws t in
+    (match expect CColon t1 with
+     | PErr _ _ _ -> ()
+     | POk _ t2 ->
+       let t3 = skip_ws t2 in
+       let erased = if tol then drop_null4 t3 else None in
+       (match erased with
+        | Some t4 ->
+          let t5 = skip_ws t4 in
+          (match t5 with
+           | CComma :: t6 -> parsed_members_wf float_read cap tol b acc t6
+           | CRBrace :: _ -> rev_app_fields_wf acc []
+           | _ -> ())
+        | None ->
+          parsed_value_wf float_read cap tol b t3;
+          (match parse_value float_read cap tol b t3 with
+           | PErr _ _ _ -> ()
+           | POk v t4 ->
+             let t5 = skip_ws t4 in
+             (match t5 with
+              | CComma :: t6 -> parsed_members_wf float_read cap tol b ((key, v) :: acc) t6
+              | CRBrace :: _ -> rev_app_fields_wf ((key, v) :: acc) []
+              | _ -> ()))))
+
+and parsed_items_wf
+  (float_read: list ch -> freadv) (cap: string) (tol: bool) (b: list unit)
+  (acc: list jval) (s: list ch)
+  : Lemma (requires jvals_wf acc)
+          (ensures (match parse_items float_read cap tol b acc s with
+                    | POk xs _ -> jvals_wf xs
+                    | PErr _ _ _ -> True))
+          (decreases %[llen s; 3]) =
+  parsed_value_wf float_read cap tol b s;
+  (match parse_value float_read cap tol b s with
+   | PErr _ _ _ -> ()
+   | POk v t ->
+     let t1 = skip_ws t in
+     (match t1 with
+      | CComma :: t2 -> parsed_items_wf float_read cap tol b (v :: acc) t2
+      | CRBrack :: _ -> rev_app_vals_wf (v :: acc) []
+      | _ -> ()))
+
+(* THE THEOREM, at the entry point. Whatever document it is given, under either null policy and
+   at any cap: a value the parser returns holds no string and no member key that is not
+   well-formed UTF-16. *)
+let parse_accepts_only_well_formed_strings
+  (float_read: list ch -> freadv) (cap: string) (pol: policy) (b: list unit) (s: list ch)
+  : Lemma (ensures (match parse float_read cap pol b s with
+                    | ROk v -> jval_wf v
+                    | RErr _ _ _ -> True)) =
+  parsed_value_wf float_read cap (EraseMemberNull? pol) b s
+
+(* THE REFUSALS, by witness, each with the kind, the message and the position production reports:
+   a raw lone high surrogate (refused at the closing quote, after it), a raw lone low one (after
+   the unit), an escaped high followed by an escaped high (after the second escape), and a high
+   followed by a short escape (after its letter). And the acceptances beside them: a raw pair, an
+   escaped pair, and one of each. *)
+let surrogate_refusals (_: unit)
+  : Lemma (ensures
+      parse_string [CQuote; CHiSur "h"; CQuote] == PErr BadEscape msg_lone_high [] /\
+      parse_string [CQuote; CLoSur "l"; CQuote] == PErr BadEscape msg_lone_low [CQuote] /\
+      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0;
+                            CBackslash; CLu; CUd; CD8; CD0; CD0; CQuote]
+        == PErr BadEscape msg_lone_high [CQuote] /\
+      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd; CBackslash; CLn; CQuote]
+        == PErr BadEscape msg_lone_high [CQuote] /\
+      POk? (parse_string [CQuote; CHiSur "h"; CLoSur "l"; CQuote]) /\
+      POk? (parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
+                                  CBackslash; CLu; CUd; CUe; CD0; CD0; CQuote]) /\
+      POk? (parse_string [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))
+  =
+  assert_norm (
+      parse_string [CQuote; CHiSur "h"; CQuote] == PErr BadEscape msg_lone_high [] /\
+      parse_string [CQuote; CLoSur "l"; CQuote] == PErr BadEscape msg_lone_low [CQuote] /\
+      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD0; CD0;
+                            CBackslash; CLu; CUd; CD8; CD0; CD0; CQuote]
+        == PErr BadEscape msg_lone_high [CQuote] /\
+      parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd; CBackslash; CLn; CQuote]
+        == PErr BadEscape msg_lone_high [CQuote] /\
+      POk? (parse_string [CQuote; CHiSur "h"; CLoSur "l"; CQuote]) /\
+      POk? (parse_string [CQuote; CBackslash; CLu; CUd; CD8; CD3; CUd;
+                                  CBackslash; CLu; CUd; CUe; CD0; CD0; CQuote]) /\
+      POk? (parse_string [CQuote; CHiSur "h"; CBackslash; CLu; CLd; CLe; CD0; CD0; CQuote]))

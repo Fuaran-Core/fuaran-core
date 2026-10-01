@@ -106,6 +106,12 @@
          WireCanon — a tag is a value read out of a `jval`, and the byte claim is stated against
          that module's renderer rather than a second one — so it follows it. -->
     <Compile Include="WireVersioning.fs" />
+    <!-- Phase 306 — the model of the COLUMNAR CODEC (../WireColumn.fst): Table.validate,
+         ColumnCodec.encodeJson / decodeJson and the decimal canonicaliser at the JVal, extracted
+         by the same leg. It follows WireCanon.fs because it opens it — the value it builds is the
+         type the canonical renderer is proved about. (Utf8.fst, the same phase's other model, is
+         checked and not extracted: see check.ps1's $proofOnly.) -->
+    <Compile Include="WireColumn.fs" />
     <!-- Phase 177 — the model of the FUNCTION SEAM (../Capability.fst): the effect lattice, the
          value spaces, `Function.signature` / `apply` / `curry` / `compose` / `auditEffect` over an
          abstract witness, and `Capability.validateArgs` / `invoke` with `Registry.register` /

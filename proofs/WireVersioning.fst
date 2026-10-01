@@ -133,9 +133,24 @@ let classify (before after: list (list ch)) : Tot evolution =
 
 (* F#: `{ Name: string; Major: int; Minor: int }`. The two counters are `nat` rather than `int`
    for the reason `Limits.fst` gives for its constants: production's parser refuses a negative
-   component (`Profile.tryParse` guards `v >= 0`), so a negative profile is not a value the wire
-   can carry, and modelling it as one would put unreachable arms into every query below. *)
+   component (`Profile.tryParse` reads a canonical unsigned integer), so a negative profile is not
+   a value the wire can carry, and modelling it as one would put unreachable arms into every query
+   below.
+
+   THE OTHER EDGE (Phase 306). `nat` has no largest element and production's counter does: it is
+   an `Int32`. Until this phase the model's `minor + 1` was total where production's wrapped to a
+   NEGATIVE minor at `Int32.MaxValue` — a profile the writer then rendered and the reader refused
+   — so every theorem below about a bump held of the model and was false of the code at one
+   value. The premise is no longer left implicit in the type: `max_counter` is the limit,
+   `try_bump` REFUSES at it as `Versioning.tryBump` does, `bump` saturates as `Versioning.bump`
+   does, and each theorem that needs the bump to have happened says so in its hypothesis. *)
 type profile = { name: list ch; major: nat; minor: nat }
+
+(* F#: `System.Int32.MaxValue` — the largest value a profile counter can hold. *)
+let max_counter : nat = 2147483647
+
+(* A profile production can hold: both counters within the Int32 range. *)
+let in_range (p: profile) : Tot bool = p.major <= max_counter && p.minor <= max_counter
 
 (* F#: `Versioning.Compatibility`. *)
 type compatibility =
@@ -151,14 +166,27 @@ let negotiate (consumer authored: profile) : Tot compatibility =
   else if authored.minor > consumer.minor then Behind authored
   else Current
 
-(* F#: `Versioning.bump`. The empty additive is its own arm in production and is its own arm here:
-   a change that added nothing bumps nothing, so the profile a no-op mints is the one it started
-   with, and a consumer meeting it stays `Current`. *)
-let bump (base_profile: profile) (ev: evolution) : Tot profile =
+(* F#: `Versioning.tryBump` (Phase 306). The empty additive is its own arm in production and is
+   its own arm here: a change that added nothing bumps nothing, so the profile a no-op mints is
+   the one it started with, and a consumer meeting it stays `Current`. The other two arms REFUSE
+   where the counter they would advance is already `Int32.MaxValue` — `None` here, a named
+   `Error` in production, whose message this model does not carry. *)
+let try_bump (base_profile: profile) (ev: evolution) : Tot (option profile) =
   match ev with
-  | Additive [] -> base_profile
-  | Additive _ -> { base_profile with minor = base_profile.minor + 1 }
-  | Breaking _ _ -> { base_profile with major = base_profile.major + 1; minor = 0 }
+  | Additive [] -> Some base_profile
+  | Additive _ ->
+    if base_profile.minor = max_counter then None
+    else Some ({ base_profile with minor = base_profile.minor + 1 })
+  | Breaking _ _ ->
+    if base_profile.major = max_counter then None
+    else Some ({ base_profile with major = base_profile.major + 1; minor = 0 })
+
+(* F#: `Versioning.bump` — `tryBump`, SATURATING where it refuses: the profile comes back
+   unchanged rather than with a counter wrapped negative. *)
+let bump (base_profile: profile) (ev: evolution) : Tot profile =
+  match try_bump base_profile ev with
+  | Some p -> p
+  | None -> base_profile
 
 (* ======================================================================================
    3. THE TOLERANT DECODE BOUNDARY.
@@ -302,7 +330,8 @@ let rename_is_breaking (before after: list (list ch)) (removed_tag: list ch)
    short of `bump` would leave the table's consequence unproved. *)
 let breaking_bump_is_foreign (base_profile: profile) (ev: evolution) (consumer: profile)
   : Lemma (requires Breaking? ev /\ consumer.name == base_profile.name /\
-                    consumer.major == base_profile.major)
+                    consumer.major == base_profile.major /\
+                    base_profile.major < max_counter)
           (ensures Foreign? (negotiate consumer (bump base_profile ev))) = ()
 
 (* The additive counterpart: an additive bump keeps the major, so the same consumer is `Behind`
@@ -310,8 +339,43 @@ let breaking_bump_is_foreign (base_profile: profile) (ev: evolution) (consumer: 
    §15.4's two-row table, as the two verdicts it produces. *)
 let additive_bump_is_behind (base_profile: profile) (added: list (list ch)) (consumer: profile)
   : Lemma (requires Cons? added /\ consumer.name == base_profile.name /\
-                    consumer.major == base_profile.major /\ consumer.minor == base_profile.minor)
+                    consumer.major == base_profile.major /\ consumer.minor == base_profile.minor /\
+                    base_profile.minor < max_counter)
           (ensures Behind? (negotiate consumer (bump base_profile (Additive added)))) = ()
+
+(* ---- THE EDGE OF THE RANGE (Phase 306) ----
+
+   The two lemmas above each carry a hypothesis they did not carry before: the counter the bump
+   advances is below `max_counter`. It is not decoration. AT the limit the bump does not happen,
+   and the verdict a consumer reads is then the opposite of the one the table promises — which is
+   why production has a refusing form at all. Three statements. *)
+
+(* `try_bump` refuses EXACTLY at the edge: an additive step with something added and the minor at
+   the limit, or a breaking step with the major at the limit. Everywhere else it bumps. *)
+let try_bump_refuses_exactly_at_the_edge (base_profile: profile) (ev: evolution)
+  : Lemma (ensures None? (try_bump base_profile ev) ==
+                   ((Additive? ev && Cons? (Additive?.added ev) &&
+                     base_profile.minor = max_counter) ||
+                    (Breaking? ev && base_profile.major = max_counter))) = ()
+
+(* Neither form leaves the range: a profile production can hold bumps to one it can hold. This is
+   the statement the wrapped counter broke — `minor + 1` at the limit was not a counter. *)
+let bump_stays_in_range (base_profile: profile) (ev: evolution)
+  : Lemma (requires in_range base_profile)
+          (ensures in_range (bump base_profile ev) /\
+                   (match try_bump base_profile ev with
+                    | Some p -> in_range p
+                    | None -> True)) = ()
+
+(* WHAT SATURATION COSTS, exhibited: at the limit a breaking change mints no new major, so a
+   consumer on the old one negotiates `Current` with a producer whose vocabulary it cannot read —
+   the verdict `breaking_bump_is_foreign` promises is not delivered. `bump` cannot say so; only
+   `try_bump` can, which is the whole reason it exists. *)
+let saturated_breaking_bump_is_not_foreign (base_profile: profile) (ev: evolution)
+  : Lemma (requires Breaking? ev /\ base_profile.major == max_counter)
+          (ensures bump base_profile ev == base_profile /\
+                   negotiate base_profile (bump base_profile ev) == Current /\
+                   None? (try_bump base_profile ev)) = ()
 
 (* ---- THEOREM 2 (§15.4's "additive" row, as a claim about DECODING): `additive_monotone` ----
 
@@ -566,7 +630,8 @@ let optional_field_addition_bumps_the_minor
   : Lemma (requires opt_class <> required_chars /\ opt_class <> host_only_chars /\
                     consumer.name == base_profile.name /\
                     consumer.major == base_profile.major /\
-                    consumer.minor == base_profile.minor)
+                    consumer.minor == base_profile.minor /\
+                    base_profile.minor < max_counter)
           (ensures (let ev = evolution_of [(classify_field_add opt_class, subj)] in
                     ev == Additive [subj] /\
                     (bump base_profile ev).major == base_profile.major /\
@@ -584,7 +649,8 @@ let required_field_addition_is_behind_not_foreign
   (subj: list ch) (base_profile: profile) (consumer: profile)
   : Lemma (requires consumer.name == base_profile.name /\
                     consumer.major == base_profile.major /\
-                    consumer.minor == base_profile.minor)
+                    consumer.minor == base_profile.minor /\
+                    base_profile.minor < max_counter)
           (ensures (let ev = evolution_of [(classify_field_add required_chars, subj)] in
                     ev == Additive [subj] /\
                     (bump base_profile ev).major == base_profile.major /\
@@ -615,7 +681,8 @@ let classify_field_add_ignoring_optionality (opt_class: list ch) : Tot severity 
    version somebody publishes. *)
 [@@ noextract_to "FSharp"]
 let ignoring_optionality_moves_a_profile_that_must_not (subj: list ch) (base_profile: profile)
-  : Lemma (ensures evolution_of [(classify_field_add host_only_chars, subj)] == Additive [] /\
+  : Lemma (requires base_profile.minor < max_counter)
+          (ensures evolution_of [(classify_field_add host_only_chars, subj)] == Additive [] /\
                    evolution_of [(classify_field_add_ignoring_optionality host_only_chars, subj)]
                      == Additive [subj] /\
                    bump base_profile (evolution_of [(classify_field_add host_only_chars, subj)])

@@ -93,6 +93,12 @@ let __proj__Mkprofile__item__minor : profile  ->  Prims.nat = (fun ( projectee  
      minor
      end))
 
+
+let max_counter : Prims.nat = (Prims.parse_int "2147483647")
+
+
+let in_range : profile  ->  Prims.bool = (fun ( p  :  profile ) -> ((p.major <= max_counter) && (p.minor <= max_counter)))
+
 type compatibility =
 | Current
 | Behind of profile
@@ -151,15 +157,34 @@ if (authored.minor > consumer.minor) then begin
      end)
 
 
-let bump : profile  ->  evolution  ->  profile = (fun ( base_profile  :  profile ) ( ev  :  evolution ) -> (match (ev) with
+let try_bump : profile  ->  evolution  ->  FStar_Pervasives_Native.option<profile> = (fun ( base_profile  :  profile ) ( ev  :  evolution ) -> (match (ev) with
 | Additive ([]) -> begin
-     base_profile
+     FStar_Pervasives_Native.Some (base_profile)
      end
 | Additive (uu___) -> begin
-     {name = base_profile.name; major = base_profile.major; minor = (base_profile.minor + (Prims.parse_int "1"))}
+      
+if (Prims.op_Equals base_profile.minor max_counter) then begin
+     FStar_Pervasives_Native.None
+     end else begin
+     FStar_Pervasives_Native.Some ({name = base_profile.name; major = base_profile.major; minor = (base_profile.minor + (Prims.parse_int "1"))})
+     end
      end
 | Breaking (uu___, uu___1) -> begin
-     {name = base_profile.name; major = (base_profile.major + (Prims.parse_int "1")); minor = (Prims.parse_int "0")}
+      
+if (Prims.op_Equals base_profile.major max_counter) then begin
+     FStar_Pervasives_Native.None
+     end else begin
+     FStar_Pervasives_Native.Some ({name = base_profile.name; major = (base_profile.major + (Prims.parse_int "1")); minor = (Prims.parse_int "0")})
+     end
+     end))
+
+
+let bump : profile  ->  evolution  ->  profile = (fun ( base_profile  :  profile ) ( ev  :  evolution ) -> (match ((try_bump base_profile ev)) with
+| FStar_Pervasives_Native.Some (p) -> begin
+     p
+     end
+| FStar_Pervasives_Native.None -> begin
+     base_profile
      end))
 
 type unknown_kind<'num, 'flt> = {kind : Prims.list<WireCanon.ch>; payload : WireCanon.jval<'num, 'flt>; required_profile : FStar_Pervasives_Native.option<profile>}
