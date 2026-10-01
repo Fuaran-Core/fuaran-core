@@ -41,6 +41,10 @@
        is what keeps every definition and every emitted lemma first-order.
 
    VOCABULARY. Discriminator "kind", flat-kind envelope, declaration key order.
+   The node is ONE object carrying the discriminator, `id`, the kind's members and the
+   envelope's: `node` has one constructor per kind, and there is no kind object.
+   Every object literal is in the encoder's construction order: fixed keys, then members
+   as declared. A shape the literal cannot carry is refused by name, never emitted.
    19 of 21 kinds are modelled; 6 declared types and 11 enums are reached.
    The kinds NOT modelled — named here rather than silently missing, because a reader
    of the theorem needs to know what it does not cover. Two different reasons, and
@@ -436,43 +440,40 @@ let dec_e_navigation_kind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome 
    ====================================================================================== *)
 
 type node (num flt: eqtype) =
-  | C__node__Node : id:string -> k:(vkind num flt) -> node num flt
-
-and vkind (num flt: eqtype) =
-  | C__vkind__Score : children:(list (node num flt)) -> composer:(option (string)) -> title:(option (string)) -> vkind num flt
-  | C__vkind__Part : children:(list (node num flt)) -> name:(string) -> staves:(list (r_staff_definition num flt)) -> vkind num flt
-  | C__vkind__PartGroup : bracket:(e_bracket_kind) -> children:(list (node num flt)) -> name:(option (string)) -> vkind num flt
-  | C__vkind__Measure : children:(list (node num flt)) -> is_anacrusis:(bool) -> number:(num) -> repeat_end:(bool) -> repeat_start:(bool) -> volta:(option (list (num))) -> vkind num flt
-  | C__vkind__Staff : children:(list (node num flt)) -> staff_number:(num) -> vkind num flt
-  | C__vkind__GraceNote : grace:(e_grace_kind) -> pitch:(r_pitch num flt) -> vkind num flt
-  | C__vkind__Dynamic : level:(e_dynamic_level) -> vkind num flt
-  | C__vkind__Fermata : vkind num flt
-  | C__vkind__HairpinStart : hairpin:(e_hairpin_kind) -> vkind num flt
-  | C__vkind__HairpinEnd : vkind num flt
-  | C__vkind__SlurStart : vkind num flt
-  | C__vkind__SlurEnd : vkind num flt
-  | C__vkind__OctaveShiftStart : octave_shift:(e_octave_shift_kind) -> vkind num flt
-  | C__vkind__OctaveShiftEnd : vkind num flt
-  | C__vkind__MultiRest : measure_count:(num) -> vkind num flt
-  | C__vkind__Ornament : ornament:(e_ornament_name) -> slash_count:(option (num)) -> vkind num flt
-  | C__vkind__RehearsalMark : label:(string) -> vkind num flt
-  | C__vkind__NavigationMark : navigation:(e_navigation_kind) -> vkind num flt
-  | C__vkind__Form : arrangement:(list (string)) -> name:(option (string)) -> sections:(list (r_form_section num flt)) -> vkind num flt
+  | C__node__Score : id:string -> title:(option (string)) -> composer:(option (string)) -> children:(list (node num flt)) -> node num flt
+  | C__node__Part : id:string -> name:(string) -> staves:(list (r_staff_definition num flt)) -> children:(list (node num flt)) -> node num flt
+  | C__node__PartGroup : id:string -> name:(option (string)) -> bracket:(e_bracket_kind) -> children:(list (node num flt)) -> node num flt
+  | C__node__Measure : id:string -> number:(num) -> repeat_start:(bool) -> repeat_end:(bool) -> volta:(option (list (num))) -> is_anacrusis:(bool) -> children:(list (node num flt)) -> node num flt
+  | C__node__Staff : id:string -> staff_number:(num) -> children:(list (node num flt)) -> node num flt
+  | C__node__GraceNote : id:string -> pitch:(r_pitch num flt) -> grace:(e_grace_kind) -> node num flt
+  | C__node__Dynamic : id:string -> level:(e_dynamic_level) -> node num flt
+  | C__node__Fermata : id:string -> node num flt
+  | C__node__HairpinStart : id:string -> hairpin:(e_hairpin_kind) -> node num flt
+  | C__node__HairpinEnd : id:string -> node num flt
+  | C__node__SlurStart : id:string -> node num flt
+  | C__node__SlurEnd : id:string -> node num flt
+  | C__node__OctaveShiftStart : id:string -> octave_shift:(e_octave_shift_kind) -> node num flt
+  | C__node__OctaveShiftEnd : id:string -> node num flt
+  | C__node__MultiRest : id:string -> measure_count:(num) -> node num flt
+  | C__node__Ornament : id:string -> ornament:(e_ornament_name) -> slash_count:(option (num)) -> node num flt
+  | C__node__RehearsalMark : id:string -> label:(string) -> node num flt
+  | C__node__NavigationMark : id:string -> navigation:(e_navigation_kind) -> node num flt
+  | C__node__Form : id:string -> name:(option (string)) -> sections:(list (r_form_section num flt)) -> arrangement:(list (string)) -> node num flt
 
 and r_staff_definition (num flt: eqtype) =
-  | C__r_staff_definition__Mk : clef:(e_clef_kind) -> initial_key:(r_key_signature num flt) -> initial_time:(r_time_signature num flt) -> number:(num) -> r_staff_definition num flt
+  | C__r_staff_definition__Mk : number:(num) -> clef:(e_clef_kind) -> initial_key:(r_key_signature num flt) -> initial_time:(r_time_signature num flt) -> r_staff_definition num flt
 
 and r_key_signature (num flt: eqtype) =
-  | C__r_key_signature__Mk : mode:(e_mode) -> tonic:(e_note_letter) -> tonic_accidental:(e_accidental) -> r_key_signature num flt
+  | C__r_key_signature__Mk : tonic:(e_note_letter) -> tonic_accidental:(e_accidental) -> mode:(e_mode) -> r_key_signature num flt
 
 and r_time_signature (num flt: eqtype) =
-  | C__r_time_signature__Mk : denominator:(num) -> numerator:(num) -> r_time_signature num flt
+  | C__r_time_signature__Mk : numerator:(num) -> denominator:(num) -> r_time_signature num flt
 
 and r_pitch (num flt: eqtype) =
-  | C__r_pitch__Mk : accidental:(e_accidental) -> letter:(e_note_letter) -> midi:(num) -> octave:(num) -> r_pitch num flt
+  | C__r_pitch__Mk : letter:(e_note_letter) -> accidental:(e_accidental) -> octave:(num) -> midi:(num) -> r_pitch num flt
 
 and r_form_section (num flt: eqtype) =
-  | C__r_form_section__Mk : children:(list (node num flt)) -> label:(string) -> r_form_section num flt
+  | C__r_form_section__Mk : label:(string) -> children:(list (node num flt)) -> r_form_section num flt
 
 (* ======================================================================================
    3. The encoder — the discriminated envelope, keys in the vocabulary's canonical
@@ -485,118 +486,113 @@ and r_form_section (num flt: eqtype) =
    Opaque to the solver: only the per-suffix lemmas of the proof script look inside. *)
 
 [@@"opaque_to_smt"]
-let sfx_vkind__Score__composer (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
-  match e with | None -> rest | Some v -> ("composer", v) :: rest
-
-[@@"opaque_to_smt"]
-let sfx_vkind__Score__title (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+let sfx_node__Score__title (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
   match e with | None -> rest | Some v -> ("title", v) :: rest
 
 [@@"opaque_to_smt"]
-let sfx_vkind__Measure__is_anacrusis (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
-  match e with | None -> rest | Some v -> ("isAnacrusis", v) :: rest
+let sfx_node__Score__composer (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("composer", v) :: rest
 
 [@@"opaque_to_smt"]
-let sfx_vkind__Measure__repeat_end (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
-  match e with | None -> rest | Some v -> ("repeatEnd", v) :: rest
-
-[@@"opaque_to_smt"]
-let sfx_vkind__Measure__repeat_start (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+let sfx_node__Measure__repeat_start (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
   match e with | None -> rest | Some v -> ("repeatStart", v) :: rest
 
 [@@"opaque_to_smt"]
-let sfx_vkind__Measure__volta (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+let sfx_node__Measure__repeat_end (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("repeatEnd", v) :: rest
+
+[@@"opaque_to_smt"]
+let sfx_node__Measure__volta (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
   match e with | None -> rest | Some v -> ("volta", v) :: rest
+
+[@@"opaque_to_smt"]
+let sfx_node__Measure__is_anacrusis (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Tot (list (string & jval num flt)) =
+  match e with | None -> rest | Some v -> ("isAnacrusis", v) :: rest
 
 (* The member READERS — one per conditional member of a suffixed constructor whose read calls
    nothing in the decoder family, applied by the decoder below rather than inlined into it.
    Opaque to the solver: only the per-reader value lemmas of the proof script look inside. *)
 
 [@@"opaque_to_smt"]
-let rd_vkind__Score__composer (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
-  (match get_prop "composer" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w)))
-
-[@@"opaque_to_smt"]
-let rd_vkind__Score__title (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
+let rd_node__Score__title (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
   (match get_prop "title" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w)))
 
 [@@"opaque_to_smt"]
-let rd_vkind__Measure__is_anacrusis (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
-  (match get_prop "isAnacrusis" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
+let rd_node__Score__composer (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (option (string))) =
+  (match get_prop "composer" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w)))
 
 [@@"opaque_to_smt"]
-let rd_vkind__Measure__repeat_end (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
+let rd_node__Measure__repeat_start (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
+  (match get_prop "repeatStart" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
+
+[@@"opaque_to_smt"]
+let rd_node__Measure__repeat_end (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
   (match get_prop "repeatEnd" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
 
 [@@"opaque_to_smt"]
-let rd_vkind__Measure__repeat_start (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
-  (match get_prop "repeatStart" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
+let rd_node__Measure__is_anacrusis (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (bool)) =
+  (match get_prop "isAnacrusis" el with | Error _ -> Ok false | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w))
 
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__node__Node i k  ->
-    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: [])
-
-and enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) =
-  match x with
-  | C__vkind__Score f0 f1 f2 ->
-    JObj (("kind", JStr "Score") :: (let s1 = sfx_vkind__Score__title #num #flt (enc_opt_str #num #flt f2) ([]) in let s0 = sfx_vkind__Score__composer #num #flt (enc_opt_str #num #flt f1) (s1) in ("children", JArr (enc_items_l_node f0)) :: s0))
-  | C__vkind__Part f0 f1 f2 ->
-    JObj (("kind", JStr "Part") :: ("children", JArr (enc_items_l_node f0)) :: ("name", JStr f1) :: ("staves", JArr (enc_items_l_r_staff_definition f2)) :: [])
-  | C__vkind__PartGroup f0 f1 f2 ->
-    JObj (("kind", JStr "PartGroup") :: ("bracket", enc_e_bracket_kind f0) :: ("children", JArr (enc_items_l_node f1)) :: (match f2 with | None -> [] | Some w -> ("name", JStr w) :: []))
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    JObj (("kind", JStr "Measure") :: (let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in ("children", JArr (enc_items_l_node f0)) :: s0))
-  | C__vkind__Staff f0 f1 ->
-    JObj (("kind", JStr "Staff") :: ("children", JArr (enc_items_l_node f0)) :: ("staffNumber", JInt f1) :: [])
-  | C__vkind__GraceNote f0 f1 ->
-    JObj (("kind", JStr "GraceNote") :: ("grace", enc_e_grace_kind f0) :: ("pitch", enc_r_pitch f1) :: [])
-  | C__vkind__Dynamic f0 ->
-    JObj (("kind", JStr "Dynamic") :: ("level", enc_e_dynamic_level f0) :: [])
-  | C__vkind__Fermata  ->
-    JObj (("kind", JStr "Fermata") :: [])
-  | C__vkind__HairpinStart f0 ->
-    JObj (("kind", JStr "HairpinStart") :: ("hairpin", enc_e_hairpin_kind f0) :: [])
-  | C__vkind__HairpinEnd  ->
-    JObj (("kind", JStr "HairpinEnd") :: [])
-  | C__vkind__SlurStart  ->
-    JObj (("kind", JStr "SlurStart") :: [])
-  | C__vkind__SlurEnd  ->
-    JObj (("kind", JStr "SlurEnd") :: [])
-  | C__vkind__OctaveShiftStart f0 ->
-    JObj (("kind", JStr "OctaveShiftStart") :: ("octaveShift", enc_e_octave_shift_kind f0) :: [])
-  | C__vkind__OctaveShiftEnd  ->
-    JObj (("kind", JStr "OctaveShiftEnd") :: [])
-  | C__vkind__MultiRest f0 ->
-    JObj (("kind", JStr "MultiRest") :: ("measureCount", JInt f0) :: [])
-  | C__vkind__Ornament f0 f1 ->
-    JObj (("kind", JStr "Ornament") :: ("ornament", enc_e_ornament_name f0) :: (match f1 with | None -> [] | Some w -> ("slashCount", JInt w) :: []))
-  | C__vkind__RehearsalMark f0 ->
-    JObj (("kind", JStr "RehearsalMark") :: ("label", JStr f0) :: [])
-  | C__vkind__NavigationMark f0 ->
-    JObj (("kind", JStr "NavigationMark") :: ("navigation", enc_e_navigation_kind f0) :: [])
-  | C__vkind__Form f0 f1 f2 ->
-    JObj (("kind", JStr "Form") :: ("arrangement", JArr (enc_items_l_str f0)) :: (match f1 with | None -> ("sections", JArr (enc_items_l_r_form_section f2)) :: [] | Some w -> ("name", JStr w) :: ("sections", JArr (enc_items_l_r_form_section f2)) :: []))
+  | C__node__Score i f0 f1 f2 ->
+    JObj ((let s1 = sfx_node__Score__composer #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: []) in let s0 = sfx_node__Score__title #num #flt (enc_opt_str #num #flt f0) (s1) in ("kind", JStr "Score") :: ("id", JStr i) :: s0))
+  | C__node__Part i f0 f1 f2 ->
+    JObj (("kind", JStr "Part") :: ("id", JStr i) :: ("name", JStr f0) :: ("staves", JArr (enc_items_l_r_staff_definition f1)) :: ("children", JArr (enc_items_l_node f2)) :: [])
+  | C__node__PartGroup i f0 f1 f2 ->
+    JObj (("kind", JStr "PartGroup") :: ("id", JStr i) :: (match f0 with | None -> ("bracket", enc_e_bracket_kind f1) :: ("children", JArr (enc_items_l_node f2)) :: [] | Some w -> ("name", JStr w) :: ("bracket", enc_e_bracket_kind f1) :: ("children", JArr (enc_items_l_node f2)) :: []))
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    JObj ((let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in ("kind", JStr "Measure") :: ("id", JStr i) :: ("number", JInt f0) :: s0))
+  | C__node__Staff i f0 f1 ->
+    JObj (("kind", JStr "Staff") :: ("id", JStr i) :: ("staffNumber", JInt f0) :: ("children", JArr (enc_items_l_node f1)) :: [])
+  | C__node__GraceNote i f0 f1 ->
+    JObj (("kind", JStr "GraceNote") :: ("id", JStr i) :: ("pitch", enc_r_pitch f0) :: ("grace", enc_e_grace_kind f1) :: [])
+  | C__node__Dynamic i f0 ->
+    JObj (("kind", JStr "Dynamic") :: ("id", JStr i) :: ("level", enc_e_dynamic_level f0) :: [])
+  | C__node__Fermata i  ->
+    JObj (("kind", JStr "Fermata") :: ("id", JStr i) :: [])
+  | C__node__HairpinStart i f0 ->
+    JObj (("kind", JStr "HairpinStart") :: ("id", JStr i) :: ("hairpin", enc_e_hairpin_kind f0) :: [])
+  | C__node__HairpinEnd i  ->
+    JObj (("kind", JStr "HairpinEnd") :: ("id", JStr i) :: [])
+  | C__node__SlurStart i  ->
+    JObj (("kind", JStr "SlurStart") :: ("id", JStr i) :: [])
+  | C__node__SlurEnd i  ->
+    JObj (("kind", JStr "SlurEnd") :: ("id", JStr i) :: [])
+  | C__node__OctaveShiftStart i f0 ->
+    JObj (("kind", JStr "OctaveShiftStart") :: ("id", JStr i) :: ("octaveShift", enc_e_octave_shift_kind f0) :: [])
+  | C__node__OctaveShiftEnd i  ->
+    JObj (("kind", JStr "OctaveShiftEnd") :: ("id", JStr i) :: [])
+  | C__node__MultiRest i f0 ->
+    JObj (("kind", JStr "MultiRest") :: ("id", JStr i) :: ("measureCount", JInt f0) :: [])
+  | C__node__Ornament i f0 f1 ->
+    JObj (("kind", JStr "Ornament") :: ("id", JStr i) :: ("ornament", enc_e_ornament_name f0) :: (match f1 with | None -> [] | Some w -> ("slashCount", JInt w) :: []))
+  | C__node__RehearsalMark i f0 ->
+    JObj (("kind", JStr "RehearsalMark") :: ("id", JStr i) :: ("label", JStr f0) :: [])
+  | C__node__NavigationMark i f0 ->
+    JObj (("kind", JStr "NavigationMark") :: ("id", JStr i) :: ("navigation", enc_e_navigation_kind f0) :: [])
+  | C__node__Form i f0 f1 f2 ->
+    JObj (("kind", JStr "Form") :: ("id", JStr i) :: (match f0 with | None -> ("sections", JArr (enc_items_l_r_form_section f1)) :: ("arrangement", JArr (enc_items_l_str f2)) :: [] | Some w -> ("name", JStr w) :: ("sections", JArr (enc_items_l_r_form_section f1)) :: ("arrangement", JArr (enc_items_l_str f2)) :: []))
 
 and enc_r_staff_definition (#num #flt: eqtype) (x: r_staff_definition num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__r_staff_definition__Mk f0 f1 f2 f3 -> JObj (("clef", enc_e_clef_kind f0) :: ("initialKey", enc_r_key_signature f1) :: ("initialTime", enc_r_time_signature f2) :: ("number", JInt f3) :: [])
+  | C__r_staff_definition__Mk f0 f1 f2 f3 -> JObj (("number", JInt f0) :: ("clef", enc_e_clef_kind f1) :: ("initialKey", enc_r_key_signature f2) :: ("initialTime", enc_r_time_signature f3) :: [])
 
 and enc_r_key_signature (#num #flt: eqtype) (x: r_key_signature num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__r_key_signature__Mk f0 f1 f2 -> JObj (("mode", enc_e_mode f0) :: ("tonic", enc_e_note_letter f1) :: ("tonicAccidental", enc_e_accidental f2) :: [])
+  | C__r_key_signature__Mk f0 f1 f2 -> JObj (("tonic", enc_e_note_letter f0) :: ("tonicAccidental", enc_e_accidental f1) :: ("mode", enc_e_mode f2) :: [])
 
 and enc_r_time_signature (#num #flt: eqtype) (x: r_time_signature num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__r_time_signature__Mk f0 f1 -> JObj (("denominator", JInt f0) :: ("numerator", JInt f1) :: [])
+  | C__r_time_signature__Mk f0 f1 -> JObj (("numerator", JInt f0) :: ("denominator", JInt f1) :: [])
 
 and enc_r_pitch (#num #flt: eqtype) (x: r_pitch num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__r_pitch__Mk f0 f1 f2 f3 -> JObj (("accidental", enc_e_accidental f0) :: ("letter", enc_e_note_letter f1) :: ("midi", JInt f2) :: ("octave", JInt f3) :: [])
+  | C__r_pitch__Mk f0 f1 f2 f3 -> JObj (("letter", enc_e_note_letter f0) :: ("accidental", enc_e_accidental f1) :: ("octave", JInt f2) :: ("midi", JInt f3) :: [])
 
 and enc_r_form_section (#num #flt: eqtype) (x: r_form_section num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__r_form_section__Mk f0 f1 -> JObj (("children", JArr (enc_items_l_node f0)) :: ("label", JStr f1) :: [])
+  | C__r_form_section__Mk f0 f1 -> JObj (("label", JStr f0) :: ("children", JArr (enc_items_l_node f1)) :: [])
 
 and enc_items_l_node (#num #flt: eqtype) (xs: list (node num flt)) : Tot (list (jval num flt)) (decreases xs) =
   match xs with
@@ -641,130 +637,126 @@ and enc_opt_l_int (#num #flt: eqtype) (o: option (list (num))) : Tot (option (jv
 
 let rec dec_node (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (node num flt)) (decreases %[(jsize el <: nat); 0]) =
   let oid : outcome string = str_field "id" el in
-  let ok : outcome (vkind num flt) = (match get_prop "kind" el with | Error e -> Error e | Ok v -> dec_vkind v) in
-  (match oid with | Error e -> Error e | Ok i -> (match ok with | Error e -> Error e | Ok k -> Ok (C__node__Node i k )))
-
-and dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num flt)) (decreases %[(jsize el <: nat); 0]) =
   match str_field "kind" el with
   | Error e -> Error e
   | Ok tag ->
     if tag = "Score" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (option (string)) = rd_vkind__Score__composer #num #flt el in
-      let o2 : outcome (option (string)) = rd_vkind__Score__title #num #flt el in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__vkind__Score f0 f1 f2))))
+      let o0 : outcome (option (string)) = rd_node__Score__title #num #flt el in
+      let o1 : outcome (option (string)) = rd_node__Score__composer #num #flt el in
+      let o2 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__node__Score i f0 f1 f2)))))
     else
     if tag = "Part" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (string) = (match get_prop "name" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o2 : outcome (list (r_staff_definition num flt)) = (match get_prop "staves" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_r_staff_definition [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__vkind__Part f0 f1 f2))))
+      let o0 : outcome (string) = (match get_prop "name" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (list (r_staff_definition num flt)) = (match get_prop "staves" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_r_staff_definition [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      let o2 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__node__Part i f0 f1 f2)))))
     else
     if tag = "PartGroup" then
-      let o0 : outcome (e_bracket_kind) = (match get_prop "bracket" el with | Error e -> Error e | Ok v -> (match dec_e_bracket_kind v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o2 : outcome (option (string)) = (match get_prop "name" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__vkind__PartGroup f0 f1 f2))))
+      let o0 : outcome (option (string)) = (match get_prop "name" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
+      let o1 : outcome (e_bracket_kind) = (match get_prop "bracket" el with | Error e -> Error e | Ok v -> (match dec_e_bracket_kind v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o2 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__node__PartGroup i f0 f1 f2)))))
     else
     if tag = "Measure" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (bool) = rd_vkind__Measure__is_anacrusis #num #flt el in
-      let o2 : outcome (num) = (match get_prop "number" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o3 : outcome (bool) = rd_vkind__Measure__repeat_end #num #flt el in
-      let o4 : outcome (bool) = rd_vkind__Measure__repeat_start #num #flt el in
-      let o5 : outcome (option (list (num))) = (match get_prop "volta" el with | Error _ -> Ok None | Ok v -> (match v with | JArr ys -> (match dec_items_l_int [] ys with | Error e -> Error e | Ok w -> Ok (Some w)) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> (match o4 with | Error e -> Error e | Ok f4 -> (match o5 with | Error e -> Error e | Ok f5 -> Ok (C__vkind__Measure f0 f1 f2 f3 f4 f5)))))))
+      let o0 : outcome (num) = (match get_prop "number" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (bool) = rd_node__Measure__repeat_start #num #flt el in
+      let o2 : outcome (bool) = rd_node__Measure__repeat_end #num #flt el in
+      let o3 : outcome (option (list (num))) = (match get_prop "volta" el with | Error _ -> Ok None | Ok v -> (match v with | JArr ys -> (match dec_items_l_int [] ys with | Error e -> Error e | Ok w -> Ok (Some w)) | other -> Error ("expected array, got " ^ kind_name other))) in
+      let o4 : outcome (bool) = rd_node__Measure__is_anacrusis #num #flt el in
+      let o5 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> (match o4 with | Error e -> Error e | Ok f4 -> (match o5 with | Error e -> Error e | Ok f5 -> Ok (C__node__Measure i f0 f1 f2 f3 f4 f5))))))))
     else
     if tag = "Staff" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (num) = (match get_prop "staffNumber" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__Staff f0 f1)))
+      let o0 : outcome (num) = (match get_prop "staffNumber" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__Staff i f0 f1))))
     else
     if tag = "GraceNote" then
-      let o0 : outcome (e_grace_kind) = (match get_prop "grace" el with | Error e -> Error e | Ok v -> (match dec_e_grace_kind v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o1 : outcome (r_pitch num flt) = (match get_prop "pitch" el with | Error e -> Error e | Ok v -> (match dec_r_pitch v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__GraceNote f0 f1)))
+      let o0 : outcome (r_pitch num flt) = (match get_prop "pitch" el with | Error e -> Error e | Ok v -> (match dec_r_pitch v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (e_grace_kind) = (match get_prop "grace" el with | Error e -> Error e | Ok v -> (match dec_e_grace_kind v with | Error e -> Error e | Ok w -> Ok w)) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__GraceNote i f0 f1))))
     else
     if tag = "Dynamic" then
       let o0 : outcome (e_dynamic_level) = (match get_prop "level" el with | Error e -> Error e | Ok v -> (match dec_e_dynamic_level v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__Dynamic f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__Dynamic i f0)))
     else
     if tag = "Fermata" then
-      Ok C__vkind__Fermata
+      (match oid with | Error e -> Error e | Ok i -> Ok (C__node__Fermata i))
     else
     if tag = "HairpinStart" then
       let o0 : outcome (e_hairpin_kind) = (match get_prop "hairpin" el with | Error e -> Error e | Ok v -> (match dec_e_hairpin_kind v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__HairpinStart f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__HairpinStart i f0)))
     else
     if tag = "HairpinEnd" then
-      Ok C__vkind__HairpinEnd
+      (match oid with | Error e -> Error e | Ok i -> Ok (C__node__HairpinEnd i))
     else
     if tag = "SlurStart" then
-      Ok C__vkind__SlurStart
+      (match oid with | Error e -> Error e | Ok i -> Ok (C__node__SlurStart i))
     else
     if tag = "SlurEnd" then
-      Ok C__vkind__SlurEnd
+      (match oid with | Error e -> Error e | Ok i -> Ok (C__node__SlurEnd i))
     else
     if tag = "OctaveShiftStart" then
       let o0 : outcome (e_octave_shift_kind) = (match get_prop "octaveShift" el with | Error e -> Error e | Ok v -> (match dec_e_octave_shift_kind v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__OctaveShiftStart f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__OctaveShiftStart i f0)))
     else
     if tag = "OctaveShiftEnd" then
-      Ok C__vkind__OctaveShiftEnd
+      (match oid with | Error e -> Error e | Ok i -> Ok (C__node__OctaveShiftEnd i))
     else
     if tag = "MultiRest" then
       let o0 : outcome (num) = (match get_prop "measureCount" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__MultiRest f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__MultiRest i f0)))
     else
     if tag = "Ornament" then
       let o0 : outcome (e_ornament_name) = (match get_prop "ornament" el with | Error e -> Error e | Ok v -> (match dec_e_ornament_name v with | Error e -> Error e | Ok w -> Ok w)) in
       let o1 : outcome (option (num)) = (match get_prop "slashCount" el with | Error _ -> Ok None | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok (Some w))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__Ornament f0 f1)))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__Ornament i f0 f1))))
     else
     if tag = "RehearsalMark" then
       let o0 : outcome (string) = (match get_prop "label" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__RehearsalMark f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__RehearsalMark i f0)))
     else
     if tag = "NavigationMark" then
       let o0 : outcome (e_navigation_kind) = (match get_prop "navigation" el with | Error e -> Error e | Ok v -> (match dec_e_navigation_kind v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__NavigationMark f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__NavigationMark i f0)))
     else
     if tag = "Form" then
-      let o0 : outcome (list (string)) = (match get_prop "arrangement" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_str [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (option (string)) = (match get_prop "name" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
-      let o2 : outcome (list (r_form_section num flt)) = (match get_prop "sections" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_r_form_section [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__vkind__Form f0 f1 f2))))
+      let o0 : outcome (option (string)) = (match get_prop "name" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
+      let o1 : outcome (list (r_form_section num flt)) = (match get_prop "sections" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_r_form_section [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      let o2 : outcome (list (string)) = (match get_prop "arrangement" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_str [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__node__Form i f0 f1 f2)))))
     else
     Error ("unknown kind: " ^ tag)
 
 and dec_r_staff_definition (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (r_staff_definition num flt)) (decreases %[(jsize el <: nat); 0]) =
-  let o0 : outcome (e_clef_kind) = (match get_prop "clef" el with | Error e -> Error e | Ok v -> (match dec_e_clef_kind v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o1 : outcome (r_key_signature num flt) = (match get_prop "initialKey" el with | Error e -> Error e | Ok v -> (match dec_r_key_signature v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o2 : outcome (r_time_signature num flt) = (match get_prop "initialTime" el with | Error e -> Error e | Ok v -> (match dec_r_time_signature v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o3 : outcome (num) = (match get_prop "number" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o0 : outcome (num) = (match get_prop "number" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o1 : outcome (e_clef_kind) = (match get_prop "clef" el with | Error e -> Error e | Ok v -> (match dec_e_clef_kind v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o2 : outcome (r_key_signature num flt) = (match get_prop "initialKey" el with | Error e -> Error e | Ok v -> (match dec_r_key_signature v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o3 : outcome (r_time_signature num flt) = (match get_prop "initialTime" el with | Error e -> Error e | Ok v -> (match dec_r_time_signature v with | Error e -> Error e | Ok w -> Ok w)) in
   (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> Ok (C__r_staff_definition__Mk f0 f1 f2 f3)))))
 
 and dec_r_key_signature (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (r_key_signature num flt)) (decreases %[(jsize el <: nat); 0]) =
-  let o0 : outcome (e_mode) = (match get_prop "mode" el with | Error e -> Error e | Ok v -> (match dec_e_mode v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o1 : outcome (e_note_letter) = (match get_prop "tonic" el with | Error e -> Error e | Ok v -> (match dec_e_note_letter v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o2 : outcome (e_accidental) = (match get_prop "tonicAccidental" el with | Error e -> Error e | Ok v -> (match dec_e_accidental v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o0 : outcome (e_note_letter) = (match get_prop "tonic" el with | Error e -> Error e | Ok v -> (match dec_e_note_letter v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o1 : outcome (e_accidental) = (match get_prop "tonicAccidental" el with | Error e -> Error e | Ok v -> (match dec_e_accidental v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o2 : outcome (e_mode) = (match get_prop "mode" el with | Error e -> Error e | Ok v -> (match dec_e_mode v with | Error e -> Error e | Ok w -> Ok w)) in
   (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__r_key_signature__Mk f0 f1 f2))))
 
 and dec_r_time_signature (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (r_time_signature num flt)) (decreases %[(jsize el <: nat); 0]) =
-  let o0 : outcome (num) = (match get_prop "denominator" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o1 : outcome (num) = (match get_prop "numerator" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o0 : outcome (num) = (match get_prop "numerator" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o1 : outcome (num) = (match get_prop "denominator" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
   (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__r_time_signature__Mk f0 f1)))
 
 and dec_r_pitch (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (r_pitch num flt)) (decreases %[(jsize el <: nat); 0]) =
-  let o0 : outcome (e_accidental) = (match get_prop "accidental" el with | Error e -> Error e | Ok v -> (match dec_e_accidental v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o1 : outcome (e_note_letter) = (match get_prop "letter" el with | Error e -> Error e | Ok v -> (match dec_e_note_letter v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o2 : outcome (num) = (match get_prop "midi" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
-  let o3 : outcome (num) = (match get_prop "octave" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o0 : outcome (e_note_letter) = (match get_prop "letter" el with | Error e -> Error e | Ok v -> (match dec_e_note_letter v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o1 : outcome (e_accidental) = (match get_prop "accidental" el with | Error e -> Error e | Ok v -> (match dec_e_accidental v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o2 : outcome (num) = (match get_prop "octave" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o3 : outcome (num) = (match get_prop "midi" el with | Error e -> Error e | Ok v -> (match as_int v with | Error e -> Error e | Ok w -> Ok w)) in
   (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> Ok (C__r_pitch__Mk f0 f1 f2 f3)))))
 
 and dec_r_form_section (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (r_form_section num flt)) (decreases %[(jsize el <: nat); 0]) =
-  let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-  let o1 : outcome (string) = (match get_prop "label" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o0 : outcome (string) = (match get_prop "label" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
+  let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
   (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__r_form_section__Mk f0 f1)))
 
 and dec_items_l_node (#num #flt: eqtype) (acc: list (node num flt)) (ys: list (jval num flt)) : Tot (outcome (list (node num flt))) (decreases %[(jsizes ys <: nat); 1]) =

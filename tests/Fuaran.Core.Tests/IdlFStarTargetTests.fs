@@ -288,15 +288,22 @@ let private conditionalCount (fs: IdlField list) =
     |> List.length
 
 /// How many LOOKUP lemmas one constructor's field list should produce under Phase 182's shape:
-/// nothing at all below the split threshold; otherwise one per member from the FIRST conditional
+/// nothing at all below the split threshold; otherwise one per entry from the FIRST conditional
 /// member in key order onwards, doubled for a conditional one. That is `2k + r'`, where `r'` is
-/// the always-emitted members that sort after the first conditional — the members BEFORE it are
+/// the always-emitted entries that sort after the first conditional — the entries BEFORE it are
 /// reached by `find_field` without meeting a branch and need no lemma.
+///
+/// `placed` are the FIXED keys the declared shape puts in the constructor's object beside the
+/// members (Phase 293): the discriminator on a kind or union case, `id` and `kind` on the nested
+/// node. Under `Sorted` order they are merged among the members, and one that sorts after the
+/// first conditional member is an always-emitted entry there — read by the decoder, so looked
+/// up by a lemma exactly as a required member in that position is. Under `Declared` order they
+/// lead the object and never need one. The vocabularies this helper is applied to are `Sorted`.
 ///
 /// Note the arithmetic against the phase's own `2k + 1`: that figure counted the conditional
 /// members and the constructor's own round-trip lemma, and passed over the always-emitted members
 /// whose key the conditionals before them move. Both numbers are pinned below.
-let private expectedLookupCount (fs: IdlField list) : int =
+let private expectedLookupCount (placed: string list) (fs: IdlField list) : int =
     let conditional (f: IdlField) =
         match f.Opt with
         | Optional
@@ -304,22 +311,23 @@ let private expectedLookupCount (fs: IdlField list) : int =
         | Required
         | HostOnly -> false
 
+    // An entry is `(key, conditional)`; a fixed key is never conditional.
     let sorted =
-        fs
-        |> List.filter (fun f ->
-            match f.Opt with
-            | HostOnly -> false
-            | _ -> true)
-        |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
+        (placed |> List.map (fun k -> k, false))
+        @ (fs
+           |> List.filter (fun f ->
+               match f.Opt with
+               | HostOnly -> false
+               | _ -> true)
+           |> List.map (fun f -> f.Name, conditional f))
+        |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
 
     if conditionalCount fs < FStarTarget.presenceSplitAt then
         0
     else
-        let start = sorted |> List.findIndex conditional
+        let start = sorted |> List.findIndex snd
 
-        sorted
-        |> List.skip start
-        |> List.sumBy (fun f -> if conditional f then 2 else 1)
+        sorted |> List.skip start |> List.sumBy (fun (_, c) -> if c then 2 else 1)
 
 /// A vocabulary at the SCALE Phase 150 measured the one-lemma shape failing at — the UI
 /// vocabulary's node envelope carried five optional members and its widest kind eleven members
@@ -748,6 +756,216 @@ let idlFStarTargetTests =
                   NodeEnvelopeShape.NestedKind
                   "the reference vocabulary is on the nested envelope, so the set reaches both"
 
+          // ---- the declared shape (Phase 293) -------------------------------
+
+          testCase
+              "the header's declared shape and the emitted encoder AGREE for every certification vocabulary, and the encoder's key order is the interpreter's"
+          <| fun _ ->
+              // Before Phase 293 the committed `DocVocabulary.fst` announced "flat-kind envelope,
+              // declaration key order" and emitted the nested, sorted form — a theorem about a
+              // document nobody sends. The oracle here is the INTERPRETER (`Encode.encode`, the
+              // one every host is certified against), never the model: for every modelled kind
+              // whose encoder arm is a plain literal, the keys the arm writes are the keys the
+              // interpreter writes for a sampled node of that kind, in the interpreter's order.
+              for g in generated do
+                  let model =
+                      match FStarTarget.vocabularyModuleFrom g.Provenance g.Module g.Idl (selection g.Idl) with
+                      | Ok text -> lf text
+                      | Error e -> failtestf "%s refused: %s" g.Module (CodegenError.describe e)
+
+                  let flat = g.Idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
+                  let declared = g.Idl.Wire.KeyOrder = KeyOrder.Declared
+
+                  let header =
+                      sprintf
+                          "VOCABULARY. Discriminator %s, %s envelope, %s key order."
+                          ("\"" + g.Idl.Wire.Discriminator + "\"")
+                          (if flat then "flat-kind" else "nested-kind")
+                          (if declared then "declaration" else "ordinal-sorted")
+
+                  Expect.stringContains model header (sprintf "%s's header states its declared shape" g.Module)
+
+                  // The envelope: what the node TYPE and its encoder carry.
+                  if flat then
+                      Expect.isFalse
+                          (model.Contains "and vkind (")
+                          (sprintf "%s: a flat kind has no kind object, so no `vkind` type" g.Module)
+
+                      Expect.isFalse (model.Contains "enc_vkind") (sprintf "%s: and no kind-object encoder" g.Module)
+
+                      for tag in selection g.Idl do
+                          Expect.isTrue
+                              (Regex.IsMatch(model, sprintf @"(?m)^  \| C__node__%s : id:string -> " tag))
+                              (sprintf "%s: the node has a constructor per kind, `%s` carrying `id`" g.Module tag)
+                  else
+                      Expect.stringContains
+                          model
+                          "and vkind (num flt: eqtype) ="
+                          (sprintf "%s: the nested kind is its own type" g.Module)
+
+                      Expect.isTrue
+                          (model.Contains "(\"kind\", enc_vkind k)")
+                          (sprintf "%s: the node object carries the kind object under `kind`" g.Module)
+
+                  // The key order, against the interpreter. A plain arm (no suffix chain, no
+                  // conditional member) is one literal whose keys read in wire order; its keys
+                  // must be exactly the interpreter's, and in the interpreter's order.
+                  let plainArms =
+                      [ for m in
+                            Regex.Matches(
+                                model,
+                                @"(?m)^  \| (C__(node|vkind)__([A-Za-z0-9]+)) [^\n]*->\n    JObj \((.*)\)$"
+                            ) -> m.Groups[2].Value, m.Groups[3].Value, m.Groups[4].Value ]
+                      |> List.filter (fun (_, _, body) ->
+                          not (body.Contains "sfx_" || body.Contains "match " || body.Contains "if "))
+
+                  Expect.isNonEmpty plainArms (sprintf "%s has at least one plain encoder arm to hold" g.Module)
+
+                  for owner, tag, body in plainArms do
+                      let modelKeys =
+                          [ for m in Regex.Matches(body, @"\(""([^""]+)"", ") -> m.Groups[1].Value ]
+
+                      // A nested node's one arm is `Node`; its sample is any modelled kind.
+                      let sampleTag =
+                          if owner = "node" && not flat then
+                              List.head (selection g.Idl)
+                          else
+                              tag
+
+                      let sampled =
+                          match Sample.sampleNodes g.Idl [ sampleTag ] 293 1 with
+                          | [ v ] -> v
+                          | other -> failtestf "%s: one sample of %s, got %d" g.Module tag (List.length other)
+
+                      let wire =
+                          match Encode.encode g.Idl sampled with
+                          | Ok text -> text
+                          | Error e -> failtestf "%s: the interpreter refused a sampled %s: %s" g.Module tag e
+
+                      let wireKeys =
+                          match Json.parse wire with
+                          | Ok(JObj fs) -> fs |> List.map fst
+                          | other ->
+                              failtestf "%s: the interpreter wrote something other than an object: %A" g.Module other
+
+                      // A nested kind's arm is the KIND object: compare it with the object under
+                      // `kind`; the node arm is compared with the node object itself.
+                      let oracleKeys =
+                          if owner = "node" then
+                              wireKeys
+                          else
+                              match Json.parse wire with
+                              | Ok(JObj fs) ->
+                                  match List.tryFind (fun (k, _) -> k = "kind") fs with
+                                  | Some(_, JObj ks) -> ks |> List.map fst
+                                  | _ -> failtestf "%s: no kind object under `kind`" g.Module
+                              | _ -> []
+
+                      // The sampler may omit an optional member the arm would have written had it
+                      // been present; a plain arm has none, so the two lists are equal outright.
+                      Expect.equal
+                          modelKeys
+                          oracleKeys
+                          (sprintf
+                              "%s: the model's `%s` encoder writes the interpreter's keys in the interpreter's order (%s)"
+                              g.Module
+                              tag
+                              (if declared then "declaration order" else "ordinal-sorted"))
+
+          testCase
+              "a key the declared shape already places is a NAMED refusal on the member that collides with it, never a literal with two entries"
+          <| fun _ ->
+              // The model's objects are literals read back by `find_field`, which returns the
+              // FIRST entry under a key — so a member whose key the shape already carries would
+              // be a document the round trip cannot hold. `Declare.wireShapeErrors` refuses the
+              // same collisions at declaration; the target refuses them again because it is
+              // handed an `Idl` value, not a checked declaration.
+              let onlyKind (fieldName: string) (shape: WireShape) (nodeFields: IdlField list) =
+                  let t = tinyIdl TStr Required
+                  let k = t.Kinds.Head
+
+                  { t with
+                      Kinds =
+                          [ { k with
+                                Fields = [ { k.Fields.Head with Name = fieldName } ] } ]
+                      NodeFields = nodeFields
+                      Wire = shape }
+
+              let refusal (idl: Idl) =
+                  match FStarTarget.vocabularyModule "M" idl [ "Only" ] with
+                  | Ok _ -> None
+                  | Error(CodegenError.UnmodellableInFStar(construct, where)) -> Some(construct, where)
+                  | Error e -> failtestf "refused through a different case: %s" (CodegenError.describe e)
+
+              let flat =
+                  { WireShape.Default with
+                      NodeEnvelope = NodeEnvelopeShape.FlatKind }
+
+              let envelope (name: string) =
+                  [ { Name = name
+                      Type = TStr
+                      Opt = Required
+                      Annotations = Annotations.Empty } ]
+
+              Expect.equal
+                  (refusal (onlyKind "id" flat []))
+                  (Some("a member 'id' whose key the node object already carries", "kind Only"))
+                  "flat: a kind member named `id` collides with the node's id"
+
+              Expect.equal
+                  (refusal (onlyKind flat.Discriminator flat []))
+                  (Some(
+                      sprintf "a member '%s' whose key the node object already carries" flat.Discriminator,
+                      "kind Only"
+                  ))
+                  "flat: a kind member named the discriminator collides with the tag"
+
+              Expect.equal
+                  (refusal (onlyKind "shared" flat (envelope "shared")))
+                  (Some("a member 'shared' whose key the node envelope already carries", "kind Only"))
+                  "flat: a kind member sharing an envelope member's key collides in the one object"
+
+              Expect.equal
+                  (refusal (onlyKind "member" WireShape.Default (envelope "kind")))
+                  (Some("a member 'kind' whose key the node object already carries", "node envelope"))
+                  "nested: an envelope member named `kind` collides with the kind object's key"
+
+              Expect.equal
+                  (refusal (onlyKind WireShape.Default.Discriminator WireShape.Default []))
+                  (Some(
+                      sprintf "a member '%s' whose key the kind object already carries" WireShape.Default.Discriminator,
+                      "kind Only"
+                  ))
+                  "nested: a kind member named the discriminator collides with the tag in the kind object"
+
+              Expect.isNone
+                  (refusal (onlyKind "id" WireShape.Default []))
+                  "nested: a kind member named `id` is NOT a collision — the node's id and the kind object are different objects"
+
+              Expect.isNone
+                  (refusal (onlyKind "member" flat (envelope "other")))
+                  "and a flat vocabulary with distinct keys is modelled"
+
+          testCase
+              "the refusal for a colliding key is the kind's own verdict in the partition, so the committed header would name it"
+          <| fun _ ->
+              let t = tinyIdl TStr Required
+              let k = t.Kinds.Head
+
+              let idl =
+                  { t with
+                      Kinds =
+                          [ { k with
+                                Fields = [ { k.Fields.Head with Name = "id" } ] } ]
+                      Wire =
+                          { WireShape.Default with
+                              NodeEnvelope = NodeEnvelopeShape.FlatKind } }
+
+              Expect.equal
+                  (FStarTarget.partition idl |> List.map (fun v -> v.Tag, v.Refusal.IsSome))
+                  [ "Only", true ]
+                  "the colliding kind is refused by name rather than emitted"
+
           // ---- the generation diff ------------------------------------------
 
           testCase
@@ -885,17 +1103,21 @@ let idlFStarTargetTests =
               // coverage change it is: the node envelope (hidden, label) and `Embed`
               // (contentHash, props) each carry exactly two conditional members, and `Embed`
               // carries one always-emitted member (`moduleId`) that sorts after `contentHash`.
+              // Phase 293: the vocabulary is `Sorted`, so the node's fixed keys `id` and `kind`
+              // sort AFTER `hidden` and are two more always-emitted entries the decoder reads
+              // past that member's test — two lookups the model of a document nobody sends did
+              // not need.
               Expect.equal
                   (lookupLemmas proofs |> List.length)
-                  9
-                  "the reference vocabulary reaches the split twice: the envelope's two conditional members (four lookups) and `Embed`'s two plus the always-emitted `moduleId` (five)"
+                  11
+                  "the reference vocabulary reaches the split twice: the envelope's two conditional members (four lookups) plus `id` and `kind` sorted after `hidden` (two), and `Embed`'s two plus the always-emitted `moduleId` (five)"
 
               Expect.equal
                   (lookupLemmas proofs |> List.length)
-                  (expectedLookupCount ReferenceIdl.refIdl.NodeFields
+                  (expectedLookupCount [ "id"; "kind" ] ReferenceIdl.refIdl.NodeFields
                    + ([ for k in ReferenceIdl.refIdl.Kinds do
                             if List.contains k.Tag (selection ReferenceIdl.refIdl) then
-                                expectedLookupCount k.Fields ]
+                                expectedLookupCount [ ReferenceIdl.refIdl.Wire.Discriminator ] k.Fields ]
                       |> List.sum))
                   "and the figure is `2k + r'` per split constructor, computed the same way the emitter does"
 
@@ -941,11 +1163,16 @@ let idlFStarTargetTests =
               let under (prefix: string) =
                   lookupLemmas proofs |> List.filter (fun n -> n.StartsWith prefix) |> List.length
 
-              Expect.equal (under "lk_node__Node__") 10 "the envelope's five conditional members, two lookups each"
+              Expect.equal
+                  (under "lk_node__Node__")
+                  (expectedLookupCount [ "id"; "kind" ] uiScaleIdl.NodeFields)
+                  "the envelope's five conditional members, two lookups each, and the node's fixed keys that sort after the first of them (Phase 293)"
 
               Expect.equal
                   (under "lk_vkind__Wide__")
-                  (expectedLookupCount (uiScaleIdl.Kinds |> List.find (fun k -> k.Tag = "Wide")).Fields)
+                  (expectedLookupCount
+                      [ uiScaleIdl.Wire.Discriminator ]
+                      (uiScaleIdl.Kinds |> List.find (fun k -> k.Tag = "Wide")).Fields)
                   "the wide kind's five conditional members and the always-emitted members that sort after the first of them"
 
               // THE FIGURE THE PHASE WAS CUT FOR. Phase 168's shape emitted 2^16 = 65,536 lemmas

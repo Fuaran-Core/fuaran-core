@@ -317,17 +317,15 @@ module FStarTarget =
         | SNode -> true
         | _ -> false
 
-    /// Does this slot reach a declared type? A walker over such a slot joins the mutual
-    /// group; one that does not is emitted standalone, which keeps the group as small as
-    /// the vocabulary actually requires.
-    let rec private reachesDeclared (s: Slot) =
-        match s with
-        | SRecord _
-        | SUnion _
-        | SNode -> true
-        | SList inner
-        | SMap inner -> reachesDeclared inner
-        | _ -> false
+    /// Phase 293 — the declared key order, applied ONCE here to every member list the closure
+    /// carries, so that every site that emits a constructor (its type, its encoder arm, its
+    /// decoder reads, its binders and its lemmas) walks the same ordered list. `Sorted` is the
+    /// Ordinal order `Canon.render` applies; `Declared` is the authored order, which is what
+    /// `Canon.renderOrdered` leaves alone.
+    let private orderMembers (order: KeyOrder) (ms: Member list) =
+        match order with
+        | KeyOrder.Sorted -> ms |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
+        | KeyOrder.Declared -> ms
 
     let private findRecord (idl: Idl) n =
         idl.Records |> List.tryFind (fun r -> r.Name = n)
@@ -384,8 +382,8 @@ module FStarTarget =
         | _ -> unmodellable (sprintf "a declared default the opaque numeric model cannot spell: %A" v) where
 
     /// A constructor literal for a declared default, with each member taken from the authored
-    /// field list under its own presence rule — the constructor's argument order is the SORTED
-    /// member order the type declaration uses, so this cannot drift from the declaration.
+    /// field list under its own presence rule — the constructor's argument order is the declared
+    /// KEY ORDER the type declaration uses ([[orderMembers]]), so this cannot drift from it.
     and private ctorLit
         (idl: Idl)
         (where: string)
@@ -393,8 +391,7 @@ module FStarTarget =
         (ms: Member list)
         (authored: (string * IdlValue) list)
         : Result<string, CodegenError> =
-        let sorted =
-            ms |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
+        let sorted = orderMembers idl.Wire.KeyOrder ms
 
         let rec go acc rest =
             match rest with
@@ -461,7 +458,8 @@ module FStarTarget =
 
     /// The transitive monomorphic closure of the slots a kind selection reaches, together
     /// with each declared type's resolved members. Ordered by first reach, so the emitted
-    /// file's order is a function of the IDL's own declaration order.
+    /// file's order is a function of the IDL's own declaration order. Every member list is in
+    /// the vocabulary's declared KEY ORDER (Phase 293, [[orderMembers]]).
     type private Closure =
         {
             Order: Slot list
@@ -473,7 +471,17 @@ module FStarTarget =
             Enums: string list
             Kinds: (string * Member list) list
             Envelope: Member list
+            /// Phase 293 — the declared wire shape the model encodes: the node envelope's
+            /// shape and the key order. Carried so the emitters need no second look at the IDL.
+            Shape: NodeEnvelopeShape
+            KeyOrder: KeyOrder
         }
+
+    /// Phase 293 — the model's node object under the FLAT envelope: the kind's members and
+    /// the envelope's share one object, kind members first as `Encode.encodeNodeEnv` builds it,
+    /// and the whole list is then put in the declared key order.
+    let private flatNodeMembers (c: Closure) (kindMembers: Member list) =
+        orderMembers c.KeyOrder (kindMembers @ c.Envelope)
 
     // -----------------------------------------------------------------------
     // 5. Walking the vocabulary.
@@ -637,23 +645,100 @@ module FStarTarget =
 
         visitSlot SNode
 
-        match failure with
+        // Phase 293 — the shape the model cannot express is REFUSED by name, never emitted. The
+        // model's objects are literals, one entry per key, read back by `find_field` — so a key
+        // that would appear twice in one object is a document the model cannot round-trip. Under
+        // the FLAT envelope the node object carries the discriminator, `id`, the kind's members
+        // and the envelope's; under the NESTED one the node object carries `id`, `kind` and the
+        // envelope's members, and the kind object the discriminator and the kind's. A union
+        // case's object carries the discriminator beside its members in both shapes.
+        // `Declare.wireShapeErrors` refuses most of these at declaration; the target refuses them
+        // again because it is handed an `Idl` value, not a declaration that was checked.
+        let disc = idl.Wire.Discriminator
+
+        let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
+            ms
+            |> List.tryPick (fun m ->
+                reserved
+                |> List.tryFind (fun (key, _) -> key = m.Name)
+                |> Option.map (fun (_, holder) ->
+                    CodegenError.UnmodellableInFStar(
+                        sprintf "a member '%s' whose key the %s already carries" m.Name holder,
+                        where
+                    )))
+
+        let shapeFailure =
+            match failure with
+            | Some e -> Some e
+            | None ->
+                let envelope =
+                    match memberMap.TryGetValue "node" with
+                    | true, ms -> ms
+                    | _ -> []
+
+                let kinds =
+                    match caseMap.TryGetValue "vkind" with
+                    | true, ks -> ks
+                    | _ -> []
+
+                let nodeKeys =
+                    match idl.Wire.NodeEnvelope with
+                    | NodeEnvelopeShape.FlatKind -> [ disc, "node object"; "id", "node object" ]
+                    | NodeEnvelopeShape.NestedKind -> [ "id", "node object"; "kind", "node object" ]
+
+                let envelopeFailure = collisions "node envelope" nodeKeys envelope
+
+                let kindFailure () =
+                    kinds
+                    |> List.tryPick (fun (tag, ms) ->
+                        match idl.Wire.NodeEnvelope with
+                        | NodeEnvelopeShape.FlatKind ->
+                            collisions
+                                ("kind " + tag)
+                                (nodeKeys @ (envelope |> List.map (fun m -> m.Name, "node envelope")))
+                                ms
+                        | NodeEnvelopeShape.NestedKind -> collisions ("kind " + tag) [ disc, "kind object" ] ms)
+
+                let unionFailure () =
+                    caseMap
+                    |> Seq.tryPick (fun kv ->
+                        if kv.Key = "vkind" then
+                            None
+                        else
+                            kv.Value
+                            |> List.tryPick (fun (tag, ms) ->
+                                match transparent.TryGetValue kv.Key with
+                                | true, t when t = tag -> None
+                                | _ -> collisions (sprintf "union %s case %s" kv.Key tag) [ disc, "case object" ] ms))
+
+                envelopeFailure
+                |> Option.orElseWith kindFailure
+                |> Option.orElseWith unionFailure
+
+        match shapeFailure with
         | Some e -> Error e
         | None ->
+            let ordered = orderMembers idl.Wire.KeyOrder
+
             Ok
                 { Order = List.ofSeq order
-                  Members = memberMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
-                  Cases = caseMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+                  Members = memberMap |> Seq.map (fun kv -> kv.Key, ordered kv.Value) |> Map.ofSeq
+                  Cases =
+                    caseMap
+                    |> Seq.map (fun kv -> kv.Key, kv.Value |> List.map (fun (t, ms) -> t, ordered ms))
+                    |> Map.ofSeq
                   Transparent = transparent |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
                   Enums = List.ofSeq enums
                   Kinds =
                     (match caseMap.TryGetValue "vkind" with
-                     | true, ks -> ks
+                     | true, ks -> ks |> List.map (fun (t, ms) -> t, ordered ms)
                      | _ -> [])
                   Envelope =
                     (match memberMap.TryGetValue "node" with
-                     | true, ms -> ms
-                     | _ -> []) }
+                     | true, ms -> ordered ms
+                     | _ -> [])
+                  Shape = idl.Wire.NodeEnvelope
+                  KeyOrder = idl.Wire.KeyOrder }
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can
@@ -753,10 +838,39 @@ module FStarTarget =
 
     let private nl = "\n"
 
-    /// Ordinal key order, matching `Canon.render`'s default: the model has no render step,
-    /// so the object LITERAL is its canonical form and the order has to be built in.
-    let private sortMembers (ms: Member list) =
-        ms |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
+    /// Phase 293 — one entry of an emitted object literal: a FIXED key the shape places (the
+    /// discriminator's tag, the node's `id`, the nested kind object), carrying the F* expression
+    /// of its value, or a declared MEMBER under its presence rule. The model has no render step,
+    /// so the object LITERAL is its canonical form and the declared order has to be built in —
+    /// which is what [[layout]] does, for both the fixed keys and the members.
+    type private Entry =
+        | Fixed of key: string * enc: string
+        | Mem of Member
+
+    let private entryKey (e: Entry) =
+        match e with
+        | Fixed(key, _) -> key
+        | Mem m -> m.Name
+
+    /// An entry the encoder ALWAYS emits — a fixed key, or a required member.
+    let private alwaysEmitted (e: Entry) =
+        match e with
+        | Fixed _ -> true
+        | Mem m -> m.Presence.IsNone
+
+    /// The entries of one object in the vocabulary's declared key order: under `Declared` the
+    /// fixed keys lead and the members follow in authored order, exactly as `Encode` builds the
+    /// object; under `Sorted` the whole list is Ordinal-sorted, fixed keys included, exactly as
+    /// `Canon.render` leaves it. A member list handed in is already in the closure's order
+    /// ([[orderMembers]]), so the sort here only merges the fixed keys into it.
+    let private layout (order: KeyOrder) (placed: (string * string) list) (ms: Member list) : Entry list =
+        let entries = (placed |> List.map Fixed) @ (ms |> List.map Mem)
+
+        match order with
+        | KeyOrder.Declared -> entries
+        | KeyOrder.Sorted ->
+            entries
+            |> List.sortWith (fun a b -> System.String.CompareOrdinal(entryKey a, entryKey b))
 
     let private binders (ms: Member list) =
         ms |> List.mapi (fun i _ -> sprintf "f%d" i)
@@ -890,27 +1004,35 @@ module FStarTarget =
           Enc: string
           Rest: string }
 
-    /// A suffixed member list as the always-emitted members BEFORE the first conditional one (in
+    /// One entry's text in an object literal.
+    let private entryText (bind: Member -> string) (e: Entry) =
+        match e with
+        | Fixed(key, enc) -> sprintf "(%s, %s)" (lit key) enc
+        | Mem m -> sprintf "(%s, %s)" (lit m.Name) (encApplied m.Slot (bind m))
+
+    /// A suffixed entry list as the always-emitted entries BEFORE the first conditional member (in
     /// key order, reached by `find_field` without meeting a test) and its links, outermost first.
-    let private suffixChain (typeName: string) (label: string) (sorted: Member list) (bind: Member -> string) =
-        let entry (m: Member) =
-            sprintf "(%s, %s)" (lit m.Name) (encApplied m.Slot (bind m))
+    let private suffixChain (typeName: string) (label: string) (entries: Entry list) (bind: Member -> string) =
+        let entry = entryText bind
 
-        let start = sorted |> List.findIndex (fun m -> m.Presence.IsSome)
-        let prefix = sorted |> List.take start
+        let start = entries |> List.findIndex (fun e -> not (alwaysEmitted e))
+        let prefix = entries |> List.take start
 
-        // Each conditional member opens a group; the always-emitted members after it ride in it.
+        // Each conditional member opens a group; the always-emitted entries after it ride in it.
+        // Groups and their riders are both built reversed and reversed once, so the fold is linear
+        // (Phase 293; the `rs @ [ m ]` form it replaces re-walked every rider per member).
         let groups =
-            sorted
+            entries
             |> List.skip start
             |> List.fold
-                (fun acc (m: Member) ->
-                    match m.Presence, acc with
-                    | Some _, _ -> (m, []) :: acc
-                    | None, (c, rs) :: t -> (c, rs @ [ m ]) :: t
-                    | None, [] -> failwith "unreachable: the first member after `start` is conditional")
+                (fun acc (e: Entry) ->
+                    match e, acc with
+                    | Mem m, _ when m.Presence.IsSome -> (m, []) :: acc
+                    | _, (c, rs) :: t -> (c, e :: rs) :: t
+                    | _, [] -> failwith "unreachable: the first entry after `start` is conditional")
                 []
             |> List.rev
+            |> List.map (fun (c, rs) -> c, List.rev rs)
 
         let n = List.length groups
 
@@ -938,13 +1060,25 @@ module FStarTarget =
     /// the prover can normalise. At `presenceSplitAt` or more conditional members it is the
     /// SUFFIX chain instead (Phase 204, section 8a): one `let` per conditional member, each
     /// binding that member's suffix applied to the next, so no tail is written twice.
-    let private encMembers (owner: string * string) (ms: Member list) (lead: string list) (bind: Member -> string) =
-        let sorted = sortMembers ms
+    ///
+    /// Phase 293: the FIXED keys the shape places (the discriminator, the node's `id`, the nested
+    /// kind object) are entries of the same literal, positioned by [[layout]] under the declared
+    /// key order rather than prepended — so a `Sorted` vocabulary whose discriminator sorts among
+    /// the members, or whose envelope member sorts ahead of `id`, is emitted where the wire has it.
+    let private encMembers
+        (order: KeyOrder)
+        (owner: string * string)
+        (placed: (string * string) list)
+        (ms: Member list)
+        (bind: Member -> string)
+        =
+        let entries = layout order placed ms
 
         let rec go rest =
             match rest with
             | [] -> "[]"
-            | (m: Member) :: t ->
+            | Fixed(key, enc) :: t -> sprintf "(%s, %s) :: %s" (lit key) enc (go t)
+            | Mem(m: Member) :: t ->
                 let v = bind m
                 let tail = go t
 
@@ -961,22 +1095,17 @@ module FStarTarget =
                 | Some(Some d) ->
                     sprintf "(if %s = %s then %s else (%s, %s) :: %s)" v d tail (lit m.Name) (encApplied m.Slot v) tail
 
-        let body =
-            if suffixed sorted then
-                let typeName, label = owner
-                let prefix, links = suffixChain typeName label sorted bind
+        if suffixed ms then
+            let typeName, label = owner
+            let prefix, links = suffixChain typeName label entries bind
 
-                sprintf
-                    "(%s %s%s)"
-                    (chainLets links |> String.concat " ")
-                    (prefix |> List.map (fun e -> e + " :: ") |> String.concat "")
-                    (List.head links).Local
-            else
-                go sorted
-
-        match lead with
-        | [] -> body
-        | _ -> (lead |> List.map (fun l -> l + " :: ") |> String.concat "") + body
+            sprintf
+                "(%s %s%s)"
+                (chainLets links |> String.concat " ")
+                (prefix |> List.map (fun e -> e + " :: ") |> String.concat "")
+                (List.head links).Local
+        else
+            go entries
 
     /// A member's index in the binder list, for the `f0 f1 …` pattern binders.
     let private bindOf (ms: Member list) =
@@ -1071,11 +1200,13 @@ module FStarTarget =
             decMember el i m
 
     /// Combine the `let`-bound member outcomes into the constructor application.
-    let private decCombine (ms: Member list) (ctor: string) =
+    /// `lead` are the binders that precede the members in the application (`i` for the node's id).
+    let private decCombineWith (lead: string list) (ms: Member list) (ctor: string) =
         let rec go i rest =
             match rest with
             | [] ->
-                let args = ms |> List.mapi (fun j _ -> sprintf "f%d" j) |> String.concat " "
+                let args =
+                    lead @ (ms |> List.mapi (fun j _ -> sprintf "f%d" j)) |> String.concat " "
 
                 if args = "" then
                     sprintf "Ok %s" ctor
@@ -1084,6 +1215,8 @@ module FStarTarget =
             | _ :: t -> sprintf "(match o%d with | Error e -> Error e | Ok f%d -> %s)" i i (go (i + 1) t)
 
         go 0 ms
+
+    let private decCombine (ms: Member list) (ctor: string) = decCombineWith [] ms ctor
 
     // -----------------------------------------------------------------------
     // 8. The model module.
@@ -1155,6 +1288,24 @@ module FStarTarget =
               (match idl.Wire.KeyOrder with
                | KeyOrder.Sorted -> "ordinal-sorted"
                | KeyOrder.Declared -> "declaration")
+          // Phase 293 — the shape is ENCODED, not announced: the two lines below say what the
+          // encoder's literals carry, and the test suite holds them to the encoder's text.
+          (match c.Shape with
+           | NodeEnvelopeShape.NestedKind ->
+               "   The node object carries `id`, the kind object under `kind` and the envelope's members;"
+           | NodeEnvelopeShape.FlatKind ->
+               "   The node is ONE object carrying the discriminator, `id`, the kind's members and the")
+          (match c.Shape with
+           | NodeEnvelopeShape.NestedKind -> "   the kind object carries the discriminator and the kind's members."
+           | NodeEnvelopeShape.FlatKind ->
+               "   envelope's: `node` has one constructor per kind, and there is no kind object.")
+          (match c.KeyOrder with
+           | KeyOrder.Sorted -> "   Every object literal is Ordinal-sorted, the fixed keys merged among the members."
+           | KeyOrder.Declared ->
+               "   Every object literal is in the encoder's construction order: fixed keys, then members")
+          (match c.KeyOrder with
+           | KeyOrder.Sorted -> "   A shape the literal cannot carry is refused by name, never emitted."
+           | KeyOrder.Declared -> "   as declared. A shape the literal cannot carry is refused by name, never emitted.")
           sprintf
               "   %d of %d kinds are modelled; %d declared types and %d enums are reached."
               (List.length kindTags)
@@ -1257,34 +1408,54 @@ module FStarTarget =
                 sprintf "%s %s (num flt: eqtype) =" kw name
 
             // The node and its kind union lead the group: they are the vocabulary's root.
+            //
+            // Phase 293 — the node's TYPE follows the declared envelope. Under the NESTED
+            // envelope the node is one constructor carrying `id`, the kind value and the
+            // envelope's members, and `vkind` is the kind union whose object sits under `kind`.
+            // Under the FLAT envelope there is no kind object on the wire — the discriminator,
+            // the id, the kind's members and the envelope's share one object — so the node IS
+            // the kind union: one constructor per kind carrying `id`, that kind's members and the
+            // envelope's, and no `vkind` type at all. The model is of the wire, and the wire has
+            // one object there.
             line (typeHead "node")
-            let envArgs = c.Envelope |> sortMembers
+            let envArgs = c.Envelope
+            let flat = c.Shape = NodeEnvelopeShape.FlatKind
 
-            let nodeArgs =
-                (sprintf "id:string -> k:(vkind num flt)")
-                + (envArgs
-                   |> List.map (fun m ->
-                       let t =
-                           match m.Presence with
-                           | Some None -> "option (" + slotType m.Slot + ")"
-                           | _ -> slotType m.Slot
+            match c.Shape with
+            | NodeEnvelopeShape.NestedKind ->
+                let nodeArgs =
+                    (sprintf "id:string -> k:(vkind num flt)")
+                    + (envArgs
+                       |> List.map (fun m ->
+                           let t =
+                               match m.Presence with
+                               | Some None -> "option (" + slotType m.Slot + ")"
+                               | _ -> slotType m.Slot
 
-                       sprintf " -> %s:(%s)" (binderName m.Name) t)
-                   |> String.concat "")
+                           sprintf " -> %s:(%s)" (binderName m.Name) t)
+                       |> String.concat "")
 
-            line (sprintf "  | %s : %s -> node num flt" (ctorName "node" "Node") nodeArgs)
-            line ""
-            line (typeHead "vkind")
+                line (sprintf "  | %s : %s -> node num flt" (ctorName "node" "Node") nodeArgs)
+                line ""
+                line (typeHead "vkind")
 
-            for tag, ms in c.Kinds do
-                line (sprintf "  | %s : %s" (ctorName "vkind" tag) (ctorArgs (sortMembers ms) "vkind num flt"))
+                for tag, ms in c.Kinds do
+                    line (sprintf "  | %s : %s" (ctorName "vkind" tag) (ctorArgs ms "vkind num flt"))
+            | NodeEnvelopeShape.FlatKind ->
+                for tag, ms in c.Kinds do
+                    line (
+                        sprintf
+                            "  | %s : id:string -> %s"
+                            (ctorName "node" tag)
+                            (ctorArgs (flatNodeMembers c ms) "node num flt")
+                    )
 
             for s in declared do
                 match s with
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n] |> sortMembers
+                    let ms = c.Members[n]
                     line ""
                     line (typeHead n)
                     line (sprintf "  | %s : %s" (ctorName n "Mk") (ctorArgs ms (n + " num flt")))
@@ -1294,7 +1465,7 @@ module FStarTarget =
                     line (typeHead n)
 
                     for tag, ms in c.Cases[n] do
-                        line (sprintf "  | %s : %s" (ctorName n tag) (ctorArgs (sortMembers ms) (n + " num flt")))
+                        line (sprintf "  | %s : %s" (ctorName n tag) (ctorArgs ms (n + " num flt")))
                 | _ -> ()
 
             line ""
@@ -1318,21 +1489,26 @@ module FStarTarget =
             // member already ENCODED (as an option) rather than the member itself, which is what
             // keeps it out of the recursive family: it calls nothing.
             let suffixOwners =
-                [ yield "node", "Node", envArgs
-                  for tag, ms in c.Kinds do
-                      yield "vkind", tag, sortMembers ms
+                [ if flat then
+                      for tag, ms in c.Kinds do
+                          yield "node", tag, flatNodeMembers c ms
+                  else
+                      yield "node", "Node", envArgs
+
+                      for tag, ms in c.Kinds do
+                          yield "vkind", tag, ms
                   for s in declared do
                       match s with
                       | SRecord _ ->
                           let n = slotName s
-                          yield n, "Mk", sortMembers c.Members[n]
+                          yield n, "Mk", c.Members[n]
                       | SUnion _ ->
                           let n = slotName s
 
                           for tag, ms in c.Cases[n] do
                               match c.Transparent.TryFind n with
                               | Some t when t = tag -> ()
-                              | _ -> yield n, tag, sortMembers ms
+                              | _ -> yield n, tag, ms
                       | _ -> () ]
                 |> List.filter (fun (_, _, ms) -> suffixed ms)
 
@@ -1398,51 +1574,56 @@ module FStarTarget =
                 firstEnc <- false
                 sprintf "%s %s" kw sig_
 
-            // the node
-            let bindNode = bindOf envArgs
-
-            let envList =
-                encMembers ("node", "Node") envArgs [] (fun m ->
-                    "e" + string (List.findIndex (fun (x: Member) -> x.Name = m.Name) envArgs))
-
-            let envBinders =
-                envArgs |> List.mapi (fun i _ -> sprintf "e%d" i) |> String.concat " "
-
-            ignore bindNode
+            // the node — Phase 293: the fixed keys the shape places are entries of the literal,
+            // positioned by the declared key order (see `encMembers`), not a prefix.
+            let order = c.KeyOrder
 
             line (
                 encHead (sprintf "enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =")
             )
 
             line "  match x with"
-            line (sprintf "  | %s i k %s ->" (ctorName "node" "Node") envBinders)
 
-            line (sprintf "    JObj ((%s, JStr i) :: (%s, enc_vkind k) :: %s)" (lit "id") (lit "kind") envList)
+            match c.Shape with
+            | NodeEnvelopeShape.NestedKind ->
+                let envBinders =
+                    envArgs |> List.mapi (fun i _ -> sprintf "e%d" i) |> String.concat " "
 
-            line ""
+                let envList =
+                    encMembers order ("node", "Node") [ "id", "JStr i"; "kind", "enc_vkind k" ] envArgs (fun m ->
+                        "e" + string (List.findIndex (fun (x: Member) -> x.Name = m.Name) envArgs))
 
-            line (
-                encHead (
-                    sprintf "enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) ="
-                )
-            )
-
-            line "  match x with"
-
-            for tag, ms in c.Kinds do
-                let sorted = sortMembers ms
-                let bs = binders sorted
-                let bind = bindOf sorted
-
-                line (sprintf "  | %s %s ->" (ctorName "vkind" tag) (String.concat " " bs))
+                line (sprintf "  | %s i k %s ->" (ctorName "node" "Node") envBinders)
+                line (sprintf "    JObj (%s)" envList)
+                line ""
 
                 line (
-                    sprintf
-                        "    JObj ((%s, JStr %s) :: %s)"
-                        (lit disc)
-                        (lit tag)
-                        (encMembers ("vkind", tag) sorted [] bind)
+                    encHead (
+                        sprintf "enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) ="
+                    )
                 )
+
+                line "  match x with"
+
+                for tag, ms in c.Kinds do
+                    let bs = binders ms
+                    let bind = bindOf ms
+
+                    line (sprintf "  | %s %s ->" (ctorName "vkind" tag) (String.concat " " bs))
+                    line (sprintf "    JObj (%s)" (encMembers order ("vkind", tag) [ disc, "JStr " + lit tag ] ms bind))
+            | NodeEnvelopeShape.FlatKind ->
+                for tag, kindMs in c.Kinds do
+                    let ms = flatNodeMembers c kindMs
+                    let bs = binders ms
+                    let bind = bindOf ms
+
+                    line (sprintf "  | %s i %s ->" (ctorName "node" tag) (String.concat " " bs))
+
+                    line (
+                        sprintf
+                            "    JObj (%s)"
+                            (encMembers order ("node", tag) [ disc, "JStr " + lit tag; "id", "JStr i" ] ms bind)
+                    )
 
             line ""
 
@@ -1451,7 +1632,7 @@ module FStarTarget =
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n] |> sortMembers
+                    let ms = c.Members[n]
                     let bs = binders ms
                     let bind = bindOf ms
 
@@ -1471,7 +1652,7 @@ module FStarTarget =
                             "  | %s %s -> JObj (%s)"
                             (ctorName n "Mk")
                             (String.concat " " bs)
-                            (encMembers (n, "Mk") ms [] bind)
+                            (encMembers order (n, "Mk") [] ms bind)
                     )
 
                     line ""
@@ -1490,24 +1671,19 @@ module FStarTarget =
                     line "  match x with"
 
                     for tag, ms in c.Cases[n] do
-                        let sorted = sortMembers ms
-                        let bs = binders sorted
-                        let bind = bindOf sorted
+                        let bs = binders ms
+                        let bind = bindOf ms
 
                         match c.Transparent.TryFind n with
                         | Some t when t = tag ->
                             // The declared transparent case rides BARE — no envelope at all.
-                            let only = List.head sorted
+                            let only = List.head ms
                             line (sprintf "  | %s f0 -> %s" (ctorName n tag) (encApplied only.Slot "f0"))
                         | _ ->
                             line (sprintf "  | %s %s ->" (ctorName n tag) (String.concat " " bs))
 
                             line (
-                                sprintf
-                                    "    JObj ((%s, JStr %s) :: %s)"
-                                    (lit disc)
-                                    (lit tag)
-                                    (encMembers (n, tag) sorted [] bind)
+                                sprintf "    JObj (%s)" (encMembers order (n, tag) [ disc, "JStr " + lit tag ] ms bind)
                             )
 
                     line ""
@@ -1634,55 +1810,72 @@ module FStarTarget =
 
             line (sprintf "  let oid : outcome string = str_field %s el in" (lit "id"))
 
-            line (
-                sprintf
-                    "  let ok : outcome (vkind num flt) = (match get_prop %s el with | Error e -> Error e | Ok v -> dec_vkind v) in"
-                    (lit "kind")
-            )
-
-            envArgs
-            |> List.iteri (fun i m -> line (indent 1 (decMemberOf "node" "Node" envArgs "el" i m)))
-
-            let envCombine =
-                let rec go i rest =
-                    match rest with
-                    | [] ->
-                        let args = envArgs |> List.mapi (fun j _ -> sprintf "f%d" j) |> String.concat " "
-
-                        sprintf "Ok (%s i k %s)" (ctorName "node" "Node") args
-                    | _ :: t -> sprintf "(match o%d with | Error e -> Error e | Ok f%d -> %s)" i i (go (i + 1) t)
-
-                go 0 envArgs
-
-            line (
-                sprintf
-                    "  (match oid with | Error e -> Error e | Ok i -> (match ok with | Error e -> Error e | Ok k -> %s))"
-                    envCombine
-            )
-
-            line ""
-
-            line (
-                decHead (
-                    "dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num flt)) (decreases %[(jsize el <: nat); 0]) ="
+            match c.Shape with
+            | NodeEnvelopeShape.NestedKind ->
+                line (
+                    sprintf
+                        "  let ok : outcome (vkind num flt) = (match get_prop %s el with | Error e -> Error e | Ok v -> dec_vkind v) in"
+                        (lit "kind")
                 )
-            )
 
-            line (sprintf "  match str_field %s el with" (lit disc))
-            line "  | Error e -> Error e"
-            line "  | Ok tag ->"
+                envArgs
+                |> List.iteri (fun i m -> line (indent 1 (decMemberOf "node" "Node" envArgs "el" i m)))
 
-            for tag, ms in c.Kinds do
-                let sorted = sortMembers ms
-                line (sprintf "    if tag = %s then" (lit tag))
+                line (
+                    sprintf
+                        "  (match oid with | Error e -> Error e | Ok i -> (match ok with | Error e -> Error e | Ok k -> %s))"
+                        (decCombineWith [ "i"; "k" ] envArgs (ctorName "node" "Node"))
+                )
 
-                sorted
-                |> List.iteri (fun i m -> line (indent 3 (decMemberOf "vkind" tag sorted "el" i m)))
+                line ""
 
-                line (indent 3 (decCombine sorted (ctorName "vkind" tag)))
-                line "    else"
+                line (
+                    decHead (
+                        "dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num flt)) (decreases %[(jsize el <: nat); 0]) ="
+                    )
+                )
 
-            line (sprintf "    Error (%s ^ tag)" (lit "unknown kind: "))
+                line (sprintf "  match str_field %s el with" (lit disc))
+                line "  | Error e -> Error e"
+                line "  | Ok tag ->"
+
+                for tag, ms in c.Kinds do
+                    line (sprintf "    if tag = %s then" (lit tag))
+
+                    ms
+                    |> List.iteri (fun i m -> line (indent 3 (decMemberOf "vkind" tag ms "el" i m)))
+
+                    line (indent 3 (decCombine ms (ctorName "vkind" tag)))
+                    line "    else"
+
+                line (sprintf "    Error (%s ^ tag)" (lit "unknown kind: "))
+            | NodeEnvelopeShape.FlatKind ->
+                // Phase 293 — the flat envelope: the tag dispatch IS the node decoder, and each
+                // arm reads that kind's members and the envelope's off the one object. `id` is
+                // read ahead of the dispatch, as `Decode.decodeNode` reads it.
+                line (sprintf "  match str_field %s el with" (lit disc))
+                line "  | Error e -> Error e"
+                line "  | Ok tag ->"
+
+                for tag, kindMs in c.Kinds do
+                    let ms = flatNodeMembers c kindMs
+                    line (sprintf "    if tag = %s then" (lit tag))
+
+                    ms
+                    |> List.iteri (fun i m -> line (indent 3 (decMemberOf "node" tag ms "el" i m)))
+
+                    line (
+                        indent
+                            3
+                            (sprintf
+                                "(match oid with | Error e -> Error e | Ok i -> %s)"
+                                (decCombineWith [ "i" ] ms (ctorName "node" tag)))
+                    )
+
+                    line "    else"
+
+                line (sprintf "    Error (%s ^ tag)" (lit "unknown kind: "))
+
             line ""
 
             for s in declared do
@@ -1690,7 +1883,7 @@ module FStarTarget =
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n] |> sortMembers
+                    let ms = c.Members[n]
 
                     line (
                         decHead (
@@ -1752,13 +1945,11 @@ module FStarTarget =
                         match c.Transparent.TryFind n with
                         | Some t when t = tag -> ()
                         | _ ->
-                            let sorted = sortMembers ms
                             line (sprintf "    if tag = %s then" (lit tag))
 
-                            sorted
-                            |> List.iteri (fun i m -> line (indent 3 (decMemberOf n tag sorted "el" i m)))
+                            ms |> List.iteri (fun i m -> line (indent 3 (decMemberOf n tag ms "el" i m)))
 
-                            line (indent 3 (decCombine sorted (ctorName n tag)))
+                            line (indent 3 (decCombine ms (ctorName n tag)))
                             line "    else"
 
                     line (sprintf "    Error (%s ^ tag)" (lit (sprintf "unknown %s case: " n)))
@@ -2048,13 +2239,23 @@ module FStarTarget =
     /// members under their presence rules, and the lemma calls that precede the members' own
     /// (`rt_vkind k` for the node).
     type private Ctor =
-        { Label: string
-          CtorName: string
-          Lead: string list
-          Members: Member list
-          Extra: string list }
+        {
+            Label: string
+            CtorName: string
+            Lead: string list
+            /// Phase 293 — the fixed keys the shape places in this constructor's object, with
+            /// the F* expression of each value: the entries of the literal that are not members.
+            Fixed: (string * string) list
+            Members: Member list
+            Extra: string list
+        }
 
-    let private ctorMembers (c: Ctor) = sortMembers c.Members
+    /// A constructor's members, in the closure's declared key order (already ordered there).
+    let private ctorMembers (c: Ctor) = c.Members
+
+    /// The entries of a constructor's object literal — fixed keys and members, in key order —
+    /// exactly as the encoder lays them out, because the lookups below are about THAT literal.
+    let private ctorEntries (order: KeyOrder) (c: Ctor) = layout order c.Fixed c.Members
 
     let private ctorPattern (c: Ctor) =
         String.concat
@@ -2062,23 +2263,31 @@ module FStarTarget =
             (c.CtorName
              :: (c.Lead @ (ctorMembers c |> List.mapi (fun i _ -> sprintf "f%d" i))))
 
-    /// The index of the first CONDITIONAL member in key order, or the member count when the
-    /// constructor has none. Every member BEFORE it is reached by `find_field` without meeting a
+    /// The index of the first CONDITIONAL entry in key order, or the entry count when the
+    /// constructor has none. Every entry BEFORE it is reached by `find_field` without meeting a
     /// branch, so it needs no lookup lemma of its own — which is why a constructor's lemma count
     /// is `2k + r' + 1` and not `2k + r + 1`.
-    let private firstConditional (ms: Member list) =
-        match ms |> List.tryFindIndex (fun m -> m.Presence.IsSome) with
+    let private firstConditional (entries: Entry list) =
+        match entries |> List.tryFindIndex (fun e -> not (alwaysEmitted e)) with
         | Some i -> i
-        | None -> List.length ms
+        | None -> List.length entries
 
-    /// One member's lookup lemma name — `__present` / `__absent` are appended for a conditional.
-    let private lookupName (typeName: string) (label: string) (m: Member) =
-        sprintf "lk_%s__%s__%s" typeName label (snake m.Name)
+    /// One key's lookup lemma name — `__present` / `__absent` are appended for a conditional.
+    let private lookupNameOf (typeName: string) (label: string) (key: string) =
+        sprintf "lk_%s__%s__%s" typeName label (snake key)
+
+    let private lookupName (typeName: string) (label: string) (m: Member) = lookupNameOf typeName label m.Name
 
     /// The presence LOOKUPS of one type's constructors — see 8b above for the shape. Emitted ahead
     /// of the round-trip family and OUTSIDE it: they recurse on nothing, so each can carry the
     /// scoped fuel its own walk needs, where a mutual family admits one option set for all of it.
-    let private emitLookups (line: string -> unit) (typeName: string) (fsType: string) (ctors: Ctor list) =
+    let private emitLookups
+        (line: string -> unit)
+        (order: KeyOrder)
+        (typeName: string)
+        (fsType: string)
+        (ctors: Ctor list)
+        =
         let multi = List.length ctors > 1
 
         for c in ctors do
@@ -2087,11 +2296,13 @@ module FStarTarget =
 
             if List.length cs >= presenceSplitAt then
                 let pattern = ctorPattern c
+                let entries = ctorEntries order c
+                let bind = bindOf ms
 
                 let fuel =
-                    lookupFuel (List.length c.Lead) (ms |> List.filter (fun m -> m.Presence.IsNone) |> List.length)
+                    lookupFuel (List.length c.Fixed) (ms |> List.filter (fun m -> m.Presence.IsNone) |> List.length)
 
-                let start = firstConditional ms
+                let start = firstConditional entries
 
                 let guarded (body: string) (fallback: string) =
                     if multi then
@@ -2101,7 +2312,7 @@ module FStarTarget =
 
                 // Phase 204: the constructor's suffix chain, bound in each lookup's body exactly as
                 // the encoder binds it, so the terms the steps below are cited at ARE the encoding's.
-                let _, links = suffixChain typeName c.Label ms (bindOf ms)
+                let _, links = suffixChain typeName c.Label entries bind
                 let lets = chainLets links
 
                 let stepName (l: Link) (step: string) =
@@ -2186,69 +2397,76 @@ module FStarTarget =
                     line "#pop-options"
                     line ""
 
-                // The link a member rides in: its own for a conditional member, else that of the
-                // last conditional member before it in key order.
-                let position (m: Member) =
-                    ms |> List.findIndex (fun x -> x.Name = m.Name)
+                // The link an entry rides in: its own for a conditional member, else that of the
+                // last conditional member before it in key order. Positions are ENTRY positions
+                // (Phase 293): a fixed key sitting after a conditional member rides in its link
+                // and is looked up through the same steps as an always-emitted member there.
+                let position (key: string) =
+                    entries |> List.findIndex (fun e -> entryKey e = key)
 
-                let linkOf (m: Member) =
-                    links |> List.findIndexBack (fun l -> position l.Member <= position m)
+                let linkOf (key: string) =
+                    links |> List.findIndexBack (fun l -> position l.Member.Name <= position key)
 
                 let skipsTo (t: int) (key: string) =
                     links |> List.take t |> List.map (fun l -> step l "skip" (Some key))
 
-                ms
-                |> List.iteri (fun i m ->
+                let found (key: string) (enc: string) =
+                    guarded (sprintf "get_prop %s (enc_%s #num #flt x) == Ok (%s)" (lit key) typeName enc) "True"
+
+                entries
+                |> List.iteri (fun i e ->
                     if i >= start then
-                        let lk = lookupName typeName c.Label m
-                        let b = sprintf "f%d" i
-                        let t = linkOf m
+                        match e with
+                        | Fixed(key, enc) ->
+                            let t = linkOf key
 
-                        let found (v: string) =
-                            guarded
-                                (sprintf
-                                    "get_prop %s (enc_%s #num #flt x) == Ok (%s)"
-                                    (lit m.Name)
-                                    typeName
-                                    (encApplied m.Slot v))
-                                "True"
-
-                        match m.Presence with
-                        | None ->
                             emit
-                                lk
-                                (m.Name + " — always emitted, at a position the conditionals before it move")
+                                (lookupNameOf typeName c.Label key)
+                                (key + " — a fixed key, at a position the conditionals before it move")
                                 (if multi then Some(sprintf "%s? x" c.CtorName) else None)
-                                (found b)
-                                (skipsTo (t + 1) m.Name)
-                        | Some d ->
-                            let cond =
-                                { Binder = b
-                                  Name = m.Name
-                                  Default = d }
+                                (found key enc)
+                                (skipsTo (t + 1) key)
+                        | Mem m ->
+                            let lk = lookupName typeName c.Label m
+                            let b = bind m
+                            let t = linkOf m.Name
 
-                            let present =
-                                match d with
-                                | None -> sprintf "(Some?.v %s)" b
-                                | Some _ -> b
+                            match m.Presence with
+                            | None ->
+                                emit
+                                    lk
+                                    (m.Name + " — always emitted, at a position the conditionals before it move")
+                                    (if multi then Some(sprintf "%s? x" c.CtorName) else None)
+                                    (found m.Name (encApplied m.Slot b))
+                                    (skipsTo (t + 1) m.Name)
+                            | Some d ->
+                                let cond =
+                                    { Binder = b
+                                      Name = m.Name
+                                      Default = d }
 
-                            emit
-                                (lk + "__present")
-                                (caption cond true)
-                                (Some(guarded (condition cond true) "false"))
-                                (found present)
-                                (skipsTo t m.Name @ [ step links[t] "hit" None ])
+                                let present =
+                                    match d with
+                                    | None -> sprintf "(Some?.v %s)" b
+                                    | Some _ -> b
 
-                            // THE NEGATIVE LOOKUP, as a chain of k cheap steps over the named
-                            // suffixes rather than one query over the 2^(k-1) shapes after it.
-                            emit
-                                (lk + "__absent")
-                                (caption cond false)
-                                (Some(guarded (condition cond false) "false"))
-                                (sprintf "Error? (get_prop %s (enc_%s #num #flt x))" (lit m.Name) typeName)
-                                (skipsTo t m.Name
-                                 @ [ step links[t] "none" None ]
-                                 @ (links |> List.skip (t + 1) |> List.map (fun l -> step l "skip" (Some m.Name)))))
+                                emit
+                                    (lk + "__present")
+                                    (caption cond true)
+                                    (Some(guarded (condition cond true) "false"))
+                                    (found m.Name (encApplied m.Slot present))
+                                    (skipsTo t m.Name @ [ step links[t] "hit" None ])
+
+                                // THE NEGATIVE LOOKUP, as a chain of k cheap steps over the named
+                                // suffixes rather than one query over the 2^(k-1) shapes after it.
+                                emit
+                                    (lk + "__absent")
+                                    (caption cond false)
+                                    (Some(guarded (condition cond false) "false"))
+                                    (sprintf "Error? (get_prop %s (enc_%s #num #flt x))" (lit m.Name) typeName)
+                                    (skipsTo t m.Name
+                                     @ [ step links[t] "none" None ]
+                                     @ (links |> List.skip (t + 1) |> List.map (fun l -> step l "skip" (Some m.Name)))))
 
                 // Phase 224 — one VALUE lemma per hoisted member's reader: the reader applied to the
                 // encoded object is `Ok` the member, proved by revealing the reader once, here, and
@@ -2318,6 +2536,7 @@ module FStarTarget =
     /// `let rec` / `and`; `line` receives the emitted text.
     let private emitFamily
         (line: string -> unit)
+        (order: KeyOrder)
         (rtHead: string -> string)
         (typeName: string)
         (fsType: string)
@@ -2369,33 +2588,41 @@ module FStarTarget =
                 line (sprintf "  | %s -> %s" (pattern c) (direct c))
                 line ""
             else
-                let start = firstConditional ms
+                let entries = ctorEntries order c
+                let start = firstConditional entries
+                let bind = bindOf ms
 
                 line (rtHead (signature name requires tier))
                 line "  match x with"
                 line (sprintf "  | %s ->" (pattern c))
 
-                ms
-                |> List.iteri (fun i m ->
+                entries
+                |> List.iteri (fun i e ->
                     if i >= start then
-                        let lk = lookupName typeName c.Label m
+                        match e with
+                        // Phase 293: a fixed key after the first conditional member is cited by
+                        // its own lookup, exactly as an always-emitted member there is.
+                        | Fixed(key, _) ->
+                            line (indent 2 (sprintf "%s #num #flt x;" (lookupNameOf typeName c.Label key)))
+                        | Mem m ->
+                            let lk = lookupName typeName c.Label m
 
-                        match m.Presence with
-                        | None -> line (indent 2 (sprintf "%s #num #flt x;" lk))
-                        // Phase 224: a hoisted member is cited by its reader's value lemma, with
-                        // no presence case in the arm and no read for the query to unfold.
-                        | Some _ when hoisted ms m ->
-                            line (indent 2 (sprintf "%s #num #flt x;" (readerValueName typeName c.Label m)))
-                        | Some d ->
-                            line (
-                                indent
-                                    2
-                                    (citeConditional
-                                        lk
-                                        { Binder = sprintf "f%d" i
-                                          Name = m.Name
-                                          Default = d })
-                            ))
+                            match m.Presence with
+                            | None -> line (indent 2 (sprintf "%s #num #flt x;" lk))
+                            // Phase 224: a hoisted member is cited by its reader's value lemma, with
+                            // no presence case in the arm and no read for the query to unfold.
+                            | Some _ when hoisted ms m ->
+                                line (indent 2 (sprintf "%s #num #flt x;" (readerValueName typeName c.Label m)))
+                            | Some d ->
+                                line (
+                                    indent
+                                        2
+                                        (citeConditional
+                                            lk
+                                            { Binder = bind m
+                                              Name = m.Name
+                                              Default = d })
+                                ))
 
                 line (indent 2 (direct c))
                 line ""
@@ -2516,7 +2743,7 @@ module FStarTarget =
             let out = System.Text.StringBuilder()
             let line (s: string) = out.Append(s).Append(nl) |> ignore
             let declared = c.Order |> List.filter declares
-            let envArgs = c.Envelope |> sortMembers
+            let envArgs = c.Envelope
 
             line (proofsHeader provenance moduleName modelName idl kindTags)
 
@@ -2544,26 +2771,46 @@ module FStarTarget =
             // lookups first (standalone lemmas, each with its own scoped fuel), then the mutual
             // round-trip family that cites them. Order is load-bearing in both walks — F* resolves
             // top to bottom, and `rt_node` must stay the family's first `let rec`.
+            let disc = idl.Wire.Discriminator
+            let tagged (tag: string) = disc, "JStr " + lit tag
+
             let families =
-                [ // The node: one constructor, `id` and the kind ahead of the envelope members, and
-                  // the kind's own round trip cited ahead of theirs.
-                  "node",
-                  "node num flt",
-                  [ { Label = "Node"
-                      CtorName = ctorName "node" "Node"
-                      Lead = [ "i"; "k" ]
-                      Members = envArgs
-                      Extra = [ "rt_vkind #num #flt k" ] } ]
-                  // The kinds: `rt_vkind` is the case split, `rt_vkind__<Kind>` each kind's arm
-                  // alone — the per-kind lemma Phase 168 was cut for.
-                  "vkind",
-                  "vkind num flt",
-                  [ for tag, ms in c.Kinds do
-                        { Label = tag
-                          CtorName = ctorName "vkind" tag
-                          Lead = []
-                          Members = ms
-                          Extra = [] } ]
+                [ match c.Shape with
+                  | NodeEnvelopeShape.NestedKind ->
+                      // The node: one constructor, `id` and the kind ahead of the envelope members,
+                      // and the kind's own round trip cited ahead of theirs.
+                      "node",
+                      "node num flt",
+                      [ { Label = "Node"
+                          CtorName = ctorName "node" "Node"
+                          Lead = [ "i"; "k" ]
+                          Fixed = [ "id", "JStr i"; "kind", "enc_vkind k" ]
+                          Members = envArgs
+                          Extra = [ "rt_vkind #num #flt k" ] } ]
+                      // The kinds: `rt_vkind` is the case split, `rt_vkind__<Kind>` each kind's arm
+                      // alone — the per-kind lemma Phase 168 was cut for.
+                      "vkind",
+                      "vkind num flt",
+                      [ for tag, ms in c.Kinds do
+                            { Label = tag
+                              CtorName = ctorName "vkind" tag
+                              Lead = []
+                              Fixed = [ tagged tag ]
+                              Members = ms
+                              Extra = [] } ]
+                  | NodeEnvelopeShape.FlatKind ->
+                      // Phase 293 — the flat envelope: the node IS the kind union, so `rt_node` is
+                      // the case split and `rt_node__<Kind>` each kind's arm, over the one object
+                      // that carries the discriminator, `id`, the kind's members and the envelope's.
+                      "node",
+                      "node num flt",
+                      [ for tag, ms in c.Kinds do
+                            { Label = tag
+                              CtorName = ctorName "node" tag
+                              Lead = [ "i" ]
+                              Fixed = [ tagged tag; "id", "JStr i" ]
+                              Members = flatNodeMembers c ms
+                              Extra = [] } ]
                   for s in declared do
                       match s with
                       | SNode -> ()
@@ -2575,6 +2822,7 @@ module FStarTarget =
                           [ { Label = "Mk"
                               CtorName = ctorName n "Mk"
                               Lead = []
+                              Fixed = []
                               Members = c.Members[n]
                               Extra = [] } ]
                       | SUnion _ ->
@@ -2586,6 +2834,10 @@ module FStarTarget =
                                 { Label = tag
                                   CtorName = ctorName n tag
                                   Lead = []
+                                  Fixed =
+                                    (match c.Transparent.TryFind n with
+                                     | Some t when t = tag -> []
+                                     | _ -> [ tagged tag ])
                                   Members = ms
                                   Extra = [] } ]
                       | _ -> () ]
@@ -2602,7 +2854,7 @@ module FStarTarget =
             line ""
 
             for typeName, fsType, ctors in families do
-                emitLookups line typeName fsType ctors
+                emitLookups line c.KeyOrder typeName fsType ctors
 
             line "(* ======================================================================================"
             line "   3. THE ROUND TRIP. One mutual induction over the whole family, recursing on the MODEL"
@@ -2621,7 +2873,7 @@ module FStarTarget =
                 sprintf "%s %s" kw sig_
 
             for typeName, fsType, ctors in families do
-                emitFamily line rtHead typeName fsType ctors
+                emitFamily line c.KeyOrder rtHead typeName fsType ctors
 
             for s in c.Order do
                 match s with

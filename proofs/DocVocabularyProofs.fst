@@ -107,65 +107,61 @@ let rt_e_list_style (#num #flt: eqtype) (x: e_list_style) : Lemma (ensures dec_e
 
 let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__node__Node i k -> rt_vkind #num #flt k
+  | C__node__Document _ _ _ _ _ -> rt_node__Document #num #flt x
+  | C__node__Section _ _ _ _ -> rt_node__Section #num #flt x
+  | C__node__Paragraph _ _ -> rt_node__Paragraph #num #flt x
+  | C__node__ListBlock _ _ _ -> rt_node__ListBlock #num #flt x
+  | C__node__ListItem _ _ -> rt_node__ListItem #num #flt x
+  | C__node__Table _ _ _ -> rt_node__Table #num #flt x
+  | C__node__Row _ _ _ -> rt_node__Row #num #flt x
+  | C__node__Cell _ _ -> rt_node__Cell #num #flt x
+  | C__node__Figure _ _ _ -> rt_node__Figure #num #flt x
+  | C__node__Caption _ _ -> rt_node__Caption #num #flt x
+  | C__node__Footnote _ _ -> rt_node__Footnote #num #flt x
 
-and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 2]) =
+and rt_node__Document (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Document? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Document _ _ _ _ -> rt_vkind__Document #num #flt x
-  | C__vkind__Section _ _ _ -> rt_vkind__Section #num #flt x
-  | C__vkind__Paragraph _ -> rt_vkind__Paragraph #num #flt x
-  | C__vkind__ListBlock _ _ -> rt_vkind__ListBlock #num #flt x
-  | C__vkind__ListItem _ -> rt_vkind__ListItem #num #flt x
-  | C__vkind__Table _ _ -> rt_vkind__Table #num #flt x
-  | C__vkind__Row _ _ -> rt_vkind__Row #num #flt x
-  | C__vkind__Cell _ -> rt_vkind__Cell #num #flt x
-  | C__vkind__Figure _ _ -> rt_vkind__Figure #num #flt x
-  | C__vkind__Caption _ -> rt_vkind__Caption #num #flt x
-  | C__vkind__Footnote _ -> rt_vkind__Footnote #num #flt x
+  | C__node__Document i f0 f1 f2 f3 -> rt_e_locale #num #flt f1; rt_e_numbering #num #flt f2; rt_items_l_node #num #flt [] f3
 
-and rt_vkind__Document (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Document? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Section (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Section? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Document f0 f1 f2 f3 -> rt_items_l_node #num #flt [] f0; rt_e_locale #num #flt f1; rt_e_numbering #num #flt f2
+  | C__node__Section i f0 f1 f2 -> rt_items_l_u_run #num #flt [] f0; rt_e_heading_depth #num #flt f1; rt_items_l_node #num #flt [] f2
 
-and rt_vkind__Section (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Section? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Paragraph (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Paragraph? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Section f0 f1 f2 -> rt_items_l_node #num #flt [] f0; rt_e_heading_depth #num #flt f1; rt_items_l_u_run #num #flt [] f2
+  | C__node__Paragraph i f0 -> rt_items_l_u_run #num #flt [] f0
 
-and rt_vkind__Paragraph (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Paragraph? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__ListBlock (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__ListBlock? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Paragraph f0 -> rt_items_l_u_run #num #flt [] f0
+  | C__node__ListBlock i f0 f1 -> rt_e_list_style #num #flt f0; rt_items_l_node #num #flt [] f1
 
-and rt_vkind__ListBlock (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__ListBlock? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__ListItem (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__ListItem? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__ListBlock f0 f1 -> rt_items_l_node #num #flt [] f0; rt_e_list_style #num #flt f1
+  | C__node__ListItem i f0 -> rt_items_l_node #num #flt [] f0
 
-and rt_vkind__ListItem (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__ListItem? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Table (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Table? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__ListItem f0 -> rt_items_l_node #num #flt [] f0
+  | C__node__Table i f0 f1 -> (match f0 with | None -> () | Some w -> rt_items_l_u_run #num #flt [] w); rt_items_l_node #num #flt [] f1
 
-and rt_vkind__Table (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Table? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Row (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Row? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Table f0 f1 -> (match f0 with | None -> () | Some w -> rt_items_l_u_run #num #flt [] w); rt_items_l_node #num #flt [] f1
+  | C__node__Row i f0 f1 -> rt_items_l_node #num #flt [] f1
 
-and rt_vkind__Row (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Row? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Cell (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Cell? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Row f0 f1 -> rt_items_l_node #num #flt [] f0
+  | C__node__Cell i f0 -> rt_items_l_u_run #num #flt [] f0
 
-and rt_vkind__Cell (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Cell? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Figure (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Figure? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Cell f0 -> rt_items_l_u_run #num #flt [] f0
+  | C__node__Figure i f0 f1 -> rt_items_l_node #num #flt [] f1
 
-and rt_vkind__Figure (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Figure? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Caption (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Caption? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Figure f0 f1 -> rt_items_l_node #num #flt [] f0
+  | C__node__Caption i f0 -> rt_items_l_u_run #num #flt [] f0
 
-and rt_vkind__Caption (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Caption? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Footnote (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Footnote? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Caption f0 -> rt_items_l_u_run #num #flt [] f0
-
-and rt_vkind__Footnote (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Footnote? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
-  match x with
-  | C__vkind__Footnote f0 -> rt_items_l_node #num #flt [] f0
+  | C__node__Footnote i f0 -> rt_items_l_node #num #flt [] f0
 
 and rt_u_run (#num #flt: eqtype) (x: u_run num flt) : Lemma (ensures dec_u_run (enc_u_run #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with

@@ -2404,6 +2404,63 @@ the topic files share, and the cases that exercise the facade's `certify` rather
 the domains into topic files would have rewritten every file that names them, which is a different change
 from this one. No assertion changed.
 
+### The F\* target encodes the wire shape it declares, and the classifier's rules are one table (Phase 293) — ADDITIVE: one property added to `Diff`; two classifier verdicts and three documented rows change
+
+**`Fuaran.Core.Idl.Codegen`. Class: `additive` on the baseline — `Diff.mappingTable : string` is
+the one public addition (the seventeen surface baselines read, one moved by that line). Three
+classifier VERDICTS consumers read through the `classify` command move, and they are the point.**
+
+*The F\* proof model.* `FStarTarget` used to emit one shape whatever the vocabulary declared: the
+nested `("id", …) :: ("kind", …) :: envelope` object, every member list Ordinal-sorted, with the
+fixed keys prepended — so the committed `DocVocabulary.fst` announced a flat-kind envelope in
+declaration key order and modelled a document nobody sends. Every object literal is now laid out
+in the declared key order with the keys the shape places (the discriminator's tag, the node's `id`,
+the nested kind object) merged among the members under `Sorted` and leading them under `Declared`;
+under the flat envelope the node IS the kind union — one constructor per kind over the one object
+the wire has, `id` and the kind's and envelope's members together, and no `vkind` type at all. A
+member whose key the shape already carries (a flat kind field named `id` or the discriminator, or
+sharing an envelope member's key; an envelope member named `kind` under the nested shape; a union
+case field named the discriminator) is a typed `UnmodellableInFStar` naming the member and the
+object, never a literal with two entries under one key. The six committed models and proof scripts
+are regenerated and every query discharges on the pinned prover under `--quake 3`; the lookup count
+the proof shape emits now includes a fixed key that sorts after a conditional member (the reference
+vocabulary's `id` and `kind` after `hidden`), which is two more lemmas on `VocabularyProofs.fst`. A
+test holds each model's header to its encoder's text, and the encoder's key order to the
+INTERPRETER's (`Encode.encode`) over a sampled node per plain arm — the oracle is never the model.
+
+*The classifier.* `Diff`'s rules lived in seven parallel matches over the `Change` union plus a
+hand-copied table in `docs/idl-stability-classes.md`. They are now ONE descriptor table —
+rank, §11 family, wire verdict, F\# consequence, summary, documented rows — of which `classify`,
+`consequences`, the report's sort order, its one-line summaries, the three family predicates and
+`Diff.mappingTable` are projections; `stabilityImpact`, `profileBump` and `verdictClass` read one
+precedence (undecided, wire break, emitter break, addition, host-surface). The document's mapping
+table is a generated section held byte-equal to `mappingTable` by a test, with a row for every
+`Change` case by name. Three documented rows read differently and the code was right in each (a
+union's type parameters moving is `host-surface-only`; `omitDefault` to `required` is
+`breaking-for-emitters`); the third was a code defect: the erased-slot rule tested the top-level
+tag alone, so a type change across a NESTED `hosted` / `json` / `opaque` slot classified
+`breaking-wire` where the document said undecided — it is `undecided` (exit 4) at any depth now.
+
+*The two F\# consequence verdicts that change.* `defaultsDecl` makes a `mk<Kind>` parameter of every
+required field with no authoring default, so (1) an authoring default added to or removed from a
+required field, and (2) a kind field moving into or out of `required` with no default to stand in,
+each move the constructor's parameter list — `full-literal-construction` (every call site) where the
+axis read `no-generated-shape-change`. The consequence property test now reads the emitter that
+emits the constructors (`Gen.fsharpModule`), which is what found the second; the context-free
+`Diff.consequences` reads a default as a required field's, and the verdict over two artifacts asks
+the snapshots.
+
+*The generator.* `GenSupport.Docs` paths, `CaseRefines` keys and `KindProjections` keys are held to
+the vocabulary by `Gen.fsharpModuleWith`: a doc path the emission never consults, a refine on no
+referenced case, a projection on no selected kind — each a typed `UnsupportedConstruct` naming the
+key where it used to be a silent drop. The emitted header names the package version
+(`Fuaran.Core.Idl.Gen 0.34.0`) in place of a phase label frozen at first emission; a consumer's next
+regeneration moves that one comment line. The bare alias `defaultExpr` and the unused
+`reachesDeclared` / `bindNode` are gone; the F\* suffix-chain fold is linear.
+
+*Consumer edit.* None for a compiling consumer. A gate that pins a classifier verdict re-reads the
+three rows above; a regenerated proof model is a regenerated file.
+
 ### The `OpStream` module becomes a forwarding facade over the concern files (Phase 332) — ADDITIVE; no public surface moves
 
 **What changed.** Phase 296 split `OpStream.fs` by concern at the type level and left the `OpStream`
@@ -3067,7 +3124,7 @@ discharge to `footprintLawsAt` changes that row and is left to a change that own
 (`Conformance.footprintLawsAt`, `FoldConfluence.laneDag`); no existing member moves, and no wire byte.
 The roster gains one family, and `docs/conformance-families.md` / `.json` are regenerated.
 
-### The compacted stream lives on, checked JSONL writers, strict effect replay (Phase 301, DECISIONS.md D96) — ADDITIVE
+### The compacted stream lives on, checked JSONL writers, strict effect replay (Phase 301, DECISIONS.md D97) — ADDITIVE
 
 **What changed.** Compaction was terminal. `append` numbers a record from the length of the list it is
 handed and links it to that list's last hash, falling back to the genesis, so an append onto a
@@ -3110,11 +3167,11 @@ or a value with a trailing space — fails the new cell, naming the record and m
 streams never round-tripped through `toJsonl` / `fromJsonl`; the cell reports what was already true.
 This repository's own reducer fixture was such a domain and now encodes a JSON string. A host that
 compacts and keeps writing moves to `Compacted` and persists `Keys` beside the compacted file
-(DECISIONS.md D96); a host that writes JSONL moves to the `try…` writers.
+(DECISIONS.md D97); a host that writes JSONL moves to the `try…` writers.
 
 **What it does not do.** The pre-Phase-296 `OpStream.replayFrom` forward still does not check the
 seam (it is `Obsolete` and leaves after this draft); `Snapshots.replayFrom` and `Compacted.replayFrom`
-do. Nothing binds `Keys` into a hash, and no line format for it is minted here (D96). The capture
+do. Nothing binds `Keys` into a hash, and no line format for it is minted here (D97). The capture
 envelope's injectivity premise is stated bundled, not decomposed as the record envelope's was.
 
 **Class: additive.** `api/Fuaran.Core.OpStream.txt` and `api/Fuaran.Core.OpStream.Dag.txt` gain

@@ -41,6 +41,10 @@
        is what keeps every definition and every emitted lemma first-order.
 
    VOCABULARY. Discriminator "kind", flat-kind envelope, declaration key order.
+   The node is ONE object carrying the discriminator, `id`, the kind's members and the
+   envelope's: `node` has one constructor per kind, and there is no kind object.
+   Every object literal is in the encoder's construction order: fixed keys, then members
+   as declared. A shape the literal cannot carry is refused by name, never emitted.
    11 of 11 kinds are modelled; 2 declared types and 4 enums are reached.
    Every kind the vocabulary declares is modelled.
 
@@ -160,20 +164,17 @@ let dec_e_list_style (#num #flt: eqtype) (el: jval num flt) : Tot (outcome e_lis
    ====================================================================================== *)
 
 type node (num flt: eqtype) =
-  | C__node__Node : id:string -> k:(vkind num flt) -> node num flt
-
-and vkind (num flt: eqtype) =
-  | C__vkind__Document : children:(list (node num flt)) -> locale:(e_locale) -> numbering:(e_numbering) -> title:(option (string)) -> vkind num flt
-  | C__vkind__Section : children:(list (node num flt)) -> depth:(e_heading_depth) -> heading:(list (u_run num flt)) -> vkind num flt
-  | C__vkind__Paragraph : runs:(list (u_run num flt)) -> vkind num flt
-  | C__vkind__ListBlock : children:(list (node num flt)) -> style:(e_list_style) -> vkind num flt
-  | C__vkind__ListItem : children:(list (node num flt)) -> vkind num flt
-  | C__vkind__Table : caption:(option (list (u_run num flt))) -> children:(list (node num flt)) -> vkind num flt
-  | C__vkind__Row : children:(list (node num flt)) -> is_header:(bool) -> vkind num flt
-  | C__vkind__Cell : runs:(list (u_run num flt)) -> vkind num flt
-  | C__vkind__Figure : children:(list (node num flt)) -> source:(string) -> vkind num flt
-  | C__vkind__Caption : runs:(list (u_run num flt)) -> vkind num flt
-  | C__vkind__Footnote : children:(list (node num flt)) -> vkind num flt
+  | C__node__Document : id:string -> title:(option (string)) -> locale:(e_locale) -> numbering:(e_numbering) -> children:(list (node num flt)) -> node num flt
+  | C__node__Section : id:string -> heading:(list (u_run num flt)) -> depth:(e_heading_depth) -> children:(list (node num flt)) -> node num flt
+  | C__node__Paragraph : id:string -> runs:(list (u_run num flt)) -> node num flt
+  | C__node__ListBlock : id:string -> style:(e_list_style) -> children:(list (node num flt)) -> node num flt
+  | C__node__ListItem : id:string -> children:(list (node num flt)) -> node num flt
+  | C__node__Table : id:string -> caption:(option (list (u_run num flt))) -> children:(list (node num flt)) -> node num flt
+  | C__node__Row : id:string -> is_header:(bool) -> children:(list (node num flt)) -> node num flt
+  | C__node__Cell : id:string -> runs:(list (u_run num flt)) -> node num flt
+  | C__node__Figure : id:string -> source:(string) -> children:(list (node num flt)) -> node num flt
+  | C__node__Caption : id:string -> runs:(list (u_run num flt)) -> node num flt
+  | C__node__Footnote : id:string -> children:(list (node num flt)) -> node num flt
 
 and u_run (num flt: eqtype) =
   | C__u_run__Text : value:(string) -> u_run num flt
@@ -192,33 +193,28 @@ and u_run (num flt: eqtype) =
 
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
-  | C__node__Node i k  ->
-    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: [])
-
-and enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) =
-  match x with
-  | C__vkind__Document f0 f1 f2 f3 ->
-    JObj (("kind", JStr "Document") :: ("children", JArr (enc_items_l_node f0)) :: ("locale", enc_e_locale f1) :: ("numbering", enc_e_numbering f2) :: (match f3 with | None -> [] | Some w -> ("title", JStr w) :: []))
-  | C__vkind__Section f0 f1 f2 ->
-    JObj (("kind", JStr "Section") :: ("children", JArr (enc_items_l_node f0)) :: ("depth", enc_e_heading_depth f1) :: ("heading", JArr (enc_items_l_u_run f2)) :: [])
-  | C__vkind__Paragraph f0 ->
-    JObj (("kind", JStr "Paragraph") :: ("runs", JArr (enc_items_l_u_run f0)) :: [])
-  | C__vkind__ListBlock f0 f1 ->
-    JObj (("kind", JStr "ListBlock") :: ("children", JArr (enc_items_l_node f0)) :: ("style", enc_e_list_style f1) :: [])
-  | C__vkind__ListItem f0 ->
-    JObj (("kind", JStr "ListItem") :: ("children", JArr (enc_items_l_node f0)) :: [])
-  | C__vkind__Table f0 f1 ->
-    JObj (("kind", JStr "Table") :: (match f0 with | None -> ("children", JArr (enc_items_l_node f1)) :: [] | Some w -> ("caption", JArr (enc_items_l_u_run w)) :: ("children", JArr (enc_items_l_node f1)) :: []))
-  | C__vkind__Row f0 f1 ->
-    JObj (("kind", JStr "Row") :: ("children", JArr (enc_items_l_node f0)) :: ("isHeader", JBool f1) :: [])
-  | C__vkind__Cell f0 ->
-    JObj (("kind", JStr "Cell") :: ("runs", JArr (enc_items_l_u_run f0)) :: [])
-  | C__vkind__Figure f0 f1 ->
-    JObj (("kind", JStr "Figure") :: ("children", JArr (enc_items_l_node f0)) :: ("source", JStr f1) :: [])
-  | C__vkind__Caption f0 ->
-    JObj (("kind", JStr "Caption") :: ("runs", JArr (enc_items_l_u_run f0)) :: [])
-  | C__vkind__Footnote f0 ->
-    JObj (("kind", JStr "Footnote") :: ("children", JArr (enc_items_l_node f0)) :: [])
+  | C__node__Document i f0 f1 f2 f3 ->
+    JObj (("kind", JStr "Document") :: ("id", JStr i) :: (match f0 with | None -> ("locale", enc_e_locale f1) :: ("numbering", enc_e_numbering f2) :: ("children", JArr (enc_items_l_node f3)) :: [] | Some w -> ("title", JStr w) :: ("locale", enc_e_locale f1) :: ("numbering", enc_e_numbering f2) :: ("children", JArr (enc_items_l_node f3)) :: []))
+  | C__node__Section i f0 f1 f2 ->
+    JObj (("kind", JStr "Section") :: ("id", JStr i) :: ("heading", JArr (enc_items_l_u_run f0)) :: ("depth", enc_e_heading_depth f1) :: ("children", JArr (enc_items_l_node f2)) :: [])
+  | C__node__Paragraph i f0 ->
+    JObj (("kind", JStr "Paragraph") :: ("id", JStr i) :: ("runs", JArr (enc_items_l_u_run f0)) :: [])
+  | C__node__ListBlock i f0 f1 ->
+    JObj (("kind", JStr "ListBlock") :: ("id", JStr i) :: ("style", enc_e_list_style f0) :: ("children", JArr (enc_items_l_node f1)) :: [])
+  | C__node__ListItem i f0 ->
+    JObj (("kind", JStr "ListItem") :: ("id", JStr i) :: ("children", JArr (enc_items_l_node f0)) :: [])
+  | C__node__Table i f0 f1 ->
+    JObj (("kind", JStr "Table") :: ("id", JStr i) :: (match f0 with | None -> ("children", JArr (enc_items_l_node f1)) :: [] | Some w -> ("caption", JArr (enc_items_l_u_run w)) :: ("children", JArr (enc_items_l_node f1)) :: []))
+  | C__node__Row i f0 f1 ->
+    JObj (("kind", JStr "Row") :: ("id", JStr i) :: ("isHeader", JBool f0) :: ("children", JArr (enc_items_l_node f1)) :: [])
+  | C__node__Cell i f0 ->
+    JObj (("kind", JStr "Cell") :: ("id", JStr i) :: ("runs", JArr (enc_items_l_u_run f0)) :: [])
+  | C__node__Figure i f0 f1 ->
+    JObj (("kind", JStr "Figure") :: ("id", JStr i) :: ("source", JStr f0) :: ("children", JArr (enc_items_l_node f1)) :: [])
+  | C__node__Caption i f0 ->
+    JObj (("kind", JStr "Caption") :: ("id", JStr i) :: ("runs", JArr (enc_items_l_u_run f0)) :: [])
+  | C__node__Footnote i f0 ->
+    JObj (("kind", JStr "Footnote") :: ("id", JStr i) :: ("children", JArr (enc_items_l_node f0)) :: [])
 
 and enc_u_run (#num #flt: eqtype) (x: u_run num flt) : Tot (jval num flt) (decreases x) =
   match x with
@@ -256,65 +252,61 @@ and enc_items_l_u_run (#num #flt: eqtype) (xs: list (u_run num flt)) : Tot (list
 
 let rec dec_node (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (node num flt)) (decreases %[(jsize el <: nat); 0]) =
   let oid : outcome string = str_field "id" el in
-  let ok : outcome (vkind num flt) = (match get_prop "kind" el with | Error e -> Error e | Ok v -> dec_vkind v) in
-  (match oid with | Error e -> Error e | Ok i -> (match ok with | Error e -> Error e | Ok k -> Ok (C__node__Node i k )))
-
-and dec_vkind (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (vkind num flt)) (decreases %[(jsize el <: nat); 0]) =
   match str_field "kind" el with
   | Error e -> Error e
   | Ok tag ->
     if tag = "Document" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      let o0 : outcome (option (string)) = (match get_prop "title" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
       let o1 : outcome (e_locale) = (match get_prop "locale" el with | Error e -> Error e | Ok v -> (match dec_e_locale v with | Error e -> Error e | Ok w -> Ok w)) in
       let o2 : outcome (e_numbering) = (match get_prop "numbering" el with | Error e -> Error e | Ok v -> (match dec_e_numbering v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o3 : outcome (option (string)) = (match get_prop "title" el with | Error _ -> Ok None | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok (Some w))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> Ok (C__vkind__Document f0 f1 f2 f3)))))
+      let o3 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> (match o3 with | Error e -> Error e | Ok f3 -> Ok (C__node__Document i f0 f1 f2 f3))))))
     else
     if tag = "Section" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      let o0 : outcome (list (u_run num flt)) = (match get_prop "heading" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_u_run [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
       let o1 : outcome (e_heading_depth) = (match get_prop "depth" el with | Error e -> Error e | Ok v -> (match dec_e_heading_depth v with | Error e -> Error e | Ok w -> Ok w)) in
-      let o2 : outcome (list (u_run num flt)) = (match get_prop "heading" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_u_run [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__vkind__Section f0 f1 f2))))
+      let o2 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> (match o2 with | Error e -> Error e | Ok f2 -> Ok (C__node__Section i f0 f1 f2)))))
     else
     if tag = "Paragraph" then
       let o0 : outcome (list (u_run num flt)) = (match get_prop "runs" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_u_run [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__Paragraph f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__Paragraph i f0)))
     else
     if tag = "ListBlock" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (e_list_style) = (match get_prop "style" el with | Error e -> Error e | Ok v -> (match dec_e_list_style v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__ListBlock f0 f1)))
+      let o0 : outcome (e_list_style) = (match get_prop "style" el with | Error e -> Error e | Ok v -> (match dec_e_list_style v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__ListBlock i f0 f1))))
     else
     if tag = "ListItem" then
       let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__ListItem f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__ListItem i f0)))
     else
     if tag = "Table" then
       let o0 : outcome (option (list (u_run num flt))) = (match get_prop "caption" el with | Error _ -> Ok None | Ok v -> (match v with | JArr ys -> (match dec_items_l_u_run [] ys with | Error e -> Error e | Ok w -> Ok (Some w)) | other -> Error ("expected array, got " ^ kind_name other))) in
       let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__Table f0 f1)))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__Table i f0 f1))))
     else
     if tag = "Row" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (bool) = (match get_prop "isHeader" el with | Error e -> Error e | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__Row f0 f1)))
+      let o0 : outcome (bool) = (match get_prop "isHeader" el with | Error e -> Error e | Ok v -> (match as_bool v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__Row i f0 f1))))
     else
     if tag = "Cell" then
       let o0 : outcome (list (u_run num flt)) = (match get_prop "runs" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_u_run [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__Cell f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__Cell i f0)))
     else
     if tag = "Figure" then
-      let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      let o1 : outcome (string) = (match get_prop "source" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
-      (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__vkind__Figure f0 f1)))
+      let o0 : outcome (string) = (match get_prop "source" el with | Error e -> Error e | Ok v -> (match as_string v with | Error e -> Error e | Ok w -> Ok w)) in
+      let o1 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> (match o1 with | Error e -> Error e | Ok f1 -> Ok (C__node__Figure i f0 f1))))
     else
     if tag = "Caption" then
       let o0 : outcome (list (u_run num flt)) = (match get_prop "runs" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_u_run [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__Caption f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__Caption i f0)))
     else
     if tag = "Footnote" then
       let o0 : outcome (list (node num flt)) = (match get_prop "children" el with | Error e -> Error e | Ok v -> (match v with | JArr ys -> (match dec_items_l_node [] ys with | Error e -> Error e | Ok w -> Ok w) | other -> Error ("expected array, got " ^ kind_name other))) in
-      (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__vkind__Footnote f0))
+      (match oid with | Error e -> Error e | Ok i -> (match o0 with | Error e -> Error e | Ok f0 -> Ok (C__node__Footnote i f0)))
     else
     Error ("unknown kind: " ^ tag)
 

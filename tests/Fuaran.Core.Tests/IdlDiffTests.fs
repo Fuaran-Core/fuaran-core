@@ -751,3 +751,155 @@ let correctedRuleTests =
                   (consequencesOf (fn "() => void") (fn "() => unknown"))
                   [ Diff.NoGeneratedShapeChange ]
                   "a TypeScript-only move leaves the F# shape where it was") ]
+
+// ---------------------------------------------------------------------------
+// Phase 293 — the descriptor table: the erased-slot rule walks nested slots, an authoring
+// default's consequence follows the field's optionality, and the three verdict readers
+// share one precedence.
+// ---------------------------------------------------------------------------
+
+let private verdictOf (before: Idl) (after: Idl) =
+    match Diff.classifyDiff before after with
+    | Ok v -> v
+    | Error e -> failtestf "classify: %s" e
+
+let private withDefaults (idl: Idl) (defaults: IdlDefault list) = { idl with Defaults = defaults }
+
+[<Tests>]
+let descriptorTableTests =
+    testList
+        "Phase 293 — the classifier's descriptor table"
+        [ testCase "a type change across a NESTED erased slot is undecided, exit 4, and shape-unreadable" (fun _ ->
+              // The rule used to test the top-level tag alone, so a list of hosted values
+              // moving to a list of verbatim JSON reported `breaking-wire` where the document
+              // said undecided — the artifact states nothing about what either slot admits.
+              let before = oneField (TList(THosted dateCodec))
+              let after = oneField (TList TJson)
+              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "undecided, not breaking"
+              Expect.equal (exitOf before after) 4 "exit 4"
+
+              Expect.equal
+                  (consequencesOf before after)
+                  [ Diff.GeneratedShapeUnreadable ]
+                  "and the F# axis is reported unreadable rather than guessed")
+
+          testCase "a nested type change that crosses no erased slot is still decided" (fun _ ->
+              let before = oneField (TList TStr)
+              let after = oneField (TList TInt)
+
+              Expect.equal
+                  (severities (diffOf before after))
+                  [ Diff.BreakingWire ]
+                  "a value that decoded no longer does"
+
+              Expect.equal (exitOf before after) 3 "exit 3")
+
+          testCase "a map value and a union argument are walked too" (fun _ ->
+              let before = oneField (TMap(THosted dateCodec))
+              let after = oneField (TMap TOpaque)
+              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "a map's value slot")
+
+          testCase
+              "an authoring default on a REQUIRED field is a construction break — `mk<Kind>` loses the parameter"
+              (fun _ ->
+                  let before = oneField TStr
+
+                  let after =
+                      withDefaults
+                          before
+                          [ { Kind = "Weight"
+                              Field = "grams"
+                              Value = VStr "0" } ]
+
+                  let v = verdictOf before after
+
+                  Expect.contains
+                      v.FSharpConsequences
+                      Diff.FullLiteralConstruction
+                      "every `mkWeight` call site stops compiling: the parameter is gone"
+
+                  Expect.contains
+                      v.FSharpConsequences
+                      Diff.StalePackageSlot
+                      "a shape change carries the stale-slot consequence"
+
+                  let removed = verdictOf after before
+
+                  Expect.contains
+                      removed.FSharpConsequences
+                      Diff.FullLiteralConstruction
+                      "and removing it brings the parameter back, which breaks every call site again")
+
+          testCase "an authoring default on an OPTIONAL field moves no generated shape" (fun _ ->
+              let before =
+                  { empty with
+                      Kinds = [ kind "Weight" [ f "grams" TStr Required; f "label" TStr Optional ] ] }
+
+              let after =
+                  withDefaults
+                      before
+                      [ { Kind = "Weight"
+                          Field = "label"
+                          Value = VStr "kg" } ]
+
+              Expect.equal
+                  (verdictOf before after).FSharpConsequences
+                  [ Diff.NoGeneratedShapeChange ]
+                  "the constructor's body moves; its parameter list does not")
+
+          testCase
+              "without a snapshot to ask, the context-free `consequences` reads a default as a required field's"
+              (fun _ ->
+                  let c = Diff.classify (Diff.DefaultAdded("Weight", "grams", "0"))
+
+                  Expect.equal
+                      (Diff.consequences c)
+                      [ Diff.FullLiteralConstruction; Diff.StalePackageSlot ]
+                      "the answer that costs a rebuild rather than a surprise")
+
+          testCase
+              "an undecided row heads the verdict even beside a breaking one, and the drafts say what is certain"
+              (fun _ ->
+                  // One precedence for the class, the front-matter draft and the profile advice:
+                  // undecided dominates the CLASS, and the two prose drafts report the breaking
+                  // remainder as certain rather than as conditional on the undecided row's check.
+                  let before =
+                      { empty with
+                          Kinds = [ kind "Weight" [ f "grams" TStr Required; f "when" (THosted dateCodec) Required ] ] }
+
+                  let after =
+                      { empty with
+                          Kinds = [ kind "Weight" [ f "grams" TInt Required; f "when" TJson Required ] ] }
+
+                  let v = verdictOf before after
+                  Expect.equal (Diff.verdictClass v) Diff.VerdictClass.Undecided "undecided heads the class"
+
+                  Expect.equal
+                      v.StabilityImpact
+                      "breaking"
+                      "the draft impact is certain: a breaking row stands whatever the check finds"
+
+                  Expect.stringContains v.ProfileAdvice "MAJOR" "and so is the profile bump")
+
+          testCase
+              "the report orders its rows by the descriptor table's rank, host-surface rows last among equals"
+              (fun _ ->
+                  let before =
+                      { empty with
+                          Kinds = [ kind "A" [ f "x" TStr Required ] ] }
+
+                  let after =
+                      { empty with
+                          Kinds = [ kind "A" [ f "x" TStr Required ]; kind "B" [] ]
+                          Enums =
+                              [ { Name = "E"
+                                  Cases = [ "P" ]
+                                  Wires = []
+                                  CaseAnnotations = [] } ] }
+
+                  let cs = diffOf before after |> List.map (fun c -> c.Change)
+
+                  Expect.equal
+                      cs
+                      [ Diff.KindAdded "B"; Diff.EnumAdded "E" ]
+                      "a kind (rank 10) sorts before an enum (rank 40), as the table ranks them") ]

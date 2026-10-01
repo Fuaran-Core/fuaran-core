@@ -1,4 +1,4 @@
-// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.
+// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 0.34.0. Do not edit by hand.
 module Fuaran.Core.Tests.DocAnnotatedGenerated
 #nowarn "44" // this layer implements every declared member, including deprecated ones
 
