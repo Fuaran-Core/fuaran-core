@@ -2387,10 +2387,13 @@ The host then dropped the entry, and changed its gate in two ways a split produc
 cut no longer compiles the compute packages (they pin an older Core until this release is published,
 so their own producer's cut gates them, and the run prints that it skipped them), and its smoke
 program compiles against both Core lines (`EffectClass.Determinism` is a set from this slot, Phase
-319). The re-run is the one this slot cites: **compile leg green — 15 Fuaran.Core packages
+319). The re-run passed: compile leg green over 15 Fuaran.Core packages, value leg 307/307. **Phase 330 then
+landed on this slot** (the kit's last three `…With` entries reordered, six witness records frozen), which
+moves the Conformance package the gate compiles, so the candidate was re-packed from commit `727f2e5`
+and the gate re-run. That run is the one this slot cites: **compile leg green — 15 Fuaran.Core packages
 transpiled at 0.33.0, compute packages skipped — and value leg green, 307/307 vectors byte-identical
 on both pipelines at 0.33.0.** No run named a defect in Core's code. Only this ledger has changed
-since `095d6f9`, so the packages a release builds are the ones the gate measured.
+since `727f2e5`, so the packages a release builds are the ones the gate measured.
 
 **It is a MINOR slot because the change that opens it is BREAKING.** `0.32.0` is tagged, so it is a
 consumer's contract and nothing rides it. Phase 258 removes four packages from this repository's
