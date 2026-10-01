@@ -320,7 +320,12 @@
          `0.33.0`, and this repository's `0.32.0` emissions of them stay on nuget.org. BREAKING —
          four packages leave the roster, a `removal` for a consumer taking them from here — so `0.32.0`,
          which is tagged, is advanced rather than ridden. See STABILITY.md "0.33.0 — DRAFT". -->
-    <Version>0.33.0</Version>
+    <!-- 0.34.0 (2026-10-01): an ADDITIVE draft slot opened over the tagged 0.33.0. Its first
+         changes are Phase 331 (the conformance tests split along the kit's topic files) and Phase
+         332 (the OpStream module behind a forwarding facade); neither moves a public surface. Later
+         additive phases ride this slot; a breaking one advances it. See STABILITY.md
+         "0.34.0 — DRAFT". -->
+    <Version>0.34.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
