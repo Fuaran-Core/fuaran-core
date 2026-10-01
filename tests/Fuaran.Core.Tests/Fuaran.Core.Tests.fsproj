@@ -33,9 +33,16 @@
     <Compile Include="EffectAuditTests.fs" />
     <Compile Include="SchemaTests.fs" />
     <Compile Include="ConformanceTests.fs" />
+    <Compile Include="TreeLawsTests.fs" />
     <Compile Include="KeyedApplyTests.fs" />
+    <Compile Include="StreamLawsTests.fs" />
+    <Compile Include="IntegrityLawsTests.fs" />
     <Compile Include="FootprintTests.fs" />
     <Compile Include="ConcurrencyTests.fs" />
+    <Compile Include="SeamLawsTests.fs" />
+    <Compile Include="FunctionLawsTests.fs" />
+    <Compile Include="PropagationLawsTests.fs" />
+    <Compile Include="SurfaceLawsTests.fs" />
     <Compile Include="WitnessLawTests.fs" />
     <Compile Include="WitnessSurfaceTests.fs" />
     <Compile Include="ReducerTests.fs" />

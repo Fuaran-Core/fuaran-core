@@ -2375,6 +2375,28 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.34.0 — DRAFT
+
+**Phase 331 — `tests/Fuaran.Core.Tests/ConformanceTests.fs` is split along the conformance kit's topic
+files. Class: `additive`, and the whole of it is tests: no package's public surface moves (the seventeen
+surface baselines read, none moved).** Phase 297 split the kit's source into topic files and deferred the
+matching split of its test file, because sibling phases were appending cases to it. That file held
+the cases of every law family in one 2,400-line module, so a change to one family edited the file every
+other family's phase was editing.
+
+Seven test files now mirror the kit's topic files — `TreeLawsTests`, `StreamLawsTests`,
+`IntegrityLawsTests`, `SeamLawsTests`, `FunctionLawsTests`, `PropagationLawsTests` and
+`SurfaceLawsTests` — registered in the test project in the kit's compile order. Each case moved verbatim
+(names, bodies, order within a topic), and the list a case is registered under kept its name, so the
+Expecto test list is identical before and after, by name and by count (1,531 listed lines each).
+Three lists keep their old names over cases that now live in other files — the `casLaws` cases still read
+`Conformance.functionVerify/…` — because the name is the identity a filter or a recorded result keys on.
+
+`ConformanceTests.fs` keeps what several files compile against: the reference domains and generators
+(the counter stream witness, the keyed and formula-sheet domains, the validity oracle), the guard helpers
+the topic files share, and the cases that exercise the facade's `certify` rather than one family. Moving
+the domains into topic files would have rewritten every file that names them, which is a different change
+from this one. No assertion changed.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
