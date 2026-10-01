@@ -165,7 +165,9 @@ reaches one of settled, pending or refused. Then dispatch through the very path 
 - **F3 — `Decode` returns `Result`.** `StreamWitness.Decode : string -> Result<'Op,string>` — most
   domains already have a `Result`-returning decoder, so just plug it in (no exception adapter).
 - **F4 — hash format.** Core's chain payload differs from a hand-rolled one, so re-expressing changes
-  the hashes; a domain with persisted streams needs a migration (Phase 255, when it lands).
+  the hashes; a domain with persisted streams migrates by sealing its converted state and continuing from
+  it — a linear stream through `OpStream.Snapshots`, a lane DAG through `Dag.sealAt` (Phase 288), which
+  seals an imported state without replaying the history that produced it.
 - **F5 — typed actors.** Core's op-stream actor is the typed `Actor` (`Human` / `Agent`) since Phase
   320, folded into the hash as step 3 shows; map your own actor type onto it at the seam.
 - **F6 — the win.** Core's `fromJsonl` is portable (FSharp.Core only), so your Fable host can
