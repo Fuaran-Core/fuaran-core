@@ -8008,18 +8008,24 @@ let private modelOutcomeRender
     | ModelProp.Error(ModelProp.EvalUndeclaredRead(n, r)) -> sprintf "EvalUndeclaredRead %s %s" n r
 
 type private PropTally =
-    { PDiffs: string list
-      Graphs: int
-      CyclicGraphs: int
-      DanglingGraphs: int
-      OrdersDistinct: int
-      DirtyNodes: int
-      CleanNodes: int
-      Reused: int
-      AbsentRecomputed: int
-      Agreed: int
-      NodeFailed: int
-      UnknownRefused: int }
+    {
+        PDiffs: string list
+        Graphs: int
+        CyclicGraphs: int
+        DanglingGraphs: int
+        OrdersDistinct: int
+        DirtyNodes: int
+        CleanNodes: int
+        Reused: int
+        AbsentRecomputed: int
+        Agreed: int
+        NodeFailed: int
+        UnknownRefused: int
+        /// Phase 317 — trials where `eval` succeeded and `evalFor` was held to it on the needed set.
+        PullAgreed: int
+        /// Phase 317 — trials whose needed set left at least one node of the map out.
+        PullPartial: int
+    }
 
 let private propProbe
     (bridge: Map<string, Set<string>> -> ModelProp.dmap)
@@ -8246,6 +8252,93 @@ let private propProbe
                     absentRecomputed <- absentRecomputed + 1
                 | _ -> ()
 
+    // (6) Phase 317 — the PULL: `neededFor`, `evalFor` and `evalForWith` against `needed_for`,
+    // `eval_for`, `eval_for_with` and `walk_for_invoked`, over a drawn TARGET set — one or two ids,
+    // one trial in eight also naming an id the map does not hold. The targets are drawn from a
+    // stream of their own, seeded by the trial, so the draws every leg above makes are unchanged.
+    let mutable targetRng = ConfRng.ofSeed (31700 + i)
+
+    let tdraw n =
+        let v, r' = ConfRng.intBelow n targetRng
+        targetRng <- r'
+        v
+
+    let targets =
+        [ for _ in 0 .. tdraw 2 -> string (tdraw nNodes) ]
+        @ (if tdraw 8 = 0 then [ "no-such-id" ] else [])
+        |> Set.ofList
+
+    let prodNeeded = Propagation.neededFor deps targets
+    let modelNeeded = Set.ofList (ModelProp.needed_for mdeps (Set.toList targets))
+
+    if prodNeeded <> modelNeeded then
+        diffs <-
+            sprintf
+                "%s targets=%A: needed production=%A model=%A"
+                where
+                (Set.toList targets)
+                (Set.toList prodNeeded)
+                (Set.toList modelNeeded)
+            :: diffs
+
+    let pullInvoked = ResizeArray()
+
+    let prodPull =
+        Propagation.evalFor (propProdEvaluator spec1 pullInvoked) targets deps
+
+    let modelPull =
+        ModelProp.eval_for (propModelEvaluator spec1) mreads (Set.toList targets) mdeps mtopo
+
+    if prodOutcomeRender prodPull <> modelOutcomeRender modelPull then
+        diffs <-
+            sprintf
+                "%s targets=%A: evalFor production=%s model=%s"
+                where
+                (Set.toList targets)
+                (prodOutcomeRender prodPull)
+                (modelOutcomeRender modelPull)
+            :: diffs
+
+    let modelPullInvoked =
+        ModelProp.walk_for_invoked (propModelEvaluator spec1) mreads (Set.toList targets) mdeps mtopo
+
+    if List.ofSeq pullInvoked <> modelPullInvoked then
+        diffs <-
+            sprintf
+                "%s targets=%A: evalFor EVALUATED production=%A model=%A"
+                where
+                (Set.toList targets)
+                (List.ofSeq pullInvoked)
+                modelPullInvoked
+            :: diffs
+
+    let prodPullWith =
+        Propagation.evalForWith (fun resolve _ id -> spec1 resolve id) targets deps
+
+    let modelPullWith =
+        ModelProp.eval_for_with (ModelProp.lift (propModelEvaluator spec1)) mreads (Set.toList targets) mdeps mtopo
+
+    if prodOutcomeRender prodPullWith <> modelOutcomeRender modelPullWith then
+        diffs <-
+            sprintf "%s targets=%A: evalForWith disagrees" where (Set.toList targets)
+            :: diffs
+
+    // the theorem on the shipped driver: where `eval` succeeds, `evalFor` is it on the needed set
+    let pulledAgreed =
+        match Propagation.eval (propProdEvaluator spec1 (ResizeArray())) deps, prodPull with
+        | Ok full, Ok pulled ->
+            let expected: Propagation.EvalOutcome<int> =
+                { Values = full.Values |> Map.filter (fun k _ -> Set.contains k prodNeeded)
+                  Cyclic = full.Cyclic |> List.filter (List.exists (fun n -> Set.contains n prodNeeded)) }
+
+            if pulled <> expected then
+                diffs <-
+                    sprintf "%s targets=%A: evalFor IS NOT eval on the needed set" where (Set.toList targets)
+                    :: diffs
+
+            1
+        | _ -> 0
+
     { PDiffs = acc.PDiffs @ List.rev diffs
       Graphs = acc.Graphs + 1
       CyclicGraphs = acc.CyclicGraphs + (if topo.Cycles.IsEmpty then 0 else 1)
@@ -8266,7 +8359,9 @@ let private propProbe
       AbsentRecomputed = acc.AbsentRecomputed + absentRecomputed
       Agreed = acc.Agreed + agreed
       NodeFailed = acc.NodeFailed + nodeFailed
-      UnknownRefused = acc.UnknownRefused + unknownRefused },
+      UnknownRefused = acc.UnknownRefused + unknownRefused
+      PullAgreed = acc.PullAgreed + pulledAgreed
+      PullPartial = acc.PullPartial + (if Set.count prodNeeded < nNodes then 1 else 0) },
     r
 
 let private propDifferential
@@ -8288,7 +8383,9 @@ let private propDifferential
           AbsentRecomputed = 0
           Agreed = 0
           NodeFailed = 0
-          UnknownRefused = 0 }
+          UnknownRefused = 0
+          PullAgreed = 0
+          PullPartial = 0 }
 
     for i in 1..trials do
         let t, r' = propProbe bridge i tally rng
@@ -15171,7 +15268,7 @@ let proofOracleTests =
           // ---- Phase 186: the incremental promise (proofs/Propagation.fst) ----
 
           testCase
-              "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval and evalFrom, over generated dependency maps and change sets"
+              "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval, evalFrom, neededFor, evalFor and evalForWith, over generated dependency maps, change sets and target sets"
           <| fun _ ->
               let t = propDifferential depsToModel 1861 400
 
@@ -15222,6 +15319,17 @@ let proofOracleTests =
                       20
                       (sprintf "an unknown change was refused (unknownRefused=%d)" t.UnknownRefused)
 
+                  // Phase 317 — the pull leg: every trial draws a target set beside its change set.
+                  Expect.isGreaterThan
+                      t.PullAgreed
+                      200
+                      (sprintf "evalFor was eval on the needed set on the shipped driver (pullAgreed=%d)" t.PullAgreed)
+
+                  Expect.isGreaterThan
+                      t.PullPartial
+                      100
+                      (sprintf "target sets that need less than the whole map arose (pullPartial=%d)" t.PullPartial)
+
                   Expect.equal (propDifferential depsToModel 1861 400) t "same seed => identical tally"
 
           testCase
@@ -15237,6 +15345,10 @@ let proofOracleTests =
               Expect.isTrue
                   (t.PDiffs |> List.exists (fun d -> d.Contains ": dirty production="))
                   "and the disagreement reaches the DIRTY SET, which is what the lost edge shrinks"
+
+              Expect.isTrue
+                  (t.PDiffs |> List.exists (fun d -> d.Contains ": needed production="))
+                  "and it reaches the NEEDED SET (Phase 317), which the lost edge shrinks from the other side"
 
               Expect.isTrue
                   (t.PDiffs |> List.exists (fun d -> d.Contains ": evalFrom production="))

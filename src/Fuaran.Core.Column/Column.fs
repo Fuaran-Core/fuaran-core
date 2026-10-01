@@ -1061,11 +1061,36 @@ module Table =
 /// relative order. A *rename* surfaces as a removed+added pair (the schema carries no rename intent; a
 /// consumer that knows a rename happened reads it from that pair). Nullability is not a schema-level
 /// fact in this model (it is the per-cell validity mask), so it is not part of the delta.
+///
+/// **`Order` makes the delta a transform (Phase 317).** `Reordered` says THAT the common columns
+/// moved, not WHERE to — and an added column's position is not recorded by anything else — so
+/// until this field a delta could be read but not replayed. `Order` is the target's column order,
+/// left EMPTY exactly when the target's order is the one `Schema.patch` derives without it: the
+/// surviving columns in their old order, then the added ones in the order `Added` lists them. So
+/// `diff a a` is `Schema.identityDelta` — every list empty, `Reordered` false — and
+/// `Schema.patch old (Schema.diff old target) = Ok target`. `Reordered` keeps its meaning and is
+/// now implied by `Order` (a reorder of the common columns is never the derived order).
 type SchemaDelta =
     { Added: (string * ColumnType) list
       Removed: (string * ColumnType) list
       Retyped: (string * ColumnType * ColumnType) list
-      Reordered: bool }
+      Reordered: bool
+      Order: string list }
+
+/// Why `Schema.patch` refused a delta (Phase 317) — named and enumerated (GP5). A refusal says the
+/// delta was not computed against the schema it is applied to; `patch` never repairs one.
+type SchemaError =
+    /// The schema names a column twice, so no delta can address its columns by name.
+    | DuplicateColumn of column: string
+    /// A removed or retyped column the schema does not hold.
+    | AbsentColumn of column: string
+    /// A removed or retyped column whose type in the schema is not the one the delta records.
+    | TypeDisagrees of column: string * expected: ColumnType * got: ColumnType
+    /// An added column the schema already holds.
+    | AlreadyPresent of column: string
+    /// An `Order` that is not a permutation of the columns the delta leaves: `expected` is that
+    /// column set in the derived order, `got` the order the delta carries.
+    | OrderMismatch of expected: string list * got: string list
 
 /// A compatibility verdict for a schema change relative to the columns a consumer actually depends on
 /// (Phase 33) — the data-strand analogue of `verifyChain` for the op-stream. Recoverable + enumerated
@@ -1109,10 +1134,88 @@ module Schema =
         let commonNew =
             target |> List.map fst |> List.filter (fun n -> Map.containsKey n oldMap)
 
+        // The order `patch` derives without being told (Phase 317): the survivors in old order,
+        // then the added columns in target order. `Order` is recorded only when the target differs.
+        let derived = commonOld @ (added |> List.map fst)
+        let targetOrder = target |> List.map fst
+
         { Added = added
           Removed = removed
           Retyped = retyped
-          Reordered = commonOld <> commonNew }
+          Reordered = commonOld <> commonNew
+          Order = if targetOrder = derived then [] else targetOrder }
+
+    /// The delta that changes nothing (Phase 317): every list empty, `Reordered` false. It is what
+    /// `diff a a` returns for every `a`, and `patch s identityDelta = Ok s` for every schema `s`
+    /// that names no column twice.
+    let identityDelta: SchemaDelta =
+        { Added = []
+          Removed = []
+          Retyped = []
+          Reordered = false
+          Order = [] }
+
+    /// Apply a delta to a schema (Phase 317) — the transform `diff` is the report of, so a host that
+    /// records deltas beside `fingerprint` can replay them. In order: every `Removed` column must be
+    /// present with the recorded type and leaves; every `Retyped` column must be present with its
+    /// recorded FROM type and takes its TO type in place; every `Added` column must be absent and is
+    /// appended, in the order listed; then a non-empty `Order` must be a permutation of the columns
+    /// that result, and is their order. Anything else is a named `SchemaError`, never a repair.
+    ///
+    /// **The law:** `patch old (diff old target) = Ok target` for every pair of schemas that each name
+    /// no column twice — including reorders and added columns placed anywhere — and
+    /// `diff a a = identityDelta`. Total.
+    let patch (old: Schema) (delta: SchemaDelta) : Result<Schema, SchemaError> =
+        let typeOf (s: Schema) (name: string) =
+            s |> List.tryPick (fun (n, t) -> if n = name then Some t else None)
+
+        let rec removeAll (s: Schema) (xs: (string * ColumnType) list) =
+            match xs with
+            | [] -> Ok s
+            | (name, ty) :: rest ->
+                match typeOf s name with
+                | None -> Error(AbsentColumn name)
+                | Some t when t <> ty -> Error(TypeDisagrees(name, ty, t))
+                | Some _ -> removeAll (s |> List.filter (fun (n, _) -> n <> name)) rest
+
+        let rec retypeAll (s: Schema) (xs: (string * ColumnType * ColumnType) list) =
+            match xs with
+            | [] -> Ok s
+            | (name, fromTy, toTy) :: rest ->
+                match typeOf s name with
+                | None -> Error(AbsentColumn name)
+                | Some t when t <> fromTy -> Error(TypeDisagrees(name, fromTy, t))
+                | Some _ -> retypeAll (s |> List.map (fun (n, t) -> if n = name then (n, toTy) else (n, t))) rest
+
+        let rec addAll (s: Schema) (xs: (string * ColumnType) list) =
+            match xs with
+            | [] -> Ok s
+            | (name, ty) :: rest ->
+                match typeOf s name with
+                | Some _ -> Error(AlreadyPresent name)
+                | None -> addAll (s @ [ name, ty ]) rest
+
+        let reorder (s: Schema) =
+            match delta.Order with
+            | [] -> Ok s
+            | order ->
+                let names = s |> List.map fst
+
+                let key (xs: string list) =
+                    List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) xs
+
+                if List.length order <> List.length names || key order <> key names then
+                    Error(OrderMismatch(names, order))
+                else
+                    Ok(order |> List.map (fun n -> n, (typeOf s n).Value))
+
+        match Table.firstDuplicate (old |> List.map fst) with
+        | Some name -> Error(DuplicateColumn name)
+        | None ->
+            removeAll old delta.Removed
+            |> Result.bind (fun s -> retypeAll s delta.Retyped)
+            |> Result.bind (fun s -> addAll s delta.Added)
+            |> Result.bind reorder
 
     /// Classify a delta against the set of columns a consumer depends on (Phase 33). A removed
     /// depended-on column is `Breaking`; a retyped depended-on column is safe iff the change is a
@@ -1669,3 +1772,117 @@ module ColumnCodec =
     let codec: Corpus.Codec<DataSource> =
         { Encode = encode
           Decode = fun s -> decode s |> Result.mapError errorString }
+
+/// The canonical wire codec for a `SchemaDelta` (Phase 317) — what a host that records deltas beside
+/// `Schema.fingerprint` as provenance writes, so that `Schema.patch` can replay them later. One
+/// object with five members, all required: `added` and `removed` as `{name, type}` entries (the
+/// columnar codec's schema entry), `retyped` as `{name, from, to}`, `reordered` a bool, and `order`
+/// the column names `Order` carries. Rendered under `Canon`, so the bytes are canonical across
+/// hosts; decode surfaces the columnar codec envelope (`ColumnError`). It decodes what it is handed
+/// and judges nothing about the schema the delta will meet — that is `Schema.patch`'s question.
+module SchemaDeltaCodec =
+
+    let private entryJson (name: string, ty: ColumnType) : JVal =
+        JObj [ "name", JStr name; "type", JStr(ColumnType.tag ty) ]
+
+    /// Encode a delta to a `JVal`; `encode` renders it under `Canon`, which sorts the keys.
+    let encodeJson (d: SchemaDelta) : JVal =
+        JObj
+            [ "added", JArr(d.Added |> List.map entryJson)
+              "removed", JArr(d.Removed |> List.map entryJson)
+              "retyped",
+              JArr(
+                  d.Retyped
+                  |> List.map (fun (name, fromTy, toTy) ->
+                      JObj
+                          [ "name", JStr name
+                            "from", JStr(ColumnType.tag fromTy)
+                            "to", JStr(ColumnType.tag toTy) ])
+              )
+              "reordered", JBool d.Reordered
+              "order", JArr(d.Order |> List.map JStr) ]
+
+    /// The canonical wire string for a delta. Total: every delta encodes.
+    let encode (d: SchemaDelta) : string = Canon.render (encodeJson d)
+
+    let private fault (ctx: string) (f: Decode.Fault) : ColumnError =
+        match f with
+        | Decode.MissingProperty name -> MissingField name
+        | Decode.WrongKind(expected, got) -> MalformedShape(ctx + ": expected " + expected + ", got " + got)
+
+    let private field (name: string) (el: JVal) : Result<JVal, ColumnError> = Decode.propWith (fault name) name el
+
+    let private text (ctx: string) (el: JVal) : Result<string, ColumnError> = Decode.stringWith (fault ctx) el
+
+    let private columnType (ctx: string) (el: JVal) : Result<ColumnType, ColumnError> =
+        text ctx el
+        |> Result.bind (fun tag ->
+            match ColumnType.ofTag tag with
+            | Some ty -> Ok ty
+            | None -> Error(UnknownType(tag, ColumnType.allTags)))
+
+    let private items (name: string) (read: JVal -> Result<'a, ColumnError>) (el: JVal) : Result<'a list, ColumnError> =
+        field name el
+        |> Result.bind (Decode.arrayWith (fault name))
+        |> Result.bind (fun xs ->
+            let rec go acc =
+                function
+                | [] -> Ok(List.rev acc)
+                | x :: rest ->
+                    match read x with
+                    | Ok v -> go (v :: acc) rest
+                    | Error e -> Error e
+
+            go [] xs)
+
+    let private entry (ctx: string) (el: JVal) : Result<string * ColumnType, ColumnError> =
+        field "name" el
+        |> Result.bind (text (ctx + ".name"))
+        |> Result.bind (fun name ->
+            field "type" el
+            |> Result.bind (columnType (ctx + ".type"))
+            |> Result.map (fun ty -> name, ty))
+
+    let private retypedEntry (el: JVal) : Result<string * ColumnType * ColumnType, ColumnError> =
+        field "name" el
+        |> Result.bind (text "retyped.name")
+        |> Result.bind (fun name ->
+            field "from" el
+            |> Result.bind (columnType "retyped.from")
+            |> Result.bind (fun fromTy ->
+                field "to" el
+                |> Result.bind (columnType "retyped.to")
+                |> Result.map (fun toTy -> name, fromTy, toTy)))
+
+    /// Decode a delta from a `JVal`. `decodeJson (encodeJson d) = Ok d` for every delta.
+    let decodeJson (el: JVal) : Result<SchemaDelta, ColumnError> =
+        items "added" (entry "added") el
+        |> Result.bind (fun added ->
+            items "removed" (entry "removed") el
+            |> Result.bind (fun removed ->
+                items "retyped" retypedEntry el
+                |> Result.bind (fun retyped ->
+                    field "reordered" el
+                    |> Result.bind (fun r ->
+                        match r with
+                        | JBool b -> Ok b
+                        | other -> Error(MalformedShape("reordered: expected bool, got " + JVal.kindName other)))
+                    |> Result.bind (fun reordered ->
+                        items "order" (text "order") el
+                        |> Result.map (fun order ->
+                            { Added = added
+                              Removed = removed
+                              Retyped = retyped
+                              Reordered = reordered
+                              Order = order })))))
+
+    /// Decode a wire string into a delta (a JSON-syntax failure is `NotJson`).
+    let decode (s: string) : Result<SchemaDelta, ColumnError> =
+        match Json.parseDetailed s with
+        | Error e -> Error(NotJson e)
+        | Ok el -> decodeJson el
+
+    /// The `Corpus.Codec` over `SchemaDelta`, for the conformance corpus tooling.
+    let codec: Corpus.Codec<SchemaDelta> =
+        { Encode = encode
+          Decode = fun s -> decode s |> Result.mapError ColumnCodec.errorString }

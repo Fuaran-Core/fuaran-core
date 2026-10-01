@@ -3509,6 +3509,54 @@ appending in a loop should collect and call `appendMany`.
 **Rollback.** Pin `0.32.0`. Nothing persisted moves: every hash, pre-image and line byte is the
 same, and a store `0.33.0` refuses is one `0.32.0` was misreading.
 
+### The remaining algebra symmetries: `Schema.patch`, propagation pull, an index carried through an edit (Phase 317, DECISIONS.md "the algebra's remaining symmetries are built") — BREAKING: `record-widening` of `SchemaDelta`, and a value move (`Tree.Index` stamps); the rest `additive`
+
+The shard classed this change additive; one record gained a field and one stamp changed its
+definition, so the class above is the honest one. Each item says what a consumer does about it.
+
+- **`SchemaDelta` gains `Order : string list`** — BREAKING, `record-widening`: a full-literal
+  construction of the record no longer compiles (FS0764); add `Order = []`, or start from
+  `Schema.identityDelta` with `{ … with … }`. `Order` is the target's column order, EMPTY exactly when
+  the target's order is the one `Schema.patch` derives without it (the surviving columns in their old
+  order, then the added ones in listed order), so an append-only change and `diff a a` record nothing.
+  `Reordered` keeps its meaning and is implied by `Order`. A delta `diff` returned before this draft
+  has no `Order`; one persisted by a consumer and read back through `SchemaDeltaCodec` must carry the
+  member.
+- **`Schema.patch : Schema -> SchemaDelta -> Result<Schema, SchemaError>`** — `additive`. The transform
+  `diff` reports: `patch old (diff old target) = Ok target` for every pair of schemas naming no column
+  twice, reorders and additions placed anywhere included; `diff a a = Schema.identityDelta`. It refuses
+  by name (`SchemaError`: `DuplicateColumn`, `AbsentColumn`, `TypeDisagrees`, `AlreadyPresent`,
+  `OrderMismatch` — a new union, `additive`) and never repairs. **The compute repository adopts it at
+  its raise**: a `SchemaChanged` delta replays through `patch` instead of forcing a full refresh.
+- **`SchemaDeltaCodec`** (`encodeJson` / `encode` / `decodeJson` / `decode` / `codec`) — `additive`.
+  One object, five required members (`added`, `removed` as `{name, type}`; `retyped` as
+  `{name, from, to}`; `reordered`; `order`), rendered under `Canon`; decode reports in the columnar
+  envelope `ColumnError`. A new wire shape, not a change to one.
+- **`Propagation.neededFor` / `evalFor` / `evalForWith`** — `additive`. The pull dual of
+  `dirtyFromChangedIds`: the targets and everything upstream of them, and demand-driven evaluation of
+  that set and nothing else, agreeing with `eval` / `evalWith` on it wherever those succeed
+  (`eval_for_agrees`, `eval_for_with_agrees` and `needed_for_least`, `proofs/Propagation.fst`). A pull
+  can succeed where the full evaluation fails, at a node outside the needed set — that is the point of
+  it. `dirtyFromChangedIds`' answers are unchanged; it now shares its frontier loop with `neededFor`.
+- **`Ops.Index.afterOp` and `Tree.Index.rebind`** — `additive`. `afterOp w idw op post ix` is the index
+  of `post` carried through `op` instead of rebuilt, for every op kind, a `Batch` included; it equals
+  `Tree.Index.build w idw post` (the law over the op generator, and at every step of a carried edit
+  session), and falls back to that rebuild whenever `post` disagrees with what the op predicts. Its
+  cost follows the op, not the tree. `rebind` is the primitive beneath it.
+- **Every `Tree.Index` stamp (`NodeIndex.Fingerprint`) changes value** — BREAKING for a consumer that
+  persisted one: the stamp is now the sum, modulo 2^32, of one FNV-1a term per node rather than one
+  digest over the preorder, so an edit can re-stamp in the nodes it touched. A stamp persisted before
+  this draft reads stale once (`isFreshFor` is false) and the index is rebuilt, which is the safe
+  direction; nothing reads it as a content id. What it detects is unchanged: every skeleton edit, a
+  kind change and an id-remap, not an opaque payload edit.
+- **Five omissions are now recorded as deliberate** (DECISIONS.md): no `uncurry` on `Function`, no
+  seventh skeleton op, `normalize` is not a canonical form, no ordinal on `InsertChild` / `MoveNode`,
+  no `fresh` on the id witness. Nothing moves.
+
+**Public surface:** the baselines `api/Fuaran.Core.Column.txt`, `api/Fuaran.Core.Propagation.txt`,
+`api/Fuaran.Core.Ops.txt` and `api/Fuaran.Core.Tree.txt` move, regenerated through the approval mode;
+`Column` reads `record-widening`, the other three `additive`.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

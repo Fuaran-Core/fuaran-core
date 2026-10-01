@@ -487,36 +487,71 @@ module Tree =
             ById: Map<string, 'Node>
             ParentOf: Map<string, 'Id>
             Root: 'Id
-            /// Staleness stamp captured at `build` — an FNV-1a digest over each node's id paired
-            /// with its ordered child-ids, so any `InsertChild` / `RemoveNode` / `MoveNode` /
-            /// `ReorderChildren` (or id-remap) since `build` changes it. A *detector*, not a
-            /// guarantee: a digest collision is possible but vanishingly unlikely. Compare with
-            /// `Index.isFreshFor`.
+            /// Staleness stamp captured at `build` — the sum, modulo 2^32, of one FNV-1a term per
+            /// node over its id, kind, child count and ordered child-ids (Phase 317; until then one
+            /// digest over the whole preorder), so any `InsertChild` / `RemoveNode` / `MoveNode` /
+            /// `ReorderChildren` (or id-remap or kind change) since `build` changes it. A sum over
+            /// nodes rather than a digest over a sequence so an edit RE-STAMPS in the nodes it
+            /// touched (`Index.rebind`) instead of in the tree. A *detector*, not a guarantee: a
+            /// collision is possible but vanishingly unlikely. Compare with `Index.isFreshFor`.
             Fingerprint: string
         }
 
     module Index =
 
-        /// The staleness digest: each node as the fields `id`, `kind`, its child COUNT and then
+        // Arithmetic modulo 2^32, masked as `Hash.fnv1a` masks, so every host wraps alike.
+        let private add32 (a: uint32) (b: uint32) : uint32 = (a + b) &&& 0xFFFFFFFFu
+
+        let private sub32 (a: uint32) (b: uint32) : uint32 =
+            (a + (0xFFFFFFFFu - b) + 1u) &&& 0xFFFFFFFFu
+
+        let private stampOf (h: uint32) : string = h.ToString("x8")
+
+        // A stamp (and an `fnv1a` digest) is x8: lowercase hex, eight digits. Read back digit by
+        // digit — portable to every host, where a platform hex parser is not.
+        let private unstamp (s: string) : uint32 =
+            let mutable h = 0u
+
+            for ch in s do
+                let d =
+                    if ch >= '0' && ch <= '9' then
+                        uint32 ch - uint32 '0'
+                    else
+                        uint32 ch - uint32 'a' + 10u
+
+                h <- ((h * 16u) + d) &&& 0xFFFFFFFFu
+
+            h
+
+        /// One node's fingerprint — its term in the staleness stamp (Phase 317; until then this name
+        /// was the whole tree's digest, and the `canonicalFields` roster in `Hash.fs` lists it by
+        /// it): the fields `id`, `kind`, its child COUNT and then
         /// each child id in order (capturing identity, kind, parent-child structure, and child
-        /// order), through `Hash.canonicalFields` and the portable FNV-1a. The count is what makes
-        /// the flat field list parse back into one tree, whatever `>` or `,` an id contains — until
-        /// Phase 290 the fields were joined on those two characters, which an id can spell. Covers
-        /// everything the witness exposes — so it detects every skeleton edit plus a kind change or
+        /// order), through `Hash.canonicalFields` and the portable FNV-1a, read back as a 32-bit
+        /// value. The record of every node, given unique ids, determines the tree — each node names
+        /// its children — so a sum over those records sees every skeleton edit plus a kind change or
         /// id-remap, but NOT an opaque per-node payload mutation the witness has no accessor for
         /// (the index would still hand back a payload-stale node; rebuild after a domain value-edit
-        /// too). Recomputed by `isFreshFor` and compared against the stamp `build` stored.
-        let private fingerprintOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : string =
-            preorder w root
-            |> List.collect (fun n ->
-                let kids = w.Children n
+        /// too). The count keeps the fields unambiguous whatever an id contains (Phase 290).
+        let private fingerprintOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (n: 'Node) : uint32 =
+            let kids = w.Children n
 
+            let digest =
                 idw.ToString(w.Id n)
                 :: w.KindTag n
                 :: string (List.length kids)
-                :: (kids |> List.map (fun c -> idw.ToString(w.Id c))))
-            |> Hash.canonicalFields
-            |> Hash.fnv1a
+                :: (kids |> List.map (fun c -> idw.ToString(w.Id c)))
+                |> Hash.canonicalFields
+                |> Hash.fnv1a
+
+            unstamp digest
+
+        /// The staleness stamp of a whole tree: the sum of every preorder node's term. Recomputed by
+        /// `isFreshFor` and compared against the stamp `build` stored.
+        let private treeStampOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : string =
+            preorder w root
+            |> List.fold (fun acc n -> add32 acc (fingerprintOf w idw n)) 0u
+            |> stampOf
 
         /// Build both maps + the staleness stamp in a single preorder pass.
         let build (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : NodeIndex<'Node, 'Id> =
@@ -528,7 +563,7 @@ module Tree =
                       for c in w.Children p -> idw.ToString(w.Id c), w.Id p ]
                 |> Map.ofList
               Root = w.Id root
-              Fingerprint = fingerprintOf w idw root }
+              Fingerprint = treeStampOf w idw root }
 
         /// The node carrying `target`, if present (O(log n)).
         let tryFind (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : 'Node option =
@@ -577,7 +612,54 @@ module Tree =
             (root: 'Node)
             (ix: NodeIndex<'Node, 'Id>)
             : bool =
-            fingerprintOf w idw root = ix.Fingerprint
+            treeStampOf w idw root = ix.Fingerprint
+
+        /// Re-index through an edit confined to known nodes (Phase 317) — the primitive an index is
+        /// MAINTAINED through rather than rebuilt (`Ops.Index.afterOp` is its caller for the
+        /// skeleton ops). `leaving` are nodes of the INDEXED tree: each one's stamp term, its `ById`
+        /// entry and the `ParentOf` entry of each of its children are withdrawn. `arriving` are
+        /// nodes of the EDITED tree: each one's term, entry and child links are installed.
+        /// Withdrawals first, then installs, so a node on both sides is replaced. The root id is
+        /// kept (no skeleton op changes it). O(the two lists and their children), never O(tree).
+        ///
+        /// **The contract.** The result is `build w idw edited` when every node whose own record
+        /// (id, kind, ordered child ids) or value differs between the two trees, or which is in only
+        /// one of them, is in `leaving` if it was in the indexed tree and in `arriving` if it is in
+        /// the edited one — each id at most once per side, ids unique in both trees. A node in
+        /// neither keeps the value the index holds. The function cannot check the contract (that
+        /// would cost the walk it exists to avoid); `afterOp` derives both lists from the op and
+        /// verifies what it can.
+        let rebind
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (leaving: 'Node list)
+            (arriving: 'Node list)
+            (ix: NodeIndex<'Node, 'Id>)
+            : NodeIndex<'Node, 'Id> =
+            let key (n: 'Node) = idw.ToString(w.Id n)
+
+            let withdrawn =
+                leaving
+                |> List.fold
+                    (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>, stamp: uint32) n ->
+                        Map.remove (key n) byId,
+                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.remove (key c) m),
+                        sub32 stamp (fingerprintOf w idw n))
+                    (ix.ById, ix.ParentOf, unstamp ix.Fingerprint)
+
+            let byId, parentOf, stamp =
+                arriving
+                |> List.fold
+                    (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>, stamp: uint32) n ->
+                        Map.add (key n) n byId,
+                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.add (key c) (w.Id n) m),
+                        add32 stamp (fingerprintOf w idw n))
+                    withdrawn
+
+            { ById = byId
+              ParentOf = parentOf
+              Root = ix.Root
+              Fingerprint = stampOf stamp }
 
     // ---- content-aware hash (Phase 06) ----
 

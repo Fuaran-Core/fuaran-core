@@ -2026,17 +2026,60 @@
         "model": "proofs/Propagation.fst",
         "prover": "proofs/fstar-pin.json"
       }
+    },    {
+      "id": "propagation-needed-least",
+      "level": "proved",
+      "claim": "The PULL dual of the dirty set (Phase 317). `neededFor deps targets` — the same frontier loop the dirty set runs, handed the dependency map itself where the dirty set is handed its inverse — holds the targets, is closed under reads (every id a member reads is a member; `needed_closed`), and is the LEAST such set: any set that holds the targets and is closed under reads contains all of it. An id no target reads, directly or through another, is never needed. Both facts are stated over the loop at an ARBITRARY edge map (`closed_by`), so they are `dirty_closed` / `dirty_least` read in the other direction.",
+      "phase": "fuaran-core#317",
+      "evidence": {
+        "theorem": "needed_for_least",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-evalfor-agrees",
+      "level": "proved",
+      "claim": "Demand-driven evaluation agrees with full evaluation on what it evaluates (Phase 317). When `eval ev deps` succeeds, `evalFor ev targets deps` succeeds with exactly its values on `neededFor deps targets` and exactly its cyclic groups that meet that set — for any value type, any dependency map, any target set and any evaluator, over ANY order handed to both, assuming nothing about `sort`. The one premise of the step lemma (`go_restrict`) is that the restriction set is closed under reads, which `needed_closed` discharges, so the theorem as stated carries no premise beyond `eval`'s success. The converse is deliberately NOT claimed: a node that fails outside the needed set is never reached, so the pull can succeed where the full evaluation fails.",
+      "phase": "fuaran-core#317",
+      "evidence": {
+        "theorem": "eval_for_agrees",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-evalforwith-agrees",
+      "level": "proved",
+      "claim": "The same agreement for the prior-aware pair (Phase 317): when `evalWith evw deps` succeeds, `evalForWith evw targets deps` succeeds with its values on the needed set and its cyclic groups that meet it. `evalForWith` hands no prior, so it is the prior-blind reading's demand-driven walk (`prior_blind_empty`, `go_with_blind`) and needs none of `evalfromwith_agrees`' extra premise.",
+      "phase": "fuaran-core#317",
+      "evidence": {
+        "theorem": "eval_for_with_agrees",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "propagation-evalfor-invokes-needed",
+      "level": "proved",
+      "claim": "Nothing outside the needed set is evaluated (Phase 317): every id the demand-driven walk hands the evaluator (`walk_for_invoked`, the instrumented reading the differential holds to production's own recorder) is in `neededFor deps targets`.",
+      "phase": "fuaran-core#317",
+      "evidence": {
+        "theorem": "eval_for_invokes_needed",
+        "model": "proofs/Propagation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
     },
     {
       "id": "propagation-differential",
       "level": "tested",
-      "claim": "The extracted model agrees with the shipped `Propagation.dependents`, `dirtyFromChangedIds`, `staleSet`, `eval` and `evalFrom` over generated dependency maps — the acyclic generator of `Conformance.propagationEvalLaws` and `dirtyPropagationLaws`, WIDENED with back edges (cycles), dangling reads, change sets of one to three ids, an unknown id, a failing evaluator and a `prior` with a hole in it — on the dependents map, the dirty set, the whole `Result` of both evaluators, and, per `evalFrom`, the ids the evaluator was handed IN ORDER (production's own recorder against the model's `walk_invoked`). Every generated graph also holds production's `sort` to the one fact the agreement theorem assumes of it (`Order` holds no id twice), and every trial whose change is known holds the shipped `evalFrom` to the shipped `eval`. Since Phase 209 every model call also carries the `read_witness` the restricted resolver is checked against, derived from the SAME map the toy evaluator folds over so the two cannot drift; the go-red hands the model a deps bridge that loses a read edge and requires it to lose on the dirty set and on `evalFrom`'s result — and it now loses harder, because the witness still names the read the bridge dropped, so the model refuses it as undeclared where production does not. A third case instantiates the theorems on the shipped driver: Phase 186 used it to EXHIBIT the gap — an evaluator reading a node it did not declare made `evalFrom` disagree with `eval`, refused by nothing — and it is now the regression test for its closure, with both drivers refusing the same node and read, the model agreeing in the same words, and the one place the refusal is not observable (a violating node clean and present in `prior`) asserted rather than assumed. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "The extracted model agrees with the shipped `Propagation.dependents`, `dirtyFromChangedIds`, `staleSet`, `eval` and `evalFrom` — and, since Phase 317, `neededFor`, `evalFor` and `evalForWith` with the ids `evalFor` evaluates, over a drawn target set of one or two ids (one trial in eight naming an id the map does not hold), with `evalFor` held to `eval` on the needed set on the shipped driver — over generated dependency maps — the acyclic generator of `Conformance.propagationEvalLaws` and `dirtyPropagationLaws`, WIDENED with back edges (cycles), dangling reads, change sets of one to three ids, an unknown id, a failing evaluator and a `prior` with a hole in it — on the dependents map, the dirty set, the whole `Result` of both evaluators, and, per `evalFrom`, the ids the evaluator was handed IN ORDER (production's own recorder against the model's `walk_invoked`). Every generated graph also holds production's `sort` to the one fact the agreement theorem assumes of it (`Order` holds no id twice), and every trial whose change is known holds the shipped `evalFrom` to the shipped `eval`. Since Phase 209 every model call also carries the `read_witness` the restricted resolver is checked against, derived from the SAME map the toy evaluator folds over so the two cannot drift; the go-red hands the model a deps bridge that loses a read edge and requires it to lose on the dirty set and on `evalFrom`'s result — and it now loses harder, because the witness still names the read the bridge dropped, so the model refuses it as undeclared where production does not. A third case instantiates the theorems on the shipped driver: Phase 186 used it to EXHIBIT the gap — an evaluator reading a node it did not declare made `evalFrom` disagree with `eval`, refused by nothing — and it is now the regression test for its closure, with both drivers refusing the same node and read, the model agreeing in the same words, and the one place the refusal is not observable (a violating node clean and present in `prior`) asserted rather than assumed. Agreement is over the pools drawn, never over all inputs.",
       "phase": "fuaran-core#209",
       "evidence": {
         "family": "Proofs.Oracle",
         "model": "proofs/Propagation.fst",
         "cases": [
-          "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval and evalFrom, over generated dependency maps and change sets",
+          "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval, evalFrom, neededFor, evalFor and evalForWith, over generated dependency maps, change sets and target sets",
           "a propagation oracle handed a BLIND deps bridge DISAGREES with Propagation.dirtyFromChangedIds and evalFrom — the measurement can fail",
           "evalFrom is eval under the evaluator contract, and an undeclared read is REFUSED by both drivers — `evalfrom_agrees`, `evalfrom_minimal`, `undeclared_refused` and `evalfrom_unknown_refused`, on the shipped driver"
         ]

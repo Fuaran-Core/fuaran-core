@@ -77,6 +77,10 @@
      - `evalfrom_unknown_refused` — a changed id the dependency map does not hold makes
        `evalFrom` the typed `EvalUnknownChange`, naming exactly the unknown ids, under every
        evaluator alike: nothing is evaluated.
+     - Section 7 (Phase 317), the PULL dual: `needed_for_least` (the needed set is the least
+       read-closed superset of the targets), `eval_for_agrees` / `eval_for_with_agrees`
+       (demand-driven evaluation equals `eval` on the needed set whenever `eval` succeeds) and
+       `eval_for_invokes_needed` (nothing outside the needed set is evaluated).
 
    WHAT IS NOT CLAIMED. Anything about `sort` beyond the one hypothesis above — that `Order` is
    a dependency order, that `Cycles` are the strongly connected groups. That the `read_witness`
@@ -1215,3 +1219,275 @@ let evalfromwith_agrees (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witne
   eval_with_is_blind evw1 t1 deps topo;
   go_with_blind evw1 t1 deps (in_set (dirty_from_changed_ids deps changed)) prior topo.cycles [] topo.order;
   evalfrom_agrees (blind evw0) (blind evw1) t0 t1 deps changed topo out0 prior
+
+(* ======================================================================================
+   7. Pull: the needed set and demand-driven evaluation (Phase 317).
+
+      F#: `neededFor`, `evalFor` / `evalForWith`, and the private `closureOver` /
+      `restrictTopo` / `walkTopo` they run on. The DIRTY set closes a change set FORWARD over
+      the dependents map; the NEEDED set closes a target set BACKWARD over the dependency map
+      itself — the same loop, `grow`, handed the other map. Production now shares that loop
+      (`closureOver`) exactly as the model always did.
+
+      WHAT IS PROVED, over any dependency map and target set:
+        - `needed_closed` / `needed_for_least` — the needed set holds the targets, is closed
+          under "is read by a member" (every read of a member is a member), and is the LEAST
+          such set. Stated over `grow` at an ARBITRARY edge map (`closed_by`), so they are the
+          dirty set's `dirty_closed` / `dirty_least` read in the other direction.
+        - `eval_for_agrees` — when the full evaluation `eval` succeeds, the demand-driven one
+          over the SAME order restricted to the needed set succeeds with exactly its values on
+          the needed set and exactly its cyclic groups that meet it. Its one premise is that the
+          restriction set is closed, which `needed_closed` discharges, so as stated for `eval_for`
+          it carries nothing beyond `eval`'s success. Like `evalfrom_agrees` it holds over ANY
+          order and assumes nothing about `sort`.
+        - `eval_for_with_agrees` — the same for the prior-aware pair, through
+          `eval_with_is_blind`: no prior is handed, so the reading is prior-blind by construction.
+        - `eval_for_invokes_needed` — the instrumented reading: every id the demand-driven walk
+          hands the evaluator is needed. Nothing outside the needed set is evaluated.
+
+      WHAT IS NOT CLAIMED. That `evalFor` agrees with `eval` when `eval` FAILS: a node that fails
+      outside the needed set is never reached, so the pull can succeed where the full evaluation
+      does not — which is what pulling is for.
+   ====================================================================================== *)
+
+(* A set closed under an edge map: every out-edge of a member lands on a member. Over the
+   dependency map that is "every read of a member is a member"; `closed` above is the same
+   relation over the dependents map, stated through `edge`. *)
+let closed_by (d:dmap) (s:list string) : Tot prop =
+  forall (n x:string). mem n s /\ mem x (dependents_of d n) ==> mem x s
+
+(* The loop invariant, for an arbitrary edge map: closed already, except at the frontier. *)
+let closed_by_except (d:dmap) (acc frontier:list string) : Tot prop =
+  forall (n x:string). mem n acc /\ not (mem n frontier) /\ mem x (dependents_of d n) ==> mem x acc
+
+let grow_step_closed_by (d:dmap) (frontier acc:list string) (n x:string)
+  : Lemma (requires closed_by_except d acc frontier)
+          (ensures (let fresh = diff (next_of d frontier []) acc in
+                    mem n (union acc fresh) /\ not (mem n fresh) /\ mem x (dependents_of d n) ==>
+                    mem x (union acc fresh))) =
+  let next = next_of d frontier [] in
+  let fresh = diff next acc in
+  mem_union n acc fresh;
+  mem_union x acc fresh;
+  mem_diff n next acc;
+  mem_diff x next acc;
+  next_mem d frontier [] x;
+  if mem n frontier && mem x (dependents_of d n) then any_dep_intro d frontier n x else ()
+
+let rec grow_closed_by (d:dmap) (frontier acc:list string)
+  : Lemma (requires closed_by_except d acc frontier)
+          (ensures closed_by d (grow d frontier acc) /\
+                   (forall (x:string). mem x acc ==> mem x (grow d frontier acc)))
+          (decreases %[len (diff (range d) acc); len frontier]) =
+  match frontier with
+  | [] -> ()
+  | _ :: _ ->
+    let fresh = diff (next_of d frontier []) acc in
+    grow_measure d frontier acc;
+    FStar.Classical.forall_intro_2 (FStar.Classical.move_requires_2 (grow_step_closed_by d frontier acc));
+    let aux (x:string) : Lemma (mem x acc ==> mem x (union acc fresh)) = mem_union x acc fresh in
+    FStar.Classical.forall_intro aux;
+    grow_closed_by d fresh (union acc fresh)
+
+let next_within_by (d:dmap) (frontier s acc:list string) (x:string)
+  : Lemma (requires closed_by d s /\ (forall (y:string). mem y frontier ==> mem y s) /\
+                    mem x (next_of d frontier acc) /\ not (mem x acc))
+          (ensures mem x s) =
+  next_mem d frontier acc x;
+  let rec walk (f:list string)
+    : Lemma (requires (forall (y:string). mem y f ==> mem y s) /\ any_dep d f x) (ensures mem x s) =
+    match f with
+    | [] -> ()
+    | node :: t -> if mem x (dependents_of d node) then () else walk t
+  in
+  walk frontier
+
+let rec grow_within_by (d:dmap) (frontier acc s:list string)
+  : Lemma (requires closed_by d s /\ (forall (y:string). mem y frontier ==> mem y s) /\
+                    (forall (y:string). mem y acc ==> mem y s))
+          (ensures (forall (y:string). mem y (grow d frontier acc) ==> mem y s))
+          (decreases %[len (diff (range d) acc); len frontier]) =
+  match frontier with
+  | [] -> ()
+  | _ :: _ ->
+    let next = next_of d frontier [] in
+    let fresh = diff next acc in
+    grow_measure d frontier acc;
+    let fresh_in (y:string) : Lemma (mem y fresh ==> mem y s) =
+      mem_diff y next acc;
+      if mem y fresh then next_within_by d frontier s [] y else ()
+    in
+    FStar.Classical.forall_intro fresh_in;
+    let acc_in (y:string) : Lemma (mem y (union acc fresh) ==> mem y s) = mem_union y acc fresh in
+    FStar.Classical.forall_intro acc_in;
+    grow_within_by d fresh (union acc fresh) s
+
+(* F#: `neededFor` — `closureOver deps targets`: the frontier loop over the dependency map. *)
+let needed_for (deps:dmap) (targets:list string) : Tot (list string) =
+  grow deps targets targets
+
+(* The needed set HOLDS the targets and is CLOSED under reads. *)
+let needed_closed (deps:dmap) (targets:list string)
+  : Lemma (subset targets (needed_for deps targets) /\ closed_by deps (needed_for deps targets)) =
+  grow_closed_by deps targets targets;
+  subset_intro targets (needed_for deps targets)
+
+(* THEOREM — needed_for_least. The needed set is the least set that holds the targets and is
+   closed under reads: an id no target reads, directly or through another, is never needed. *)
+let needed_for_least (deps:dmap) (targets s:list string)
+  : Lemma (requires subset targets s /\ closed_by deps s)
+          (ensures subset (needed_for deps targets) s) =
+  let aux (y:string) : Lemma (mem y targets ==> mem y s) =
+    if mem y targets then subset_mem targets s y else ()
+  in
+  FStar.Classical.forall_intro aux;
+  grow_within_by deps targets targets s;
+  subset_intro (needed_for deps targets) s
+
+(* F#: `List.filter (fun id -> Set.contains id needed)` over `Order`. *)
+let rec keep (s:list string) (l:list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | h :: t -> if mem h s then h :: keep s t else keep s t
+
+(* F#: `List.exists (fun id -> Set.contains id needed)` — a cyclic group that MEETS the set. *)
+let rec meets (s:list string) (g:list string) : Tot bool =
+  match g with
+  | [] -> false
+  | h :: t -> mem h s || meets s t
+
+(* F#: `List.filter (List.exists (fun id -> Set.contains id needed))` over `Cycles`. *)
+let rec keep_groups (s:list string) (gs:list (list string)) : Tot (list (list string)) =
+  match gs with
+  | [] -> []
+  | g :: t -> if meets s g then g :: keep_groups s t else keep_groups s t
+
+(* F#: the private `restrictTopo`. *)
+let restrict_topo (s:list string) (topo:topo_result) : Tot topo_result =
+  { order = keep s topo.order; cycles = keep_groups s topo.cycles }
+
+(* The values a result map holds for the ids of `s` — the reading the agreement is stated in. *)
+let rec keep_values (#v:Type) (s:list string) (l:list (string & v)) : Tot (list (string & v)) =
+  match l with
+  | [] -> []
+  | (k, x) :: t -> if mem k s then (k, x) :: keep_values s t else keep_values s t
+
+(* F#: `evalForWith` — the prior-aware walk, handed no prior, over the restricted order. *)
+let eval_for_with (#v:Type) (evw:evaluator_with v) (touches:read_witness) (targets:list string)
+                  (deps:dmap) (topo:topo_result)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  walk_with evw touches deps always [] (restrict_topo (needed_for deps targets) topo)
+
+(* F#: `evalFor` — `evalForWith` over the evaluator that ignores its prior. *)
+let eval_for (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string) (deps:dmap)
+             (topo:topo_result)
+  : Tot (outcome (eval_outcome v) propagation_error) =
+  eval_for_with (lift ev) touches targets deps topo
+
+(* What `evalFor` evaluates: the walk's invocations over the restricted order. *)
+let walk_for_invoked (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
+                     (deps:dmap) (topo:topo_result)
+  : Tot (list string) =
+  go_invoked ev touches deps always [] [] (keep (needed_for deps targets) topo.order)
+
+let reads_are_dependents_of (deps:dmap) (id:string)
+  : Lemma (reads_of deps id == dependents_of deps id) = ()
+
+let rec assoc_keep_values (#v:Type) (s:list string) (l:list (string & v)) (k:string)
+  : Lemma (requires mem k s) (ensures assoc k (keep_values s l) == assoc k l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> assoc_keep_values s t k
+
+(* The two walks, step for step: over a CLOSED set, the restricted walk hands each kept node the
+   same argument the full walk hands it, because every read of a kept node is kept. *)
+let rec go_restrict (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap) (s:list string)
+                    (cyc cyc':list (list string)) (results:list (string & v)) (order:list string)
+  : Lemma (requires closed_by deps s)
+          (ensures (match go ev touches deps always [] cyc results order with
+                    | Ok o -> go ev touches deps always [] cyc' (keep_values s results) (keep s order) ==
+                              Ok ({ values = keep_values s o.values; cyclic = cyc' })
+                    | Error _ -> True))
+          (decreases order) =
+  match order with
+  | [] -> ()
+  | id :: rest ->
+    (match first_undeclared deps id (touches id) with
+     | Some _ -> ()
+     | None ->
+       if mem id s then begin
+         reads_are_dependents_of deps id;
+         let rs = reads_of deps id in
+         let same (r:string) : Lemma (mem r rs ==> assoc r (keep_values s results) == assoc r results) =
+           if mem r rs then assoc_keep_values s results r else ()
+         in
+         FStar.Classical.forall_intro same;
+         lookups_eq rs (keep_values s results) results;
+         (match ev (resolve_in (lookups rs results)) id with
+          | Ok x -> go_restrict ev touches deps s cyc cyc' ((id, x) :: results) rest
+          | Error _ -> ())
+       end
+       else
+         (match ev (resolve_in (lookups (reads_of deps id) results)) id with
+          | Ok x -> go_restrict ev touches deps s cyc cyc' ((id, x) :: results) rest
+          | Error _ -> ()))
+
+(* THEOREM — eval_for_agrees. When the full evaluation succeeds, the demand-driven evaluation
+   succeeds with its values on the needed set and its cyclic groups that meet the needed set. *)
+let eval_for_agrees (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
+                    (deps:dmap) (topo:topo_result) (out:eval_outcome v)
+  : Lemma (requires eval ev touches deps topo == Ok out)
+          (ensures (let s = needed_for deps targets in
+                    eval_for ev touches targets deps topo ==
+                      Ok ({ values = keep_values s out.values; cyclic = keep_groups s topo.cycles }))) =
+  let s = needed_for deps targets in
+  needed_closed deps targets;
+  go_with_lift ev touches deps always [] (keep_groups s topo.cycles) [] (keep s topo.order);
+  go_restrict ev touches deps s topo.cycles (keep_groups s topo.cycles) [] topo.order
+
+(* THEOREM — eval_for_with_agrees. The same for the prior-aware pair: `evalForWith` hands no
+   prior, so it is the prior-blind reading's demand-driven walk, and that reading's agreement. *)
+let eval_for_with_agrees (#v:Type) (evw:evaluator_with v) (touches:read_witness) (targets:list string)
+                         (deps:dmap) (topo:topo_result) (out:eval_outcome v)
+  : Lemma (requires eval_with evw touches deps topo == Ok out)
+          (ensures (let s = needed_for deps targets in
+                    eval_for_with evw touches targets deps topo ==
+                      Ok ({ values = keep_values s out.values; cyclic = keep_groups s topo.cycles }))) =
+  let s = needed_for deps targets in
+  eval_with_is_blind evw touches deps topo;
+  needed_closed deps targets;
+  prior_blind_empty evw touches deps always [] (keep s topo.order);
+  go_with_blind evw touches deps always [] (keep_groups s topo.cycles) [] (keep s topo.order);
+  go_restrict (blind evw) touches deps s topo.cycles (keep_groups s topo.cycles) [] topo.order
+
+let rec go_invoked_within (#v:Type) (ev:evaluator v) (touches:read_witness) (deps:dmap)
+                          (recompute:string -> bool) (prior:list (string & v))
+                          (results:list (string & v)) (order:list string) (x:string)
+  : Lemma (ensures mem x (go_invoked ev touches deps recompute prior results order) ==> mem x order)
+          (decreases order) =
+  match order with
+  | [] -> ()
+  | id :: rest ->
+    (match reuse recompute prior id with
+     | None ->
+       (match first_undeclared deps id (touches id) with
+        | Some _ -> ()
+        | None ->
+          (match ev (resolve_in (lookups (reads_of deps id) results)) id with
+           | Ok y -> go_invoked_within ev touches deps recompute prior ((id, y) :: results) rest x
+           | Error _ -> ()))
+     | Some p -> go_invoked_within ev touches deps recompute prior ((id, p) :: results) rest x)
+
+let rec mem_keep (s l:list string) (x:string) : Lemma (mem x (keep s l) ==> mem x s) =
+  match l with
+  | [] -> ()
+  | _ :: t -> mem_keep s t x
+
+(* THEOREM — eval_for_invokes_needed. Every id the demand-driven walk hands the evaluator is
+   needed: nothing outside the needed set is evaluated. *)
+let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (targets:list string)
+                            (deps:dmap) (topo:topo_result) (x:string)
+  : Lemma (ensures mem x (walk_for_invoked ev touches targets deps topo) ==> mem x (needed_for deps targets)) =
+  let s = needed_for deps targets in
+  go_invoked_within ev touches deps always [] [] (keep s topo.order) x;
+  mem_keep s topo.order x
