@@ -1826,7 +1826,7 @@ let private renderProdArbitration (a: Arbitration<RNode, string>) : string list 
           match why with
           | Inapplicable(i, rej) ->
               yield sprintf "rejected %d/%s inapplicable at %d (%s)" p.Id p.Holder i (prodRejClass rej)
-          | Conflicts ids -> yield sprintf "rejected %d/%s conflicts %A" p.Id p.Holder ids ]
+          | Conflicts(ids, _) -> yield sprintf "rejected %d/%s conflicts %A" p.Id p.Holder ids ]
 
 /// The model's result in the same vocabulary.
 let private renderModelArbitration (a: Arbitrate.arbitration) : string list =
@@ -11121,7 +11121,7 @@ let proofOracleTests =
               Expect.equal (List.length r.Accepted + List.length r.Rejected) 2 "nothing dropped"
 
               match r.Rejected with
-              | [ (p, Conflicts [ 1 ]) ] -> Expect.equal p.Holder "b" "the loser cites the winner's id"
+              | [ (p, Conflicts([ 1 ], _)) ] -> Expect.equal p.Holder "b" "the loser cites the winner's id"
               | other -> failtestf "expected one Conflicts [1] rejection, got %A" other
 
               // the check itself: total, ascending, each repeated id once, empty on unique input
@@ -11166,8 +11166,12 @@ let proofOracleTests =
               Expect.equal (ids last) [ 2; 3 ] "numbered last, the same proposal loses to an accepted set of TWO"
 
               Expect.equal
-                  (first.Rejected |> List.map snd)
-                  [ Conflicts [ 1 ]; Conflicts [ 1 ] ]
+                  (first.Rejected
+                   |> List.map (fun (_, r) ->
+                       match r with
+                       | Conflicts(ids, _) -> Some ids
+                       | _ -> None))
+                  [ Some [ 1 ]; Some [ 1 ] ]
                   "and both rejections are justified — each cites the proposal standing in its way"
 
               Expect.equal

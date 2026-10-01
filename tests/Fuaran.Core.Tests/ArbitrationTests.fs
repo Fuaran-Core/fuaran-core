@@ -21,6 +21,14 @@ let private acceptedIds (r: Arbitration<RNode, string>) = r.Accepted |> List.map
 let private rejectedWith (r: Arbitration<RNode, string>) =
     r.Rejected |> List.map (fun (p, reason) -> p.Id, reason)
 
+/// Each rejected proposal's `Conflicts` citation (`None` for any other reason).
+let private citedBy (r: Arbitration<RNode, string>) =
+    r.Rejected
+    |> List.map (fun (p, reason) ->
+        match reason with
+        | Conflicts(ids, _) -> p.Id, Some ids
+        | Inapplicable _ -> p.Id, None)
+
 [<Tests>]
 let arbitrateTests =
     testList
@@ -56,8 +64,8 @@ let arbitrateTests =
               Expect.equal (acceptedIds r) [ 1 ] "only the lowest-id proposal is accepted"
 
               Expect.equal
-                  (rejectedWith r)
-                  [ 2, Conflicts [ 1 ]; 3, Conflicts [ 1 ] ]
+                  (citedBy r)
+                  [ 2, Some [ 1 ]; 3, Some [ 1 ] ]
                   "each reject cites the accepted interferer (never the other reject)"
 
           testCase "an inapplicable proposal carries the op-algebra's own rejection envelope"
@@ -91,7 +99,7 @@ let arbitrateTests =
               Expect.equal (acceptedIds r) [ 1; 4 ] "the two independent applicable proposals are accepted"
 
               match rejectedWith r with
-              | [ (2, Inapplicable(0, UnknownNode("zz", _))); (3, Conflicts interfering) ] ->
+              | [ (2, Inapplicable(0, UnknownNode("zz", _))); (3, Conflicts(interfering, _)) ] ->
                   Expect.equal interfering [ 1; 4 ] "the conflict cites the FULL accepted interferer set"
               | other -> failtestf "unexpected rejected shape: %A" other
 
@@ -107,7 +115,7 @@ let arbitrateTests =
               let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
 
               Expect.equal (acceptedIds r) [ 1; 3 ] "p1 + p3 accepted"
-              Expect.equal (rejectedWith r) [ 2, Conflicts [ 1; 3 ] ] "p2 cites BOTH accepted interferers"
+              Expect.equal (citedBy r) [ 2, Some [ 1; 3 ] ] "p2 cites BOTH accepted interferers"
 
           testCase "the outcome is invariant under permutation of the input list"
           <| fun _ ->
@@ -238,9 +246,10 @@ let explainedRejectionTests =
 
               for p, reason in r.Rejected do
                   match reason with
-                  | Conflicts ids ->
+                  | Conflicts(ids, carried) ->
                       let explained = Arbitration.interference nodew idw r.Accepted p
                       Expect.equal (List.map fst explained) ids "the explanation cites exactly the Conflicts ids"
+                      Expect.equal carried explained "the case carries exactly Arbitration.interference"
 
                       for _, clauses in explained do
                           Expect.isNonEmpty clauses "every interfering pair names at least one clause"

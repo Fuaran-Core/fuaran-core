@@ -36,10 +36,14 @@ type ArbitrationRejection<'Id> =
     /// The script applies, but its footprint (Phase 78) interferes with the
     /// accepted set — the interfering accepted proposals' ids (computed against
     /// the FULL accepted set, in pinned order): exactly what to rebase against
-    /// once they land. Non-empty by construction. HOW each one interferes — the
-    /// clauses and addresses — is `Arbitration.interference` (Phase 248), the
-    /// function these ids are computed by.
-    | Conflicts of interfering: int list
+    /// once they land. Non-empty by construction.
+    ///
+    /// `interference` (Phase 248) says HOW each one interferes: every cited id, in
+    /// the same order, paired with the `Ops.interference` clauses its footprint and
+    /// the proposal's fail (the proposal on the left), each list non-empty. It is
+    /// exactly `Arbitration.interference nodew idw accepted proposal`, computed by the
+    /// same function, so `interfering = List.map fst interference` always holds.
+    | Conflicts of interfering: int list * interference: (int * Interference list) list
 
 /// The bounded report of a stale proposal (Phase 248): the id its script named that the tree
 /// does not hold, where in the script, how many ids the tree does hold, and a sample of them
@@ -130,9 +134,11 @@ module Arbitration =
     /// Why `proposal` cannot join `accepted` (Phase 248): each accepted proposal it interferes with,
     /// in the order given, paired with `Ops.interference` of the two footprints — the proposal on
     /// the left, the accepted one on the right. Handed an arbitration's `Accepted` and one of its
-    /// `Conflicts`-rejected proposals, the ids are exactly that `Conflicts` citation, in the same
-    /// order, because `arbitrate` computes the citation with this function; every clause list is
-    /// non-empty. Empty exactly when the proposal is independent of every accepted one. Total.
+    /// `Conflicts`-rejected proposals, it is exactly that `Conflicts`' `interference` member (its ids
+    /// the `interfering` citation, in the same order), because `arbitrate` computes both with this
+    /// function; every clause list is non-empty. It stays the query surface for a party that holds
+    /// a proposal and an accepted set but no rejection. Empty exactly when the proposal is
+    /// independent of every accepted one. Total.
     let interference
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -164,7 +170,8 @@ module Arbitration =
     ///      everything already accepted; otherwise it is rejected with
     ///      `Conflicts`, citing the interfering accepted ids (recomputed
     ///      against the FULL accepted set, so the citation is the complete
-    ///      rebase target, not just the first collision).
+    ///      rebase target, not just the first collision) and, since Phase 248,
+    ///      each one's `Ops.interference` clauses.
     ///
     /// The accepted set is pairwise independent, so (footprint soundness,
     /// `Conformance.footprintLaws`) its scripts apply confluently in any
@@ -199,7 +206,7 @@ module Arbitration =
                 if accepted |> List.forall (fun (_, afp) -> Ops.independent fp afp) then
                     (p, fp) :: accepted, rejected
                 else
-                    accepted, (p, Conflicts []) :: rejected
+                    accepted, (p, Conflicts([], [])) :: rejected
 
         let acceptedRev, rejectedRev = pinned |> List.fold step ([], [])
         let accepted = List.rev acceptedRev
@@ -214,10 +221,8 @@ module Arbitration =
                 match reason with
                 | Inapplicable _ -> p, reason
                 | Conflicts _ ->
-                    let interfering =
-                        interferingWith (Ops.footprint nodew idw p.Ops) accepted |> List.map fst
-
-                    p, Conflicts interfering)
+                    let explained = interferingWith (Ops.footprint nodew idw p.Ops) accepted
+                    p, Conflicts(List.map fst explained, explained))
 
         let acceptedProposals = accepted |> List.map fst
 

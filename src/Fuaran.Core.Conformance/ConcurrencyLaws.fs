@@ -897,7 +897,7 @@ module internal ConcurrencyLaws =
                         Ops.canApplyAll nodew idw p.Ops tree = Error(ix, rej),
                         fun () -> at (sprintf "Inapplicable ≠ the canApplyAll envelope (proposal %d)" p.Id)
                     )
-                | Conflicts ids ->
+                | Conflicts(ids, _) ->
                     let fp = Ops.footprint nodew idw p.Ops
 
                     let citesInterferingAccepted =
