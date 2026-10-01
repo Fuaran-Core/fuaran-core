@@ -199,6 +199,16 @@ module Conformance =
         : LawResult list =
         StreamLaws.dagLaws sw gen hashFn seed iterations
 
+    /// Forward — see `StreamLaws.reachLaws` (Phase 289).
+    let reachLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        StreamLaws.reachLaws sw gen hashFn seed iterations
+
     /// Forward — see `StreamLaws.captureReplayLaws`.
     let captureReplayLaws
         (encode: 'v -> string)

@@ -704,6 +704,19 @@
       "refusal": "drawn"
     },
     {
+      "id": "Conformance.reachLaws",
+      "module": "Conformance",
+      "entry": "reachLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.reconcileLaws",
       "module": "Conformance",
       "entry": "reconcileLaws",

@@ -450,6 +450,346 @@ module internal StreamLaws =
               verifiedAgrees
               verifiedRefuses ]
 
+    /// The questions a reachability index answers, asked one way (Phase 289) — the unindexed functions
+    /// on a DAG, or `Dag.Reach` on an index — so two ways can be compared question by question.
+    type private ReachAsker<'State, 'Rej> =
+        { Ancestors: string -> Set<string>
+          Reaches: string -> string -> bool
+          Order: string -> Result<string list, string>
+          MergeBase: string -> string -> string option
+          Between: string -> string -> string list
+          Replay: string -> Result<'State, Dag.ReplayFault<'Rej>> }
+
+    /// Reachability-index laws (Phase 289): every answer `Dag.Reach` gives equals the unindexed
+    /// function's on the same DAG — ancestors, reachability, topological order, merge base and branch
+    /// delta, and the two index-taking forms `tryReplayToWith` / `reconcileManyWith` — and an index
+    /// EXTENDED node by node through `appendIndexed` / `mergeIndexed` answers every question as the
+    /// index `Reach.ofDag` builds from the finished DAG. Each iteration grows one DAG from the caller's
+    /// drawn ops on a kit-drawn shape (appends onto heads and older nodes, merges of two heads, merges
+    /// of two arbitrary nodes, a second root) and also asks every question of a BUILT cyclic load with
+    /// a dangling parent, where the index answers by the unindexed walk. `'State` and `'Rej` need
+    /// equality; ops are compared through `Encode`.
+    ///
+    /// `Guarded [ "DAG shape" ]` (the Phase 245 guard): a merge base and a branch delta are only
+    /// tested by a DAG where two incomparable lanes MERGE — on a chain both are trivial — and whether
+    /// the drawn shape holds one depends on what the caller supplies: the same op drawn onto the same
+    /// parent is one node (a content-addressed DAG holds the second append as the first), and a step
+    /// whose id the caller's hash has already given another node is refused and skipped. So the family
+    /// counts the samples holding such a merge, counts the ones without beside them, and a run with
+    /// none reds the guard: the merge-base, delta and reconcile laws read as never tested rather than
+    /// as passed.
+    let reachLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let family = "Conformance.reachLaws"
+        let dimension = "DAG shape"
+        let ancestorsCell = LawKit.LawCell "Reach.ancestors equals Dag.ancestorsOf"
+
+        let reachesCell =
+            LawKit.LawCell "Reach.reaches equals membership in Dag.ancestorsOf"
+
+        let orderCell = LawKit.LawCell "Reach.tryTopoOrder equals Dag.tryTopoOrder"
+
+        let mergeBaseCell =
+            LawKit.LawCell("Reach.mergeBase equals Dag.mergeBase", Some dimension)
+
+        let betweenCell = LawKit.LawCell("Reach.between equals Dag.between", Some dimension)
+
+        let replayCell = LawKit.LawCell "tryReplayToWith equals tryReplayTo"
+
+        let reconcileCell =
+            LawKit.LawCell("reconcileManyWith equals reconcileMany", Some dimension)
+
+        let extensionCell =
+            LawKit.LawCell "an index extended by appendIndexed / mergeIndexed answers as Reach.ofDag of the result"
+
+        let cyclicCell =
+            LawKit.LawCell "on a cyclic load with a dangling parent every Reach answer equals the unindexed one"
+
+        let mutable merged = 0
+        let mutable unmerged = 0
+        let mutable folded = 0
+        let mutable refused = 0
+        let actor = Human "reach"
+
+        let unindexed (dag: Dag.T<'Op>) : ReachAsker<'State, 'Rej> =
+            { Ancestors = Dag.ancestorsOf dag
+              Reaches = fun a d -> Set.contains a (Dag.ancestorsOf dag d)
+              Order = Dag.tryTopoOrder dag
+              MergeBase = Dag.mergeBase dag
+              Between = fun b h -> Dag.between dag b h |> List.map (fun n -> n.Id)
+              Replay = Dag.tryReplayTo sw gen.State0 dag }
+
+        let indexed (reach: Dag.Reach<'Op>) : ReachAsker<'State, 'Rej> =
+            { Ancestors = Dag.Reach.ancestors reach
+              Reaches = Dag.Reach.reaches reach
+              Order = Dag.Reach.tryTopoOrder reach
+              MergeBase = Dag.Reach.mergeBase reach
+              Between = fun b h -> Dag.Reach.between reach b h |> List.map (fun n -> n.Id)
+              Replay = Dag.tryReplayToWith sw gen.State0 reach }
+
+        // The first question of one kind the two askers answer differently, over `ids` and every
+        // ordered pair of them.
+        let firstMismatch
+            (kind: string)
+            (x: ReachAsker<'State, 'Rej>)
+            (y: ReachAsker<'State, 'Rej>)
+            (ids: string list)
+            : string option =
+            let single (ask: ReachAsker<'State, 'Rej> -> string -> _) =
+                ids
+                |> List.tryPick (fun a ->
+                    let l, r = ask x a, ask y a
+
+                    if l = r then
+                        None
+                    else
+                        Some(sprintf "%s %s: %A vs %A" kind a l r))
+
+            let pair (ask: ReachAsker<'State, 'Rej> -> string -> string -> _) =
+                ids
+                |> List.tryPick (fun a ->
+                    ids
+                    |> List.tryPick (fun b ->
+                        let l, r = ask x a b, ask y a b
+
+                        if l = r then
+                            None
+                        else
+                            Some(sprintf "%s %s %s: %A vs %A" kind a b l r)))
+
+            match kind with
+            | "ancestors" -> single (fun k a -> k.Ancestors a |> Set.toList)
+            | "reaches" -> pair (fun k a b -> k.Reaches a b)
+            | "order" -> single (fun k a -> k.Order a)
+            | "mergeBase" -> pair (fun k a b -> k.MergeBase a b)
+            | "between" -> pair (fun k a b -> k.Between a b)
+            | _ -> single (fun k a -> k.Replay a)
+
+        let kinds = [ "ancestors"; "reaches"; "order"; "mergeBase"; "between"; "replay" ]
+
+        let anyMismatch x y ids =
+            kinds |> List.tryPick (fun k -> firstMismatch k x y ids)
+
+        // Each op content-writes its own encoding, so two lanes holding the same op interfere and the
+        // reconcile laws reach the refusal as well as the fold.
+        let footprintOf (op: 'Op) : Footprint =
+            { Reads = Set.empty
+              StructureWrites = Set.empty
+              ContentWrites = Set.singleton (sw.Encode op)
+              UnknownParentWrites = Set.empty }
+
+        let renderReconcile (r: Result<'Op list, ReconcileFault<'Op, 'Rej>>) =
+            match r with
+            | Ok ops -> Ok(ops |> List.map sw.Encode)
+            | Error(ReconcileFault.LanesInterfere cs) ->
+                Error(
+                    Choice1Of3(
+                        cs
+                        |> List.map (fun c -> sw.Encode c.Left, sw.Encode c.Right, c.Address, c.Shape)
+                    )
+                )
+            | Error(ReconcileFault.SharedHistoryRejected(n, rej)) -> Error(Choice2Of3(n, rej))
+            | Error(ReconcileFault.LanesRejected ls) ->
+                Error(
+                    Choice3Of3(
+                        ls
+                        |> List.map (fun l -> l.Head, l.Delta |> List.map sw.Encode, l.NodeId, l.Reject)
+                    )
+                )
+
+        LawKit.run iterations seed (fun rng i at ->
+            // ---- grow a DAG through the indexed forms, a step at a time ----
+            let mutable reach = Dag.Reach.ofDag Dag.empty
+            let mutable nodes: string list = []
+
+            let note (built: Result<string * Dag.T<'Op> * Dag.Reach<'Op>, DagAppendFault>) =
+                match built with
+                | Ok(id, _, r) -> Some(id, r)
+                | Error _ -> None // a content-id collision under the caller's hash: the step is skipped
+
+            match note (Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) "" reach) with
+            | Some(id, r) ->
+                reach <- r
+                nodes <- [ id ]
+            | None -> ()
+
+            let steps = 2 + rng.IntBelow 13
+
+            for _ in 1..steps do
+                let dag = Dag.Reach.dag reach
+                let heads = Dag.heads dag
+                let op = rng.Draw gen.Op
+                let kind = rng.IntBelow 10
+
+                let step =
+                    if List.isEmpty nodes || kind = 9 then
+                        Dag.appendIndexed hashFn sw actor op "" reach
+                    elif kind >= 5 && kind <= 7 && List.length heads >= 2 then
+                        let l = rng.Choose heads
+                        let r = rng.Choose(heads |> List.filter (fun h -> h <> l))
+                        Dag.mergeIndexed hashFn sw actor op l r reach
+                    elif kind = 8 then
+                        Dag.mergeIndexed hashFn sw actor op (rng.Choose nodes) (rng.Choose nodes) reach
+                    else
+                        let onto =
+                            if rng.IntBelow 2 = 0 then
+                                rng.Choose heads
+                            else
+                                rng.Choose nodes
+
+                        Dag.appendIndexed hashFn sw actor op onto reach
+
+                match note step with
+                | Some(id, r) ->
+                    reach <- r
+
+                    if not (List.contains id nodes) then
+                        nodes <- nodes @ [ id ]
+                | None -> ()
+
+            let dag = Dag.Reach.dag reach
+            let fresh = Dag.Reach.ofDag dag
+            let absent = "absent-" + string i
+            let ids = nodes @ [ absent ]
+
+            // ---- the guard's count: a merge of two nodes neither of which reaches the other ----
+            let laneMerge =
+                dag.Nodes
+                |> Map.exists (fun _ n ->
+                    match n.Parents with
+                    | [ p; q ] ->
+                        p <> q
+                        && not (Set.contains p (Dag.ancestorsOf dag q))
+                        && not (Set.contains q (Dag.ancestorsOf dag p))
+                    | _ -> false)
+
+            if laneMerge then
+                merged <- merged + 1
+            else
+                unmerged <- unmerged + 1
+
+            // ---- each indexed answer equals the unindexed one ----
+            let truth = unindexed dag
+            let built = indexed fresh
+
+            let check (cell: LawKit.LawCell) (kind: string) =
+                match firstMismatch kind built truth ids with
+                | None -> cell.Saw()
+                | Some m -> cell.Check(false, fun () -> at ("indexed vs unindexed, " + m))
+
+            check ancestorsCell "ancestors"
+            check reachesCell "reaches"
+            check orderCell "order"
+            check mergeBaseCell "mergeBase"
+            check betweenCell "between"
+            check replayCell "replay"
+
+            // ---- the extension law: the index grown step by step answers as the one built whole ----
+            match anyMismatch (indexed reach) built ids with
+            | None -> extensionCell.Saw()
+            | Some m -> extensionCell.Check(false, fun () -> at ("extended vs Reach.ofDag, " + m))
+
+            // ---- reconcileManyWith, over drawn bases and head sets ----
+            for _ in 1..4 do
+                let baseId = rng.Choose ids
+                let heads = [ for _ in 0 .. rng.IntBelow 4 -> rng.Choose ids ]
+
+                let baseState =
+                    match Dag.tryReplayTo sw gen.State0 dag baseId with
+                    | Ok s -> s
+                    | Error _ -> gen.State0
+
+                let l =
+                    renderReconcile (Dag.reconcileManyWith sw footprintOf fresh baseId baseState heads)
+
+                let r =
+                    renderReconcile (Dag.reconcileMany sw footprintOf dag baseId baseState heads)
+
+                if Result.isOk r then
+                    folded <- folded + 1
+                else
+                    refused <- refused + 1
+
+                reconcileCell.Check(
+                    (l = r),
+                    fun () -> at (sprintf "reconcile base %s heads %A: %A vs %A" baseId heads l r)
+                )
+
+            // ---- a built cyclic load: a two-node cycle with a child under it, a node under a head,
+            // and a node naming a parent the DAG does not hold ----
+            match nodes with
+            | [] -> ()
+            | first :: _ ->
+                let last = List.last nodes
+                let template = dag.Nodes.[first]
+
+                let forgedNode id parents =
+                    id,
+                    { template with
+                        Id = id
+                        Parents = parents }
+
+                let forged: Dag.T<'Op> =
+                    { Nodes =
+                        [ forgedNode "cyc-x" [ "cyc-y"; first ]
+                          forgedNode "cyc-y" [ "cyc-x" ]
+                          forgedNode "cyc-z" [ "cyc-x" ]
+                          forgedNode "cyc-w" [ last ]
+                          forgedNode "cyc-d" [ "cyc-missing" ] ]
+                        |> List.fold (fun m (k, v) -> Map.add k v m) dag.Nodes }
+
+                let forgedIds = ids @ [ "cyc-x"; "cyc-y"; "cyc-z"; "cyc-w"; "cyc-d"; "cyc-missing" ]
+                let forgedReach = Dag.Reach.ofDag forged
+
+                match anyMismatch (indexed forgedReach) (unindexed forged) forgedIds with
+                | None -> cyclicCell.Saw()
+                | Some m -> cyclicCell.Check(false, fun () -> at ("cyclic load, " + m))
+
+                // extending such an index: under an unorderable parent, under an orderable one, and
+                // a node minted under the id the dangling parent names (a hash that answers it)
+                let minted: HashFn = fun _ _ -> "cyc-missing"
+
+                let extensions =
+                    [ Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) "cyc-z" forgedReach
+                      Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) last forgedReach
+                      Dag.appendIndexed minted sw actor (rng.Draw gen.Op) last forgedReach ]
+
+                for e in extensions do
+                    match e with
+                    | Ok(_, dag', r') ->
+                        let ids' =
+                            forgedIds
+                            @ (Dag.heads dag' |> List.filter (fun h -> not (List.contains h forgedIds)))
+
+                        match anyMismatch (indexed r') (indexed (Dag.Reach.ofDag dag')) ids' with
+                        | None -> extensionCell.Saw()
+                        | Some m -> extensionCell.Check(false, fun () -> at ("extended cyclic load, " + m))
+                    | Error _ -> ()) // a collision under the caller's hash, as in the growth above
+
+        LawKit.results
+            [ ancestorsCell
+              reachesCell
+              orderCell
+              mergeBaseCell
+              betweenCell
+              replayCell
+              reconcileCell
+              extensionCell
+              cyclicCell ]
+        @ [ SampleAdequacy.reachedBeside
+                family
+                dimension
+                seed
+                [ "lane merge", merged ]
+                [ "no lane merge", unmerged
+                  "reconcile folded", folded
+                  "reconcile refused", refused ] ]
+
     /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a
     /// realized effect value (the stand-in for a live non-deterministic source); the kit certifies:

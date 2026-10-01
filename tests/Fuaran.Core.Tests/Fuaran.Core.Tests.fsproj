@@ -47,6 +47,7 @@
     <Compile Include="WitnessSurfaceTests.fs" />
     <Compile Include="ReducerTests.fs" />
     <Compile Include="DagTests.fs" />
+    <Compile Include="ReachTests.fs" />
     <Compile Include="ProvenanceTests.fs" />
     <Compile Include="ColumnTests.fs" />
     <Compile Include="QueryTests.fs" />

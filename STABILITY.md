@@ -2675,6 +2675,51 @@ alone, already in the kit's closure, so the kit's package graph gains one packag
 runner's comparison unit grows by 86 lines at the consumer's next Core raise.
 
 **Class: additive.** `api/Fuaran.Core.Conformance.txt` gains one member (`ParityVectors.sanitiseSweep`).
+
+### A reachability index on the lane DAG: `Dag.Reach`, the indexed append and merge, and two index-taking overloads (Phase 289) — ADDITIVE
+
+**What changed.** Every graph query on the lane DAG recomputed from the node map on each call:
+`ancestorsOf` walked the parents, `tryTopoOrder` / `tryReplayTo` / `between` re-drained a head's closure,
+`mergeBase` took two closures and one more per common ancestor, and `reconcileMany` one per head. A
+loop of them — a keyring walk asking reachability per act, a fold asking a merge base per lane pair —
+cost the history's size times the number of questions. `Fuaran.Core.OpStream.Dag` now ships an index
+that answers the same questions from what it built once:
+
+- `Dag.Reach<'Op>` (no equality; immutable; carries the DAG it indexes) and the `Dag.Reach` module:
+  `ofDag` (one drain of the whole node set), `dag`, `ancestors`, `reaches ancestor descendant`,
+  `tryTopoOrder`, `mergeBase` and `between`, each answering exactly as the unindexed function of the
+  same name (`reaches` as membership in `ancestorsOf`).
+- `Dag.appendIndexed` / `Dag.mergeIndexed`: `append` / `merge` that also return the index extended for
+  the new node, at O(N) rather than a rebuild. Their refusals are `append`'s and `merge`'s.
+- `Dag.tryReplayToWith` and `Dag.reconcileManyWith`: `tryReplayTo` and `reconcileMany` taking the index
+  where they take the DAG, so a consumer holding an index does not pay the closure walks inside the call.
+- `Conformance.reachLaws` (opt-in, `StrongerPromise`, `Guarded [ "DAG shape" ]`): every indexed answer
+  equals the unindexed one on generated DAGs and on a built cyclic load with a dangling parent, the
+  index grown by `appendIndexed` / `mergeIndexed` answers as `Reach.ofDag` of the result, and a sample
+  without a merge of two incomparable lanes reds the guard rather than passing the merge-base, delta
+  and reconcile laws on chains.
+
+The representation and its measured cost are DECISIONS.md's Phase 289 entry: a slot per orderable
+node, the whole DAG's drain order (a head's order, a union's and a delta's are filters of it), and a
+per-slot ancestor bitset over slots — N²/64 32-bit words, about 1.6 MB at 5,000 nodes.
+
+**What did NOT change, deliberately.** No existing function's signature or answer moves:
+`reconcileMany` is re-expressed over a shared private fold (`reconcileRegion`) with the partition it
+always computed, and the laws pin every indexed answer to the unindexed one. The shard named
+`replayToWith`; the overload is `tryReplayToWith`, because `replayTo` is obsolete and leaves after this
+draft, and an overload of it would leave with it. The shard named `Reach.topoOrder`; it is
+`Reach.tryTopoOrder`, because the unindexed function it equals is `tryTopoOrder` (`topoOrder` is
+private) and answers with a `Result`. `mergeIndexed` is beyond the shard's list: a session that appends
+and merges in a loop would otherwise rebuild at its first merge.
+
+**What adopting it costs.** Nothing for a consumer that does not build an index. A consumer that does
+builds it once per load (`Dag.Reach.ofDag`), keeps it current with `appendIndexed` / `mergeIndexed`
+where it appended with `append` / `merge`, and asks through `Dag.Reach.*` or passes it to the `…With`
+overloads. The index holds its DAG, so there is no DAG argument to mismatch.
+
+**Class: additive.** `api/Fuaran.Core.OpStream.Dag.txt` gains the `Reach` type and module and four
+functions; `api/Fuaran.Core.Conformance.txt` gains `Conformance.reachLaws`. No wire bytes move.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

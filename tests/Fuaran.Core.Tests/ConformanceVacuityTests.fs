@@ -166,6 +166,10 @@ let private runs =
                100
                (Conformance.dagLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 99 100)
            run
+               "Conformance.reachLaws"
+               100
+               (Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 289 100)
+           run
                "Conformance.casLaws"
                200
                (Conformance.casLaws

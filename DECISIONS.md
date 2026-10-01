@@ -1,5 +1,71 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D92: the lane DAG's reachability index is a drain order plus per-node ancestor bitsets — an additional way to ask, never a change to what the unindexed functions answer
+
+**Recorded by Phase 289. `Fuaran.Core.OpStream.Dag` (`Dag.Reach`, `appendIndexed` / `mergeIndexed`,
+`tryReplayToWith`, `reconcileManyWith`); rides the `0.34.0` draft (STABILITY.md, "A reachability index
+on the lane DAG").** The shard left the representation to Core and asked for it, its measured cost on
+the shapes lane stores actually hold (a few long lanes, a shallow fan of merges), and the boundary to
+be recorded.
+
+*Chosen: a slot per orderable node, the whole DAG's drain order, and a per-slot ancestor bitset over
+slots.* The per-head functions drain a head's closure smallest ordinal id first. The drain of a
+down-closed node set is the whole DAG's drain restricted to it — a node's readiness depends only on its
+ancestors, and a node outside the set never unlocks one inside it — so one array of the whole drain
+answers a head's order, a union of heads' order (`reconcileMany`'s region) and a branch delta's order by
+filtering. A node's ancestors always hold smaller slots, so slot `s` needs `s + 1` bits: N²/64 32-bit
+words over the index. Reachability is one bit test; a merge base is a scan of two bitsets' common bits
+ranked by the stored closure size, the unindexed rule's key. Words are 32-bit `int`s so the arithmetic is
+the same under Fable. *Rejected:* a closure `Set` per node (the shard's "simplest"), which holds the
+same N² information as tree nodes of tens of bytes each rather than bits, and interval or chain labels,
+which are smaller on a few long lanes but need a second structure to give the ORDER back, and order is
+what replay, `between` and `reconcileMany` ask for.
+
+*Measured* (`FUARAN_CORE_MEASURE_REACH`, the opt-in leg in `ReachTests.fs`; 5,000 nodes, 25 lanes, 200
+merge points, built through `appendIndexed` / `mergeIndexed` under SHA-256; each loop asks up to 5,000
+times and stops at a 20-second budget, and the count it reached is stated; the reconcile row uses a
+footprint that writes nothing, so every call reaches the lane replays):
+
+| question | through the index (calls, µs per call) | unindexed (calls in budget, µs per call) | fraction |
+|---|---|---|---|
+| `reaches` (a keyring walk's question) | 5,000 · 1.1 | 5,000 · 867.7 | 0.0013 |
+| `ancestors` | 5,000 · 421.3 | 5,000 · 836.0 | 0.50 |
+| `tryTopoOrder` | 5,000 · 78.3 | 3,415 · 5,857 | 0.013 |
+| `mergeBase` of two lane heads | 5,000 · 97.7 | 42 · 476,746 | 0.0002 |
+| `between` (a node, a lane head) | 5,000 · 493.5 | 967 · 20,686 | 0.024 |
+| `tryReplayToWith` / `tryReplayTo` to a lane head | 5,000 · 716.6 | 973 · 20,559 | 0.035 |
+| `reconcileManyWith` / `reconcileMany`, two lane heads over their base | 308 · 65,313 | 180 · 111,478 | 0.59 |
+| `appendIndexed` / `append` then `Reach.ofDag` | 100 · 175 | 100 · 69,380 | 0.0025 |
+
+Two rows are read, not just quoted. `ancestors` halves and no more: the answer is a `Set` of up to 5,000
+strings and building it is most of the cost either way — the index removes the walk, not the answer.
+`reconcileManyWith` saves the region partition (N+1 closure walks and a drain) and nothing else: the
+pairwise interference check over the two exclusive deltas and the per-lane replays are the fold's own
+cost, unchanged by design, and on two lanes of a few hundred ops each they are most of the call.
+
+The index over 5,000 nodes held 1,572,512 bytes (393,128 words) of bitsets and `Reach.ofDag` took 80 ms
+(18.8 MB allocated in passing). The bound is quadratic — about 156 MB at 50,000 nodes — and is stated
+for the shapes measured, not as a general
+claim; a store that grows past it is the trigger to revisit the representation (chain labels for the
+membership half, the drain array kept for order), not to drop the index.
+
+*The boundary, decided.* The index is an ADDITIONAL way to ask. Every unindexed function keeps its
+signature and its answer — `reconcileMany` was re-expressed over a shared private fold with the same
+partition — and `Conformance.reachLaws` pins every indexed answer equal to the unindexed one, the
+extension law included. A node the drain cannot order (on or below a cycle, which only an unverified
+load can hold) gets no slot, and any question touching one is answered by the unindexed function itself;
+a node minted under an id some held node names as a dangling parent is not a leaf, so extending onto it
+rebuilds. The index carries the DAG it was built for, so the overloads take it IN PLACE of the DAG and
+there is no pair of arguments to mismatch. The extension is O(N) (arrays copied, bitsets shared) and its
+law is observational: an extended index numbers its nodes in arrival order and a rebuilt one in drain
+order, and they answer every question alike, so `Reach` carries no equality.
+
+*Two names moved from the shard, both to match the function each equals.* `tryReplayToWith`, not
+`replayToWith`: `replayTo` is obsolete and leaves after this draft. `Reach.tryTopoOrder`, not
+`Reach.topoOrder`: the public unindexed function is `tryTopoOrder` and answers with a `Result`.
+`mergeIndexed` was added beside the shard's `appendIndexed` because a session that merges would
+otherwise rebuild at its first merge.
+
 ## 2026-10-01 — D91: a generated record holding a host-only closure takes WIRE equality; the conformance families keep their equality constraint
 
 **Recorded by Phase 252. `Fuaran.Core.Idl.Codegen` (`Gen.fsharpModule`'s output); rides the `0.34.0`

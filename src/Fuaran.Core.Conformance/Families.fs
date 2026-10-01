@@ -350,6 +350,17 @@ module Families =
                   "each iteration builds, replays and round-trips one DAG, and tampers it whenever a fresh draw differs; a run that never tampers reds the tamper law as never reached")
               (DrawnMissIsRed,
                "the tampered node it must reject is built only when a fresh draw differs from the op it replaces; the tamper law is a strict runner cell, so a run that never tampers reds it as never reached (Phase 297)")
+          // Phase 289 — the reachability index against the unindexed functions. The shape is drawn
+          // by the kit, but whether two drawn lanes stay two depends on the caller's ops (the same op
+          // on the same parent is one node), so a merge of incomparable lanes is counted and guarded.
+          c
+              "reachLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "DAG shape" ])
+              (Drawn,
+               "the unknown head and the cyclic load are built every iteration, but a replay rejection and a reconcile refusal come from the caller's drawn ops and their agreement laws hold when none is drawn; the refusals are counted beside the DAG-shape guard, not demanded, since a domain whose ops never reject cannot produce one")
           // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
           // found and left for this phase. Each was `Unconditional` on the strength of what every
           // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an
