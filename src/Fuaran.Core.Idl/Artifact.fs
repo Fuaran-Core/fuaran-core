@@ -1118,7 +1118,22 @@ module Artifact =
                                               ValueLiteralField = valueField
                                               TransparentUnions = unions }))))))))
 
+    /// Phase 292 — a read vocabulary is VALIDATED before anyone receives it: `idl.json` is
+    /// untrusted input (DECISIONS D93), and a hand-edited one could otherwise carry a quote in
+    /// its discriminator, a line break in an annotation or a dangling type name straight to
+    /// an emitter. Every error is named, not just the first, so one edit fixes them all.
+    let private validated (idl: Idl) : Result<Idl, string> =
+        match Declare.errors idl with
+        | [] -> Ok idl
+        | errs ->
+            Error(
+                sprintf "idl.json declares a vocabulary that is not well-formed (%d error(s)):\n" (List.length errs)
+                + (errs |> List.map (fun e -> "  - " + e) |> String.concat "\n")
+            )
+
     /// Read a vocabulary from the artifact's parsed root.
+    ///
+    /// The vocabulary is refused unless [[Declare.errors]] finds nothing (Phase 292).
     ///
     /// The encoding version is checked FIRST and refused by name when it is not this
     /// engine's: an artifact written by a newer encoder may spell a member this reader
@@ -1159,16 +1174,17 @@ module Artifact =
                                         readWire root
                                         |> Result.bind (fun wire ->
                                             readHarden root
-                                            |> Result.map (fun harden ->
-                                                { Kinds = kinds
-                                                  Unions = unions
-                                                  Enums = enums
-                                                  Records = records
-                                                  Defaults = defaults
-                                                  NodeFields = nodeFields
-                                                  Ops = ops
-                                                  Wire = wire
-                                                  Harden = harden })))))))))
+                                            |> Result.bind (fun harden ->
+                                                validated
+                                                    { Kinds = kinds
+                                                      Unions = unions
+                                                      Enums = enums
+                                                      Records = records
+                                                      Defaults = defaults
+                                                      NodeFields = nodeFields
+                                                      Ops = ops
+                                                      Wire = wire
+                                                      Harden = harden })))))))))
         | Some _ -> Error "idl.json 'version' is not an integer"
 
     /// Read a vocabulary from `idl.json` bytes — the inverse of [[render]], up to the

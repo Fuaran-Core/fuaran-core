@@ -279,6 +279,10 @@
          reads ReferenceIdl.fs, SecondDomainSpike.fs and ScoreDomainSpike.fs and must
          follow all three. Appended at the end of the list (append-only registration). -->
     <Compile Include="IdlEnvelopeTests.fs" />
+    <!-- Phase 292 - Declare.errors at every loading path, the SourceLit escaper, and a total
+         codec and sampler. Reads MiniIdl.fs, ReferenceIdl.fs, both spikes, IdlDocAnnotationTests.fs
+         and Snapshots.fs, so it follows all of them. -->
+    <Compile Include="IdlValidationTests.fs" />
     <!-- Phase 203 — "exhaustively proved" as a gate predicate: every packable package is named by
          a model or carries a declared exclusion, every assumed row is accounted for by its class,
          and every differential is paired to a theorem. Reads PackageRosterTests.fs above for the
