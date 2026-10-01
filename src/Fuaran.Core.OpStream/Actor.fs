@@ -11,6 +11,14 @@ type Actor =
     | Human of id: string
     | Agent of model: string * version: string * id: string
 
+/// Why an actor was refused (Phase 315) — an actor that names nobody. `Actor.validate` /
+/// `Actor.human` / `Actor.agent` return it, and the JSONL decoder carries it in
+/// `JsonlFaultReason.ActorInvalid`. A refusal-class envelope: a case may be added.
+[<RequireQualifiedAccess>]
+type ActorInvalid =
+    /// The actor's `id` is empty — it attributes the op to nobody.
+    | EmptyId
+
 /// The spine's JSON string escape as THIS package carries it (Phase 287). A DELIBERATE COPY of
 /// `Wire.Json.escape`: `Fuaran.Core.OpStream` is standalone by design and takes no `Wire`
 /// dependency (DECISIONS.md D2), so the rule is copied here exactly as `Hash.fnv1a` is copied
@@ -103,3 +111,25 @@ module Actor =
     /// unstructured string outside any Human/Agent distinction) to the typed `Human` case — the
     /// migration default. See `OpStream.legacyActorConfig` / `OpStream.fromJsonlLegacyActor`.
     let ofLegacyString (s: string) : Actor = Human s
+
+    // ---- Phase 315: an actor names somebody ----
+    // An empty id attributes an op to nobody, and every reader that groups by `Actor.id` folds all
+    // such ops into one anonymous author. The two cases cannot refuse it themselves — a union case
+    // is a constructor, and closing them would break every construction site — so the refusal is
+    // stated here, once, and applied at the two boundaries that admit an actor: these constructors,
+    // and the JSONL decoder (`OpStream.Jsonl.actorField`, which answers `JsonlFaultReason.ActorInvalid`).
+
+    /// The actor, or the first reason it names nobody: an empty `id` (`ActorInvalid.EmptyId`).
+    /// `model` and `version` are attribution detail and may be empty; the id is the identity.
+    let validate (a: Actor) : Result<Actor, ActorInvalid> =
+        if System.String.IsNullOrEmpty(id a) then
+            Error ActorInvalid.EmptyId
+        else
+            Ok a
+
+    /// `Human id`, refusing an empty id.
+    let human (id: string) : Result<Actor, ActorInvalid> = validate (Human id)
+
+    /// `Agent(model, version, id)`, refusing an empty id.
+    let agent (model: string) (version: string) (id: string) : Result<Actor, ActorInvalid> =
+        validate (Agent(model, version, id))

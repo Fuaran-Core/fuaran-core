@@ -48,6 +48,9 @@ type JsonlFaultReason =
     /// an actor kind this build does not know, a node colliding with one already read. The reader's
     /// reason, verbatim.
     | Refused of reason: string
+    /// The line's actor names nobody (Phase 315) — the member that carried it, and why. Declared
+    /// LAST so every existing case keeps its tag.
+    | ActorInvalid of field: string * reason: ActorInvalid
 
 /// One refused JSONL line (Phase 296): the 1-based `Line` number counted over EVERY line of the
 /// text (blank lines included, so it is the number an editor shows), the scanner's own 0-based
@@ -81,6 +84,7 @@ module JsonlFault =
         | JsonlFaultReason.MissingField f -> "missing field " + f
         | JsonlFaultReason.SnapshotNotAtHead -> "a snapshot line that is not the first line of the stream"
         | JsonlFaultReason.Refused reason -> reason
+        | JsonlFaultReason.ActorInvalid(field, ActorInvalid.EmptyId) -> "the actor in " + field + " has an empty id"
 
     /// `line N: <reason> (position P)` — the `line N:` prefix every JSONL reader's `Error` string
     /// has carried since Phase 252, now 1-based over all lines.

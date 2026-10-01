@@ -213,7 +213,8 @@ module ApplyVectorExport =
         | DuplicateId d -> Canon.typed "duplicateId" [ "id", JStr d ]
         | UnknownNode(target, _) -> Canon.typed "unknownNode" [ "target", JStr target ]
         | CannotRemoveRoot -> Canon.typed "cannotRemoveRoot" []
-        | WouldNestUnderSelf t -> Canon.typed "wouldNestUnderSelf" [ "target", JStr t ]
+        // Phase 315's `relation` is evidence for the class, like `ReorderMismatch`'s orders: not pinned.
+        | WouldNestUnderSelf(t, _) -> Canon.typed "wouldNestUnderSelf" [ "target", JStr t ]
         | NotAContainer(target, kindTag) ->
             Canon.typed "notAContainer" [ "target", JStr target; "kindTag", JStr kindTag ]
         | ReorderMismatch(parent, _, _) -> Canon.typed "reorderMismatch" [ "parent", JStr parent ]

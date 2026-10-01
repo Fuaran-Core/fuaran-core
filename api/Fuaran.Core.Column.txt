@@ -49,8 +49,10 @@ field Fuaran.Core.DataSource+Tags.Ref : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Breaking : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Compatible : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Unknown : System.Int32 (literal)
+method Fuaran.Core.CellModule.compare(Fuaran.Core.Cell, Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.CellModule.decimal(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Cell>
 method Fuaran.Core.CellModule.isNull(Fuaran.Core.Cell) : System.Boolean
+method Fuaran.Core.CellModule.token(Fuaran.Core.Cell) : System.String
 method Fuaran.Core.CellModule.typeOf(Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ColumnType>
 method Fuaran.Core.ColumnCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DataSource, Fuaran.Core.ColumnError>
 method Fuaran.Core.ColumnCodec.decodeJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.DataSource, Fuaran.Core.ColumnError>

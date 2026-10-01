@@ -3532,6 +3532,47 @@ The phase's source is a downstream spreadsheet-shaped consumer's measurement (Ph
 a sheet over `Column.Ops`, `DataFrame.Incremental` and `Propagation`, and found five places where
 the three strands met only through glue it kept by hand. Each entry below closes one of them.
 
+### The light set: the small exports consumers copied (Phase 315, DECISIONS.md "the light set") — `additive`, with three BREAKING items beside it: a case payload (`Rejection.WouldNestUnderSelf`, breaking-source), a type that moves package (`RejectionGuidance`, AiSurface → Ops, source-compatible), and refusals of input that was accepted (an empty actor id on read; `ColumnValidator.unique` reading decimals by value)
+
+**Additive.** `OpStream.sha256Hash` (the named SHA-256 `HashFn`, byte-for-byte `Hash.sha256Hex (prev +
+"|" + payload)`); `Hash.fnv1a32` (the raw value `fnv1a` renders); `OpStream.chainHashOf` and
+`OpStream.appendChainOnly` (the record hash, and an append with no state and no apply); the
+`Footprint` builders `empty` / `union` / `contentEdit` / `insertUnder` / `removeNode` / `moveTo`;
+`Rejection.code` / `Rejection.explain` with `RejectionNouns`, and `RejectionCodec.encode` / `render` in
+AiSurface; `NestRelation`; `FloatLayout` public (`finite`, `roundTrip`); `Cell.token` / `Cell.compare`;
+`Validator.Pack` / `PackCheck` / `PackFinding` / `citation` / `runPack`; `ActorInvalid` with
+`Actor.validate` / `Actor.human` / `Actor.agent`. The guard classes `Column`, `Tree`, `Validator` and
+`Wire` as `additive`. No emitted byte moves: the chain hash, the apply vectors, the law vectors and
+every committed parity row are unchanged, and the parity table gains `sha256Hash/*`, `fnv1a32/*`,
+`floatLayout/*`, `cellToken/*` and `cellCompare/*` rows, appended.
+
+**BREAKING — `Rejection.WouldNestUnderSelf of target * relation: NestRelation`** (the guard's `retype`
+on `Ops`). The case carried the target alone, so a move under itself and a move into its own subtree
+were one refusal; the relation is now a field. A pattern `WouldNestUnderSelf id` no longer compiles:
+write `WouldNestUnderSelf(id, _)`, or match the relation. `WouldNestUnderSelf _` compiles unchanged, and
+the class every host and vector names is unchanged.
+
+**BREAKING (binary only) — `RejectionGuidance` is declared in `Fuaran.Core.Ops`** (the guard's
+`removal` on `AiSurface`). Same namespace, same fields: a source that names it compiles unchanged; an
+assembly compiled against the old location rebuilds.
+
+**BREAKING (behaviour) — an empty actor id is refused on read.** `OpStream.fromJsonl` (and the readers
+built on it, `Dag.fromJsonl` included) refuse an actor whose `id` is empty with
+`JsonlFaultReason.ActorInvalid(member, ActorInvalid.EmptyId)` — the guard's `union-widening` on
+`OpStream`, the new reason being declared last. A store holding such a record is no longer read; the
+legacy bare-string reader (`fromJsonlLegacyActor`) is unchanged. The `Human` / `Agent` cases still
+construct anything — validate at the boundary with `Actor.validate` / `Actor.human` / `Actor.agent`.
+
+**BREAKING (behaviour) — `ColumnValidator.unique` keys on `Cell.token`.** Its private token wrote a
+`Decimal` as its raw text; `Cell.token` writes the canonical text, so two cells holding `1.5` and `1.50`
+are now one key value and the second is a `COL-UNIQUE` defect. No other cell's key moves. A table that
+passed `Table.validate` holds only canonical decimals and sees no difference. `CountDistinct` now reads
+the same token; its counts do not move (its ±∞ spelling changed, which no count can see).
+
+**Not moved.** `Query.invocationKey` keeps its own cell encoding — it is injective on cells, which
+`Cell.token` deliberately is not (DECISIONS.md "the light set"). No `appendAll` is added: Phase 296's
+`appendMany` is that function.
+
 ### `UpdateNode` — the in-place skeleton op (Phase 250) — BREAKING, `union-widening`
 
 **What changed.** `SkeletonOp<'Node, 'Id>` gains a sixth case, declared last so every existing tag

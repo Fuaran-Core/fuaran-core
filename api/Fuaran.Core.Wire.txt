@@ -71,6 +71,8 @@ method Fuaran.Core.Decode.propWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.C
 method Fuaran.Core.Decode.strField(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Decode.stringWith`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Decode+Fault, !!0>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, !!0>
 method Fuaran.Core.Decode.tryProp(System.String, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.JVal>
+method Fuaran.Core.FloatLayout.finite(System.Double) : System.String
+method Fuaran.Core.FloatLayout.roundTrip(System.Double) : System.String
 method Fuaran.Core.JValModule.asFloat(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
 method Fuaran.Core.JValModule.kindName(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.JValModule.nonFiniteToken(System.Double) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
@@ -146,6 +148,7 @@ type Fuaran.Core.Decode+Fault (union)
 type Fuaran.Core.Decode+Fault+MissingProperty (type)
 type Fuaran.Core.Decode+Fault+Tags (type)
 type Fuaran.Core.Decode+Fault+WrongKind (type)
+type Fuaran.Core.FloatLayout (module)
 type Fuaran.Core.JVal (union)
 type Fuaran.Core.JVal+JArr (type)
 type Fuaran.Core.JVal+JBool (type)

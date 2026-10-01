@@ -15,6 +15,7 @@ method Fuaran.Core.Hash.canonicalField(System.String) : System.String
 method Fuaran.Core.Hash.canonicalFields(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : System.String
 method Fuaran.Core.Hash.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.IllFormedUtf16>
 method Fuaran.Core.Hash.fnv1a(System.String) : System.String
+method Fuaran.Core.Hash.fnv1a32(System.String) : System.UInt32
 method Fuaran.Core.Hash.sha256Bytes(System.Byte[]) : System.Byte[]
 method Fuaran.Core.Hash.sha256Hex(System.String) : System.String
 method Fuaran.Core.Hash.sha256HexOfBytes(System.Byte[]) : System.String

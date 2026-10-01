@@ -113,7 +113,25 @@ let private expected: (string * string) list =
       "profile/plus-sign", "refused"
       "profile/trailing-nul", "refused"
       "profile/int32-max", "core@2147483647.2147483647"
-      "profile/past-int32", "refused" ]
+      "profile/past-int32", "refused"
+      // Phase 315 — the light set. `sha256Hash/*` is also held to the platform digest in
+      // `LightSetTests`, and `fnv1a32/a` is `fnv1a/a`'s `e40c292c` in decimal.
+      "sha256Hash/genesis", "88ab8d7b4727fd34f90a698cd45e27a227812ca72e4d5daf0da808a11c07fdb2"
+      "sha256Hash/two-block", "890f16829cee657dc9291880730df50b465ac92d2332a595fb49cffa198319f7"
+      "sha256Hash/agrees-with-sha256Hex", "agrees:13"
+      "fnv1a32/a", "3826002220"
+      "fnv1a32/unicode", "2803962730"
+      "fnv1a32/agrees-with-fnv1a", "agrees:13"
+      "floatLayout/finite-neg-zero", "-0"
+      "floatLayout/finite-tenth", "0.1"
+      "floatLayout/finite-e21", "1E+21"
+      "floatLayout/finite-e-7", "1E-07"
+      "floatLayout/finite-neg-third", "-0.3333333333333333"
+      "floatLayout/round-trip-non-finite", "NaN,Infinity,-Infinity"
+      "cellToken/floats", "f:NaN f:Inf f:-Inf f:0 f:0 f:0.1 f:1E+21"
+      "cellToken/scalars", "i:-3 b:1 s:s d:2026-10-01 n:"
+      "cellToken/decimal-canonical", "m:1.5"
+      "cellCompare/float-order", "f:-Inf f:0 i:0 f:1 f:Inf f:NaN" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -132,7 +150,12 @@ let private families =
       "tryUtf8Bytes/"
       "canonTryRender/"
       "render/"
-      "profile/" ]
+      "profile/"
+      "sha256Hash/"
+      "fnv1a32/"
+      "floatLayout/"
+      "cellToken/"
+      "cellCompare/" ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the

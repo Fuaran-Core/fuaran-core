@@ -55,6 +55,19 @@ module Hash =
         let cross = ((aLo * bHi) + (aHi * bLo)) &&& 0xFFFFu
         ((aLo * bLo) + (cross * 65536u)) &&& 0xFFFFFFFFu
 
+    /// The raw 32-bit FNV-1a value `fnv1a` renders (Phase 315) — for a caller that buckets, mixes or
+    /// compares the number rather than its text, and so used to copy `mul32` to get it. The same
+    /// fold, the same unit (the UTF-16 code unit — read `fnv1a`), the same split-half multiply; the
+    /// `fnv1a32/*` parity vectors hold it to one value on both pipelines.
+    let fnv1a32 (s: string) : uint32 =
+        let mutable h = 2166136261u
+
+        for ch in s do
+            h <- h ^^^ uint32 ch
+            h <- mul32 h 16777619u
+
+        h
+
     /// A 32-bit non-cryptographic content fingerprint (FNV-1a, lowercase hex). Cheap, and a second
     /// pre-image is seconds of search — so it belongs on a cache key or a rebuild stamp, never under
     /// a signature. Use `sha256Hex` for anything an adversary would gain by forging.
@@ -72,14 +85,9 @@ module Hash =
     /// which the three readings give three values, so a twin learns which it implemented. Every
     /// unit is folded as found, a lone surrogate included: this is a cache fingerprint, not a
     /// digest, and it refuses nothing.
-    let fnv1a (s: string) : string =
-        let mutable h = 2166136261u
-
-        for ch in s do
-            h <- h ^^^ uint32 ch
-            h <- mul32 h 16777619u
-
-        h.ToString("x8")
+    ///
+    /// Defined over `fnv1a32` (Phase 315): the string is that value as eight lower-case hex digits.
+    let fnv1a (s: string) : string = (fnv1a32 s).ToString("x8")
 
     /// The field TERMINATOR of every canonical pre-image on the spine (`canonicalField` below):
     /// the ASCII control byte `U+0001` (SOH). Since Phase 290 no key joins on it bare — every key
