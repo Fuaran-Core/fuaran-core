@@ -2423,6 +2423,67 @@ two-argument method, which the baseline refuses as a `removal`.
 
 **Class: additive.** No public surface moves; a change to one op-stream concern now edits one file.
 
+### One sanitisation floor, total on hostile input, with the URL floor at parity with the UI tier's (Phase 291) — ADDITIVE; no public surface moves
+
+**What changed.** `Fuaran.Core.Idl.Sanitize` is the floor `Trust.harden` sends every declared URL and
+markdown field through, and it had two defects. Neither changes a signature; `api/Fuaran.Core.Idl.txt` is
+byte-identical.
+
+**1. `scrubMarkdown` took indices from a lowered copy of the string and applied them to the original.** The
+event-handler scan and the `javascript:` / `vbscript:` loop both did (`s.ToLowerInvariant()` then
+`IndexOf`, then `Remove` / `Substring` on `s`). On .NET `ToLowerInvariant` keeps the length. Under Fable a
+string lowercase is `toLowerCase()`, which turns U+0130 into two units, so each `İ` shifts every later
+index by one: the wrong characters are replaced, and with enough of them and a tail the scheme loop
+replaces past the real match forever. Every scan now compares per unit on the string it indexes —
+`foldAscii` (`A`-`Z` to `a`-`z`, nothing else) inside `indexOfFolded`, and the same fold inside the handler
+scan — so no index is ever taken from a string of another length, on either pipeline. The element sweep
+moved onto the same helper: `IndexOf(…, OrdinalIgnoreCase)` is a comparison whose Fable lowering this
+repository cannot see, and the one function whose contract is "total on hostile input" should not lean on
+it. The scheme loop is bounded by a `searchFrom` cursor that advances past every replacement, as the UI
+tier's copy is; resuming at the cursor loses no match, because `about:blank` holds no `j` or `v` and its one
+`:` follows `about`, which is the tail of neither scheme (the Phase 96 splice case is still in the corpus
+and still passes). On .NET the output is byte-identical to before for every input: the fold is the one
+`OrdinalIgnoreCase` already applied to these ASCII needles, and the one character whose invariant
+lowercase is ASCII under .NET (U+212A) occurs in no token this module scans for.
+
+**2. The URL floor was not the UI floor.** Compared clause by clause (`Fuaran.UI.EmissionGrammar`'s
+`normalizeUrlForFloor`, `isProtocolRelative`, `sanitizeUrl`):
+
+| Clause | UI floor | Core before | Core now |
+|---|---|---|---|
+| Edge removal | every unit at or below U+0020, both ends | `String.Trim()`: Unicode white space only | as the UI floor |
+| Interior TAB / LF / CR | removed | kept | as the UI floor |
+| Interior VT / FF | kept (the parser keeps them) | kept | as the UI floor |
+| Protocol-relative pair | any two units drawn from `/` and `\` | `//` and `/\` only | as the UI floor |
+| A single leading `\` | allowed (reads as `/`) | allowed | as the UI floor |
+| Value returned | the normalised string | the trimmed string | as the UI floor |
+| Scheme extraction, allow and reject sets, default-deny, empty string | — | identical | unchanged |
+
+The clauses the UI floor held that Core lacked are therefore four: the C0 half of the edge removal (NUL,
+U+0001-U+0008, U+000E-U+001B), the interior TAB / LF / CR removal, the `\\` and `\/` halves of the pair, and the
+normalised return. So Core accepted `\\evil.example`, `\/evil.example`, `/<TAB>/evil.example` and
+`<U+0001>//evil.example`, each of which a browser normalises to an off-origin `//evil.example`; all four are
+refused now. The clause table is a test (`urlFloorClauses`), so a divergence is a red case naming its
+clause.
+
+**What adopting it costs.** Nothing at the call site. One consequence is worth reading: the edge removal no
+longer takes non-ASCII white space (U+0085, U+00A0, U+2028, …), because the parser keeps it, so
+`<U+00A0>//host` is now returned as an ordinary relative path where Core used to refuse it. That is the
+UI floor's choice and the reason for the exact normalisation; a consumer that trims the value again itself
+before use re-opens the hole the floor exists to close, and should not. Both floors still classify a scheme
+candidate through `Trim()` and `ToLowerInvariant` (the candidate has already lost everything at or below
+U+0020); that residue is shared, default-deny covers it, and it is unchanged here.
+
+**The corpus.** `IdlCertificationTests` gains, with the expected output stated as a literal so both
+pipelines can share the oracle: `İ` runs of 1, 3, 11 and 12 before each scheme with and without a tail,
+bare and inside an `href`; a lone surrogate (high, low, and a doubled form) before a scheme; the handler
+and element scans after an `İ` run; and the URL clause table. Each case runs under a 20 s bound.
+
+**Class: additive.** The floor refuses more (the four pair spellings, and a scheme after any number of
+`İ` under Fable, which the old scan could miss or loop on) and nothing it accepted that was safe is
+refused. The narrow reverse edge above, strings it used to refuse and now passes through unchanged, is the
+parity the phase exists to establish.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
