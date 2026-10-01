@@ -3509,6 +3509,51 @@ appending in a loop should collect and call `appendMany`.
 **Rollback.** Pin `0.32.0`. Nothing persisted moves: every hash, pre-image and line byte is the
 same, and a store `0.33.0` refuses is one `0.32.0` was misreading.
 
+### The DAG's checked append gains a verifying variant (Phase 329, DECISIONS.md "the verified append is the call-site check D83 left to the caller") — ADDITIVE on the public surface; `dagLaws` gains two laws, and a stream generator whose DAG nodes never differ in state now reds the family as never reached
+
+**What changed.**
+
+- **`Dag.appendVerified` / `Dag.mergeVerified`** (`'State : equality`) and **`Dag.appendVerifiedWith`
+  / `Dag.mergeVerifiedWith`** (the caller's comparison, first) — `additive`. Each takes the checked
+  form's arguments with the initial state `state0` after the witness, replays the named parent's
+  ancestor closure from it (the genesis parent `""` replays to `state0`; a merge replays the union of
+  both parents' closures, without the merge op, in the order `tryReplayTo` drains the merge node's
+  closure), and refuses a handed-in state that differs. Refusals in order: the graph refusals, then a
+  parent whose replay fails, then the mismatch; otherwise the result is exactly `appendChecked`'s /
+  `mergeChecked`'s. One replay per call, linear in the parent's closure — a choice for tests and debug
+  builds, never the production path.
+- **`Dag.VerifiedAppendRejection<'State, 'Rej>`** — a NEW union (`Checked of DagAppendRejection<'Rej>`
+  | `ParentReplay of Dag.ReplayFault<'Rej>` | `StateMismatch of handed * replayed`), `additive`. No
+  existing union gains a case.
+- **`Dag.tryReplayTo`** is now the shared union replay at one root. Same fold, same order, same faults;
+  its tests are unchanged and green.
+- **`Conformance.dagLaws`** gains "appendVerified / mergeVerified answer as the checked forms at the
+  parent's replayed state" and "appendVerified / mergeVerified refuse another node's state with
+  StateMismatch": nine results where there were seven. The new draws come after every earlier arm's,
+  so a recorded seed reproduces the sample the seven laws saw. The family's signature is unchanged and
+  `api/Fuaran.Core.Conformance.txt` did not move; the census row reads `900` cases where it read `700`
+  (`docs/conformance-families.{md,json}` regenerated).
+
+**Class.** One baseline moved, `api/Fuaran.Core.OpStream.Dag.txt`, by additions only: the four
+functions and the union's members. No wire surface moved. The slot is untagged and already breaking,
+so this rides it.
+
+**What adopting it costs.** Nothing for a caller of the checked forms. A domain certifying `dagLaws`
+reads two more results; a generator whose drawn ops never make two of the family's nodes differ in
+state never reaches the refusal law, and that strict cell then reports "never reached" — the same
+verdict a constant generator already gets from the tamper law. A caller that wants the check swaps
+`appendChecked hashFn w actor op state parentId dag` for `appendVerified hashFn w state0 actor op state
+parentId dag` and matches `VerifiedAppendRejection.Checked` where it matched the checked refusal.
+
+**Shown failing first.** With the comparison in the verifiers' shared step skipped (a perturbation of
+the tree, reverted), `dagLaws` at the reference counter went red on exactly the refusal law, at seed 99
+iteration 0: an append onto a fork head holding its sibling's state was admitted. The seven earlier
+laws and the agreement law stayed green. `DagTests.fs` pins the three mis-pairings, the genesis
+parent, a parent whose replay is refused (a rejecting node, a cyclic history), the graph refusals'
+precedence, and that a `…With` comparison which always agrees verifies nothing.
+
+**Rollback.** Pin `0.32.0`, or stop calling the verified forms. Nothing persisted moves.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

@@ -12,6 +12,9 @@ ctor Fuaran.Core.MergeConflict`1..ctor(!0, !0, System.String, Fuaran.Core.MergeC
 field Fuaran.Core.Dag+ReplayFault`1+Tags.CyclicHistory : System.Int32 (literal)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.Rejected : System.Int32 (literal)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.UnknownHead : System.Int32 (literal)
+field Fuaran.Core.Dag+VerifiedAppendRejection`2+Tags.Checked : System.Int32 (literal)
+field Fuaran.Core.Dag+VerifiedAppendRejection`2+Tags.ParentReplay : System.Int32 (literal)
+field Fuaran.Core.Dag+VerifiedAppendRejection`2+Tags.StateMismatch : System.Int32 (literal)
 field Fuaran.Core.DagAppendFault+Tags.CommaInParentId : System.Int32 (literal)
 field Fuaran.Core.DagAppendFault+Tags.ContentIdCollision : System.Int32 (literal)
 field Fuaran.Core.DagAppendFault+Tags.EmptyParentId : System.Int32 (literal)
@@ -29,6 +32,8 @@ field Fuaran.Core.ReconcileFault`2+Tags.LanesRejected : System.Int32 (literal)
 field Fuaran.Core.ReconcileFault`2+Tags.SharedHistoryRejected : System.Int32 (literal)
 method Fuaran.Core.Dag.ancestorsOf`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 method Fuaran.Core.Dag.appendChecked`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, !!1, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<!!1, System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendRejection`1<!!2>>
+method Fuaran.Core.Dag.appendVerifiedWith`3(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, !!0, Fuaran.Core.Actor, !!1, !!0, System.String, Fuaran.Core.Dag+T`1<!!1>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<!!0, System.String, Fuaran.Core.Dag+T`1<!!1>>, Fuaran.Core.Dag+VerifiedAppendRejection`2<!!0, !!2>>
+method Fuaran.Core.Dag.appendVerified`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Actor, !!0, !!1, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<!!1, System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.Dag+VerifiedAppendRejection`2<!!1, !!2>>
 method Fuaran.Core.Dag.append`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendFault>
 method Fuaran.Core.Dag.betweenOps`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
 method Fuaran.Core.Dag.between`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DagNode`1<!!0>>
@@ -41,6 +46,8 @@ method Fuaran.Core.Dag.heads`1(Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Coll
 method Fuaran.Core.Dag.isAcyclic`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : System.Boolean
 method Fuaran.Core.Dag.mergeBase`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Dag.mergeChecked`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, !!1, System.String, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<!!1, System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendRejection`1<!!2>>
+method Fuaran.Core.Dag.mergeVerifiedWith`3(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, !!0, Fuaran.Core.Actor, !!1, !!0, System.String, System.String, Fuaran.Core.Dag+T`1<!!1>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<!!0, System.String, Fuaran.Core.Dag+T`1<!!1>>, Fuaran.Core.Dag+VerifiedAppendRejection`2<!!0, !!2>>
+method Fuaran.Core.Dag.mergeVerified`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Actor, !!0, !!1, System.String, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<!!1, System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.Dag+VerifiedAppendRejection`2<!!1, !!2>>
 method Fuaran.Core.Dag.merge`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendFault>
 method Fuaran.Core.Dag.reconcileMany`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, !!1, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.ReconcileFault`2<!!0, !!2>>
 method Fuaran.Core.Dag.reconcile`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!!0>>>
@@ -76,6 +83,11 @@ type Fuaran.Core.Dag+ReplayFault`1+Rejected (type)
 type Fuaran.Core.Dag+ReplayFault`1+Tags (type)
 type Fuaran.Core.Dag+ReplayFault`1+UnknownHead (type)
 type Fuaran.Core.Dag+T`1 (record)
+type Fuaran.Core.Dag+VerifiedAppendRejection`2 (union)
+type Fuaran.Core.Dag+VerifiedAppendRejection`2+Checked (type)
+type Fuaran.Core.Dag+VerifiedAppendRejection`2+ParentReplay (type)
+type Fuaran.Core.Dag+VerifiedAppendRejection`2+StateMismatch (type)
+type Fuaran.Core.Dag+VerifiedAppendRejection`2+Tags (type)
 type Fuaran.Core.DagAppendFault (union)
 type Fuaran.Core.DagAppendFault+CommaInParentId (type)
 type Fuaran.Core.DagAppendFault+ContentIdCollision (type)
@@ -104,6 +116,9 @@ type Fuaran.Core.ReconcileFault`2+Tags (type)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewCyclicHistory #1(headId: System.String)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewRejected #2(nodeId: System.String, reject: !0)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewUnknownHead #0(headId: System.String)
+union-case Fuaran.Core.Dag+VerifiedAppendRejection`2.NewChecked #0(Item: Fuaran.Core.DagAppendRejection`1<!1>)
+union-case Fuaran.Core.Dag+VerifiedAppendRejection`2.NewParentReplay #1(Item: Fuaran.Core.Dag+ReplayFault`1<!1>)
+union-case Fuaran.Core.Dag+VerifiedAppendRejection`2.NewStateMismatch #2(handed: !0, replayed: !0)
 union-case Fuaran.Core.DagAppendFault.EmptyParentId #0()
 union-case Fuaran.Core.DagAppendFault.NewCommaInParentId #1(parentId: System.String)
 union-case Fuaran.Core.DagAppendFault.NewContentIdCollision #3(nodeId: System.String)

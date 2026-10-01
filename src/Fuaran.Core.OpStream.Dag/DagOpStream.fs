@@ -368,7 +368,8 @@ module Dag =
 
     /// `merge` that also APPLIES the merge op (Phase 296): `state` is the state the merged closure
     /// replays to (`tryReplayTo`, or `reconcileMany`'s result), and a rejected merge op is refused
-    /// before it enters the DAG. The graph refusals are judged first.
+    /// before it enters the DAG. The graph refusals are judged first. `mergeVerified` (Phase 329)
+    /// replays both parents and refuses a `state` that is not theirs; `appendVerified` likewise.
     let mergeChecked
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -519,25 +520,31 @@ module Dag =
         | CyclicHistory of headId: string
         | Rejected of nodeId: string * reject: 'Rej
 
-    /// Replay to `headId`, refusing what cannot be replayed (Phase 42, Phase 296): fold the reducer
-    /// over the head's ancestor-closure in topological order, each op applied once. Deterministic —
-    /// the topo order is total — so two convergent histories over the same node set replay to the same
-    /// state. `Error(ReplayFault.UnknownHead h)` for a head the DAG does not hold,
-    /// `Error(ReplayFault.CyclicHistory h)` when the closure is not fully orderable (a hand-crafted or
-    /// tampered load — `fromJsonlVerified`'s content-hash gate makes a forged cycle impossible), and
-    /// `Error(ReplayFault.Rejected …)` on a domain rejection.
-    let tryReplayTo
+    /// Replay the UNION of `roots`' ancestor closures from `state0` (Phase 329): every node once, in
+    /// the drain order `tryReplayTo` folds a merge node's closure in — so for the two parents of a
+    /// merge it is the state the merge node's own replay applies the merge op to. A root the DAG does
+    /// not hold is `UnknownHead` (the first such, in the order given); a union that does not drain is
+    /// `CyclicHistory` of the first root whose own closure is cyclic (a cycle reached from the union
+    /// is reached from some root).
+    let private replayClosure
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (state0: 'State)
         (dag: T<'Op>)
-        (headId: string)
+        (roots: string list)
         : Result<'State, ReplayFault<'Rej>> =
-        if not (dag.Nodes.ContainsKey headId) then
-            Error(ReplayFault.UnknownHead headId)
-        else
-            match tryTopoOrder dag headId with
-            | Error _ -> Error(ReplayFault.CyclicHistory headId)
-            | Ok order ->
+        match roots |> List.tryFind (fun r -> not (dag.Nodes.ContainsKey r)) with
+        | Some r -> Error(ReplayFault.UnknownHead r)
+        | None ->
+            let order, anc = topoCoreMany dag roots
+
+            if List.length order <> Set.count anc then
+                let cyclic =
+                    roots
+                    |> List.tryFind (fun r -> not (isAcyclic dag r))
+                    |> Option.defaultValue (List.head roots)
+
+                Error(ReplayFault.CyclicHistory cyclic)
+            else
                 let rec go st =
                     function
                     | [] -> Ok st
@@ -549,6 +556,24 @@ module Dag =
                         | Error e -> Error(ReplayFault.Rejected(id, e))
 
                 go state0 order
+
+    /// Replay to `headId`, refusing what cannot be replayed (Phase 42, Phase 296): fold the reducer
+    /// over the head's ancestor-closure in topological order, each op applied once. Deterministic —
+    /// the topo order is total — so two convergent histories over the same node set replay to the same
+    /// state. `Error(ReplayFault.UnknownHead h)` for a head the DAG does not hold,
+    /// `Error(ReplayFault.CyclicHistory h)` when the closure is not fully orderable (a hand-crafted or
+    /// tampered load — `fromJsonlVerified`'s content-hash gate makes a forged cycle impossible), and
+    /// `Error(ReplayFault.Rejected …)` on a domain rejection.
+    ///
+    /// Written over `replayClosure` at one root since Phase 329, which is exactly the fold it always
+    /// was: the drain of one head's closure is `topoCore`'s, and its only cyclic root is the head.
+    let tryReplayTo
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (dag: T<'Op>)
+        (headId: string)
+        : Result<'State, ReplayFault<'Rej>> =
+        replayClosure w state0 dag [ headId ]
 
     /// Replay to `headId` — a bridge for one draft over `tryReplayTo` (Phase 296). A domain rejection
     /// is `Error(nodeId, reject)` as before; an unknown head or a cyclic history, which this signature
@@ -566,6 +591,127 @@ module Dag =
         | Error(ReplayFault.Rejected(id, e)) -> Error(id, e)
         | Error(ReplayFault.UnknownHead h) -> invalidArg "headId" ("Dag.replayTo: the DAG holds no node " + h)
         | Error(ReplayFault.CyclicHistory h) -> invalidArg "headId" ("Dag.replayTo: cyclic history at " + h)
+
+    // ---- the verified append (Phase 329) ----
+    // `appendChecked` / `mergeChecked` apply the op at a state the CALLER hands in, and do not replay
+    // (D83: a DAG holds no state). A node's own state never changes, but on a DAG the parent is chosen
+    // per call, so a caller can hand over the state of a DIFFERENT node — fork from an older node while
+    // holding the latest head's state, append to one head while holding another's, pass one side's
+    // state after a merge — and the op is then judged at a state that never existed at that point in
+    // the graph. The verified forms replay the named parent first and refuse a handed-in state that is
+    // not its state, so the mis-pairing is caught at the call that made it rather than at a later
+    // reconcile. They are ordinary functions a caller chooses (in its tests, in a debug build), never
+    // conditional compilation: a package ships one build, and a `DEBUG`-only path reaches no consumer.
+    // The price is one replay per call, linear in the parent's closure.
+
+    /// Why `Dag.appendVerified` / `Dag.mergeVerified` refused (Phase 329). A NEW union beside
+    /// `DagAppendRejection` rather than a case added to it, so every exhaustive match over the checked
+    /// forms' refusal still compiles.
+    [<RequireQualifiedAccess>]
+    type VerifiedAppendRejection<'State, 'Rej> =
+        /// The checked form's own refusal, verbatim: a graph `Fault` (judged before anything is
+        /// replayed), or the domain's rejection of the op at a state that WAS the parent's.
+        | Checked of DagAppendRejection<'Rej>
+        /// The named parent's closure — both parents' for a merge — does not replay from the initial
+        /// state: the fault `tryReplayTo` names.
+        | ParentReplay of ReplayFault<'Rej>
+        /// The handed-in state is not the state the parent's closure replays to; both are carried.
+        | StateMismatch of handed: 'State * replayed: 'State
+
+    /// The verification step both forms share: a replay fault, else a mismatch, else the checked form.
+    let private verifiedThen
+        (stateEquals: 'State -> 'State -> bool)
+        (handed: 'State)
+        (replayed: Result<'State, ReplayFault<'Rej>>)
+        (checkedForm: unit -> Result<'State * string * T<'Op>, DagAppendRejection<'Rej>>)
+        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        match replayed with
+        | Error fault -> Error(VerifiedAppendRejection.ParentReplay fault)
+        | Ok r when not (stateEquals handed r) -> Error(VerifiedAppendRejection.StateMismatch(handed, r))
+        | Ok _ -> checkedForm () |> Result.mapError VerifiedAppendRejection.Checked
+
+    /// `appendChecked`, verifying the PAIRING of `state` with `parentId` (Phase 329), under the
+    /// caller's state equality — for a `'State` without structural equality, or one whose structural
+    /// equality is finer than the domain's. `parentId`'s ancestor closure is replayed from `state0`
+    /// (the genesis parent `""` replays to `state0` itself) and compared with `state` as
+    /// `stateEquals state replayed`. In order: the graph refusals are judged first
+    /// (`Checked(Fault …)`), then a parent whose replay fails surfaces the replay fault
+    /// (`ParentReplay`), then a difference is refused (`StateMismatch(state, replayed)`); otherwise
+    /// the result is exactly `appendChecked hashFn w actor op state parentId dag`'s. One replay per
+    /// call, linear in the parent's closure.
+    let appendVerifiedWith
+        (stateEquals: 'State -> 'State -> bool)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
+        (parentId: string)
+        (dag: T<'Op>)
+        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        match append hashFn w actor op parentId dag with
+        | Error f -> Error(VerifiedAppendRejection.Checked(DagAppendRejection.Fault f))
+        | Ok _ ->
+            let replayed =
+                if parentId = "" then
+                    Ok state0
+                else
+                    tryReplayTo w state0 dag parentId
+
+            verifiedThen stateEquals state replayed (fun () -> appendChecked hashFn w actor op state parentId dag)
+
+    /// `appendVerifiedWith` under the state's own equality (Phase 329): `appendChecked` that refuses
+    /// a handed-in `state` which is not the state `parentId`'s closure replays to from `state0`.
+    let appendVerified
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
+        (parentId: string)
+        (dag: T<'Op>)
+        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        appendVerifiedWith (fun a b -> a = b) hashFn w state0 actor op state parentId dag
+
+    /// `mergeChecked`, verifying the PAIRING of `state` with the two parents (Phase 329), under the
+    /// caller's state equality. The union of both parents' closures — WITHOUT the merge op — is
+    /// replayed from `state0`, in the drain order `tryReplayTo` folds the merge node's closure in, so
+    /// an accepted merge's returned state is the merge node's own replay. Refusals in the order of
+    /// `appendVerifiedWith`; otherwise exactly `mergeChecked`'s result.
+    let mergeVerifiedWith
+        (stateEquals: 'State -> 'State -> bool)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
+        (leftId: string)
+        (rightId: string)
+        (dag: T<'Op>)
+        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        match merge hashFn w actor op leftId rightId dag with
+        | Error f -> Error(VerifiedAppendRejection.Checked(DagAppendRejection.Fault f))
+        | Ok _ ->
+            verifiedThen stateEquals state (replayClosure w state0 dag [ leftId; rightId ]) (fun () ->
+                mergeChecked hashFn w actor op state leftId rightId dag)
+
+    /// `mergeVerifiedWith` under the state's own equality (Phase 329): `mergeChecked` that refuses a
+    /// handed-in `state` which is not the state both parents' closures replay to from `state0`.
+    let mergeVerified
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
+        (leftId: string)
+        (rightId: string)
+        (dag: T<'Op>)
+        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        mergeVerifiedWith (fun a b -> a = b) hashFn w state0 actor op state leftId rightId dag
 
     // ---- JSONL persistence (Phase 01) ----
     // The linear OpStream round-trips to JSONL; the DAG does too, closing the persistence
