@@ -817,6 +817,131 @@ module Diff =
                 subject,
             "Idl.Annotations (Phase 113); WIRE_FORMAT.md §13 by the same argument"
 
+    /// The `hostSurface` blocks of a [[FieldSnap.TypeHost]] string, path to parsed
+    /// block (Phase 252). The string joins `path=<canonical JSON>` entries with
+    /// `"; "`, so it is split only where that separator sits OUTSIDE a JSON string
+    /// and outside any brace — a host signature may itself contain `"; "`. An entry
+    /// that does not parse is kept as a bare string, so it still compares.
+    let private hostBlocks (typeHost: string) : Map<string, JVal> =
+        let entries = ResizeArray<string>()
+        let current = System.Text.StringBuilder()
+        let mutable depth = 0
+        let mutable inString = false
+        let mutable escaped = false
+        let mutable i = 0
+
+        while i < typeHost.Length do
+            let ch = typeHost[i]
+
+            if inString then
+                current.Append ch |> ignore
+
+                if escaped then
+                    escaped <- false
+                elif ch = '\\' then
+                    escaped <- true
+                elif ch = '"' then
+                    inString <- false
+
+                i <- i + 1
+            elif depth = 0 && ch = ';' && i + 1 < typeHost.Length && typeHost[i + 1] = ' ' then
+                entries.Add(current.ToString())
+                current.Clear() |> ignore
+                i <- i + 2
+            else
+                match ch with
+                | '"' -> inString <- true
+                | '{'
+                | '[' -> depth <- depth + 1
+                | '}'
+                | ']' -> depth <- depth - 1
+                | _ -> ()
+
+                current.Append ch |> ignore
+                i <- i + 1
+
+        if current.Length > 0 then
+            entries.Add(current.ToString())
+
+        entries
+        |> Seq.choose (fun e ->
+            match e.IndexOf '=' with
+            | -1 -> None
+            | at ->
+                let path = e.Substring(0, at)
+                let body = e.Substring(at + 1)
+
+                Some(
+                    path,
+                    match Json.parse body with
+                    | Ok v -> v
+                    | Error _ -> JStr body
+                ))
+        |> Map.ofSeq
+
+    /// Whether a `hostSurface` block is a HOSTED slot's (it names a codec) rather
+    /// than a `fn` slot's (it names a placeholder): the two carry different keys.
+    let private isHostedBlock (block: JVal) =
+        (field "encode" block).IsSome || (field "decode" block).IsSome
+
+    /// Did any HOSTED slot's declaration move between two `TypeHost` strings? A
+    /// hosted slot's codec IS its wire form — the artifact does not state what the
+    /// codec writes — so a move here can move every document's bytes, and it is
+    /// `Unclassifiable`, never `HostSurfaceOnly` (Phase 252; the codec-swap
+    /// revision that read as an absorbable `host-surface`, exit 0). A `fn` slot's
+    /// declaration stays host-surface: a closure is the fixed sentinel on the wire
+    /// whatever its signature says.
+    let private hostedSlotMoved (before: string) (after: string) : bool =
+        let hosted s =
+            hostBlocks s |> Map.filter (fun _ b -> isHostedBlock b)
+
+        hosted before <> hosted after
+
+    /// Did any slot's declared F# HOST TYPE move? The `fsharp` member is the one
+    /// the generated declaration spells; a codec or placeholder expression is a
+    /// body, and moving only that leaves every construction site where it was.
+    let private hostTypeMoved (before: string) (after: string) : bool =
+        let types s =
+            hostBlocks s |> Map.map (fun _ b -> str "fsharp" b)
+
+        types before <> types after
+
+    /// Is `after` `before` with one or more `int` positions widened to `float`, and
+    /// nothing else moved (Phase 252)? Read on the wire-type objects, so a list, a
+    /// map value or a union argument widens the same way a bare field does.
+    let rec private widensIntToFloat (before: JVal) (after: JVal) : bool option =
+        // `Some true` — widened somewhere; `Some false` — identical; `None` — any
+        // other difference.
+        match before, after with
+        | JObj bs, JObj afs when
+            (List.tryPick (fun (k, v) -> if k = "$type" then Some v else None) bs = Some(JStr "int")
+             && List.tryPick (fun (k, v) -> if k = "$type" then Some v else None) afs = Some(JStr "float")
+             && bs.Length = 1
+             && afs.Length = 1)
+            ->
+            Some true
+        | JObj bs, JObj afs when List.map fst bs = List.map fst afs ->
+            (Some false, List.zip bs afs)
+            ||> List.fold (fun acc ((_, bv), (_, av)) ->
+                match acc, widensIntToFloat bv av with
+                | None, _
+                | _, None -> None
+                | Some x, Some y -> Some(x || y))
+        | JArr bs, JArr afs when bs.Length = afs.Length ->
+            (Some false, List.zip bs afs)
+            ||> List.fold (fun acc (bv, av) ->
+                match acc, widensIntToFloat bv av with
+                | None, _
+                | _, None -> None
+                | Some x, Some y -> Some(x || y))
+        | b, a when b = a -> Some false
+        | _ -> None
+
+    let private isIntToFloatWidening (before: FieldSnap) (after: FieldSnap) : bool =
+        match Json.parse before.TypeWire, Json.parse after.TypeWire with
+        | Ok b, Ok a -> widensIntToFloat b a = Some true
+        | _ -> false
+
     let classify (c: Change) : Classification =
         let sev, why, cite =
             match c with
@@ -978,6 +1103,20 @@ module Diff =
                         a.Label
                         (if erased b.TypeTag then b.TypeTag else a.TypeTag),
                     "Idl.THosted / TJson / TOpaque (content carried verbatim; not described by the artifact)"
+                elif isIntToFloatWidening b a then
+                    // Phase 252 — a float slot admits every integer literal and a whole float
+                    // renders as the same digits, so every old document decodes and re-encodes
+                    // byte-identically, and an old emitter (writing integers) stays conformant.
+                    // That is the table's definition of additive; the cost is host lag, as for
+                    // a new enum case: a decoder that predates the widening refuses `2.5`.
+                    Additive,
+                    sprintf
+                        "field `%s` on %s WIDENED: %s → %s. A float slot admits every integer, and a whole float renders as the same digits, so every existing document decodes and re-encodes byte-identically and every previously-conformant emitter stays conformant. Not breaking-for-emitters: no old emitter's output became invalid. The cost is host lag — a decoder that predates the widening refuses a fractional value such as `2.5` — exactly as for a new enum case."
+                        n
+                        owner.Describe
+                        b.Label
+                        a.Label,
+                    "docs/idl-stability-classes.md (int → float widening, Phase 252); VOCABULARY.md §4.3 (host-lag)"
                 else
                     BreakingWire,
                     sprintf
@@ -998,6 +1137,13 @@ module Diff =
             | EnumCaseAnnotationsChanged(e, w, b, a) ->
                 classifyAnnotations (sprintf "case `\"%s\"` of enum `%s`" w e) b a
 
+            | FieldHostSurfaceChanged(owner, n, b, a) when hostedSlotMoved b a ->
+                Unclassifiable,
+                sprintf
+                    "field `%s` on %s changed a HOSTED slot's declaration (its host type or its codec). A hosted slot's codec IS its wire form, and the artifact does not state what the codec writes, so nothing here can say whether a document's bytes moved. CHECK: does every value the old codec wrote still decode under the new one, and does every document come back byte-identical? If both, this is host-surface only; if either fails, it is BREAKING (wire)."
+                    n
+                    owner.Describe,
+                "Idl.THosted (the codec is the wire form; Phase 252); docs/idl-stability-classes.md (anything crossing an erased slot)"
             | FieldHostSurfaceChanged(owner, n, _, _) ->
                 HostSurfaceOnly,
                 sprintf
@@ -1134,14 +1280,13 @@ module Diff =
           Strength: Strength
           Note: string }
 
-    /// The §11.0 roster, hand-declared.
+    /// The UI vocabulary's §11.0 roster, hand-declared — ONE vocabulary's hosts.
     ///
-    /// TODO(roster-anchor): `WIRE_FORMAT.md` §11.0 names
-    /// `wire-format-fixtures/manifest.json` as the intended machine-readable
-    /// mirror ("until that lands this table is authoritative"). It carries no
-    /// `hosts` key yet — `version` / `schema` / `idl` / `description` / `kinds` /
-    /// `formFieldKinds` / `fixtures`. `rosterFrom` below reads one the moment it
-    /// appears, so landing the anchor retires this list without touching callers.
+    /// **Not a default since Phase 252.** It was the roster every report used when no
+    /// manifest supplied one, so a vocabulary with none of these hosts was told to
+    /// change all of them. [[run]] now takes the roster from the vocabulary's own
+    /// manifest (`hosts`) and from nowhere else; a caller that wants this list passes
+    /// it to [[report]] / [[obligations]] explicitly, which is what it is kept for.
     let declaredRoster: Host list =
         [ { Id = "fuaran"
             Language = "F#"
@@ -1238,9 +1383,18 @@ module Diff =
     ///   model is a compiler-forced arm (the 745 precedent, restated by 864) —
     ///   but only for the families they actually model, which the artifact does
     ///   not record.
+    ///
+    /// **Which rows a roster earns (Phase 252).** Every row naming a corpus, a spec
+    /// document, a veneer or an analyzer is the UI tier's §11 checklist, and is emitted
+    /// only when the roster declares that tier's reference codec host (`fuaran`). A
+    /// roster without it — another vocabulary's, or the EMPTY roster a vocabulary with
+    /// no manifest `hosts` gets — is obliged by the rows that hold for any vocabulary:
+    /// each declared host, the generated layer, the artifact, and the profile and
+    /// emitter rows a breaking verdict carries.
     let obligations (roster: Host list) (c: Classification) : Obligation list =
         let codecHosts = roster |> List.filter (fun h -> h.Role = CodecHost)
         let projections = roster |> List.filter (fun h -> h.Role = RenderProjection)
+        let uiTier = roster |> List.exists (fun h -> h.Id = "fuaran")
         let ch = c.Change
 
         if not (touchesWire c) then
@@ -1248,6 +1402,44 @@ module Diff =
                 Strength = Required
                 Note =
                   "host-surface only — regenerate the generated layer and recompile. No codec host, corpus fixture or spec row is obliged." } ]
+        elif not uiTier then
+            [ if roster.IsEmpty then
+                  { Surface = "hosts: none declared"
+                    Strength = Check
+                    Note =
+                      "the vocabulary's manifest declares no `hosts`, so no codec host is obliged by name. Every host generated from this vocabulary (`Gen.fsharpModule`, `Gen.typescriptModule`, `Gen.jsonSchema`) regenerates in the same change-set; declare `hosts` in the manifest to have each named here." }
+
+              for h in codecHosts do
+                  { Surface = sprintf "codec: %s (%s)" h.Id h.Language
+                    Strength = Required
+                    Note = "encoder + decoder + schema shape, same change-set, pinned to the vocabulary's documents." }
+
+              for h in projections do
+                  { Surface = sprintf "render arm: %s (%s)" h.Id h.Language
+                    Strength = (if isKindSetChange ch then Required else Check)
+                    Note =
+                      "a projection that models the changed family as a closed type gains or loses an arm; one that does not is unaffected." }
+
+              { Surface = "generated layer: regenerate"
+                Strength = Required
+                Note = "regenerate every generated module and schema from the new vocabulary, and recompile." }
+
+              { Surface = "artifact: idl.json"
+                Strength = Required
+                Note =
+                  "re-render the vocabulary artifact beside the vocabulary it projects; a regenerate-and-byte-compare guard fails when the committed artifact and a fresh emission disagree." }
+
+              if c.Severity = BreakingWire then
+                  { Surface = "profile: §15 negotiation"
+                    Strength = Required
+                    Note =
+                      "a major wire event moves the `/vN/` segment; an older consumer must classify the new profile `Foreign` and hard-refuse it (STABILITY.md §15 negotiate outcomes)." }
+
+              if c.Severity = BreakingForEmitters then
+                  { Surface = "downstream emitters"
+                    Strength = Required
+                    Note =
+                      "coordinate the bump with every emitter, and advance the producing package's `<Version>` in the SAME commit — an unmoved version re-packs the slot under consumers already pinned to it." } ]
         else
             [ for h in codecHosts do
                   if h.Id = "fuaran" then
@@ -1482,7 +1674,11 @@ module Diff =
         sb.ToString()
 
     /// Whole-pipeline entry: two `idl.json` texts and an optional `manifest.json`
-    /// text (used only for the roster, and only once it carries one).
+    /// text (used only for the roster).
+    ///
+    /// The roster is the manifest's `hosts` and nothing else (Phase 252): absent, it
+    /// is EMPTY, and the report says so, rather than falling back to one vocabulary's
+    /// hosts ([[declaredRoster]]) for every vocabulary.
     let run (manifestText: string option) (oldText: string) (newText: string) : Result<string, string> =
         let roster =
             manifestText
@@ -1490,7 +1686,11 @@ module Diff =
             |> Option.bind rosterFrom
             |> function
                 | Some hs -> "manifest.json `hosts`", hs
-                | None -> "declared (WIRE_FORMAT.md §11.0 — manifest.json carries no `hosts` key yet)", declaredRoster
+                | None ->
+                    (match manifestText with
+                     | None -> "none declared (no manifest given)"
+                     | Some _ -> "none declared (the manifest carries no `hosts` key)"),
+                    []
 
         parse oldText
         |> Result.mapError (fun e -> "old: " + e)
@@ -1642,17 +1842,26 @@ module Diff =
         let matching = [ ExhaustiveMatch; StalePackageSlot ]
         let reference = [ TypeNameReference; StalePackageSlot ]
 
-        match c.Severity with
-        | Unclassifiable -> [ GeneratedShapeUnreadable ]
+        match c.Severity, c.Change with
+        // The generated DECLARATION is readable whatever the wire verdict: a
+        // `hostSurface` block states the F# host type outright (Phase 252). Only the
+        // `fsharp` member is spelled by the generated record, so a codec or
+        // placeholder expression moving alone leaves every site where it was —
+        // decidable, so decided, including on a hosted slot whose WIRE verdict is
+        // undecided.
+        | _, FieldHostSurfaceChanged(_, _, before, after) ->
+            if hostTypeMoved before after then
+                construction
+            else
+                [ NoGeneratedShapeChange ]
+        | Unclassifiable, _ -> [ GeneratedShapeUnreadable ]
         | _ ->
             match c.Change with
             // A field on any owner is a record member.
             | FieldAdded _
             | FieldRemoved _
             | FieldTypeChanged _ -> construction
-            // The generated DECLARATION moved — a `TFn` field's F# signature, a
-            // hosted slot's codec expression. Invisible on the wire; a construction
-            // break all the same.
+            // (`FieldHostSurfaceChanged` is decided above, from the blocks themselves.)
             | FieldHostSurfaceChanged _ -> construction
             // Only the `optional` class emits an F# `option`, so the generated type
             // moves exactly when one side is optional and the other is not. Every

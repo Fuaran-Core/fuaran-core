@@ -192,10 +192,11 @@ module Trust =
     ///
     /// **Static in `(idl, policy)`, not in the value.** Whether a member is needed is
     /// decided by the vocabulary and the caller's trust decisions, never by which nodes
-    /// a particular tree happens to contain: the gate runs over every harden, so the
-    /// gated kind and the four members its inert placeholder is built from are always
-    /// needed; the URL literal members are needed exactly when the caller declared a URL
-    /// field to sanitise. A value-dependent answer would be worse than useless here — a
+    /// a particular tree happens to contain: the gate runs over every harden of a
+    /// vocabulary that declares a gated kind, so the four members its inert placeholder
+    /// is built from are needed whenever it does; the URL literal members are needed
+    /// exactly when the caller declared a URL field to sanitise, and the text literal
+    /// members whenever a markdown field is declared. A value-dependent answer would be worse than useless here — a
     /// tree with no `Custom` node today would pass, and the same vocabulary would refuse
     /// tomorrow on a document nobody changed.
     ///
@@ -206,15 +207,49 @@ module Trust =
     /// Reports the FIRST undeclared member in the record's own declaration order, so the
     /// refusal a caller sees does not depend on iteration order or on how many members
     /// are missing.
+    ///
+    /// **The gate is conditional on a declared gated kind (Phase 252).** A vocabulary
+    /// with no foreign component has nothing to gate, and refusing it for not naming
+    /// one shut it out of the checked path altogether. So an EMPTY [[GatedKind]] means
+    /// "no gate": the placeholder members are not needed, and the run still sanitises
+    /// every declared URL / markdown field under the tokens those need. What keeps that
+    /// from being the Phase 96 fail-open is the structural check beside it: a vocabulary
+    /// that leaves [[GatedKind]] empty while declaring a kind carrying the fields the
+    /// gate reads (`moduleId` and `componentId`) is refused by name, because that is a
+    /// foreign-component kind nobody declared as gated — decided from the vocabulary,
+    /// never from the tree.
     let checkHardenPolicy (idl: Idl) (policy: Policy) : Result<unit, CodegenError> =
         let tokens = idl.Harden
+        let gateDeclared = tokens.GatedKind <> ""
+
+        let ungatedForeignKind =
+            if gateDeclared then
+                None
+            else
+                idl.Kinds
+                |> List.tryFind (fun k ->
+                    let names = k.Fields |> List.map (fun f -> f.Name) |> Set.ofList
+                    names.Contains "moduleId" && names.Contains "componentId")
 
         let needed =
-            [ "GatedKind", tokens.GatedKind, "the gate"
-              "PlaceholderKind", tokens.PlaceholderKind, "the inert placeholder the gate mints"
-              "PlaceholderField", tokens.PlaceholderField, "the inert placeholder the gate mints"
-              "TextLiteralCase", tokens.TextLiteralCase, "the inert placeholder the gate mints"
-              "TextLiteralField", tokens.TextLiteralField, "the inert placeholder the gate mints" ]
+            (match ungatedForeignKind with
+             | Some k ->
+                 [ "GatedKind",
+                   "",
+                   sprintf
+                       "the gate: kind '%s' carries 'moduleId' and 'componentId', the fields a foreign-component gate reads, and no gated kind is declared"
+                       k.Tag ]
+             | None -> [])
+            @ (if gateDeclared then
+                   [ "PlaceholderKind", tokens.PlaceholderKind, "the inert placeholder the gate mints"
+                     "PlaceholderField", tokens.PlaceholderField, "the inert placeholder the gate mints"
+                     "TextLiteralCase", tokens.TextLiteralCase, "the inert placeholder the gate mints"
+                     "TextLiteralField", tokens.TextLiteralField, "the inert placeholder the gate mints" ]
+               elif Set.isEmpty policy.MarkdownFields then
+                   []
+               else
+                   [ "TextLiteralCase", tokens.TextLiteralCase, "a declared markdown field"
+                     "TextLiteralField", tokens.TextLiteralField, "a declared markdown field" ])
             @ (if Set.isEmpty policy.UrlFields then
                    []
                else
@@ -275,5 +310,5 @@ module Trust =
         // function's error channel is prose and every other arm of it already is.
         harden idl policy v
         |> Result.mapError CodegenError.describe
-        |> Result.bind (Gen.fsharpValue idl TNode)
+        |> Result.bind (Gen.fsharpValue idl TNode >> Result.mapError CodegenError.describe)
         |> Result.map (fun body -> Gen.provenanceHeader "//" wireHash actor + "\n" + body)

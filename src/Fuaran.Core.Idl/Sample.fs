@@ -60,6 +60,25 @@ module Sample =
     /// round-trip ("R") formatting.
     let private floatPool = [ 0.0; 1.0; -1.0; 3.0; 2.5; -0.125; 1234.5; 1e10; 1e-7 ]
 
+    /// Values for a hosted slot's declared FORMAT (Phase 252, [[HostedFormat]]): the
+    /// boundaries a codec most often gets wrong — a leap day, the calendar's ends, the
+    /// epoch, an offset other than UTC — each admitted by its format, so a document
+    /// drawn here is valid in every leg. An unknown format draws nothing it could admit;
+    /// the empty string stands in, and [[Declare.hostedWireErrors]] is what reports it.
+    let private formatPool (format: string) : string list =
+        match format with
+        | "date" -> [ "2026-10-03"; "2000-02-29"; "1970-01-01"; "0001-01-01"; "9999-12-31" ]
+        | "date-time" ->
+            [ "2026-10-03T12:34:56Z"
+              "2000-02-29T23:59:59+01:00"
+              "1970-01-01T00:00:00Z"
+              "1999-12-31T23:59:59-05:30" ]
+        | "uuid" ->
+            [ "00000000-0000-0000-0000-000000000000"
+              "123e4567-e89b-12d3-a456-426614174000"
+              "f81d4fae-7dec-11d0-a765-00a0c91e6bf6" ]
+        | _ -> [ "" ]
+
     /// Whether sampling a value of `t` **at the depth floor** can still reach a
     /// `TNode` — the sampler's termination predicate (Phase 698).
     ///
@@ -147,6 +166,15 @@ module Sample =
         // passthrough is stressed on escaping and float layout like every other leg.
         // A hosted slot samples the same way: both the interpreter and the TS backend
         // carry it verbatim, so arbitrary JSON stresses exactly what they share.
+        // Phase 252 — a hosted slot that DECLARES its wire form is drawn from it: from the
+        // format's pool when it names one, else from the wire type itself, rendered through
+        // the interpreter's own encoder. Every other hosted slot draws as before, so a
+        // vocabulary that declares nothing keeps its seeded stream.
+        | THosted { Format = Some fmt } -> VJson(JStr(pick r (formatPool fmt)))
+        | THosted { Wire = Some w } ->
+            match Encode.valueJson idl w (sampleType idl r depth w) with
+            | Ok j -> VJson j
+            | Error _ -> VJson(JObj [])
         | TJson
         | THosted _ ->
             VJson(

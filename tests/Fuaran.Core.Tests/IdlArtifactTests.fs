@@ -293,3 +293,96 @@ let tests =
                         Expect.isNonEmpty
                             (verdict.Changes |> List.filter hardenRow)
                             "emptying every token is a hardening change and must be reported") ] ]
+
+// ---------------------------------------------------------------------------
+// Phase 252 — the artifact carries the vocabulary's own identity, and a hosted
+// slot's declared wire form.
+//
+// `render` wrote one domain's description into every artifact, so an authored
+// `idl.json` never re-rendered to itself. `renderWith` takes the identity and
+// `identityOf` reads it back; `render` keeps its bytes. A hosted slot's `wire` is a
+// type object when declared and `"json"` when not — the latter byte-for-byte what
+// every earlier artifact wrote.
+// ---------------------------------------------------------------------------
+
+let private hostedIdl (wire: IdlType option) (format: string option) : Idl =
+    { refIdl with
+        Kinds =
+            [ { Tag = "Trip"
+                Category = "trip"
+                Annotations = Annotations.Empty
+                Fields =
+                  [ { Name = "departs"
+                      Opt = Required
+                      Annotations = Annotations.Empty
+                      Type =
+                        THosted
+                            { FSharp = "System.DateOnly"
+                              Encode = "encDate"
+                              Decode = "decDate"
+                              Wire = wire
+                              Format = format } } ] } ] }
+
+[<Tests>]
+let identityAndWireFormTests =
+    testList
+        "Phase 252 — identity and the hosted wire form in the artifact"
+        [ testCase "an authored identity re-renders to itself" (fun _ ->
+              let identity: Artifact.Identity =
+                  { Name = Some "trips"
+                    Description = "A packing list: trips hold bags, bags hold items." }
+
+              let text = Artifact.renderWith identity refIdl
+
+              Expect.stringContains text "\"name\": \"trips\"" "the name is written"
+
+              match Artifact.identityOf text, Artifact.parse text with
+              | Ok readBack, Ok idl ->
+                  Expect.equal readBack identity "the identity reads back"
+                  Expect.equal (Artifact.renderWith readBack idl) text "and the artifact re-renders byte-for-byte"
+              | e1, e2 -> failtestf "did not read back: %A / %A" e1 e2)
+
+          testCase "render keeps its bytes: no name, the default description" (fun _ ->
+              let text = Artifact.render refIdl
+
+              Expect.equal
+                  text
+                  (Artifact.renderWith Artifact.defaultIdentity refIdl)
+                  "render is renderWith the default"
+
+              match Json.parse text with
+              | Ok(JObj members) ->
+                  Expect.isFalse (members |> List.exists (fun (k, _) -> k = "name")) "no top-level name"
+              | other -> failtestf "the artifact is not an object: %A" other
+
+              Expect.equal
+                  (Artifact.identityOf text)
+                  (Ok Artifact.defaultIdentity)
+                  "an artifact without a name reads back as the default identity")
+
+          testCase
+              "a hosted slot's declared wire form and format round-trip, and an undeclared one is unchanged"
+              (fun _ ->
+                  for wire, format in [ None, None; Some TStr, Some "date"; Some(TList TStr), None ] do
+                      let idl = hostedIdl wire format
+                      let text = Artifact.render idl
+
+                      match Artifact.parse text with
+                      | Ok back ->
+                          Expect.equal (Artifact.render back) text (sprintf "re-renders (%A, %A)" wire format)
+
+                          Expect.equal
+                              back.Kinds.Head.Fields.Head.Type
+                              idl.Kinds.Head.Fields.Head.Type
+                              "the slot reads back"
+                      | Error e -> failtestf "did not parse: %s" e
+
+                  Expect.stringContains
+                      (Artifact.render (hostedIdl None None))
+                      "\"wire\": \"json\""
+                      "undeclared: as before"
+
+                  Expect.stringContains
+                      (Artifact.render (hostedIdl (Some TStr) (Some "date")))
+                      "\"format\": \"date\""
+                      "the format") ]

@@ -328,7 +328,9 @@ let tests =
                                       (THosted
                                           { FSharp = "HostPrelude.LiveRegionKind"
                                             Encode = "encLiveRegionKind"
-                                            Decode = "decLiveRegionKind" })
+                                            Decode = "decLiveRegionKind"
+                                            Wire = None
+                                            Format = None })
                                       Optional ] } ] }
 
               let declared =
@@ -562,16 +564,48 @@ let tests =
                       "a manifest roster REPLACES the declared list rather than merging with it"
               | Error e -> failtestf "idl-diff: %s" e
 
-          testCase "without a manifest roster the report says the list is declared"
+          testCase "without a manifest roster no host is obliged by name, and the report says so"
+          <| fun _ ->
+              // Phase 252 — the roster used to fall back to the UI vocabulary's hosts, so a
+              // vocabulary with none of them was told to change all of them.
+              let after =
+                  { oneKind with
+                      Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
+
+              let text = reportOf oneKind after
+
+              Expect.stringContains
+                  text
+                  "none declared (no manifest given)"
+                  "an absent roster must be visible as absent, not silently filled"
+
+              Expect.stringContains text "hosts: none declared" "the obligation set says no host is named"
+
+              for uiOnly in [ "fuaran-py"; "JsonDecode.fs"; "wire-format-fixtures"; "Fuaran.UI" ] do
+                  Expect.isFalse (text.Contains uiOnly) (sprintf "no UI-tier obligation (%s) without its host" uiOnly)
+
+          testCase "a manifest without `hosts` obliges no host either"
           <| fun _ ->
               let after =
                   { oneKind with
                       Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
 
-              Expect.stringContains
-                  (reportOf oneKind after)
-                  "declared (WIRE_FORMAT.md §11.0"
-                  "an unanchored roster must be visible as unanchored, not silently authoritative"
+              match Diff.run (Some(Canon.render (JObj [ "kinds", JArr [] ]))) (art oneKind) (art after) with
+              | Ok text ->
+                  Expect.stringContains text "none declared (the manifest carries no `hosts` key)" "names the cause"
+                  Expect.isFalse (text.Contains "codec: fuaran") "no default roster"
+              | Error e -> failtestf "idl-diff: %s" e
+
+          testCase "the UI tier's rows follow its reference host, passed explicitly"
+          <| fun _ ->
+              let after =
+                  { oneKind with
+                      Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
+
+              let rows = surfaces oneKind after
+
+              Expect.contains rows "codec: fuaran-py (Python)" "the declared UI roster still obliges its hosts"
+              Expect.contains rows "corpus: wire-format-fixtures fixture" "and its corpus row"
 
           // --- a whole vocabulary, not a two-kind fixture -----------------------
           //
@@ -607,3 +641,113 @@ let tests =
               let cs = diffOf refIdl after
               Expect.equal (List.length cs) 1 "one change, not a re-listing of the vocabulary"
               Expect.equal (severities cs) [ Diff.Additive ] "and it is additive" ]
+
+// ---------------------------------------------------------------------------
+// Phase 252 — two classifier rules corrected.
+//
+// Int to float is a WIDENING: a float slot admits every integer and a whole float
+// renders as the same digits, so every old document decodes and re-encodes
+// byte-identically and every old emitter stays conformant — the table's definition
+// of additive (the 2026-09-30 amendment; the cost is host lag, as for a new enum
+// case). And a hosted slot's codec IS its wire form, so a move in its declaration
+// is undecided (exit 4), never an absorbable host-surface change.
+// ---------------------------------------------------------------------------
+
+let private oneField (ty: IdlType) =
+    { empty with
+        Kinds = [ kind "Weight" [ f "grams" ty Required ] ] }
+
+let private hostedField (h: HostedCodec) = oneField (THosted h)
+
+let private dateCodec: HostedCodec =
+    { FSharp = "System.DateOnly"
+      Encode = "HostDate.encode"
+      Decode = "HostDate.decode"
+      Wire = None
+      Format = None }
+
+let private consequencesOf (before: Idl) (after: Idl) =
+    diffOf before after |> List.collect Diff.consequences |> List.distinct
+
+let private exitOf (before: Idl) (after: Idl) =
+    match Diff.classifyDiff before after with
+    | Ok v -> Diff.exitCode (Diff.verdictClass v)
+    | Error e -> failtestf "classify: %s" e
+
+[<Tests>]
+let correctedRuleTests =
+    testList
+        "Phase 252 — int-to-float widening and the hosted codec"
+        [ testCase "int to float is an additive widening, a construction break, exit 0" (fun _ ->
+              Expect.equal (severities (diffOf (oneField TInt) (oneField TFloat))) [ Diff.Additive ] "additive"
+
+              Expect.contains
+                  (consequencesOf (oneField TInt) (oneField TFloat))
+                  Diff.FullLiteralConstruction
+                  "the generated field moved from int to float"
+
+              Expect.equal (exitOf (oneField TInt) (oneField TFloat)) 0 "a gate absorbs it")
+
+          testCase "the widening reaches a list element, and nothing else widens" (fun _ ->
+              Expect.equal
+                  (severities (diffOf (oneField (TList TInt)) (oneField (TList TFloat))))
+                  [ Diff.Additive ]
+                  "list<int> to list<float>"
+
+              Expect.equal
+                  (severities (diffOf (oneField TFloat) (oneField TInt)))
+                  [ Diff.BreakingWire ]
+                  "narrowing breaks"
+
+              Expect.equal
+                  (severities (diffOf (oneField TInt) (oneField TStr)))
+                  [ Diff.BreakingWire ]
+                  "a retype breaks"
+
+              Expect.equal
+                  (severities (diffOf (oneField (TList TInt)) (oneField (TMap TFloat))))
+                  [ Diff.BreakingWire ]
+                  "a widening inside a different container is not a widening")
+
+          testCase "a hosted slot's codec swap is undecided, exit 4, and moves no generated shape" (fun _ ->
+              let before = hostedField dateCodec
+
+              let after =
+                  hostedField
+                      { dateCodec with
+                          Encode = "HostDate.encodeEpochDays"
+                          Decode = "HostDate.decodeEpochDays" }
+
+              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "undecided"
+              Expect.equal (exitOf before after) 4 "a gate stops"
+              Expect.equal (consequencesOf before after) [ Diff.NoGeneratedShapeChange ] "the F# type did not move")
+
+          testCase "a hosted slot's host-type change is undecided too, and a construction break" (fun _ ->
+              let before = hostedField dateCodec
+
+              let after =
+                  hostedField
+                      { dateCodec with
+                          FSharp = "System.DateTime" }
+
+              Expect.equal (severities (diffOf before after)) [ Diff.Unclassifiable ] "undecided"
+              Expect.contains (consequencesOf before after) Diff.FullLiteralConstruction "the field's type moved")
+
+          testCase "a closure's signature stays host-surface only" (fun _ ->
+              let fn ts =
+                  oneField (
+                      TFn
+                          { FSharp = "unit -> unit"
+                            TypeScript = ts
+                            Placeholder = "ignore" }
+                  )
+
+              Expect.equal
+                  (severities (diffOf (fn "() => void") (fn "() => unknown")))
+                  [ Diff.HostSurfaceOnly ]
+                  "host-surface"
+
+              Expect.equal
+                  (consequencesOf (fn "() => void") (fn "() => unknown"))
+                  [ Diff.NoGeneratedShapeChange ]
+                  "a TypeScript-only move leaves the F# shape where it was") ]

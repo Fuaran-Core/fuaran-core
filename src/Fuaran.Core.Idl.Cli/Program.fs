@@ -56,8 +56,9 @@ let private usage =
     + "\n"
     + "  Advisory. Nothing is written, no version is bumped and no build is gated.\n"
     + "\n"
-    + "  --manifest   the conformance corpus manifest, read ONLY for its host roster.\n"
-    + "               Omitted, the declared roster is used and the report says so.\n"
+    + "  --manifest   the vocabulary's manifest, read ONLY for its host roster (`hosts`).\n"
+    + "               Omitted, or without `hosts`, no host is obliged by name and the\n"
+    + "               report says so.\n"
     + "  --expect     assert the verdict class. Exits 0 on a match, 1 on a mismatch.\n"
     + "               One of: "
     + classes

@@ -105,7 +105,7 @@ type CodegenError =
 module CodegenError =
 
     /// A one-line human rendering of a codegen refusal. It exists so that a leg whose published
-    /// channel is a plain `string` (`Gen.fsharpValue`, the scaffold mode) reports the SAME typed
+    /// channel is a plain `string` (`Trust.scaffoldFSharp`, the scaffold mode) reports the SAME typed
     /// case as the module emitters rather than an ad-hoc sentence of its own — before Phase 124 an
     /// unrenderable default was two unrelated refusals depending on which leg met it.
     let describe (e: CodegenError) : string =
@@ -179,6 +179,60 @@ module Gen =
             "GP4: a typed value, not an exception",
             "declare the slot with a type this backend models; the op-emission leg is unshipped (nothing walks the IDL's `Ops` here yet)"
         )
+
+    /// Phase 252 — the typed refusal for a hosted slot whose declared wire form no
+    /// backend can read without the host codec (another erased slot, a node, a type
+    /// variable), or whose format is not one [[HostedFormat]] knows or sits on a
+    /// non-string wire. `None` ⇒ the declaration is well-formed. The per-slot face of
+    /// [[Declare.hostedWireErrors]]; a backend that would emit the slot asks it first.
+    let private hostedWireRefusal (backend: string) (h: HostedCodec) : CodegenError option =
+        let rec unreadable (t: IdlType) =
+            match t with
+            | TStr
+            | TInt
+            | TBool
+            | TFloat
+            | TEnum _
+            | TRecord _ -> false
+            | TUnion(_, args) -> args |> List.exists unreadable
+            | TList inner
+            | TMap inner -> unreadable inner
+            | _ -> true
+
+        let refuse what =
+            Some(
+                CodegenError.UnsupportedConstruct(
+                    sprintf "the hosted slot '%s' %s, reached from %s" h.FSharp what backend,
+                    "GP5: a declared wire form every leg can read, or none",
+                    "declare the wire form as a scalar, enum, record, union, list or map, and a format only on a string wire (date, date-time, uuid)"
+                )
+            )
+
+        match h.Wire, h.Format with
+        | Some w, _ when unreadable w -> refuse (sprintf "declaring the wire form %A" w)
+        | _, Some f when not (List.contains f HostedFormat.known) ->
+            refuse (sprintf "declaring the unknown format '%s'" f)
+        | w, Some f when w <> Some TStr -> refuse (sprintf "declaring the format '%s' on a non-string wire" f)
+        | _ -> None
+
+    /// Whether any hosted slot in the vocabulary declares a FORMAT — the condition the
+    /// F# and TypeScript decoder preludes emit their `dFormat` helper on, so a vocabulary
+    /// that declares none emits byte-for-byte what it did.
+    let private declaresHostedFormat (idl: Idl) : bool =
+        let rec has (t: IdlType) =
+            match t with
+            | THosted { Format = Some _ } -> true
+            | TList inner
+            | TMap inner -> has inner
+            | TUnion(_, args) -> args |> List.exists has
+            | _ -> false
+
+        [ idl.NodeFields
+          yield! idl.Kinds |> List.map _.Fields
+          yield! idl.Ops |> List.map _.Fields
+          yield! idl.Records |> List.map _.Fields
+          yield! idl.Unions |> List.collect (fun u -> u.Cases |> List.map _.Fields) ]
+        |> List.exists (List.exists (fun f -> has f.Type))
 
     /// Phase 195 — the typed refusal for a DECLARED transparent union case that does not
     /// carry exactly one field. A transparent case is on the wire BARE, so its single field
@@ -1280,7 +1334,24 @@ let private encFloat (f: float) : JVal =
         // field's contract.
         | TJson -> Ok "dJson"
         // The named host decode expression, verbatim (JVal -> Result<'host, string>).
-        | THosted h -> Ok h.Decode
+        // Phase 252 — a declared wire form is checked FIRST (its type, then its format),
+        // so this host refuses exactly what the interpreter and the TypeScript host refuse,
+        // whatever the codec itself would admit.
+        | THosted h ->
+            match hostedWireRefusal "the F# decoder emitter" h with
+            | Some e -> Error e
+            | None ->
+                match h.Wire with
+                | None -> Ok h.Decode
+                | Some w ->
+                    decFn w
+                    |> Result.map (fun wd ->
+                        let format =
+                            match h.Format with
+                            | Some f -> sprintf " |> Result.bind (fun _ -> dFormat \"%s\" __j)" f
+                            | None -> ""
+
+                        sprintf "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> (%s) __j))" wd format h.Decode)
         | TRecord n -> Ok("dec" + n)
         | TMap vt -> decFn vt |> Result.map (sprintf "(dMap %s)")
 
@@ -1516,6 +1587,46 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
               "let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v\n    | None -> Ok dflt"
               "// An optional closure / opaque field: the value is a sentinel carrying nothing,\n// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.\nlet private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =\n    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))" ]
 
+    /// Phase 252 — the generated F# check of a hosted slot's declared FORMAT, emitted only
+    /// when the vocabulary declares one ([[declaresHostedFormat]]). It restates
+    /// [[HostedFormat.admits]] because the generated module carries no reference to this
+    /// package; a test holds the two to the same answers.
+    let private fsFormatHelper =
+        """// Phase 252 — a hosted slot's declared string format, checked before its host codec runs,
+// exactly as the interpreter and the TypeScript host check it.
+let private dFormat (format: string) (j: JVal) : Result<unit, string> =
+    let day (y: int) (m: int) (d: int) =
+        y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
+
+    let num (m: System.Text.RegularExpressions.Match) (i: int) = int m.Groups[i].Value
+
+    let ok =
+        match format, j with
+        | "date", JStr s ->
+            let m = System.Text.RegularExpressions.Regex.Match(s, "^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
+            m.Success && day (num m 1) (num m 2) (num m 3)
+        | "date-time", JStr s ->
+            let m =
+                System.Text.RegularExpressions.Regex.Match(
+                    s,
+                    "^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})([.][0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$"
+                )
+
+            m.Success
+            && day (num m 1) (num m 2) (num m 3)
+            && num m 4 <= 23
+            && num m 5 <= 59
+            && num m 6 <= 59
+            && (not m.Groups[9].Success || (num m 9 <= 23 && num m 10 <= 59))
+        | "uuid", JStr s ->
+            System.Text.RegularExpressions.Regex.IsMatch(
+                s,
+                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            )
+        | _ -> false
+
+    if ok then Ok() else Error("expected a '" + format + "' string")"""
+
     /// Transitive closure of the enum / union / record types referenced from a set of kinds —
     /// through union case fields, record fields, list elements, map value-types, and union
     /// type-args. Records ↔ unions are mutually recursive (`CellKindErased.ButtonGroup` holds a
@@ -1565,6 +1676,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             // reference declared types AND generated codecs (`encRangePair`,
             // `decBinding`) — a type reached only that way must still be emitted.
             | THosted h ->
+                // Phase 252 — a declared wire form is a reachability root like any field type.
+                h.Wire |> Option.iter visit
                 let text = h.FSharp + " " + h.Encode + " " + h.Decode
 
                 for e in idl.Enums do
@@ -1875,6 +1988,159 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
             + "\n\n"
             + String.concat "\n\n" ctors)
 
+    /// Phase 252 — which generated RECORD-SHAPED declarations take custom WIRE equality:
+    /// keys `"R:<record>"`, `"S:<kind tag>"` (a kind's spec record) and `"Node"`.
+    ///
+    /// A [[Optionality.HostOnly]] field is a closure, so the record holding it has no
+    /// structural equality, and neither does anything that holds THAT — the generated `Node`
+    /// included, which is what every tree-algebra conformance family compares. A host-only
+    /// field is by definition invisible on the wire, so the record's wire-observable identity
+    /// is its OTHER fields, and equality over them is exactly what the wire can tell apart.
+    /// That is what these declarations get (DECISIONS, Phase 252).
+    ///
+    /// A declaration qualifies when it holds a host-only CLOSURE (a host-only field whose
+    /// declared type is a function; a host-only data field compares already), is not generic in `'Msg`
+    /// (its equality would need a constraint the generated layer cannot state), and every
+    /// one of its wire fields is itself equality-capable — scalars, enums, JSON, the erased
+    /// `unit` sentinels, and records / unions / nodes built of those or of a declaration that
+    /// qualifies. A wire-visible closure (`TFn`) or a hosted host type (whose equality the
+    /// IDL cannot see) disqualifies the declaration rather than emitting source that does not
+    /// compile; such a vocabulary keeps the shape it had. The set is a fixpoint, because
+    /// qualifying is mutually dependent across a recursive type group.
+    let private wireEqualityKeys
+        (idl: Idl)
+        (msg: Set<string>)
+        (kinds: IdlKind list)
+        (projected: Set<string>)
+        : Set<string> =
+        let fieldsOf (key: string) : IdlField list option =
+            if key = "Node" then
+                Some idl.NodeFields
+            elif key.StartsWith "R:" then
+                idl.Records
+                |> List.tryFind (fun r -> r.Name = key.Substring 2)
+                |> Option.map _.Fields
+            // A PROJECTED kind's record is verbatim host source, so nothing here can say what it
+            // compares — it neither qualifies nor counts as capable.
+            elif key.StartsWith "S:" && not (projected.Contains(key.Substring 2)) then
+                kinds |> List.tryFind (fun k -> k.Tag = key.Substring 2) |> Option.map _.Fields
+            else
+                None
+
+        // A host-only field whose declared host type is a FUNCTION — the one kind of host-only
+        // field that removes structural equality. A host-only DATA field (`Motion option`)
+        // compares structurally already, and a declaration holding only such fields keeps the
+        // equality it has.
+        let hostOnlyClosure (f: IdlField) =
+            f.Opt = HostOnly
+            && (match f.Type with
+                | TFn s -> s.FSharp.Contains "->"
+                | _ -> false)
+
+        let generic (key: string) =
+            if key = "Node" then msg.Contains "Node"
+            elif key.StartsWith "R:" then msg.Contains(key.Substring 2)
+            else msg.Contains(key.Substring 2 + "Spec")
+
+        let candidates =
+            [ "Node"
+              yield! idl.Records |> List.map (fun r -> "R:" + r.Name)
+              yield! kinds |> List.map (fun k -> "S:" + k.Tag) ]
+            |> List.filter (fun key ->
+                not (generic key)
+                && (fieldsOf key |> Option.exists (List.exists hostOnlyClosure)))
+            |> Set.ofList
+
+        let rec capable (granted: Set<string>) (visiting: Set<string>) (t: IdlType) : bool =
+            match t with
+            | TStr
+            | TInt
+            | TBool
+            | TFloat
+            | TEnum _
+            | TJson
+            | TClosure
+            | TOpaque
+            | TVar _ -> true
+            | TList inner
+            | TMap inner -> capable granted visiting inner
+            | TRecord n -> declCapable granted visiting ("R:" + n)
+            | TNode -> declCapable granted visiting "Node"
+            | TUnion(n, args) ->
+                args |> List.forall (capable granted visiting)
+                && (match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+                    | Some u when not (msg.Contains n) && not (Set.contains ("U:" + n) visiting) ->
+                        u.Cases
+                        |> List.forall (fun c ->
+                            c.Fields
+                            |> List.forall (fun f ->
+                                not (hostOnlyClosure f)
+                                && (f.Opt = HostOnly || capable granted (Set.add ("U:" + n) visiting) f.Type)))
+                    | Some u when Set.contains ("U:" + n) visiting -> true
+                    | _ -> false)
+            | TFn _
+            | THosted _
+            | TKind
+            | TOp -> false
+
+        and declCapable (granted: Set<string>) (visiting: Set<string>) (key: string) : bool =
+            if Set.contains key granted || Set.contains key visiting then
+                true
+            else
+                let visiting = Set.add key visiting
+
+                let own =
+                    match fieldsOf key with
+                    | Some fs ->
+                        fs
+                        |> List.forall (fun f ->
+                            not (hostOnlyClosure f) && (f.Opt = HostOnly || capable granted visiting f.Type))
+                    | None -> false
+
+                // The node's equality also reaches every kind it can carry.
+                own
+                && (key <> "Node"
+                    || kinds |> List.forall (fun k -> declCapable granted visiting ("S:" + k.Tag)))
+
+        let wireFieldsCapable (granted: Set<string>) (key: string) =
+            let own =
+                fieldsOf key
+                |> Option.defaultValue []
+                |> List.filter (fun f -> f.Opt <> HostOnly)
+                |> List.forall (fun f -> capable granted (Set.singleton key) f.Type)
+
+            own
+            && (key <> "Node"
+                || kinds
+                   |> List.forall (fun k -> declCapable granted (Set.singleton key) ("S:" + k.Tag)))
+
+        let rec fixpoint (granted: Set<string>) =
+            let next = granted |> Set.filter (wireFieldsCapable granted)
+            if next = granted then granted else fixpoint next
+
+        fixpoint candidates
+
+    /// Phase 252 — the custom-equality members for a qualifying declaration (see
+    /// [[wireEqualityKeys]]): `Equals` and `GetHashCode` over its WIRE fields, in declared
+    /// order. `typeName` is the generated type, `wireFields` the fields' F# names.
+    let private wireEqualityMembers (typeName: string) (wireFields: string list) : string =
+        let equals =
+            match wireFields with
+            | [] -> "true"
+            | fs -> fs |> List.map (fun n -> sprintf "this.%s = o.%s" n n) |> String.concat " && "
+
+        let hashed =
+            match wireFields with
+            | [] -> "0"
+            | [ n ] -> sprintf "hash this.%s" n
+            | fs -> "hash (" + (fs |> List.map (fun n -> "this." + n) |> String.concat ", ") + ")"
+
+        sprintf
+            "\n    // Phase 252 — wire equality: a host-only field is not on the wire, so it takes no part.\n    override this.Equals(other: obj) =\n        match other with\n        | :? %s as o -> %s\n        | _ -> false\n\n    override this.GetHashCode() = %s"
+            typeName
+            equals
+            hashed
+
     /// The F# module emission before [[normalizeEol]] — see `fsharpModuleWith`, the public
     /// entry point, which is this composed with it.
     let private fsharpModuleUnnormalised
@@ -1963,12 +2229,34 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                     |> Result.map (fun d -> doc ("field:" + owner + "." + pascal f.Name) "      " + d))
                 |> concatR "\n"
 
+            // Phase 252 — the declarations that take wire equality, and the attribute + members
+            // each gets. Empty for every vocabulary without a host-only field.
+            let wireEq =
+                wireEqualityKeys idl msg kinds (sup.KindProjections |> Map.toList |> List.map fst |> Set.ofList)
+
+            let eqAttr key =
+                if Set.contains key wireEq then
+                    [ "[<CustomEquality; NoComparison>]" ]
+                else
+                    []
+
+            let eqMembers key typeName (fields: IdlField list) =
+                if Set.contains key wireEq then
+                    wireEqualityMembers
+                        typeName
+                        (fields
+                         |> List.filter (fun f -> f.Opt <> HostOnly)
+                         |> List.map (fun f -> pascal f.Name))
+                else
+                    ""
+
             let recordBody (r: IdlRecord) =
                 fieldDecls r.Name r.Fields
                 |> Result.map (fun fields ->
                     docOpt ("type:" + r.Name),
-                    [],
-                    sprintf "%s%s =\n    {\n%s\n    }" r.Name (declParams msg r.Name []) fields)
+                    eqAttr ("R:" + r.Name),
+                    sprintf "%s%s =\n    {\n%s\n    }" r.Name (declParams msg r.Name []) fields
+                    + eqMembers ("R:" + r.Name) r.Name r.Fields)
 
             let specBody (k: IdlKind) =
                 // Phase 119 — the kind's own declared annotations: the doc block joins
@@ -1992,8 +2280,9 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                     fieldDecls (k.Tag + "Spec") k.Fields
                     |> Result.map (fun fields ->
                         comment,
-                        attrs,
-                        sprintf "%sSpec%s =\n    {\n%s\n    }" k.Tag (declParams msg (k.Tag + "Spec") []) fields)
+                        attrs @ eqAttr ("S:" + k.Tag),
+                        sprintf "%sSpec%s =\n    {\n%s\n    }" k.Tag (declParams msg (k.Tag + "Spec") []) fields
+                        + eqMembers ("S:" + k.Tag) (k.Tag + "Spec") k.Fields)
 
             let nodeKindBody =
                 None,
@@ -2019,7 +2308,25 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                         let fields =
                             "      Id: string" :: sprintf "      Kind: NodeKind%s" kindArgs :: envelope
 
-                        None, [], sprintf "Node%s =\n    {\n%s\n    }" nodeArgs (String.concat "\n" fields))
+                        // Phase 252 — a host-only ENVELOPE member takes the node's equality
+                        // away exactly as a spec's does; the node then compares id, kind and
+                        // its wire envelope.
+                        let members =
+                            if Set.contains "Node" wireEq then
+                                wireEqualityMembers
+                                    "Node"
+                                    ("Id"
+                                     :: "Kind"
+                                     :: (idl.NodeFields
+                                         |> List.filter (fun f -> f.Opt <> HostOnly)
+                                         |> List.map (fun f -> pascal f.Name)))
+                            else
+                                ""
+
+                        None,
+                        eqAttr "Node",
+                        sprintf "Node%s =\n    {\n%s\n    }" nodeArgs (String.concat "\n" fields)
+                        + members)
 
             // (comment, attributes, keyword-less body). The first member leads with `type`
             // and carries its attributes on their own preceding lines; the rest are
@@ -2247,7 +2554,8 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
                else
                    [])
               (sup.AccessorSplice |> Option.toList)
-              [ decodeHelpers idl.Wire.Discriminator ]
+              decodeHelpers idl.Wire.Discriminator
+              :: (if declaresHostedFormat idl then [ fsFormatHelper ] else [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
               [ sprintf
@@ -2370,6 +2678,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // the encoder does not decompose, matching how the hand-written schema already
         // renders the rule-12 structured-payload positions. A hosted slot is the same
         // deliberate abstention: its content belongs to the host codec's own spec.
+        | THosted { Wire = Some w; Format = fmt } ->
+            // Phase 252 — a hosted slot that declares its wire form is stated as that type,
+            // with its format beside it; only an undeclared one keeps the abstention below.
+            match schemaOf w, fmt with
+            | JObj fs, Some f -> JObj(fs @ [ "format", JStr f ])
+            | s, _ -> s
         | TJson
         | THosted _ -> JBool true
         | TRecord n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
@@ -2823,10 +3137,6 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         // Phase 676 — a JSON value emits as its canonical literal.
         | VJson j -> Canon.render j
 
-    /// [[typescriptValueWith]] under the default shape — byte-identical to the
-    /// pre-declarable emission.
-    let typescriptValue (v: IdlValue) : string = typescriptValueWith WireShape.Default v
-
     /// The point-free TS encoder reference for a type (used where a codec must be
     /// passed — a generic union's type-parameter codec).
     let rec private tsEncFn (t: IdlType) : Result<string, CodegenError> =
@@ -2855,6 +3165,12 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TClosure
         | TFn _ -> Ok "(() => '\"<closure>\"')"
         | TOpaque -> Ok "(() => '\"<opaque>\"')"
+        // Phase 252 — a hosted slot that declares its wire form is written THROUGH it, so
+        // the bytes are that type's canonical ones.
+        | THosted h when h.Wire.IsSome ->
+            match hostedWireRefusal "the TypeScript encoder backend" h with
+            | Some e -> Error e
+            | None -> tsEncFn h.Wire.Value
         // Phase 676 — `encJson` renders the parsed value canonically (see the prelude).
         // A hosted slot is verbatim JSON to the TS backend, like the interpreter.
         | TJson
@@ -3207,6 +3523,18 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
         | TClosure
         | TFn _
         | TOpaque -> Ok "(() => null)"
+        // Phase 252 — a hosted slot that declares its wire form is CHECKED against it (its
+        // type, then its format), which is what makes this host refuse what the F# host's
+        // codec refuses.
+        | THosted h when h.Wire.IsSome ->
+            match hostedWireRefusal "the TypeScript decoder backend" h with
+            | Some e -> Error e
+            | None ->
+                tsDecFn h.Wire.Value
+                |> Result.map (fun d ->
+                    match h.Format with
+                    | Some f -> "((x) => dFormat(" + tsSourceStr f + ", " + d + "(x)))"
+                    | None -> d)
         // Phase 676 — keep the parsed JSON as-is. Hosted slots identically.
         | TJson
         | THosted _ -> Ok "((x) => x)"
@@ -3417,6 +3745,35 @@ const dDef = (name, fs, dec, dflt) => (name in fs) ? dec(fs[name]) : dflt;
 // An optional closure/opaque field: the value is a sentinel carrying nothing, but
 // its PRESENCE distinguishes present-from-absent and must survive the round trip.
 const dPresent = (name, fs) => (name in fs) ? null : undefined;"""
+
+    /// Phase 252 — the TypeScript check of a hosted slot's declared FORMAT, emitted only when
+    /// the vocabulary declares one ([[declaresHostedFormat]]); the JS face of
+    /// [[HostedFormat.admits]], held to the same answers by a test. Returns the value, so a
+    /// decoder composes it in place.
+    let private tsFormatHelper =
+        """// Phase 252 — a hosted slot's declared string format, checked as the F# host checks it.
+const dFormatDay = (y, m, d) => {
+  if (y < 1 || m < 1 || m > 12 || d < 1) return false;
+  const last = new Date(0);
+  last.setUTCFullYear(y, m, 0);
+  return d <= last.getUTCDate();
+};
+const dFormat = (format, v) => {
+  let ok = false;
+  if (typeof v === 'string') {
+    if (format === 'date') {
+      const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(v);
+      ok = m !== null && dFormatDay(+m[1], +m[2], +m[3]);
+    } else if (format === 'date-time') {
+      const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})([.][0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$/.exec(v);
+      ok = m !== null && dFormatDay(+m[1], +m[2], +m[3]) && +m[4] <= 23 && +m[5] <= 59 && +m[6] <= 59
+        && (m[9] === undefined || (+m[9] <= 23 && +m[10] <= 59));
+    } else if (format === 'uuid') {
+      ok = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
+    }
+  }
+  return ok ? v : dFail("expected a '" + format + "' string");
+};"""
 
     /// Emit a self-contained TypeScript (ESM) structural encoder for the named
     /// kinds — `encodeNode(n)` returns canonical wire byte-identical to the F#
@@ -3705,7 +4062,11 @@ const plain = (pairs) =>
           unions |> List.map (tsUnionEncoder idl disc idl.Harden)
           kinds |> List.map (tsSpecEncoder idl disc flat)
           [ kindDispatch ]
-          [ Ok(tsDecodePrelude disc) ]
+          Ok(tsDecodePrelude disc)
+          :: (if declaresHostedFormat idl then
+                  [ Ok tsFormatHelper ]
+              else
+                  [])
           enums |> List.map (tsEnumDecoder >> Ok)
           records |> List.map (tsRecordDecoder idl disc)
           unions |> List.map (tsUnionDecoder idl disc idl.Harden)
@@ -3718,6 +4079,292 @@ const plain = (pairs) =>
         // from; the three preludes above are multi-line templates and would otherwise carry the
         // line endings of whichever checkout compiled them. See [[normalizeEol]].
         |> Result.map normalizeEol
+
+    // -----------------------------------------------------------------------
+    // Phase 252 — the TypeScript scaffold leg in the DECODER's shape, and the
+    // module's type declarations.
+    // -----------------------------------------------------------------------
+
+    /// An object-literal / interface member key: bare when JS can spell it, quoted
+    /// otherwise — the same rule [[tsDiscKey]] applies to the discriminator.
+    let private tsMemberKey (name: string) =
+        if tsIsIdent name then name else tsSourceStr name
+
+    /// Phase 252 — a TypeScript value literal for an authored `IdlValue` of type `t`, in
+    /// the SHAPE the generated decoder produces, which is the shape the generated encoder
+    /// reads: every omit-at-default member is PRESENT, filled from its declared default
+    /// as [[fsharpValue]] fills it; an absent optional and a host-only member are absent.
+    ///
+    /// BREAKING (Phase 252): it took the value alone (`typescriptValue v : string`), and a value
+    /// alone cannot know a default, so a node it scaffolded left such a member `undefined` and
+    /// the encoder then wrote `"quantity":undefined` (not JSON) or a default the wire omits.
+    /// A caller passes the vocabulary and the slot's type (`TNode` for a node) and handles the
+    /// [[CodegenError]] a value that does not fit its declaration now raises.
+    ///
+    /// Walks the IDL rather than the value, so a value that does not fit its declaration
+    /// is refused (a [[CodegenError]]) rather than emitted. Respects the declared wire
+    /// shape (discriminator key, node envelope) exactly as [[typescriptValueWith]] does.
+    let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        let disc = tsDiscKey idl.Wire.Discriminator
+
+        let mismatch (what: string) =
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    what,
+                    "GP5: the scaffold leg names what it cannot construct rather than emitting a value the encoder mis-writes",
+                    "author the value against the vocabulary's declaration (Encode.encode refuses the same value)"
+                )
+            )
+
+        let objectOf (pairs: (string * string) list) =
+            "{ "
+            + (pairs |> List.map (fun (k, e) -> k + ": " + e) |> String.concat ", ")
+            + " }"
+
+        let rec go (subst: Map<string, IdlType>) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+            match substType subst t, v with
+            | TStr, VStr s -> Ok(tsSourceStr s)
+            | TInt, VInt i -> Ok(string i)
+            | TBool, VBool b -> Ok(if b then "true" else "false")
+            | TFloat, VFloat f -> Ok(invariantFloat f)
+            | TFloat, VInt i -> Ok(string i)
+            | TEnum n, VEnum wire ->
+                match idl.Enums |> List.tryFind (fun e -> e.Name = n) with
+                | Some e when List.contains wire e.WireCases -> Ok(tsSourceStr wire)
+                | _ -> mismatch (sprintf "the wire string \"%s\" at enum '%s'" wire n)
+            | TList inner, VList xs ->
+                xs
+                |> List.map (go subst inner)
+                |> sequenceR
+                |> Result.map (fun items -> "[" + String.concat ", " items + "]")
+            | TMap vt, VMap entries ->
+                entries
+                |> List.map (fun (k, ev) -> go subst vt ev |> Result.map (fun e -> tsSourceStr k, e))
+                |> sequenceR
+                |> Result.map objectOf
+            // A hosted slot that declares its wire form takes that type's decoded shape (a
+            // record's omit-at-default members filled, as for any record); the JSON is read
+            // through the interpreter's decoder, so a value outside the form is refused.
+            | THosted { Wire = Some w }, VJson j ->
+                match Decode.value idl w j with
+                | Ok wv -> go subst w wv
+                | Error m -> mismatch (sprintf "a hosted value outside its declared wire form (%s)" m)
+            | (TJson | THosted _), VJson j -> Ok(Canon.render j)
+            // The encoder never reads a sentinel slot; a PRESENT stand-in keeps an optional
+            // one's presence test honest (see [[typescriptValueWith]]).
+            | (TClosure | TFn _ | TOpaque), (VClosure | VOpaque) -> Ok "(() => undefined)"
+            | TRecord n, VRecord authored ->
+                match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+                | None -> mismatch (sprintf "a value of the undeclared record '%s'" n)
+                | Some r -> members subst ("record '" + n + "'") r.Fields authored |> Result.map objectOf
+            | TUnion(n, args), VUnion(tag, authored) ->
+                match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+                | None -> mismatch (sprintf "a value of the undeclared union '%s'" n)
+                | Some u when List.length u.Params <> List.length args ->
+                    mismatch (sprintf "union '%s' applied to %d type arguments" n (List.length args))
+                | Some u ->
+                    match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
+                    | None -> mismatch (sprintf "the case '%s', which union '%s' does not declare" tag n)
+                    | Some c ->
+                        let caseSubst = Map.ofList (List.zip u.Params args)
+
+                        members caseSubst (sprintf "union case '%s.%s'" n tag) c.Fields authored
+                        |> Result.map (fun ms -> objectOf ((disc, tsSourceStr tag) :: ms))
+            | TNode, VNode(id, kindTag, fields) -> node id [] kindTag fields
+            | TNode, VNodeEnv(id, envelope, kindTag, fields) -> node id envelope kindTag fields
+            | _, VAbsent -> mismatch "an absent value (VAbsent) in a value position"
+            | t', _ -> mismatch (sprintf "a value that does not match IDL type %A" t')
+
+        /// The members of an object under its declared fields' presence rules.
+        and members
+            (subst: Map<string, IdlType>)
+            (where: string)
+            (declared: IdlField list)
+            (authored: (string * IdlValue) list)
+            : Result<(string * string) list, CodegenError> =
+            declared
+            |> List.map (fun f ->
+                let value =
+                    authored
+                    |> List.tryPick (fun (n, av) -> if n = f.Name && av <> VAbsent then Some av else None)
+
+                match f.Opt, value with
+                // Never on the wire, and `undefined` in the decoder's shape.
+                | HostOnly, _ -> Ok None
+                | _, Some av -> go subst f.Type av |> Result.map (fun e -> Some(tsMemberKey f.Name, e))
+                | Optional, None -> Ok None
+                | OmitDefault d, None -> go subst f.Type d |> Result.map (fun e -> Some(tsMemberKey f.Name, e))
+                | Required, None -> mismatch (sprintf "%s without its required field '%s'" where f.Name))
+            |> sequenceR
+            |> Result.map (List.choose id)
+
+        and node (id: string) envelope (kindTag: string) fields : Result<string, CodegenError> =
+            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            | None -> mismatch (sprintf "a node of the undeclared kind '%s'" kindTag)
+            | Some k ->
+                match
+                    members Map.empty ("kind '" + kindTag + "'") k.Fields fields,
+                    members Map.empty "node envelope" idl.NodeFields envelope
+                with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok kindMembers, Ok envMembers ->
+                    let tagged = (disc, tsSourceStr kindTag)
+
+                    match idl.Wire.NodeEnvelope with
+                    | NodeEnvelopeShape.NestedKind ->
+                        Ok(
+                            objectOf (
+                                (("id", tsSourceStr id) :: envMembers)
+                                @ [ "kind", objectOf (tagged :: kindMembers) ]
+                            )
+                        )
+                    | NodeEnvelopeShape.FlatKind ->
+                        Ok(objectOf ((tagged :: ("id", tsSourceStr id) :: envMembers) @ kindMembers))
+
+        go Map.empty t v
+
+    /// Phase 252 — TypeScript TYPE DECLARATIONS for the module [[typescriptModule]] emits
+    /// over the same kinds: one declaration per enum, record, union and kind spec the
+    /// module reaches, the `Node` type, and the signatures of `encodeNode` / `decodeNode`.
+    /// Written beside the module (`generated.mjs` + `generated.d.mts`), it is what lets a
+    /// TypeScript consumer's compiler catch a scaffolded value of the wrong shape — the
+    /// module is untyped JavaScript, so nothing did.
+    ///
+    /// The types describe the DECODER's shape, which is the one the encoder reads: an
+    /// omit-at-default member is present (not optional), an optional member is `?:`, a
+    /// host-only member is `?:` (it is never on the wire), an enum is the union of its wire
+    /// strings, and a sentinel, JSON or hosted slot is `unknown` (the TypeScript tier
+    /// carries a hosted slot's JSON verbatim).
+    let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
+        let kinds =
+            kindTags
+            |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+
+        let enums, unions, records = referenced idl kinds
+        let disc = tsDiscKey idl.Wire.Discriminator
+
+        let rec tsType (t: IdlType) : Result<string, CodegenError> =
+            match t with
+            | TStr -> Ok "string"
+            | TInt
+            | TFloat -> Ok "number"
+            | TBool -> Ok "boolean"
+            | TEnum n
+            | TRecord n
+            | TUnion(n, []) -> Ok n
+            | TUnion(n, args) ->
+                args
+                |> List.map tsType
+                |> concatR ", "
+                |> Result.map (fun a -> n + "<" + a + ">")
+            | TVar v -> Ok v
+            | TNode -> Ok "Node"
+            | TList inner -> tsType inner |> Result.map (fun s -> "Array<" + s + ">")
+            | TMap vt -> tsType vt |> Result.map (fun s -> "{ [key: string]: " + s + " }")
+            // A hosted slot that declares its wire form IS that type on this side.
+            | THosted { Wire = Some w } -> tsType w
+            | TJson
+            | THosted _
+            | TClosure
+            | TFn _
+            | TOpaque -> Ok "unknown"
+            | TKind
+            | TOp -> Error(opVocabularySlot "the TypeScript declaration backend" t)
+
+        let memberDecl (f: IdlField) : Result<string, CodegenError> =
+            tsType f.Type
+            |> Result.map (fun ty ->
+                match f.Opt with
+                | Optional
+                | HostOnly -> tsMemberKey f.Name + "?: " + ty
+                | Required
+                | OmitDefault _ -> tsMemberKey f.Name + ": " + ty)
+
+        let objectType (extra: string list) (fields: IdlField list) : Result<string, CodegenError> =
+            fields
+            |> List.map memberDecl
+            |> sequenceR
+            |> Result.map (fun ms ->
+                match extra @ ms with
+                | [] -> "{}"
+                | all -> "{ " + String.concat "; " all + " }")
+
+        let generic (ps: string list) =
+            match ps with
+            | [] -> ""
+            | _ -> "<" + String.concat ", " ps + ">"
+
+        let orNever (xs: string list) =
+            match xs with
+            | [] -> "never"
+            | _ -> String.concat " | " xs
+
+        let enumDecls =
+            enums
+            |> List.map (fun e ->
+                Ok(
+                    "export type "
+                    + e.Name
+                    + " = "
+                    + orNever (e.WireCases |> List.map tsSourceStr)
+                    + ";"
+                ))
+
+        let recordDecls =
+            records
+            |> List.map (fun r ->
+                objectType [] r.Fields
+                |> Result.map (fun o -> "export type " + r.Name + " = " + o + ";"))
+
+        let unionDecls =
+            unions
+            |> List.map (fun u ->
+                u.Cases
+                |> List.map (fun c -> objectType [ disc + ": " + tsSourceStr c.Tag ] c.Fields)
+                |> sequenceR
+                |> Result.map (fun cases -> "export type " + u.Name + generic u.Params + " = " + orNever cases + ";"))
+
+        let specDecls =
+            kinds
+            |> List.map (fun k ->
+                objectType [ disc + ": " + tsSourceStr k.Tag ] k.Fields
+                |> Result.map (fun o -> "export type " + k.Tag + "Spec = " + o + ";"))
+
+        let envelope = objectType [ "id: string" ] idl.NodeFields
+        let specs = kinds |> List.map (fun k -> k.Tag + "Spec")
+
+        let nodeDecl =
+            envelope
+            |> Result.map (fun env ->
+                match idl.Wire.NodeEnvelope with
+                | NodeEnvelopeShape.NestedKind ->
+                    "export type NodeKind = "
+                    + orNever specs
+                    + ";\n"
+                    + "export type Node = "
+                    + env.Substring(0, env.Length - 2)
+                    + "; kind: NodeKind };"
+                | NodeEnvelopeShape.FlatKind ->
+                    "export type Node = "
+                    + orNever (specs |> List.map (fun s -> "(" + s + " & " + env + ")"))
+                    + ";")
+
+        [ [ Ok(
+                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 252 — type declarations for the TS backend). Do not edit by hand."
+            ) ]
+          enumDecls
+          recordDecls
+          unionDecls
+          specDecls
+          [ nodeDecl ]
+          [ Ok(
+                "export declare function encodeNode(n: Node): string;\n"
+                + "export declare function decodeNode(s: string): { ok: true; value: Node } | { ok: false; error: string };"
+            ) ] ]
+        |> List.concat
+        |> concatR "\n\n"
+        |> Result.map (fun s -> normalizeEol s + "\n")
 
     // -----------------------------------------------------------------------
     // Phase 317 syntax-tree-emission leg + Phase 321 trust boundary. The
@@ -3762,70 +4409,126 @@ const plain = (pairs) =>
         | TUnion(n, args) -> TUnion(n, List.map (substG subst) args)
         | other -> other
 
-    let private combineR (results: Result<string, string> list) : Result<string list, string> =
-        (Ok [], results)
-        ||> List.fold (fun acc r ->
-            match acc, r with
-            | Error e, _ -> Error e
-            | Ok xs, Ok x -> Ok(xs @ [ x ])
-            | Ok _, Error e -> Error e)
+    /// Phase 252 — the value emitter's refusals, typed. Every arm of [[fsharpValue]]
+    /// that cannot render answers with one of these rather than with a sentence, so the
+    /// scaffold leg refuses in Phase 195's shape like every module emitter already did.
+    let private valueRefusal (construct: string) (alternative: string) : CodegenError =
+        CodegenError.UnsupportedConstruct(
+            construct,
+            "GP5: the scaffold leg names what it cannot construct rather than emitting source that does not compile",
+            alternative
+        )
+
+    /// A value that does not fit its declared type, or a name the vocabulary does not
+    /// declare — the authored value is wrong, not the generator.
+    let private valueMismatch (what: string) : CodegenError =
+        valueRefusal what "author the value against the vocabulary's declaration (Encode.encode refuses the same value)"
+
+    /// Phase 252 — an escaped F# expression constructing a `JVal`, for the hosted arm of
+    /// [[fsharpValue]]. Every string (keys included) goes through `fsStringLit`, so wire data
+    /// stays data; a negative integer is parenthesised (`JInt(-5)`, not `JInt -5`). `None` for
+    /// a non-finite float, which has no F# literal.
+    let rec private fsJValLit (j: JVal) : string option =
+        match j with
+        | JStr s -> Some("JStr " + fsStringLit s)
+        | JInt i -> Some(sprintf "JInt(%d)" i)
+        | JBool b -> Some(if b then "JBool true" else "JBool false")
+        | JFloat f when System.Double.IsFinite f -> Some("JFloat(" + fsFloatLit f + ")")
+        | JFloat _ -> None
+        | JArr xs ->
+            let items = xs |> List.map fsJValLit
+
+            if items |> List.forall Option.isSome then
+                Some("JArr [ " + (items |> List.choose id |> String.concat "; ") + " ]")
+            else
+                None
+        | JObj fs ->
+            let members =
+                fs
+                |> List.map (fun (k, v) -> fsJValLit v |> Option.map (fun e -> "(" + fsStringLit k + ", " + e + ")"))
+
+            if members |> List.forall Option.isSome then
+                Some("JObj [ " + (members |> List.choose id |> String.concat "; ") + " ]")
+            else
+                None
 
     /// Emit an F# value-construction expression for an authored `IdlValue` of
-    /// type `t`, building values of the GENERATED types. Wire-derived strings
-    /// route through `fsStringLit`; an unsupported shape ERRORS rather than
-    /// mis-emitting (the syntax-tree-emission contract). `Result` so a hostile or
-    /// malformed value is rejected, never silently mangled.
-    let rec fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, string> =
+    /// type `t`, building values of the GENERATED types (`Gen.fsharpModule`'s). Wire-derived
+    /// strings route through `fsStringLit`; an unsupported shape is REFUSED rather than
+    /// mis-emitted (the syntax-tree-emission contract), and the refusal is a [[CodegenError]]
+    /// (Phase 252) — the same typed shape every module emitter returns.
+    ///
+    /// BREAKING (Phase 252): the error channel was a plain `string`. A caller that wants the
+    /// sentence adapts with `|> Result.mapError CodegenError.describe`.
+    ///
+    /// Phase 252 also widened what it constructs: an enum literal resolves through
+    /// [[IdlEnum.CaseOf]] to the HOST case the generated type declares (the wire string is
+    /// not an F# identifier in general — `"documents"` against `Documents`), and a
+    /// [[TRecord]] value emits a record expression under the same presence rules a kind's
+    /// spec record uses. A union case's positional fields honour presence too: an
+    /// `Optional` one is `Some(…)` / `None`, as its generated declaration says.
+    let rec fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         match t, v with
         | TStr, VStr s -> Ok(fsStringLit s)
         | TInt, VInt i -> Ok(string i)
         | TBool, VBool b -> Ok(if b then "true" else "false")
         | TFloat, VFloat f -> Ok(invariantFloat f)
         | TFloat, VInt i -> Ok(invariantFloat (float i))
-        | TEnum name, VEnum case -> Ok(name + "." + case)
+        | TEnum name, VEnum wire ->
+            match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
+            | None -> Error(valueMismatch (sprintf "a value of the undeclared enum '%s'" name))
+            | Some e ->
+                match e.CaseOf wire with
+                | Some case -> Ok(name + "." + case)
+                | None ->
+                    Error(valueMismatch (sprintf "the wire string \"%s\", which enum '%s' does not admit" wire name))
         | TUnion(name, args), VUnion(tag, fields) ->
             match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
-            | None -> Error(sprintf "fsharpValue: unknown union '%s'" name)
+            | None -> Error(valueMismatch (sprintf "a value of the undeclared union '%s'" name))
             | Some u when List.length u.Params <> List.length args ->
-                Error(sprintf "fsharpValue: union '%s' arity mismatch" name)
+                Error(valueMismatch (sprintf "union '%s' applied to %d type arguments" name (List.length args)))
             | Some u ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
-                | None -> Error(sprintf "fsharpValue: union '%s' has no case '%s'" name tag)
+                | None -> Error(valueMismatch (sprintf "the case '%s', which union '%s' does not declare" tag name))
                 | Some c ->
                     let subst = Map.ofList (List.zip u.Params args)
 
-                    let argResults =
-                        c.Fields
-                        |> List.map (fun f ->
-                            match fields |> List.tryFind (fun (n, _) -> n = f.Name) with
-                            | Some(_, fv) -> fsharpValue idl (substG subst f.Type) fv
-                            | None -> Error(sprintf "fsharpValue: union case '%s' missing field '%s'" tag f.Name))
-
-                    match combineR argResults with
-                    | Error e -> Error e
-                    | Ok [] -> Ok(name + "." + tag)
-                    | Ok parts -> Ok(sprintf "%s.%s(%s)" name tag (String.concat ", " parts))
+                    c.Fields
+                    |> List.map (fun f ->
+                        fsPositional
+                            idl
+                            (sprintf "union case '%s.%s'" name tag)
+                            { f with Type = substG subst f.Type }
+                            (fields |> List.tryFind (fun (n, _) -> n = f.Name) |> Option.map snd))
+                    |> sequenceR
+                    |> Result.map (fun parts ->
+                        match parts with
+                        | [] -> name + "." + tag
+                        | ps -> sprintf "%s.%s(%s)" name tag (String.concat ", " ps))
+        | TRecord name, VRecord fields ->
+            match idl.Records |> List.tryFind (fun r -> r.Name = name) with
+            | None -> Error(valueMismatch (sprintf "a value of the undeclared record '%s'" name))
+            | Some r ->
+                fsAssignments idl ("record '" + name + "'") r.Fields fields
+                |> Result.map (fun assigns -> "{ " + String.concat "; " assigns + " }")
         | TNode, VNode(id, kindTag, fields) ->
             match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
-            | None -> Error(sprintf "fsharpValue: unknown kind '%s'" kindTag)
+            | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
             | Some k ->
-                match fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields with
-                | Error e -> Error e
-                | Ok recFields ->
-                    Ok(
-                        sprintf
-                            "{ Id = %s; Kind = NodeKind.%s { %s } }"
-                            (fsStringLit id)
-                            kindTag
-                            (String.concat "; " recFields)
-                    )
+                fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields
+                |> Result.map (fun recFields ->
+                    sprintf
+                        "{ Id = %s; Kind = NodeKind.%s { %s } }"
+                        (fsStringLit id)
+                        kindTag
+                        (String.concat "; " recFields))
         // Phase 698 — the enveloped form. The envelope's assignments sit on the
         // `Node` record itself (`Style = Some …`), the kind's on the spec record, and
         // both go through the SAME `fsAssignments`, so the presence rules cannot
         // drift between the two halves of a node.
         | TNode, VNodeEnv(id, envelope, kindTag, fields) ->
             match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
-            | None -> Error(sprintf "fsharpValue: unknown kind '%s'" kindTag)
+            | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
             | Some k ->
                 match
                     fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields,
@@ -3843,61 +4546,95 @@ const plain = (pairs) =>
                             (envFields |> List.map (fun a -> "; " + a) |> String.concat "")
                     )
         | TList inner, VList xs ->
-            match combineR (xs |> List.map (fsharpValue idl inner)) with
-            | Error e -> Error e
-            | Ok items -> Ok("[ " + String.concat "; " items + " ]")
-        | _, VAbsent -> Error "fsharpValue: VAbsent reached the emitter"
-        | _ -> Error(sprintf "fsharpValue: value does not match IDL type %A" t)
+            xs
+            |> List.map (fsharpValue idl inner)
+            |> sequenceR
+            |> Result.map (fun items -> "[ " + String.concat "; " items + " ]")
+        | _, VAbsent -> Error(valueMismatch "an absent value (VAbsent) in a value position")
+        // Phase 252 — a hosted slot that DECLARES its wire form is scaffolded through its own
+        // codec: the wire value (checked against the form first) is emitted as an escaped
+        // `JVal` literal and handed to the slot's `Decode` expression, so the host value is
+        // built by the one function that defines it. A value outside the form is refused here
+        // rather than at the scaffold's run time.
+        | THosted({ Wire = Some w } as h), VJson j ->
+            let inForm =
+                match Decode.value idl w j, h.Format, j with
+                | Error m, _, _ -> Error m
+                | Ok _, None, _ -> Ok()
+                | Ok _, Some fmt, JStr s when HostedFormat.admits fmt s -> Ok()
+                | Ok _, Some fmt, _ -> Error(sprintf "not a '%s' string" fmt)
+
+            match inForm, fsJValLit j with
+            | Error m, _ -> Error(valueMismatch (sprintf "a hosted value outside its declared wire form (%s)" m))
+            | _, None -> Error(valueMismatch "a hosted value holding a non-finite float, which has no F# literal")
+            | Ok(), Some lit ->
+                Ok(sprintf "(match (%s) (%s) with Ok __v -> __v | Error __e -> failwith __e)" h.Decode lit)
+        // What remains is REFUSED by construct, never mis-emitted: a hosted slot's value is
+        // a host type only its own codec knows how to build (unless its wire form is
+        // declared, above), a closure is behaviour (human-bound, Phase 318), and a JSON /
+        // map / sentinel / op slot has no scaffold arm yet.
+        | THosted h, _ ->
+            Error(
+                valueRefusal
+                    (sprintf "a value of the hosted slot '%s'" h.FSharp)
+                    "construct the host value in hand-written source and assign it to the field; the scaffold carries wire data, and a hosted slot's value is the host codec's"
+            )
+        | (TFn _ | TClosure), _ ->
+            Error(
+                valueRefusal
+                    "a closure-typed value"
+                    "behaviour is human-bound (Phase 318): assign the closure in hand-written source"
+            )
+        | (TJson | TMap _ | TOpaque | TKind | TOp | TVar _), _ ->
+            Error(
+                valueRefusal
+                    (sprintf "a value at %A, which the scaffold leg has no arm for" t)
+                    "author the slot in hand-written source, or scaffold the surrounding node without it"
+            )
+        | _ -> Error(valueMismatch (sprintf "a value that does not match IDL type %A" t))
+
+    /// One POSITIONAL union-case field, under the presence rules its generated declaration
+    /// states (an `Optional` field is `T option`). `authored` is the value at the field's name,
+    /// if any.
+    and private fsPositional
+        (idl: Idl)
+        (where: string)
+        (f: IdlField)
+        (authored: IdlValue option)
+        : Result<string, CodegenError> =
+        match authored with
+        | None
+        | Some VAbsent ->
+            match f.Opt with
+            | Optional -> Ok "None"
+            | HostOnly -> hostOnlyLit f
+            | OmitDefault d -> fsDefaultLit idl f.Type d
+            | Required -> Error(valueMismatch (sprintf "%s without its required field '%s'" where f.Name))
+        | Some fv ->
+            match f.Opt with
+            // A host-only field has no wire projection, so a wire value at its name is not
+            // its value — take the placeholder.
+            | HostOnly -> hostOnlyLit f
+            | Optional -> fsharpValue idl f.Type fv |> Result.map (fun s -> "Some(" + s + ")")
+            | OmitDefault _
+            | Required -> fsharpValue idl f.Type fv
 
     /// Record-field assignments (`Label = …; Icon = Some …`) for one declared field
     /// list against one authored field list, honouring every presence rule. Shared
-    /// by a kind's spec record and (Phase 698) by the node envelope — `where`
-    /// names the owner for the error messages only.
+    /// by a kind's spec record, (Phase 698) the node envelope and (Phase 252) a
+    /// non-discriminated record — `where` names the owner for the refusals only.
     and private fsAssignments
         (idl: Idl)
         (where: string)
         (declared: IdlField list)
         (authored: (string * IdlValue) list)
-        : Result<string list, string> =
+        : Result<string list, CodegenError> =
         declared
         |> List.map (fun f ->
-            match authored |> List.tryFind (fun (n, _) -> n = f.Name) with
-            | (None | Some(_, VAbsent)) ->
-                match f.Opt with
-                | Optional -> Ok(pascal f.Name + " = None")
-                // Phase 195 — the placeholder read is a refusal now, rendered into this leg's
-                // plain-string channel exactly as the omit-default one below is, and for the
-                // same reason: one defect, one sentence.
-                | HostOnly ->
-                    hostOnlyLit f
-                    |> Result.map (fun p -> pascal f.Name + " = " + p)
-                    |> Result.mapError (fun e -> sprintf "fsharpValue: %s (on %s)" (CodegenError.describe e) where)
-                // OmitDefault absent → restore the identity default value.
-                //
-                // Phase 124 — the refusal is the module emitters' own `UnsupportedDefault`,
-                // rendered into the plain-string channel this leg publishes rather than reworded.
-                // Two legs answering the same defect with two different sentences is how a reader
-                // ends up believing they are two different defects.
-                | OmitDefault d ->
-                    fsDefaultLit idl f.Type d
-                    |> Result.map (fun e -> pascal f.Name + " = " + e)
-                    |> Result.mapError (fun e ->
-                        sprintf "fsharpValue: %s (omit-default for '%s' on %s)" (CodegenError.describe e) f.Name where)
-                | Required -> Error(sprintf "fsharpValue: %s missing required field '%s'" where f.Name)
-            | Some(_, fv) ->
-                match f.Opt, fsharpValue idl f.Type fv with
-                | _, Error e -> Error e
-                // A host-only field has no wire projection, so a wire value
-                // at its name is not its value — take the placeholder.
-                | HostOnly, Ok _ ->
-                    hostOnlyLit f
-                    |> Result.map (fun p -> pascal f.Name + " = " + p)
-                    |> Result.mapError (fun e -> sprintf "fsharpValue: %s (on %s)" (CodegenError.describe e) where)
-                | Optional, Ok s -> Ok(pascal f.Name + " = Some(" + s + ")")
-                // OmitDefault present → the raw (non-option) value, like Required.
-                | OmitDefault _, Ok s
-                | Required, Ok s -> Ok(pascal f.Name + " = " + s))
-        |> combineR
+            fsPositional idl where f (authored |> List.tryFind (fun (n, _) -> n = f.Name) |> Option.map snd)
+            |> Result.map (fun e -> pascal f.Name + " = " + e))
+        |> sequenceR
+
 
     /// A provenance-stamp header for AI-scaffolded source (Phase 321) — records
     /// the source wire hash + the typed actor so generated code is auditable +
