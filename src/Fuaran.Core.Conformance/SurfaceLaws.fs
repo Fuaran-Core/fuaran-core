@@ -49,11 +49,11 @@ module internal SurfaceLaws =
 
         LawKit.run iterations seed (fun rng _ at ->
             let tree = rng.Draw gen
-            let whole = Projection.project pw Whole tree
+            let whole = Projection.project pw Scope.Whole tree
 
             // determinism: the same tree projects to the identical projection
             digestStable.Check(
-                (Projection.project pw Whole tree = whole),
+                (Projection.project pw Scope.Whole tree = whole),
                 fun () -> at "projecting the same tree twice differs"
             )
 
@@ -65,7 +65,7 @@ module internal SurfaceLaws =
                 | Error e -> roundTrip.Check(false, fun () -> at (sprintf "re-import rejected the parsed ops: %s" e))
                 | Ok tree2 ->
                     roundTrip.Check(
-                        (Projection.project pw Whole tree2 = whole),
+                        (Projection.project pw Scope.Whole tree2 = whole),
                         fun () -> at "re-imported tree projects differently"
                     )
 
@@ -75,7 +75,18 @@ module internal SurfaceLaws =
 
             let wholeRendered = whole.Lines |> List.map Projection.renderLine |> Set.ofList
 
-            for scope in [ ById target; Subtree target ] do
+            // Phase 298 — every scope agrees on the id key: `ById` of a drawn id finds its line, keyed
+            // by `Projection.idKey` (an id with a space or a newline used to find nothing)
+            let byId = Projection.project pw (Scope.ById target) tree
+
+            subset.Check(
+                (not (List.isEmpty byId.Lines)
+                 && byId.Lines |> List.forall (fun l -> l.IdKey = Projection.idKey pw target)),
+                fun () ->
+                    at (sprintf "ById of the drawn id %A found no line under its id key" (pw.IdW.ToString target))
+            )
+
+            for scope in [ Scope.ById target; Scope.Subtree target ] do
                 let scoped = Projection.project pw scope tree
 
                 subset.Check(
@@ -90,7 +101,7 @@ module internal SurfaceLaws =
                 )
 
             subset.Check(
-                ((Projection.project pw (ChangedSince(Projection.snapshot pw tree)) tree).Lines = []),
+                ((Projection.project pw (Scope.ChangedSince(Projection.snapshot pw tree)) tree).Lines = []),
                 fun () -> at "ChangedSince over an unchanged tree is non-empty"
             )
 
@@ -214,6 +225,22 @@ module internal SurfaceLaws =
                     fun () -> sprintf "seed=%d: the unknown-tool refusal does not enumerate the available tools" seed
                 )
 
+        // ---- Phase 298: no catch-all anchor (bank-fixed — checked once) ----
+        // An anchor with no literal segment matches every intent, so bank order hands that pattern
+        // every request the patterns before it miss. Ordinal matching (Phase 298) already stops a
+        // zero-width or soft-hyphen segment from matching everywhere; this refuses the anchor that
+        // is nothing but wildcards.
+        for card in w.Patterns do
+            for anchor in card.PromptAnchors do
+                patterns.Check(
+                    not (List.isEmpty (PatternBank.literalSegments anchor)),
+                    fun () ->
+                        sprintf
+                            "seed=%d: pattern '%s' anchor '%s' has no literal segment — it matches every intent"
+                            seed
+                            card.Name
+                            anchor
+                )
         // an intent text a pattern's own anchor matches: wildcard spans filled with a drawn token.
         let textOfAnchor (token: string) (anchor: string) : string =
             let sb = System.Text.StringBuilder()
@@ -319,9 +346,9 @@ module internal SurfaceLaws =
                         let dRoll = rng.IntBelow 3
 
                         match dRoll with
-                        | 0 -> Allow
-                        | 1 -> NeedsApproval
-                        | _ -> Deny "policy says no"
+                        | 0 -> PolicyDecision.Allow
+                        | 1 -> PolicyDecision.NeedsApproval
+                        | _ -> PolicyDecision.deny "policy says no"
                     else
                         domainDecision
 
@@ -333,7 +360,7 @@ module internal SurfaceLaws =
                             Decide = w.Decide }
 
                 match decision with
-                | Allow ->
+                | PolicyDecision.Allow ->
                     allowed <- allowed + 1
                     // Allow: submit applies exactly what the reducer applies.
                     match Proposals.submit wUnder author "t0" None [ op ] Proposals.Queue.empty state0, direct with
@@ -345,21 +372,67 @@ module internal SurfaceLaws =
                             false,
                             fun () -> at (sprintf "allowed submit disagreed with the reducer (%A)" other)
                         )
-                | NeedsApproval ->
+                | PolicyDecision.NeedsApproval ->
                     parked <- parked + 1
                     // NeedsApproval: parks without applying; approval applies (or stays pending).
                     let wi = wUnder
+
+                    // Phase 298 — `approve` re-consults `Decide` for the APPROVER. Under the kit's
+                    // roll the approver is allowed (the parity below is about the reducer); under
+                    // the domain's own policy the approver's decision is the domain's, and a `Deny`
+                    // must refuse the approval without the reducer.
+                    let wApprove =
+                        if kitPolicy then
+                            { wi with
+                                Decide =
+                                    fun actor o ->
+                                        if actor = "approver" then
+                                            PolicyDecision.Allow
+                                        else
+                                            wi.Decide actor o }
+                        else
+                            wi
+
+                    let approverAllowed =
+                        try
+                            match wApprove.Decide "approver" op with
+                            | PolicyDecision.Deny _ -> false
+                            | PolicyDecision.Allow
+                            | PolicyDecision.NeedsApproval -> true
+                        with _ ->
+                            false
 
                     match Proposals.submit wi author "t0" (Some "intent") [ op ] Proposals.Queue.empty state0 with
                     | Proposals.SubmitProposed(q, id) ->
                         proposals.Check((applyCalls.Value = 0), fun () -> at "parking a proposal invoked the reducer")
 
-                        (match Proposals.approve wi "approver" "t1" id q state0, direct with
+                        // Phase 298 — the author can never approve their own proposal.
+                        (match Proposals.approve wApprove author "t1" id q state0 with
+                         | Error(Proposals.SelfApproval _) -> proposals.Saw()
+                         | other ->
+                             proposals.Check(
+                                 false,
+                                 fun () -> at (sprintf "the author approved their own proposal (%A)" other)
+                             ))
+
+                        let beforeApprove = applyCalls.Value
+
+                        (match Proposals.approve wApprove "approver" "t1" id q state0, direct with
+                         | Error(Proposals.ApprovalDenied _), _ when not approverAllowed ->
+                             proposals.Check(
+                                 (applyCalls.Value = beforeApprove),
+                                 fun () -> at "an approval the policy refused invoked the reducer"
+                             )
+                         | _ when not approverAllowed ->
+                             proposals.Check(
+                                 false,
+                                 fun () -> at "approve applied ops the approver's own policy denies"
+                             )
                          | Ok(q2, s'), Ok sd ->
                              proposals.Check((s' = sd), fun () -> at "an approved proposal ≠ direct apply")
 
                              // double-decide is a named failure.
-                             match Proposals.approve wi "approver" "t2" id q2 state0 with
+                             match Proposals.approve wApprove "approver" "t2" id q2 state0 with
                              | Error(Proposals.NotPending _) -> proposals.Saw()
                              | _ -> proposals.Check(false, fun () -> at "a decided proposal was re-decidable")
                          | Error(Proposals.OpNoLongerApplies _), Error _ -> proposals.Saw()
@@ -381,7 +454,7 @@ module internal SurfaceLaws =
                          | Error _ -> proposals.Check(false, fun () -> at "rejecting a pending proposal failed"))
 
                         // an unknown id is a named failure.
-                        (match Proposals.approve wi "approver" "t1" 9999 q state0 with
+                        (match Proposals.approve wApprove "approver" "t1" 9999 q state0 with
                          | Error(Proposals.UnknownProposal _) -> proposals.Saw()
                          | _ -> proposals.Check(false, fun () -> at "an unknown proposal id was not refused"))
                     | other ->
@@ -389,7 +462,7 @@ module internal SurfaceLaws =
                             false,
                             fun () -> at (sprintf "NeedsApproval did not park the submit (%A)" other)
                         )
-                | Deny _ ->
+                | PolicyDecision.Deny _ ->
                     denied <- denied + 1
                     // Deny: refused, and the reducer is never invoked.
                     match Proposals.submit wUnder author "t0" None [ op ] Proposals.Queue.empty state0 with
@@ -491,6 +564,8 @@ module internal SurfaceLaws =
           "ProjectionWitness",
           typeof<ProjectionWitness<obj, obj, obj>>,
           [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
+          // Phase 298 — the observer seam's witness, frozen as it ships
+          "ObserverWitness", typeof<ObserverWitness<obj, obj>>, [ "Derive"; "Options" ]
           "CapabilitySeamWitness", typeof<CapabilitySeamWitness<obj>>, [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
           "QuerySeamWitness", typeof<QuerySeamWitness>, [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
           "CapabilityPipelineWitness", typeof<CapabilityPipelineWitness>, [ "PipelineRegistry"; "GenPipeline" ]

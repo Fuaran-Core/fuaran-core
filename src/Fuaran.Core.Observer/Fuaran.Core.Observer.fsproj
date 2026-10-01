@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Observer</PackageId>
-    <Description>Fuaran.Core.Observer — the generic runtime-verification seam: the Observation record, the pure Input→Flag Derivation shape, the IObserver register/snapshot/derive/subscribe contract, and an in-memory engine. The runtime analogue of Fuaran.Core.Validator; all flag content stays domain-side (a verification pack supplies its own metric envelope + flag vocabulary). FSharp.Core only.</Description>
+    <Description>Fuaran.Core.Observer — the generic runtime-verification seam: the Observation record, the pure Input→Flag Derivation shape, and the ObserverWitness functions (register / update / snapshot / observeTree) over a pure ObserverState value, plus the IObserver / InMemoryObserver adapter. The runtime analogue of Fuaran.Core.Validator; all flag content stays domain-side (a verification pack supplies its own metric envelope + flag vocabulary). FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Observer.fs" />

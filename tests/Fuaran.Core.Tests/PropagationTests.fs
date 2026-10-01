@@ -233,7 +233,7 @@ let tests =
               let evalNode (_: string -> int option) id = Ok(if id = "a" then 1 else 0)
 
               match Propagation.evalFrom evalNode Map.empty (Set.singleton "ghost") deps with
-              | Error(Propagation.EvalUnknownChange [ "ghost" ]) -> ()
+              | Error(Propagation.PropagationError.EvalUnknownChange [ "ghost" ]) -> ()
               | other -> failtestf "expected EvalUnknownChange [ghost], got %A" other
 
           testCase

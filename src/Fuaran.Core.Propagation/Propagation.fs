@@ -1,8 +1,9 @@
 namespace Fuaran.Core
 
-/// Change propagation over a reference DAG + tree-level dirty recomputation (Phase 68) — the third
-/// incremental-recomputation surface of the compute strand, after the columnar `DataFrame.evalFrom`
-/// (Phase 34) and the capability-DAG `CapabilityPipeline.evalFrom` (Phase 62). A domain models its artefact
+/// Change propagation over a reference DAG + tree-level dirty recomputation (Phase 68) — the tree-level
+/// incremental-recomputation surface. (It was written as the third of a trio beside a columnar and a
+/// capability-DAG `evalFrom`; those left this repository with the compute strand under DECISIONS D66,
+/// and this one stays: it is witness-generic tree machinery, not compute.) A domain models its artefact
 /// as a typed tree whose cross-node references are **declared bindings on permanent ids** (a Calc model, a
 /// notebook, an Office cross-domain refresh); given the dependency structure this module derives the
 /// dependency order, enumerates any reference cycle (as data, GP4 — never a divergence), and computes the
@@ -43,8 +44,13 @@ module Propagation =
 
     // Tarjan strongly-connected components over the reference sub-graph — SCCs emit in reverse-topological
     // order (dependencies-first), exactly evaluation order (the Fuaran.Calc `Topology.tarjan`, string-id
-    // keyed). Recursive like the Calc precedent; a pathologically deep dependency *chain* could stack-overflow
-    // (an iterative rewrite mirrors Tree.fs's Phase-19 walkers if a consumer ever needs it — noted, not built).
+    // keyed). ITERATIVE (Phase 298, the Phase-19 walker posture): the recursion is an explicit frame stack,
+    // each frame a node and the successors it has not yet visited, so a dependency chain as long as a
+    // spreadsheet's row count cannot overflow the thread stack (the recursive form died near 3,500 deep
+    // in a Debug test host and 13,700 in Release). The frames replay the recursive visit exactly — the
+    // successors in `succ` order, a child's low-link folded into its parent's when the child's frame
+    // finishes, a component emitted when its root's frame does — so the SCCs and their order are the
+    // recursive version's, item for item.
     let private tarjan (nodes: string list) (succ: string -> string list) : string list list =
         let mutable index = 0
         let idx = System.Collections.Generic.Dictionary<string, int>()
@@ -52,38 +58,56 @@ module Propagation =
         let onStack = System.Collections.Generic.HashSet<string>()
         let stack = System.Collections.Generic.Stack<string>()
         let sccs = ResizeArray<string list>()
+        // the call stack: each frame's node, and the successors that node has still to visit
+        let frames = System.Collections.Generic.Stack<string>()
+        let pending = System.Collections.Generic.Dictionary<string, string list>()
 
-        let rec strongConnect v =
+        let enter v =
             idx[v] <- index
             low[v] <- index
             index <- index + 1
             stack.Push v
             onStack.Add v |> ignore
-
-            for w in succ v do
-                if not (idx.ContainsKey w) then
-                    strongConnect w
-                    low[v] <- min low[v] low[w]
-                elif onStack.Contains w then
-                    low[v] <- min low[v] idx[w]
-
-            if low[v] = idx[v] then
-                let comp = ResizeArray<string>()
-                let mutable popped = false
-
-                while not popped do
-                    let w = stack.Pop()
-                    onStack.Remove w |> ignore
-                    comp.Add w
-
-                    if w = v then
-                        popped <- true
-
-                sccs.Add(List.ofSeq comp)
+            pending[v] <- succ v
+            frames.Push v
 
         for n in nodes do
             if not (idx.ContainsKey n) then
-                strongConnect n
+                enter n
+
+                while frames.Count > 0 do
+                    let v = frames.Peek()
+
+                    match pending[v] with
+                    | w :: rest ->
+                        pending[v] <- rest
+
+                        if not (idx.ContainsKey w) then
+                            enter w
+                        elif onStack.Contains w then
+                            low[v] <- min low[v] idx[w]
+                    | [] ->
+                        frames.Pop() |> ignore
+                        pending.Remove v |> ignore
+
+                        if low[v] = idx[v] then
+                            let comp = ResizeArray<string>()
+                            let mutable popped = false
+
+                            while not popped do
+                                let w = stack.Pop()
+                                onStack.Remove w |> ignore
+                                comp.Add w
+
+                                if w = v then
+                                    popped <- true
+
+                            sccs.Add(List.ofSeq comp)
+
+                        // the return to the caller's frame: fold the child's low-link into it
+                        if frames.Count > 0 then
+                            let parent = frames.Peek()
+                            low[parent] <- min low[parent] low[v]
 
         List.ofSeq sccs
 
@@ -160,8 +184,10 @@ module Propagation =
         closureOver (dependents deps) changed
 
     /// Staleness as queryable data (A3): the dirty closure the caller has not yet recomputed, returned as a
-    /// derived `Set<string>` — no mutable state, no stored flag on any node (GP2). A semantic alias of
-    /// `dirtyFromChangedIds` making the "outputs to mark stale" contract explicit at the call site.
+    /// derived `Set<string>` — no mutable state, no stored flag on any node (GP2). **An ALIAS of
+    /// `dirtyFromChangedIds`, and only that** (Phase 298 states it): the same function under the name a
+    /// call site that marks outputs stale reads better with. It has no semantics of its own and never
+    /// will; a reader who meets both names is reading one function.
     let staleSet (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
         dirtyFromChangedIds deps changed
 
@@ -340,12 +366,12 @@ module Propagation =
         Set.union changed (dirtyFromChangedIds deps firstHop)
 
     // ---- incremental recompute driver (Phase 69) ----
-    // The tree-level member of the incremental-eval trio (DataFrame.evalFrom columnar ∥
-    // CapabilityPipeline.evalFrom capability-DAG ∥ this). Core owns the *order + reuse plumbing* — it walks
-    // the acyclic nodes in dependency order and threads the value map; the domain injects `evalNode` (the
-    // evaluator, GP6 — no compute in Core). `evalFrom` recomputes only the dirty subgraph and reuses each
-    // clean node's prior value, byte-identical to a full `eval`. Cyclic SCCs are returned as data (the
-    // `#CALC!` posture); the iterative upgrade is Phase 72.
+    // The tree-level incremental driver (its columnar and capability-DAG siblings left with the compute
+    // strand, DECISIONS D66). Core owns the *order + reuse plumbing* — it walks the acyclic nodes in
+    // dependency order and threads the value map; the domain injects `evalNode` (the evaluator, GP6 — no
+    // compute in Core). `evalFrom` recomputes only the dirty subgraph and reuses each clean node's prior
+    // value, byte-identical to a full `eval`. Cyclic SCCs are returned as data (the `#CALC!` posture);
+    // iterating a cyclic group to a fixed point is a domain policy over `EvalOutcome.Cyclic`.
 
     /// Why incremental evaluation failed — named, enumerated (GP5), never a throw (GP4). A cyclic reference
     /// is **not** a failure — it is data in `EvalOutcome.Cyclic`.
@@ -353,6 +379,11 @@ module Propagation =
     /// `EvalUndeclaredRead` (Phase 209) is declared LAST because a case's declaration order IS its tag
     /// number: appending keeps every existing tag where a consumer's serialised or cached form already has
     /// it. It names the node that read and the first id it read outside `deps[node]`.
+    ///
+    /// `RequireQualifiedAccess` (Phase 298): `EvalNodeFailed` is also a case of `Function`'s pipeline
+    /// error, with the same payload, so a consumer opening both met one name for two cases — write
+    /// `PropagationError.EvalNodeFailed`.
+    [<RequireQualifiedAccess>]
     type PropagationError =
         | EvalUnknownChange of ids: string list
         | EvalNodeFailed of node: string * message: string
@@ -360,7 +391,7 @@ module Propagation =
 
     /// The outcome of a (re)evaluation: the acyclic nodes' values, plus the cyclic SCCs that could not be
     /// ordered (the `#CALC!` set — a caller renders them as cycle errors, or re-runs them under an
-    /// iteration policy, Phase 72). A node downstream of a cycle evaluates with its cyclic read resolving to
+    /// iteration policy of its own). A node downstream of a cycle evaluates with its cyclic read resolving to
     /// `None` — the domain's `evalNode` decides how to propagate that (Calc's `#CALC!` propagation).
     type EvalOutcome<'v> =
         { Values: Map<string, 'v>
@@ -426,17 +457,17 @@ module Propagation =
                     let computed = evalNode resolve (Map.tryFind id prior) id
 
                     match undeclared.Value with
-                    | Some r -> Error(EvalUndeclaredRead(id, r))
+                    | Some r -> Error(PropagationError.EvalUndeclaredRead(id, r))
                     | None ->
                         match computed with
                         | Ok v -> go (Map.add id v results) rest
-                        | Error m -> Error(EvalNodeFailed(id, m))
+                        | Error m -> Error(PropagationError.EvalNodeFailed(id, m))
                 else
                     go (Map.add id (Map.find id prior) results) rest
 
         go Map.empty topo.Order
 
-    /// The walk over `sort deps` — what every entry point but the demand-driven pair runs.
+    /// The walk over `sort deps` — the full evaluators' order.
     let private walkWith
         (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
         (recompute: string -> bool)
@@ -445,18 +476,43 @@ module Propagation =
         : Result<EvalOutcome<'v>, PropagationError> =
         walkTopo evalNode recompute prior deps (sort deps)
 
-    /// The prior-blind walk every existing entry point runs: the evaluator is never handed a prior.
-    let private walk
+    /// The adapter every prior-blind entry point runs through (Phase 298): an evaluator that is never
+    /// handed a prior, as the prior-aware shape the `With` forms take. `eval` and `evalFrom` ARE
+    /// `evalWith` and `evalFromWith` over it, so the two families cannot drift apart.
+    let private priorBlind
         (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
-        (recompute: string -> bool)
-        (prior: Map<string, 'v>)
+        : (string -> 'v option) -> 'v option -> string -> Result<'v, string> =
+        fun resolve _ id -> evalNode resolve id
+
+    /// A dependency map PREPARED for repeated incremental evaluation (Phase 298): its order and cycles
+    /// (`sort`) and its dependents (`dependents`), derived ONCE. `evalFrom` / `evalFromWith` derive all
+    /// three on every call — a Tarjan pass and a map inversion per tick, for a graph that changes far
+    /// less often than its values do; a host that ticks hands `evalFromPlan` / `evalFromWithPlan` the
+    /// same plan until the GRAPH changes, and rebuilds it then. `Deps` is the map the plan was built
+    /// from: a plan is a cache of it, never a second source of truth.
+    type Plan =
+        { Deps: Map<string, Set<string>>
+          Topo: TopoResult
+          Dependents: Map<string, Set<string>> }
+
+    /// Prepare `deps` (Phase 298): one `sort`, one `dependents`.
+    let plan (deps: Map<string, Set<string>>) : Plan =
+        { Deps = deps
+          Topo = sort deps
+          Dependents = dependents deps }
+
+    /// The full evaluator over a prior-aware evaluator (Phase 250): `eval` with every node handed
+    /// `None` as its prior. It is the reference `evalFromWith` is certified against.
+    let evalWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
-        walkWith (fun resolve _ id -> evalNode resolve id) recompute prior deps
+        walkWith evalNode (fun _ -> true) Map.empty deps
 
     /// The reference full evaluator (Phase 69): evaluate every acyclic node once, in dependency order,
     /// threading the results; cyclic SCCs are returned in `EvalOutcome.Cyclic`. The evaluator the
-    /// incremental `evalFrom` is certified byte-identical to.
+    /// incremental `evalFrom` is certified byte-identical to. `evalWith` over an evaluator that ignores
+    /// its prior (Phase 298).
     ///
     /// Every node is recomputed, so this is where an evaluator that reads outside its declaration is ALWAYS
     /// caught: `EvalUndeclaredRead` at the first such node in dependency order (Phase 209).
@@ -464,14 +520,69 @@ module Propagation =
         (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
-        walk evalNode (fun _ -> true) Map.empty deps
+        evalWith (priorBlind evalNode) deps
+
+    /// `evalFromWith` over a prepared plan (Phase 298) — the one incremental walk every incremental
+    /// entry point runs. The refusal and the walk are `evalFromWith`'s, word for word; only the
+    /// order, the cycles and the dependents are read from `p` instead of derived from `p.Deps`.
+    let evalFromWithPlan
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (prior: Map<string, 'v>)
+        (changed: Set<string>)
+        (p: Plan)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        let unknown = changed |> Set.filter (fun c -> not (Map.containsKey c p.Deps))
+
+        if not (Set.isEmpty unknown) then
+            Error(PropagationError.EvalUnknownChange(Set.toList unknown))
+        else
+            let dirty = closureOver p.Dependents changed
+            walkTopo evalNode (fun id -> Set.contains id dirty) prior p.Deps p.Topo
+
+    /// `evalFrom` over a prepared plan (Phase 298): `evalFromWithPlan` with an evaluator that ignores
+    /// its prior.
+    let evalFromPlan
+        (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
+        (prior: Map<string, 'v>)
+        (changed: Set<string>)
+        (p: Plan)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        evalFromWithPlan (priorBlind evalNode) prior changed p
+
+    /// Incrementally re-evaluate with each RECOMPUTED node handed its own prior value (Phase 250):
+    /// `evalFrom`, except that `evalNode resolve prior id` receives `Map.tryFind id prior` beside the
+    /// resolver. A clean node is reused exactly as `evalFrom` reuses it, and the refusals are
+    /// `evalFrom`'s: an unknown changed id is `EvalUnknownChange`, an undeclared read
+    /// `EvalUndeclaredRead` — one contract, not two. `evalFromWithPlan` over `plan deps` (Phase 298).
+    ///
+    /// **The agreement theorem, restated for it** (`evalfromwith_agrees`, `proofs/Propagation.fst`):
+    /// `evalFromWith ev prior changed deps = evalWith ev deps` under `evalFrom`'s premises for the
+    /// evaluator's prior-blind reading (`fun resolve id -> ev resolve None id`) and ONE more — **the
+    /// evaluator's answer does not depend on the prior it is handed**: at every node the walk
+    /// recomputes, under the resolver it is handed there, `ev resolve (Some p) id = ev resolve None
+    /// id`. The prior is a hint for reusing work, never an input to the answer. A table node that
+    /// refreshes from its prior state must return the table a fresh evaluation would; one whose prior
+    /// is out of step with its source must recompute rather than trust it.
+    ///
+    /// That premise is the domain's, and `Conformance.propagationEvaluatorLawsWith` samples it at the
+    /// domain's own evaluator and edits. A value that carries a reuse cache (an incremental state
+    /// beside a table) defines its equality over what it MEANS, not over the cache: the theorem's
+    /// equality is the value type's.
+    let evalFromWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (prior: Map<string, 'v>)
+        (changed: Set<string>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        evalFromWithPlan evalNode prior changed (plan deps)
 
     /// Incrementally re-evaluate (Phase 69) given the PRIOR values and the changed-input set: recompute only
     /// the dirty subgraph (`dirtyFromChangedIds`) in dependency order, reusing each clean node's prior value.
     /// **Byte-identical to a full `eval` over the same inputs** (`Conformance.propagationEvalLaws`) — a clean
     /// node's inputs are unchanged, so its value equals its prior; a dirty node re-evaluates against the new
     /// upstream values. A node absent from `prior` (never evaluated) is always recomputed. A `changed` id
-    /// not in the dependency map is a named `EvalUnknownChange` (GP5).
+    /// not in the dependency map is a named `EvalUnknownChange` (GP5). `evalFromWith` over an evaluator
+    /// that ignores its prior (Phase 298); a host that ticks over one graph hands `evalFromPlan` a `plan`.
     ///
     /// **The evaluator contract (Phase 186, first clause ENFORCED by Phase 209).** That equality is a
     /// THEOREM — `evalfrom_agrees` in `proofs/Propagation.fst`. Its first premise is now a property of this
@@ -496,62 +607,15 @@ module Propagation =
         (changed: Set<string>)
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
-        let unknown = changed |> Set.filter (fun c -> not (Map.containsKey c deps))
-
-        if not (Set.isEmpty unknown) then
-            Error(EvalUnknownChange(Set.toList unknown))
-        else
-            let dirty = dirtyFromChangedIds deps changed
-            walk evalNode (fun id -> Set.contains id dirty) prior deps
+        evalFromWith (priorBlind evalNode) prior changed deps
 
     // ---- the prior value, inside the contract (Phase 250) ----
     // `evalFrom` hands an evaluator its declared reads and nothing else, and a node's OWN prior value
     // is not one of them — so a domain that reuses work WITHIN a node (a table node refreshing only the
-    // rows a source edit reached, `DataFrame.Incremental`) had to keep its caches beside the driver and
-    // keep them in step with it by hand, with nothing certifying the bookkeeping. These two hand the
+    // rows a source edit reached) had to keep its caches beside the driver and keep them in step with
+    // it by hand, with nothing certifying the bookkeeping. `evalWith` / `evalFromWith` above hand the
     // evaluator its prior value as an argument, so the driver keeps it in step: a node is handed
     // exactly the value it had in the evaluation that produced `prior`.
-
-    /// The full evaluator over a prior-aware evaluator (Phase 250): `eval` with every node handed
-    /// `None` as its prior. It is the reference `evalFromWith` is certified against.
-    let evalWith
-        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
-        (deps: Map<string, Set<string>>)
-        : Result<EvalOutcome<'v>, PropagationError> =
-        walkWith evalNode (fun _ -> true) Map.empty deps
-
-    /// Incrementally re-evaluate with each RECOMPUTED node handed its own prior value (Phase 250):
-    /// `evalFrom`, except that `evalNode resolve prior id` receives `Map.tryFind id prior` beside the
-    /// resolver. A clean node is reused exactly as `evalFrom` reuses it, and the refusals are
-    /// `evalFrom`'s: an unknown changed id is `EvalUnknownChange`, an undeclared read
-    /// `EvalUndeclaredRead` — one contract, not two.
-    ///
-    /// **The agreement theorem, restated for it** (`evalfromwith_agrees`, `proofs/Propagation.fst`):
-    /// `evalFromWith ev prior changed deps = evalWith ev deps` under `evalFrom`'s premises for the
-    /// evaluator's prior-blind reading (`fun resolve id -> ev resolve None id`) and ONE more — **the
-    /// evaluator's answer does not depend on the prior it is handed**: at every node the walk
-    /// recomputes, under the resolver it is handed there, `ev resolve (Some p) id = ev resolve None
-    /// id`. The prior is a hint for reusing work, never an input to the answer. A table node that
-    /// refreshes from its prior state must return the table a fresh evaluation would; one whose prior
-    /// is out of step with its source must recompute rather than trust it.
-    ///
-    /// That premise is the domain's, and `Conformance.propagationEvaluatorLawsWith` samples it at the
-    /// domain's own evaluator and edits. A value that carries a reuse cache (an incremental state
-    /// beside a table) defines its equality over what it MEANS, not over the cache: the theorem's
-    /// equality is the value type's.
-    let evalFromWith
-        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
-        (prior: Map<string, 'v>)
-        (changed: Set<string>)
-        (deps: Map<string, Set<string>>)
-        : Result<EvalOutcome<'v>, PropagationError> =
-        let unknown = changed |> Set.filter (fun c -> not (Map.containsKey c deps))
-
-        if not (Set.isEmpty unknown) then
-            Error(EvalUnknownChange(Set.toList unknown))
-        else
-            let dirty = dirtyFromChangedIds deps changed
-            walkWith evalNode (fun id -> Set.contains id dirty) prior deps
 
     // ---- demand-driven evaluation: pull (Phase 317) ----
     // `evalFrom` pushes a change forward over the dirty set; these two pull a TARGET set back over
@@ -596,7 +660,7 @@ module Propagation =
         (targets: Set<string>)
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
-        evalForWith (fun resolve _ id -> evalNode resolve id) targets deps
+        evalForWith (priorBlind evalNode) targets deps
 
 /// The dependency-graph algorithms of `Propagation`, under a name a consumer with NO evaluator finds
 /// them by (Phase 313). A domain checking reference cycles, ordering declarations or inverting a

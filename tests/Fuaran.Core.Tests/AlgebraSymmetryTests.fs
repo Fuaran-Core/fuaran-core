@@ -465,7 +465,7 @@ let propagationPullTests =
 
               Expect.equal
                   (Propagation.evalFor leaky (Set.singleton "b") deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "the undeclared read is named" ]
 
 // ---- Ops.Index.afterOp ------------------------------------------------------------------------

@@ -393,11 +393,15 @@ let tests =
                               [ { Code = "GEN001"
                                   Severity = Severity.Error
                                   Message = "empty id"
-                                  Node = Some(w.Id n) } ]
+                                  Node = Some(w.Id n)
+                                  Family = ""
+                                  Related = [] } ]
                           else
                               [])
 
-                  let reg = Validator.empty |> Validator.register noEmptyId
+                  let reg =
+                      Validator.ofFamilies [ noEmptyId ]
+                      |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
 
                   let tree: G.Node<unit> =
                       { Id = "root"

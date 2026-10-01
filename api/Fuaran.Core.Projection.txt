@@ -13,6 +13,8 @@ field Fuaran.Core.Scope`1+Tags.ChangedSince : System.Int32 (literal)
 field Fuaran.Core.Scope`1+Tags.Subtree : System.Int32 (literal)
 field Fuaran.Core.Scope`1+Tags.Whole : System.Int32 (literal)
 method Fuaran.Core.ProjectionModule.digestOf`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, !!0) : System.String
+method Fuaran.Core.ProjectionModule.escapeCell(System.String) : System.String
+method Fuaran.Core.ProjectionModule.idKey`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, !!1) : System.String
 method Fuaran.Core.ProjectionModule.lineOf`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, System.Int32, !!0) : Fuaran.Core.ProjectionLine
 method Fuaran.Core.ProjectionModule.lineText(Fuaran.Core.ProjectionLine) : System.String
 method Fuaran.Core.ProjectionModule.parseBack`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!2>, System.String>
@@ -20,7 +22,9 @@ method Fuaran.Core.ProjectionModule.project`3(Fuaran.Core.ProjectionWitness`3<!!
 method Fuaran.Core.ProjectionModule.render(Fuaran.Core.Projection) : System.String
 method Fuaran.Core.ProjectionModule.renderLine(Fuaran.Core.ProjectionLine) : System.String
 method Fuaran.Core.ProjectionModule.sizeOf(Fuaran.Core.Projection) : System.Int32
+method Fuaran.Core.ProjectionModule.snapshotDigestOf`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, !!0) : System.String
 method Fuaran.Core.ProjectionModule.snapshot`3(Fuaran.Core.ProjectionWitness`3<!!0, !!1, !!2>, !!0) : Fuaran.Core.ProjectionSnapshot
+method Fuaran.Core.ProjectionModule.unescapeCell(System.String) : System.String
 record-field Fuaran.Core.Projection.Lines #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ProjectionLine>
 record-field Fuaran.Core.ProjectionLine.Depth #2 : System.Int32
 record-field Fuaran.Core.ProjectionLine.Digest #3 : System.String

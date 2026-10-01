@@ -361,10 +361,11 @@ host in the same change-set — whatever the caller count in this repository say
 
 ## Witness-record field freeze (the 1.0 contract)
 
-The thirteen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
+The fourteen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
 `AiSurfaceWitness`, `ProjectionWitness`, since Phase 330 the six conformance-kit inputs
 `CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
-`KeyedWitness`, `EvaluatorWitness`, and since Phase 313 `RefWitness`, frozen at birth) are
+`KeyedWitness`, `EvaluatorWitness`, since Phase 313 `RefWitness` and since Phase 298 `ObserverWitness`, each
+frozen at birth) are
 **plain records**: adding a field is a compile-break for *every* adopter's construction site, with no
 gradual-migration path. At `1.0` their field sets **freeze**. (The freeze originally named only the
 four base records; `AiSurfaceWitness` and `ProjectionWitness` are equally public, equally
@@ -3410,6 +3411,99 @@ and `queryLawsWith`.
 families go red on witnesses they passed. `docs/conformance-families.md` / `.json` are regenerated. No
 wire byte moves.
 
+### The five smaller seams are total and speak the spine's conventions (Phase 298, DECISIONS.md D101) — BREAKING (source): `Defect` widened, both registries' `register` retyped, four unions qualified, `Deny` / `SubmitDenied` retyped, `ApprovalFailure` widened; the rest `additive`
+
+Observer, Propagation, Validator, Projection and AiSurface were built one phase at a time; this
+entry makes each total over the inputs that hung or threw it, and moves each onto the spine's
+conventions. Tree and Ops lose two whole-tree walks.
+
+**The consumer edits, one per break.**
+
+- **`Defect<'Id>` gains `Family: string` and `Related: 'Id list`** (`record-widening`; FS0764 at every
+  full literal). Add `Family = ""` and `Related = []`, or build through the new `Defect.create`. The
+  walkers (`Validator.runAll` / `runAllTagged`, `ColumnValidator.validate` / `validateTagged`,
+  `Validator.runPack`) STAMP `Family` with the family id, the column rule id, or `pack/rule`; a rule
+  body never needs to. `Related` is the finding's supporting enumeration: the stock families fill it
+  (`containment` the parent, `REF-FORWARD` the declarer, `REF-CYCLE` the cycle).
+- **`Validator.register` and `ColumnValidator.register` return `Result<_, RegistrationError>`** and
+  refuse an id already registered (`RegistrationError.DuplicateRule(id, registered)`) — a second
+  registration used to double every finding. A pipeline `empty |> register a |> register b` becomes
+  `Validator.ofFamilies [ a; b ]` / `ColumnValidator.ofRules [ a; b ]`, handling the `Error`.
+- **`Validator.Registry` is renamed `Validator.RuleRegistry`**; `Registry` remains as an alias for
+  this draft and is removed in the next.
+- **`[<RequireQualifiedAccess>]` on `PolicyDecision`, Projection's `Scope`, `Proposals.ProposalStatus`
+  and `Propagation.PropagationError`** — their cases collided with `Deferred.Pending`,
+  `Rejection.Rejected`, `Function`'s `EvalNodeFailed`, or a consumer's own `Whole` / `ById`. Write
+  `PolicyDecision.Allow`, `Scope.Whole`, `ProposalStatus.Pending`, `PropagationError.EvalNodeFailed`.
+- **`PolicyDecision.Deny` carries a `RejectionGuidance`, and so does `Proposals.SubmitDenied`.** A
+  policy's `Deny "reason"` becomes `PolicyDecision.deny "reason"` (or `denyWith reason alternatives`);
+  a match on `SubmitDenied reason` reads `g.Message` from `SubmitDenied g`. A refused agent now gets
+  the alternatives a policy names, rendered by the same `Proposals.renderGuidance` as a reducer
+  rejection.
+- **`Proposals.ApprovalFailure` gains `SelfApproval(id, author)` and `ApprovalDenied(id, guidance)`**
+  (`union-widening`). `approve` refuses an approver who is the proposal's author, and re-consults
+  `Decide` for the approver and refuses on a `Deny` — before, `propose` (public) then `approve`
+  applied ops a deny-all policy refused through `submit`. A `NeedsApproval` for the approver is not a
+  refusal: approving is that approval. Both refusals leave the proposal pending. An exhaustive match
+  adds the two arms.
+- **Observer's records move to `namespace Fuaran.Core`** (`Observation`, `Derivation`,
+  `ObserverOptions`). `Fuaran.Core.Observer` forwards each by an abbreviation and keeps `IObserver` and
+  `InMemoryObserver` as an adapter, for this draft. A file that only opens `Fuaran.Core.Observer` and
+  CONSTRUCTS an `Observation` or `ObserverOptions` record literal opens `Fuaran.Core` too.
+
+**Additive.** `Propagation.Plan` / `plan` / `evalFromPlan` / `evalFromWithPlan` (order, cycles and
+dependents derived once and reused across ticks; `eval` / `evalFrom` are now the `With` forms over a
+prior-blind adapter, one walk each); `Validator.runAllTagged`, `enumerate`, `tryFind`, `ofFamilies`,
+`asCheck`, `FamilyFaultCode`; `ColumnValidator.validateTagged`, `enumerate`, `tryFind`, `ofRules`,
+`ruleId`, `asCheck` and the codes `BadRangeCode` / `NotANumberCode` / `RaggedCode`; `Defect.create` /
+`inFamily`; `Projection.idKey`, `escapeCell`, `unescapeCell`, `snapshotDigestOf`;
+`PatternBank.literalSegments` (now public); `PolicyDecision.deny` / `denyWith`; `Proposals.Queue.nextId`,
+`proposeWithId`, `ProposeFailure`; `Tree.Index.tryBuild`; the `ObserverWitness` record, `ObserverEntry`,
+`ObserverState` and the `ObserverWitness` functions (`create`, `createWith`, `empty`, `derive`,
+`register`, `update`, `unregister`, `snapshot`, `observeTree`); `Conformance.observerLaws`, rostered.
+`ObserverWitness` joins the witness-record field freeze at birth (fourteen records).
+
+**Behaviour a consumer will see** (no type moves for these):
+
+- **Totality.** `Propagation.sort` / `eval` / `evalFrom` are iterative — a 50,000-long dependency
+  chain evaluates (the recursive Tarjan died near 3,500 deep in a Debug host, 13,700 in Release) and
+  the SCCs and their order are the recursive version's, item for item. `Tree.Index.path` terminates
+  on the cyclic index `build` makes from a tree carrying an id twice (`None`). `ObserverWitness.observeTree`
+  carries a visited set (a cyclic parent declaration walks each member once), orders by
+  registration, and derives before it commits a registration. The adapter delivers each emission to
+  a snapshot of its subscribers, so one that disposes itself or subscribes another mid-callback no
+  longer throws on .NET or skips one under Fable. `Validator.runAll` and `ColumnValidator.validate`
+  catch a throwing family or rule as one `RULE-FAULT` error and keep the others' findings.
+- **Validator findings.** `inRange` reports a NaN bound (`COL-BADRANGE`, at the column, no cell read)
+  and a NaN or unreadable-decimal cell (`COL-NAN`) where both passed. `unique` is linear (each key
+  column read once into an array; 100,000 rows measured in the suite), refuses a ragged key column
+  (`COL-RAGGED`) instead of reporting phantom duplicates, and treats `Null` as a key value. **The
+  stock column rule ids change**: each is `Hash.canonicalFields` over the kind and every parameter
+  (`inRange` its bounds, `ofType` its type), so `unique ["a,b"]` and `unique ["a"; "b"]` are two rules;
+  a consumer that persisted or compared a rule id re-derives it.
+- **Projection.** One id key (`Projection.idKey`: the id's string form, escaped) is used by every scope
+  and by `snapshot`, so an id carrying a newline matches `ById`. The line grammar is stated:
+  `ID` and `KIND` escape `\`, space, tab, LF and CR (`\\`, `\s`, `\t`, `\n`, `\r`) — a line for an id
+  holding one of those renders differently than before. `parseBack` reads CRLF and prefixes a refusal
+  `line N: `. **Snapshot digests are SHA-256 over the content pre-image and the ordered child ids**:
+  `ChangedSince` reports the parent of a reorder and both parents of a move (it reported nothing), and
+  a snapshot taken before this draft reads every node as changed once. A scoped read encodes and
+  digests only its scope; the header's "cost independent of size" claim is corrected to that.
+- **AiSurface.** `matchesAnchor` compares ordinally over lowered copies and advances by the matched
+  length: a zero-width or soft-hyphen segment no longer matches every intent, .NET and Fable agree, and
+  `"é{x}b"` against `"é"` is `false` where it threw. `aiSurfaceLaws` refuses an anchor with no literal
+  segment and checks both approval refusals. `propose` mints one past the largest id held (equal to
+  `Length + 1` on a queue that only grew; fresh on a pruned one).
+- **Tree and Ops.** `Tree.updateNode` copies only the root-to-target path and shares every other
+  subtree (every `Ops.apply` rebuilt the whole tree); on a tree carrying the target id twice it
+  rewrites the first preorder occurrence. `canApply (MoveNode _)` validates without building a tree
+  (`validateMove`), returning exactly the rejection `apply` returns; `validateInsert` and the reorder
+  and move arms locate each node once.
+
+**Class: breaking (source)**, rides the `0.34.0` draft. No wire byte moves: no codec, corpus vector or
+canonical form changes. Baselines regenerated: `api/Fuaran.Core.AiSurface.txt`, `Conformance`,
+`Observer`, `Projection`, `Propagation`, `Tree`, `Validator` (`Ops` is unchanged).
+`docs/conformance-families.md` / `.json` are regenerated for the new family.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

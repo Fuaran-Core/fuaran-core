@@ -78,7 +78,7 @@ let witness: AiSurfaceWitness<NoteState, NoteOp, NoteRej> =
             Title = "Add a note"
             PromptAnchors = [ "add a note {text}"; "note that {text}" ]
             Emit = emitAddNote } ]
-      Decide = fun _ _ -> Allow
+      Decide = fun _ _ -> PolicyDecision.Allow
       Apply = applyNote
       Explain = explainNote }
 
@@ -90,9 +90,10 @@ let state0 = { Notes = [ "n1", "hello" ] }
 /// three decisions meets the ops `genNoteOp` draws.
 let notePolicy (_: string) (op: NoteOp) : PolicyDecision =
     match op with
-    | RemoveNote _ -> NeedsApproval
-    | AddNote(id, _) when id.Length > 0 && int id.[id.Length - 1] % 2 = 1 -> Deny "odd note ids are reserved"
-    | AddNote _ -> Allow
+    | RemoveNote _ -> PolicyDecision.NeedsApproval
+    | AddNote(id, _) when id.Length > 0 && int id.[id.Length - 1] % 2 = 1 ->
+        PolicyDecision.deny "odd note ids are reserved"
+    | AddNote _ -> PolicyDecision.Allow
 
 /// The reference witness with its policy.
 let policedWitness = { witness with Decide = notePolicy }
@@ -104,7 +105,7 @@ let private emptyWitness: AiSurfaceWitness<unit, string, string> =
       OpKinds = []
       KindOfOp = id
       Patterns = []
-      Decide = fun _ _ -> Allow
+      Decide = fun _ _ -> PolicyDecision.Allow
       Apply = fun _ () -> Ok()
       Explain = fun m -> { Message = m; Alternatives = [] } }
 
@@ -219,10 +220,10 @@ let tests =
 
               let deny =
                   { witness with
-                      Decide = fun _ _ -> Deny "read-only region" }
+                      Decide = fun _ _ -> PolicyDecision.deny "read-only region" }
 
               match Proposals.submit deny "agent" "t0" None [ AddNote("n2", "b") ] Proposals.Queue.empty state0 with
-              | Proposals.SubmitDenied "read-only region" -> ()
+              | Proposals.SubmitDenied { Message = "read-only region" } -> ()
               | other -> failtestf "expected SubmitDenied, got %A" other
 
               let gated =
@@ -230,8 +231,8 @@ let tests =
                       Decide =
                           fun _ op ->
                               match op with
-                              | RemoveNote _ -> NeedsApproval
-                              | _ -> Allow }
+                              | RemoveNote _ -> PolicyDecision.NeedsApproval
+                              | _ -> PolicyDecision.Allow }
 
               // a mixed sequence parks as a unit — approval covers what the agent proposed.
               match
@@ -252,7 +253,7 @@ let tests =
                       Expect.equal (List.map fst s.Notes) [ "n2" ] "both ops applied on approval"
 
                       match (q2.Proposals |> List.exactlyOne).Status with
-                      | Proposals.Approved("reviewer", "t1") -> ()
+                      | Proposals.ProposalStatus.Approved("reviewer", "t1") -> ()
                       | other -> failtestf "expected dual-attributed approval, got %A" other
                   | Error e -> failtestf "approval failed: %A" e
               | other -> failtestf "expected SubmitProposed, got %A" other
@@ -280,7 +281,7 @@ let tests =
               match Proposals.reject "reviewer" "t1" "not now" id q with
               | Ok q2 ->
                   match (q2.Proposals |> List.exactlyOne).Status with
-                  | Proposals.Rejected("reviewer", "t1", "not now") -> ()
+                  | Proposals.ProposalStatus.Rejected("reviewer", "t1", "not now") -> ()
                   | other -> failtestf "expected the recorded rejection, got %A" other
               | Error e -> failtestf "reject failed: %A" e
 

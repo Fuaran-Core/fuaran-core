@@ -1094,8 +1094,8 @@ let trustsNothingTests =
               // The columnar range rule must not read the refusal as "in range": a decimal past the
               // float range is out of every finite range, in either sign.
               let reg =
-                  ColumnValidator.empty
-                  |> ColumnValidator.register (ColumnValidator.inRange "m" 0.0 100.0)
+                  ColumnValidator.ofRules [ ColumnValidator.inRange "m" 0.0 100.0 ]
+                  |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
 
               let rangeDefects (cells: Cell list) =
                   ColumnValidator.validate

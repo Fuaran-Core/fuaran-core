@@ -8031,9 +8031,9 @@ let private topoToModel (t: Propagation.TopoResult) : ModelProp.topo_result =
 let private prodOutcomeRender (r: Result<Propagation.EvalOutcome<int>, Propagation.PropagationError>) : string =
     match r with
     | Ok o -> sprintf "Ok values=%A cyclic=%A" (Map.toList o.Values) o.Cyclic
-    | Error(Propagation.EvalUnknownChange ids) -> sprintf "EvalUnknownChange %A" ids
-    | Error(Propagation.EvalNodeFailed(n, m)) -> sprintf "EvalNodeFailed %s %s" n m
-    | Error(Propagation.EvalUndeclaredRead(n, r)) -> sprintf "EvalUndeclaredRead %s %s" n r
+    | Error(Propagation.PropagationError.EvalUnknownChange ids) -> sprintf "EvalUnknownChange %A" ids
+    | Error(Propagation.PropagationError.EvalNodeFailed(n, m)) -> sprintf "EvalNodeFailed %s %s" n m
+    | Error(Propagation.PropagationError.EvalUndeclaredRead(n, r)) -> sprintf "EvalUndeclaredRead %s %s" n r
 
 let private modelOutcomeRender
     (r: ModelProp.outcome<ModelProp.eval_outcome<int>, ModelProp.propagation_error>)
@@ -8254,7 +8254,7 @@ let private propProbe
             diffs <- sprintf "%s: eval after the change disagrees" where :: diffs
 
         match prodIncr with
-        | Error(Propagation.EvalUnknownChange _) ->
+        | Error(Propagation.PropagationError.EvalUnknownChange _) ->
             unknownRefused <- unknownRefused + 1
 
             if prodInvoked.Count <> 0 then
@@ -15627,14 +15627,14 @@ let proofOracleTests =
               // `eval` refuses first, which is why there is no `prior` to reuse a stale value from.
               Expect.equal
                   (Propagation.eval (spec 1) undeclared)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "the full driver refuses the undeclared read, naming the node and the read"
 
               let ranU = ResizeArray()
 
               Expect.equal
                   (Propagation.evalFrom (propProdEvaluator (spec 2) ranU) Map.empty (Set.singleton "a") undeclared)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "and the incremental driver refuses it identically wherever it recomputes the node"
 
               // The walk stops AT the violating node, so `b` is the last id the recorder saw. Not an
@@ -15714,7 +15714,7 @@ let proofOracleTests =
                       prior
                       (Set.ofList [ "a"; "nope" ])
                       declared)
-                  (Error(Propagation.EvalUnknownChange [ "nope" ]))
+                  (Error(Propagation.PropagationError.EvalUnknownChange [ "nope" ]))
                   "an unknown change is the typed refusal naming it"
 
               Expect.isEmpty ranUnknown "and no evaluator ran"

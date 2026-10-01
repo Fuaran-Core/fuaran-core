@@ -679,6 +679,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.observerLaws",
+      "module": "Conformance",
+      "entry": "observerLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["ObserverWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.opAlgebra",
       "module": "Conformance",
       "entry": "opAlgebra",
@@ -956,7 +969,7 @@
       "optIn": true,
       "reason": "no-witness-to-certify",
       "discharges": [],
-      "cases": "14",
+      "cases": "15",
       "adequacy": "unconditional",
       "refusal": "none"
     },

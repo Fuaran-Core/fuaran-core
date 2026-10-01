@@ -225,8 +225,8 @@ module Tree =
 
     /// Bottom-up structural rebuild: map every node through `f` *after* its children are
     /// rebuilt, reassembling via `ReplaceChildren`. Iterative with an explicit frame stack
-    /// (Phase 19) so a deep tree cannot overflow — the shared engine behind `map` and
-    /// `updateNode`. A frame is `(node, children-not-yet-rebuilt, rebuilt-children-reversed)`;
+    /// (Phase 19) so a deep tree cannot overflow — the engine behind `map` (`updateNode` copies
+    /// only the root-to-target path since Phase 298). A frame is `(node, children-not-yet-rebuilt, rebuilt-children-reversed)`;
     /// `carry` hands a just-finished child up to its parent frame.
     let private rebuildPostorder (w: NodeWitness<'Node, 'Id>) (f: 'Node -> 'Node) (root: 'Node) : 'Node =
         let rec loop (stack: ('Node * 'Node list * 'Node list) list) (carry: 'Node option) : 'Node =
@@ -247,12 +247,18 @@ module Tree =
 
         loop [ (root, w.Children root, []) ] None
 
-    /// Rebuild the tree, replacing the single node identified by `target` with `f` applied to
-    /// it. Returns None if `target` is absent. Iterative (Phase 19, via `rebuildPostorder`) so a
-    /// deep tree cannot overflow — this backs every `Ops.apply`. For a conformant witness
-    /// (`ReplaceChildren` round-trips, per the witness laws) the result is identical to the prior
-    /// recursive version: `f` sees the target node with its own children, every ancestor is
-    /// rebuilt, every other subtree is structurally unchanged.
+    /// Rebuild the tree, replacing the node identified by `target` with `f` applied to it.
+    /// Returns None if `target` is absent. This backs every `Ops.apply`.
+    ///
+    /// **Path copying (Phase 298).** The target is located by an iterative depth-first search
+    /// (the Phase-19 posture — a deep tree cannot overflow) that records the root-to-target path,
+    /// and only that path is rebuilt: `f` sees the target with its own children, each ancestor is
+    /// rebuilt through `ReplaceChildren` with its one changed child, and every other subtree is
+    /// SHARED with `root`, untouched. Until Phase 298 every node of the tree was rebuilt through
+    /// `ReplaceChildren` on every edit, so each `Ops.apply` reallocated the whole tree. For a
+    /// conformant witness (`ReplaceChildren` round-trips, per the witness laws) the result is the
+    /// same tree. The FIRST preorder node carrying `target` is the one rewritten — on a
+    /// well-formed tree (unique ids, `Tree.wellFormed`) it is the only one.
     let updateNode
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -260,17 +266,21 @@ module Tree =
         (f: 'Node -> 'Node)
         (root: 'Node)
         : 'Node option =
-        let mutable hit = false
+        // each work item: a node, and its ancestors nearest-first with the child index taken at each
+        let rec find (stack: ('Node * ('Node * int) list) list) =
+            match stack with
+            | [] -> None
+            | (node, ancestors) :: rest ->
+                if idw.Equals (w.Id node) target then
+                    Some(node, ancestors)
+                else
+                    find ((w.Children node |> List.mapi (fun i c -> c, (node, i) :: ancestors)) @ rest)
 
-        let g (node: 'Node) =
-            if idw.Equals (w.Id node) target then
-                hit <- true
-                f node
-            else
-                node
-
-        let result = rebuildPostorder w g root
-        if hit then Some result else None
+        find [ root, [] ]
+        |> Option.map (fun (node, ancestors) ->
+            (f node, ancestors)
+            ||> List.fold (fun child (parent, i) ->
+                w.ReplaceChildren parent (w.Children parent |> List.mapi (fun j c -> if j = i then child else c))))
 
     /// The digest pre-image of a tree under a per-node labelling: every preorder node as TWO
     /// fields — its label, then its ARITY (`List.length (w.Children n)`, as a decimal) — through
@@ -553,7 +563,10 @@ module Tree =
             |> List.fold (fun acc n -> add32 acc (fingerprintOf w idw n)) 0u
             |> stampOf
 
-        /// Build both maps + the staleness stamp in a single preorder pass.
+        /// Build both maps + the staleness stamp in a single preorder pass. Over a tree that is not
+        /// well-formed (an id carried twice) `ById` and `ParentOf` keep the LAST occurrence, and
+        /// the parent links can form a cycle; every read below terminates on such an index
+        /// regardless (Phase 298), and `tryBuild` refuses the tree instead.
         let build (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) : NodeIndex<'Node, 'Id> =
             let nodes = preorder w root
 
@@ -565,6 +578,18 @@ module Tree =
               Root = w.Id root
               Fingerprint = treeStampOf w idw root }
 
+        /// `build`, refusing a tree that is not well-formed (Phase 298): `Error (RepeatedId d)`
+        /// naming the first id the preorder carries twice (`Tree.wellFormed`'s verdict), where
+        /// `build` would index it with the earlier occurrences silently overwritten.
+        let tryBuild
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (root: 'Node)
+            : Result<NodeIndex<'Node, 'Id>, WellFormed<'Id>> =
+            match wellFormed w idw root with
+            | Structural -> Ok(build w idw root)
+            | repeated -> Error repeated
+
         /// The node carrying `target`, if present (O(log n)).
         let tryFind (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : 'Node option =
             Map.tryFind (idw.ToString target) ix.ById
@@ -575,16 +600,22 @@ module Tree =
             |> Option.bind (fun pid -> Map.tryFind (idw.ToString pid) ix.ById)
 
         /// The absolute id-path root..target (inclusive), walking parent links (O(depth)).
+        ///
+        /// **Terminates on any index (Phase 298).** The walk carries the ids it has visited: over
+        /// an index `build` made from a tree carrying an id twice, the parent links can form a
+        /// cycle, and the walk that followed them looped forever. A cycle has no root to reach, so
+        /// such a target's path is `None` — the same answer as an absent id.
         let path (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : 'Id list option =
             if not (Map.containsKey (idw.ToString target) ix.ById) then
                 None
             else
-                let rec up acc cur =
+                let rec up acc (visited: Set<string>) cur =
                     match Map.tryFind (idw.ToString cur) ix.ParentOf with
-                    | Some p -> up (p :: acc) p
-                    | None -> acc // cur is the root
+                    | Some p when Set.contains (idw.ToString p) visited -> None // a parent cycle
+                    | Some p -> up (p :: acc) (Set.add (idw.ToString p) visited) p
+                    | None -> Some acc // cur is the root
 
-                Some(up [ target ] target)
+                up [ target ] (Set.singleton (idw.ToString target)) target
 
         /// The proper ancestors of `target`, root-first. Empty for the root / an absent id.
         let ancestors (idw: IdWitness<'Id>) (target: 'Id) (ix: NodeIndex<'Node, 'Id>) : 'Node list =

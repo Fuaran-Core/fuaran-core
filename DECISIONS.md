@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D101: the observer is a witness and its state a value; a defect names its family and its supporting nodes; a union whose case names collide anywhere on the spine is qualified — D1 made general
+
+**Recorded by Phase 298. `Fuaran.Core.Observer`, `Validator`, `Propagation`, `Projection`, `AiSurface`,
+`Tree`, `Ops` and the conformance kit; rides the `0.34.0` draft (STABILITY.md, "The five smaller seams
+are total").**
+
+*Decided: the observer's shape is the spine's.* `ObserverWitness<'Input,'Flag>` is the domain's pure
+derivation and its emit policy; the registry is `ObserverState`, an immutable value of entries by id
+and the ids in registration order; `ObserverWitness.register` / `update` / `unregister` / `snapshot` /
+`observeTree` are functions over it, each returning the emission it produced. Registration order is
+part of the state because the walk's determinism must not depend on a container's enumeration (a
+`Dictionary` reuses freed slots on .NET and not under Fable). **Subscription is host state, not a
+witness function**: a pure function cannot hold a subscriber, so the functions return emissions and
+the `InMemoryObserver` adapter keeps the subscriber list and delivers to a snapshot of it. The OO
+surface stays one draft as that adapter; `IObserver.Register` still declares no parent and is not
+widened (widening an interface breaks every implementer for a surface that is leaving). *Not built:*
+an optional `NodeWitness` on the observer witness — observing a domain tree directly is
+`Tree.preorder` then `ObserverWitness.derive`, a line in the consumer, and a `Tree` dependency would
+have cost this package its FSharp.Core-only footprint for it (reuse over a new seam).
+
+*Decided: `Defect` carries `Family` and `Related`, in this draft.* The shard deferred both to "the next
+breaking draft"; `0.34.0` already is one (Phases 252 and 248), so the deferral would only have
+scheduled a second break for every domain's literals. `Family` is stamped by the walker, never trusted
+from the rule — the `runPack` precedent, where a rule cannot mis-cite itself — so the provenance the
+`PackRule` convention promised is on every finding. `Related` is the supporting enumeration several artefact domains each
+added to their own copy of the record, and is what
+`Rejection.UnknownNode(target, addressable)` and `RejectionGuidance.Alternatives` already carry.
+`runAllTagged` / `validateTagged` keep the pair form beside it for a caller that groups by family.
+*Not built:* retyping `RuleFamily<'Node,'Id>` into a subject-generic `RuleFamily<'Subject,'Loc>`.
+Phase 315's `Validator.PackCheck<'Subject,'Id>` already IS that rule; `Validator.asCheck` and
+`ColumnValidator.asCheck` make a tree family and a column rule instances of it, so retyping
+`RuleFamily` would break every tree family for no capability.
+
+*Decided: a registry refuses a repeated id.* A total append made a duplicate a silent doubling of
+findings and gave two families one provenance id. Both `register`s return
+`Result<_, RegistrationError>`; `ofFamilies` / `ofRules` are the pipeline form. Stock column rule ids
+are `Hash.canonicalFields` over the kind and every parameter, because once ids are keys an ambiguous
+id (`unique ["a,b"]` against `unique ["a"; "b"]`, two `inRange`s over one column) is a false refusal.
+
+*Decided: D1 is general.* D1 qualified `Severity` because `Error` shadowed `Result.Error`. The rule it
+stated is about any union: **a union whose case names collide with a case anywhere else on the spine
+— or with a name a consumer plausibly owns — is `[<RequireQualifiedAccess>]` when it ships.** This
+draft applies it to `PolicyDecision`, Projection's `Scope`, `Proposals.ProposalStatus` and
+`Propagation.PropagationError`; a new public union is checked against it at review.
+
+*Decided: a denial is guidance, and approval is gated by the approver's policy.* `PolicyDecision.Deny`
+carries a `RejectionGuidance` and `SubmitDenied` hands it on, because the witness's `Explain` is typed
+over the reducer's rejection and the frozen witness cannot gain a field: the guidance has to ride the
+decision. `approve` refuses the proposal's author and refuses when `Decide` DENIES the approver one of
+the ops; a `NeedsApproval` for the approver is not a refusal, since approving is that approval (a
+policy that does not distinguish actors would otherwise make every parked proposal unapprovable).
+
+*Decided: the walks are iterative and the updates path-copying.* The Tarjan pass replays the recursion
+with an explicit frame stack and is tested item-for-item against the recursive one; `Propagation.Plan`
+holds what a tick used to re-derive. `Tree.updateNode` rebuilds only the root-to-target path.
+`canApply (MoveNode _)` validates through `validateMove`, the move's checks in the order `apply` has
+always refused in, without building the tree.
 ## 2026-10-01 — D100: every gated arm is counted where its evidence is built and reds at zero; a query result is bound by a law, not by a refusal; a premise names the family that carries it and is discharged by nothing
 
 **Recorded by Phase 302. `Fuaran.Core.Conformance` (the kit's runner `LawKit`, `SampleAdequacy`, the

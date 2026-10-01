@@ -138,6 +138,9 @@ module Hash =
     ///   - `Tree.preimageWith` (the one pre-image `Tree.contentHash`, `Tree.encodePreimage` and
     ///     `Tree.encodeHash` share)
     ///   - `Tree.Index.fingerprintOf`
+    ///   - `Projection.snapshotDigestOf` (Phase 298: the changed-since baseline, under SHA-256)
+    ///   - `ColumnValidator.ruleId` (Phase 298: a stock column rule's id over its parameters)
+    ///   - `ColumnValidator.keyText` (Phase 298: one composite key of the `unique` rule)
     let canonicalFields (fields: string list) : string =
         fields |> List.map canonicalField |> String.concat ""
 

@@ -323,7 +323,7 @@ module internal PropagationLaws =
                         (Set.singleton "no-such-id")
                         deps
                 with
-                | Error(Propagation.EvalUnknownChange [ "no-such-id" ]) -> unknownChange.Saw()
+                | Error(Propagation.PropagationError.EvalUnknownChange [ "no-such-id" ]) -> unknownChange.Saw()
                 | other ->
                     unknownChange.Check(false, fun () -> at (sprintf "expected EvalUnknownChange, got %A" other))
 
@@ -335,7 +335,9 @@ module internal PropagationLaws =
                 // with the violating node in its change set, so it recomputes and therefore invokes
                 // it: that is the qualifier `evalFrom`'s doc comment states, not a weaker law.
                 let leakVerdict (leakAt: string) (leakRead: string) : string option =
-                    let expected = Error(Propagation.EvalUndeclaredRead(leakAt, leakRead))
+                    let expected =
+                        Error(Propagation.PropagationError.EvalUndeclaredRead(leakAt, leakRead))
+
                     let ev = leakyEvalNode base1 deps leakAt leakRead
                     let viaFullLeak = Propagation.eval ev deps
                     let viaIncrLeak = Propagation.evalFrom ev prior.Values (Set.singleton leakAt) deps

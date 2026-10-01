@@ -80,10 +80,31 @@ type PatternCard<'Op> =
 /// The policy decision for one op by one actor — the shape of the domain's
 /// write policy (the rules stay domain-side). Default-deny lives in the domain;
 /// the core only routes the three outcomes.
+///
+/// **A denial is GUIDANCE (Phase 298).** `Deny` carries a `RejectionGuidance` — the
+/// message and the alternatives the actor may take instead — so a refused agent
+/// repairs from the same envelope a reducer rejection gives it through `Explain`
+/// (`Proposals.renderGuidance` renders both), where a bare reason string used to
+/// reach it with nothing to choose from. `PolicyDecision.deny` builds one from a
+/// reason alone. `RequireQualifiedAccess` (Phase 298): `PolicyDecision.Allow`, …
+[<RequireQualifiedAccess>]
 type PolicyDecision =
     | Allow
     | NeedsApproval
-    | Deny of reason: string
+    | Deny of guidance: RejectionGuidance
+
+/// Constructors for `PolicyDecision` (Phase 298).
+module PolicyDecision =
+
+    /// A denial with `reason` and no alternatives.
+    let deny (reason: string) : PolicyDecision =
+        PolicyDecision.Deny { Message = reason; Alternatives = [] }
+
+    /// A denial with `reason` and the `alternatives` the actor may take instead.
+    let denyWith (reason: string) (alternatives: string list) : PolicyDecision =
+        PolicyDecision.Deny
+            { Message = reason
+              Alternatives = alternatives }
 
 // `RejectionGuidance` — the agent-readable guidance `Explain` returns — is declared in
 // `Fuaran.Core.Ops` since Phase 315, beside `Rejection.explain`, which builds it. Same namespace,
@@ -165,8 +186,10 @@ module PatternBank =
 
     /// The literal segments of an anchor: a `{...}` span is a wildcard, so
     /// `"look up {key}"` yields `[ "look up " ]`. An unterminated `{` treats
-    /// the rest as consumed (defensive — anchors are domain-authored).
-    let private literalSegments (anchor: string) : string list =
+    /// the rest as consumed (defensive — anchors are domain-authored). An anchor
+    /// with NO literal segment matches every intent (`aiSurfaceLaws` refuses one,
+    /// Phase 298).
+    let literalSegments (anchor: string) : string list =
         let rec go (rest: string) (acc: string list) =
             match rest.IndexOf '{' with
             | -1 -> List.rev (if rest = "" then acc else rest :: acc)
@@ -180,19 +203,50 @@ module PatternBank =
 
         go anchor []
 
+    /// The first index at or after `from` where `seg` occurs in `text`, compared
+    /// ORDINALLY — char for char, no culture, no ignorable characters — or -1. A
+    /// loop rather than a platform `IndexOf` overload, so .NET and Fable answer
+    /// alike by construction (Phase 298).
+    let private ordinalIndexOf (text: string) (seg: string) (from: int) : int =
+        if seg.Length = 0 then
+            (if from <= text.Length then from else -1)
+        else
+            let last = text.Length - seg.Length
+            let mutable i = from
+            let mutable found = -1
+
+            while found < 0 && i <= last do
+                let mutable j = 0
+
+                while j < seg.Length && text[i + j] = seg[j] do
+                    j <- j + 1
+
+                if j = seg.Length then found <- i else i <- i + 1
+
+            found
+
     /// Case-insensitive anchor match: every literal segment appears in the
     /// intent text, in order (wildcard spans match anything, including "").
+    ///
+    /// **Ordinal over lowered copies (Phase 298).** Both sides are lowered
+    /// (`ToLowerInvariant`) and compared char for char, and the cursor advances by
+    /// the LOWERED segment's length — the length of what actually matched. The
+    /// culture-sensitive `IndexOf` this replaces matched a zero-width or soft-hyphen
+    /// segment everywhere (so such an anchor swallowed the bank), answered
+    /// differently on .NET and Fable, and could match fewer chars than the segment
+    /// held, so advancing by the segment's own length overran the text and threw.
     let matchesAnchor (anchor: string) (text: string) : bool =
-        let lower (s: string) = s.ToLowerInvariant()
-        let t = lower text
+        let t = text.ToLowerInvariant()
 
         let rec go (fromIdx: int) =
             function
             | [] -> true
             | (seg: string) :: rest ->
-                match t.IndexOf(lower seg, fromIdx) with
+                let s = seg.ToLowerInvariant()
+
+                match ordinalIndexOf t s fromIdx with
                 | -1 -> false
-                | at -> go (at + seg.Length) rest
+                | at -> go (at + s.Length) rest
 
         go 0 (literalSegments anchor)
 
@@ -219,6 +273,11 @@ module PatternBank =
 /// generalised — the queue is a pure value the host owns and persists (GP2).
 module Proposals =
 
+    /// Where a proposal stands. `RequireQualifiedAccess` (Phase 298): `Pending` and
+    /// `Rejected` were also cases of `Function`'s `Deferred` and of `Ops`' `Rejection`,
+    /// so a consumer opening the spine met one name for two cases — write
+    /// `ProposalStatus.Pending`.
+    [<RequireQualifiedAccess>]
     type ProposalStatus =
         | Pending
         | Approved of approver: string * at: string
@@ -241,19 +300,24 @@ module Proposals =
         let empty<'Op> : ProposalQueue<'Op> = { Proposals = [] }
 
         let pending (q: ProposalQueue<'Op>) : Proposal<'Op> list =
-            q.Proposals |> List.filter (fun p -> p.Status = Pending)
+            q.Proposals |> List.filter (fun p -> p.Status = ProposalStatus.Pending)
 
-    /// Park an op sequence for approval. Returns the queue and the assigned
-    /// (1-based, queue-positional) id.
-    let propose
-        (author: string)
-        (proposedAt: string)
-        (intent: string option)
-        (ops: 'Op list)
-        (q: ProposalQueue<'Op>)
-        : ProposalQueue<'Op> * int =
-        let id = q.Proposals.Length + 1
+        /// The id the next `propose` mints (Phase 298): one past the largest id the
+        /// queue holds, `1` for an empty queue. For a queue that only ever grew this
+        /// is the `Length + 1` it used to be; for one a host has pruned of decided
+        /// proposals it is still fresh, where `Length + 1` re-issued a live id.
+        let nextId (q: ProposalQueue<'Op>) : int =
+            match q.Proposals with
+            | [] -> 1
+            | ps -> (ps |> List.map (fun p -> p.Id) |> List.max) + 1
 
+    /// Why a proposal could not be parked under a caller-chosen id (Phase 298): the
+    /// queue already holds that id; `held` enumerates the ids it holds.
+    [<RequireQualifiedAccess>]
+    type ProposeFailure = DuplicateProposal of id: int * held: int list
+
+    /// One pending proposal appended under `id` — unchecked; both proposers check first.
+    let private append id author proposedAt intent (ops: 'Op list) (q: ProposalQueue<'Op>) : ProposalQueue<'Op> =
         { Proposals =
             q.Proposals
             @ [ { Id = id
@@ -261,8 +325,39 @@ module Proposals =
                   ProposedAt = proposedAt
                   Intent = intent
                   Ops = ops
-                  Status = Pending } ] },
-        id
+                  Status = ProposalStatus.Pending } ] }
+
+    /// Park an op sequence for approval under the id `id` (Phase 298) — the form
+    /// for a host that mints ids from its own source (a sequence it persists, a
+    /// content hash of the proposal). REFUSED when the queue already holds `id`:
+    /// two proposals under one id would make every later decision ambiguous.
+    let proposeWithId
+        (id: int)
+        (author: string)
+        (proposedAt: string)
+        (intent: string option)
+        (ops: 'Op list)
+        (q: ProposalQueue<'Op>)
+        : Result<ProposalQueue<'Op>, ProposeFailure> =
+        if q.Proposals |> List.exists (fun p -> p.Id = id) then
+            Error(ProposeFailure.DuplicateProposal(id, q.Proposals |> List.map (fun p -> p.Id)))
+        else
+            Ok(append id author proposedAt intent ops q)
+
+    /// Park an op sequence for approval. Returns the queue and the assigned id —
+    /// `Queue.nextId` (Phase 298: one past the largest held, so an id is never
+    /// re-issued even after a host prunes decided proposals). `proposeWithId`
+    /// takes the id from the caller instead.
+    let propose
+        (author: string)
+        (proposedAt: string)
+        (intent: string option)
+        (ops: 'Op list)
+        (q: ProposalQueue<'Op>)
+        : ProposalQueue<'Op> * int =
+        // `nextId` exceeds every id the queue holds, so the duplicate check has nothing to refuse
+        let id = Queue.nextId q
+        append id author proposedAt intent ops q, id
 
     /// Why an approval/rejection was refused — total, and it enumerates the
     /// pending ids where a closed set is expected (GP5).
@@ -273,13 +368,24 @@ module Proposals =
         /// applies — the rejection is surfaced and the proposal STAYS pending:
         /// repair-or-reject is the approver's call, never an automatic drop.
         | OpNoLongerApplies of id: int * rejection: 'Rej
+        /// The approver is the proposal's author (Phase 298). Approval is the
+        /// second pair of eyes; an author signing off their own proposal is no
+        /// approval at all. The proposal stays pending.
+        | SelfApproval of id: int * author: string
+        /// The domain's policy DENIES the approver one of the proposal's ops
+        /// (Phase 298): `approve` re-consults `Decide` for the approver, so
+        /// parking a sequence and approving it can never apply what the
+        /// approver's own policy refuses. The proposal stays pending; the
+        /// guidance is the policy's denial. (`NeedsApproval` for the approver is
+        /// not a refusal: approving IS that approval.)
+        | ApprovalDenied of id: int * guidance: RejectionGuidance
 
     let private find (id: int) (q: ProposalQueue<'Op>) : Result<Proposal<'Op>, ApprovalFailure<'Rej>> =
         match q.Proposals |> List.tryFind (fun p -> p.Id = id) with
         | None -> Error(UnknownProposal(id, Queue.pending q |> List.map (fun p -> p.Id)))
         | Some p ->
             match p.Status with
-            | Pending -> Ok p
+            | ProposalStatus.Pending -> Ok p
             | status -> Error(NotPending(id, status))
 
     let private setStatus (id: int) (status: ProposalStatus) (q: ProposalQueue<'Op>) : ProposalQueue<'Op> =
@@ -296,10 +402,32 @@ module Proposals =
         : Result<'State, 'Rej> =
         ops |> List.fold (fun acc op -> acc |> Result.bind (w.Apply op)) (Ok state)
 
+    /// The approver's own policy over the proposal's ops (Phase 298): the guidance
+    /// of the first op the policy DENIES `approver`, which `ApprovalDenied` carries.
+    let private approverRefusal
+        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
+        (approver: string)
+        (ops: 'Op list)
+        : RejectionGuidance option =
+        ops
+        |> List.tryPick (fun op ->
+            match w.Decide approver op with
+            | PolicyDecision.Deny g -> Some g
+            | PolicyDecision.Allow
+            | PolicyDecision.NeedsApproval -> None)
+
     /// Approve a pending proposal: its ops apply through the domain reducer. On
     /// success the proposal is marked approved (dual attribution — the proposer
     /// authored the ops, the approver signed off); if an op no longer applies
     /// the rejection is surfaced and the proposal stays pending.
+    ///
+    /// **Two refusals before the reducer runs (Phase 298), each leaving the
+    /// proposal pending:** an approver who is the proposal's author
+    /// (`SelfApproval`), and an approver the domain's policy DENIES one of the ops
+    /// (`ApprovalDenied`). Without the second, `propose` (public)
+    /// then `approve` by the same or any actor applied ops a deny-all policy
+    /// refused through `submit` — a policy bypass, not only a missing second pair
+    /// of eyes.
     let approve
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (approver: string)
@@ -310,9 +438,15 @@ module Proposals =
         : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
         find id q
         |> Result.bind (fun p ->
-            match applyAll w p.Ops state with
-            | Error rejection -> Error(OpNoLongerApplies(id, rejection))
-            | Ok next -> Ok(setStatus id (Approved(approver, at)) q, next))
+            if p.Author = approver then
+                Error(SelfApproval(id, p.Author))
+            else
+                match approverRefusal w approver p.Ops with
+                | Some g -> Error(ApprovalDenied(id, g))
+                | None ->
+                    match applyAll w p.Ops state with
+                    | Error rejection -> Error(OpNoLongerApplies(id, rejection))
+                    | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
 
     /// Reject a pending proposal with a reason. Recorded, never dropped — and
     /// the artifact is never touched (a denied proposal never mutates).
@@ -324,7 +458,7 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         : Result<ProposalQueue<'Op>, ApprovalFailure<'Rej>> =
         find id q
-        |> Result.map (fun _ -> setStatus id (Rejected(approver, at, reason)) q)
+        |> Result.map (fun _ -> setStatus id (ProposalStatus.Rejected(approver, at, reason)) q)
 
     /// Outcome of submitting an op sequence through the policy gate.
     type SubmitOutcome<'State, 'Op, 'Rej> =
@@ -332,17 +466,18 @@ module Proposals =
         | SubmitApplied of 'State
         /// Policy parked the sequence; the proposal id is in the queue.
         | SubmitProposed of ProposalQueue<'Op> * proposalId: int
-        /// Policy refused an op.
-        | SubmitDenied of reason: string
+        /// Policy refused an op: the policy's guidance — its message and the
+        /// alternatives it names (Phase 298; a bare reason string before).
+        | SubmitDenied of guidance: RejectionGuidance
         /// Policy allowed it but the domain reducer rejected an op.
         | SubmitOpRejected of 'Rej
 
     /// The composed gated co-authoring loop — the single entry point an
     /// agent-facing surface calls: decide every op, then apply | park | deny
     /// the sequence as a unit. A `Deny` anywhere refuses the whole sequence
-    /// (first reason wins); otherwise any `NeedsApproval` parks it whole (an
-    /// approval decision covers what the agent proposed, not a fragment);
-    /// otherwise the ops apply in order.
+    /// (the first denial's guidance wins); otherwise any `NeedsApproval` parks it
+    /// whole (an approval decision covers what the agent proposed, not a
+    /// fragment); otherwise the ops apply in order.
     let submit
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (author: string)
@@ -357,12 +492,12 @@ module Proposals =
         match
             decisions
             |> List.tryPick (function
-                | Deny reason -> Some reason
+                | PolicyDecision.Deny g -> Some g
                 | _ -> None)
         with
-        | Some reason -> SubmitDenied reason
+        | Some g -> SubmitDenied g
         | None ->
-            if decisions |> List.exists ((=) NeedsApproval) then
+            if decisions |> List.exists ((=) PolicyDecision.NeedsApproval) then
                 let q', id = propose author at intent ops q
                 SubmitProposed(q', id)
             else
@@ -373,6 +508,8 @@ module Proposals =
     /// Render guidance as agent-readable text: the message plus the enumerated
     /// alternatives (one per line), so a refused agent repairs instead of
     /// guessing. No alternatives ⇒ the message alone (the core invents none).
+    /// A policy denial (`SubmitDenied`, `ApprovalDenied`) and a reducer
+    /// rejection (`explainRejection`) render through this one function.
     let renderGuidance (g: RejectionGuidance) : string =
         match g.Alternatives with
         | [] -> g.Message

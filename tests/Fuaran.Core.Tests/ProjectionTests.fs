@@ -133,7 +133,7 @@ let tests =
           }
 
           test "ById projects exactly the one line" {
-              let p = Projection.project pw (ById "p2") fixture
+              let p = Projection.project pw (Scope.ById "p2") fixture
 
               match p.Lines with
               | [ l ] ->
@@ -145,15 +145,15 @@ let tests =
           }
 
           test "ById of an absent id is the empty projection (total, not an error)" {
-              Expect.equal (Projection.project pw (ById "nope") fixture).Lines [] "empty"
+              Expect.equal (Projection.project pw (Scope.ById "nope") fixture).Lines [] "empty"
           }
 
           test "Subtree projects the contiguous preorder slice at absolute depth" {
-              let p = Projection.project pw (Subtree "s1") fixture
+              let p = Projection.project pw (Scope.Subtree "s1") fixture
               Expect.equal (p.Lines |> List.map _.IdKey) [ "s1"; "p1"; "p2" ] "the subtree ids, preorder"
               Expect.equal (p.Lines |> List.map _.Depth) [ 1; 2; 2 ] "absolute depths"
 
-              let whole = Projection.project pw Whole fixture |> Projection.render
+              let whole = Projection.project pw Scope.Whole fixture |> Projection.render
               let scoped = Projection.render p
 
               for line in scoped.Split('\n') do
@@ -166,13 +166,13 @@ let tests =
               let edited =
                   Tree.map nodew (fun n -> if n.Id = "p1" then { n with Value = "ALPHA" } else n) fixture
 
-              let p = Projection.project pw (ChangedSince snap) edited
+              let p = Projection.project pw (Scope.ChangedSince snap) edited
               Expect.equal (p.Lines |> List.map _.IdKey) [ "p1" ] "only the edited node"
-              Expect.equal (Projection.project pw (ChangedSince snap) fixture).Lines [] "unchanged tree ⇒ empty"
+              Expect.equal (Projection.project pw (Scope.ChangedSince snap) fixture).Lines [] "unchanged tree ⇒ empty"
           }
 
           test "a structural move re-indents a line without changing its content cell" {
-              let before = Projection.project pw Whole fixture
+              let before = Projection.project pw Scope.Whole fixture
 
               // relocate p3 under s1: identical node contents everywhere, different shape
               let moved =
@@ -186,7 +186,7 @@ let tests =
                               RNode.leaf "p2" "para" "beta"
                               RNode.leaf "p3" "para" "gamma" ] ]
 
-              let after = Projection.project pw Whole moved
+              let after = Projection.project pw Scope.Whole moved
 
               let cellOf id (p: Projection) =
                   p.Lines
@@ -217,7 +217,7 @@ let tests =
           }
 
           test "the projection is strictly smaller than the wire form on the fixture" {
-              let p = Projection.project pw Whole fixture
+              let p = Projection.project pw Scope.Whole fixture
               Expect.isLessThan (Projection.sizeOf p) (String.length (wireEncode fixture)) "compactness floor"
           }
 

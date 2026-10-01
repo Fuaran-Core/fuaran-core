@@ -540,7 +540,16 @@ module Families =
               (Some NeedsWitnessCapability)
               []
               (Unconditional "each iteration projects, re-imports and scopes the same tree")
-              (NoRefusal, "a re-import Error only fails a law")
+              (NoRefusal, "a re-import Error only fails a law") // Phase 298 — the observer seam's family: every arm is built each iteration (a drawn
+          // registration script, a ring of parents, a re-entrant subscriber).
+          c
+              "observerLaws"
+              [ "ObserverWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional
+                  "each iteration drives a drawn registration script, a parent ring and a re-entrant subscriber")
+              (NoRefusal, "no refused outcome is read")
           // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
           // rejection only when the caller's op generator draws one; the decision axis, the unknown
           // tool and the unknown proposal id are built.

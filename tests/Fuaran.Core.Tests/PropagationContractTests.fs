@@ -46,7 +46,7 @@ let private openEval
         | id :: rest ->
             match evalNode (fun k -> Map.tryFind k results) id with
             | Ok v -> go (Map.add id v results) rest
-            | Error m -> Error(Propagation.EvalNodeFailed(id, m))
+            | Error m -> Error(Propagation.PropagationError.EvalNodeFailed(id, m))
 
     go Map.empty topo.Order
 
@@ -71,12 +71,12 @@ let tests =
 
               Expect.equal
                   (Propagation.eval evalNode deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "eval refuses, naming the reading node and the id it read"
 
               Expect.equal
                   (Propagation.evalFrom evalNode Map.empty (Set.singleton "a") deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "and evalFrom refuses identically where it recomputes the node"
 
               // THE GO-RED: under the open resolver the same evaluator runs to completion and `b`
@@ -110,7 +110,7 @@ let tests =
 
               Expect.equal
                   (Propagation.eval evalNode deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "z")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "z")))
                   "the first undeclared read is named, not the last"
 
               Expect.isFalse (invoked.Contains "c") "and `c`, which reads `b`, was never evaluated"
@@ -132,7 +132,7 @@ let tests =
 
               Expect.equal
                   (Propagation.eval evalNode deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "the undeclared read is reported, not the failure it caused"
 
           // ---- 2. the two shapes the refusal must NOT be confused with ----
@@ -238,11 +238,11 @@ let tests =
 
               Expect.equal
                   (Propagation.eval evalNode deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "and the full driver refuses the same evaluator, so priming with eval finds it first"
 
               // The same node absent from `prior` IS recomputed, so the refusal is seen.
               Expect.equal
                   (Propagation.evalFrom evalNode (Map.remove "b" handBuiltPrior) (Set.singleton "a") deps)
-                  (Error(Propagation.EvalUndeclaredRead("b", "a")))
+                  (Error(Propagation.PropagationError.EvalUndeclaredRead("b", "a")))
                   "an id absent from prior is always recomputed, so the violation surfaces there too" ]
