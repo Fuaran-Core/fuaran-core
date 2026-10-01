@@ -69,9 +69,10 @@
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it:
      - `DagOpStream.fs` — `DagNode`, `Dag.T`, `Dag.nodeHash`, `Dag.append`, `Dag.merge`,
                           `Dag.firstBreak`, `Dag.verifyDag`, `DagBreak`
-     - `OpStream.fs`    — `OpRecord`, `StreamConfig`, `OpStream.appendWith`,
+     - `Chain.fs`       — `OpRecord`, `StreamConfig`, `OpStream.appendWith`,
                           `OpStream.firstChainBreakWith`, `verifyChain`, `ChainBreak`,
-                          `ChainBreakReason`
+                          `ChainBreakReason` (the types, and since Phase 332 the members'
+                          bodies; `OpStream.fs` holds their forwards)
    The reasons a break carries are reproduced VERBATIM rather than classified, as the decode model
    beside this one reproduces its messages: naming which check failed is most of what a localising
    verifier is for, and a differential that compared only the class would not notice a walker
