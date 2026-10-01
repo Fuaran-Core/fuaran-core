@@ -125,6 +125,10 @@
          Depends on nothing here either, so it simply follows. -->
     <Compile Include="FoldConfluenceTests.fs" />
     <Compile Include="ReconcileShapeTests.fs" />
+    <!-- Phase 249 — footprintLawsAt at a domain's own ops (the keyed reference and the plan domain)
+         and FoldConfluence.laneDag. Reads ConformanceTests' keyed reference and FoldConfluenceTests'
+         plan domain, so it follows both. -->
+    <Compile Include="FootprintLawsAtTests.fs" />
     <!-- Phase 139 — the `apply/` corpus family: the host-neutral skeleton envelope, its codec,
          and the emitter behind the `emit-apply` flag. It sits HERE rather than beside the other
          corpus exporters further down because ProofOracleTests.fs below reads its decoder, to run the

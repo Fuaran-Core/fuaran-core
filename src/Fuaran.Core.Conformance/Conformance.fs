@@ -382,6 +382,18 @@ module Conformance =
         : LawResult list =
         ConcurrencyLaws.footprintLaws nodew idw gen encode seed iterations
 
+    /// Forward — see `ConcurrencyLaws.footprintLawsAt` (Phase 249): `footprintLaws`' soundness law
+    /// at the domain's own ops, stream witness and generator, rather than the skeleton op algebra.
+    let footprintLawsAt
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (hashState: 'State -> string)
+        (gen: StreamGen<'Op, 'State>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ConcurrencyLaws.footprintLawsAt sw footprintOf hashState gen seed iterations
+
     /// Forward — see `ConcurrencyLaws.mergeConflictLaws`.
     let mergeConflictLaws
         (nodew: NodeWitness<'Node, 'Id>)

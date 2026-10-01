@@ -124,6 +124,17 @@ let private runs =
                "Conformance.footprintLaws"
                300
                (Conformance.footprintLaws nodew idw ConformanceTests.opGen encNode 4242 300)
+           // Phase 249 — the same soundness law at the keyed reference's own stream witness.
+           run
+               "Conformance.footprintLawsAt"
+               300
+               (Conformance.footprintLawsAt
+                   FootprintLawsAtTests.keyedW
+                   FootprintLawsAtTests.keyedFootprint
+                   FootprintLawsAtTests.keyedHash
+                   FootprintLawsAtTests.keyedGen
+                   2490
+                   300)
            run
                "Conformance.concurrencyLaws"
                300

@@ -297,6 +297,19 @@ module Families =
               [ "independence-diamond" ]
               (Guarded [ "script-pair independence" ])
               (NoRefusal, "a refused op is skipped; no law reads it")
+          // Phase 249 — `footprintLaws`' soundness law at the domain's own ops: the domain's stream
+          // witness, footprint projection and generator, so a hand-written footprint over a domain
+          // op is certified rather than trusted. Guarded on both the independent pair the law reads
+          // and the interfering pair without which the sample cannot tell a sound footprint from an
+          // empty one.
+          c
+              "footprintLawsAt"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "script-pair independence" ])
+              (NoRefusal,
+               "a refused draw is skipped while threading and counted beside the guard; an Apply error on an independent pair only fails the soundness law")
           c
               "concurrencyLaws"
               treeWitness

@@ -105,6 +105,133 @@ module internal ConcurrencyLaws =
                 seed
                 ([ "independent pair", independentPairs ] @ kinds.Demands) ]
 
+    /// The footprint soundness law at a DOMAIN'S OWN ops (Phase 249) — Phase 78's soundness law
+    /// (`footprintLaws`) lifted off `SkeletonOp`. `footprintLaws`, `mergeConflictLaws`,
+    /// `reconcileLaws` and `concurrencyLawsWith` are all typed over the skeleton op algebra, so a
+    /// domain whose ops are its own, each with a hand-written footprint, had no law that certified
+    /// that footprint at all: `FoldConfluence.laneFoldLaws` takes the projection but certifies
+    /// arrival-order invariance, and a footprint that misses an id is SYMMETRIC — the same rejection
+    /// under every order passes it.
+    ///
+    /// Over a seed-replayable sample it reaches a state by threading drawn ops from `gen.State0`,
+    /// draws two scripts `a`, `b` from that state (each threaded through the domain's own `Apply`,
+    /// so each applies on its own), and certifies:
+    ///
+    ///  - **soundness** — for every pair `footprintOf` declares independent, the independence
+    ///    `Dag.conflicts` and `Dag.reconcile` read (no op of `a` interferes with any op of `b` under
+    ///    `Ops.independent`), the two scripts commute under the domain's `Apply`: `a` then `b` and
+    ///    `b` then `a` both apply and reach states `hashState` cannot tell apart. A single
+    ///    independent pair that fails to apply in either order, or lands apart, is a soundness break:
+    ///    the fold would have composed two deltas the domain does not commute;
+    ///  - **determinism** — `footprintOf` is a pure function of the op (recomputing it agrees), the
+    ///    precondition for seed replay and for a host to cache a computed lease.
+    ///
+    /// Monotonicity, the third law of `footprintLaws`, has no counterpart here: the projection is
+    /// per op, and a script's footprint is the per-op relation `Dag.conflicts` reads, so there is no
+    /// union fold to break.
+    ///
+    /// **Starved two ways, both named.** The soundness law only runs on an INDEPENDENT pair, so a
+    /// generator that never draws one certifies nothing; and a generator that never draws an
+    /// INTERFERING pair never put two ops on one address, so it cannot tell a sound footprint from
+    /// one that declares everything independent. The guard demands both, and counts beside them the
+    /// drawn ops the domain refused while threading.
+    ///
+    /// The domain-witness form (`…At`, the kit's naming rule): `sw` and `gen` are the domain's own
+    /// stream witness and generator, `hashState` the state identity the commuting comparison reads
+    /// (as `FoldConfluence.laneFoldLaws` takes it). Opt-in — a domain that folds lanes or computes
+    /// leases over its own ops runs it.
+    let footprintLawsAt
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (hashState: 'State -> string)
+        (gen: StreamGen<'Op, 'State>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let soundness =
+            LawKit.LawCell(
+                "footprint soundness at the domain's ops (an independent script pair commutes under the domain's Apply)",
+                Some "script-pair independence"
+            )
+
+        let determinism =
+            LawKit.LawCell "footprint determinism at the domain's ops (a pure function of the op)"
+
+        let mutable independentPairs = 0
+        let mutable interferingPairs = 0
+        let mutable refusedDraws = 0
+
+        // `n` drawn ops threaded from `s` through the domain's own `Apply`: the ops it accepted, in
+        // order, and where they land. A refused draw does not extend the script.
+        let thread (rng: LawKit.Draws) (n: int) (s: 'State) =
+            let mutable cur = s
+            let mutable ops = []
+
+            for _ in 1..n do
+                let op = rng.Draw gen.Op
+
+                match sw.Apply op cur with
+                | Ok s' ->
+                    cur <- s'
+                    ops <- op :: ops
+                | Error _ -> refusedDraws <- refusedDraws + 1
+
+            List.rev ops, cur
+
+        let applyAll (ops: 'Op list) (s: 'State) =
+            ops |> List.fold (fun acc op -> acc |> Result.bind (sw.Apply op)) (Ok s)
+
+        let render (ops: 'Op list) =
+            "[" + (ops |> List.map sw.Encode |> String.concat "; ") + "]"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let _, state = thread rng (rng.IntBelow 5) gen.State0
+            let a, _ = thread rng (rng.IntBelow 3 + 1) state
+            let b, _ = thread rng (rng.IntBelow 3 + 1) state
+
+            for op in a @ b do
+                determinism.Check(
+                    footprintOf op = footprintOf op,
+                    fun () -> at ("footprintOf is not a pure function of the op " + sw.Encode op)
+                )
+
+            if not (List.isEmpty a) && not (List.isEmpty b) then
+                if List.isEmpty (Dag.conflicts footprintOf a b) then
+                    independentPairs <- independentPairs + 1
+
+                    let ab = applyAll a state |> Result.bind (applyAll b) |> Result.map hashState
+
+                    let ba = applyAll b state |> Result.bind (applyAll a) |> Result.map hashState
+
+                    soundness.Check(
+                        (match ab, ba with
+                         | Ok ha, Ok hb -> ha = hb
+                         | _ -> false),
+                        fun () ->
+                            at (
+                                "an INDEPENDENT pair did not commute under the domain's Apply: a="
+                                + render a
+                                + " b="
+                                + render b
+                                + (match ab with
+                                   | Ok h -> " a;b → " + h
+                                   | Error rej -> sprintf " a;b rejected %A" rej)
+                                + (match ba with
+                                   | Ok h -> " b;a → " + h
+                                   | Error rej -> sprintf " b;a rejected %A" rej)
+                            )
+                    )
+                else
+                    interferingPairs <- interferingPairs + 1)
+
+        LawKit.results [ soundness; determinism ]
+        @ [ SampleAdequacy.reachedBeside
+                "Conformance.footprintLawsAt"
+                "script-pair independence"
+                seed
+                [ "independent pair", independentPairs; "interfering pair", interferingPairs ]
+                [ "refused draw", refusedDraws ] ]
+
     /// The merge-conflict enumeration laws (Phase 64) — the teeth on `Dag.conflicts` and the
     /// "detection is the negation of #78 independence, decomposed by shape" claim. Over a
     /// seed-replayable sample it builds two applyable scripts `a`, `b` on a shared tree (each threaded

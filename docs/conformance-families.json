@@ -238,19 +238,6 @@
       "refusal": "built"
     },
     {
-      "id": "Conformance.checkpointLaws",
-      "module": "Conformance",
-      "entry": "checkpointLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["StreamWitness", "StreamGen"],
-      "optIn": true,
-      "reason": "stronger-promise",
-      "discharges": [],
-      "cases": "900",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
       "id": "Conformance.codecInjectivityLaws",
       "module": "Conformance",
       "entry": "codecInjectivityLaws",
@@ -458,15 +445,15 @@
       "refusal": "none"
     },
     {
-      "id": "Conformance.freshIdLaws",
+      "id": "Conformance.footprintLawsAt",
       "module": "Conformance",
-      "entry": "freshIdLaws",
+      "entry": "footprintLawsAt",
       "package": "Fuaran.Core.Conformance",
-      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "1400",
+      "cases": "600",
       "adequacy": "guarded-reached",
       "refusal": "none"
     },
@@ -575,19 +562,6 @@
       "refusal": "built"
     },
     {
-      "id": "Conformance.loweringLaws",
-      "module": "Conformance",
-      "entry": "loweringLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["NodeWitness", "IdWitness", "OpGen"],
-      "optIn": true,
-      "reason": "stronger-promise",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "guarded-reached",
-      "refusal": "built"
-    },
-    {
       "id": "Conformance.memoLaws",
       "module": "Conformance",
       "entry": "memoLaws",
@@ -675,19 +649,6 @@
       "discharges": [],
       "cases": "800",
       "adequacy": "unconditional",
-      "refusal": "built"
-    },
-    {
-      "id": "Conformance.placementLaws",
-      "module": "Conformance",
-      "entry": "placementLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["NodeWitness", "IdWitness", "OpGen"],
-      "optIn": true,
-      "reason": "stronger-promise",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "guarded-reached",
       "refusal": "built"
     },
     {

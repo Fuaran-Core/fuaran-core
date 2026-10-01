@@ -3025,6 +3025,48 @@ control character emits it escaped or split, which is the point. A consumer that
 **Class: additive.** `api/Fuaran.Core.Idl.txt` gains members and types only;
 `api/Fuaran.Core.Idl.Codegen.txt` does not move.
 
+### Footprint soundness at a domain's own ops, and the lane DAG `foldOnce` folds (Phase 249) — ADDITIVE
+
+**What changed.** Every soundness law over a footprint — `footprintLaws`, `mergeConflictLaws`,
+`reconcileLaws`, `concurrencyLawsWith`, `keyedArbitrationLawsWith` — is typed over `SkeletonOp`, so a
+domain whose ops are its own, each with a hand-written footprint, had no law that certified that
+footprint. `FoldConfluence.laneFoldLaws` takes the projection but certifies arrival-order invariance,
+and a footprint that misses an id is symmetric: two grafts bringing in one keyed id are refused the
+same way under every order, and the pack passes it. And `FoldConfluence.foldOnce` returned only a
+canonicalised outcome, so a domain that wanted a halt's typed `MergeConflict` list rebuilt the lane
+DAG beside it, free to drift. Two members, beside what was there:
+
+- `Conformance.footprintLawsAt sw footprintOf hashState gen seed iterations` — a new opt-in family
+  (`StrongerPromise`; `StreamWitness`, `StreamGen`): Phase 78's soundness law at the domain's own
+  ops. It reaches a state by threading drawn ops from `gen.State0`, draws two scripts from it (each
+  applies on its own), and holds every pair `Dag.conflicts footprintOf` reports nothing for to
+  commute under the domain's `Apply` — both orders apply and land on states `hashState` cannot tell
+  apart — with footprint determinism beside it. The guard demands an independent pair AND an
+  interfering one (a sample that never puts two ops on one address cannot tell a sound footprint from
+  an empty one) and counts refused draws beside them. Named by the kit's rule: `…At` is the
+  domain-witness form; it carries no `hashFn`, because it chains nothing.
+- `FoldConfluence.laneDag hashFn w baseOp lanes : Dag.T<'Op> * string * string list` — the DAG one
+  trial folds: `baseOp` under `Human "base"`, each lane chained onto it under `Human "lane-<i>"`,
+  answered as the DAG, the base id and the heads in lane order (an empty lane's head is the base) —
+  what `Dag.reconcileMany w footprintOf dag baseId state0 heads` takes. `foldOnce` is now defined over
+  it, and `laneFoldLawsWith`'s shaped draws build their base through the same private helper, so the
+  DAG a domain reads conflicts off and the DAG the pack folds cannot diverge. `foldOnce`'s output is
+  unchanged on every input.
+
+**What adopting it costs.** Nothing: no existing member, type or emitted byte moves. A domain that
+folds lanes over its own ops adds `footprintLawsAt` beside `laneFoldLaws`, handing it the same witness,
+footprint and state hash; one that built its own lane DAG to read typed conflicts replaces it with
+`laneDag`.
+
+**What it does not do.** The claims ladder's `independence-diamond` row — the fold theorem's one
+domain hypothesis, stated about a domain's OWN ops — still names `footprintLaws` as what discharges
+it, which samples the skeleton algebra the `tree-independence-diamond` row already proves. Moving the
+discharge to `footprintLawsAt` changes that row and is left to a change that owns the ladder.
+
+**Class: additive.** `api/Fuaran.Core.Conformance.txt` gains two members
+(`Conformance.footprintLawsAt`, `FoldConfluence.laneDag`); no existing member moves, and no wire byte.
+The roster gains one family, and `docs/conformance-families.md` / `.json` are regenerated.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
