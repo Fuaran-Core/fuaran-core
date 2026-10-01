@@ -44,7 +44,9 @@ module RefusalCorpus =
         {
             Name: string
             /// `json` — `Json.parseDetailed`, the refusal class a `JsonErrorKind`; `column` —
-            /// `ColumnCodec.decode`, the class a `ColumnError` case (`NotJson/<kind>` for a parse failure).
+            /// `ColumnCodec.decode`, the class a `ColumnError` case (`NotJson/<kind>` for a parse failure);
+            /// `profile` (Phase 306) — `Versioning.Profile.tryParse`, whose one refusal class is
+            /// `MalformedProfile` and whose acceptance is the profile's canonical string.
             Codec: string
             Input: string
             Intent: Intent
@@ -59,6 +61,12 @@ module RefusalCorpus =
     let private col name input intent =
         { Name = name
           Codec = "column"
+          Input = input
+          Intent = intent }
+
+    let private profile name input intent =
+        { Name = name
+          Codec = "profile"
           Input = input
           Intent = intent }
 
@@ -132,20 +140,52 @@ module RefusalCorpus =
           col "ragged-columns" """{"columns":{"a":[1,2],"b":[3]}}""" (Refuse "RaggedColumns")
           col "leading-zero-in-a-column" (one "int" "01") (Refuse "NotJson/MalformedNumber")
           col "lone-surrogate-in-a-column" (one "string" "\"\\uD800\"") (Refuse "NotJson/BadEscape")
-          col "ref-without-schema" """{"ref":"orders"}""" Accept ]
+          col "ref-without-schema" """{"ref":"orders"}""" Accept
+          // ---- Phase 306: surplus members are must-ignore, and the table is the schema's ----
+          col
+              "surplus-members-read-past"
+              """{"$type":"x","schema":[{"name":"a","type":"int"}],"columns":{"a":[1],"zz":[true]},"extra":1}"""
+              Accept
+          // ---- Phase 306: the profile grammar — the canonical string and nothing else ----
+          //   name "@" number "." number;  name = letter (letter | digit | "." | "_" | "-")*, ASCII;
+          //   number = "0" | nonzero digit*, at most 2147483647
+          profile "profile-canonical" "core@1.0" Accept
+          profile "profile-zero-zero" "core@0.0" Accept
+          profile "profile-int32-max" "core@2147483647.2147483647" Accept
+          profile "profile-name-punctuation" "Fuaran-UI.v2_x@10.20" Accept
+          profile "profile-leading-zero-major" "core@01.0" (Refuse "MalformedProfile")
+          profile "profile-leading-zero-minor" "core@1.00" (Refuse "MalformedProfile")
+          profile "profile-plus-sign" "core@+1.0" (Refuse "MalformedProfile")
+          profile "profile-negative-zero" "core@-0.0" (Refuse "MalformedProfile")
+          profile "profile-trailing-nul" ("core@1.0" + string (char 0)) (Refuse "MalformedProfile")
+          profile "profile-trailing-space" "core@1.0 " (Refuse "MalformedProfile")
+          profile "profile-past-int32" "core@2147483648.0" (Refuse "MalformedProfile")
+          profile "profile-three-components" "core@1.0.0" (Refuse "MalformedProfile")
+          profile "profile-missing-minor" "core@1." (Refuse "MalformedProfile")
+          profile "profile-missing-name" "@1.0" (Refuse "MalformedProfile")
+          profile "profile-name-starts-with-digit" "1core@1.0" (Refuse "MalformedProfile")
+          profile "profile-name-with-space" "co re@1.0" (Refuse "MalformedProfile")
+          profile "profile-name-with-at" "a@b@1.0" (Refuse "MalformedProfile")
+          profile "profile-name-not-ascii" "café@1.0" (Refuse "MalformedProfile")
+          profile "profile-non-ascii-digit" "core@1.٣" (Refuse "MalformedProfile") ]
 
     let private caseName (v: obj) : string =
         let case, _ = FSharpValue.GetUnionFields(v, v.GetType())
         case.Name
 
     /// The outcome the codec gives `v`: `Error <class>` for a refusal, `Ok <canonical bytes>` for an
-    /// acceptance (`Canon.render` of the parse; `ColumnCodec.encode` of the decode).
+    /// acceptance (`Canon.render` of the parse; `ColumnCodec.encode` of the decode; `Profile.render`
+    /// of the parsed profile).
     let outcome (v: Vector) : Result<string, string> =
         match v.Codec with
         | "json" ->
             match Json.parseDetailed v.Input with
             | Ok jv -> Ok(Canon.render jv)
             | Error e -> Error(caseName (box e.Kind))
+        | "profile" ->
+            match Versioning.Profile.tryParse v.Input with
+            | Ok p -> Ok(Versioning.Profile.render p)
+            | Error _ -> Error "MalformedProfile"
         | _ ->
             match ColumnCodec.decode v.Input with
             | Ok src -> Ok(ColumnCodec.encode src)
@@ -169,7 +209,7 @@ module RefusalCorpus =
             .Append(familyId)
             .Append("\",\n  \"description\": \"")
             .Append(
-                "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder. A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome."
+                "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder, `profile` inputs (Phase 306) through the wire-profile reader. A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure; MalformedProfile); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome."
             )
             .Append("\",\n  \"vectors\": [\n")
         |> ignore
@@ -202,7 +242,7 @@ module RefusalCorpus =
               string (List.length vectors)
               ", \"adoption\": "
               adoption
-              ", \"description\": \"The JSON number grammar, well-formed UTF-16 strings, and the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, beside the acceptances they are the boundary of.\" }\n"
+              ", \"description\": \"The JSON number grammar, well-formed UTF-16 strings, the columnar codec's cell-type, canonical-text, duplicate-name and ragged-table refusals, and the wire-profile grammar, beside the acceptances they are the boundary of.\" }\n"
               "  ]\n"
               "}\n" ]
 

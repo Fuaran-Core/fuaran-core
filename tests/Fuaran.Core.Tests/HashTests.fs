@@ -25,15 +25,22 @@ let private bcl (s: string) =
 /// Phase 290 — the ILL-FORMED rows: lone and ill-ordered surrogates, which the encoder must map
 /// to the platform's replacement bytes (`EF BF BD` per unit that is not half of a pair) rather
 /// than consume the next unit unchecked (`"\uD801\uD800"` was U+10000's four bytes) or write
-/// CESU-style. Built from escapes: a raw surrogate does not survive a UTF-8 checkout.
+/// CESU-style. BUILT FROM `char` VALUES, never written as `\u` escapes (Phase 306): the F#
+/// compiler replaces an unpaired surrogate escape in a string literal with U+FFFD, so the literals
+/// this list held until then were well-formed strings of replacement characters — which encode to
+/// the same `EF BF BD` a correct encoder gives the surrogate, so the rows passed without ever
+/// handing the encoder an ill-formed unit.
+let private units (codes: int list) : string =
+    System.String(codes |> List.map char |> Array.ofList)
+
 let private illFormed =
-    [ "\uD800" // a lone high surrogate
-      "\uDFFF" // a lone low surrogate
-      "a\uD83D" // a high surrogate at the end of the string
-      "\uD801\uD800" // a high surrogate followed by a high one — NOT the pair for U+10000
-      "\uD83Dz" // a high surrogate followed by ASCII
-      "\uDE00\uD83D" // a pair written backwards
-      "\uD83D\uDE00\uDE00" ] // a well-formed pair, then a stray low half
+    [ units [ 0xD800 ] // a lone high surrogate
+      units [ 0xDFFF ] // a lone low surrogate
+      "a" + units [ 0xD83D ] // a high surrogate at the end of the string
+      units [ 0xD801; 0xD800 ] // a high surrogate followed by a high one — NOT the pair for U+10000
+      units [ 0xD83D ] + "z" // a high surrogate followed by ASCII
+      units [ 0xDE00; 0xD83D ] // a pair written backwards
+      units [ 0xD83D; 0xDE00; 0xDE00 ] ] // a well-formed pair, then a stray low half
 
 /// Inputs chosen for the three things the ASCII vectors cannot reach: multi-byte UTF-8 (two-, three-
 /// and four-byte sequences, including a ZWJ sequence of surrogate pairs), the 55/56/64-byte padding

@@ -5,6 +5,7 @@
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 ctor Fuaran.Core.IdWitness`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, !0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>>)
+ctor Fuaran.Core.IllFormedUtf16..ctor(System.Int32, System.Int32)
 ctor Fuaran.Core.KeyedWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!0>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, !0>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpOption`1<!0>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>)
 ctor Fuaran.Core.NodeWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, !1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!0>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, !0>>)
 ctor Fuaran.Core.Tree+NodeIndex`2..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !1>, !1, System.String)
@@ -12,10 +13,13 @@ field Fuaran.Core.Tree+WellFormed`1+Tags.RepeatedId : System.Int32 (literal)
 field Fuaran.Core.Tree+WellFormed`1+Tags.Structural : System.Int32 (literal)
 method Fuaran.Core.Hash.canonicalField(System.String) : System.String
 method Fuaran.Core.Hash.canonicalFields(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : System.String
+method Fuaran.Core.Hash.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.IllFormedUtf16>
 method Fuaran.Core.Hash.fnv1a(System.String) : System.String
 method Fuaran.Core.Hash.sha256Bytes(System.Byte[]) : System.Byte[]
 method Fuaran.Core.Hash.sha256Hex(System.String) : System.String
 method Fuaran.Core.Hash.sha256HexOfBytes(System.Byte[]) : System.String
+method Fuaran.Core.Hash.trySha256Hex(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.IllFormedUtf16>
+method Fuaran.Core.Hash.tryUtf8Bytes(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Byte[], Fuaran.Core.IllFormedUtf16>
 method Fuaran.Core.Hash.utf8Bytes(System.String) : System.Byte[]
 method Fuaran.Core.Tree+Index.ancestors`2(Fuaran.Core.IdWitness`1<!!0>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!1, !!0>) : Microsoft.FSharp.Collections.FSharpList`1<!!1>
 method Fuaran.Core.Tree+Index.build`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0) : Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>
@@ -61,6 +65,8 @@ property Fuaran.Core.Hash.foldSep : System.String { get }
 record-field Fuaran.Core.IdWitness`1.Equals #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>>
 record-field Fuaran.Core.IdWitness`1.OfString #1 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, !0>
 record-field Fuaran.Core.IdWitness`1.ToString #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
+record-field Fuaran.Core.IllFormedUtf16.Index #0 : System.Int32
+record-field Fuaran.Core.IllFormedUtf16.Unit #1 : System.Int32
 record-field Fuaran.Core.KeyedWitness`2.IdsUnique #4 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>
 record-field Fuaran.Core.KeyedWitness`2.KeyedChildren #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!0>>
 record-field Fuaran.Core.KeyedWitness`2.PlaceKeyedChild #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpOption`1<!0>>>
@@ -76,6 +82,7 @@ record-field Fuaran.Core.Tree+NodeIndex`2.ParentOf #1 : Microsoft.FSharp.Collect
 record-field Fuaran.Core.Tree+NodeIndex`2.Root #2 : !1
 type Fuaran.Core.Hash (module)
 type Fuaran.Core.IdWitness`1 (record)
+type Fuaran.Core.IllFormedUtf16 (record)
 type Fuaran.Core.KeyedWitness`2 (record)
 type Fuaran.Core.NodeWitness`2 (record)
 type Fuaran.Core.Tree (module)

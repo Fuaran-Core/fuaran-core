@@ -1,5 +1,17 @@
 namespace Fuaran.Core
 
+/// Why a guarded digest refused a string (Phase 306): the UTF-16 unit at `Index` is a surrogate
+/// with no partner — a high one (`D800`–`DBFF`) not followed at once by a low one, or a low one
+/// (`DC00`–`DFFF`) with no high one before it — so the string has no code point there, UTF-8 has no
+/// encoding for it, and a digest over a substitute would be some other string's digest.
+type IllFormedUtf16 =
+    {
+        /// The 0-based index of the unpaired surrogate, in UTF-16 units.
+        Index: int
+        /// The unit itself (`0xD800`–`0xDFFF`).
+        Unit: int
+    }
+
 /// Deterministic content hashing. Two regimes, separately named so a call site says which one it is
 /// in: `fnv1a` — 32-bit, fast, NOT cryptographic — for staleness fingerprints and the
 /// content-hashed bounded-escape regions; `sha256Hex` / `sha256Bytes` — the pinned pure FIPS 180-4
@@ -49,6 +61,17 @@ module Hash =
     ///
     /// **Value-identical on .NET and under Fable** — measured, not asserted. The multiply goes
     /// through `mul32` for that reason; read its comment before simplifying the loop.
+    ///
+    /// **THE UNIT IS THE UTF-16 CODE UNIT, not the byte and not the code point (stated by
+    /// Phase 306; it was always so).** Each `char` of the string is folded in whole, as one 16-bit
+    /// value: a BMP character is one step, an astral character is TWO (its high surrogate, then its
+    /// low one), and nothing is UTF-8-encoded first. That is not the textbook FNV-1a, which folds
+    /// bytes, and a host twin that folds UTF-8 bytes or code points agrees with this one on ASCII
+    /// and on nothing else — silently, since ASCII is what most fixtures carry. The
+    /// `fnv1a/astral-code-units` parity vector pins one astral character, the shortest input on
+    /// which the three readings give three values, so a twin learns which it implemented. Every
+    /// unit is folded as found, a lone surrogate included: this is a cache fingerprint, not a
+    /// digest, and it refuses nothing.
     let fnv1a (s: string) : string =
         let mutable h = 2166136261u
 
@@ -247,8 +270,8 @@ module Hash =
     /// **What replacement does NOT buy: injectivity.** The platform maps `"\uD800"`, `"\uDFFF"` and
     /// `"\uFFFD"` to ONE byte string, so a digest over ill-formed input has a second pre-image by
     /// construction. This is the UNGUARDED, platform-parity path, and it says so; wherever a
-    /// digest must name one string, an ill-formed unit is refused before it reaches here — that
-    /// guarded form is Phase 306's.
+    /// digest must name one string, an ill-formed unit is refused before it reaches here —
+    /// `tryUtf8Bytes` / `trySha256Hex` below are that guarded form (Phase 306).
     let utf8Bytes (s: string) : byte[] =
         let out = ResizeArray<byte>()
         let mutable i = 0
@@ -288,6 +311,39 @@ module Hash =
             i <- i + 1
 
         out.ToArray()
+
+    /// The first unpaired surrogate of `s`, or `None` where `s` is well-formed UTF-16 (Phase 306).
+    /// The same rule the wire parser and the guarded canonical renderer refuse on, kept here as
+    /// its own few lines because this package references nothing.
+    let firstIllFormedUnit (s: string) : IllFormedUtf16 option =
+        let mutable i = 0
+        let mutable found = None
+
+        while found.IsNone && i < s.Length do
+            let c = int s[i]
+
+            if c >= 0xD800 && c <= 0xDBFF then
+                if i + 1 < s.Length && int s[i + 1] >= 0xDC00 && int s[i + 1] <= 0xDFFF then
+                    i <- i + 2
+                else
+                    found <- Some { Index = i; Unit = c }
+            elif c >= 0xDC00 && c <= 0xDFFF then
+                found <- Some { Index = i; Unit = c }
+            else
+                i <- i + 1
+
+        found
+
+    /// `utf8Bytes`, GUARDED (Phase 306): the UTF-8 bytes of a well-formed string, or the first
+    /// unpaired surrogate as a typed refusal. Over a well-formed string it is exactly
+    /// `Ok (utf8Bytes s)`, and there the encoding is INJECTIVE — two well-formed strings with one
+    /// byte string are one string (`proofs/Utf8.fst`, `utf8_injective`) — which the unguarded
+    /// form cannot be, since replacement maps three strings to `EF BF BD`. This is the form a
+    /// digest pre-image goes through wherever the digest must name one string.
+    let tryUtf8Bytes (s: string) : Result<byte[], IllFormedUtf16> =
+        match firstIllFormedUnit s with
+        | Some bad -> Error bad
+        | None -> Ok(utf8Bytes s)
 
     /// The compression function: pad per FIPS 180-4 §5.1.1 and fold, returning the eight state words.
     /// Both public forms below project from this, so the byte form and the hex form cannot drift.
@@ -407,6 +463,13 @@ module Hash =
     /// Lowercase-hex SHA-256 over the UTF-8 bytes of a string — the form nearly every call site
     /// wants. Byte-for-byte the platform's answer on .NET, ill-formed surrogates included (the
     /// replacement bytes `utf8Bytes` describes), and the same answer under Fable. Over an
-    /// ill-formed string it therefore has the platform's second pre-images too; the guarded,
-    /// refusing form is Phase 306's.
+    /// ill-formed string it therefore has the platform's second pre-images too; `trySha256Hex` is
+    /// the guarded, refusing form.
     let sha256Hex (input: string) : string = sha256HexOfBytes (utf8Bytes input)
+
+    /// `sha256Hex`, GUARDED (Phase 306): the digest of a well-formed string, or the first unpaired
+    /// surrogate as a typed refusal. Over a well-formed string it is exactly `Ok (sha256Hex
+    /// input)`; over an ill-formed one `sha256Hex` still answers — with the digest of whichever
+    /// string the replacement bytes also spell — and this does not.
+    let trySha256Hex (input: string) : Result<string, IllFormedUtf16> =
+        tryUtf8Bytes input |> Result.map sha256HexOfBytes

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -288,6 +288,7 @@
          emit-refusals renderer, and the test holding the committed files to a fresh render.
          Reads OwnedConformance.fs for the committed root; appended (append-only). -->
     <Compile Include="RefusalVectorTests.fs" />
+    <Compile Include="TotalityTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

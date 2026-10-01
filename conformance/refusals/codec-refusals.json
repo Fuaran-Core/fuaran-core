@@ -1,6 +1,6 @@
 {
   "family": "codecRefusals",
-  "description": "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder. A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome.",
+  "description": "Codec refusal vectors (Phase 299). Each vector is an input and the outcome computed by calling the reference codec: `json` inputs go through the JSON reader, `column` inputs through the columnar DataSource decoder, `profile` inputs (Phase 306) through the wire-profile reader. A `refusal` names the class the decode must refuse with (a JsonErrorKind; a ColumnError case, NotJson/<kind> for a parse failure; MalformedProfile); a `canonical` is the canonical re-encoding of what the input decodes to. A host certifies its codec twin by reproducing every outcome.",
   "vectors": [
     {"codec":"json","input":"01","name":"leading-zero","refusal":"MalformedNumber"},
     {"codec":"json","input":"-01","name":"leading-zero-negative","refusal":"MalformedNumber"},
@@ -52,6 +52,26 @@
     {"codec":"column","input":"{\"columns\":{\"a\":[1,2],\"b\":[3]}}","name":"ragged-columns","refusal":"RaggedColumns"},
     {"codec":"column","input":"{\"schema\":[{\"name\":\"c\",\"type\":\"int\"}],\"columns\":{\"c\":{\"values\":[01],\"validity\":[true]}}}","name":"leading-zero-in-a-column","refusal":"NotJson/MalformedNumber"},
     {"codec":"column","input":"{\"schema\":[{\"name\":\"c\",\"type\":\"string\"}],\"columns\":{\"c\":{\"values\":[\"\\uD800\"],\"validity\":[true]}}}","name":"lone-surrogate-in-a-column","refusal":"NotJson/BadEscape"},
-    {"canonical":"{\"ref\":\"orders\",\"schema\":[]}","codec":"column","input":"{\"ref\":\"orders\"}","name":"ref-without-schema"}
+    {"canonical":"{\"ref\":\"orders\",\"schema\":[]}","codec":"column","input":"{\"ref\":\"orders\"}","name":"ref-without-schema"},
+    {"canonical":"{\"columns\":{\"a\":{\"validity\":[true],\"values\":[1]}},\"schema\":[{\"name\":\"a\",\"type\":\"int\"}]}","codec":"column","input":"{\"$type\":\"x\",\"schema\":[{\"name\":\"a\",\"type\":\"int\"}],\"columns\":{\"a\":[1],\"zz\":[true]},\"extra\":1}","name":"surplus-members-read-past"},
+    {"canonical":"core@1.0","codec":"profile","input":"core@1.0","name":"profile-canonical"},
+    {"canonical":"core@0.0","codec":"profile","input":"core@0.0","name":"profile-zero-zero"},
+    {"canonical":"core@2147483647.2147483647","codec":"profile","input":"core@2147483647.2147483647","name":"profile-int32-max"},
+    {"canonical":"Fuaran-UI.v2_x@10.20","codec":"profile","input":"Fuaran-UI.v2_x@10.20","name":"profile-name-punctuation"},
+    {"codec":"profile","input":"core@01.0","name":"profile-leading-zero-major","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@1.00","name":"profile-leading-zero-minor","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@+1.0","name":"profile-plus-sign","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@-0.0","name":"profile-negative-zero","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@1.0\u0000","name":"profile-trailing-nul","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@1.0 ","name":"profile-trailing-space","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@2147483648.0","name":"profile-past-int32","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@1.0.0","name":"profile-three-components","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@1.","name":"profile-missing-minor","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"@1.0","name":"profile-missing-name","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"1core@1.0","name":"profile-name-starts-with-digit","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"co re@1.0","name":"profile-name-with-space","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"a@b@1.0","name":"profile-name-with-at","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"café@1.0","name":"profile-name-not-ascii","refusal":"MalformedProfile"},
+    {"codec":"profile","input":"core@1.٣","name":"profile-non-ascii-digit","refusal":"MalformedProfile"}
   ]
 }

@@ -51,6 +51,54 @@ let private hexOf (bs: byte[]) : string =
 
     sb.ToString()
 
+/// A string from its UTF-16 units. An unpaired surrogate is built this way and never written as a
+/// `\u` escape: the F# compiler replaces such an escape in a string literal with U+FFFD, so the
+/// literal is a well-formed string and a row over it measures nothing about ill-formed input.
+let private units (codes: int list) : string =
+    codes |> List.map (fun c -> string (char c)) |> String.concat ""
+
+/// The guarded UTF-8 encoder's answer as ASCII (Phase 306): `ok:<hex>`, or
+/// `refused@<index>:<unit>` naming the unpaired surrogate.
+let private guardedUtf8 (s: string) : string =
+    match Hash.tryUtf8Bytes s with
+    | Ok bytes -> "ok:" + hexOf bytes
+    | Error bad ->
+        "refused@"
+        + string bad.Index
+        + ":"
+        + hexOf [| byte (bad.Unit >>> 8); byte (bad.Unit &&& 0xFF) |]
+
+/// A guarded render's answer as ASCII: `ok:<sha256 of the text>`, or `refused` (the message
+/// carries the offending string's path, whose text is not ASCII by construction).
+let private guardedRender (r: Result<string, string>) : string =
+    match r with
+    | Ok text -> "ok:" + Hash.sha256Hex text
+    | Error _ -> "refused"
+
+/// `JInt 1` under `depth` arrays, built by a loop. The renderers were recursive until Phase 306
+/// and died on a value this deep — on .NET by the stack, and a JS runtime has a stack too.
+let private nested (depth: int) : JVal =
+    let mutable v = JInt 1
+
+    for _ in 1..depth do
+        v <- JArr [ v ]
+
+    v
+
+/// A float aggregate over a float column, through the canonical layout, or the refusal's class.
+let private floatAggregate (fn: AggFn) (xs: float list) : string =
+    match Column.aggregate fn (Column.create "f" FloatType (xs |> List.map Float)) with
+    | Ok(Float f) -> Canon.canonicalFloat f
+    | Ok _ -> "<not-a-float>"
+    | Error(AggregateOverflow _) -> "<overflow>"
+    | Error _ -> "<refused>"
+
+/// `Profile.tryParse` then `render`, or `refused`.
+let private profileRoundTrip (s: string) : string =
+    match Versioning.Profile.tryParse s with
+    | Ok p -> Versioning.Profile.render p
+    | Error _ -> "refused"
+
 /// The first eight draws of `ConfRng.next` from a seed, hyphen-joined. EIGHT rather than one
 /// because the first draw is the one a broken generator gets very nearly right: at seed 1488 the
 /// LCG that stood here until 0.20.0 drew `1547650046` on .NET and `1547650048` under Fable — a
@@ -154,18 +202,21 @@ let vectors: (string * string) list =
       "utf8Bytes/unicode", hexOf (Hash.utf8Bytes unicodeSample)
       // Phase 290 — the ILL-FORMED rows: what the encoder does to a lone or ill-ordered surrogate
       // is the platform's answer (`EF BF BD` per unit that is not half of a pair), pinned on both
-      // pipelines and asserted against `System.Text.Encoding.UTF8` on .NET. Written as escapes:
-      // a raw surrogate cannot survive a UTF-8 checkout. `high-then-nonlow` is the pair that
+      // pipelines and asserted against `System.Text.Encoding.UTF8` on .NET. BUILT FROM UNITS
+      // (`units`, Phase 306), never written as escapes: the F# compiler replaces an unpaired
+      // surrogate escape in a literal with U+FFFD, so until then the .NET half of these rows
+      // encoded replacement characters and never met an ill-formed unit. The expected bytes are
+      // the same either way, which is how that went unseen. `high-then-nonlow` is the pair that
       // encoded as U+10000's four bytes until Phase 290; `high-then-high` and `low-then-high` are
       // two replacements each, never a pair read backwards.
-      "utf8Bytes/ill-formed-lone-high", hexOf (Hash.utf8Bytes "\uD800")
-      "utf8Bytes/ill-formed-lone-low", hexOf (Hash.utf8Bytes "\uDFFF")
-      "utf8Bytes/ill-formed-high-at-end", hexOf (Hash.utf8Bytes "a\uD83D")
-      "utf8Bytes/ill-formed-high-then-nonlow", hexOf (Hash.utf8Bytes "\uD801\uD800")
-      "utf8Bytes/ill-formed-high-then-ascii", hexOf (Hash.utf8Bytes "\uD83Dz")
-      "utf8Bytes/ill-formed-low-then-high", hexOf (Hash.utf8Bytes "\uDE00\uD83D")
-      "utf8Bytes/ill-formed-beside-a-pair", hexOf (Hash.utf8Bytes "\uD83D\uDE00\uDE00")
-      "sha256/ill-formed-lone-high", Hash.sha256Hex "\uD800"
+      "utf8Bytes/ill-formed-lone-high", hexOf (Hash.utf8Bytes (units [ 0xD800 ]))
+      "utf8Bytes/ill-formed-lone-low", hexOf (Hash.utf8Bytes (units [ 0xDFFF ]))
+      "utf8Bytes/ill-formed-high-at-end", hexOf (Hash.utf8Bytes ("a" + units [ 0xD83D ]))
+      "utf8Bytes/ill-formed-high-then-nonlow", hexOf (Hash.utf8Bytes (units [ 0xD801; 0xD800 ]))
+      "utf8Bytes/ill-formed-high-then-ascii", hexOf (Hash.utf8Bytes (units [ 0xD83D ] + "z"))
+      "utf8Bytes/ill-formed-low-then-high", hexOf (Hash.utf8Bytes (units [ 0xDE00; 0xD83D ]))
+      "utf8Bytes/ill-formed-beside-a-pair", hexOf (Hash.utf8Bytes (units [ 0xD83D; 0xDE00; 0xDE00 ]))
+      "sha256/ill-formed-lone-high", Hash.sha256Hex (units [ 0xD800 ])
 
       // ---- Wire.Canon.canonicalFloat — the pinned cross-host float layout (Phase 55) ----
       "canonicalFloat/zero", Canon.canonicalFloat 0.0
@@ -236,7 +287,41 @@ let vectors: (string * string) list =
       "confRng/seed-1488", drawsOf 1488
 
       // ---- Column.aggregate — the NaN-aware order (Phase 299) ----
-      "aggregate/nan-order", aggregateNanOrder ]
+      "aggregate/nan-order", aggregateNanOrder
+
+      // ---- Phase 306 — totality against the machine. Appended, so every earlier row keeps its
+      // place in the comparison. ----
+      // FNV-1a's unit is the UTF-16 code unit: one astral character is two steps (D83D, DE00). A
+      // twin that folds its UTF-8 bytes or its code point computes another value here, and the
+      // same value as this one on every ASCII input.
+      "fnv1a/astral-code-units", Hash.fnv1a (units [ 0xD83D; 0xDE00 ])
+      // The guarded encoder: a well-formed string is its bytes; an unpaired surrogate is refused
+      // with its index and unit, where the unguarded rows above answer replacement bytes.
+      "tryUtf8Bytes/well-formed", guardedUtf8 unicodeSample
+      "tryUtf8Bytes/lone-high", guardedUtf8 (units [ 0xD800 ])
+      "tryUtf8Bytes/high-then-high", guardedUtf8 (units [ 0xD801; 0xD800 ])
+      "tryUtf8Bytes/stray-low-after-a-pair", guardedUtf8 (units [ 0xD83D; 0xDE00; 0xDE00 ])
+      // The guarded canonical render refuses an ill-formed string, as a value and as a member key.
+      "canonTryRender/well-formed", guardedRender (Canon.tryRender (JObj [ "k", JStr unicodeSample ]))
+      "canonTryRender/ill-formed-value", guardedRender (Canon.tryRender (JObj [ "k", JStr(units [ 0xD801; 0xD800 ]) ]))
+      "canonTryRender/ill-formed-key", guardedRender (Canon.tryRender (JObj [ units [ 0xDC00 ], JInt 1 ]))
+      "jsonTryRender/ill-formed-value", guardedRender (Json.tryRender (JArr [ JStr(units [ 0xDFFF ]) ]))
+      // A value 10,000 deep renders — folded through the digest, since the text is 20,001 bytes.
+      "render/depth-10000-json", Hash.sha256Hex (Json.render (nested 10000))
+      "render/depth-10000-canon", guardedRender (Canon.tryRender (nested 10000))
+      // The float aggregates over finite input whose plain formulas overflowed an intermediate.
+      "aggregate/median-at-the-edge", floatAggregate Median [ 1e308; 1e308 ]
+      "aggregate/mean-at-the-edge", floatAggregate Mean [ 1.7e308; 1.7e308; -1.7e308 ]
+      "aggregate/stddev-at-the-edge", floatAggregate StdDev [ 1e200; -1e200 ]
+      "aggregate/sum-past-the-edge", floatAggregate Sum [ 1e308; 1e308 ]
+      "aggregate/stddev-population", floatAggregate StdDev [ 2.0; 4.0; 4.0; 4.0; 5.0; 5.0; 7.0; 9.0 ]
+      // The profile grammar: the canonical string and nothing else. The NUL is built, not written.
+      "profile/canonical", profileRoundTrip "core@1.0"
+      "profile/leading-zero", profileRoundTrip "core@01.0"
+      "profile/plus-sign", profileRoundTrip "core@+1.0"
+      "profile/trailing-nul", profileRoundTrip ("core@1.0" + string (char 0))
+      "profile/int32-max", profileRoundTrip "core@2147483647.2147483647"
+      "profile/past-int32", profileRoundTrip "core@2147483648.0" ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

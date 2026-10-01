@@ -76,8 +76,11 @@ method Fuaran.Core.JValModule.kindName(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.JValModule.nonFiniteToken(System.Double) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Json.encode(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.escape(System.String) : System.String
+method Fuaran.Core.Json.firstIllFormedString(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
+method Fuaran.Core.Json.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Json.firstNonFinite(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
 method Fuaran.Core.Json.isJsonNumber(System.String) : System.Boolean
+method Fuaran.Core.Json.isWellFormedUtf16(System.String) : System.Boolean
 method Fuaran.Core.Json.kindObj(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
 method Fuaran.Core.Json.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Json.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.JsonError>
@@ -94,8 +97,11 @@ method Fuaran.Core.Json.tryEncode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSha
 method Fuaran.Core.Json.tryRender(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.RowCodec.decodeRows(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.Collections.Generic.IEnumerable`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Object>>, System.String>
 method Fuaran.Core.RowCodec.encodeRows(System.Collections.Generic.IEnumerable`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Object>>) : Fuaran.Core.JVal
+method Fuaran.Core.Versioning+ProfileModule.isValid(Fuaran.Core.Versioning+Profile) : System.Boolean
+method Fuaran.Core.Versioning+ProfileModule.isValidName(System.String) : System.Boolean
 method Fuaran.Core.Versioning+ProfileModule.render(Fuaran.Core.Versioning+Profile) : System.String
 method Fuaran.Core.Versioning+ProfileModule.tryParse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Profile, System.String>
+method Fuaran.Core.Versioning+ProfileModule.tryRender(Fuaran.Core.Versioning+Profile) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Versioning.bump(Fuaran.Core.Versioning+Profile, Fuaran.Core.Versioning+Evolution) : Fuaran.Core.Versioning+Profile
 method Fuaran.Core.Versioning.classify(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>) : Fuaran.Core.Versioning+Evolution
 method Fuaran.Core.Versioning.decode(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Envelope, System.String>
@@ -105,6 +111,8 @@ method Fuaran.Core.Versioning.negotiate(Fuaran.Core.Versioning+Profile, Fuaran.C
 method Fuaran.Core.Versioning.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Envelope, System.String>
 method Fuaran.Core.Versioning.reencode`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Versioning+Decoded`1<!!0>) : Fuaran.Core.JVal
 method Fuaran.Core.Versioning.render(Fuaran.Core.Versioning+Envelope) : System.String
+method Fuaran.Core.Versioning.tryBump(Fuaran.Core.Versioning+Profile, Fuaran.Core.Versioning+Evolution) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Profile, System.String>
+method Fuaran.Core.Versioning.tryRender(Fuaran.Core.Versioning+Envelope) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 property Fuaran.Core.Versioning+ProfileModule.coreV1 : Fuaran.Core.Versioning+Profile { get }
 record-field Fuaran.Core.Corpus+Case.Json #2 : System.String
 record-field Fuaran.Core.Corpus+Case.Kind #1 : Fuaran.Core.Corpus+CaseKind

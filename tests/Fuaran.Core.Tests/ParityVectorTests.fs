@@ -87,7 +87,33 @@ let private expected: (string * string) list =
       "confRng/seed-1488", "1779094209-974108648-1386259377-469941146-625613426-646666080-1082870579-340445045"
       // Phase 299: Min is -1 (NaN is not below it), Max is NaN (NaN sorts last), Median of the five is
       // the third of -1, -0, 3, NaN, NaN, and the four distinct values are 3, NaN, -1 and 0.
-      "aggregate/nan-order", "-1/\"NaN\"/3/4" ]
+      "aggregate/nan-order", "-1/\"NaN\"/3/4"
+      // Phase 306. `fnv1a/astral-code-units` is FNV-1a over the two UTF-16 units D83D DE00; the
+      // guarded rows name the unpaired unit by index and value; the two depth-10,000 renders are one
+      // text, so one digest; `mean-at-the-edge` is the scaled recurrence's answer, one unit in the
+      // last place below 1.7e308 / 3, and the other three edge aggregates are exact.
+      "fnv1a/astral-code-units", "cb31c4b8"
+      "tryUtf8Bytes/well-formed", "ok:636166c3a92fe697a5e69cace8aa9e2ff09f9880"
+      "tryUtf8Bytes/lone-high", "refused@0:d800"
+      "tryUtf8Bytes/high-then-high", "refused@0:d801"
+      "tryUtf8Bytes/stray-low-after-a-pair", "refused@2:de00"
+      "canonTryRender/well-formed", "ok:d5ccf1a3ef9786b1399f86349cc633e20f0f68d670d46ce7ecf6d3b11a540666"
+      "canonTryRender/ill-formed-value", "refused"
+      "canonTryRender/ill-formed-key", "refused"
+      "jsonTryRender/ill-formed-value", "refused"
+      "render/depth-10000-json", "bf87f541c6ec3cdd0f4de28a7264b2fe92e14f8535c0d951b5d825e1e3459d2a"
+      "render/depth-10000-canon", "ok:bf87f541c6ec3cdd0f4de28a7264b2fe92e14f8535c0d951b5d825e1e3459d2a"
+      "aggregate/median-at-the-edge", "1E+308"
+      "aggregate/mean-at-the-edge", "5.666666666666666E+307"
+      "aggregate/stddev-at-the-edge", "1E+200"
+      "aggregate/sum-past-the-edge", "<overflow>"
+      "aggregate/stddev-population", "2"
+      "profile/canonical", "core@1.0"
+      "profile/leading-zero", "refused"
+      "profile/plus-sign", "refused"
+      "profile/trailing-nul", "refused"
+      "profile/int32-max", "core@2147483647.2147483647"
+      "profile/past-int32", "refused" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -102,7 +128,11 @@ let private families =
       "witness/"
       "chain/"
       "confRng/"
-      "aggregate/" ]
+      "aggregate/"
+      "tryUtf8Bytes/"
+      "canonTryRender/"
+      "render/"
+      "profile/" ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the

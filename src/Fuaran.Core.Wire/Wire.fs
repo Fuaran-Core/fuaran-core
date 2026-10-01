@@ -249,38 +249,213 @@ module Json =
 
         sb.ToString()
 
-    let rec render (v: JVal) : string =
-        match v with
-        | JStr s -> "\"" + escape s + "\""
-        | JInt i -> string i
-        | JBool b -> (if b then "true" else "false")
-        | JFloat f -> FloatLayout.roundTrip f
-        | JArr xs -> "[" + (xs |> List.map render |> String.concat ",") + "]"
-        | JObj fields ->
-            "{"
-            + (fields
-               |> List.map (fun (k, v) -> "\"" + escape k + "\":" + render v)
-               |> String.concat ",")
-            + "}"
+    // ---- THE WRITER (Phase 306) ----
+    // One iterative writer stands behind `Json.render`, `Canon.render`, `Canon.renderOrdered` and
+    // both `tryRender`s. Each used to be a recursive function mapping itself over a list, so its
+    // stack depth was the VALUE's nesting depth: a constructed value some 1,400 deep killed the
+    // process on a 1 MB thread (a stack overflow is uncatchable on .NET), the guarded renderers
+    // included, while the parse cap protected only the read side. The pending work is held on an
+    // explicit stack in the heap instead, so depth costs memory and never the process.
+
+    /// One unit of pending output: a value still to write, or the rest of an open array or object
+    /// (`first` is false once a member has been written, so the next one takes a comma).
+    type private Pending =
+        | Value of JVal
+        | Items of rest: JVal list * first: bool
+        | Members of rest: (string * JVal) list * first: bool
+
+    /// Write `v` with `floatText` as the float layout and object members in Ordinal key order
+    /// (`sortKeys`) or as authored. The bytes are the ones the recursive renderers wrote.
+    let internal writeWith (sortKeys: bool) (floatText: float -> string) (v: JVal) : string =
+        let sb = System.Text.StringBuilder()
+        let mutable stack = [ Value v ]
+
+        let quoted (s: string) =
+            sb.Append('"').Append(escape s).Append('"') |> ignore
+
+        while not stack.IsEmpty do
+            match stack with
+            | [] -> ()
+            | Value x :: rest ->
+                stack <- rest
+
+                match x with
+                | JStr s -> quoted s
+                | JInt i -> sb.Append(string i) |> ignore
+                | JBool b -> sb.Append(if b then "true" else "false") |> ignore
+                | JFloat f -> sb.Append(floatText f) |> ignore
+                | JArr xs ->
+                    sb.Append('[') |> ignore
+                    stack <- Items(xs, true) :: stack
+                | JObj fields ->
+                    sb.Append('{') |> ignore
+
+                    let ordered =
+                        if sortKeys then
+                            fields
+                            |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+                        else
+                            fields
+
+                    stack <- Members(ordered, true) :: stack
+            | Items(xs, first) :: rest ->
+                match xs with
+                | [] ->
+                    sb.Append(']') |> ignore
+                    stack <- rest
+                | x :: tail ->
+                    if not first then
+                        sb.Append(',') |> ignore
+
+                    stack <- Value x :: Items(tail, false) :: rest
+            | Members(fields, first) :: rest ->
+                match fields with
+                | [] ->
+                    sb.Append('}') |> ignore
+                    stack <- rest
+                | (k, x) :: tail ->
+                    if not first then
+                        sb.Append(',') |> ignore
+
+                    quoted k
+                    sb.Append(':') |> ignore
+                    stack <- Value x :: Members(tail, false) :: rest
+
+        sb.ToString()
+
+    /// Render a `JVal` in author order with the round-trip float layout. TOTAL AGAINST THE MACHINE
+    /// (Phase 306): iterative, so a value of any nesting depth renders — the text of one nested past
+    /// `defaultMaxDepth` is text `parse` then refuses by name, which is the read side's cap doing
+    /// its job, not a crash.
+    ///
+    /// ONE DIVERGENCE FROM `Canon.render` THAT A PARSE COLLAPSES: `JFloat -0.0` renders `-0` here
+    /// (the layout keeps the sign; `Canon.canonicalFloat` collapses it to `0`), and `-0` is an
+    /// integer token, so it parses back as `JInt 0` and renders `0` from then on. The first
+    /// `render` of a negative zero is therefore not a fixed point of `parse >> render`; every later
+    /// one is. The bytes are left as they are because chain pre-images are built from this renderer.
+    let render (v: JVal) : string = writeWith false FloatLayout.roundTrip v
+
+    /// One step of a path into a value, innermost first while a scan holds it.
+    type private Step =
+        | Index of int
+        | Key of string
+
+    /// `$` for the root, `[i]` for an array item, `["key"]` for a member (the key under `escape`).
+    let private pathText (stepsRev: Step list) : string =
+        let sb = System.Text.StringBuilder("$")
+
+        for step in List.rev stepsRev do
+            match step with
+            | Index i -> sb.Append('[').Append(string i).Append(']') |> ignore
+            | Key k -> sb.Append("[\"").Append(escape k).Append("\"]") |> ignore
+
+        sb.ToString()
+
+    /// A frame of the document-order scan: a value at a path, or the rest of an array or object.
+    type private Frame =
+        | At of Step list * JVal
+        | RestItems of Step list * int * JVal list
+        | RestMembers of Step list * (string * JVal) list
+
+    /// The first hit of a document-order scan — arrays by index, members in AUTHORED order, a
+    /// member's KEY before its value — as `(path, finding)`. `ofKey` reads a member key (its path
+    /// is the member's); `ofValue` reads a scalar. Iterative, for the reason the writer is, and a
+    /// path is only rendered for the hit.
+    let private firstInDocumentOrder
+        (ofKey: string -> string option)
+        (ofValue: JVal -> string option)
+        (v: JVal)
+        : (string * string) option =
+        let mutable stack = [ At([], v) ]
+        let mutable found = None
+
+        while found.IsNone && not stack.IsEmpty do
+            match stack with
+            | [] -> ()
+            | At(path, x) :: rest ->
+                stack <- rest
+
+                match x with
+                | JArr xs -> stack <- RestItems(path, 0, xs) :: stack
+                | JObj fields -> stack <- RestMembers(path, fields) :: stack
+                | scalar -> found <- ofValue scalar |> Option.map (fun finding -> pathText path, finding)
+            | RestItems(path, i, xs) :: rest ->
+                match xs with
+                | [] -> stack <- rest
+                | x :: tail -> stack <- At(Index i :: path, x) :: RestItems(path, i + 1, tail) :: rest
+            | RestMembers(path, fields) :: rest ->
+                match fields with
+                | [] -> stack <- rest
+                | (k, x) :: tail ->
+                    match ofKey k with
+                    | Some finding -> found <- Some(pathText (Key k :: path), finding)
+                    | None -> stack <- At(Key k :: path, x) :: RestMembers(path, tail) :: rest
+
+        found
 
     /// The FIRST non-finite `JFloat` in `v`, in document order — arrays by index, object members in
     /// AUTHORED order — as `(path, token)`: the path is `$` for the root, `[i]` for an array item and
     /// `["key"]` for a member (the key under `escape`, so the path is unambiguous for any key), and
     /// the token is `JVal.nonFiniteToken`'s. `None` where every float is finite. Public once
     /// (Phase 299): it is the scan both guarded renderers (`Json.tryRender`, `Canon.tryRender`)
-    /// refuse on, which each used to carry as a private copy.
+    /// refuse on, which each used to carry as a private copy. Iterative since Phase 306.
     let firstNonFinite (v: JVal) : (string * string) option =
-        let rec scan (path: string) (v: JVal) : (string * string) option =
-            match v with
-            | JFloat f -> JVal.nonFiniteToken f |> Option.map (fun tok -> path, tok)
-            | JArr xs ->
-                xs
-                |> List.indexed
-                |> List.tryPick (fun (i, x) -> scan (path + "[" + string i + "]") x)
-            | JObj fields -> fields |> List.tryPick (fun (k, x) -> scan (path + "[\"" + escape k + "\"]") x)
-            | _ -> None
+        firstInDocumentOrder
+            (fun _ -> None)
+            (fun x ->
+                match x with
+                | JFloat f -> JVal.nonFiniteToken f
+                | _ -> None)
+            v
 
-        scan "$" v
+    /// The index of the first UTF-16 unit of `s` that is not part of a character (Phase 306): a
+    /// high surrogate (`D800`–`DBFF`) not followed at once by a low one, or a low surrogate
+    /// (`DC00`–`DFFF`) with no high one before it. `None` where `s` is well-formed UTF-16 — the
+    /// strings that have code points, and the only ones `parse` accepts.
+    let firstIllFormedUnit (s: string) : int option =
+        let n = s.Length
+        let mutable k = 0
+        let mutable found = None
+
+        while found.IsNone && k < n do
+            let u = int s.[k]
+
+            if u >= 0xD800 && u <= 0xDBFF then
+                if k + 1 < n && int s.[k + 1] >= 0xDC00 && int s.[k + 1] <= 0xDFFF then
+                    k <- k + 2
+                else
+                    found <- Some k
+            elif u >= 0xDC00 && u <= 0xDFFF then
+                found <- Some k
+            else
+                k <- k + 1
+
+        found
+
+    /// True where `s` is well-formed UTF-16 (`firstIllFormedUnit s = None`).
+    let isWellFormedUtf16 (s: string) : bool = (firstIllFormedUnit s).IsNone
+
+    /// The FIRST string in `v` that is not well-formed UTF-16, in document order — a member's key
+    /// before its value — as `(path, description)`; the description names the unit and its index
+    /// and says whether the string is a member key. `None` where every string has code points.
+    /// Both guarded renderers refuse on it (Phase 306).
+    let firstIllFormedString (v: JVal) : (string * string) option =
+        let describe (what: string) (s: string) : string option =
+            firstIllFormedUnit s
+            |> Option.map (fun k ->
+                what
+                + " holds the unpaired surrogate U+"
+                + (int s.[k]).ToString("X4")
+                + " at unit "
+                + string k)
+
+        firstInDocumentOrder
+            (describe "a member key")
+            (fun x ->
+                match x with
+                | JStr s -> describe "a string" s
+                | _ -> None)
+            v
 
     /// A `"kind"`-tagged object — the wire envelope every domain node/op serialises as.
     /// `tag` leads; `fields` follow in author order (camelCase keys by discipline).
@@ -292,12 +467,26 @@ module Json =
     /// non-finite float (`NaN` / `Infinity` / `-Infinity`) emits a token that is not valid JSON
     /// and that `parse` then rejects — `render` succeeds but produces un-parseable wire, breaking
     /// `render ∘ parse = id`. The Fuaran wire model has no non-finite float (the same posture as
-    /// "no null"). `tryRender` names the first non-finite `JFloat` as a typed `Error` instead;
-    /// over an all-finite value it is exactly `Ok (render v)`.
+    /// "no null"). `tryRender` names the first non-finite `JFloat` as a typed `Error` instead.
+    ///
+    /// Since Phase 306 it refuses a second class for the same reason: a string (or member key)
+    /// that is not well-formed UTF-16. `render` writes a lone surrogate through as it found it, and
+    /// `parse` refuses the text — so that, too, was un-parseable wire from a guarded entry point.
+    /// A non-finite float is looked for first, so every refusal this function already made keeps
+    /// its message. Over a value with neither it is exactly `Ok (render v)`, at any nesting depth.
     let tryRender (v: JVal) : Result<string, string> =
         match firstNonFinite v with
         | Some(_, tok) -> Error("non-finite float is not representable on the Fuaran wire: " + tok)
-        | None -> Ok(render v)
+        | None ->
+            match firstIllFormedString v with
+            | Some(path, what) ->
+                Error(
+                    "ill-formed string is not representable on the Fuaran wire: "
+                    + what
+                    + " at "
+                    + path
+                )
+            | None -> Ok(render v)
 
     /// `tryRender` under the `encode` name — the total, guarded encode entry point.
     let tryEncode (v: JVal) : Result<string, string> = tryRender v
@@ -310,16 +499,37 @@ module Json =
     /// server locale while its bytes and digests agreed. `NumberStyles.None` would refuse the sign
     /// itself, sending every negative integer to the float path on every host. `parseNumber` and
     /// `Versioning.Profile.tryParse` both read through this one function.
+    ///
+    /// THE TOKEN IS HELD TO `[+-]?[0-9]+` FIRST (Phase 306). The host reader is not that strict
+    /// on its own: it has always tolerated trailing NUL characters, so `"7\u0000"` read as `7`.
+    /// The parser never hands it such a token (the scanner collects digits, and the grammar check
+    /// refuses a `+`), but this function is public and the profile grammar reads through it — so
+    /// the shape is checked here, where every caller gets it.
     let readInt32 (tok: string) : int option =
-        match
-            System.Int32.TryParse(
-                tok,
-                System.Globalization.NumberStyles.AllowLeadingSign,
-                System.Globalization.CultureInfo.InvariantCulture
-            )
-        with
-        | true, v -> Some v
-        | _ -> None
+        let digitsFrom =
+            if tok.Length > 0 && (tok.[0] = '-' || tok.[0] = '+') then
+                1
+            else
+                0
+
+        let mutable shaped = tok.Length > digitsFrom
+
+        for k in digitsFrom .. tok.Length - 1 do
+            if tok.[k] < '0' || tok.[k] > '9' then
+                shaped <- false
+
+        if not shaped then
+            None
+        else
+            match
+                System.Int32.TryParse(
+                    tok,
+                    System.Globalization.NumberStyles.AllowLeadingSign,
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+            with
+            | true, v -> Some v
+            | _ -> None
 
     /// True where `tok` is a number token of the JSON grammar, exactly (Phase 299; RFC 8259 §6):
     ///
@@ -792,12 +1002,10 @@ module Json =
 /// tagged) stays for Core's pre-unification internal uses; `Canon.render` is the cross-host form.
 module Canon =
 
-    /// Canonical string escape (WIRE_FORMAT §2 rule 6): only `"`, `\`, and control chars
-    /// (`U+0000`–`U+001F` → `\u00xx`, lower-case hex). No `\n`/`\r`/`\t` shortcuts — byte-for-byte
-    /// the UI host's `appendRawString`. Since Phase 287 this IS `Json.escape`: the spine has one
-    /// escaping rule, and the private copy that used to live here is gone.
-    let private escape (s: string) : string = Json.escape s
-
+    // The canonical string escape (WIRE_FORMAT §2 rule 6) is `Json.escape`: only `"`, `\`, and
+    // control chars (`U+0000`–`U+001F` → `\u00xx`, lower-case hex), no `\n`/`\r`/`\t` shortcuts —
+    // byte-for-byte the UI host's `appendRawString`. The spine has one escaping rule (Phase 287)
+    // and one writer (Phase 306, `Json.writeWith`), which every renderer here goes through.
 
     /// The single canonical, cross-host float → string encoder (Phase 55). Non-finite floats render to
     /// the fixed JSON-string tokens `"NaN"` / `"Infinity"` / `"-Infinity"`; `-0.0` collapses to `0`; a
@@ -815,21 +1023,9 @@ module Canon =
 
     /// Render a `JVal` under the canonical `$type` discipline: object keys Ordinal-sorted
     /// (recursively), the pinned float layout, canonical escaping. The encoder enforces key order;
-    /// decoders stay order-tolerant (they look up by name).
-    let rec render (v: JVal) : string =
-        match v with
-        | JStr s -> "\"" + escape s + "\""
-        | JInt i -> string i
-        | JBool b -> (if b then "true" else "false")
-        | JFloat f -> canonicalFloat f
-        | JArr xs -> "[" + (xs |> List.map render |> String.concat ",") + "]"
-        | JObj fields ->
-            "{"
-            + (fields
-               |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
-               |> List.map (fun (k, v) -> "\"" + escape k + "\":" + render v)
-               |> String.concat ",")
-            + "}"
+    /// decoders stay order-tolerant (they look up by name). Iterative since Phase 306 (`Json`'s
+    /// writer), so a value of any nesting depth renders; the bytes are unchanged.
+    let render (v: JVal) : string = Json.writeWith true canonicalFloat v
 
     /// The GUARDED canonical render (Phase 165) — [[render]] with a refusal beside it, in the
     /// shape `Json.tryRender` gives `Json.render`.
@@ -855,10 +1051,31 @@ module Canon =
     /// the canonical form and wants the refusal digests THIS function's `Ok` — there is no digest
     /// in this package to wrap (it references nothing that hashes), so the guarded digest is
     /// `tryRender v |> Result.map digest` at the caller, with the caller's own hash.
+    ///
+    /// A STRING THAT IS NOT WELL-FORMED UTF-16 IS REFUSED TOO (Phase 306), and for the same
+    /// reason a non-finite float is: its digest is some other value's. A lone surrogate has no
+    /// code point and UTF-8 has no encoding for it, so every encoder substitutes — over all
+    /// 66,060,288 (high surrogate, non-low unit) pairs, 97.6% used to encode byte-identically to a
+    /// well-formed astral character, and under the platform's replacement rule `"\uD800"`,
+    /// `"\uDFFF"` and `"�"` are one byte string. Replacement only moves which strings collide;
+    /// injectivity needs the refusal, here and at the parser, which makes it on read. The first
+    /// such string in document order (a member's key before its value) is named with its path. A
+    /// non-finite float is looked for first, so every refusal this function already made keeps its
+    /// message. `proofs/WireCanon.fst` states what the two refusals buy: over values this function
+    /// accepts, equal UTF-8 bytes of the rendering are equal normal forms.
     let tryRender (v: JVal) : Result<string, string> =
         match Json.firstNonFinite v with
         | Some(path, tok) -> Error("non-finite float has no canonical rendering of its own: " + tok + " at " + path)
-        | None -> Ok(render v)
+        | None ->
+            match Json.firstIllFormedString v with
+            | Some(path, what) ->
+                Error(
+                    "ill-formed string has no canonical rendering of its own: "
+                    + what
+                    + " at "
+                    + path
+                )
+            | None -> Ok(render v)
 
     /// Render a `JVal` with the SAME canonical escaping and pinned float layout as [[render]],
     /// but object keys in AUTHORED order — no sort. The declared-key-order leg (a vocabulary
@@ -866,19 +1083,7 @@ module Canon =
     /// `WireShape.KeyOrder`): there the ENCODER is the order authority — it constructs each
     /// object's pairs in the declared order and this renderer preserves them, so canonical form
     /// stays unique without a sort. [[render]] is untouched and remains the cross-host default.
-    let rec renderOrdered (v: JVal) : string =
-        match v with
-        | JStr s -> "\"" + escape s + "\""
-        | JInt i -> string i
-        | JBool b -> (if b then "true" else "false")
-        | JFloat f -> canonicalFloat f
-        | JArr xs -> "[" + (xs |> List.map renderOrdered |> String.concat ",") + "]"
-        | JObj fields ->
-            "{"
-            + (fields
-               |> List.map (fun (k, v) -> "\"" + escape k + "\":" + renderOrdered v)
-               |> String.concat ",")
-            + "}"
+    let renderOrdered (v: JVal) : string = Json.writeWith false canonicalFloat v
 
     /// Build a `$type`-discriminated object — the DU-position convention. `$type` (0x24) sorts
     /// before every lower-case data key, so it is always the canonical first key after `render`.
@@ -1112,15 +1317,64 @@ module Versioning =
 
     module Profile =
 
-        /// The canonical string form: `<name>@<major>.<minor>`.
+        // THE PROFILE GRAMMAR (Phase 306) — a BIJECTION between the valid profiles and their
+        // canonical strings:
+        //
+        //     profile = name "@" number "." number
+        //     name    = letter (letter | digit | "." | "_" | "-")*      ; ASCII only
+        //     number  = "0" | nonzero digit*                            ; at most Int32.MaxValue
+        //
+        // `render` writes exactly this over a valid profile, and `tryParse` accepts exactly this:
+        // `tryParse (render p) = Ok p` for every valid `p`, and `render q = s` whenever
+        // `tryParse s = Ok q`. Until this phase the reader took strings the writer never wrote —
+        // `core@01.0`, `core@+1.0`, a version followed by NUL characters, and any name at all, the
+        // empty-looking and the control-character ones included — so two strings named one
+        // profile, and a `requiredProfile` could not be compared as text.
+
+        let private isNameStart (c: char) =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+
+        let private isNameChar (c: char) =
+            isNameStart c || (c >= '0' && c <= '9') || c = '.' || c = '_' || c = '-'
+
+        /// True where `name` is a profile name of the grammar: an ASCII letter, then ASCII letters,
+        /// digits, `.`, `_` and `-`.
+        let isValidName (name: string) : bool =
+            not (isNull (box name))
+            && name.Length > 0
+            && isNameStart name.[0]
+            && name |> Seq.forall isNameChar
+
+        /// True where `p` is a profile the wire can carry: a name of the grammar and two
+        /// non-negative counters. The record is public, so one can be built that is not.
+        let isValid (p: Profile) : bool =
+            isValidName p.Name && p.Major >= 0 && p.Minor >= 0
+
+        /// The canonical string form: `<name>@<major>.<minor>`. **Assumes a valid profile**
+        /// (`isValid`) — over one, the string is the one `tryParse` reads back to it. `tryRender`
+        /// is the guarded, total entry point for a profile built by hand.
         let render (p: Profile) : string =
             p.Name + "@" + string p.Major + "." + string p.Minor
+
+        /// `render`, refusing a profile `tryParse` could not read back (Phase 306): a name outside
+        /// the grammar or a negative counter. Over a valid profile it is exactly `Ok (render p)`.
+        let tryRender (p: Profile) : Result<string, string> =
+            if not (isValidName p.Name) then
+                Error(
+                    "profile name is outside the grammar (an ASCII letter, then letters, digits, '.', '_' or '-'): "
+                    + (if isNull (box p.Name) then "<null>" else Json.escape p.Name)
+                )
+            elif p.Major < 0 || p.Minor < 0 then
+                Error("profile version is negative: " + string p.Major + "." + string p.Minor)
+            else
+                Ok(render p)
 
         /// The base `core` profile — `core@1.0`.
         let coreV1: Profile = { Name = "core"; Major = 1; Minor = 0 }
 
-        /// Parse `<name>@<major>.<minor>`. Names a typed `Error` on any malformed shape — the
-        /// same envelope discipline as the parser (no exceptions escape).
+        /// Parse `<name>@<major>.<minor>` — the canonical form and nothing else (the grammar
+        /// above). Names a typed `Error` on any other shape — the same envelope discipline as the
+        /// parser (no exceptions escape).
         let tryParse (s: string) : Result<Profile, string> =
             let at = s.LastIndexOf '@'
 
@@ -1131,23 +1385,37 @@ module Versioning =
                 let ver = s.Substring(at + 1)
                 let parts = ver.Split('.')
 
-                // The wire's one integer reader (invariant culture, a sign and digits only). What
-                // it still accepts that `render` never emits (`01`) is Phase 306's grammar bijection.
+                // A canonical number: digits only, no sign, and no leading zero — so `01`, `+1`,
+                // `-0` and a digit run followed by anything are refused before the wire's one
+                // integer reader sees them; the reader then bounds the value to Int32.
                 let parseInt (t: string) =
-                    match Json.readInt32 t with
-                    | Some v when v >= 0 -> Some v
-                    | _ -> None
+                    let canonical =
+                        t.Length > 0
+                        && t |> Seq.forall (fun c -> c >= '0' && c <= '9')
+                        && (t.Length = 1 || t.[0] <> '0')
 
-                match parts with
-                | [| maj; min |] ->
-                    match parseInt maj, parseInt min with
-                    | Some major, Some minor ->
-                        Ok
-                            { Name = name
-                              Major = major
-                              Minor = minor }
-                    | _ -> Error("malformed profile version (expected non-negative '<major>.<minor>'): " + ver)
-                | _ -> Error("malformed profile version (expected '<major>.<minor>'): " + ver)
+                    if canonical then Json.readInt32 t else None
+
+                if not (isValidName name) then
+                    Error(
+                        "malformed profile name (expected an ASCII letter, then letters, digits, '.', '_' or '-'): "
+                        + Json.escape name
+                    )
+                else
+                    match parts with
+                    | [| maj; min |] ->
+                        match parseInt maj, parseInt min with
+                        | Some major, Some minor ->
+                            Ok
+                                { Name = name
+                                  Major = major
+                                  Minor = minor }
+                        | _ ->
+                            Error(
+                                "malformed profile version (expected '<major>.<minor>', each a canonical non-negative integer within Int32): "
+                                + Json.escape ver
+                            )
+                    | _ -> Error("malformed profile version (expected '<major>.<minor>'): " + Json.escape ver)
 
     /// The capability-negotiation outcome of a consumer reading an artifact's authored profile.
     type Compatibility =
@@ -1190,8 +1458,17 @@ module Versioning =
     let encode (env: Envelope) : JVal =
         JObj [ payloadKey, env.Payload; profileKey, JStr(Profile.render env.Profile) ]
 
-    /// Render an envelope to canonical wire bytes.
+    /// Render an envelope to canonical wire bytes. **Assumes a valid profile and a payload
+    /// `Canon.tryRender` accepts** — `tryRender` is the guarded entry point.
     let render (env: Envelope) : string = Canon.render (encode env)
+
+    /// `render`, guarded (Phase 306): the profile through `Profile.tryRender`, then the whole
+    /// envelope through `Canon.tryRender` — so an envelope this returns `Ok` for is one `parse`
+    /// reads back to the same profile. Over a valid profile and an accepted payload it is exactly
+    /// `Ok (render env)`.
+    let tryRender (env: Envelope) : Result<string, string> =
+        Profile.tryRender env.Profile
+        |> Result.bind (fun _ -> Canon.tryRender (encode env))
 
     /// Decode an envelope JVal — reads `$profile` (parsed) + the verbatim `$payload`.
     let decode (el: JVal) : Result<Envelope, string> =
@@ -1289,16 +1566,46 @@ module Versioning =
     /// untouched; an additive bumps the minor (same major — older consumers stay compatible); a
     /// breaking change bumps the major and resets the minor (a `/vN/` boundary — older consumers
     /// become `Foreign`).
-    let bump (baseProfile: Profile) (ev: Evolution) : Profile =
+    ///
+    /// REFUSES AT THE EDGE OF THE RANGE (Phase 306): a counter is an `int`, and one already at
+    /// `Int32.MaxValue` has no successor the wire can carry. `baseProfile.Minor + 1` there wrapped
+    /// to a NEGATIVE minor — a profile `render` then wrote as `core@1.-2147483648` and `tryParse`
+    /// refused, and one `negotiate` read as older than every consumer. The refusal names the
+    /// counter; `bump` is the saturating form for a caller with no error channel.
+    let tryBump (baseProfile: Profile) (ev: Evolution) : Result<Profile, string> =
         match ev with
-        | Additive [] -> baseProfile
+        | Additive [] -> Ok baseProfile
         | Additive _ ->
-            { baseProfile with
-                Minor = baseProfile.Minor + 1 }
+            if baseProfile.Minor = System.Int32.MaxValue then
+                Error(
+                    "the minor of "
+                    + Profile.render baseProfile
+                    + " is at Int32.MaxValue and cannot be bumped"
+                )
+            else
+                Ok
+                    { baseProfile with
+                        Minor = baseProfile.Minor + 1 }
         | Breaking _ ->
-            { baseProfile with
-                Major = baseProfile.Major + 1
-                Minor = 0 }
+            if baseProfile.Major = System.Int32.MaxValue then
+                Error(
+                    "the major of "
+                    + Profile.render baseProfile
+                    + " is at Int32.MaxValue and cannot be bumped"
+                )
+            else
+                Ok
+                    { baseProfile with
+                        Major = baseProfile.Major + 1
+                        Minor = 0 }
+
+    /// `tryBump`, SATURATING where it refuses: a counter at `Int32.MaxValue` stays there rather
+    /// than wrapping negative, and the profile comes back unchanged. Everywhere below that edge it
+    /// is the bump it always was. A caller that must know the bump did not happen uses `tryBump`.
+    let bump (baseProfile: Profile) (ev: Evolution) : Profile =
+        match tryBump baseProfile ev with
+        | Ok p -> p
+        | Error _ -> baseProfile
 
 /// Conformance-corpus tooling — manifest + round-trip/reject runner + coverage gate,
 /// parameterised by a domain's codec. The methodology (not the per-kind cases) is the
@@ -1406,35 +1713,9 @@ module Corpus =
                "\uDFFF" |]
             [| for k in 0x00..0x1F -> string (char k) |]
 
-    /// Every unit of `s` pairs: a high surrogate is followed by a low one, and a low one follows a
-    /// high one — the strings the parser accepts.
-    let private isWellFormedUtf16 (s: string) : bool =
-        let rec go (k: int) =
-            if k >= s.Length then
-                true
-            else
-                let u = int s.[k]
-
-                if u >= 0xD800 && u <= 0xDBFF then
-                    k + 1 < s.Length
-                    && int s.[k + 1] >= 0xDC00
-                    && int s.[k + 1] <= 0xDFFF
-                    && go (k + 2)
-                elif u >= 0xDC00 && u <= 0xDFFF then
-                    false
-                else
-                    go (k + 1)
-
-        go 0
-
-    let rec private allStringsWellFormed (v: JVal) : bool =
-        match v with
-        | JStr s -> isWellFormedUtf16 s
-        | JArr xs -> xs |> List.forall allStringsWellFormed
-        | JObj fields ->
-            fields
-            |> List.forall (fun (k, x) -> isWellFormedUtf16 k && allStringsWellFormed x)
-        | _ -> true
+    /// Every string and member key of `v` is well-formed UTF-16 — the values the parser can hand
+    /// back (`Json.firstIllFormedString`, the scan the guarded renderers refuse on).
+    let private allStringsWellFormed (v: JVal) : bool = (Json.firstIllFormedString v).IsNone
 
     /// Generate one random valid `JVal` from `seed`, nesting no deeper than `maxDepth`.
     let private genJVal (seed: int) (maxDepth: int) : JVal =
