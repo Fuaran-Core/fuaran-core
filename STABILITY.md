@@ -3238,6 +3238,62 @@ already breaking (source). `api/Fuaran.Core.Ops.txt`, `.Validator.txt`, `.Propag
 `.Conformance.txt` are regenerated; the roster gains two families and `docs/conformance-families.md` /
 `.json` are regenerated. No wire byte moves.
 
+### A decode layer with typed, path-carrying refusals (Phase 310, DECISIONS.md D99) — ADDITIVE; a malformed optional member is now refused where it was read as absent
+
+**What changed.** `Decode`'s combinators answered `Result<_, string>`: no optional or defaulted member,
+no reader for half the `JVal` kinds, no path, no tag dispatch, no accumulation. Beside them, in
+`Fuaran.Core.Wire`:
+
+- **The refusal.** `DecodeError { Code; Path; Expected; Message }` over the closed `DecodeCode` set
+  (`InvalidJson`, `MissingField`, `WrongKind`, `UnknownTag`, `OutOfRange`, `UndeclaredMember`,
+  `LimitExceeded`, `NotAdmitted`, `SchemaFault`), a path of `PathSegment.Key` / `Index` steps from the
+  root, and the `DecodeError` module (`codes`, `codeName` / `tryCodeOfName`, `make`, `under`,
+  `within`, `reword`, `describe`, `render`, `toJson`, `resolvesIn`, `ofJsonError`). `DecodePath`
+  renders (`$["a"][0]`), resolves, and carries a path as a JSON array.
+- **The decoders.** `Decoder<'T> = JVal -> Result<'T, DecodeError>` and the `Decoder` module: `str`,
+  `int`, `float`, `bool`, `items`, `obj`, `json`; `field`, `optField` (absent → `Ok None`, present and
+  refused → the refusal), `fieldOr` (any kind, through its decoder), `at`; `list`, `mapListIndexed`,
+  `boundedList`, `listAll`; `sequence` and the accumulating `all`; `oneOf`, `tagDispatch`,
+  `kindDispatch` (a miss names every known tag); `intRange`; the strict policy `members` / `closed` /
+  `undeclared` (Phase 251's `ReadPolicy.Strict`, generalised); `parse`, `parseWith`, `ofString`,
+  `describing`, `succeed`, `fail`, `map`, `bind`, `andThen`, `wrongKind`, `missing`, `tryMember`.
+- **The refusal law and reject vectors.** `Corpus.RejectVector`, `runRejects`, `mutations` and
+  `refusalLaws`: every refusal a decoder raises over a structurally mutated encoding carries a path that
+  resolves in that document.
+- **Typed entry points beside the string ones.** `Idl.Decode.valueDetailed` / `decodeDetailed` /
+  `decodeOpDetailed` (the interpreter walks natively typed; the path runs through the vocabulary),
+  `Artifact.ofJsonDetailed` / `parseDetailed`, `Proposal.ofJsonDetailed` / `parseDetailed`,
+  `CapabilityCodec.decodeJsonDetailedWith` / `decodeDetailedWith` / `decodeInvocationDetailedWith`,
+  `CapabilityPipeline.decodeDetailed`. Each string form is the typed one's `DecodeError.describe`, and
+  answers the sentence it always answered.
+- **The codecs read through the layer, and their private readers are gone:** Proposal's
+  `field`/`str`/`intOf`/`arr`, Artifact's `atKey`/`strAt`/`arrAt`/`arrOrEmpty`, the IDL interpreter's
+  member reader, Query's `asBool` and `optIntOf`, the two strict-member copies in the capability and
+  query codecs, and the pipeline codec's second copy of the value-space codec. `Diff`'s snapshot reads
+  through the layer and stays tolerant by design. The string combinators in `Decode` (`getProp`,
+  `asString`, `asInt`, `asBool`, `asFloat`, `kindOf`, `strField`, `intField`, `tryProp`) are forwards
+  onto `Decoder`, kept for this draft and removed at the next breaking one.
+- **`conformance/decode/`**: the decode reject family (`decode-rejects.json`, its own `manifest.json`,
+  every code at the path it names over a shape grammar a host reads with its own combinators), emitted
+  by `dotnet run --project tests/Fuaran.Core.Tests -- --emit-decode`, adoption `proposed` for every host.
+
+**What breaks.** No signature. A decode BEHAVIOUR tightens on malformed input only: an optional member
+that is present and of the wrong kind is refused where the reader took it for absent and read its
+default — `QueryCodec`'s `nextPageToken`, the capability codec's `slotKind` (on a hole and on a
+`slotTree` space), every optional member and omitted-when-empty array of a proposal document, and an
+artifact's `deprecated` / `annotations` blocks when they are not objects. A document a writer produces
+never carries such a member. Every sentence a well-formed or previously refused document produced is
+unchanged.
+
+**What a consumer does.** Nothing to keep compiling. To read refusals as data, call the `…Detailed`
+form and branch on `Code`; to report where, render `Path`. A hand-written decoder moves onto `Decoder`
+and deletes its own field readers; a reader that kept a lenient optional on purpose discards the
+refusal at the call, by name.
+
+**Class: additive** (surface). `api/Fuaran.Core.Wire.txt`, `.Idl.txt` and `.Function.txt` gain
+members and types only. The malformed-optional tightening above is a behaviour change on input no
+writer emits, recorded here rather than classed.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

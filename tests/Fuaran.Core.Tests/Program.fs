@@ -1,4 +1,4 @@
-﻿module Fuaran.Core.Tests.Program
+module Fuaran.Core.Tests.Program
 
 open Expecto
 
@@ -68,6 +68,16 @@ let main argv =
         RefusalVectorTests.RefusalCorpus.write dir
         printfn "Wrote %s" (RefusalVectorTests.RefusalCorpus.vectorsPath dir)
         printfn "Wrote %s" (RefusalVectorTests.RefusalCorpus.manifestPath dir)
+        0
+    // Phase 310 — write the `decode/` family (the decode reject vectors: every decode code at the path
+    // it names, over a shape grammar each host reads with its own combinators); same target rule as
+    // `--emit-laws`:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-decode [<dir>]
+    | "--emit-decode" :: rest ->
+        let dir = emitTarget rest
+        DecodeLayerTests.DecodeRejectCorpus.write dir
+        printfn "Wrote %s" (DecodeLayerTests.DecodeRejectCorpus.vectorsPath dir)
+        printfn "Wrote %s" (DecodeLayerTests.DecodeRejectCorpus.manifestPath dir)
         0
     // Phase 184 — write the law-family roster's two generated artefacts (the human-readable
     // `docs/conformance-families.md` and the machine-readable `docs/conformance-families.json`

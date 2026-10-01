@@ -82,7 +82,9 @@ method Fuaran.Core.Idl.Artifact.identityOfJson(Fuaran.Core.JVal) : Microsoft.FSh
 method Fuaran.Core.Idl.Artifact.json(Fuaran.Core.Idl.Idl) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.Artifact.jsonWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.Artifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
+method Fuaran.Core.Idl.Artifact.ofJsonDetailed(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Artifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
+method Fuaran.Core.Idl.Artifact.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Artifact.render(Fuaran.Core.Idl.Idl) : System.String
 method Fuaran.Core.Idl.Artifact.renderJson(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Idl.Artifact.renderWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : System.String
@@ -94,8 +96,11 @@ method Fuaran.Core.Idl.Declare.errors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Co
 method Fuaran.Core.Idl.Declare.hostedWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.Declare.wireShapeErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.Decode.decode(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
+method Fuaran.Core.Idl.Decode.decodeDetailed(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Decode.decodeOp(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
+method Fuaran.Core.Idl.Decode.decodeOpDetailed(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Decode.value(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, System.String>
+method Fuaran.Core.Idl.Decode.valueDetailed(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlValue, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.Encode.encode(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Idl.Encode.encodeNode(Fuaran.Core.Idl.Idl, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.IdlValue>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.Idl.Encode.encodeOp(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
@@ -105,7 +110,9 @@ method Fuaran.Core.Idl.IdlEnum.CaseOf(System.String) : Microsoft.FSharp.Core.FSh
 method Fuaran.Core.Idl.IdlEnum.WireOf(System.String) : System.String
 method Fuaran.Core.Idl.ProposalModule.applyDelta(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalDelta>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Idl, System.String>
 method Fuaran.Core.Idl.ProposalModule.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, System.String>
+method Fuaran.Core.Idl.ProposalModule.ofJsonDetailed(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.ProposalModule.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, System.String>
+method Fuaran.Core.Idl.ProposalModule.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.ProposalModule.touchedKinds(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalDelta>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.ProposalModule.validate(Fuaran.Core.Idl.Proposal) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.Sample.sampleNodes(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlValue>

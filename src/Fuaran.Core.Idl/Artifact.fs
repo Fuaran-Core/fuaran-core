@@ -619,55 +619,105 @@ module Artifact =
     // fails it.
     // -----------------------------------------------------------------------
 
-    let private atKey (name: string) (v: JVal) : JVal option =
+    // Phase 310 — every member is read through the typed decode layer, so a refusal carries a
+    // code and the path to the value at fault ([[ofJsonDetailed]], [[parseDetailed]]), and the
+    // string forms answer the sentence this reader has always answered.
+
+    let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
+        r |> Result.mapError (DecodeError.under step)
+
+    /// A refusal at the value being read, with this reader's own sentence.
+    let private refuse (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
+        Error(DecodeError.make code expected message)
+
+    /// A read whose OWN refusal (not one from inside it) carries `message`.
+    let private scalar (message: string) (d: Decoder<'T>) : Decoder<'T> =
+        fun x -> d x |> Result.mapError (DecodeError.reword (fun _ -> message))
+
+    /// The required member `name`, read with `d`; absent is `MissingField` with `missing`, and a
+    /// value that is not an object at all carries the same sentence as `WrongKind`.
+    let private need (name: string) (missing: string) (d: Decoder<'T>) (v: JVal) : Result<'T, DecodeError> =
         match v with
-        | JObj fields -> fields |> List.tryPick (fun (n, x) -> if n = name then Some x else None)
-        | _ -> None
+        | JObj _ ->
+            match Decoder.tryMember name v with
+            | None ->
+                Error(
+                    { Decoder.missing name with
+                        Message = missing }
+                )
+            | Some x -> d x |> under (PathSegment.Key name)
+        | other ->
+            Error(
+                { Decoder.wrongKind "object" other with
+                    Message = missing }
+            )
 
-    let private strAt (name: string) (v: JVal) : Result<string, string> =
-        match atKey name v with
-        | Some(JStr s) -> Ok s
-        | Some _ -> Error("'" + name + "' is not a string")
-        | None -> Error("missing '" + name + "'")
+    let private strAt (name: string) (v: JVal) : Result<string, DecodeError> =
+        need name ("missing '" + name + "'") (scalar ("'" + name + "' is not a string") Decoder.str) v
 
-    let private arrAt (name: string) (v: JVal) : Result<JVal list, string> =
-        match atKey name v with
-        | Some(JArr xs) -> Ok xs
-        | Some _ -> Error("'" + name + "' is not an array")
-        | None -> Error("missing '" + name + "'")
+    /// The items of an array, each read with `f`; a non-array carries `notArray`.
+    let private itemsOf (notArray: string) (f: Decoder<'a>) : Decoder<'a list> =
+        fun x ->
+            match x with
+            | JArr _ -> Decoder.list f x
+            | other ->
+                Error(
+                    { Decoder.wrongKind "array" other with
+                        Message = notArray }
+                )
+
+    let private arrAt (name: string) (f: Decoder<'a>) (v: JVal) : Result<'a list, DecodeError> =
+        need name ("missing '" + name + "'") (itemsOf ("'" + name + "' is not an array") f) v
 
     /// An array key that is OMITTED when empty (`params`, `args`, `fields`) reads as
     /// empty rather than as an error — the projection's omit-when-empty rule, read back.
-    let private arrOrEmpty (name: string) (v: JVal) : Result<JVal list, string> =
-        match atKey name v with
+    let private arrOrEmpty (name: string) (f: Decoder<'a>) (v: JVal) : Result<'a list, DecodeError> =
+        match Decoder.tryMember name v with
         | None -> Ok []
-        | Some(JArr xs) -> Ok xs
-        | Some _ -> Error("'" + name + "' is not an array")
+        | Some x -> itemsOf ("'" + name + "' is not an array") f x |> under (PathSegment.Key name)
 
-    let private discriminator (v: JVal) : Result<string, string> = strAt "$type" v
+    let private discriminator (v: JVal) : Result<string, DecodeError> = strAt "$type" v
 
-    let private sequence (results: Result<'a, string> list) : Result<'a list, string> =
-        (Ok [], results)
-        ||> List.fold (fun acc r ->
-            match acc, r with
-            | Error e, _ -> Error e
-            | _, Error e -> Error e
-            | Ok xs, Ok x -> Ok(x :: xs))
-        |> Result.map List.rev
-
-    let private traverse (f: JVal -> Result<'a, string>) (xs: JVal list) : Result<'a list, string> =
-        xs |> List.map f |> sequence
+    /// A discriminator naming no case of the position, at the discriminator.
+    let private unknownTag (known: string list) (message: string) : Result<'T, DecodeError> =
+        refuse
+            DecodeCode.UnknownTag
+            ("one of " + (known |> List.map (fun k -> "'" + k + "'") |> String.concat ", "))
+            message
+        |> under (PathSegment.Key "$type")
 
     /// The host-surface block of a `fn` / `hosted` type — the three verbatim host
     /// strings each carries. Named so the two arms report the same way.
-    let private hostSurface (keys: string list) (v: JVal) : Result<string list, string> =
-        match atKey "hostSurface" v with
-        | None -> Error("'" + (defaultArg (List.tryHead keys) "?") + "' type has no 'hostSurface'")
-        | Some block -> keys |> List.map (fun k -> strAt k block) |> sequence
+    let private hostSurface (keys: string list) (v: JVal) : Result<string list, DecodeError> =
+        need
+            "hostSurface"
+            ("'" + (defaultArg (List.tryHead keys) "?") + "' type has no 'hostSurface'")
+            (fun block -> Decoder.sequence (keys |> List.map (fun k -> strAt k)) block)
+            v
 
-    let rec private readType (v: JVal) : Result<IdlType, string> =
+    let private typeTags =
+        [ "str"
+          "int"
+          "bool"
+          "float"
+          "node"
+          "kind"
+          "op"
+          "json"
+          "closure"
+          "opaque"
+          "enum"
+          "record"
+          "var"
+          "list"
+          "map"
+          "union"
+          "fn"
+          "hosted" ]
+
+    let rec private readType (v: JVal) : Result<IdlType, DecodeError> =
         match discriminator v with
-        | Error e -> Error("type: " + e)
+        | Error e -> Error(DecodeError.reword (fun m -> "type: " + m) e)
         | Ok t ->
             match t with
             | "str" -> Ok TStr
@@ -686,20 +736,11 @@ module Artifact =
             | "enum" -> strAt "name" v |> Result.map TEnum
             | "record" -> strAt "name" v |> Result.map TRecord
             | "var" -> strAt "name" v |> Result.map TVar
-            | "list" ->
-                match atKey "of" v with
-                | Some inner -> readType inner |> Result.map TList
-                | None -> Error "list type has no 'of'"
-            | "map" ->
-                match atKey "values" v with
-                | Some inner -> readType inner |> Result.map TMap
-                | None -> Error "map type has no 'values'"
+            | "list" -> need "of" "list type has no 'of'" readType v |> Result.map TList
+            | "map" -> need "values" "map type has no 'values'" readType v |> Result.map TMap
             | "union" ->
                 strAt "name" v
-                |> Result.bind (fun n ->
-                    arrOrEmpty "args" v
-                    |> Result.bind (traverse readType)
-                    |> Result.map (fun args -> TUnion(n, args)))
+                |> Result.bind (fun n -> arrOrEmpty "args" readType v |> Result.map (fun args -> TUnion(n, args)))
             | "fn" ->
                 hostSurface [ "fsharp"; "typescript"; "placeholder" ] v
                 |> Result.bind (function
@@ -710,23 +751,30 @@ module Artifact =
                                   TypeScript = ts
                                   Placeholder = ph }
                         )
-                    | _ -> Error "fn type has an incomplete 'hostSurface'")
+                    | _ -> refuse DecodeCode.SchemaFault "three host strings" "fn type has an incomplete 'hostSurface'")
             | "hosted" ->
                 hostSurface [ "fsharp"; "encode"; "decode" ] v
                 |> Result.bind (function
                     | [ fs; enc; dec ] ->
                         let wire =
-                            match atKey "wire" v with
+                            match Decoder.tryMember "wire" v with
                             | None
                             | Some(JStr "json") -> Ok None
-                            | Some(JObj _ as w) -> readType w |> Result.map Some
-                            | Some _ -> Error "hosted type's 'wire' is neither \"json\" nor a type"
+                            | Some(JObj _ as w) -> readType w |> Result.map Some |> under (PathSegment.Key "wire")
+                            | Some _ ->
+                                refuse
+                                    DecodeCode.WrongKind
+                                    "\"json\" or a type"
+                                    "hosted type's 'wire' is neither \"json\" nor a type"
+                                |> under (PathSegment.Key "wire")
 
                         let format =
-                            match atKey "format" v with
+                            match Decoder.tryMember "format" v with
                             | None -> Ok None
                             | Some(JStr f) -> Ok(Some f)
-                            | Some _ -> Error "hosted type's 'format' is not a string"
+                            | Some _ ->
+                                refuse DecodeCode.WrongKind "string" "hosted type's 'format' is not a string"
+                                |> under (PathSegment.Key "format")
 
                         match wire, format with
                         | Error e, _
@@ -740,43 +788,31 @@ module Artifact =
                                       Wire = w
                                       Format = f }
                             )
-                    | _ -> Error "hosted type has an incomplete 'hostSurface'")
-            | other -> Error("unknown type '" + other + "'")
+                    | _ ->
+                        refuse DecodeCode.SchemaFault "three host strings" "hosted type has an incomplete 'hostSurface'")
+            | other -> unknownTag typeTags ("unknown type '" + other + "'")
 
-    let rec private readValue (v: JVal) : Result<IdlValue, string> =
+    let rec private readValue (v: JVal) : Result<IdlValue, DecodeError> =
         match discriminator v with
-        | Error e -> Error("value: " + e)
+        | Error e -> Error(DecodeError.reword (fun m -> "value: " + m) e)
         | Ok t ->
+            let value (message: string) (d: Decoder<'T>) =
+                need "value" message (scalar message d) v
+
             match t with
             | "absent" -> Ok VAbsent
             | "closure" -> Ok VClosure
             | "opaque" -> Ok VOpaque
-            | "str" ->
-                match atKey "value" v with
-                | Some(JStr s) -> Ok(VStr s)
-                | _ -> Error "str value has no string 'value'"
-            | "int" ->
-                match atKey "value" v with
-                | Some(JInt i) -> Ok(VInt i)
-                | _ -> Error "int value has no integer 'value'"
-            | "bool" ->
-                match atKey "value" v with
-                | Some(JBool b) -> Ok(VBool b)
-                | _ -> Error "bool value has no boolean 'value'"
+            | "str" -> value "str value has no string 'value'" Decoder.str |> Result.map VStr
+            | "int" -> value "int value has no integer 'value'" Decoder.int |> Result.map VInt
+            | "bool" -> value "bool value has no boolean 'value'" Decoder.bool |> Result.map VBool
             // A whole-valued float renders with no `.` and no exponent, so the parser
-            // hands it back as `JInt`. Reading only `JFloat` here would refuse every
-            // `VFloat 1.0` the projection itself wrote.
-            | "float" ->
-                match atKey "value" v with
-                | Some(JFloat f) -> Ok(VFloat f)
-                | Some(JInt i) -> Ok(VFloat(float i))
-                | _ -> Error "float value has no numeric 'value'"
+            // hands it back as `JInt`. `Decoder.float` reads both, or this would refuse
+            // every `VFloat 1.0` the projection itself wrote.
+            | "float" -> value "float value has no numeric 'value'" Decoder.float |> Result.map VFloat
             | "enum" -> strAt "case" v |> Result.map VEnum
-            | "json" ->
-                match atKey "value" v with
-                | Some j -> Ok(VJson j)
-                | None -> Error "json value has no 'value'"
-            | "list" -> arrAt "items" v |> Result.bind (traverse readValue) |> Result.map VList
+            | "json" -> need "value" "json value has no 'value'" Decoder.json v |> Result.map VJson
+            | "list" -> arrAt "items" readValue v |> Result.map VList
             | "union" ->
                 strAt "tag" v
                 |> Result.bind (fun tag -> readNamed "fields" v |> Result.map (fun fields -> VUnion(tag, fields)))
@@ -793,72 +829,79 @@ module Artifact =
                     |> Result.bind (fun kindTag ->
                         readNamed "fields" v
                         |> Result.bind (fun fields ->
-                            match atKey "envelope" v with
+                            match Decoder.tryMember "envelope" v with
                             | None -> Ok(VNode(id, kindTag, fields))
                             | Some _ ->
                                 readNamed "envelope" v
                                 |> Result.map (fun env -> VNodeEnv(id, env, kindTag, fields)))))
-            | other -> Error("unknown value kind '" + other + "'")
+            | other ->
+                unknownTag
+                    [ "absent"
+                      "closure"
+                      "opaque"
+                      "str"
+                      "int"
+                      "bool"
+                      "float"
+                      "enum"
+                      "json"
+                      "list"
+                      "union"
+                      "record"
+                      "map"
+                      "node" ]
+                    ("unknown value kind '" + other + "'")
 
-    and private readNamed (key: string) (owner: JVal) : Result<(string * IdlValue) list, string> =
-        arrAt key owner
-        |> Result.bind (
-            traverse (fun entry ->
+    and private readNamed (key: string) (owner: JVal) : Result<(string * IdlValue) list, DecodeError> =
+        arrAt
+            key
+            (fun entry ->
                 strAt "name" entry
                 |> Result.bind (fun name ->
-                    match atKey "value" entry with
-                    | Some value -> readValue value |> Result.map (fun v -> name, v)
-                    | None -> Error("named value '" + name + "' has no 'value'")))
-        )
+                    need "value" ("named value '" + name + "' has no 'value'") readValue entry
+                    |> Result.map (fun v -> name, v)))
+            owner
 
-    let private readOptionality (v: JVal) : Result<Optionality, string> =
+    let private readOptionality (v: JVal) : Result<Optionality, DecodeError> =
         match discriminator v with
-        | Error e -> Error("optionality: " + e)
+        | Error e -> Error(DecodeError.reword (fun m -> "optionality: " + m) e)
         | Ok "required" -> Ok Required
         | Ok "optional" -> Ok Optional
         | Ok "hostOnly" -> Ok HostOnly
         | Ok "omitDefault" ->
-            match atKey "default" v with
-            | Some d -> readValue d |> Result.map OmitDefault
-            | None -> Error "omitDefault has no 'default'"
-        | Ok other -> Error("unknown optionality '" + other + "'")
+            need "default" "omitDefault has no 'default'" readValue v
+            |> Result.map OmitDefault
+        | Ok other ->
+            unknownTag [ "required"; "optional"; "hostOnly"; "omitDefault" ] ("unknown optionality '" + other + "'")
 
     /// One annotation-set OBJECT — the value under an `annotations` key, and (Phase 119)
     /// the value under each entry of an enum's `caseAnnotations` map. The inverse of
     /// [[annotationBlock]], and split out for the same reason it was.
-    let private readAnnotationBlock (block: JVal) : Result<Annotations, string> =
-        let optStr name =
-            match atKey name block with
-            | None -> Ok None
-            | Some(JStr s) -> Ok(Some s)
-            | Some _ -> Error("'" + name + "' is not a string")
+    let private readAnnotationBlock (block: JVal) : Result<Annotations, DecodeError> =
+        let optStr (message: string) (name: string) (v: JVal) =
+            Decoder.optField name (scalar message Decoder.str) v
 
         let deprecated =
-            match atKey "deprecated" block with
+            match Decoder.tryMember "deprecated" block with
             | None -> Ok None
             | Some d ->
                 let slot name =
-                    match atKey name d with
-                    | None -> Ok None
-                    | Some(JStr s) -> Ok(Some s)
-                    | Some _ -> Error("deprecated '" + name + "' is not a string")
+                    optStr ("deprecated '" + name + "' is not a string") name d
 
                 slot "replacement"
                 |> Result.bind (fun r -> slot "message" |> Result.map (fun m -> Some { Replacement = r; Message = m }))
+                |> under (PathSegment.Key "deprecated")
 
         let inProcessOnly =
-            match atKey "inProcessOnly" block with
-            | None -> Ok false
-            | Some(JBool b) -> Ok b
-            | Some _ -> Error "'inProcessOnly' is not a boolean"
+            Decoder.fieldOr "inProcessOnly" false (scalar "'inProcessOnly' is not a boolean" Decoder.bool) block
 
         deprecated
         |> Result.bind (fun d ->
             inProcessOnly
             |> Result.bind (fun ipo ->
-                optStr "since"
+                optStr "'since' is not a string" "since" block
                 |> Result.bind (fun since ->
-                    optStr "doc"
+                    optStr "'doc' is not a string" "doc" block
                     |> Result.map (fun doc ->
                         { Deprecated = d
                           InProcessOnly = ipo
@@ -868,21 +911,27 @@ module Artifact =
     /// The annotation set under an owner's `annotations` key, or [[Annotations.Empty]]
     /// when the key is absent — the projection omits an empty set entirely, so absence
     /// is the default and not a gap.
-    let private readAnnotations (owner: JVal) : Result<Annotations, string> =
-        match atKey "annotations" owner with
-        | None -> Ok Annotations.Empty
-        | Some block -> readAnnotationBlock block
+    let private readAnnotations (owner: JVal) : Result<Annotations, DecodeError> =
+        Decoder.fieldOr "annotations" Annotations.Empty readAnnotationBlock owner
 
-    let private readField (v: JVal) : Result<IdlField, string> =
+    let private readField (v: JVal) : Result<IdlField, DecodeError> =
         strAt "name" v
         |> Result.bind (fun name ->
-            match atKey "type" v, atKey "optionality" v with
-            | None, _ -> Error("field '" + name + "' has no 'type'")
-            | _, None -> Error("field '" + name + "' has no 'optionality'")
-            | Some t, Some o ->
-                readType t
+            match Decoder.tryMember "type" v, Decoder.tryMember "optionality" v with
+            | None, _ ->
+                Error(
+                    { Decoder.missing "type" with
+                        Message = "field '" + name + "' has no 'type'" }
+                )
+            | _, None ->
+                Error(
+                    { Decoder.missing "optionality" with
+                        Message = "field '" + name + "' has no 'optionality'" }
+                )
+            | Some _, Some _ ->
+                need "type" "" readType v
                 |> Result.bind (fun ty ->
-                    readOptionality o
+                    need "optionality" "" readOptionality v
                     |> Result.bind (fun opt ->
                         readAnnotations v
                         |> Result.map (fun ann ->
@@ -891,10 +940,9 @@ module Artifact =
                               Opt = opt
                               Annotations = ann }))))
 
-    let private readFields (owner: JVal) : Result<IdlField list, string> =
-        arrAt "fields" owner |> Result.bind (traverse readField)
+    let private readFields (owner: JVal) : Result<IdlField list, DecodeError> = arrAt "fields" readField owner
 
-    let private readKind (v: JVal) : Result<IdlKind, string> =
+    let private readKind (v: JVal) : Result<IdlKind, DecodeError> =
         strAt "tag" v
         |> Result.bind (fun tag ->
             strAt "category" v
@@ -908,19 +956,14 @@ module Artifact =
                           Fields = fields
                           Annotations = ann }))))
 
-    let private readUnion (v: JVal) : Result<IdlUnion, string> =
+    let private readUnion (v: JVal) : Result<IdlUnion, DecodeError> =
         strAt "name" v
         |> Result.bind (fun name ->
-            arrOrEmpty "params" v
-            |> Result.bind (
-                traverse (function
-                    | JStr s -> Ok s
-                    | _ -> Error("union '" + name + "' has a non-string type parameter"))
-            )
+            arrOrEmpty "params" (scalar ("union '" + name + "' has a non-string type parameter") Decoder.str) v
             |> Result.bind (fun ps ->
-                arrAt "cases" v
-                |> Result.bind (
-                    traverse (fun c ->
+                arrAt
+                    "cases"
+                    (fun c ->
                         strAt "tag" c
                         |> Result.bind (fun tag ->
                             readFields c
@@ -930,7 +973,7 @@ module Artifact =
                                     { Tag = tag
                                       Fields = fields
                                       Annotations = ann }))))
-                )
+                    v
                 |> Result.map (fun cases ->
                     // `transparentCase` is DERIVED from the vocabulary's declared
                     // [[HardenPolicy.TransparentUnions]], which `readHarden` reads
@@ -942,13 +985,8 @@ module Artifact =
                       Params = ps
                       Cases = cases })))
 
-    let private readStrings (name: string) (v: JVal) : Result<string list, string> =
-        arrAt name v
-        |> Result.bind (
-            traverse (function
-                | JStr s -> Ok s
-                | _ -> Error("'" + name + "' has a non-string entry"))
-        )
+    let private readStrings (name: string) (v: JVal) : Result<string list, DecodeError> =
+        arrAt name (scalar ("'" + name + "' has a non-string entry") Decoder.str) v
 
     /// `cases` is always the WIRE contract; `hostCases` appears only for a wire-mapped
     /// enum. So an entry with no `hostCases` is the identity mapping (`Wires = []`),
@@ -958,31 +996,46 @@ module Artifact =
     /// does not declare is an ERROR rather than a silently dropped entry: the round-trip
     /// law is what this reader exists to satisfy, and a hand-edited artifact naming a
     /// case that is not there is the one thing the sparse shape can get wrong.
-    let private readCaseAnnotations (e: IdlEnum) (v: JVal) : Result<(string * Annotations) list, string> =
-        match atKey "caseAnnotations" v with
+    let private readCaseAnnotations (e: IdlEnum) (v: JVal) : Result<(string * Annotations) list, DecodeError> =
+        match Decoder.tryMember "caseAnnotations" v with
         | None -> Ok []
         | Some(JObj entries) ->
             entries
             |> List.map (fun (wire, block) ->
                 match e.CaseOf wire with
                 | None ->
-                    Error(
-                        "enum '"
-                        + e.Name
-                        + "': 'caseAnnotations' names case '"
-                        + wire
-                        + "', which it does not declare"
-                    )
-                | Some case -> readAnnotationBlock block |> Result.map (fun a -> case, a))
-            |> sequence
-        | Some _ -> Error("enum '" + e.Name + "': 'caseAnnotations' is not an object")
+                    refuse
+                        DecodeCode.UnknownTag
+                        "a case the enum declares"
+                        ("enum '"
+                         + e.Name
+                         + "': 'caseAnnotations' names case '"
+                         + wire
+                         + "', which it does not declare")
+                    |> under (PathSegment.Key wire)
+                | Some case ->
+                    readAnnotationBlock block
+                    |> Result.map (fun a -> case, a)
+                    |> under (PathSegment.Key wire))
+            |> List.fold
+                (fun acc r ->
+                    match acc, r with
+                    | Error e, _ -> Error e
+                    | _, Error e -> Error e
+                    | Ok xs, Ok x -> Ok(x :: xs))
+                (Ok [])
+            |> Result.map List.rev
+            |> under (PathSegment.Key "caseAnnotations")
+        | Some _ ->
+            refuse DecodeCode.WrongKind "object" ("enum '" + e.Name + "': 'caseAnnotations' is not an object")
+            |> under (PathSegment.Key "caseAnnotations")
 
-    let private readEnum (v: JVal) : Result<IdlEnum, string> =
+    let private readEnum (v: JVal) : Result<IdlEnum, DecodeError> =
         strAt "name" v
         |> Result.bind (fun name ->
             readStrings "cases" v
             |> Result.bind (fun wireCases ->
-                match atKey "hostCases" v with
+                match Decoder.tryMember "hostCases" v with
                 | None ->
                     Ok
                         { Name = name
@@ -999,7 +1052,11 @@ module Artifact =
                                   Wires = wireCases
                                   CaseAnnotations = [] }
                         else
-                            Error("enum '" + name + "': 'hostCases' and 'cases' differ in length")))
+                            refuse
+                                DecodeCode.OutOfRange
+                                (string (List.length wireCases) + " host cases")
+                                ("enum '" + name + "': 'hostCases' and 'cases' differ in length")
+                            |> under (PathSegment.Key "hostCases")))
             // The case↔wire mapping has to be in hand before an entry keyed on a wire
             // string can be resolved, so the annotations are read into the enum rather
             // than alongside it.
@@ -1007,31 +1064,26 @@ module Artifact =
                 readCaseAnnotations e v
                 |> Result.map (fun anns -> { e with CaseAnnotations = anns })))
 
-    let private readRecord (v: JVal) : Result<IdlRecord, string> =
+    let private readRecord (v: JVal) : Result<IdlRecord, DecodeError> =
         strAt "name" v
         |> Result.bind (fun name -> readFields v |> Result.map (fun fields -> { Name = name; Fields = fields }))
 
-    let private readDefault (v: JVal) : Result<IdlDefault, string> =
+    let private readDefault (v: JVal) : Result<IdlDefault, DecodeError> =
         strAt "kind" v
         |> Result.bind (fun kind ->
             strAt "field" v
             |> Result.bind (fun field ->
-                match atKey "value" v with
-                | None -> Error("default " + kind + "." + field + " has no 'value'")
-                | Some value ->
-                    readValue value
-                    |> Result.map (fun value ->
-                        { Kind = kind
-                          Field = field
-                          Value = value })))
+                need "value" ("default " + kind + "." + field + " has no 'value'") readValue v
+                |> Result.map (fun value ->
+                    { Kind = kind
+                      Field = field
+                      Value = value })))
 
     /// The declared wire shape. Absent means [[WireShape.Default]] — the projection
     /// omits the block when it is the default, so every `$type`-nested vocabulary's
     /// artifact reads back unchanged.
-    let private readWire (root: JVal) : Result<WireShape, string> =
-        match atKey "wire" root with
-        | None -> Ok WireShape.Default
-        | Some block ->
+    let private readWire (root: JVal) : Result<WireShape, DecodeError> =
+        let shape (block: JVal) =
             strAt "discriminator" block
             |> Result.bind (fun disc ->
                 strAt "nodeEnvelope" block
@@ -1042,13 +1094,23 @@ module Artifact =
                             match env with
                             | "nestedKind" -> Ok NodeEnvelopeShape.NestedKind
                             | "flatKind" -> Ok NodeEnvelopeShape.FlatKind
-                            | other -> Error("unknown nodeEnvelope '" + other + "'")
+                            | other ->
+                                refuse
+                                    DecodeCode.UnknownTag
+                                    "one of 'nestedKind', 'flatKind'"
+                                    ("unknown nodeEnvelope '" + other + "'")
+                                |> under (PathSegment.Key "nodeEnvelope")
 
                         let keyOrder =
                             match order with
                             | "sorted" -> Ok KeyOrder.Sorted
                             | "declared" -> Ok KeyOrder.Declared
-                            | other -> Error("unknown keyOrder '" + other + "'")
+                            | other ->
+                                refuse
+                                    DecodeCode.UnknownTag
+                                    "one of 'sorted', 'declared'"
+                                    ("unknown keyOrder '" + other + "'")
+                                |> under (PathSegment.Key "keyOrder")
 
                         envelope
                         |> Result.bind (fun e ->
@@ -1057,6 +1119,8 @@ module Artifact =
                                 { Discriminator = disc
                                   NodeEnvelope = e
                                   KeyOrder = k })))))
+
+        Decoder.fieldOr "wire" WireShape.Default shape root
 
     /// The declared hardening vocabulary. Absent means [[HardenPolicy.Undeclared]] —
     /// an artifact that names no hardening tokens has not named them, and a hardening
@@ -1079,19 +1143,17 @@ module Artifact =
     ///
     /// `IdlArtifactTests`' reader-flip family is the guard; read D40 before changing it
     /// back.
-    let private readHarden (root: JVal) : Result<HardenPolicy, string> =
-        match atKey "harden" root with
-        | None -> Ok HardenPolicy.Undeclared
-        | Some block ->
+    let private readHarden (root: JVal) : Result<HardenPolicy, DecodeError> =
+        let policy (block: JVal) =
             let str name = strAt name block
 
             let transparent =
-                arrAt "transparentUnions" block
-                |> Result.bind (
-                    traverse (fun e ->
+                arrAt
+                    "transparentUnions"
+                    (fun e ->
                         strAt "union" e
                         |> Result.bind (fun u -> strAt "case" e |> Result.map (fun c -> u, c)))
-                )
+                    block
 
             str "gatedKind"
             |> Result.bind (fun gated ->
@@ -1118,20 +1180,26 @@ module Artifact =
                                               ValueLiteralField = valueField
                                               TransparentUnions = unions }))))))))
 
+        Decoder.fieldOr "harden" HardenPolicy.Undeclared policy root
+
     /// Phase 292 — a read vocabulary is VALIDATED before anyone receives it: `idl.json` is
     /// untrusted input (DECISIONS D95), and a hand-edited one could otherwise carry a quote in
     /// its discriminator, a line break in an annotation or a dangling type name straight to
-    /// an emitter. Every error is named, not just the first, so one edit fixes them all.
-    let private validated (idl: Idl) : Result<Idl, string> =
+    /// an emitter. Every error is named, not just the first, so one edit fixes them all. A
+    /// vocabulary that does not declare well is the document's fault as a whole, so its
+    /// refusal is `SchemaFault` at the root.
+    let private validated (idl: Idl) : Result<Idl, DecodeError> =
         match Declare.errors idl with
         | [] -> Ok idl
         | errs ->
-            Error(
-                sprintf "idl.json declares a vocabulary that is not well-formed (%d error(s)):\n" (List.length errs)
-                + (errs |> List.map (fun e -> "  - " + e) |> String.concat "\n")
-            )
+            refuse
+                DecodeCode.SchemaFault
+                "a well-formed vocabulary"
+                (sprintf "idl.json declares a vocabulary that is not well-formed (%d error(s)):\n" (List.length errs)
+                 + (errs |> List.map (fun e -> "  - " + e) |> String.concat "\n"))
 
-    /// Read a vocabulary from the artifact's parsed root.
+    /// Read a vocabulary from the artifact's parsed root, answering a typed refusal (Phase 310):
+    /// its code, the path to the value at fault, and [[ofJson]]'s sentence.
     ///
     /// The vocabulary is refused unless [[Declare.errors]] finds nothing (Phase 292).
     ///
@@ -1139,37 +1207,50 @@ module Artifact =
     /// engine's: an artifact written by a newer encoder may spell a member this reader
     /// would silently drop, and a vocabulary that loses a field quietly is worse than
     /// one that will not load at all.
-    let ofJson (root: JVal) : Result<Idl, string> =
-        match atKey "version" root with
-        | None -> Error "idl.json has no 'version'"
-        | Some(JInt v) when v <> version ->
+    let ofJsonDetailed (root: JVal) : Result<Idl, DecodeError> =
+        match Decoder.tryMember "version" root with
+        // A root that is not an object has no `version` either, and is told so in the same
+        // sentence; its refusal is the root's kind, at the root, where the path resolves.
+        | None when
+            (match root with
+             | JObj _ -> false
+             | _ -> true)
+            ->
             Error(
-                "idl.json declares encoding version "
-                + string v
-                + "; this engine reads version "
-                + string version
+                { Decoder.wrongKind "object" root with
+                    Message = "idl.json has no 'version'" }
             )
+        | None ->
+            Error(
+                { Decoder.missing "version" with
+                    Message = "idl.json has no 'version'" }
+            )
+        | Some(JInt v) when v <> version ->
+            refuse
+                DecodeCode.OutOfRange
+                ("encoding version " + string version)
+                ("idl.json declares encoding version "
+                 + string v
+                 + "; this engine reads version "
+                 + string version)
+            |> under (PathSegment.Key "version")
         | Some(JInt _) ->
-            let listAt name read =
-                arrAt name root |> Result.bind (traverse read)
-
-            listAt "kinds" readKind
+            arrAt "kinds" readKind root
             |> Result.bind (fun kinds ->
-                listAt "unions" readUnion
+                arrAt "unions" readUnion root
                 |> Result.bind (fun unions ->
-                    listAt "enums" readEnum
+                    arrAt "enums" readEnum root
                     |> Result.bind (fun enums ->
-                        listAt "records" readRecord
+                        arrAt "records" readRecord root
                         |> Result.bind (fun records ->
-                            listAt "defaults" readDefault
+                            arrAt "defaults" readDefault root
                             |> Result.bind (fun defaults ->
-                                arrAt "nodeFields" root
-                                |> Result.bind (traverse readField)
+                                arrAt "nodeFields" readField root
                                 |> Result.bind (fun nodeFields ->
                                     // `ops` is omitted for an op-free vocabulary.
-                                    (match atKey "ops" root with
+                                    (match Decoder.tryMember "ops" root with
                                      | None -> Ok []
-                                     | Some _ -> listAt "ops" readKind)
+                                     | Some _ -> arrAt "ops" readKind root)
                                     |> Result.bind (fun ops ->
                                         readWire root
                                         |> Result.bind (fun wire ->
@@ -1185,11 +1266,23 @@ module Artifact =
                                                       Ops = ops
                                                       Wire = wire
                                                       Harden = harden })))))))))
-        | Some _ -> Error "idl.json 'version' is not an integer"
+        | Some _ ->
+            refuse DecodeCode.WrongKind "int" "idl.json 'version' is not an integer"
+            |> under (PathSegment.Key "version")
+
+    /// Read a vocabulary from the artifact's parsed root — the sentence of
+    /// [[ofJsonDetailed]]'s refusal.
+    let ofJson (root: JVal) : Result<Idl, string> =
+        ofJsonDetailed root |> Result.mapError DecodeError.describe
+
+    /// [[ofJsonDetailed]] over `idl.json` bytes; a parse failure is refused at the root.
+    let parseDetailed (text: string) : Result<Idl, DecodeError> =
+        Decoder.parse text |> Result.bind ofJsonDetailed
 
     /// Read a vocabulary from `idl.json` bytes — the inverse of [[render]], up to the
     /// ordering [[canonicalise]] states.
-    let parse (text: string) : Result<Idl, string> = Json.parse text |> Result.bind ofJson
+    let parse (text: string) : Result<Idl, string> =
+        parseDetailed text |> Result.mapError DecodeError.describe
 
     /// The [[Identity]] an artifact declares (Phase 252): its `description`, and its
     /// `name` when it carries one. The other half of [[parse]] — what the `Idl` record
@@ -1198,16 +1291,11 @@ module Artifact =
     let identityOfJson (root: JVal) : Result<Identity, string> =
         strAt "description" root
         |> Result.bind (fun description ->
-            match atKey "name" root with
-            | None ->
-                Ok
-                    { Name = None
-                      Description = description }
-            | Some(JStr name) ->
-                Ok
-                    { Name = Some name
-                      Description = description }
-            | Some _ -> Error "idl.json 'name' is not a string")
+            Decoder.optField "name" (scalar "idl.json 'name' is not a string" Decoder.str) root
+            |> Result.map (fun name ->
+                { Name = name
+                  Description = description }))
+        |> Result.mapError DecodeError.describe
 
     /// [[identityOfJson]] over `idl.json` bytes.
     let identityOf (text: string) : Result<Identity, string> =

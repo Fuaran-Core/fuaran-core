@@ -179,28 +179,82 @@ module Proposal =
     let requiredAlternatives = [ "normalisation"; "teaching"; "variant" ]
 
     // -- reading -------------------------------------------------------------
+    //
+    // Phase 310 — every member is read through the typed decode layer, so a refusal carries a
+    // code and the path to the value at fault ([[ofJsonDetailed]]), and [[ofJson]] answers the
+    // sentence this reader always answered. One reading changed: an OPTIONAL member that is
+    // present and ill-typed (a `count` that is a string) is refused, where the hand-rolled readers
+    // this replaced took it for absent and read the default in its place.
 
-    let private field (name: string) (v: JVal) : JVal option =
+    let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
+        r |> Result.mapError (DecodeError.under step)
+
+    /// A refusal at the value being read, with this reader's own sentence.
+    let private refuse (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
+        Error(DecodeError.make code expected message)
+
+    /// A scalar read whose refusal carries `message` — the sentence this reader has always given
+    /// for a member that is not there OR not of its kind.
+    let private scalar (message: string) (d: Decoder<'T>) : Decoder<'T> =
+        fun x -> d x |> Result.mapError (DecodeError.reword (fun _ -> message))
+
+    /// The required member `name`, read with `d`; absent is `MissingField` with `message`.
+    let private need (name: string) (message: string) (d: Decoder<'T>) (v: JVal) : Result<'T, DecodeError> =
         match v with
-        | JObj fields -> fields |> List.tryPick (fun (n, x) -> if n = name then Some x else None)
-        | _ -> None
+        | JObj _ ->
+            match Decoder.tryMember name v with
+            | None ->
+                Error(
+                    { Decoder.missing name with
+                        Message = message }
+                )
+            | Some x -> d x |> under (PathSegment.Key name)
+        | other ->
+            Error(
+                { Decoder.wrongKind "object" other with
+                    Message = message }
+            )
 
-    let private str (name: string) (v: JVal) : string option =
-        match field name v with
-        | Some(JStr s) -> Some s
-        | _ -> None
+    /// The required string member `name`; absent or not a string, `message`.
+    let private needStr (name: string) (message: string) (v: JVal) : Result<string, DecodeError> =
+        need name message (scalar message Decoder.str) v
 
-    let private intOf (name: string) (v: JVal) : int option =
-        match field name v with
-        | Some(JInt i) -> Some i
-        | _ -> None
+    /// The refusal of the absent required member `name`, with this reader's sentence (or of `v`
+    /// not being an object at all).
+    let private absent (name: string) (message: string) (v: JVal) : Result<'T, DecodeError> =
+        match v with
+        | JObj _ ->
+            Error(
+                { Decoder.missing name with
+                    Message = message }
+            )
+        | other ->
+            Error(
+                { Decoder.wrongKind "object" other with
+                    Message = message }
+            )
 
-    let private arr (name: string) (v: JVal) : JVal list =
-        match field name v with
-        | Some(JArr xs) -> xs
-        | _ -> []
+    /// The `$type` discriminator, if present — a present non-string one is refused.
+    let private tag (v: JVal) : Result<string option, DecodeError> = Decoder.optField "$type" Decoder.str v
 
-    let private tag (v: JVal) : string option = str "$type" v
+    /// An absent discriminator, in this reader's sentence for the position.
+    let private untagged (message: string) : Result<'T, DecodeError> =
+        Error(
+            { Decoder.missing "$type" with
+                Message = message }
+        )
+
+    /// A discriminator naming no case of the position, in this reader's sentence.
+    let private unknownTag (known: string list) (message: string) : Result<'T, DecodeError> =
+        refuse
+            DecodeCode.UnknownTag
+            ("one of " + (known |> List.map (fun k -> "'" + k + "'") |> String.concat ", "))
+            message
+        |> under (PathSegment.Key "$type")
+
+    /// The host-surface type tags a proposal is refused by name: known to the vocabulary, not
+    /// admitted in a data-only delta.
+    let private hostSurfaceTypes = [ "closure"; "fn"; "opaque"; "hosted"; "var"; "op" ]
 
     /// Read an IDL type from the artifact's own `type` vocabulary.
     ///
@@ -211,253 +265,293 @@ module Proposal =
     /// data-only proposal has no business making and that no reviewer could check
     /// from the proposal document. A demand that genuinely needs one of them is a
     /// design conversation, not a delta.
-    let rec private readType (v: JVal) : Result<IdlType, string> =
+    let rec private readType (v: JVal) : Result<IdlType, DecodeError> =
         match tag v with
-        | Some "str" -> Ok TStr
-        | Some "int" -> Ok TInt
-        | Some "bool" -> Ok TBool
-        | Some "float" -> Ok TFloat
-        | Some "json" -> Ok TJson
-        | Some "node" -> Ok TNode
-        | Some "kind" -> Ok TKind
-        | Some "enum" ->
-            match str "name" v with
-            | Some n -> Ok(TEnum n)
-            | None -> Error "enum type has no 'name'"
-        | Some "record" ->
-            match str "name" v with
-            | Some n -> Ok(TRecord n)
-            | None -> Error "record type has no 'name'"
-        | Some "list" ->
-            match field "of" v with
-            | Some inner -> readType inner |> Result.map TList
-            | None -> Error "list type has no 'of'"
-        | Some "map" ->
-            match field "values" v with
-            | Some inner -> readType inner |> Result.map TMap
-            | None -> Error "map type has no 'values'"
-        | Some "union" ->
-            match str "name" v with
-            | None -> Error "union type has no 'name'"
-            | Some n ->
-                let args = arr "args" v
+        | Error e -> Error e
+        | Ok(Some "str") -> Ok TStr
+        | Ok(Some "int") -> Ok TInt
+        | Ok(Some "bool") -> Ok TBool
+        | Ok(Some "float") -> Ok TFloat
+        | Ok(Some "json") -> Ok TJson
+        | Ok(Some "node") -> Ok TNode
+        | Ok(Some "kind") -> Ok TKind
+        | Ok(Some "enum") -> needStr "name" "enum type has no 'name'" v |> Result.map TEnum
+        | Ok(Some "record") -> needStr "name" "record type has no 'name'" v |> Result.map TRecord
+        | Ok(Some "list") -> need "of" "list type has no 'of'" readType v |> Result.map TList
+        | Ok(Some "map") -> need "values" "map type has no 'values'" readType v |> Result.map TMap
+        | Ok(Some "union") ->
+            needStr "name" "union type has no 'name'" v
+            |> Result.bind (fun n ->
+                Decoder.fieldOr "args" [] (Decoder.list readType) v
+                |> Result.map (fun args -> TUnion(n, args)))
+        | Ok(Some other) ->
+            let message =
+                sprintf "type '%s' is a host-surface declaration, not wire data — a proposal cannot mint one" other
 
-                (Ok [], args)
-                ||> List.fold (fun acc a ->
-                    match acc, readType a with
-                    | Error e, _ -> Error e
-                    | _, Error e -> Error e
-                    | Ok xs, Ok t -> Ok(t :: xs))
-                |> Result.map (fun xs -> TUnion(n, List.rev xs))
-        | Some other ->
-            Error(sprintf "type '%s' is a host-surface declaration, not wire data — a proposal cannot mint one" other)
-        | None -> Error "type has no '$type'"
+            if List.contains other hostSurfaceTypes then
+                refuse DecodeCode.NotAdmitted "a wire-data type" message
+                |> under (PathSegment.Key "$type")
+            else
+                unknownTag
+                    [ "str"
+                      "int"
+                      "bool"
+                      "float"
+                      "json"
+                      "node"
+                      "kind"
+                      "enum"
+                      "record"
+                      "list"
+                      "map"
+                      "union" ]
+                    message
+        | Ok None -> untagged "type has no '$type'"
 
     /// Read an authored default value. Scalars and enum cases only — the same set
     /// the F# generator can emit a default expression for, so a proposal cannot
     /// declare a default the generated layer would then fail to compile.
-    let private readValue (v: JVal) : Result<IdlValue, string> =
-        match tag v with
-        | Some "str" ->
-            match field "value" v with
-            | Some(JStr s) -> Ok(VStr s)
-            | _ -> Error "str default has no string 'value'"
-        | Some "int" ->
-            match field "value" v with
-            | Some(JInt i) -> Ok(VInt i)
-            | _ -> Error "int default has no integer 'value'"
-        | Some "bool" ->
-            match field "value" v with
-            | Some(JBool b) -> Ok(VBool b)
-            | _ -> Error "bool default has no boolean 'value'"
-        | Some "float" ->
-            match field "value" v with
-            | Some(JFloat f) -> Ok(VFloat f)
-            | Some(JInt i) -> Ok(VFloat(float i))
-            | _ -> Error "float default has no numeric 'value'"
-        | Some "enum" ->
-            match str "case" v with
-            | Some c -> Ok(VEnum c)
-            | None -> Error "enum default has no 'case'"
-        | Some other -> Error(sprintf "default value of kind '%s' is not proposable" other)
-        | None -> Error "default value has no '$type'"
+    let private readValue (v: JVal) : Result<IdlValue, DecodeError> =
+        let value (message: string) (d: Decoder<'T>) =
+            need "value" message (scalar message d) v
 
-    let private readOptionality (v: JVal) : Result<Optionality, string> =
         match tag v with
-        | Some "required" -> Ok Required
-        | Some "optional" -> Ok Optional
-        | Some "omitDefault" ->
-            match field "default" v with
-            | Some d -> readValue d |> Result.map OmitDefault
-            | None -> Error "omitDefault has no 'default'"
-        | Some "hostOnly" ->
+        | Error e -> Error e
+        | Ok(Some "str") -> value "str default has no string 'value'" Decoder.str |> Result.map VStr
+        | Ok(Some "int") -> value "int default has no integer 'value'" Decoder.int |> Result.map VInt
+        | Ok(Some "bool") -> value "bool default has no boolean 'value'" Decoder.bool |> Result.map VBool
+        | Ok(Some "float") -> value "float default has no numeric 'value'" Decoder.float |> Result.map VFloat
+        | Ok(Some "enum") -> needStr "case" "enum default has no 'case'" v |> Result.map VEnum
+        | Ok(Some other) ->
+            refuse
+                DecodeCode.NotAdmitted
+                "a scalar or enum default"
+                (sprintf "default value of kind '%s' is not proposable" other)
+            |> under (PathSegment.Key "$type")
+        | Ok None -> untagged "default value has no '$type'"
+
+    let private readOptionality (v: JVal) : Result<Optionality, DecodeError> =
+        match tag v with
+        | Error e -> Error e
+        | Ok(Some "required") -> Ok Required
+        | Ok(Some "optional") -> Ok Optional
+        | Ok(Some "omitDefault") ->
+            need "default" "omitDefault has no 'default'" readValue v
+            |> Result.map OmitDefault
+        | Ok(Some "hostOnly") ->
             // A host-only slot is wire-invisible by definition, so proposing one
             // proposes nothing a consumer can observe — and it requires a declared
             // host signature this format deliberately cannot carry.
-            Error "'hostOnly' is not proposable — it declares a host slot with no wire projection"
-        | Some other -> Error(sprintf "unknown optionality '%s'" other)
-        | None -> Error "optionality has no '$type'"
+            refuse
+                DecodeCode.NotAdmitted
+                "a wire-visible optionality"
+                "'hostOnly' is not proposable — it declares a host slot with no wire projection"
+            |> under (PathSegment.Key "$type")
+        | Ok(Some other) ->
+            unknownTag [ "required"; "optional"; "omitDefault" ] (sprintf "unknown optionality '%s'" other)
+        | Ok None -> untagged "optionality has no '$type'"
 
-    let private sequence (results: Result<'a, string> list) : Result<'a list, string> =
-        (Ok [], results)
-        ||> List.fold (fun acc r ->
-            match acc, r with
-            | Error e, _ -> Error e
-            | _, Error e -> Error e
-            | Ok xs, Ok x -> Ok(x :: xs))
-        |> Result.map List.rev
+    let private readField (v: JVal) : Result<IdlField, DecodeError> =
+        // All three members are looked for BEFORE any is read, so a field missing one reports the
+        // missing one, as it always has.
+        match Decoder.tryMember "name" v, Decoder.tryMember "type" v, Decoder.tryMember "optionality" v with
+        | Some _, Some _, Some _ ->
+            needStr "name" "field has no 'name'" v
+            |> Result.bind (fun name ->
+                need "type" "field has no 'type'" readType v
+                |> Result.bind (fun ty ->
+                    need "optionality" "field has no 'optionality'" readOptionality v
+                    |> Result.map (fun opt ->
+                        // Phase 113 — a proposal proposes a SHAPE. Annotations are
+                        // statements about a member that already exists (retirement,
+                        // in-process-only, the version it arrived in), so a delta that
+                        // MINTS a member has nothing to say with them.
+                        { Name = name
+                          Type = ty
+                          Opt = opt
+                          Annotations = Annotations.Empty })))
+        | None, _, _ -> absent "name" "field has no 'name'" v
+        | _, None, _ -> absent "type" "field has no 'type'" v
+        | _, _, None -> absent "optionality" "field has no 'optionality'" v
 
-    let private readField (v: JVal) : Result<IdlField, string> =
-        match str "name" v, field "type" v, field "optionality" v with
-        | Some name, Some t, Some o ->
-            readType t
-            |> Result.bind (fun ty ->
-                readOptionality o
-                |> Result.map (fun opt ->
-                    // Phase 113 — a proposal proposes a SHAPE. Annotations are
-                    // statements about a member that already exists (retirement,
-                    // in-process-only, the version it arrived in), so a delta that
-                    // MINTS a member has nothing to say with them.
-                    { Name = name
-                      Type = ty
-                      Opt = opt
-                      Annotations = Annotations.Empty }))
-        | None, _, _ -> Error "field has no 'name'"
-        | _, None, _ -> Error "field has no 'type'"
-        | _, _, None -> Error "field has no 'optionality'"
+    let private readFields (owner: JVal) : Result<IdlField list, DecodeError> =
+        Decoder.fieldOr "fields" [] (Decoder.list readField) owner
 
-    let private readFields (owner: JVal) : Result<IdlField list, string> =
-        arr "fields" owner |> List.map readField |> sequence
-
-    let private readOwner (v: JVal) : Result<ProposalOwner, string> =
+    let private readOwner (v: JVal) : Result<ProposalOwner, DecodeError> =
         match tag v with
-        | Some "kind" ->
-            match str "name" v with
-            | Some n -> Ok(OwnerKind n)
-            | None -> Error "kind owner has no 'name'"
-        | Some "record" ->
-            match str "name" v with
-            | Some n -> Ok(OwnerRecord n)
-            | None -> Error "record owner has no 'name'"
-        | Some "op" ->
-            match str "name" v with
-            | Some n -> Ok(OwnerOp n)
-            | None -> Error "op owner has no 'name'"
-        | Some "unionCase" ->
-            match str "union" v, str "case" v with
-            | Some u, Some c -> Ok(OwnerUnionCase(u, c))
-            | _ -> Error "unionCase owner needs 'union' and 'case'"
-        | Some "envelope" -> Ok OwnerEnvelope
-        | Some other -> Error(sprintf "unknown owner '%s'" other)
-        | None -> Error "owner has no '$type'"
+        | Error e -> Error e
+        | Ok(Some "kind") -> needStr "name" "kind owner has no 'name'" v |> Result.map OwnerKind
+        | Ok(Some "record") -> needStr "name" "record owner has no 'name'" v |> Result.map OwnerRecord
+        | Ok(Some "op") -> needStr "name" "op owner has no 'name'" v |> Result.map OwnerOp
+        | Ok(Some "unionCase") ->
+            let message = "unionCase owner needs 'union' and 'case'"
 
-    let private readDelta (v: JVal) : Result<ProposalDelta, string> =
-        match str "op" v with
-        | Some "addKind" ->
-            match field "kind" v with
-            | None -> Error "addKind has no 'kind'"
-            | Some k ->
-                match str "tag" k with
-                | None -> Error "addKind kind has no 'tag'"
-                | Some t ->
-                    readFields k
-                    |> Result.map (fun fs ->
-                        AddKind
-                            { Tag = t
-                              Category = defaultArg (str "category" k) "proposed"
-                              Fields = fs
-                              Annotations = Annotations.Empty })
-        | Some "addUnionCase" ->
-            match str "union" v, field "case" v with
-            | Some u, Some c ->
-                match str "tag" c with
-                | None -> Error "addUnionCase case has no 'tag'"
-                | Some t ->
-                    readFields c
-                    |> Result.map (fun fs ->
-                        AddUnionCase(
-                            u,
-                            { Tag = t
-                              Fields = fs
-                              Annotations = Annotations.Empty }
-                        ))
-            | _ -> Error "addUnionCase needs 'union' and 'case'"
-        | Some "addEnumCase" ->
-            match str "enum" v, str "wire" v with
-            | Some e, Some w -> Ok(AddEnumCase(e, w, str "host" v))
-            | _ -> Error "addEnumCase needs 'enum' and 'wire'"
-        | Some "addField" ->
-            match field "owner" v, field "field" v with
-            | Some o, Some f ->
-                readOwner o
-                |> Result.bind (fun owner -> readField f |> Result.map (fun fld -> AddField(owner, fld)))
-            | _ -> Error "addField needs 'owner' and 'field'"
-        | Some other -> Error(sprintf "unknown delta op '%s'" other)
-        | None -> Error "delta entry has no 'op'"
+            needStr "union" message v
+            |> Result.bind (fun u -> needStr "case" message v |> Result.map (fun c -> OwnerUnionCase(u, c)))
+        | Ok(Some "envelope") -> Ok OwnerEnvelope
+        | Ok(Some other) ->
+            unknownTag [ "kind"; "record"; "op"; "unionCase"; "envelope" ] (sprintf "unknown owner '%s'" other)
+        | Ok None -> untagged "owner has no '$type'"
 
-    let private readEvidence (v: JVal) : Result<ProposalEvidence, string> =
-        match str "signal" v with
-        | None -> Error "evidence entry has no 'signal'"
-        | Some s ->
-            Ok
-                { Signal = s
-                  RunId = defaultArg (str "runId" v) ""
-                  PromptDigest = defaultArg (str "promptDigest" v) ""
-                  Count = defaultArg (intOf "count" v) 0
-                  Detail = defaultArg (str "detail" v) "" }
+    let private readDelta (v: JVal) : Result<ProposalDelta, DecodeError> =
+        let ops = [ "addKind"; "addUnionCase"; "addEnumCase"; "addField" ]
 
-    let private readAlternative (v: JVal) : Result<ProposalAlternative, string> =
-        match str "disposition" v with
-        | None -> Error "alternative has no 'disposition'"
-        | Some d ->
-            Ok
-                { Disposition = d
-                  Verdict = defaultArg (str "verdict" v) ""
-                  Argument = defaultArg (str "argument" v) "" }
+        match Decoder.optField "op" Decoder.str v with
+        | Error e -> Error e
+        | Ok(Some "addKind") ->
+            need
+                "kind"
+                "addKind has no 'kind'"
+                (fun k ->
+                    needStr "tag" "addKind kind has no 'tag'" k
+                    |> Result.bind (fun t ->
+                        readFields k
+                        |> Result.bind (fun fs ->
+                            Decoder.fieldOr "category" "proposed" Decoder.str k
+                            |> Result.map (fun category ->
+                                AddKind
+                                    { Tag = t
+                                      Category = category
+                                      Fields = fs
+                                      Annotations = Annotations.Empty }))))
+                v
+        | Ok(Some "addUnionCase") ->
+            let message = "addUnionCase needs 'union' and 'case'"
 
-    let private readFixture (v: JVal) : Result<ProposalFixture, string> =
-        match str "name" v, field "wire" v with
-        | Some n, Some w -> Ok { Name = n; Wire = Canon.render w }
-        | None, _ -> Error "candidate fixture has no 'name'"
-        | _, None -> Error "candidate fixture has no 'wire'"
+            needStr "union" message v
+            |> Result.bind (fun u ->
+                need
+                    "case"
+                    message
+                    (fun c ->
+                        needStr "tag" "addUnionCase case has no 'tag'" c
+                        |> Result.bind (fun t ->
+                            readFields c
+                            |> Result.map (fun fs ->
+                                AddUnionCase(
+                                    u,
+                                    { Tag = t
+                                      Fields = fs
+                                      Annotations = Annotations.Empty }
+                                ))))
+                    v)
+        | Ok(Some "addEnumCase") ->
+            let message = "addEnumCase needs 'enum' and 'wire'"
 
-    /// Read a proposal document. Structural failures only — a document that reads
-    /// cleanly can still be an inadmissible proposal; that is [[validate]]'s job,
-    /// and the two are separate so a defective document does not hide a defective
-    /// argument behind a parse error.
-    let ofJson (v: JVal) : Result<Proposal, string> =
-        match str "id" v with
-        | None -> Error "proposal has no 'id'"
-        | Some id ->
-            arr "delta" v
-            |> List.map readDelta
-            |> sequence
+            needStr "enum" message v
+            |> Result.bind (fun e ->
+                needStr "wire" message v
+                |> Result.bind (fun w ->
+                    Decoder.optField "host" Decoder.str v
+                    |> Result.map (fun h -> AddEnumCase(e, w, h))))
+        | Ok(Some "addField") ->
+            let message = "addField needs 'owner' and 'field'"
+
+            match Decoder.tryMember "owner" v, Decoder.tryMember "field" v with
+            | Some _, Some _ ->
+                need "owner" message readOwner v
+                |> Result.bind (fun owner ->
+                    need "field" message readField v |> Result.map (fun fld -> AddField(owner, fld)))
+            | None, _ -> absent "owner" message v
+            | _, None -> absent "field" message v
+        | Ok(Some other) ->
+            refuse
+                DecodeCode.UnknownTag
+                ("one of " + (ops |> List.map (fun o -> "'" + o + "'") |> String.concat ", "))
+                (sprintf "unknown delta op '%s'" other)
+            |> under (PathSegment.Key "op")
+        | Ok None ->
+            Error(
+                { Decoder.missing "op" with
+                    Message = "delta entry has no 'op'" }
+            )
+
+    let private readEvidence (v: JVal) : Result<ProposalEvidence, DecodeError> =
+        needStr "signal" "evidence entry has no 'signal'" v
+        |> Result.bind (fun s ->
+            Decoder.fieldOr "runId" "" Decoder.str v
+            |> Result.bind (fun runId ->
+                Decoder.fieldOr "promptDigest" "" Decoder.str v
+                |> Result.bind (fun digest ->
+                    Decoder.fieldOr "count" 0 Decoder.int v
+                    |> Result.bind (fun count ->
+                        Decoder.fieldOr "detail" "" Decoder.str v
+                        |> Result.map (fun detail ->
+                            { Signal = s
+                              RunId = runId
+                              PromptDigest = digest
+                              Count = count
+                              Detail = detail })))))
+
+    let private readAlternative (v: JVal) : Result<ProposalAlternative, DecodeError> =
+        needStr "disposition" "alternative has no 'disposition'" v
+        |> Result.bind (fun d ->
+            Decoder.fieldOr "verdict" "" Decoder.str v
+            |> Result.bind (fun verdict ->
+                Decoder.fieldOr "argument" "" Decoder.str v
+                |> Result.map (fun argument ->
+                    { Disposition = d
+                      Verdict = verdict
+                      Argument = argument })))
+
+    let private readFixture (v: JVal) : Result<ProposalFixture, DecodeError> =
+        needStr "name" "candidate fixture has no 'name'" v
+        |> Result.bind (fun n ->
+            need "wire" "candidate fixture has no 'wire'" Decoder.json v
+            |> Result.map (fun w -> { Name = n; Wire = Canon.render w }))
+
+    /// Read a proposal document, answering a typed refusal (Phase 310): its code, the path to
+    /// the value at fault, and [[ofJson]]'s sentence. Structural failures only — a document that
+    /// reads cleanly can still be an inadmissible proposal; that is [[validate]]'s job, and the
+    /// two are separate so a defective document does not hide a defective argument behind a
+    /// parse error.
+    let ofJsonDetailed (v: JVal) : Result<Proposal, DecodeError> =
+        let text (name: string) = Decoder.fieldOr name "" Decoder.str v
+
+        needStr "id" "proposal has no 'id'" v
+        |> Result.bind (fun id ->
+            Decoder.fieldOr "delta" [] (Decoder.list readDelta) v
             |> Result.bind (fun delta ->
-                arr "candidateFixtures" v
-                |> List.map readFixture
-                |> sequence
+                Decoder.fieldOr "candidateFixtures" [] (Decoder.list readFixture) v
                 |> Result.bind (fun fixtures ->
-                    arr "evidence" v
-                    |> List.map readEvidence
-                    |> sequence
+                    Decoder.fieldOr "evidence" [] (Decoder.list readEvidence) v
                     |> Result.bind (fun evidence ->
-                        arr "alternatives" v
-                        |> List.map readAlternative
-                        |> sequence
-                        |> Result.map (fun alternatives ->
-                            { Id = id
-                              Cluster = defaultArg (str "cluster" v) ""
-                              DraftedBy = defaultArg (str "draftedBy" v) ""
-                              DraftedAt = defaultArg (str "draftedAt" v) ""
-                              Delta = delta
-                              Fixtures = fixtures
-                              Evidence = evidence
-                              Irreducibility = defaultArg (str "irreducibility" v) ""
-                              Alternatives = alternatives
-                              NormalisationDistinction = defaultArg (str "normalisationDistinction" v) ""
-                              ConfusionPlan = defaultArg (str "confusionPlan" v) "" }))))
+                        Decoder.fieldOr "alternatives" [] (Decoder.list readAlternative) v
+                        |> Result.bind (fun alternatives ->
+                            text "cluster"
+                            |> Result.bind (fun cluster ->
+                                text "draftedBy"
+                                |> Result.bind (fun draftedBy ->
+                                    text "draftedAt"
+                                    |> Result.bind (fun draftedAt ->
+                                        text "irreducibility"
+                                        |> Result.bind (fun irreducibility ->
+                                            text "normalisationDistinction"
+                                            |> Result.bind (fun distinction ->
+                                                text "confusionPlan"
+                                                |> Result.map (fun confusionPlan ->
+                                                    { Id = id
+                                                      Cluster = cluster
+                                                      DraftedBy = draftedBy
+                                                      DraftedAt = draftedAt
+                                                      Delta = delta
+                                                      Fixtures = fixtures
+                                                      Evidence = evidence
+                                                      Irreducibility = irreducibility
+                                                      Alternatives = alternatives
+                                                      NormalisationDistinction = distinction
+                                                      ConfusionPlan = confusionPlan })))))))))))
 
-    let parse (text: string) : Result<Proposal, string> = Json.parse text |> Result.bind ofJson
+    /// Read a proposal document — the sentence of [[ofJsonDetailed]]'s refusal.
+    let ofJson (v: JVal) : Result<Proposal, string> =
+        ofJsonDetailed v |> Result.mapError DecodeError.describe
+
+    /// [[ofJsonDetailed]] over text; a parse failure is refused at the root.
+    let parseDetailed (text: string) : Result<Proposal, DecodeError> =
+        Decoder.parse text |> Result.bind ofJsonDetailed
+
+    let parse (text: string) : Result<Proposal, string> =
+        parseDetailed text |> Result.mapError DecodeError.describe
 
     // -- validation ----------------------------------------------------------
 

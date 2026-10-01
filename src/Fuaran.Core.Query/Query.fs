@@ -493,16 +493,35 @@ module QueryCodec =
         | TimestampType -> "timestamp"
         | DecimalType -> "decimal"
 
-    let private colTypeOf =
-        function
-        | "int" -> Ok IntType
-        | "float" -> Ok FloatType
-        | "bool" -> Ok BoolType
-        | "string" -> Ok StringType
-        | "date" -> Ok DateType
-        | "timestamp" -> Ok TimestampType
-        | "decimal" -> Ok DecimalType
-        | other -> Error("unknown column type: " + other)
+    // Phase 310 — every member is read through the typed decode layer (`Decoder`); a refusal is
+    // spelled into this codec's `QueryError` envelope at the entry points, with the sentence it
+    // has always carried.
+
+    /// A string from a closed set; a miss is `UnknownTag`, in this codec's sentence `<what><value>`.
+    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> =
+        Decoder.str
+        |> Decoder.andThen (fun s ->
+            match cases |> List.tryFind (fun (k, _) -> k = s) with
+            | Some(_, v) -> Ok v
+            | None ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.UnknownTag
+                        ("one of "
+                         + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "))
+                        (what + s)
+                ))
+
+    let private colTypeOf: Decoder<ColumnType> =
+        tagged
+            "unknown column type: "
+            [ "int", IntType
+              "float", FloatType
+              "bool", BoolType
+              "string", StringType
+              "date", DateType
+              "timestamp", TimestampType
+              "decimal", DecimalType ]
 
     // ---- effect class ----
 
@@ -512,29 +531,28 @@ module QueryCodec =
         | ReadsHost -> "readsHost"
         | WritesHost -> "writesHost"
 
-    let private hostOf =
-        function
-        | "pure" -> Ok Pure
-        | "readsHost" -> Ok ReadsHost
-        | "writesHost" -> Ok WritesHost
-        | other -> Error("unknown host effect: " + other)
+    let private hostOf: Decoder<HostEffect> =
+        tagged "unknown host effect: " [ "pure", Pure; "readsHost", ReadsHost; "writesHost", WritesHost ]
 
     let private detStr = Effect.determinismTag
 
-    let private detOf (tag: string) =
-        match Effect.tryDeterminismOfTag tag with
-        | Some set -> Ok set
-        | None -> Error("unknown determinism source: " + tag)
+    let private detOf: Decoder<DeterminismSource> =
+        Decoder.str
+        |> Decoder.andThen (fun tag ->
+            match Effect.tryDeterminismOfTag tag with
+            | Some set -> Ok set
+            | None ->
+                Error(
+                    DecodeError.make DecodeCode.UnknownTag "a determinism tag" ("unknown determinism source: " + tag)
+                ))
 
     let private effectJson (e: EffectClass) : JVal =
         JObj [ "host", JStr(hostStr e.Host); "determinism", JStr(detStr e.Determinism) ]
 
-    let private effectOf (el: JVal) : Result<EffectClass, string> =
-        Decode.strField "host" el
-        |> Result.bind hostOf
+    let private effectOf (el: JVal) : Result<EffectClass, DecodeError> =
+        Decoder.field "host" hostOf el
         |> Result.bind (fun h ->
-            Decode.strField "determinism" el
-            |> Result.bind detOf
+            Decoder.field "determinism" detOf el
             |> Result.map (fun d -> { Host = h; Determinism = d }))
 
     // ---- param ----
@@ -545,19 +563,18 @@ module QueryCodec =
               "type", JStr(colTypeStr p.Type)
               "required", JBool p.Required ]
 
-    let private asBool (el: JVal) : Result<bool, string> =
-        match el with
-        | JBool b -> Ok b
-        | _ -> Error "expected a bool"
-
-    let private paramOf (el: JVal) : Result<QueryParam, string> =
-        Decode.strField "name" el
+    let private paramOf (el: JVal) : Result<QueryParam, DecodeError> =
+        Decoder.field "name" Decoder.str el
         |> Result.bind (fun name ->
-            Decode.strField "type" el
-            |> Result.bind colTypeOf
+            Decoder.field "type" colTypeOf el
             |> Result.bind (fun ty ->
-                Decode.getProp "required" el
-                |> Result.bind asBool
+                // This codec's sentence for a non-bool `required` is its own, kept.
+                Decoder.field
+                    "required"
+                    (fun j ->
+                        Decoder.bool j
+                        |> Result.mapError (DecodeError.reword (fun _ -> "expected a bool")))
+                    el
                 |> Result.map (fun req ->
                     { Name = name
                       Type = ty
@@ -571,13 +588,10 @@ module QueryCodec =
             |> List.map (fun (n, t) -> JObj [ "name", JStr n; "type", JStr(colTypeStr t) ])
         )
 
-    let private schemaOf (el: JVal) : Result<Schema, string> =
-        Decode.mapList
-            (fun e ->
-                Decode.strField "name" e
-                |> Result.bind (fun n ->
-                    Decode.strField "type" e |> Result.bind colTypeOf |> Result.map (fun t -> n, t)))
-            el
+    let private schemaOf: Decoder<Schema> =
+        Decoder.list (fun e ->
+            Decoder.field "name" Decoder.str e
+            |> Result.bind (fun n -> Decoder.field "type" colTypeOf e |> Result.map (fun t -> n, t)))
 
     // ---- optional int ----
 
@@ -585,11 +599,6 @@ module QueryCodec =
         match v with
         | Some n -> [ name, JInt n ]
         | None -> []
-
-    let private optIntOf (name: string) (el: JVal) : Result<int option, string> =
-        match Decode.getProp name el with
-        | Ok j -> Decode.asInt j |> Result.map Some
-        | Error _ -> Ok None
 
     // ---- query declaration ----
 
@@ -607,33 +616,33 @@ module QueryCodec =
 
     let encode (q: Query) : string = Canon.render (queryJson q)
 
-    let internal queryOf (el: JVal) : Result<Query, QueryError> =
-        let dataErr (s: string) = ExecutionFailed("decode: " + s, [])
+    /// A decode refusal in this codec's envelope: `ExecutionFailed("decode: " + sentence)`.
+    let private dataErr (e: DecodeError) : QueryError =
+        ExecutionFailed("decode: " + DecodeError.describe e, [])
 
+    let internal queryOf (el: JVal) : Result<Query, QueryError> =
         let r =
-            Decode.strField "id" el
+            Decoder.field "id" Decoder.str el
             |> Result.bind (fun id ->
-                Decode.getProp "params" el
-                |> Result.bind (Decode.mapList paramOf)
+                Decoder.field "params" (Decoder.list paramOf) el
                 |> Result.bind (fun ps ->
-                    Decode.getProp "resultSchema" el
-                    |> Result.bind schemaOf
+                    Decoder.field "resultSchema" schemaOf el
                     |> Result.bind (fun sch ->
-                        Decode.getProp "effect" el
-                        |> Result.bind effectOf
+                        Decoder.field "effect" effectOf el
                         |> Result.bind (fun eff ->
-                            optIntOf "timeoutMs" el
+                            Decoder.optField "timeoutMs" Decoder.int el
                             |> Result.bind (fun tmo ->
-                                optIntOf "pageSize" el |> Result.map (fun pg -> id, ps, sch, eff, tmo, pg))))))
+                                Decoder.optField "pageSize" Decoder.int el
+                                |> Result.map (fun pg -> id, ps, sch, eff, tmo, pg))))))
 
         match r with
-        | Error m -> Error(dataErr m)
+        | Error e -> Error(dataErr e)
         | Ok(id, ps, sch, eff, tmo, pg) ->
-            match Decode.getProp "source" el with
-            | Error m -> Error(dataErr m)
+            match Decoder.field "source" Decoder.json el with
+            | Error e -> Error(dataErr e)
             | Ok srcEl ->
                 match ColumnCodec.decodeJson srcEl with
-                | Error _ -> Error(dataErr "source")
+                | Error _ -> Error(ExecutionFailed("decode: source", []))
                 | Ok src ->
                     Ok
                         { Id = id
@@ -668,32 +677,31 @@ module QueryCodec =
     let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
 
     let internal resultOf (el: JVal) : Result<QueryResult, QueryError> =
-        let dataErr (s: string) = ExecutionFailed("decode: " + s, [])
-
-        match Decode.getProp "rows" el with
-        | Error m -> Error(dataErr m)
+        match Decoder.field "rows" Decoder.json el with
+        | Error e -> Error(dataErr e)
         | Ok rowsEl ->
             match ColumnCodec.decodeJson rowsEl with
-            | Error _ -> Error(dataErr "rows")
+            | Error _ -> Error(ExecutionFailed("decode: rows", []))
             | Ok(Embedded t) ->
                 let parts =
-                    Decode.intField "pageNum" el
-                    |> Result.bind (fun pn -> optIntOf "totalRowCount" el |> Result.map (fun trc -> pn, trc))
+                    Decoder.field "pageNum" Decoder.int el
+                    |> Result.bind (fun pn ->
+                        Decoder.optField "totalRowCount" Decoder.int el
+                        |> Result.bind (fun trc ->
+                            // Phase 310: a present `nextPageToken` that is not a string is refused,
+                            // where it was read as absent.
+                            Decoder.optField "nextPageToken" Decoder.str el
+                            |> Result.map (fun tok -> pn, trc, tok)))
 
                 match parts with
-                | Error m -> Error(dataErr m)
-                | Ok(pn, trc) ->
-                    let tok =
-                        match Decode.strField "nextPageToken" el with
-                        | Ok s -> Some s
-                        | Error _ -> None
-
+                | Error e -> Error(dataErr e)
+                | Ok(pn, trc, tok) ->
                     Ok
                         { Rows = t
                           PageNum = pn
                           TotalRowCount = trc
                           NextPageToken = tok }
-            | Ok(Ref _) -> Error(dataErr "rows must be embedded, not a ref")
+            | Ok(Ref _) -> Error(ExecutionFailed("decode: rows must be embedded, not a ref", []))
 
     let decodeResult (s: string) : Result<QueryResult, QueryError> =
         match Decode.parse s with
@@ -748,39 +756,44 @@ module QueryCodec =
 
     let encodeQueryError (e: QueryError) : string = Canon.render (queryErrorJson e)
 
+    let private queryErrorOfDetailed: Decoder<QueryError> =
+        let str name = Decoder.field name Decoder.str
+
+        let strList name =
+            Decoder.field name (Decoder.list Decoder.str)
+
+        let both (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> QueryError) : Decoder<QueryError> =
+            a |> Decoder.bind (fun x -> b |> Decoder.map (f x))
+
+        let cases =
+            [ "noSuchQuery", both (str "id") (strList "known") (fun id known -> NoSuchQuery(id, known))
+              "duplicateQuery", str "id" |> Decoder.map DuplicateQuery
+              "unknownParam", both (str "name") (strList "declared") (fun name d -> UnknownParam(name, d))
+              "paramTypeMismatch",
+              str "name"
+              |> Decoder.bind (fun name ->
+                  both (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
+                      ParamTypeMismatch(name, exp, got)))
+              "requiredParamsUnbound", strList "names" |> Decoder.map RequiredParamsUnbound
+              "sourceNotResolved", str "ref" |> Decoder.map SourceNotResolved
+              "executionFailed", both (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
+              "timeout", Decoder.succeed Timeout
+              "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull ]
+
+        // The dispatch's own miss keeps this codec's sentence.
+        fun el ->
+            Decoder.tagDispatch "$type" cases el
+            |> Result.mapError (fun e ->
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with
+                        Message = "unknown query error: " + other }
+                | _ -> e)
+
     /// Decode a `QueryError` from a `JVal`. The error side is a plain `string`: a refusal that
     /// cannot be read is not itself a refusal of the query.
     let queryErrorOf (el: JVal) : Result<QueryError, string> =
-        let strList (name: string) =
-            Decode.getProp name el |> Result.bind (Decode.mapList Decode.asString)
-
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "noSuchQuery" ->
-                Decode.strField "id" el
-                |> Result.bind (fun id -> strList "known" |> Result.map (fun known -> NoSuchQuery(id, known)))
-            | "duplicateQuery" -> Decode.strField "id" el |> Result.map DuplicateQuery
-            | "unknownParam" ->
-                Decode.strField "name" el
-                |> Result.bind (fun name -> strList "declared" |> Result.map (fun d -> UnknownParam(name, d)))
-            | "paramTypeMismatch" ->
-                Decode.strField "name" el
-                |> Result.bind (fun name ->
-                    Decode.strField "expected" el
-                    |> Result.bind colTypeOf
-                    |> Result.bind (fun exp ->
-                        Decode.strField "got" el
-                        |> Result.bind colTypeOf
-                        |> Result.map (fun got -> ParamTypeMismatch(name, exp, got))))
-            | "requiredParamsUnbound" -> strList "names" |> Result.map RequiredParamsUnbound
-            | "sourceNotResolved" -> Decode.strField "ref" el |> Result.map SourceNotResolved
-            | "executionFailed" ->
-                Decode.strField "detail" el
-                |> Result.bind (fun d -> strList "recoverable" |> Result.map (fun r -> ExecutionFailed(d, r)))
-            | "timeout" -> Ok Timeout
-            | "requiredParamsNull" -> strList "names" |> Result.map RequiredParamsNull
-            | other -> Error("unknown query error: " + other))
+        Decoder.describing queryErrorOfDetailed el
 
     let decodeQueryError (s: string) : Result<QueryError, string> =
         Decode.parse s |> Result.bind queryErrorOf
@@ -884,47 +897,43 @@ module QueryCodec =
     let private quoteAll (xs: string list) : string =
         xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
 
+    // Phase 310 — the members check is the decode layer's strict policy (`Decoder.members`); the
+    // refusal keeps this codec's sentence, naming the object it is in.
+
     let private tagOf (el: JVal) : string option =
-        match el with
-        | JObj fields ->
-            fields
-            |> List.tryPick (fun (k, v) ->
-                match k, v with
-                | "$type", JStr t -> Some t
-                | _ -> None)
+        match Decoder.tryMember "$type" el with
+        | Some(JStr t) -> Some t
         | _ -> None
 
-    let private members (where: string) (known: string list) (el: JVal) : Result<unit, QueryError> =
-        match el with
-        | JObj fields ->
-            match fields |> List.tryFind (fun (k, _) -> not (List.contains k known)) with
-            | Some(k, _) ->
-                Error(
-                    ExecutionFailed(
-                        "decode: unknown member '"
-                        + k
-                        + "' in "
-                        + where
-                        + "; its members are "
-                        + quoteAll (List.sort known),
-                        []
-                    )
-                )
-            | None -> Ok()
-        | _ -> Ok()
+    let private members (where: string) (known: string list) : Decoder<unit> =
+        fun el ->
+            Decoder.members known el
+            |> Result.mapError (fun e ->
+                match List.tryLast e.Path with
+                | Some(PathSegment.Key k) ->
+                    { e with
+                        Message =
+                            "unknown member '"
+                            + k
+                            + "' in "
+                            + where
+                            + "; its members are "
+                            + quoteAll (List.sort known) }
+                | _ -> e)
 
-    let private within (name: string) (check: JVal -> Result<unit, QueryError>) (el: JVal) =
-        match el with
-        | JObj fields ->
-            match fields |> List.tryFind (fun (k, _) -> k = name) with
-            | Some(_, v) -> check v
-            | None -> Ok()
-        | _ -> Ok()
+    /// Check the member `name` of `el`, where it is present.
+    let private within (name: string) (check: Decoder<unit>) : Decoder<unit> =
+        fun el ->
+            match el with
+            | JObj _ -> Decoder.optField name check el |> Result.map ignore
+            | _ -> Ok()
 
-    let private each (check: JVal -> Result<unit, QueryError>) (el: JVal) : Result<unit, QueryError> =
-        match el with
-        | JArr xs -> xs |> List.fold (fun acc x -> acc |> Result.bind (fun () -> check x)) (Ok())
-        | _ -> Ok()
+    /// Check every element of an array.
+    let private each (check: Decoder<unit>) : Decoder<unit> =
+        fun el ->
+            match el with
+            | JArr _ -> Decoder.list check el |> Result.map ignore
+            | _ -> Ok()
 
     let private strictQuery (el: JVal) =
         members
@@ -960,7 +969,7 @@ module QueryCodec =
 
     let private readWith
         (policy: ReadPolicy)
-        (check: JVal -> Result<unit, QueryError>)
+        (check: Decoder<unit>)
         (read: JVal -> Result<'T, QueryError>)
         (s: string)
         : Result<'T, QueryError> =
@@ -969,7 +978,10 @@ module QueryCodec =
         | Ok el ->
             match policy with
             | ReadPolicy.Lenient -> read el
-            | ReadPolicy.Strict -> check el |> Result.bind (fun () -> read el)
+            | ReadPolicy.Strict ->
+                match check el with
+                | Error e -> Error(dataErr e)
+                | Ok() -> read el
 
     /// `decode` under a read policy: `Strict` refuses an unknown member of the declaration, its
     /// parameters, its result columns or its effect.

@@ -157,7 +157,7 @@ module Space =
     let slotKindOf (s: string) : string option =
         match Json.parse s with
         | Ok(JObj _ as el) ->
-            match Decode.kindOf el with
+            match Decoder.field "kind" Decoder.str el with
             | Ok k -> Some k
             | Error _ -> None
         | _ -> None
@@ -1436,7 +1436,7 @@ module CapabilityCodec =
 
     // ---- value-space ----
 
-    let private spaceJson (s: ValueSpace) : JVal =
+    let internal spaceJson (s: ValueSpace) : JVal =
         match s with
         | IntRange(lo, hi) -> Canon.typed "intRange" [ "min", JInt lo; "max", JInt hi ]
         | FloatRange(lo, hi) -> Canon.typed "floatRange" [ "min", JFloat lo; "max", JFloat hi ]
@@ -1450,37 +1450,53 @@ module CapabilityCodec =
                  | Some k -> [ "slotKind", JStr k ]
                  | None -> [])
 
-    let private spaceOf (el: JVal) : Result<ValueSpace, string> =
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "intRange" ->
-                Decode.intField "min" el
-                |> Result.bind (fun lo -> Decode.intField "max" el |> Result.map (fun hi -> IntRange(lo, hi)))
-            | "floatRange" ->
-                Decode.getProp "min" el
-                |> Result.bind Decode.asFloat
-                |> Result.bind (fun lo ->
-                    Decode.getProp "max" el
-                    |> Result.bind Decode.asFloat
-                    |> Result.map (fun hi -> FloatRange(lo, hi)))
-            | "stringLen" ->
-                Decode.intField "min" el
-                |> Result.bind (fun lo -> Decode.intField "max" el |> Result.map (fun hi -> StringLen(lo, hi)))
-            | "enum" ->
-                Decode.getProp "values" el
-                |> Result.bind (Decode.mapList Decode.asString)
-                |> Result.map Enum
-            | "anyString" -> Ok AnyString
-            | "slotTree" ->
-                Ok(
-                    SlotTree(
-                        match Decode.strField "slotKind" el with
-                        | Ok k -> Some k
-                        | Error _ -> None
-                    )
-                )
-            | other -> Error("unknown value-space kind: " + other))
+    // Phase 310 — every member is read through the typed decode layer (`Decoder`), so a refusal
+    // carries a code and the path to the value at fault (`decodeJsonDetailedWith` and its
+    // siblings); the string forms answer the sentence this codec has always answered. One reading
+    // changed: an optional `slotKind` that is present and not a string is refused, where it was
+    // read as absent.
+
+    /// Two members of one object, combined.
+    let private both (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> 'C) : Decoder<'C> =
+        a |> Decoder.bind (fun x -> b |> Decoder.map (f x))
+
+    /// Dispatch on `$type`; a miss keeps this codec's sentence `<what><tag>`.
+    let private dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
+        fun el ->
+            Decoder.tagDispatch "$type" cases el
+            |> Result.mapError (fun e ->
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with Message = what + other }
+                | _ -> e)
+
+    /// A string from a closed set; a miss is `UnknownTag`, in this codec's sentence `<what><value>`.
+    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> =
+        Decoder.str
+        |> Decoder.andThen (fun s ->
+            match cases |> List.tryFind (fun (k, _) -> k = s) with
+            | Some(_, v) -> Ok v
+            | None ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.UnknownTag
+                        ("one of "
+                         + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "))
+                        (what + s)
+                ))
+
+    let internal spaceOfDetailed: Decoder<ValueSpace> =
+        let int name = Decoder.field name Decoder.int
+        let num name = Decoder.field name Decoder.float
+
+        dispatch
+            "unknown value-space kind: "
+            [ "intRange", both (int "min") (int "max") (fun lo hi -> IntRange(lo, hi))
+              "floatRange", both (num "min") (num "max") (fun lo hi -> FloatRange(lo, hi))
+              "stringLen", both (int "min") (int "max") (fun lo hi -> StringLen(lo, hi))
+              "enum", Decoder.field "values" (Decoder.list Decoder.str) |> Decoder.map Enum
+              "anyString", Decoder.succeed AnyString
+              "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree ]
 
     // ---- effect class ----
 
@@ -1490,30 +1506,24 @@ module CapabilityCodec =
         | ReadsHost -> "readsHost"
         | WritesHost -> "writesHost"
 
-    let private hostOf =
-        function
-        | "pure" -> Ok Pure
-        | "readsHost" -> Ok ReadsHost
-        | "writesHost" -> Ok WritesHost
-        | other -> Error("unknown host effect: " + other)
+    let private hostOf: Decoder<HostEffect> =
+        tagged "unknown host effect: " [ "pure", Pure; "readsHost", ReadsHost; "writesHost", WritesHost ]
 
-    let private detOf (tag: string) =
-        match Effect.tryDeterminismOfTag tag with
-        | Some set -> Ok set
-        | None -> Error("unknown determinism: " + tag)
+    let private detOf: Decoder<DeterminismSource> =
+        Decoder.str
+        |> Decoder.andThen (fun tag ->
+            match Effect.tryDeterminismOfTag tag with
+            | Some set -> Ok set
+            | None -> Error(DecodeError.make DecodeCode.UnknownTag "a determinism tag" ("unknown determinism: " + tag)))
 
     let private effectJson (e: EffectClass) : JVal =
         JObj
             [ "host", JStr(hostStr e.Host)
               "determinism", JStr(Effect.determinismTag e.Determinism) ]
 
-    let private effectOf (el: JVal) : Result<EffectClass, string> =
-        Decode.strField "host" el
-        |> Result.bind hostOf
-        |> Result.bind (fun host ->
-            Decode.strField "determinism" el
-            |> Result.bind detOf
-            |> Result.map (fun det -> { Host = host; Determinism = det }))
+    let private effectOf: Decoder<EffectClass> =
+        both (Decoder.field "host" hostOf) (Decoder.field "determinism" detOf) (fun host det ->
+            { Host = host; Determinism = det })
 
     // ---- signature entry + signature ----
 
@@ -1534,49 +1544,37 @@ module CapabilityCodec =
            | None -> [])
         |> JObj
 
-    let private entryOf (el: JVal) : Result<SigEntry, string> =
-        Decode.strField "addr" el
+    let private entryOf (el: JVal) : Result<SigEntry, DecodeError> =
+        let str name = Decoder.field name Decoder.str el
+
+        str "addr"
         |> Result.bind (fun addr ->
-            Decode.strField "name" el
+            str "name"
             |> Result.bind (fun name ->
-                Decode.strField "kind" el
+                str "kind"
                 |> Result.bind (fun kind ->
-                    Decode.getProp "required" el
-                    |> Result.bind Decode.asBool
+                    Decoder.field "required" Decoder.bool el
                     |> Result.bind (fun required ->
-                        let space =
-                            match Decode.getProp "space" el with
-                            | Ok s -> spaceOf s |> Result.map Some
-                            | Error _ -> Ok None
-
-                        let action =
-                            match Decode.getProp "actionEffect" el with
-                            | Ok a -> effectOf a |> Result.map Some
-                            | Error _ -> Ok None
-
-                        space
+                        Decoder.optField "space" spaceOfDetailed el
                         |> Result.bind (fun sp ->
-                            action
-                            |> Result.map (fun ac ->
-                                let slot =
-                                    match Decode.strField "slotKind" el with
-                                    | Ok k -> Some k
-                                    | Error _ -> None
+                            Decoder.optField "actionEffect" effectOf el
+                            |> Result.bind (fun ac ->
+                                Decoder.optField "slotKind" Decoder.str el
+                                |> Result.map (fun slot ->
+                                    // A slot entry travels without its derived space (Phase 229), so
+                                    // decoding restores it from the constraint.
+                                    let sp =
+                                        match sp with
+                                        | None when kind = "slot" -> Some(SlotTree slot)
+                                        | other -> other
 
-                                // A slot entry travels without its derived space (Phase 229), so
-                                // decoding restores it from the constraint.
-                                let sp =
-                                    match sp with
-                                    | None when kind = "slot" -> Some(SlotTree slot)
-                                    | other -> other
-
-                                { Addr = addr
-                                  Name = name
-                                  Kind = kind
-                                  Space = sp
-                                  Slot = slot
-                                  Action = ac
-                                  Required = required }))))))
+                                    { Addr = addr
+                                      Name = name
+                                      Kind = kind
+                                      Space = sp
+                                      Slot = slot
+                                      Action = ac
+                                      Required = required })))))))
 
     let internal signatureJson (sg: Signature) : JVal =
         JObj
@@ -1584,18 +1582,19 @@ module CapabilityCodec =
               "effect", effectJson sg.Effect
               "holes", JArr(sg.Holes |> List.map entryJson) ]
 
-    let signatureOf (el: JVal) : Result<Signature, string> =
-        Decode.strField "name" el
+    let private signatureOfDetailed (el: JVal) : Result<Signature, DecodeError> =
+        Decoder.field "name" Decoder.str el
         |> Result.bind (fun name ->
-            Decode.getProp "effect" el
-            |> Result.bind effectOf
+            Decoder.field "effect" effectOf el
             |> Result.bind (fun eff ->
-                Decode.getProp "holes" el
-                |> Result.bind (Decode.mapList entryOf)
+                Decoder.field "holes" (Decoder.list entryOf) el
                 |> Result.map (fun holes ->
                     { Name = name
                       Holes = holes
                       Effect = eff })))
+
+    let signatureOf (el: JVal) : Result<Signature, string> =
+        Decoder.describing signatureOfDetailed el
 
     // ---- placement ----
 
@@ -1605,12 +1604,8 @@ module CapabilityCodec =
         | Fable -> "fable"
         | Js -> "js"
 
-    let private islandOf =
-        function
-        | "pyodide" -> Ok Pyodide
-        | "fable" -> Ok Fable
-        | "js" -> Ok Js
-        | other -> Error("unknown island kind: " + other)
+    let private islandOf: Decoder<IslandKind> =
+        tagged "unknown island kind: " [ "pyodide", Pyodide; "fable", Fable; "js", Js ]
 
     let private placementJson (p: Placement) : JVal =
         match p with
@@ -1620,16 +1615,14 @@ module CapabilityCodec =
         | Precomputed -> Canon.typed "precomputed" []
         | ClientIsland k -> Canon.typed "clientIsland" [ "island", JStr(islandTag k) ]
 
-    let private placementOf (el: JVal) : Result<Placement, string> =
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "buildTime" -> Ok BuildTime
-            | "server" -> Ok Server
-            | "clientDeclarative" -> Ok ClientDeclarative
-            | "precomputed" -> Ok Precomputed
-            | "clientIsland" -> Decode.strField "island" el |> Result.bind islandOf |> Result.map ClientIsland
-            | other -> Error("unknown placement: " + other))
+    let private placementOf: Decoder<Placement> =
+        dispatch
+            "unknown placement: "
+            [ "buildTime", Decoder.succeed BuildTime
+              "server", Decoder.succeed Server
+              "clientDeclarative", Decoder.succeed ClientDeclarative
+              "precomputed", Decoder.succeed Precomputed
+              "clientIsland", Decoder.field "island" islandOf |> Decoder.map ClientIsland ]
 
     // ---- capability declaration ----
 
@@ -1644,11 +1637,10 @@ module CapabilityCodec =
 
     let encode (c: Capability) : string = Canon.render (encodeJson c)
 
-    let decodeJson (el: JVal) : Result<Capability, string> =
-        Decode.strField "id" el
+    let private decodeJsonDetailed (el: JVal) : Result<Capability, DecodeError> =
+        Decoder.field "id" Decoder.str el
         |> Result.bind (fun id ->
-            Decode.getProp "signature" el
-            |> Result.bind signatureOf
+            Decoder.field "signature" signatureOfDetailed el
             |> Result.bind (fun sg ->
                 // Cross-check the wire `determinism` tag against the signature's effect determinism
                 // (Phase 44). The tag is written on encode but was previously ignored on decode, so a
@@ -1656,26 +1648,34 @@ module CapabilityCodec =
                 // decoded silently to the signature-derived value, mis-keying the Phase 27 replay seam.
                 let expectedTag = Effect.determinismTag sg.Effect.Determinism
 
-                Decode.strField "determinism" el
-                |> Result.bind (fun wireTag ->
-                    if wireTag <> expectedTag then
-                        Error(
-                            "capability determinism disagrees with signature effect: wire '"
-                            + wireTag
-                            + "' vs signature '"
-                            + expectedTag
-                            + "'"
-                        )
-                    else
-                        Ok())
+                Decoder.field
+                    "determinism"
+                    (Decoder.str
+                     |> Decoder.andThen (fun wireTag ->
+                         if wireTag <> expectedTag then
+                             Error(
+                                 DecodeError.make
+                                     DecodeCode.OutOfRange
+                                     ("'" + expectedTag + "', the signature's determinism")
+                                     ("capability determinism disagrees with signature effect: wire '"
+                                      + wireTag
+                                      + "' vs signature '"
+                                      + expectedTag
+                                      + "'")
+                             )
+                         else
+                             Ok()))
+                    el
                 |> Result.bind (fun () ->
-                    Decode.getProp "placement" el
-                    |> Result.bind placementOf
+                    Decoder.field "placement" placementOf el
                     |> Result.map (fun placement ->
                         { Id = id
                           Signature = sg
                           Determinism = sg.Effect.Determinism
                           Placement = placement }))))
+
+    let decodeJson (el: JVal) : Result<Capability, string> =
+        Decoder.describing decodeJsonDetailed el
 
     let decode (s: string) : Result<Capability, string> =
         Decode.parse s |> Result.bind decodeJson
@@ -1692,18 +1692,15 @@ module CapabilityCodec =
     let encodeInvocation (capabilityId: string) (args: (string * string) list) : string =
         Canon.render (encodeInvocationJson capabilityId args)
 
+    let private invocationOf: Decoder<string * (string * string) list> =
+        let arg =
+            both (Decoder.field "addr" Decoder.str) (Decoder.field "value" Decoder.str) (fun addr v -> addr, v)
+
+        both (Decoder.field "capabilityId" Decoder.str) (Decoder.field "args" (Decoder.list arg)) (fun cid args ->
+            cid, args)
+
     let decodeInvocation (s: string) : Result<string * (string * string) list, string> =
-        Decode.parse s
-        |> Result.bind (fun el ->
-            Decode.strField "capabilityId" el
-            |> Result.bind (fun cid ->
-                Decode.getProp "args" el
-                |> Result.bind (
-                    Decode.mapList (fun a ->
-                        Decode.strField "addr" a
-                        |> Result.bind (fun addr -> Decode.strField "value" a |> Result.map (fun v -> addr, v)))
-                )
-                |> Result.map (fun args -> cid, args)))
+        Decode.parse s |> Result.bind (Decoder.describing invocationOf)
 
     // ---- Deferred<'T> async-result envelope (Phase 32) ----
 
@@ -1720,13 +1717,20 @@ module CapabilityCodec =
     /// Decode a `Deferred<'T>` from a `JVal`, using `decodeT` for a `ready` payload — `Result`-typed with
     /// a named error (the codec envelope discipline).
     let deferredOf (decodeT: JVal -> Result<'T, string>) (el: JVal) : Result<Deferred<'T>, string> =
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "pending" -> Ok Pending
-            | "ready" -> Decode.getProp "value" el |> Result.bind decodeT |> Result.map Ready
-            | "failed" -> Decode.strField "message" el |> Result.map Failed
-            | other -> Error("unknown deferred kind: " + other))
+        // The caller's payload reader answers a sentence and no code, so its refusal is carried
+        // through this envelope's string form unchanged.
+        let payload: Decoder<'T> =
+            fun v ->
+                decodeT v
+                |> Result.mapError (fun m -> DecodeError.make DecodeCode.OutOfRange "a payload its reader accepts" m)
+
+        Decoder.describing
+            (dispatch
+                "unknown deferred kind: "
+                [ "pending", Decoder.succeed Pending
+                  "ready", Decoder.field "value" payload |> Decoder.map Ready
+                  "failed", Decoder.field "message" Decoder.str |> Decoder.map Failed ])
+            el
 
     let decodeDeferred (decodeT: JVal -> Result<'T, string>) (s: string) : Result<Deferred<'T>, string> =
         Decode.parse s |> Result.bind (deferredOf decodeT)
@@ -1755,30 +1759,27 @@ module CapabilityCodec =
 
     /// Decode an `InvokeError` from a `JVal` — `Result`-typed with a named error.
     let invokeErrorOf (el: JVal) : Result<InvokeError, string> =
-        let strList (name: string) =
-            Decode.getProp name el |> Result.bind (Decode.mapList Decode.asString)
+        let str name = Decoder.field name Decoder.str
 
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "noSuchCapability" ->
-                Decode.strField "id" el
-                |> Result.bind (fun id -> strList "known" |> Result.map (fun known -> NoSuchCapability(id, known)))
-            | "duplicateCapability" -> Decode.strField "id" el |> Result.map DuplicateCapability
-            | "unknownArg" ->
-                Decode.strField "addr" el
-                |> Result.bind (fun addr -> strList "declared" |> Result.map (fun d -> UnknownArg(addr, d)))
-            | "argOutOfSpace" ->
-                Decode.strField "addr" el
-                |> Result.bind (fun addr ->
-                    Decode.getProp "space" el
-                    |> Result.bind spaceOf
-                    |> Result.bind (fun sp ->
-                        Decode.strField "got" el |> Result.map (fun got -> ArgOutOfSpace(addr, sp, got))))
-            | "requiredArgsUnbound" -> strList "addrs" |> Result.map RequiredArgsUnbound
-            | "uninvocableArg" -> Decode.strField "addr" el |> Result.map UninvocableArg
-            | "bodyFailed" -> Decode.strField "reason" el |> Result.map BodyFailed
-            | other -> Error("unknown invoke error: " + other))
+        let strList name =
+            Decoder.field name (Decoder.list Decoder.str)
+
+        let invokeError =
+            dispatch
+                "unknown invoke error: "
+                [ "noSuchCapability", both (str "id") (strList "known") (fun id known -> NoSuchCapability(id, known))
+                  "duplicateCapability", str "id" |> Decoder.map DuplicateCapability
+                  "unknownArg", both (str "addr") (strList "declared") (fun addr d -> UnknownArg(addr, d))
+                  "argOutOfSpace",
+                  str "addr"
+                  |> Decoder.bind (fun addr ->
+                      both (Decoder.field "space" spaceOfDetailed) (str "got") (fun sp got ->
+                          ArgOutOfSpace(addr, sp, got)))
+                  "requiredArgsUnbound", strList "addrs" |> Decoder.map RequiredArgsUnbound
+                  "uninvocableArg", str "addr" |> Decoder.map UninvocableArg
+                  "bodyFailed", str "reason" |> Decoder.map BodyFailed ]
+
+        Decoder.describing invokeError el
 
     let decodeInvokeError (s: string) : Result<InvokeError, string> =
         Decode.parse s |> Result.bind invokeErrorOf
@@ -1791,47 +1792,45 @@ module CapabilityCodec =
     // refusal. A `ready` envelope's payload is the caller's `decodeT`'s to read, so its members are
     // the caller's to police.
 
+    // Phase 310 — the members check IS the decode layer's strict policy (`Decoder.members`, its
+    // generalisation); a refusal keeps this codec's sentence, naming the object it is in, and its
+    // path names the member.
+
     let private tagOf (el: JVal) : string option =
-        match el with
-        | JObj fields ->
-            fields
-            |> List.tryPick (fun (k, v) ->
-                match k, v with
-                | "$type", JStr t -> Some t
-                | _ -> None)
+        match Decoder.tryMember "$type" el with
+        | Some(JStr t) -> Some t
         | _ -> None
 
     /// The first member of `el` outside `known`, as a refusal naming it and the members read.
-    let private members (where: string) (known: string list) (el: JVal) : Result<unit, string> =
-        match el with
-        | JObj fields ->
-            match fields |> List.tryFind (fun (k, _) -> not (List.contains k known)) with
-            | Some(k, _) ->
-                Error(
-                    "unknown member '"
-                    + k
-                    + "' in "
-                    + where
-                    + "; its members are "
-                    + Space.quoteAll (List.sort known)
-                )
-            | None -> Ok()
-        | _ -> Ok()
+    let private members (where: string) (known: string list) : Decoder<unit> =
+        fun el ->
+            Decoder.members known el
+            |> Result.mapError (fun e ->
+                match List.tryLast e.Path with
+                | Some(PathSegment.Key k) ->
+                    { e with
+                        Message =
+                            "unknown member '"
+                            + k
+                            + "' in "
+                            + where
+                            + "; its members are "
+                            + Space.quoteAll (List.sort known) }
+                | _ -> e)
 
     /// Check the member `name` of `el`, where it is present.
-    let private within (name: string) (check: JVal -> Result<unit, string>) (el: JVal) : Result<unit, string> =
-        match el with
-        | JObj fields ->
-            match fields |> List.tryFind (fun (k, _) -> k = name) with
-            | Some(_, v) -> check v
-            | None -> Ok()
-        | _ -> Ok()
+    let private within (name: string) (check: Decoder<unit>) : Decoder<unit> =
+        fun el ->
+            match el with
+            | JObj _ -> Decoder.optField name check el |> Result.map ignore
+            | _ -> Ok()
 
     /// Check every element of an array.
-    let private each (check: JVal -> Result<unit, string>) (el: JVal) : Result<unit, string> =
-        match el with
-        | JArr xs -> xs |> List.fold (fun acc x -> acc |> Result.bind (fun () -> check x)) (Ok())
-        | _ -> Ok()
+    let private each (check: Decoder<unit>) : Decoder<unit> =
+        fun el ->
+            match el with
+            | JArr _ -> Decoder.list check el |> Result.map ignore
+            | _ -> Ok()
 
     let private strictSpace (el: JVal) =
         let extra =
@@ -1884,27 +1883,46 @@ module CapabilityCodec =
 
         members "deferred" ("$type" :: extra) el
 
-    let private under (policy: ReadPolicy) (check: JVal -> Result<unit, string>) (el: JVal) : Result<unit, string> =
+    let private under (policy: ReadPolicy) (check: Decoder<unit>) (d: Decoder<'T>) : Decoder<'T> =
         match policy with
-        | ReadPolicy.Lenient -> Ok()
-        | ReadPolicy.Strict -> check el
+        | ReadPolicy.Lenient -> d
+        | ReadPolicy.Strict -> check |> Decoder.bind (fun () -> d)
+
+    /// `decodeJsonWith` answering a typed refusal (Phase 310): its code, the path to the value at
+    /// fault (an undeclared member under `Strict` is `UndeclaredMember` at that member), what the
+    /// position expected, and `decodeJsonWith`'s sentence.
+    let decodeJsonDetailedWith (policy: ReadPolicy) (el: JVal) : Result<Capability, DecodeError> =
+        under policy strictCapability decodeJsonDetailed el
+
+    /// `decodeWith` answering a typed refusal (Phase 310); a parse failure is refused at the root.
+    let decodeDetailedWith (policy: ReadPolicy) (s: string) : Result<Capability, DecodeError> =
+        Decoder.parse s |> Result.bind (decodeJsonDetailedWith policy)
 
     /// `decodeJson` under a read policy: `Strict` refuses an unknown member anywhere in the
     /// declaration (its signature, holes, value spaces, effects and placement included).
     let decodeJsonWith (policy: ReadPolicy) (el: JVal) : Result<Capability, string> =
-        under policy strictCapability el |> Result.bind (fun () -> decodeJson el)
+        decodeJsonDetailedWith policy el |> Result.mapError DecodeError.describe
 
     /// `decode` under a read policy.
     let decodeWith (policy: ReadPolicy) (s: string) : Result<Capability, string> =
         Decode.parse s |> Result.bind (decodeJsonWith policy)
+
+    /// `decodeInvocationWith` answering a typed refusal (Phase 310); a parse failure is refused at
+    /// the root.
+    let decodeInvocationDetailedWith
+        (policy: ReadPolicy)
+        (s: string)
+        : Result<string * (string * string) list, DecodeError> =
+        Decoder.parse s |> Result.bind (under policy strictInvocation invocationOf)
 
     /// `decodeInvocation` under a read policy: `Strict` refuses an unknown member of the
     /// invocation or of any of its arguments — an `"actor"` beside the `capabilityId`, say, which
     /// `Lenient` reads past.
     let decodeInvocationWith (policy: ReadPolicy) (s: string) : Result<string * (string * string) list, string> =
         Decode.parse s
-        |> Result.bind (under policy strictInvocation)
-        |> Result.bind (fun () -> decodeInvocation s)
+        |> Result.bind (fun el ->
+            under policy strictInvocation invocationOf el
+            |> Result.mapError DecodeError.describe)
 
     /// `deferredOf` under a read policy: `Strict` refuses an unknown member of the envelope; the
     /// `ready` payload is `decodeT`'s to read.
@@ -1913,7 +1931,10 @@ module CapabilityCodec =
         (decodeT: JVal -> Result<'T, string>)
         (el: JVal)
         : Result<Deferred<'T>, string> =
-        under policy strictDeferred el |> Result.bind (fun () -> deferredOf decodeT el)
+        match policy with
+        | ReadPolicy.Lenient -> Ok()
+        | ReadPolicy.Strict -> strictDeferred el |> Result.mapError DecodeError.describe
+        |> Result.bind (fun () -> deferredOf decodeT el)
 
     /// `decodeDeferred` under a read policy.
     let decodeDeferredWith
@@ -2454,74 +2475,48 @@ module CapabilityPipeline =
 
     // ---- wire codec ----
 
-    let private spaceToJ (s: ValueSpace) : JVal =
-        match s with
-        | IntRange(lo, hi) -> Canon.typed "intRange" [ "min", JInt lo; "max", JInt hi ]
-        | FloatRange(lo, hi) -> Canon.typed "floatRange" [ "min", JFloat lo; "max", JFloat hi ]
-        | StringLen(lo, hi) -> Canon.typed "stringLen" [ "min", JInt lo; "max", JInt hi ]
-        | Enum xs -> Canon.typed "enum" [ "values", JArr(xs |> List.map JStr) ]
-        | AnyString -> Canon.typed "anyString" []
-        | SlotTree c ->
-            Canon.typed
-                "slotTree"
-                (match c with
-                 | Some k -> [ "slotKind", JStr k ]
-                 | None -> [])
+    // Phase 310 — the value-space codec is the capability codec's, not a second copy of it; the one
+    // difference, the sentence for an unknown space, is this codec's and is kept.
 
-    let private spaceFromJ (el: JVal) : Result<ValueSpace, string> =
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "intRange" ->
-                Decode.intField "min" el
-                |> Result.bind (fun lo -> Decode.intField "max" el |> Result.map (fun hi -> IntRange(lo, hi)))
-            | "floatRange" ->
-                Decode.getProp "min" el
-                |> Result.bind Decode.asFloat
-                |> Result.bind (fun lo ->
-                    Decode.getProp "max" el
-                    |> Result.bind Decode.asFloat
-                    |> Result.map (fun hi -> FloatRange(lo, hi)))
-            | "stringLen" ->
-                Decode.intField "min" el
-                |> Result.bind (fun lo -> Decode.intField "max" el |> Result.map (fun hi -> StringLen(lo, hi)))
-            | "enum" ->
-                Decode.getProp "values" el
-                |> Result.bind (Decode.mapList Decode.asString)
-                |> Result.map Enum
-            | "anyString" -> Ok AnyString
-            | "slotTree" ->
-                Ok(
-                    SlotTree(
-                        match Decode.strField "slotKind" el with
-                        | Ok k -> Some k
-                        | Error _ -> None
-                    )
-                )
-            | other -> Error("unknown value-space: " + other))
+    let private spaceToJ (s: ValueSpace) : JVal = CapabilityCodec.spaceJson s
+
+    let private spaceFromJ: Decoder<ValueSpace> =
+        fun el ->
+            CapabilityCodec.spaceOfDetailed el
+            |> Result.mapError (fun e ->
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with
+                        Message = "unknown value-space: " + other }
+                | _ -> e)
+
+    /// Dispatch on `$type`; a miss keeps this codec's sentence `<what><tag>`.
+    let private dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
+        fun el ->
+            Decoder.tagDispatch "$type" cases el
+            |> Result.mapError (fun e ->
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with Message = what + other }
+                | _ -> e)
 
     let private argSrcToJ (s: ArgSource) : JVal =
         match s with
         | Literal v -> Canon.typed "literal" [ "value", JStr v ]
         | FromNode n -> Canon.typed "fromNode" [ "node", JStr n ]
 
-    let private argSrcFromJ (el: JVal) : Result<ArgSource, string> =
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "literal" -> Decode.strField "value" el |> Result.map Literal
-            | "fromNode" -> Decode.strField "node" el |> Result.map FromNode
-            | other -> Error("unknown arg source: " + other))
+    let private argSrcFromJ: Decoder<ArgSource> =
+        dispatch
+            "unknown arg source: "
+            [ "literal", Decoder.field "value" Decoder.str |> Decoder.map Literal
+              "fromNode", Decoder.field "node" Decoder.str |> Decoder.map FromNode ]
 
     let private argToJ (addr: string, s: ArgSource) : JVal =
         JObj [ "addr", JStr addr; "source", argSrcToJ s ]
 
-    let private argFromJ (el: JVal) : Result<string * ArgSource, string> =
-        Decode.strField "addr" el
-        |> Result.bind (fun addr ->
-            Decode.getProp "source" el
-            |> Result.bind argSrcFromJ
-            |> Result.map (fun s -> addr, s))
+    let private argFromJ (el: JVal) : Result<string * ArgSource, DecodeError> =
+        Decoder.field "addr" Decoder.str el
+        |> Result.bind (fun addr -> Decoder.field "source" argSrcFromJ el |> Result.map (fun s -> addr, s))
 
     let private nodeToJ (n: PipelineNode) : JVal =
         match n with
@@ -2535,42 +2530,44 @@ module CapabilityPipeline =
                   "outputType", spaceToJ ty
                   "args", JArr(args |> List.map argToJ) ]
 
-    let private nodeFromJ (el: JVal) : Result<PipelineNode, string> =
-        Decode.strField "$type" el
-        |> Result.bind (fun k ->
-            match k with
-            | "source" ->
-                Decode.strField "id" el
-                |> Result.bind (fun id ->
-                    Decode.strField "dataRef" el
-                    |> Result.bind (fun dref ->
-                        Decode.getProp "outputType" el
-                        |> Result.bind spaceFromJ
-                        |> Result.map (fun ty -> Source(id, dref, ty))))
-            | "invoke" ->
-                Decode.strField "id" el
-                |> Result.bind (fun id ->
-                    Decode.strField "capabilityId" el
-                    |> Result.bind (fun capId ->
-                        Decode.getProp "outputType" el
-                        |> Result.bind spaceFromJ
-                        |> Result.bind (fun ty ->
-                            Decode.getProp "args" el
-                            |> Result.bind (Decode.mapList argFromJ)
-                            |> Result.map (fun args -> Invoke(id, capId, ty, args)))))
-            | other -> Error("unknown pipeline node: " + other))
+    let private nodeFromJ: Decoder<PipelineNode> =
+        let str name = Decoder.field name Decoder.str
+
+        let source (el: JVal) =
+            str "id" el
+            |> Result.bind (fun id ->
+                str "dataRef" el
+                |> Result.bind (fun dref ->
+                    Decoder.field "outputType" spaceFromJ el
+                    |> Result.map (fun ty -> Source(id, dref, ty))))
+
+        let invoke (el: JVal) =
+            str "id" el
+            |> Result.bind (fun id ->
+                str "capabilityId" el
+                |> Result.bind (fun capId ->
+                    Decoder.field "outputType" spaceFromJ el
+                    |> Result.bind (fun ty ->
+                        Decoder.field "args" (Decoder.list argFromJ) el
+                        |> Result.map (fun args -> Invoke(id, capId, ty, args)))))
+
+        dispatch "unknown pipeline node: " [ "source", source; "invoke", invoke ]
 
     /// Encode a pipeline to its canonical wire string.
     let encode (p: CapabilityPipeline) : string =
         Canon.render (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
 
-    /// Decode a pipeline from a wire string (`Result`-typed, named errors).
+    /// Decode a pipeline from a wire string, answering a typed refusal (Phase 310): its code, the
+    /// path to the value at fault, and [[decode]]'s sentence. A parse failure is refused at the root.
+    let decodeDetailed (s: string) : Result<CapabilityPipeline, DecodeError> =
+        Decoder.parse s
+        |> Result.bind (Decoder.field "nodes" (Decoder.list nodeFromJ))
+        |> Result.map (fun nodes -> { Nodes = nodes })
+
+    /// Decode a pipeline from a wire string (`Result`-typed, named errors) — the sentence of
+    /// [[decodeDetailed]]'s refusal.
     let decode (s: string) : Result<CapabilityPipeline, string> =
-        Decode.parse s
-        |> Result.bind (fun el ->
-            Decode.getProp "nodes" el
-            |> Result.bind (Decode.mapList nodeFromJ)
-            |> Result.map (fun nodes -> { Nodes = nodes }))
+        decodeDetailed s |> Result.mapError DecodeError.describe
 
     // ---- evaluation + incremental re-evaluation (Phase 62) ----
     // The reference evaluator the incremental path is certified byte-identical to. Core runs NO capability

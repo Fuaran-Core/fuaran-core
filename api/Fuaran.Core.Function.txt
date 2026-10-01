@@ -96,10 +96,13 @@ field Fuaran.Core.ValueSpace+Tags.StringLen : System.Int32 (literal)
 method Fuaran.Core.CapabilityCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.decodeDeferredWith`1(Fuaran.Core.ReadPolicy, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.decodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
+method Fuaran.Core.CapabilityCodec.decodeDetailedWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, Fuaran.Core.DecodeError>
 method Fuaran.Core.CapabilityCodec.decodeInvocation(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, System.String>
+method Fuaran.Core.CapabilityCodec.decodeInvocationDetailedWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, Fuaran.Core.DecodeError>
 method Fuaran.Core.CapabilityCodec.decodeInvocationWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, System.String>
 method Fuaran.Core.CapabilityCodec.decodeInvokeError(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.InvokeError, System.String>
 method Fuaran.Core.CapabilityCodec.decodeJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
+method Fuaran.Core.CapabilityCodec.decodeJsonDetailedWith(Fuaran.Core.ReadPolicy, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, Fuaran.Core.DecodeError>
 method Fuaran.Core.CapabilityCodec.decodeJsonWith(Fuaran.Core.ReadPolicy, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.decodeWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.deferredJson`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Deferred`1<!!0>) : Fuaran.Core.JVal
@@ -122,6 +125,7 @@ method Fuaran.Core.CapabilityModule.typeArgs(Fuaran.Core.Capability, Microsoft.F
 method Fuaran.Core.CapabilityModule.validateArgs(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityModule.validateArgsAll(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.InvokeError>>
 method Fuaran.Core.CapabilityPipelineModule.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityPipeline, System.String>
+method Fuaran.Core.CapabilityPipelineModule.decodeDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityPipeline, Fuaran.Core.DecodeError>
 method Fuaran.Core.CapabilityPipelineModule.dirtySet(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.CapabilityPipeline) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 method Fuaran.Core.CapabilityPipelineModule.encode(Fuaran.Core.CapabilityPipeline) : System.String
 method Fuaran.Core.CapabilityPipelineModule.enumerate(Fuaran.Core.CapabilityPipeline) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>
