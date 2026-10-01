@@ -2423,6 +2423,50 @@ two-argument method, which the baseline refuses as a `removal`.
 
 **Class: additive.** No public surface moves; a change to one op-stream concern now edits one file.
 
+### Rejections that explain themselves: `Ops.interference` names the clause, and a stale proposal has a bounded report (Phase 248) — ADDITIVE
+
+**What changed.** A `Conflicts` rejection named WHO interfered and not HOW, so a party that wanted
+to know what to rebase against — the parent it shares, the id the other script reads, the
+relocation that serialises it — re-derived `Ops.independent`'s clauses itself, in glue that copied
+private logic and could drift from it. And a stale proposal's rejection reused the op-algebra's
+`UnknownNode` envelope, whose `addressable` is every id in the base: at a 465-node document, 465 ids
+per stale proposal, sent again to every party a scheduler reports to.
+
+- **`Interference`** (new, `Fuaran.Core.Ops`, qualified access) — one case per clause of
+  `independent`, in its order: `SameTarget`, `LeftWritesRightReads`, `RightWritesLeftReads`,
+  `SameParent`, `LeftUnknownParent`, `RightUnknownParent`, each carrying the addresses it fails on
+  (an overlap's one shared set; the unknown-parent clauses the relocated ids on one side and the
+  structural writes on the other).
+- **`Ops.interference : Footprint -> Footprint -> Interference list`** (new) — every clause two
+  footprints fail. **`Ops.independent` is now DEFINED as `interference a b = []`**, so the verdict and
+  its explanation have one source. Its verdict did not move: the suite holds the redefinition to the
+  previous clause-by-clause conjunction on every ordered pair of the 256 footprints over a two-address
+  universe, in which every clause fires.
+- **`Arbitration.interference nodew idw accepted proposal`** (new) — each accepted proposal the
+  proposal interferes with, paired with its clauses (the proposal on the left). `arbitrate` now
+  computes every `Conflicts` citation with it, so handed an arbitration's `Accepted` and a
+  `Conflicts`-rejected proposal it returns exactly the cited ids, in order, each with a non-empty
+  clause list.
+- **`StaleProposal<'Id>`** (new record: `OpIndex`, `Missing`, `AddressableCount`, `Sample`),
+  **`Arbitration.stale`** (new: `Some` for an `Inapplicable` whose envelope is `UnknownNode`, `None`
+  otherwise) and **`Arbitration.staleSampleSize`** (new, `8`). **The bound:** a stale proposal's
+  report is one id, two integers and at most eight sampled ids (the base's first eight in pre-order),
+  whatever the document's size.
+- **Documentation only:** `Rejection.UnknownNode` now states what `addressable` is for — a repair
+  aid on the single-op `canApply` path, where a model repairs one op and needs every id it could
+  have meant — and that a party reporting a stale script to others reports `Arbitration.stale`
+  instead.
+
+**What did NOT change, deliberately.** The `Conflicts` case still carries `interfering: int list`
+alone, and `Inapplicable` still carries the op-algebra's own envelope, `addressable` in full. Putting
+the clause lists ON `Conflicts`, or the bounded report IN `Inapplicable`, changes a published case's
+payload — a `retype`, breaking for every consumer that constructs or matches the case — so the
+explanation and the bound ship beside the cases, computed by the same function the cases are, rather
+than in them. `arbitrate`'s partition, citations and envelopes are byte-for-byte what they were.
+
+**Class: additive.** One new union, one new record, four new module values; `api/Fuaran.Core.Ops.txt`
+gains lines and loses none. Nothing a pinned consumer compiles against moves.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

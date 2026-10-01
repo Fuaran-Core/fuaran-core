@@ -217,3 +217,109 @@ let arbitrationLawTests =
                   (Conformance.arbitrationLaws nodew idw opGen encNode 8585 300)
                   results
                   "same seed ⇒ identical report" ]
+
+// ---- Phase 248 — rejections that explain themselves ----
+
+[<Tests>]
+let explainedRejectionTests =
+    testList
+        "Arbitration.interference / Arbitration.stale"
+        [ testCase "every Conflicts citation is exactly the ids Arbitration.interference reports, each with a clause"
+          <| fun _ ->
+              let tree = sample ()
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
+              let p2 = prop 2 [ RemoveNode "b1" ]
+              let p3 = prop 3 [ InsertChild("b", RNode.leaf "y" "para" "3") ]
+              let p4 = prop 4 [ InsertChild("a", RNode.leaf "z" "para" "4") ]
+
+              let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3; p4 ]
+
+              Expect.equal (acceptedIds r) [ 1; 3 ] "p1 + p3 accepted"
+
+              for p, reason in r.Rejected do
+                  match reason with
+                  | Conflicts ids ->
+                      let explained = Arbitration.interference nodew idw r.Accepted p
+                      Expect.equal (List.map fst explained) ids "the explanation cites exactly the Conflicts ids"
+
+                      for _, clauses in explained do
+                          Expect.isNonEmpty clauses "every interfering pair names at least one clause"
+                  | other -> failtestf "expected only Conflicts here, got %A" other
+
+              // and the clauses say HOW: the remove serialises against both inserts, the second
+              // insert under `a` shares p1's parent.
+              Expect.equal
+                  (Arbitration.interference nodew idw r.Accepted p2)
+                  [ 1, [ Interference.LeftUnknownParent(Set.ofList [ "b1" ], Set.ofList [ "a" ]) ]
+                    3, [ Interference.LeftUnknownParent(Set.ofList [ "b1" ], Set.ofList [ "b" ]) ] ]
+                  "p2 relocates b1 against each accepted structural write"
+
+              Expect.equal
+                  (Arbitration.interference nodew idw r.Accepted p4)
+                  [ 1, [ Interference.SameParent(Set.ofList [ "a" ]) ] ]
+                  "p4 shares parent a with p1, and nothing with p3"
+
+          testCase "an accepted proposal's interference with the rest of the accepted set is empty"
+          <| fun _ ->
+              let tree = sample ()
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
+              let p2 = prop 2 [ InsertChild("b", RNode.leaf "y" "para" "2") ]
+              let r = Arbitration.arbitrate nodew idw tree [ p1; p2 ]
+
+              for p in r.Accepted do
+                  let others = r.Accepted |> List.filter (fun a -> a.Id <> p.Id)
+                  Expect.isEmpty (Arbitration.interference nodew idw others p) "accepted proposals are independent"
+
+          testCase "a stale proposal's bounded report: the missing id, the count, and a capped sample"
+          <| fun _ ->
+              // a document far larger than the cap: root with 200 leaves.
+              let big =
+                  RNode.node "root" "doc" [ for i in 1..200 -> RNode.leaf (sprintf "n%d" i) "para" "v" ]
+
+              let p1 = prop 1 [ InsertChild("n1", RNode.leaf "x" "para" "1"); RemoveNode "gone" ]
+              let r = Arbitration.arbitrate nodew idw big [ p1 ]
+
+              match r.Rejected with
+              | [ (_, reason) ] ->
+                  // the op-algebra's own envelope still carries the whole document, as it always has.
+                  match reason with
+                  | Inapplicable(_, UnknownNode(_, addressable)) ->
+                      Expect.equal (List.length addressable) 202 "the full envelope enumerates every id"
+                  | other -> failtestf "expected Inapplicable(UnknownNode), got %A" other
+
+                  match Arbitration.stale reason with
+                  | Some s ->
+                      Expect.equal s.OpIndex 1 "the second op failed"
+                      Expect.equal s.Missing "gone" "the id the script named that the base lacks"
+                      Expect.equal s.AddressableCount 202 "the base's id count (root, x, 200 leaves)"
+                      Expect.equal (List.length s.Sample) Arbitration.staleSampleSize "the sample is capped"
+                      Expect.equal s.Sample [ "root"; "n1"; "x"; "n2"; "n3"; "n4"; "n5"; "n6" ] "pre-order, root first"
+                  | None -> failtest "a stale rejection has a bounded report"
+              | other -> failtestf "expected one rejection, got %A" other
+
+          testCase "the bounded report's size is fixed by the cap, not by the document"
+          <| fun _ ->
+              let docOf n =
+                  RNode.node "root" "doc" [ for i in 1..n -> RNode.leaf (sprintf "n%d" i) "para" "v" ]
+
+              for n in [ 0; 3; 7; 50; 465; 2000 ] do
+                  let r = Arbitration.arbitrate nodew idw (docOf n) [ prop 1 [ RemoveNode "gone" ] ]
+
+                  match r.Rejected |> List.map (snd >> Arbitration.stale) with
+                  | [ Some s ] ->
+                      Expect.equal s.AddressableCount (n + 1) "the count is the document's"
+                      Expect.equal (List.length s.Sample) (min (n + 1) Arbitration.staleSampleSize) "the sample is not"
+                  | other -> failtestf "expected one bounded report at n=%d, got %A" n other
+
+          testCase "stale is None for every rejection that is not a missing id"
+          <| fun _ ->
+              let tree = sample ()
+              let p1 = prop 1 [ InsertChild("a", RNode.leaf "x" "para" "1") ]
+              let p2 = prop 2 [ InsertChild("a", RNode.leaf "y" "para" "2") ] // Conflicts
+              let p3 = prop 3 [ InsertChild("b", RNode.leaf "a1" "para" "3") ] // DuplicateId
+              let r = Arbitration.arbitrate nodew idw tree [ p1; p2; p3 ]
+
+              Expect.equal (List.length r.Rejected) 2 "one conflict, one duplicate"
+
+              for _, reason in r.Rejected do
+                  Expect.isNone (Arbitration.stale reason) (sprintf "%A carries no document-sized payload" reason) ]

@@ -282,3 +282,165 @@ let footprintLawTests =
                   (Conformance.footprintLaws nodew idw opGen encNode 4242 300)
                   results
                   "same seed ⇒ identical report" ]
+
+// ---- Phase 248 — Ops.interference: the clause behind a dependent verdict ----
+
+/// `Ops.independent` exactly as it read before Phase 248 redefined it over `interference` — the
+/// clause-by-clause conjunction, kept here so the redefinition is held to the verdict it replaced.
+let private independentBefore248 (a: Footprint) (b: Footprint) =
+    let disjoint x y = Set.isEmpty (Set.intersect x y)
+
+    let hasStructural (f: Footprint) =
+        not (Set.isEmpty f.StructureWrites && Set.isEmpty f.UnknownParentWrites)
+
+    disjoint a.ContentWrites b.ContentWrites
+    && disjoint a.ContentWrites b.Reads
+    && disjoint b.ContentWrites a.Reads
+    && disjoint a.StructureWrites b.StructureWrites
+    && not (not (Set.isEmpty a.UnknownParentWrites) && hasStructural b)
+    && not (not (Set.isEmpty b.UnknownParentWrites) && hasStructural a)
+
+/// Every footprint over a two-address universe: each of the four sets is one of the four subsets of
+/// {x, y}, so every overlap shape a clause can see (none, one address, both) occurs — 256 footprints.
+let private everyFootprint =
+    let subsets = [ Set.empty; setOf [ "x" ]; setOf [ "y" ]; setOf [ "x"; "y" ] ]
+
+    [ for r in subsets do
+          for s in subsets do
+              for c in subsets do
+                  for u in subsets do
+                      { Reads = r
+                        StructureWrites = s
+                        ContentWrites = c
+                        UnknownParentWrites = u } ]
+
+/// The clause as the other side reads it: overlaps are their own mirror, directional clauses swap.
+let private mirror (i: Interference) =
+    match i with
+    | Interference.SameTarget t -> Interference.SameTarget t
+    | Interference.LeftWritesRightReads xs -> Interference.RightWritesLeftReads xs
+    | Interference.RightWritesLeftReads xs -> Interference.LeftWritesRightReads xs
+    | Interference.SameParent ps -> Interference.SameParent ps
+    | Interference.LeftUnknownParent(relocated, structural) -> Interference.RightUnknownParent(structural, relocated)
+    | Interference.RightUnknownParent(structural, relocated) -> Interference.LeftUnknownParent(relocated, structural)
+
+let private clauseName (i: Interference) =
+    match i with
+    | Interference.SameTarget _ -> "SameTarget"
+    | Interference.LeftWritesRightReads _ -> "LeftWritesRightReads"
+    | Interference.RightWritesLeftReads _ -> "RightWritesLeftReads"
+    | Interference.SameParent _ -> "SameParent"
+    | Interference.LeftUnknownParent _ -> "LeftUnknownParent"
+    | Interference.RightUnknownParent _ -> "RightUnknownParent"
+
+[<Tests>]
+let interferenceTests =
+    testList
+        "Ops.interference"
+        [ testCase "independent is interference = [] and agrees with the pre-248 conjunction on every pair"
+          <| fun _ ->
+              let mutable pairs = 0
+              let mutable reached = Set.empty
+
+              for a in everyFootprint do
+                  for b in everyFootprint do
+                      pairs <- pairs + 1
+                      let clauses = Ops.interference a b
+                      reached <- clauses |> List.map clauseName |> Set.ofList |> Set.union reached
+
+                      if Ops.independent a b <> List.isEmpty clauses then
+                          failtestf "independent disagrees with interference at %A / %A" a b
+
+                      if Ops.independent a b <> independentBefore248 a b then
+                          failtestf "the redefinition moved the verdict at %A / %A" a b
+
+              Expect.equal pairs 65536 "every ordered pair of the 256 footprints was judged"
+
+              // the sweep is not vacuous: every clause fired somewhere in it.
+              Expect.equal
+                  reached
+                  (setOf
+                      [ "SameTarget"
+                        "LeftWritesRightReads"
+                        "RightWritesLeftReads"
+                        "SameParent"
+                        "LeftUnknownParent"
+                        "RightUnknownParent" ])
+                  "every clause was reached"
+
+          testCase "each clause carries exactly the addresses its definition names, at most once, in order"
+          <| fun _ ->
+              let structural (f: Footprint) =
+                  Set.union f.StructureWrites f.UnknownParentWrites
+
+              for a in everyFootprint do
+                  for b in everyFootprint do
+                      let clauses = Ops.interference a b
+
+                      let expected =
+                          [ let st = Set.intersect a.ContentWrites b.ContentWrites
+
+                            if not st.IsEmpty then
+                                Interference.SameTarget st
+
+                            let lw = Set.intersect a.ContentWrites b.Reads
+
+                            if not lw.IsEmpty then
+                                Interference.LeftWritesRightReads lw
+
+                            let rw = Set.intersect a.Reads b.ContentWrites
+
+                            if not rw.IsEmpty then
+                                Interference.RightWritesLeftReads rw
+
+                            let sp = Set.intersect a.StructureWrites b.StructureWrites
+
+                            if not sp.IsEmpty then
+                                Interference.SameParent sp
+
+                            if not a.UnknownParentWrites.IsEmpty && not (structural b).IsEmpty then
+                                Interference.LeftUnknownParent(a.UnknownParentWrites, structural b)
+
+                            if not b.UnknownParentWrites.IsEmpty && not (structural a).IsEmpty then
+                                Interference.RightUnknownParent(structural a, b.UnknownParentWrites) ]
+
+                      if clauses <> expected then
+                          failtestf "interference %A / %A = %A, expected %A" a b clauses expected
+
+          testCase "swapping the sides mirrors the clauses (interference b a = mirror of interference a b)"
+          <| fun _ ->
+              for a in everyFootprint do
+                  for b in everyFootprint do
+                      let forward = Ops.interference a b |> List.map mirror |> Set.ofList
+                      let backward = Ops.interference b a |> Set.ofList
+
+                      if forward <> backward then
+                          failtestf "not mirror-symmetric at %A / %A" a b
+
+          testCase "concrete scripts name the clause and the addresses"
+          <| fun _ ->
+              let fp ops = Ops.footprint nodew idw ops
+
+              let ins parent id =
+                  InsertChild(parent, RNode.leaf id "para" "v")
+
+              // two inserts under one parent: the pinned same-parent rule, on that parent.
+              Expect.equal
+                  (Ops.interference (fp [ ins "a" "x" ]) (fp [ ins "a" "y" ]))
+                  [ Interference.SameParent(setOf [ "a" ]) ]
+                  "same parent, named"
+
+              // a remove against an insert elsewhere: the unknown-parent clause, both sides' addresses.
+              Expect.equal
+                  (Ops.interference (fp [ RemoveNode "b1" ]) (fp [ ins "a" "x" ]))
+                  [ Interference.LeftUnknownParent(setOf [ "b1" ], setOf [ "a" ]) ]
+                  "the remove relocates b1; the insert writes a's child list"
+
+              // one script authors q, the other inserts under q: content against read, on q.
+              Expect.equal
+                  (Ops.interference (fp [ ins "a" "q" ]) (fp [ ins "q" "r" ]))
+                  [ Interference.LeftWritesRightReads(setOf [ "q" ]) ]
+                  "A authors q; B reads q as its parent"
+
+              // independent scripts explain nothing.
+              Expect.isEmpty (Ops.interference (fp [ ins "a" "x" ]) (fp [ ins "b" "y" ])) "disjoint inserts" ]
