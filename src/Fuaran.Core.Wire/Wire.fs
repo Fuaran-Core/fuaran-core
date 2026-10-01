@@ -1702,6 +1702,13 @@ module Corpus =
     /// binary), a non-ASCII BMP character, and the surrogate classes — a well-formed pair, a lone
     /// high and a lone low (a low atom drawn before a high atom is the ill-ordered class). A string
     /// holding a lone or ill-ordered surrogate is not well-formed UTF-16, and the parser refuses it.
+    ///
+    /// THE TWO LONE SURROGATES ARE BUILT, like the controls, and never written as `\u` escapes
+    /// (Phase 306). Written as literals they were wrong on both pipelines: the F# compiler
+    /// replaces an unpaired surrogate escape in a string literal with U+FFFD, so on .NET this
+    /// alphabet held two replacement characters and the fuzz never drew an ill-formed string;
+    /// and the Fable compiler, which keeps the unit, could not write it into its output file and
+    /// failed the compile of this package outright.
     let private fuzzAtoms: string[] =
         Array.append
             [| "a"
@@ -1714,8 +1721,8 @@ module Corpus =
                "\u007F"
                "é"
                "😀"
-               "\uD800"
-               "\uDFFF" |]
+               string (char 0xD800)
+               string (char 0xDFFF) |]
             [| for k in 0x00..0x1F -> string (char k) |]
 
     /// Every string and member key of `v` is well-formed UTF-16 — the values the parser can hand
