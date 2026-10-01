@@ -4,6 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
+    <!-- Phase 255 - an XML doc comment that does not parse fails this build (the generated
+         DocAnnotatedGenerated.fs is the subject); Directory.Build.props already turns 3390 on. -->
+    <WarningsAsErrors>$(WarningsAsErrors);FS3390</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Reference.fs" />
@@ -86,6 +89,11 @@
          registration), after the wire-shape family it shares its fixture shape with. -->
     <Compile Include="IdlAnnotationTests.fs" />
     <Compile Include="IdlKindAnnotationTests.fs" />
+    <!-- Phase 255 - the authored doc annotation. DocAnnotatedGenerated.fs is the F# emitted
+         from IdlDocAnnotationTests' vocabulary, committed and compiled here so that FS3390 (an
+         invalid XML doc comment) is an ERROR against it; the test file holds its drift guard. -->
+    <Compile Include="DocAnnotatedGenerated.fs" />
+    <Compile Include="IdlDocAnnotationTests.fs" />
     <!-- Phase 702 — the vocabulary-change proposal document and the branchless spike
          that prices it (the harness lives in Fuaran.Core.Idl.Cli since Phase 230). Reads
          MiniIdl.fs, so after the Idl families above. -->

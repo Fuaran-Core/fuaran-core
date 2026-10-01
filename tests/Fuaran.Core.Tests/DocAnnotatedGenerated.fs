@@ -1,0 +1,269 @@
+// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.
+module Fuaran.Core.Tests.DocAnnotatedGenerated
+#nowarn "44" // this layer implements every declared member, including deprecated ones
+
+open Fuaran.Core
+
+[<RequireQualifiedAccess>]
+type Tone =
+    | Quiet
+    /// <summary>
+    /// &lt;'T> is not a tag here: Option&lt;'T> &amp; friends.
+    /// </summary>
+    | Loud
+
+[<RequireQualifiedAccess>]
+type Src =
+    /// The literal case: the value is the text.
+    | Lit of value: string
+    /// A by-name reference to another note.
+    /// **Deprecated.** Use `Lit` instead.
+    /// resolve the reference before encoding.
+    /// **In-process only** — this member has no wire projection: a value here
+    /// is carried inside one host process and is LOST across any wire boundary.
+    /// Since `0.2.0`.
+    | [<System.Obsolete("deprecated — use `Lit` instead: resolve the reference before encoding.; in-process only — no wire projection; a value here is lost across a wire boundary", false)>] Ref of target: string
+
+and Pair =
+    {
+      /// The left half, < the right.
+      Left: string
+      Right: string
+    }
+
+// leaf
+/// A short note.
+/// Renders as one paragraph & never wraps <'T>.
+and NoteSpec =
+    {
+      /// Holds a List<'T> & a <b>bold</b> claim.
+      /// See javascript:alert(1) <script>x</script>.
+      ///
+      /// Tab	here, bell �, lone � end.
+      Label: string
+      Src: Src option
+      Tone: Tone
+      Pair: Pair option
+    }
+
+and [<RequireQualifiedAccess>] NodeKind =
+    | Note of NoteSpec
+
+and Node = { Id: string; Kind: NodeKind }
+
+let private encTone (v: Tone) : JVal =
+    match v with
+    | Tone.Quiet -> JStr "Quiet"
+    | Tone.Loud -> JStr "Loud"
+
+// WIRE_FORMAT §5 — a non-finite double has no JSON *number* spelling, so it rides as
+// one of the three quoted sentinel strings, which §7 requires a decoder to read back
+// AT A FLOAT SLOT (`dFloat` below; `dInt` is deliberately not widened — §7 stops at
+// the float slot, and an integer slot has no sentinel).
+//
+// Building the `JStr` HERE rather than leaving `Canon.render` to spell a non-finite
+// `JFloat` is what keeps the emitted `JVal` renderable by the GUARDED
+// `Fuaran.Core.Wire.tryRender`, which refuses a non-finite `JFloat` outright. The core
+// wire model still has no non-finite float — the sentinel is a string, which it carries
+// perfectly — so this widens the generated float slot's spelling, not the model.
+let private encFloat (f: float) : JVal =
+    if System.Double.IsNaN f then JStr "NaN"
+    elif System.Double.IsPositiveInfinity f then JStr "Infinity"
+    elif System.Double.IsNegativeInfinity f then JStr "-Infinity"
+    else JFloat f
+
+let rec private encNodeKind (k: NodeKind) : JVal =
+    match k with
+    | NodeKind.Note s -> encNoteSpec s
+
+and private encNode (n: Node) : JVal =
+    let kind = encNodeKind n.Kind
+
+    JObj [ "id", JStr n.Id; "kind", kind ]
+
+and private encSrc (v: Src) : JVal =
+    match v with
+    | Src.Lit value -> Canon.typed "Lit" [ "value", JStr value ]
+    | Src.Ref target -> Canon.typed "Ref" [ "target", JStr target ]
+
+and private encPair (s: Pair) : JVal =
+    JObj([ Some("left", JStr s.Left); Some("right", JStr s.Right) ] |> List.choose id)
+
+and private encNoteSpec (s: NoteSpec) : JVal =
+    Canon.typed "Note" ([ Some("label", JStr s.Label); (s.Src |> Option.map (fun v -> "src", encSrc v)); Some("tone", encTone s.Tone); (s.Pair |> Option.map (fun v -> "pair", encPair v)) ] |> List.choose id)
+
+let encodeNode (n: Node) : string = Canon.render (encNode n)
+
+/// JVal-level accessors (Phase 694) — for host codecs that splice generated
+/// encodings into a larger canonical document (e.g. a TreeOp codec).
+let encodeNodeJson (n: Node) : JVal = encNode n
+
+let encodeNodeKindJson (k: NodeKind) : JVal = encNodeKind k
+
+let private dObj (j: JVal) : Result<(string * JVal) list, string> =
+    match j with
+    | JObj fs -> Ok fs
+    | _ -> Error "expected an object"
+
+let private dTag (fs: (string * JVal) list) : Result<string, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = "$type") with
+    | Some(_, JStr t) -> Ok t
+    | _ -> Error "missing or non-string $type"
+
+let private dStr (j: JVal) : Result<string, string> =
+    match j with
+    | JStr s -> Ok s
+    | _ -> Error "expected a string"
+
+let private dInt (j: JVal) : Result<int, string> =
+    match j with
+    | JInt i -> Ok i
+    | _ -> Error "expected an int"
+
+let private dBool (j: JVal) : Result<bool, string> =
+    match j with
+    | JBool b -> Ok b
+    | _ -> Error "expected a bool"
+
+// A whole-valued float renders without a decimal point, so it parses back as JInt.
+// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
+// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never
+// to the string: a host that answered the string would hand a consumer a different tree on
+// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
+// the float slot.
+let private dFloat (j: JVal) : Result<float, string> =
+    match j with
+    | JFloat f -> Ok f
+    | JInt i -> Ok(float i)
+    | JStr "NaN" -> Ok System.Double.NaN
+    | JStr "Infinity" -> Ok System.Double.PositiveInfinity
+    | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
+    | _ -> Error "expected a number"
+
+let private dUnit (_: JVal) : Result<unit, string> = Ok()
+
+// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
+// contract is that its content is not the schema's business.
+let private dJson (j: JVal) : Result<JVal, string> = Ok j
+
+let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =
+    match j with
+    | JArr xs ->
+        (Ok [], xs)
+        ||> List.fold (fun acc x ->
+            match acc with
+            | Error e -> Error e
+            | Ok items -> dec x |> Result.map (fun v -> v :: items))
+        |> Result.map List.rev
+    | _ -> Error "expected an array"
+
+let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =
+    match j with
+    | JObj fs ->
+        (Ok [], fs)
+        ||> List.fold (fun acc (k, v) ->
+            match acc with
+            | Error e -> Error e
+            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))
+        |> Result.map (List.rev >> Map.ofList)
+    | _ -> Error "expected an object"
+
+let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v
+    | None -> Error("missing required field '" + name + "'")
+
+let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> Result.map Some
+    | None -> Ok None
+
+let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v
+    | None -> Ok dflt
+
+// An optional closure / opaque field: the value is a sentinel carrying nothing,
+// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
+let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =
+    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
+
+let private decTone (j: JVal) : Result<Tone, string> =
+    match j with
+    | JStr "Quiet" -> Ok Tone.Quiet
+    | JStr "Loud" -> Ok Tone.Loud
+    | _ -> Error "not a Tone"
+
+let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dTag __fs |> Result.bind (fun __t ->
+    match __t with
+    | "Note" -> decNoteSpec j |> Result.map NodeKind.Note
+    | __other -> Error ("unknown node kind: " + __other)))
+
+and private decNode (j: JVal) : Result<Node, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "id" __fs dStr |> Result.bind (fun id ->
+    dReq "kind" __fs decNodeKind |> Result.bind (fun kind ->
+    Ok { Id = id; Kind = kind })))
+
+and private decSrc (j: JVal) : Result<Src, string> =
+    match j with
+    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+        dTag __fs |> Result.bind (fun __t ->
+        match __t with
+        | "Lit" ->
+            dReq "value" __fs dStr |> Result.bind (fun value ->
+            Ok(Src.Lit(value)))
+        | "Ref" ->
+            dReq "target" __fs dStr |> Result.bind (fun target ->
+            Ok(Src.Ref(target)))
+        | __other -> Error ("unknown Src case: " + __other))
+    | _ -> Error "expected a Src object"
+
+and private decPair (j: JVal) : Result<Pair, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "left" __fs dStr |> Result.bind (fun left ->
+    dReq "right" __fs dStr |> Result.bind (fun right ->
+    Ok { Left = left; Right = right })))
+
+and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
+    dObj j |> Result.bind (fun __fs ->
+    dReq "label" __fs dStr |> Result.bind (fun label ->
+    dOpt "src" __fs decSrc |> Result.bind (fun src ->
+    dReq "tone" __fs decTone |> Result.bind (fun tone ->
+    dOpt "pair" __fs decPair |> Result.bind (fun pair ->
+    Ok { Label = label; Src = src; Tone = tone; Pair = pair })))))
+
+/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
+/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
+let decodeNode (s: string) : Result<Node, string> =
+    Json.parse s |> Result.bind decNode
+
+let private witnessKindTag (n: Node) : string =
+    match n.Kind with
+    | NodeKind.Note _ -> "Note"
+
+let private witnessChildren (n: Node) : Node list =
+    match n.Kind with
+    | _ -> []
+
+let private witnessReplaceChildren (n: Node) (kids: Node list) : Node =
+    match n.Kind with
+    | _ -> n
+
+let nodeWitness: NodeWitness<Node, string> =
+    { Id = fun n -> n.Id
+      KindTag = witnessKindTag
+      Children = witnessChildren
+      ReplaceChildren = witnessReplaceChildren }
+
+// Validator scaffold — register domain RuleFamilies into `reg`; rule content stays domain-side.
+let runValidator (reg: Validator.Registry<Node, string>) (root: Node) : Defect<string> list =
+    Validator.runAll nodeWitness reg root
+
+// Smart constructors — required-without-default fields are parameters; IDL-declared
+// defaults are filled, other optionals default to None.
+
+let mkNote (id: string) (label: string) (tone: Tone) : Node =
+    { Id = id; Kind = NodeKind.Note { Label = label; Src = None; Tone = tone; Pair = None } }
