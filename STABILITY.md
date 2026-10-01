@@ -2375,6 +2375,33 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.34.0 — DRAFT
+
+### The `OpStream` module becomes a forwarding facade over the concern files (Phase 332) — ADDITIVE; no public surface moves
+
+**What changed.** Phase 296 split `OpStream.fs` by concern at the type level and left the `OpStream`
+module's own members in one file, so that file still held every concern's code. Each member's body
+now lives in the file that owns its concern, in an internal module there — `Chain.fs` (the chain
+hashes, the payload configs, append, verification, rehash, replay, the head, compare-and-append and
+idempotent append), `Jsonl.fs` (the one scanner and the record reader and writer), `Snapshot.fs` (the
+snapshot family and its pre-Phase-296 forwards), `Capture.fs` (capture / replay and attestation) and
+`Attributed.fs` — and `OpStream` (`OpStream.fs`, compiled last) keeps every public name, the nested
+`OpStream.Jsonl`, `OpStream.Snapshots` and `OpStream.Attributed` included, as a forward with the same
+signature, attributes and documentation. `Jsonl.fs` now compiles before `Snapshot.fs`, ahead of the
+readers built on its scanner; the `fable/` source distribution ships the project file that says so.
+Two documentation edits ride it: `OpStream.appendIf` now carries the compare-and-append contract,
+which was written above the private core it calls and so never reached a consumer's tooltip, and two
+doc comments that pointed "above" / "below" at code that moved name its file instead.
+
+**What adopting it costs.** Nothing. `api/Fuaran.Core.OpStream.txt` is byte-identical, every error
+string is byte-identical (the bodies moved verbatim, the `OpStream.snapshotAt: …` strings the
+compaction proof model pins among them), and the proof cone over `proofs/Chain.fst` verifies with its extracted oracle
+byte-identical to a fresh extraction. A forward of a hash function keeps the lambda form
+(`fun prev payload -> …`): written as a bare value it would compile to a property rather than a
+two-argument method, which the baseline refuses as a `removal`.
+
+**Class: additive.** No public surface moves; a change to one op-stream concern now edits one file.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

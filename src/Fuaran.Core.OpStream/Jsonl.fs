@@ -102,3 +102,646 @@ type JsonlLine =
         { Number: int
           Text: string
           Fields: (string * string * int) list }
+
+/// The bodies of the `OpStream` JSONL members (Phase 332): the one escaper, the record writer, THE
+/// line scanner (`OpStream.Jsonl`) and the record readers built on it. Internal: a consumer reaches
+/// each one through its forward in `OpStream` (OpStream.fs), which carries the member's contract
+/// and documentation.
+module internal OpStreamJsonl =
+    open Fuaran.Core.OpStreamChain
+
+    /// JSON string spelling for every line, snapshot, capture and envelope this package emits —
+    /// the ONE escaper this package carries (`JsonString.quote`, the D2 copy of `Wire.Json.escape`,
+    /// every control character as `\u00xx` since Phase 287). Fable-clean.
+    let jstr (s: string) : string = JsonString.quote s
+
+    let toJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : string =
+        records
+        |> List.map (fun r ->
+            "{\"seq\":"
+            + string r.Seq
+            + ",\"actor\":"
+            + Actor.encode r.Actor
+            + ",\"op\":"
+            + w.Encode r.Op
+            + ",\"prevHash\":"
+            + jstr r.PrevHash
+            + ",\"hash\":"
+            + jstr r.Hash
+            + "}")
+        |> String.concat "\n"
+
+    module Jsonl =
+
+        let inline private isWs (c: char) =
+            c = ' ' || c = '\t' || c = '\n' || c = '\r'
+
+        let private fail (pos: int) (reason: JsonlFaultReason) : 'a = raise (JsonlScanFault(pos, reason))
+
+        let inline private isHex (c: char) =
+            (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+
+        let inline private hexVal (c: char) =
+            if c <= '9' then int c - int '0'
+            elif c >= 'a' then int c - int 'a' + 10
+            else int c - int 'A' + 10
+
+        /// The code unit of the `\uXXXX` escape whose backslash is at `i`, or `-1` when fewer than
+        /// four hex digits follow the `u`.
+        let private unicodeAt (s: string) (i: int) : int =
+            if
+                i + 5 < s.Length
+                && s.[i + 1] = 'u'
+                && isHex s.[i + 2]
+                && isHex s.[i + 3]
+                && isHex s.[i + 4]
+                && isHex s.[i + 5]
+            then
+                (hexVal s.[i + 2] <<< 12)
+                + (hexVal s.[i + 3] <<< 8)
+                + (hexVal s.[i + 4] <<< 4)
+                + hexVal s.[i + 5]
+            else
+                -1
+
+        let private escapeText (s: string) (i: int) (len: int) = s.Substring(i, min len (s.Length - i))
+
+        /// Index just past the string token whose opening quote is at `start`, every escape held to
+        /// the JSON grammar: the eight single-letter escapes, and `\uXXXX` with four hex digits, a
+        /// high surrogate followed at once by an escaped low one.
+        let internal skipString (s: string) (start: int) : int =
+            let n = s.Length
+            let mutable i = start + 1
+            let mutable fin = false
+
+            while not fin do
+                if i >= n then
+                    fail start JsonlFaultReason.UnterminatedString
+
+                match s.[i] with
+                | '"' ->
+                    i <- i + 1
+                    fin <- true
+                | '\\' ->
+                    if i + 1 >= n then
+                        fail start JsonlFaultReason.UnterminatedString
+
+                    match s.[i + 1] with
+                    | '"'
+                    | '\\'
+                    | '/'
+                    | 'b'
+                    | 'f'
+                    | 'n'
+                    | 'r'
+                    | 't' -> i <- i + 2
+                    | 'u' ->
+                        let code = unicodeAt s i
+
+                        if code < 0 then
+                            fail i (JsonlFaultReason.InvalidEscape(escapeText s i 6))
+                        elif code >= 0xD800 && code <= 0xDBFF then
+                            let low =
+                                if i + 6 < n && s.[i + 6] = '\\' then
+                                    unicodeAt s (i + 6)
+                                else
+                                    -1
+
+                            if low >= 0xDC00 && low <= 0xDFFF then
+                                i <- i + 12
+                            else
+                                fail i (JsonlFaultReason.InvalidEscape(escapeText s i 12))
+                        elif code >= 0xDC00 && code <= 0xDFFF then
+                            fail i (JsonlFaultReason.InvalidEscape(escapeText s i 6))
+                        else
+                            i <- i + 6
+                    | c -> fail i (JsonlFaultReason.InvalidEscape("\\" + string c))
+                | _ -> i <- i + 1
+
+            i
+
+        /// Decode a string token `skipString` has already accepted (quotes included).
+        let private decodeString (token: string) : string =
+            let sb = System.Text.StringBuilder()
+            let last = token.Length - 1
+            let mutable i = 1
+
+            while i < last do
+                let c = token.[i]
+
+                if c = '\\' then
+                    match token.[i + 1] with
+                    | 'u' ->
+                        sb.Append(char (unicodeAt token i)) |> ignore
+                        i <- i + 6
+                    | e ->
+                        (match e with
+                         | 'b' -> sb.Append('\b')
+                         | 'f' -> sb.Append('\f')
+                         | 'n' -> sb.Append('\n')
+                         | 'r' -> sb.Append('\r')
+                         | 't' -> sb.Append('\t')
+                         | other -> sb.Append(other))
+                        |> ignore
+
+                        i <- i + 2
+                else
+                    sb.Append(c) |> ignore
+                    i <- i + 1
+
+            sb.ToString()
+
+        /// A bare value's token held to the literal grammar: `true`, `false`, `null`, or a JSON number
+        /// (`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`).
+        let private isLiteral (t: string) : bool =
+            if t = "true" || t = "false" || t = "null" then
+                true
+            else
+                let n = t.Length
+                let mutable i = 0
+                let digit k = k < n && t.[k] >= '0' && t.[k] <= '9'
+
+                if i < n && t.[i] = '-' then
+                    i <- i + 1
+
+                let intStart = i
+
+                if i < n && t.[i] = '0' then
+                    i <- i + 1
+                else
+                    while digit i do
+                        i <- i + 1
+
+                let mutable ok = i > intStart
+
+                if ok && i < n && t.[i] = '.' then
+                    i <- i + 1
+                    let fracStart = i
+
+                    while digit i do
+                        i <- i + 1
+
+                    ok <- i > fracStart
+
+                if ok && i < n && (t.[i] = 'e' || t.[i] = 'E') then
+                    i <- i + 1
+
+                    if i < n && (t.[i] = '+' || t.[i] = '-') then
+                        i <- i + 1
+
+                    let expStart = i
+
+                    while digit i do
+                        i <- i + 1
+
+                    ok <- i > expStart
+
+                ok && i = n
+
+        /// Index just past the JSON value starting at `start` (no leading whitespace).
+        let internal skipValue (s: string) (start: int) : int =
+            let n = s.Length
+
+            if start >= n then
+                fail start JsonlFaultReason.Truncated
+
+            match s.[start] with
+            | '"' -> skipString s start
+            | '{'
+            | '[' ->
+                let mutable i = start + 1
+                let mutable depth = 1
+
+                while depth > 0 do
+                    if i >= n then
+                        fail start JsonlFaultReason.UnterminatedContainer
+
+                    match s.[i] with
+                    | '"' -> i <- skipString s i
+                    | '{'
+                    | '[' ->
+                        depth <- depth + 1
+                        i <- i + 1
+                    | '}'
+                    | ']' ->
+                        depth <- depth - 1
+                        i <- i + 1
+                    | _ -> i <- i + 1
+
+                i
+            | ','
+            | '}'
+            | ']' -> fail start JsonlFaultReason.MissingValue
+            | _ ->
+                let mutable i = start
+
+                while i < n && not (let c = s.[i] in c = ',' || c = '}' || c = ']' || isWs c) do
+                    i <- i + 1
+
+                let token = s.Substring(start, i - start)
+
+                if not (isLiteral token) then
+                    fail start (JsonlFaultReason.InvalidLiteral token)
+
+                i
+
+        /// The members of the flat object `s` holds — `(key, raw value, value position)`, first-wins
+        /// on a repeated key (Phase 45: the first-wins `JVal` decoders and this scanner agree on which
+        /// value a repeated key resolves to). Positions are offsets into `s` plus `offset`.
+        let private membersOf (offset: int) (s: string) : (string * string * int) list =
+            let n = s.Length
+            let mutable i = 0
+
+            let skipWs () =
+                while i < n && isWs s.[i] do
+                    i <- i + 1
+
+            let at k = offset + k
+            skipWs ()
+
+            if i >= n || s.[i] <> '{' then
+                fail (at i) JsonlFaultReason.NotAnObject
+
+            i <- i + 1
+            skipWs ()
+            let fields = ResizeArray<string * string * int>()
+
+            if i >= n then
+                fail (at i) JsonlFaultReason.Truncated
+
+            if s.[i] = '}' then
+                i <- i + 1
+            else
+                let mutable go = true
+
+                while go do
+                    skipWs ()
+
+                    if i >= n then
+                        fail (at i) JsonlFaultReason.Truncated
+
+                    if s.[i] <> '"' then
+                        fail (at i) JsonlFaultReason.ExpectedKey
+
+                    let ks =
+                        try
+                            skipString s i
+                        with JsonlScanFault(p, r) ->
+                            fail (at p) r
+
+                    let key = decodeString (s.Substring(i, ks - i))
+                    i <- ks
+                    skipWs ()
+
+                    if i >= n then
+                        fail (at i) JsonlFaultReason.Truncated
+
+                    if s.[i] <> ':' then
+                        fail (at i) JsonlFaultReason.ExpectedColon
+
+                    i <- i + 1
+                    skipWs ()
+
+                    if i >= n then
+                        fail (at i) JsonlFaultReason.Truncated
+
+                    let vs =
+                        try
+                            skipValue s i
+                        with JsonlScanFault(p, r) ->
+                            fail (at p) r
+
+                    fields.Add((key, s.Substring(i, vs - i), at i))
+                    i <- vs
+                    skipWs ()
+
+                    if i >= n then
+                        fail (at i) JsonlFaultReason.Truncated
+
+                    if s.[i] = ',' then
+                        i <- i + 1
+                    elif s.[i] = '}' then
+                        i <- i + 1
+                        go <- false
+                    else
+                        fail (at i) JsonlFaultReason.ExpectedCommaOrBrace
+
+            skipWs ()
+
+            if i < n then
+                fail (at i) JsonlFaultReason.TrailingContent
+
+            let seen = System.Collections.Generic.HashSet<string>()
+
+            [ for (k, v, p) in fields do
+                  if seen.Add k then
+                      yield (k, v, p) ]
+
+        let private faultAt (line: int) (pos: int) (reason: JsonlFaultReason) : JsonlFault =
+            { Line = line
+              Position = pos
+              Reason = reason }
+
+        let parseLine (number: int) (text: string) : Result<JsonlLine, JsonlFault> =
+            try
+                Ok
+                    { Number = number
+                      Text = text
+                      Fields = membersOf 0 text }
+            with JsonlScanFault(p, r) ->
+                Error(faultAt number p r)
+
+        let topFields (line: string) : Result<(string * string) list, JsonlFault> =
+            parseLine 1 line
+            |> Result.map (fun l -> l.Fields |> List.map (fun (k, v, _) -> k, v))
+
+        let rawSpan (field: string) (line: string) : Result<string option, JsonlFault> =
+            parseLine 1 line
+            |> Result.map (fun l -> l.Fields |> List.tryPick (fun (k, v, _) -> if k = field then Some v else None))
+
+        let unquote (raw: string) : Result<string, JsonlFaultReason> =
+            if raw.Length < 2 || raw.[0] <> '"' then
+                Error(JsonlFaultReason.ExpectedString "")
+            else
+                try
+                    if skipString raw 0 = raw.Length then
+                        Ok(decodeString raw)
+                    else
+                        Error(JsonlFaultReason.ExpectedString "")
+                with JsonlScanFault(_, r) ->
+                    Error r
+
+        let lineNumber (line: JsonlLine) : int = line.Number
+
+        let lineText (line: JsonlLine) : string = line.Text
+
+        let refuse (line: JsonlLine) (reason: string) : JsonlFault =
+            faultAt line.Number 0 (JsonlFaultReason.Refused reason)
+
+        let private memberOf (key: string) (line: JsonlLine) : (string * int) option =
+            line.Fields
+            |> List.tryPick (fun (k, v, p) -> if k = key then Some(v, p) else None)
+
+        let tryRawField (key: string) (line: JsonlLine) : string option = memberOf key line |> Option.map fst
+
+        let rawField (key: string) (line: JsonlLine) : Result<string, JsonlFault> =
+            match memberOf key line with
+            | Some(v, _) -> Ok v
+            | None -> Error(faultAt line.Number 0 (JsonlFaultReason.MissingField key))
+
+        let stringField (key: string) (line: JsonlLine) : Result<string, JsonlFault> =
+            match memberOf key line with
+            | None -> Error(faultAt line.Number 0 (JsonlFaultReason.MissingField key))
+            | Some(v, p) ->
+                match unquote v with
+                | Ok s -> Ok s
+                | Error(JsonlFaultReason.ExpectedString _) ->
+                    Error(faultAt line.Number p (JsonlFaultReason.ExpectedString key))
+                | Error r -> Error(faultAt line.Number p r)
+
+        let intField (key: string) (line: JsonlLine) : Result<int, JsonlFault> =
+            match memberOf key line with
+            | None -> Error(faultAt line.Number 0 (JsonlFaultReason.MissingField key))
+            | Some(v, p) ->
+                let digits = if v.StartsWith "-" then v.Substring 1 else v
+
+                let grammatical =
+                    digits.Length > 0
+                    && digits.Length <= 10
+                    && Seq.forall (fun c -> c >= '0' && c <= '9') digits
+                    && (digits = "0" || digits.[0] <> '0')
+
+                // Read from the DIGITS, never through a host number reader (Phase 306). The
+                // `System.Int64.Parse v` this replaces read under the CURRENT culture: under one
+                // whose negative sign is not U+002D (fa-IR, he-IL) it threw on `-5` — a token the
+                // grammar test above had just accepted — out of a function that returns a `Result`.
+                // At most ten digits, so the fold cannot leave int64.
+                let value =
+                    if grammatical then
+                        let magnitude =
+                            digits |> Seq.fold (fun acc c -> acc * 10L + int64 (int c - int '0')) 0L
+
+                        if v.StartsWith "-" then -magnitude else magnitude
+                    else
+                        0L
+
+                if
+                    grammatical
+                    && value >= int64 System.Int32.MinValue
+                    && value <= int64 System.Int32.MaxValue
+                then
+                    Ok(int value)
+                else
+                    Error(faultAt line.Number p (JsonlFaultReason.ExpectedInteger key))
+
+        let stringsField (key: string) (line: JsonlLine) : Result<string list, JsonlFault> =
+            match memberOf key line with
+            | None -> Error(faultAt line.Number 0 (JsonlFaultReason.MissingField key))
+            | Some(v, p) ->
+                let bad () =
+                    Error(faultAt line.Number p (JsonlFaultReason.ExpectedStringArray key))
+
+                let n = v.Length
+
+                if n < 2 || v.[0] <> '[' || v.[n - 1] <> ']' then
+                    bad ()
+                else
+                    let items = ResizeArray<string>()
+                    let mutable i = 1
+                    let mutable ok = true
+                    let mutable expectItem = true
+
+                    let skipWs () =
+                        while i < n - 1 && isWs v.[i] do
+                            i <- i + 1
+
+                    skipWs ()
+
+                    if i = n - 1 then
+                        Ok []
+                    else
+                        while ok && i < n - 1 do
+                            skipWs ()
+
+                            if expectItem then
+                                if i < n - 1 && v.[i] = '"' then
+                                    let e =
+                                        try
+                                            skipString v i
+                                        with JsonlScanFault _ ->
+                                            n
+
+                                    items.Add(decodeString (v.Substring(i, e - i)))
+                                    i <- e
+                                    expectItem <- false
+                                else
+                                    ok <- false
+                            elif v.[i] = ',' then
+                                i <- i + 1
+                                expectItem <- true
+                            else
+                                ok <- false
+
+                            skipWs ()
+
+                        if ok && not expectItem then
+                            Ok(List.ofSeq items)
+                        else
+                            bad ()
+
+        let actorField (key: string) (line: JsonlLine) : Result<Actor, JsonlFault> =
+            match memberOf key line with
+            | None -> Error(faultAt line.Number 0 (JsonlFaultReason.MissingField key))
+            | Some(v, p) ->
+                try
+                    let inner =
+                        { Number = line.Number
+                          Text = v
+                          Fields = membersOf p v }
+
+                    let str k =
+                        match stringField k inner with
+                        | Ok s -> s
+                        | Error f ->
+                            let reason =
+                                match f.Reason with
+                                | JsonlFaultReason.MissingField m -> JsonlFaultReason.MissingField(key + "." + m)
+                                | JsonlFaultReason.ExpectedString m -> JsonlFaultReason.ExpectedString(key + "." + m)
+                                | r -> r
+
+                            fail f.Position reason
+
+                    // Phase 315 — an actor that names nobody is refused here, as `Actor.validate`
+                    // refuses it at construction, so a store cannot read back an anonymous author.
+                    let named (a: Actor) =
+                        Actor.validate a
+                        |> Result.mapError (fun why -> faultAt line.Number p (JsonlFaultReason.ActorInvalid(key, why)))
+
+                    match tryRawField "kind" inner with
+                    | None -> Error(refuse line "the actor carries no kind")
+                    | Some _ ->
+                        match str "kind" with
+                        | "human" -> named (Human(str "id"))
+                        | "agent" -> named (Agent(str "model", str "version", str "id"))
+                        | kind -> Error(refuse line (sprintf "unknown actor kind \"%s\"" kind))
+                with JsonlScanFault(pos, r) ->
+                    Error(faultAt line.Number pos r)
+
+        let scanRecords (decode: JsonlLine -> Result<'T, JsonlFault>) (text: string) : Result<'T list, JsonlFault> =
+            let lines = text.Replace("\r\n", "\n").Split('\n')
+            let acc = ResizeArray<'T>()
+            let mutable fault = None
+            let mutable k = 0
+
+            while fault.IsNone && k < lines.Length do
+                let text = lines.[k]
+
+                if text.Trim() <> "" then
+                    match parseLine (k + 1) text |> Result.bind decode with
+                    | Ok v -> acc.Add v
+                    | Error f -> fault <- Some f
+
+                k <- k + 1
+
+            match fault with
+            | Some f -> Error f
+            | None -> Ok(List.ofSeq acc)
+
+    let inline bindR ([<InlineIfLambda>] f: 'a -> Result<'b, 'e>) (r: Result<'a, 'e>) = Result.bind f r
+
+    /// A single-object reader's refusal (a snapshot line, an attribution envelope) — the reason and
+    /// the position, without a line number the caller never had.
+    let spanFault (f: JsonlFault) : string =
+        sprintf "%s (position %d)" (JsonlFault.reasonText f.Reason) f.Position
+
+    /// One record line, decoded — the members in line order, the `op` span handed to the witness.
+    let private recordOf
+        (actorOf: JsonlLine -> Result<Actor, JsonlFault>)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (line: JsonlLine)
+        : Result<OpRecord<'Op>, JsonlFault> =
+        Jsonl.intField "seq" line
+        |> bindR (fun seq ->
+            actorOf line
+            |> bindR (fun actor ->
+                Jsonl.rawField "op" line
+                |> bindR (fun raw -> w.Decode raw |> Result.mapError (Jsonl.refuse line))
+                |> bindR (fun op ->
+                    Jsonl.stringField "prevHash" line
+                    |> bindR (fun prevHash ->
+                        Jsonl.stringField "hash" line
+                        |> Result.map (fun hash ->
+                            { Seq = seq
+                              Actor = actor
+                              Op = op
+                              PrevHash = prevHash
+                              Hash = hash })))))
+
+    /// Is this line a snapshot line? One carrying `"snapshot":true` and NO `op` — a record line that
+    /// happens to carry a `snapshot` member is a record (Phase 296), not a snapshot dropped on the
+    /// floor.
+    let private isSnapshotLine (line: JsonlLine) : bool =
+        Option.isNone (Jsonl.tryRawField "op" line)
+        && Jsonl.tryRawField "snapshot" line = Some "true"
+
+    /// The records-and-snapshot reader, parameterised on how the `actor` member decodes — the
+    /// canonical typed object, or the legacy bare string. One snapshot line is admitted, and only as
+    /// the first line of the stream (Phase 296); a second, or one after a record, is refused.
+    let private scanJsonlWithSnapshots
+        (actorOf: JsonlLine -> Result<Actor, JsonlFault>)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list * string list, JsonlFault> =
+        text
+        |> Jsonl.scanRecords (fun line ->
+            if isSnapshotLine line then
+                Ok(Choice2Of2 line)
+            else
+                recordOf actorOf w line |> Result.map Choice1Of2)
+        |> bindR (fun items ->
+            let rec go (first: bool) recs snaps =
+                function
+                | [] -> Ok(List.rev recs, List.rev snaps)
+                | Choice1Of2 r :: rest -> go false (r :: recs) snaps rest
+                | Choice2Of2(l: JsonlLine) :: rest ->
+                    if first then
+                        go false recs [ Jsonl.lineText l ] rest
+                    else
+                        Error
+                            { Line = Jsonl.lineNumber l
+                              Position = 0
+                              Reason = JsonlFaultReason.SnapshotNotAtHead }
+
+            go true [] [] items)
+
+    let fromJsonlWithSnapshots
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list * string list, string> =
+        scanJsonlWithSnapshots (Jsonl.actorField "actor") w text
+        |> Result.mapError JsonlFault.toString
+
+    let fromJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<OpRecord<'Op> list, string> =
+        fromJsonlWithSnapshots w text |> Result.map fst
+
+    let fromJsonlLegacyActor (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<OpRecord<'Op> list, string> =
+        scanJsonlWithSnapshots (fun line -> Jsonl.stringField "actor" line |> Result.map Actor.ofLegacyString) w text
+        |> Result.map fst
+        |> Result.mapError JsonlFault.toString
+
+    let fromJsonlVerified
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (text: string)
+        : Result<OpRecord<'Op> list, string> =
+        fromJsonl w text
+        |> Result.bind (fun recs ->
+            match firstChainBreak hashFn w recs with
+            | None -> Ok recs
+            | Some b ->
+                Error(
+                    sprintf
+                        "OpStream.fromJsonlVerified: chain breaks at record %d — %s"
+                        b.Index
+                        (ChainBreakReason.toString b.Reason)
+                ))
