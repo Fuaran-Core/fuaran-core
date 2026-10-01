@@ -188,13 +188,22 @@ let tests =
                   | Error e -> failtestf "type-gen refused the vocabulary: %A" e
 
               Expect.isGreaterThan src.Length 0 "type-gen produced empty source"
-              Expect.isTrue (src.Contains "type Binding<'T>") "type-gen should emit a generic Binding<'T>"
+              // Phase 293 — ONE type emitter: every declaration is a member of the recursion
+              // group, so a union may lead with `type` or join with `and`.
+              let declares (name: string) =
+                  System.Text.RegularExpressions.Regex.IsMatch(
+                      src,
+                      @"(?m)^(type|and)( \[<[^\]]*>\])* "
+                      + System.Text.RegularExpressions.Regex.Escape name
+                  )
+
+              Expect.isTrue (declares "Binding<'T>") "type-gen should emit a generic Binding<'T>"
 
               for k in miniIdl.Kinds do
                   Expect.isTrue (src.Contains(k.Tag + "Spec")) (sprintf "missing generated spec for kind '%s'" k.Tag)
 
               for u in miniIdl.Unions do
-                  Expect.isTrue (src.Contains("type " + u.Name)) (sprintf "missing generated union '%s'" u.Name))
+                  Expect.isTrue (declares u.Name) (sprintf "missing generated union '%s'" u.Name))
 
           testCase "encoder rejects an authored field absent from the IDL" (fun _ ->
               let bogus =

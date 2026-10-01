@@ -748,6 +748,58 @@ let tests =
               Expect.equal noArgs 2 "classify needs its two paths"
               Expect.stringContains noArgsOut "two paths" "and says which")
 
+          testCase "the command takes each side's support document, and refuses one side alone" (fun _ ->
+              // Phase 293. The same vocabulary either side; only the support moved.
+              let dir =
+                  Path.Combine(Path.GetTempPath(), "fuaran-support-" + Guid.NewGuid().ToString("N"))
+
+              Directory.CreateDirectory dir |> ignore
+              let a = Path.Combine(dir, "support-a.json")
+              let b = Path.Combine(dir, "support-b.json")
+              File.WriteAllText(a, SupportArtifact.render ReferenceIdl.support)
+
+              let edited =
+                  { ReferenceIdl.support with
+                      Support =
+                          { ReferenceIdl.support.Support with
+                              CaseRefines =
+                                  ReferenceIdl.support.Support.CaseRefines
+                                  |> Map.map (fun _ e -> e + " (* refined *)") } }
+
+              File.WriteAllText(b, SupportArtifact.render edited)
+
+              try
+                  let code, out =
+                      runCli (
+                          sprintf
+                              "classify %s %s --support-before \"%s\" --support-after \"%s\""
+                              (quoted "before")
+                              (quoted "before")
+                              a
+                              b
+                      )
+
+                  Expect.equal code 0 "a host-surface verdict is absorbable: exit 0"
+                  Expect.stringContains out "declared support changed: refine:Text.Lookup" "the row names the refine"
+                  Expect.stringContains out "host-surface" "and the class is host-surface, not unchanged"
+
+                  let plain, plainOut =
+                      runCli (sprintf "classify %s %s" (quoted "before") (quoted "before"))
+
+                  Expect.equal plain 0 "without the support the pair is unchanged"
+                  Expect.stringContains plainOut "unchanged" "and says so"
+
+                  let oneSide, oneSideOut =
+                      runCli (sprintf "classify %s %s --support-before \"%s\"" (quoted "before") (quoted "before") a)
+
+                  Expect.equal oneSide 2 "one side's support alone is refused"
+                  Expect.stringContains oneSideOut "go together" "and the refusal says why"
+              finally
+                  try
+                      Directory.Delete(dir, true)
+                  with _ ->
+                      ())
+
           testCase "the command prints the consequence table the docs restate" (fun _ ->
               let code, out = runCli "table"
               Expect.equal code 0 "table exits 0"

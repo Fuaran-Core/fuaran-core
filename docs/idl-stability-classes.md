@@ -96,6 +96,7 @@ point.
 | an authoring default added | `additive` | `full-literal-construction` when the field is required — `mk<Kind>` loses the parameter, so every call site moves — else `no-generated-shape-change` | `DefaultAdded` |
 | an authoring default removed | `breaking-for-emitters` | `full-literal-construction` when the field is required — `mk<Kind>` gains the parameter — else `no-generated-shape-change` | `DefaultRemoved` |
 | an authoring default changed | `breaking-for-emitters` | `no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not | `DefaultChanged` |
+| a declared support entry (`support.json`) added, removed or changed — a doc block, a splice, a case refine, a kind projection, the host prelude | `host-surface-only` — host-language source the generator splices, never on the wire | `full-literal-construction` for a kind projection or the type splice (generated declarations move), else `no-generated-shape-change` | `SupportChanged` |
 <!-- END GENERATED -->
 
 **The table is the classifier's own (Phase 293).** Every row above is rendered from the one

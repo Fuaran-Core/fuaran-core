@@ -42,6 +42,8 @@ let private usage =
     + "USAGE\n"
     + "  fuaran-core-idl classify <before.json> <after.json> [--manifest <manifest.json>]\n"
     + "                                                      [--expect <class>]\n"
+    + "                                                      [--support-before <support.json>\n"
+    + "                                                       --support-after <support.json>]\n"
     + "  fuaran-core-idl table\n"
     + "  fuaran-core-idl spike-proposal <proposal.json> --idl <idl.json> [--corpus <dir>]\n"
     + "                                 [--out <report.md>] [--seed <int>] [--vectors <int>]\n"
@@ -60,6 +62,10 @@ let private usage =
     + "               Omitted, or without `hosts`, no host is obliged by name and the\n"
     + "               report says so.\n"
     + "  --expect     assert the verdict class. Exits 0 on a match, 1 on a mismatch.\n"
+    + "  --support-before / --support-after\n"
+    + "               each side's declared support (support.json), both or neither: a doc block,\n"
+    + "               splice, case refine, kind projection or prelude that moved is then a\n"
+    + "               host-surface row instead of reading as `unchanged`.\n"
     + "               One of: "
     + classes
     + "\n"
@@ -107,19 +113,46 @@ let private readFile (label: string) (path: string) : Result<string, string> =
 /// Options after the two positional paths. Parsed by hand and STRICTLY: an
 /// unrecognised flag is refused rather than ignored, because a gate that misspells
 /// `--expect` must not get a pass from a tool that silently dropped its assertion.
-let rec private options (expect: string option) (manifest: string option) (argv: string list) =
+type private Options =
+    {
+        Expect: string option
+        Manifest: string option
+        /// Phase 293 — each side's `support.json`, both or neither.
+        SupportBefore: string option
+        SupportAfter: string option
+    }
+
+let rec private options (acc: Options) (argv: string list) =
     match argv with
-    | [] -> Ok(expect, manifest)
-    | "--expect" :: value :: rest -> options (Some value) manifest rest
-    | "--manifest" :: value :: rest -> options expect (Some value) rest
+    | [] ->
+        (match acc.SupportBefore, acc.SupportAfter with
+         | Some _, None
+         | None, Some _ ->
+             Error
+                 "--support-before and --support-after go together: a support document on one side only is a diff against nothing"
+         | _ -> Ok acc)
+    | "--expect" :: value :: rest -> options { acc with Expect = Some value } rest
+    | "--manifest" :: value :: rest -> options { acc with Manifest = Some value } rest
+    | "--support-before" :: value :: rest -> options { acc with SupportBefore = Some value } rest
+    | "--support-after" :: value :: rest -> options { acc with SupportAfter = Some value } rest
     | [ "--expect" ] -> Error "--expect needs a class"
     | [ "--manifest" ] -> Error "--manifest needs a path"
+    | [ "--support-before" ] -> Error "--support-before needs a path"
+    | [ "--support-after" ] -> Error "--support-after needs a path"
     | other :: _ -> Error(sprintf "unrecognised option: %s" other)
 
 let private classify (beforePath: string) (afterPath: string) (rest: string list) : int =
-    match options None None rest with
+    match
+        options
+            { Expect = None
+              Manifest = None
+              SupportBefore = None
+              SupportAfter = None }
+            rest
+    with
     | Error e -> refuse e
-    | Ok(expect, manifestPath) ->
+    | Ok opts ->
+        let expect, manifestPath = opts.Expect, opts.Manifest
 
         let declared =
             match expect with
@@ -140,15 +173,26 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
             | None -> Ok None
             | Some p -> readFile "manifest" p |> Result.map Some
 
+        let supportText (label: string) (path: string option) =
+            match path with
+            | None -> Ok None
+            | Some p -> readFile label p |> Result.map Some
+
         let inputs =
             declared
             |> Result.bind (fun d -> manifestText |> Result.map (fun m -> d, m))
             |> Result.bind (fun (d, m) -> readFile "before" beforePath |> Result.map (fun b -> d, m, b))
             |> Result.bind (fun (d, m, b) -> readFile "after" afterPath |> Result.map (fun a -> d, m, b, a))
+            |> Result.bind (fun (d, m, b, a) ->
+                supportText "support-before" opts.SupportBefore
+                |> Result.map (fun sb -> d, m, b, a, sb))
+            |> Result.bind (fun (d, m, b, a, sb) ->
+                supportText "support-after" opts.SupportAfter
+                |> Result.map (fun sa -> d, m, b, a, sb, sa))
 
         match inputs with
         | Error e -> refuse e
-        | Ok(declared, manifestText, beforeText, afterText) ->
+        | Ok(declared, manifestText, beforeText, afterText, supportBefore, supportAfter) ->
             // Phase 292 — both artifacts are read as VOCABULARIES first, so a vocabulary that
             // is not well-formed is reported with every error `Declare.errors` names, before
             // any classification: a verdict about an artifact no loader would accept is a
@@ -164,7 +208,7 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
                 refuse (String.concat "\n" unreadable)
             else
 
-                match Diff.runVerdict manifestText beforeText afterText with
+                match Diff.runVerdictWith manifestText beforeText afterText supportBefore supportAfter with
                 | Error e -> refuse e
                 | Ok(text, verdict) ->
                     printf "%s" text

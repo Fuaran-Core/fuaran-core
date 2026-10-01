@@ -903,3 +903,95 @@ let descriptorTableTests =
                       cs
                       [ Diff.KindAdded "B"; Diff.EnumAdded "E" ]
                       "a kind (rank 10) sorts before an enum (rank 40), as the table ranks them") ]
+
+// ---------------------------------------------------------------------------
+// Phase 293 — support.json joins the classifier's inputs.
+// ---------------------------------------------------------------------------
+
+let private supportVerdict (before: SupportDocument option) (after: SupportDocument option) =
+    match Diff.classifyDiffWith refIdl refIdl before after with
+    | Ok v -> v
+    | Error e -> failtestf "classifyDiffWith: %s" e
+
+[<Tests>]
+let supportInputTests =
+    testList
+        "Phase 293 — declared support is a classifier input"
+        [ testCase
+              "the same vocabulary with the same support is unchanged, and so is one with no support on either side"
+              (fun _ ->
+                  Expect.equal
+                      (Diff.verdictClass (supportVerdict (Some support) (Some support)))
+                      Diff.VerdictClass.Unchanged
+                      "same support"
+
+                  Expect.equal (Diff.verdictClass (supportVerdict None None)) Diff.VerdictClass.Unchanged "no support")
+
+          testCase
+              "a kind projection edited beside an unchanged vocabulary is a host-surface row with a construction consequence, not `unchanged`"
+              (fun _ ->
+                  let edited =
+                      { support with
+                          Support =
+                              { support.Support with
+                                  KindProjections =
+                                      support.Support.KindProjections
+                                      |> Map.map (fun _ p ->
+                                          { p with
+                                              SpecDecl = p.SpecDecl + " // moved" }) } }
+
+                  let v = supportVerdict (Some support) (Some edited)
+
+                  Expect.equal
+                      (v.Changes |> List.map (fun c -> c.Severity))
+                      [ Diff.HostSurfaceOnly ]
+                      "host-surface, never wire"
+
+                  Expect.equal (Diff.verdictClass v) Diff.VerdictClass.HostSurface "the class a gate reads"
+
+                  Expect.contains
+                      v.FSharpConsequences
+                      Diff.FullLiteralConstruction
+                      "a projection supplies the generated record, so a move there moves declarations"
+
+                  match v.Changes.Head.Change with
+                  | Diff.SupportChanged(key, Some _, Some _) ->
+                      Expect.equal key "projection:Note" "keyed by the projected kind"
+                  | other -> failtestf "expected a projection change, got %A" other)
+
+          testCase "a case refine edited is host-surface with no generated shape change" (fun _ ->
+              let edited =
+                  { support with
+                      Support =
+                          { support.Support with
+                              CaseRefines = support.Support.CaseRefines |> Map.map (fun _ e -> e + " (* refined *)") } }
+
+              let v = supportVerdict (Some support) (Some edited)
+              Expect.equal (v.Changes |> List.map (fun c -> c.Severity)) [ Diff.HostSurfaceOnly ] "host-surface"
+
+              Expect.equal
+                  v.FSharpConsequences
+                  [ Diff.NoGeneratedShapeChange ]
+                  "a decoder arm's final expression moves no declaration")
+
+          testCase
+              "support arriving where there was none reports every entry as added, and the artifact-only door still reads unchanged"
+              (fun _ ->
+                  let v = supportVerdict None (Some support)
+                  Expect.isNonEmpty v.Changes "every declared entry is an added row"
+
+                  for c in v.Changes do
+                      match c.Change with
+                      | Diff.SupportChanged(_, None, Some _) -> ()
+                      | other -> failtestf "expected an added support entry, got %A" other
+
+                  match Diff.classifyDiff refIdl refIdl with
+                  | Ok plain ->
+                      Expect.equal
+                          (Diff.verdictClass plain)
+                          Diff.VerdictClass.Unchanged
+                          "the door with no support sees none"
+                  | Error e -> failtestf "classifyDiff: %s" e)
+
+          testCase "the mapping table carries the support row" (fun _ ->
+              Expect.stringContains Diff.mappingTable "`SupportChanged`" "a row for the case") ]

@@ -147,6 +147,12 @@ module Diff =
             /// (`IdlDefault`), NOT the wire-visible `omitDefault` optionality.
             Defaults: Map<string * string, string>
             NodeFields: FieldSnap list
+            /// Phase 293 — the declared SUPPORT beside the vocabulary (`support.json`), keyed
+            /// `doc:<path>` / `splice:<slot>` / `refine:<Union.Tag>` / `projection:<Kind>` /
+            /// `prelude`, each value its canonical text. Empty when the snapshot was taken
+            /// without a support document, so every pre-existing pair reads exactly as it did;
+            /// with one, a projection or refine edit classifies instead of reading `unchanged`.
+            Support: Map<string, string>
             /// The declared wire shape (Phases 108/109), as `discriminator/envelope`
             /// — `"$type/nestedKind"` when the artifact predates the key or the
             /// vocabulary declares the default.
@@ -300,7 +306,56 @@ module Diff =
     /// Read one `idl.json` revision. Tolerant of keys the revision predates
     /// (`ops`, `hostCases`, `transparentCase` are all emitted conditionally) —
     /// their absence is read as empty, which is what the emitter means by it.
-    let snapshot (artifact: JVal) : Result<Snapshot, string> =
+    /// The support document's declared entries as one flat map of canonical texts — the
+    /// shape the diff walk pairs by key.
+    let private supportEntries (doc: SupportDocument) : Map<string, string> =
+        let sup = doc.Support
+
+        let projection (p: Gen.KindProjection) =
+            String.concat
+                "\n--\n"
+                [ p.SpecDecl
+                  p.Encoder
+                  p.Decoder
+                  (match p.Mk with
+                   | Some mk -> mk
+                   | None -> "") ]
+
+        [ for KeyValue(path, lines) in sup.Docs -> "doc:" + path, String.concat "\n" lines
+          match sup.TypeSplice with
+          | Some t -> yield "splice:type", t
+          | None -> ()
+          match sup.EncodeSplice with
+          | Some t -> yield "splice:encode", t
+          | None -> ()
+          match sup.DecodeSplice with
+          | Some t -> yield "splice:decode", t
+          | None -> ()
+          match sup.AccessorSplice with
+          | Some t -> yield "splice:accessor", t
+          | None -> ()
+          for KeyValue(case, expr) in sup.CaseRefines -> "refine:" + case, expr
+          for KeyValue(kind, proj) in sup.KindProjections -> "projection:" + kind, projection proj
+          match doc.HostPrelude with
+          | Some pre -> yield "prelude", pre.Module + "/" + pre.Path
+          | None -> () ]
+        |> Map.ofList
+
+    /// Phase 293 — a snapshot with the support document beside the artifact joined in;
+    /// `None` reads as a vocabulary with no declared support.
+    let rec snapshotWith (artifact: JVal) (support: JVal option) : Result<Snapshot, string> =
+        match support with
+        | None -> snapshot artifact
+        | Some sv ->
+            SupportArtifact.ofJson sv
+            |> Result.mapError (fun e -> "support: " + e)
+            |> Result.bind (fun doc ->
+                snapshot artifact
+                |> Result.map (fun snap ->
+                    { snap with
+                        Support = supportEntries doc }))
+
+    and snapshot (artifact: JVal) : Result<Snapshot, string> =
         match artifact with
         | JObj _ ->
             let version =
@@ -367,6 +422,7 @@ module Diff =
                         | _ -> None)
                     |> Map.ofList
                   NodeFields = arr "nodeFields" artifact |> List.choose readField
+                  Support = Map.empty
                   Wire =
                     match field "wire" artifact with
                     | Some w ->
@@ -409,6 +465,15 @@ module Diff =
 
     /// Parse + read in one step.
     let parse (text: string) : Result<Snapshot, string> = Json.parse text |> Result.bind snapshot
+
+    /// Phase 293 — `parse` with the support document's text beside the artifact's.
+    let parseWith (text: string) (supportText: string option) : Result<Snapshot, string> =
+        match supportText with
+        | None -> parse text
+        | Some st ->
+            Json.parse st
+            |> Result.mapError (fun e -> "support: " + e)
+            |> Result.bind (fun sv -> Json.parse text |> Result.bind (fun av -> snapshotWith av (Some sv)))
 
     // -----------------------------------------------------------------------
     // The change list.
@@ -471,6 +536,12 @@ module Diff =
         | DefaultAdded of kind: string * field: string * value: string
         | DefaultRemoved of kind: string * field: string * value: string
         | DefaultChanged of kind: string * field: string * before: string * after: string
+        /// Phase 293 — a declared SUPPORT entry (`support.json`) moved: a doc block, a verbatim
+        /// splice, a case refine, a kind projection or the host prelude, keyed as
+        /// [[Snapshot.Support]] keys them. `None` on a side means the entry is absent there.
+        /// Never a wire event — support is host-language source — and the one row that used
+        /// to read `unchanged` when only the support beside the vocabulary had moved.
+        | SupportChanged of key: string * before: string option * after: string option
 
     /// The addition and removal of a field are a `FieldOptionalityChanged` seen
     /// from too far away only when the name matches; everything else pairs by
@@ -1902,7 +1973,57 @@ module Diff =
               [ row
                     "an authoring default changed"
                     "`breaking-for-emitters`"
-                    "`no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not" ] ]
+                    "`no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not" ]
+
+          rule
+              "SupportChanged"
+              "80"
+              NoFamily
+              (function
+              | SupportChanged(k, _, _) -> k
+              | c -> misapplied "SupportChanged" c)
+              (function
+              | SupportChanged(k, b, a) ->
+                  let what =
+                      match b, a with
+                      | None, _ -> "ADDED"
+                      | _, None -> "REMOVED"
+                      | _ -> "changed"
+
+                  HostSurfaceOnly,
+                  sprintf
+                      "declared support `%s` %s — a doc block, a verbatim splice, a case refine, a kind projection or the host prelude is host-language SOURCE the generator splices, never a wire fact: no document's bytes move and no emitter's output changes. What changes is the GENERATED module, so regenerate against the new support and read the F# consequence beside this row."
+                      k
+                      what,
+                  "SupportArtifact (support.json, Phase 114); docs/idl-stability-classes.md (declared support, Phase 293)"
+              | c -> misapplied "SupportChanged" c)
+              // A projection supplies the kind's record, encoder, decoder and constructor
+              // verbatim, and a type splice adds members to the type group: a move there moves
+              // generated declarations. A doc block, a refine (the final expression of one
+              // decoder arm, built from binders already read), an encoder/decoder/accessor
+              // splice (bodies) and the prelude move no declaration a consumer constructs.
+              (fun _ c ->
+                  match c with
+                  | SupportChanged(k, _, _) ->
+                      if k.StartsWith "projection:" || k = "splice:type" then
+                          construction
+                      else
+                          noShape
+                  | c -> misapplied "SupportChanged" c)
+              (function
+              | SupportChanged(k, b, a) ->
+                  sprintf
+                      "declared support %s: %s"
+                      (match b, a with
+                       | None, _ -> "added"
+                       | _, None -> "removed"
+                       | _ -> "changed")
+                      k
+              | c -> misapplied "SupportChanged" c)
+              [ row
+                    "a declared support entry (`support.json`) added, removed or changed — a doc block, a splice, a case refine, a kind projection, the host prelude"
+                    "`host-surface-only` — host-language source the generator splices, never on the wire"
+                    "`full-literal-construction` for a kind projection or the type splice (generated declarations move), else `no-generated-shape-change`" ] ]
 
     /// The rule for a change, by its union case name. Built once; a `Change` case with no rule
     /// is a defect this table reports at first use rather than a silent default.
@@ -2046,7 +2167,18 @@ module Diff =
 
               for KeyValue((kd, f), v) in before.Defaults do
                   if not (Map.containsKey (kd, f) after.Defaults) then
-                      DefaultRemoved(kd, f, v) ]
+                      DefaultRemoved(kd, f, v)
+
+              // Phase 293 — the declared support, paired by key.
+              for KeyValue(key, v) in after.Support do
+                  match Map.tryFind key before.Support with
+                  | None -> SupportChanged(key, None, Some v)
+                  | Some old when old <> v -> SupportChanged(key, Some old, Some v)
+                  | Some _ -> ()
+
+              for KeyValue(key, v) in before.Support do
+                  if not (Map.containsKey key after.Support) then
+                      SupportChanged(key, Some v, None) ]
 
         unordered |> List.sortBy sortKey
 
@@ -2485,6 +2617,33 @@ module Diff =
     /// The roster is the manifest's `hosts` and nothing else (Phase 252): absent, it
     /// is EMPTY, and the report says so, rather than falling back to one vocabulary's
     /// hosts ([[declaredRoster]]) for every vocabulary.
+    /// Phase 293 — `run` with each side's support document text, or `None` for a side with none.
+    let runWith
+        (manifestText: string option)
+        (oldText: string)
+        (newText: string)
+        (oldSupport: string option)
+        (newSupport: string option)
+        : Result<string, string> =
+        let roster =
+            manifestText
+            |> Option.bind (fun t -> Json.parse t |> Result.toOption)
+            |> Option.bind rosterFrom
+            |> function
+                | Some hs -> "manifest.json `hosts`", hs
+                | None ->
+                    (match manifestText with
+                     | None -> "none declared (no manifest given)"
+                     | Some _ -> "none declared (the manifest carries no `hosts` key)"),
+                    []
+
+        parseWith oldText oldSupport
+        |> Result.mapError (fun e -> "old: " + e)
+        |> Result.bind (fun before ->
+            parseWith newText newSupport
+            |> Result.mapError (fun e -> "new: " + e)
+            |> Result.map (fun after -> report (fst roster) (snd roster) before after))
+
     let run (manifestText: string option) (oldText: string) (newText: string) : Result<string, string> =
         let roster =
             manifestText
@@ -2655,13 +2814,38 @@ module Diff =
 
     /// The verdict over two `idl.json` TEXTS — the committed-artifact door, which
     /// works across revisions whose F# vocabulary no longer compiles.
-    let classifyArtifacts (beforeText: string) (afterText: string) : Result<Verdict, string> =
-        parse beforeText
+    /// Phase 293 — the verdict over two artifact texts WITH each side's support document
+    /// text (`None` for a side with none): a projection or refine edit beside an unchanged
+    /// vocabulary classifies `host-surface`, where the artifact-only door reads `unchanged`.
+    let classifyArtifactsWith
+        (beforeText: string)
+        (afterText: string)
+        (beforeSupport: string option)
+        (afterSupport: string option)
+        : Result<Verdict, string> =
+        parseWith beforeText beforeSupport
         |> Result.mapError (fun e -> "old: " + e)
         |> Result.bind (fun before ->
-            parse afterText
+            parseWith afterText afterSupport
             |> Result.mapError (fun e -> "new: " + e)
             |> Result.map (verdictOf before))
+
+    let classifyArtifacts (beforeText: string) (afterText: string) : Result<Verdict, string> =
+        classifyArtifactsWith beforeText afterText None None
+
+    /// Phase 293 — the in-process door with each side's support document (rendered through
+    /// `SupportArtifact.render`, the published shape, for the reason `classifyDiff` renders).
+    let classifyDiffWith
+        (before: Idl)
+        (after: Idl)
+        (beforeSupport: SupportDocument option)
+        (afterSupport: SupportDocument option)
+        : Result<Verdict, string> =
+        classifyArtifactsWith
+            (Artifact.render before)
+            (Artifact.render after)
+            (beforeSupport |> Option.map SupportArtifact.render)
+            (afterSupport |> Option.map SupportArtifact.render)
 
     /// The verdict over two `Idl` VALUES — the in-process door, for a caller holding
     /// both revisions as values (a proposal applied to a vocabulary, a generated
@@ -2830,15 +3014,25 @@ module Diff =
     /// exactly one place that decides whether the manifest carries a host roster.
     /// The cost is reading the two artifacts twice, which for two files on a gate's
     /// command line is not a cost.
+    /// Phase 293 — `runVerdict` with each side's support document text.
+    let runVerdictWith
+        (manifestText: string option)
+        (oldText: string)
+        (newText: string)
+        (oldSupport: string option)
+        (newSupport: string option)
+        : Result<string * Verdict, string> =
+        runWith manifestText oldText newText oldSupport newSupport
+        |> Result.bind (fun reportText ->
+            classifyArtifactsWith oldText newText oldSupport newSupport
+            |> Result.map (fun v -> reportText + verdictBlock v, v))
+
     let runVerdict
         (manifestText: string option)
         (oldText: string)
         (newText: string)
         : Result<string * Verdict, string> =
-        run manifestText oldText newText
-        |> Result.bind (fun reportText ->
-            classifyArtifacts oldText newText
-            |> Result.map (fun v -> reportText + verdictBlock v, v))
+        runVerdictWith manifestText oldText newText None None
 
     /// The profile a `baseProfile` bumps to under a verdict — `Versioning.bump`
     /// applied to `evolution`'s answer, which is the whole reason this module
