@@ -129,11 +129,11 @@
       "packages": [ "Fuaran.Core.Tree" ],
       "budgetSeconds": 70,
       "measuredSeconds": 35,
-      "floorSeconds": 15,
-      "fastestSeconds": 30,
-      "floorPhase": "fuaran-core#306",
+      "floorSeconds": 5,
+      "fastestSeconds": 10,
+      "floorPhase": "fuaran-core#289",
       "phase": "fuaran-core#306",
-      "note": "The UTF-8 encoder the digests hash through, over integer code units: `utf8`, the guard, a left inverse and the round trip that makes the encoding injective on well-formed UTF-16. CHECKED AND NOT EXTRACTED — it is in `check.ps1`'s `$proofOnly` because its integers do not survive the extraction, so there is no oracle and its bridge to the code is an independent-oracle differential. Seeded from two cold observations under the leg's flags, every query 3/3 under --quake: 35s and 30s, so the budget is 2x35 = 70 and the floor is half the fastest, 15s. The one lemma that costs anything is `unread_utf8`, whose four arms are division and remainder by constants; it carries a scoped `#push-options \"--z3rlimit 80 --fuel 2 --ifuel 2\"`."
+      "note": "RE-SEEDED 2026-10-01 from CI (the floor the CI runner breached, or came within a second of): the hosted runner verified this module cold in 10s (run 36910928059 (commit bfd9ee3), a fresh per-invocation cache), faster than the recorded fastest 30s, so by `floorSeeding` the floor is 5s (half, rounded down); the budget is unchanged. The UTF-8 encoder the digests hash through, over integer code units: `utf8`, the guard, a left inverse and the round trip that makes the encoding injective on well-formed UTF-16. CHECKED AND NOT EXTRACTED — it is in `check.ps1`'s `$proofOnly` because its integers do not survive the extraction, so there is no oracle and its bridge to the code is an independent-oracle differential. Seeded from two cold observations under the leg's flags, every query 3/3 under --quake: 35s and 30s, so the budget is 2x35 = 70 and the floor is half the fastest, 15s. The one lemma that costs anything is `unread_utf8`, whose four arms are division and remainder by constants; it carries a scoped `#push-options \"--z3rlimit 80 --fuel 2 --ifuel 2\"`."
     },
     {
       "module": "WireCanon",
@@ -162,11 +162,11 @@
       "packages": [ "Fuaran.Core.Column" ],
       "budgetSeconds": 160,
       "measuredSeconds": 77,
-      "floorSeconds": 33,
-      "fastestSeconds": 67,
-      "floorPhase": "fuaran-core#306",
+      "floorSeconds": 17,
+      "fastestSeconds": 34,
+      "floorPhase": "fuaran-core#289",
       "phase": "fuaran-core#306",
-      "note": "The columnar codec at the `JVal`: `Table.validate`, `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` and the decimal canonicaliser, with the image and the round-trip-to-a-normal-form theorems, three refutations of the literal round trip and the necessity of its two hypotheses. `Fuaran.Core.Column`'s first model. Seeded from cold observations under the leg's flags, every query 3/3 under --quake: 72s, 74s, 77s and 73s run directly against a private cache and 67s inside the leg, so the slowest observed is 77s, the budget 2x77 rounded up to 160, and the floor half the fastest, 33s. Only about 8s per quake pass is solver time; the rest is the context `WireCanon` brings, which the module prunes (`--ext context_pruning`, scoped in the file). Four `#push-options` blocks, fuel 3 and ifuel 1-2, each scoped. It opens `WireCanon`, so it follows it and a cone that names it names `WireCanon`, `JsonParse`, `Utf8` and `Limits`."
+      "note": "RE-SEEDED 2026-10-01 from CI (the floor the CI runner breached, or came within a second of): the hosted runner verified this module cold in 34s (run 36900535886 (commit 9b1de04), a fresh per-invocation cache), faster than the recorded fastest 67s, so by `floorSeeding` the floor is 17s (half, rounded down); the budget is unchanged. The columnar codec at the `JVal`: `Table.validate`, `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` and the decimal canonicaliser, with the image and the round-trip-to-a-normal-form theorems, three refutations of the literal round trip and the necessity of its two hypotheses. `Fuaran.Core.Column`'s first model. Seeded from cold observations under the leg's flags, every query 3/3 under --quake: 72s, 74s, 77s and 73s run directly against a private cache and 67s inside the leg, so the slowest observed is 77s, the budget 2x77 rounded up to 160, and the floor half the fastest, 33s. Only about 8s per quake pass is solver time; the rest is the context `WireCanon` brings, which the module prunes (`--ext context_pruning`, scoped in the file). Four `#push-options` blocks, fuel 3 and ifuel 1-2, each scoped. It opens `WireCanon`, so it follows it and a cone that names it names `WireCanon`, `JsonParse`, `Utf8` and `Limits`."
     },
     {
       "module": "Vocabulary",
@@ -276,11 +276,11 @@
       "packages": [ "Fuaran.Core.Ops" ],
       "budgetSeconds": 30,
       "measuredSeconds": 12,
-      "floorSeconds": 6,
-      "fastestSeconds": 12,
-      "floorPhase": "fuaran-core#157",
+      "floorSeconds": 4,
+      "fastestSeconds": 8,
+      "floorPhase": "fuaran-core#289",
       "phase": "fuaran-core#157",
-      "note": "Proposal arbitration — `Arbitration.arbitrate` clause for clause over Phase 133's `TreeOps` model: the stable pinned sort (`pin`), the `canApplyAll` dry run (`can_script`), the greedy independence pass (`fold_step`) and the re-citation (`recite_all`); `accepted_pairwise_independent`, `accepted_maximal` and `arbitrate_deterministic` proved, with `accepted_pair_commutes` carrying footprint soundness to the accepted set, `arbitrate_is_total` counting the partition, and two witnesses read off the model (`duplicate_ids_break_invariance` — the id-uniqueness hypothesis is NEEDED — and `maximal_is_not_maximum`). Opens DagFold and TreeOps, and carries `--ext context_pruning` for the reason TreeOps's entry gives: every membership pattern those two declare is live at every query here. No scoped rlimit, no SMT pattern of its own: the whole module discharges at the leg's own rlimit of 40 under `--quake 3` with no query needing more than one attempt. SEEDED BY PHASE 157 from three cold runs of the prover invoked directly on the file with the leg's own flags against a cache holding only DagFold and TreeOps — 12s, 12s, 12s — taken BESIDE other proof workers on the same machine (a tier of parallel workers), so by `seeding`'s rule the budget is 30s (2x12 is 24, rounded up to the next 10) and by `floorSeeding`'s the floor is half the fastest genuine cold run (6s from 12s). A quiet machine will run it faster; per `floorSeeding` that leaves the floor correct and merely conservative unless a run lands under 6s, which is first a reason to look for a second writer. Nothing here costs anything individually: the proofs are structural inductions over the fold and over `DagFold.perm`, and the `assert_norm`s in the two witnesses each normalise an arbitration of two or three proposals. If this entry ever overshoots, look first at those normalisations (a larger witness tree multiplies `first_dup`'s scan) and then for a lemma about `app` / `rev` that has gained an SMT pattern upstream."
+      "note": "RE-SEEDED 2026-10-01 from CI (the floor the CI runner breached, or came within a second of): the hosted runner verified this module cold in 8s (run 36889568686 (commit a7ced83), a fresh per-invocation cache), faster than the recorded fastest 12s, so by `floorSeeding` the floor is 4s (half, rounded down); the budget is unchanged. Proposal arbitration — `Arbitration.arbitrate` clause for clause over Phase 133's `TreeOps` model: the stable pinned sort (`pin`), the `canApplyAll` dry run (`can_script`), the greedy independence pass (`fold_step`) and the re-citation (`recite_all`); `accepted_pairwise_independent`, `accepted_maximal` and `arbitrate_deterministic` proved, with `accepted_pair_commutes` carrying footprint soundness to the accepted set, `arbitrate_is_total` counting the partition, and two witnesses read off the model (`duplicate_ids_break_invariance` — the id-uniqueness hypothesis is NEEDED — and `maximal_is_not_maximum`). Opens DagFold and TreeOps, and carries `--ext context_pruning` for the reason TreeOps's entry gives: every membership pattern those two declare is live at every query here. No scoped rlimit, no SMT pattern of its own: the whole module discharges at the leg's own rlimit of 40 under `--quake 3` with no query needing more than one attempt. SEEDED BY PHASE 157 from three cold runs of the prover invoked directly on the file with the leg's own flags against a cache holding only DagFold and TreeOps — 12s, 12s, 12s — taken BESIDE other proof workers on the same machine (a tier of parallel workers), so by `seeding`'s rule the budget is 30s (2x12 is 24, rounded up to the next 10) and by `floorSeeding`'s the floor is half the fastest genuine cold run (6s from 12s). A quiet machine will run it faster; per `floorSeeding` that leaves the floor correct and merely conservative unless a run lands under 6s, which is first a reason to look for a second writer. Nothing here costs anything individually: the proofs are structural inductions over the fold and over `DagFold.perm`, and the `assert_norm`s in the two witnesses each normalise an arbitration of two or three proposals. If this entry ever overshoots, look first at those normalisations (a larger witness tree multiplies `first_dup`'s scan) and then for a lemma about `app` / `rev` that has gained an SMT pattern upstream."
     },
     {
       "module": "DecimalText",
