@@ -54,6 +54,7 @@
     <Compile Include="ProvenanceTests.fs" />
     <Compile Include="ColumnTests.fs" />
     <Compile Include="QueryTests.fs" />
+    <Compile Include="SeamModelTests.fs" />
     <Compile Include="Snapshots.fs" />
     <!-- Pins the UTF-8 decoding of a redirected child's stdout, so the cross-host
          suites below do not depend on the console code page the runner inherited.

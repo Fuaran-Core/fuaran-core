@@ -346,6 +346,8 @@ let internal roots: WireRoot list =
           CapabilityCodec.encodeInvocation id args)
       derived<Deferred<string>> "Fuaran.Core.Function" "deferred" (CapabilityCodec.encodeDeferred JStr)
       derived<CapabilityPipeline> "Fuaran.Core.Function" "capabilityPipeline" CapabilityPipeline.encode
+      derived<InvokeError> "Fuaran.Core.Function" "invokeError" CapabilityCodec.encodeInvokeError
+      derived<QueryError> "Fuaran.Core.Query" "queryError" QueryCodec.encodeQueryError
       derived<Actor> "Fuaran.Core.OpStream" "actor" Actor.encode
       derived<OpRecord<string> list> "Fuaran.Core.OpStream" "records" (OpStream.toJsonl stringStream)
       derived<Attributed<string>>
