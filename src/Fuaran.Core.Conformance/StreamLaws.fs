@@ -67,11 +67,14 @@ module internal StreamLaws =
             | [] -> ()
             | _ ->
                 let tIdx = rng.IntBelow(List.length recs)
-                let newOp = rng.Draw gen.Op
                 let orig = List.item tIdx recs
 
-                // Only a genuinely-different op is a tamper the chain must detect.
-                if sw.Encode orig.Op <> sw.Encode newOp then
+                // Only a genuinely-different op is a tamper the chain must detect; the replacement
+                // is redrawn until it encodes differently (Phase 302), and a run that never builds
+                // one reds the "tampered chain" guard below.
+                match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode orig.Op <> sw.Encode o) with
+                | None -> ()
+                | Some newOp ->
                     tampered <- tampered + 1
 
                     let forged =
@@ -309,12 +312,14 @@ module internal StreamLaws =
                 fun () -> at "a permuted-construction history diverged (nodes/head/replay)"
             )
 
-            // tamper one node's op with a genuinely-different op
-            let newOp = rng.Draw gen.Op
-
+            // tamper one node's op with a genuinely-different op, redrawn until it encodes
+            // differently (Phase 302); the tamper cell is strict, so a run that never builds one
+            // reds it rather than reporting a green over nothing.
             let tid, tnode = dag.Nodes |> Map.toList |> List.head
 
-            if sw.Encode tnode.Op <> sw.Encode newOp then
+            match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode tnode.Op <> sw.Encode o) with
+            | None -> ()
+            | Some newOp ->
                 let forged = { Dag.T.Nodes = Map.add tid { tnode with Op = newOp } dag.Nodes }
 
                 tamper.Check(not (Dag.verifyDag hashFn sw forged), fun () -> at "a tampered DAG node was not detected")
@@ -335,7 +340,7 @@ module internal StreamLaws =
             // answers the merge node's id for everything makes the next append collide with it.
             let colliding: HashFn = fun _ _ -> m
 
-            match Dag.append colliding sw (Human "collider") newOp m dag with
+            match Dag.append colliding sw (Human "collider") tnode.Op m dag with
             | Error(DagAppendFault.ContentIdCollision id) when id = m -> collision.Saw()
             | other ->
                 collision.Check(false, fun () -> at (sprintf "an append whose id collides with %s gave %A" m other))
@@ -897,6 +902,7 @@ module internal StreamLaws =
         let mutable coveredMerge = 0
         let mutable uncovered = 0
         let mutable compactedAbove = 0
+        let mutable opForged = 0
         let mutable noLaneMerge = 0
         let mutable rejected = 0
         let mutable compactRefused = 0
@@ -1157,9 +1163,15 @@ module internal StreamLaws =
                         | _ ->
                             let victim = rng.Choose later
                             let n = small.Nodes.[victim]
-                            let fresh = rng.Draw gen.Op
 
-                            if sw.Encode fresh <> sw.Encode n.Op then
+                            // Phase 302 — redrawn until it encodes differently, and COUNTED: this
+                            // cell is also asserted unconditionally below, so without the count a
+                            // run that never forged an op read green on the seal arms alone.
+                            match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode o <> sw.Encode n.Op) with
+                            | None -> ()
+                            | Some fresh ->
+                                opForged <- opForged + 1
+
                                 let forged =
                                     { small with
                                         Nodes = Map.add victim { n with Op = fresh } small.Nodes }
@@ -1260,7 +1272,8 @@ module internal StreamLaws =
                 seed
                 [ "covered replay over a lane merge", coveredMerge
                   "uncovered refusal", uncovered
-                  "compaction keeping history above its checkpoint", compactedAbove ]
+                  "compaction keeping history above its checkpoint", compactedAbove
+                  "kept node with a forged op", opForged ]
                 [ "no lane merge", noLaneMerge
                   "replay rejected", rejected
                   "compaction refused", compactRefused
@@ -1388,11 +1401,13 @@ module internal StreamLaws =
             | [] -> ()
             | _ ->
                 let tIdx = rng.IntBelow(List.length captures)
-                let newV = rng.Draw draw
-                let newValue = encode newV
                 let orig = List.item tIdx captures
 
-                if orig.Value <> newValue then
+                // Phase 302 — redrawn until the replacement encodes differently.
+                match LawKit.drawDistinct rng draw (fun v -> encode v <> orig.Value) with
+                | None -> ()
+                | Some newV ->
+                    let newValue = encode newV
                     tampered <- tampered + 1
 
                     let forged =
@@ -1596,12 +1611,14 @@ module internal StreamLaws =
         // drawn op is refused, which is a property of the run.
         let mutable accepted = 0
         let mutable refused = 0
-        // The gated arms — the two fresh-key arms run only when the drawn op's key is not already in
-        // the index, and the seen-key arm (duplicate convergence + the stale-head retry) only over a
-        // non-empty chain, all three decided by what the generator drew — are held by the runner's
-        // evidence count: an arm never reached reports its law "never reached" rather than green
-        // (Phase 302). A census-visible guard naming the starved arm is a later widening (see
-        // `snapshotLawsWith`).
+        let mutable freshAttempts = 0
+        let mutable freshBuilt = 0
+        // The gated arms — the two fresh-key arms run only when an op whose key is not already in the
+        // index can be drawn, and the seen-key arm (duplicate convergence + the stale-head retry) only
+        // over a non-empty chain, all three decided by what the generator drew — are held by the
+        // runner's evidence count: an arm never reached reports its law "never reached" rather than
+        // green. Since Phase 302 the fresh-key arms are also MEASURED: they redraw (bounded) until
+        // the key is fresh, and the guard demands they were built on at least half their attempts.
 
         LawKit.run iterations seed (fun rng _ at ->
             // Build a base chain THROUGH appendIdempotent, threading (state, records, index) — a
@@ -1630,9 +1647,15 @@ module internal StreamLaws =
             let baseHead = OpStream.head recs
 
             // ---- fresh ≡ append (chain-identity + index extended by exactly the new entry) ----
-            let opF = rng.Draw gen.Op
+            // Phase 302 — the fresh op is redrawn until its key is unseen, and the arm's reach is
+            // measured against its attempts: a run that built it once in two hundred tries read
+            // adequate when the guard asked only for one.
+            freshAttempts <- freshAttempts + 1
 
-            if (KeyIndex.tryFind (keyOf opF) index).IsNone then
+            match LawKit.drawDistinct rng gen.Op (fun o -> (KeyIndex.tryFind (keyOf o) index).IsNone) with
+            | None -> ()
+            | Some opF ->
+                freshBuilt <- freshBuilt + 1
                 let viaAppend = OpStream.append hashFn sw actor opF state recs
 
                 let viaIdem =
@@ -1659,35 +1682,56 @@ module internal StreamLaws =
             if not (List.isEmpty recs) then
                 let pick = rng.IntBelow(List.length recs)
                 let key = keyOf (List.item pick recs).Op
-                let first = recs |> List.find (fun r -> keyOf r.Op = key)
                 let opD = rng.Draw gen.Op
 
-                match OpStream.appendIdempotent hashFn sw key actor opD state index recs with
-                | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
-                    dupLaw.Saw() // recs/index are immutable values the caller still holds — the stream is byte-identical
-                | other ->
+                // Phase 302 — a `keyOf` that is not a function (two calls on one op disagree) used
+                // to throw here; it is a counterexample now.
+                match recs |> List.tryFind (fun r -> keyOf r.Op = key) with
+                | None ->
                     dupLaw.Check(
                         false,
-                        fun () -> at (sprintf "a seen key did not converge on its first entry (got %A)" other)
-                    )
-
-                // ---- idempotency-before-CAS: the lost-ack retry converges under a stale head ----
-                let staleHead = baseHead + "!" // guaranteed ≠ baseHead
-
-                match OpStream.appendIdempotentIf hashFn sw key staleHead actor opD state index recs with
-                | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
-                    casLaw.Saw()
-                | other ->
-                    casLaw.Check(
-                        false,
                         fun () ->
-                            at (sprintf "a seen key under a stale head did not converge on Duplicate (got %A)" other)
+                            at (
+                                sprintf
+                                    "keyOf is not a function: the key %s of record %d matches no record when recomputed"
+                                    key
+                                    pick
+                            )
                     )
+                | Some first ->
+                    match OpStream.appendIdempotent hashFn sw key actor opD state index recs with
+                    | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
+                        dupLaw.Saw() // recs/index are immutable values the caller still holds — the stream is byte-identical
+                    | other ->
+                        dupLaw.Check(
+                            false,
+                            fun () -> at (sprintf "a seen key did not converge on its first entry (got %A)" other)
+                        )
+
+                    // ---- idempotency-before-CAS: the lost-ack retry converges under a stale head ----
+                    let staleHead = baseHead + "!" // guaranteed ≠ baseHead
+
+                    match OpStream.appendIdempotentIf hashFn sw key staleHead actor opD state index recs with
+                    | Ok(AppendOutcome.Duplicate existing) when existing.Seq = first.Seq && existing.Hash = first.Hash ->
+                        casLaw.Saw()
+                    | other ->
+                        casLaw.Check(
+                            false,
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "a seen key under a stale head did not converge on Duplicate (got %A)"
+                                        other
+                                )
+                        )
 
             // ---- fresh key through the CAS: stale head refuses; the true head ≡ append ----
-            let opC = rng.Draw gen.Op
+            freshAttempts <- freshAttempts + 1
 
-            if (KeyIndex.tryFind (keyOf opC) index).IsNone then
+            match LawKit.drawDistinct rng gen.Op (fun o -> (KeyIndex.tryFind (keyOf o) index).IsNone) with
+            | None -> ()
+            | Some opC ->
+                freshBuilt <- freshBuilt + 1
                 let staleHead = baseHead + "!"
 
                 match OpStream.appendIdempotentIf hashFn sw (keyOf opC) staleHead actor opC state index recs with
@@ -1720,8 +1764,19 @@ module internal StreamLaws =
         // Phase 223 — `Guarded ["accepted"; "refused"]`, after the subject laws. A StreamGen that
         // never draws a refused fresh op leaves the verbatim-forwarding half of `fresh ≡ append`
         // and of the true-head CAS arm certified by nothing, and green.
-        @ [ SampleAdequacy.reached "Conformance.idempotencyLaws" "accepted fresh op" seed [ "accepted", accepted ]
-            SampleAdequacy.reached "Conformance.idempotencyLaws" "refused fresh op" seed [ "refused", refused ] ]
+        // Phase 302 — the thresholds are fractions: the fresh arms must be BUILT on at least half of
+        // their attempts, and each outcome must be at least one in twenty of the arms built.
+        @ [ SampleAdequacy.reachedFraction
+                "Conformance.idempotencyLaws"
+                "accepted fresh op"
+                seed
+                [ "accepted", accepted, freshBuilt, 20
+                  "fresh-key arm built", freshBuilt, freshAttempts, 2 ]
+            SampleAdequacy.reachedFraction
+                "Conformance.idempotencyLaws"
+                "refused fresh op"
+                seed
+                [ "refused", refused, freshBuilt, 20 ] ]
 
     /// **Every reason this library MINTS is a named case** (Phase 125) — the law that makes
     /// `ChainBreakReason.Unrecognised` an honest arm rather than a hedge.

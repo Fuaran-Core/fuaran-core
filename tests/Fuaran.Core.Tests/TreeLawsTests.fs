@@ -23,7 +23,11 @@ let treeLawTests =
           testCase "diff laws certify the reference witness green (Phase 03)"
           <| fun _ ->
               let results = Conformance.diffLaws nodew idw opGen 4242 200
-              Expect.equal (List.length results) 3 "reconstruction + applyability + survivor"
+
+              Expect.equal
+                  (List.length results)
+                  4
+                  "reconstruction + applyability + survivor + the non-identity guard (Phase 302)"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

@@ -533,12 +533,17 @@ supply a cryptographic `HashFn` (e.g. SHA-256) at the host boundary — the `Has
 for exactly this, and cross-host parity holds as long as both hosts use the same one.
 
 **The supply-your-own-crypto contract is conformance-certified (Phase 65).** `Conformance.hashFnLaws`
-certifies, over a seed-replayable sample under *any* supplied `HashFn`, that a chain hash is a pure
+certifies, over a seed-replayable sample under the SUPPLIED `HashFn`, that a chain hash is a pure
 function of the canonical wire pre-image: **determinism** (the same op sequence hashes identically
 across builds), **pre-image parity** (an incremental `append` build and a bulk reforge of the same
 `(seq, actor, op)` pre-images agree hash-for-hash — the cross-host-parity foundation: two hosts on the
 same `HashFn` + same pre-image get byte-identical chains), and **tamper-detection** (reorder / drop /
-bit-flip caught by `verifyChain`). The crypto posture itself is pinned by
+bit-flip caught by `verifyChain`). Until Phase 302 this read "under *any* supplied `HashFn`", and a
+constant `HashFn` passed: those three tampers are caught before the hash is consulted. Since Phase 302
+the family also builds the three arms that need the hash itself — an op replaced with its seq, prev and
+stored hash kept, the forgery re-minted end to end (the head must move), and two envelopes differing
+only in their op under one prev hash (they must hash apart) — so a `HashFn` that cannot tell ops apart
+is RED, and the family is not a certificate for any `HashFn` whatever. The crypto posture itself is pinned by
 `Conformance.hashFnAdversarialLaws`: a collision-resistant `HashFn` admits **no** pre-image collision
 within the search budget (a re-hashed forgery cannot land a chosen head, so it is caught), whereas the
 32-bit default FNV-1a **does** — the documented forgery primitive, asserted so a silent widening of the
@@ -3237,6 +3242,68 @@ extracted.
 already breaking (source). `api/Fuaran.Core.Ops.txt`, `.Validator.txt`, `.Propagation.txt` and
 `.Conformance.txt` are regenerated; the roster gains two families and `docs/conformance-families.md` /
 `.json` are regenerated. No wire byte moves.
+
+### The kit's non-degeneracy floor: every gated arm counts what it built and reds at zero (Phase 302, DECISIONS.md D99) — ADDITIVE: no public member moves; families go red on witnesses they passed
+
+**What moved.** An audit ran every law family against deliberately broken witnesses and found one
+recurring blind spot: an arm whose evidence is DRAWN and then gated on a difference the defective
+witness cannot produce, so the law was skipped and nothing counted the skip. The floor closes it.
+
+- **Replacements are redrawn, bounded, and counted where they are built.** `streamLaws`,
+  `attestationLaws`, `dagLaws`, `checkpointLaws`, `captureReplayLaws` and both fresh-key arms of
+  `idempotencyLaws` redraw a replacement op (or value, or key) until it genuinely differs, at most
+  sixteen times; the count each guard reads is taken inside the gate. `checkpointLaws` demands a kept
+  node with a forged op (its tamper cell was otherwise met by the seal arms alone), and
+  `attestationLaws` demands the different-length-prefix half of its prefix law.
+- **`hashFnLaws` gains three laws** — op-tamper detection, re-minting moves the head, and content
+  addressing (two envelopes differing only in their op hash apart under one prev hash) — so a
+  constant `HashFn` is red. Its result count moves from 4 to 7; the guard stays last.
+- **`certify` folds `reducer`'s accepted/refused guards**, so a refusal-free `StreamGen` is red there
+  as it already was in `certifyStream`. Its result count moves by two. Its header no longer claims a
+  codec round trip beyond the JSONL cell it runs.
+- **The confluence families are given non-empty independent pairs and told when encode is blind.**
+  `footprintLaws` counts an independent pair only over two NON-EMPTY scripts — measured at this
+  repository's reference witness, every pair it had counted held an empty script, so its soundness
+  law had never commuted anything — and, like `concurrencyLawsWith` and `reconcileLawsWith`, draws a
+  short independent pair (bounded) where the drawn one interferes. `reconcileLawsWith` counts a
+  shape where its law is asserted (on a clean fold), counts the clean-fold law on the disjoint arm
+  only, and counts an independent delta pair only when both deltas are non-empty. The four families
+  (`footprintLaws`, `concurrencyLawsWith`, `reconcileLawsWith`, `arbitrationLaws`) demand an
+  `encode-distinguished node`: a node `encode` that ignores its input is red. `arbitrationLaws` and
+  `keyedArbitrationLawsWith` demand a `Conflicts` rejection beside the rejected proposals.
+- **`diffLaws` and `normalizeLaws` leave `Unconditional`.** Each carries a guard — a non-identity
+  pair, a script that moves the tree — and is `Guarded` in the census. Result counts move from 3 to 4.
+- **`idempotencyLaws`' thresholds are fractions**: the fresh-key arms must be built on at least half
+  their attempts and each outcome must be one in twenty of the arms built; a `keyOf` that is not a
+  function is a counterexample, not a `KeyNotFoundException`.
+- **`queryLawsWith` / `queryLawsAt` gain a result law**: a settled result's `Rows.Schema` equals the
+  query's `ResultSchema` and `Table.validate` accepts the rows. The law carries it; `Query.invoke` is
+  unchanged (no `QueryError` case is added — D99).
+- **`propagationEvaluatorLaws`' honesty law** checks every id a node asks for is one it declares and
+  that every reader of a removed node is named; its agreement law also replays an edit that moves the
+  map from a survivor-restricted prior (counted beside the guard, not demanded).
+- Smaller counts folded into existing guards: `keyedApplyLaws` (a keyed holder that can hold
+  children), `containmentLaws` (an illegal drawn tree), `diffContainedLaws` (built grafts, counted
+  beside), `FoldConfluence.laneFoldLawsWith` (a fold over two or more non-empty lanes).
+- **The proof bridge**: the tree differentials in the suite compare accepted results structurally
+  rather than by digest.
+
+**The ladder.** `independence-diamond`'s `dischargedBy` moves from `Conformance.footprintLaws` to
+`Conformance.footprintLawsAt` (the row is about a domain's own ops; the skeleton algebra's form is
+proved at `tree-independence-diamond`), with the roster's `Discharges` field beside it.
+`content-id-determines-content` is restated: it holds for the host's collision-resistant `HashFn` and
+is false for the default at scale; `hashFnLaws` carries it, sampled; a premise is discharged by
+nothing, so the row names no `dischargedBy`.
+
+**What a consumer does.** Nothing compiles differently. Re-run your families at your next pin: a red
+that was not there before is information your witness or generator did not give the kit until now —
+widen the generator (the counterexamples name the starved arm); do not raise the iteration count. A
+reader that pins a family's result count re-pins `hashFnLaws`, `diffLaws`, `normalizeLaws`, `certify`
+and `queryLawsWith`.
+
+**Class: additive** — no public type or member moves (`api/Fuaran.Core.Conformance.txt` unchanged);
+families go red on witnesses they passed. `docs/conformance-families.md` / `.json` are regenerated. No
+wire byte moves.
 
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 

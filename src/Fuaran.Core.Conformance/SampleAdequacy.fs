@@ -124,6 +124,61 @@ module SampleAdequacy =
                     + remedy
                 ) }
 
+    /// `reached`, with every count also held to a FRACTION of the attempts it was drawn out of —
+    /// Phase 302. A count that is positive is not evidence the arm is well covered: an arm built
+    /// once in two hundred attempts satisfies `reached`, and a run that skipped it 199 times read
+    /// adequate. Each entry is `(verdict, reached, outOf, oneIn)` and demands `reached ≥ 1` and
+    /// `reached × oneIn ≥ outOf` — at least one in `oneIn`. The law text is `reached`'s, so a guard
+    /// does not change its name by demanding more. Internal until a second family needs it.
+    let internal reachedFraction
+        (family: string)
+        (dimension: string)
+        (seed: int)
+        (counts: (string * int * int * int) list)
+        : LawResult =
+        let short (_, n, outOf, oneIn) = n <= 0 || n * oneIn < outOf
+        let missed = counts |> List.filter short
+
+        let render (v, n, outOf, oneIn) =
+            v
+            + "="
+            + string n
+            + " of "
+            + string outOf
+            + " (needs at least 1 in "
+            + string oneIn
+            + ")"
+
+        { Law =
+            lawPrefix family
+            + "the sample reached every "
+            + dimension
+            + " the laws distinguish"
+          Passed = not (List.isEmpty counts) && List.isEmpty missed
+          Counterexample =
+            if List.isEmpty counts then
+                Some(
+                    "seed="
+                    + string seed
+                    + ": "
+                    + dimension
+                    + " declared no verdicts, so it demands nothing"
+                )
+            elif List.isEmpty missed then
+                None
+            else
+                Some(
+                    "seed="
+                    + string seed
+                    + ": "
+                    + dimension
+                    + " reached "
+                    + (counts |> List.map render |> String.concat " ")
+                    + " — too rarely: "
+                    + (missed |> List.map (fun (v, _, _, _) -> v) |> String.concat ", ")
+                    + remedy
+                ) }
+
     /// A verdict-coverage law over counts the family already keeps. Fails when any declared verdict
     /// was reached zero times — and when the family declared NO verdicts at all, which is a demand
     /// that demands nothing rather than a family with nothing to demand.

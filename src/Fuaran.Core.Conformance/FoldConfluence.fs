@@ -441,7 +441,12 @@ module FoldConfluence =
 
                 match single with
                 | LaneFolded _ ->
-                    folded <- folded + 1
+                    // Phase 302 — a fold is counted only over two or more non-empty lanes: an empty
+                    // set, or one lane, folds the same under every order by construction, and a sample
+                    // made of those met the guard while testing order-invariance never.
+                    if (lanes |> List.filter (List.isEmpty >> not) |> List.length) >= 2 then
+                        folded <- folded + 1
+
                     foldLaw.Saw()
                 | LaneHalted _ ->
                     halted <- halted + 1

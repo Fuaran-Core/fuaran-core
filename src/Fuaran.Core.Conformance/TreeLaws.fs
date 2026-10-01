@@ -440,6 +440,11 @@ module internal TreeLaws =
 
         let survivor =
             LawKit.LawCell "diff survivor preservation (no RemoveNode on a survived id)"
+        // Phase 302 — every law below holds over the IDENTITY pair (`after = before`, the empty
+        // script), and `after` stays `before` whenever every derived op is refused. A generator whose
+        // ops this witness always refuses certified the family green over nothing but identities, so
+        // the family is `Guarded` and counts the pairs that actually differ.
+        let mutable nonIdentity = 0
 
         LawKit.run iterations seed (fun rng _ at ->
             let before = rng.Draw gen.Tree
@@ -453,6 +458,9 @@ module internal TreeLaws =
                 match Ops.applyContained canHold nodew idw op after with
                 | Ok t' -> after <- t'
                 | Error _ -> ()
+
+            if after <> before then
+                nonIdentity <- nonIdentity + 1
 
             match Diff.toOps nodew idw before after with
             | Error e ->
@@ -488,6 +496,7 @@ module internal TreeLaws =
                 | None -> survivor.Saw())
 
         LawKit.results [ reconstruction; applyability; survivor ]
+        @ [ SampleAdequacy.reached "Conformance.diffLaws" "non-identity pair" seed [ "non-identity pair", nonIdentity ] ]
 
     /// The CONTAINER-AWARE structural-diff laws (Phase 141) — `Diff.toOpsContained` certified
     /// through the container-aware sequence surface, with the witness's own `canHold`.
@@ -556,6 +565,7 @@ module internal TreeLaws =
         // `after` carries a node the witness's `canHold` rejects, which is DRAWN.
         let mutable accepted = 0
         let mutable refused = 0
+        let mutable grafted = 0
 
         /// the first node of `t` the predicate refuses, if any — the offender `toOpsContained`
         /// names once it also carries children
@@ -577,6 +587,8 @@ module internal TreeLaws =
                 | Ok cut when Tree.tryFind nodew idw (nodew.Id host) cut |> Option.exists canHold ->
                     let answer =
                         Ops.applyContained canHold nodew idw (InsertChild(nodew.Id host, graft)) cut
+
+                    grafted <- grafted + 1
 
                     correspondence.Check(
                         (match answer with
@@ -709,7 +721,17 @@ module internal TreeLaws =
             // `canHold` refuses nothing (or supplies none) exercises only the trivial direction of the
             // refusal IFF; that is now reported as the guard, not as a pass.
             SampleAdequacy.reached "Conformance.diffContainedLaws" "container-valid pair" seed [ "accepted", accepted ]
-            SampleAdequacy.reached "Conformance.diffContainedLaws" "refused pair" seed [ "refused", refused ] ]
+            // Phase 302 — the correspondence law skips a refusal it cannot ask (a root offender, a
+            // host refused once the graft is cut), so `refused` alone can be met while no graft was
+            // ever built. The built grafts are COUNTED beside it rather than demanded: a predicate
+            // that refuses every node makes every offender the root, so the law is unaskable at that
+            // witness by construction, not starved by its generator.
+            SampleAdequacy.reachedBeside
+                "Conformance.diffContainedLaws"
+                "refused pair"
+                seed
+                [ "refused", refused ]
+                [ "graft built", grafted ] ]
 
     /// The op-script normalisation laws (Phase 23) — the teeth on `Ops.normalize`. Build a random
     /// *applyable* script (apply random ops, keep the accepted ones), then check: **preservation**
@@ -730,12 +752,20 @@ module internal TreeLaws =
             LawKit.LawCell "normalize idempotence (normalize ∘ normalize = normalize)"
 
         let nonGrowth = LawKit.LawCell "normalize never lengthens a script"
+        // Phase 302 — all three laws hold over a script that does nothing: the empty one a run whose
+        // every drawn op is refused collects, and the identity reorders and empty batches such a
+        // witness still accepts. The family is `Guarded` and counts the scripts that MOVE the tree.
+        let mutable nonIdentity = 0
 
         LawKit.run iterations seed (fun rng _ at ->
             let tree = rng.Draw gen.Tree
 
             // collect an applyable script: thread random ops, keep the accepted ones
             let accepted = rng.Draw(LawKit.collectScript None nodew idw gen 6 tree)
+
+            match Ops.applyAll nodew idw accepted tree with
+            | Ok moved when moved <> tree -> nonIdentity <- nonIdentity + 1
+            | _ -> ()
 
             let normd = Ops.normalize nodew idw accepted
 
@@ -749,6 +779,11 @@ module internal TreeLaws =
             nonGrowth.Check(List.length normd <= List.length accepted, fun () -> at "normalize lengthened the script"))
 
         LawKit.results [ preservation; idempotence; nonGrowth ]
+        @ [ SampleAdequacy.reached
+                "Conformance.normalizeLaws"
+                "non-identity script"
+                seed
+                [ "non-identity script", nonIdentity ] ]
 
     /// The body of `containerLaws`, under a predicate the domain actually declared. Private so the
     /// census's reflection over public `…Laws` entry points sees one family rather than two.
@@ -2007,6 +2042,7 @@ module internal TreeLaws =
 
         let mutable accepted = 0
         let mutable refused = 0
+        let mutable illegalDrawn = 0
 
         let expectNamed (at: string -> string) (result: 'Node) (e: Rejection<'Id>) =
             match e with
@@ -2140,6 +2176,9 @@ module internal TreeLaws =
 
             match Ops.illegalChildren allowedChildren nodew drawn with
             | (p, c) :: _ ->
+                // Phase 302 — counted: the engine-loop refusals above meet "IllegalChild" without
+                // this arm ever being reached.
+                illegalDrawn <- illegalDrawn + 1
                 let answer = Diff.toOpsGrammar allowedChildren canHold nodew idw start drawn
 
                 diffRefuses.Check(
@@ -2206,7 +2245,9 @@ module internal TreeLaws =
                 "Conformance.containmentLaws"
                 "grammar refusal"
                 seed
-                [ "accepted op", accepted; "IllegalChild", refused ] ]
+                [ "accepted op", accepted
+                  "IllegalChild", refused
+                  "illegal drawn tree", illegalDrawn ] ]
 
     /// The reference-integrity laws (Phase 313) — the teeth on `Validator.referenceDefects` /
     /// `forwardReferences` and their families, the reference-aware engine (`Ops.applyReferenced`) and

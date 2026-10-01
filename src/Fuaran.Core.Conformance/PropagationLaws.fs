@@ -456,6 +456,7 @@ module internal PropagationLaws =
         let mutable readerReached = 0
         let mutable cleanReused = 0
         let mutable failed = 0
+        let mutable movedMap = 0
 
         /// One node, evaluated under a FIXED set of answers, with the reads it asked for in the order
         /// it asked. The resolver answers any id it holds: this probes the evaluator as a function, and
@@ -522,7 +523,7 @@ module internal PropagationLaws =
                 | Some why -> Some why
                 | None -> differs "when every node was visited in reverse" backward
 
-        let honestyDefect
+        let honestyDefectCore
             (i: int)
             ev0
             ev1
@@ -596,6 +597,75 @@ module internal PropagationLaws =
                         else
                             None)
 
+        /// Phase 302 — two clauses checked ahead of the ones above.
+        ///
+        /// Every id a node ASKS for is one it declares. An evaluator that reads past its declaration
+        /// makes `Deps` — and every dirty set computed from it — a guess, and the probes compare two
+        /// evaluations over reads nobody tracks. Checked of both models, under each model's own
+        /// values and under no answers at all.
+        ///
+        /// A node the edit REMOVED is not held to naming, but every reader of it that stays in the
+        /// map is: its input vanished, so its value can move although its own declaration did not.
+        let honestyDefect
+            (i: int)
+            ev0
+            ev1
+            (deps0: Map<string, Set<string>>)
+            (deps1: Map<string, Set<string>>)
+            (changed: Set<string>)
+            (oldValues: Map<string, 'V>)
+            (newValues: Map<string, 'V>)
+            (answerSets: (string * Map<string, 'V>) list)
+            : string option =
+            let undeclared =
+                [ for which, ev, deps, own in [ "prior", ev0, deps0, oldValues; "edited", ev1, deps1, newValues ] do
+                      for answers in [ own; Map.empty ] do
+                          for id in keysOf deps do
+                              let _, asked = probe ev answers id
+                              let declared = Map.tryFind id deps |> Option.defaultValue Set.empty
+
+                              for a in asked do
+                                  if not (Set.contains a declared) then
+                                      yield which, id, a, declared ]
+
+            let removed = Set.difference (Set.ofList (keysOf deps0)) (Set.ofList (keysOf deps1))
+
+            let readsRemoved (id: string) =
+                [ deps0; deps1 ]
+                |> List.exists (fun d ->
+                    Map.tryFind id d
+                    |> Option.exists (fun reads -> not (Set.isEmpty (Set.intersect reads removed))))
+
+            let unnamedReader =
+                keysOf deps1
+                |> List.tryFind (fun id -> not (Set.contains id changed) && readsRemoved id)
+
+            match undeclared, unnamedReader with
+            | (which, id, a, declared) :: _, _ ->
+                Some(
+                    sprintf
+                        "seed=%d iter=%d: %s — node %s of the %s model asked for %s, which its declared reads %A do not hold"
+                        seed
+                        i
+                        evw.Surface
+                        id
+                        which
+                        a
+                        (Set.toList declared)
+                )
+            | [], Some id ->
+                Some(
+                    sprintf
+                        "seed=%d iter=%d: %s — node %s reads %A, which the edit removed, but the change set %A does not name it"
+                        seed
+                        i
+                        evw.Surface
+                        id
+                        (Set.toList removed)
+                        (Set.toList changed)
+                )
+            | [], None -> honestyDefectCore i ev0 ev1 deps0 deps1 changed answerSets
+
         LawKit.run iterations seed (fun rng i at ->
             let m0 = rng.Draw evw.Model
             let m1, changed = rng.Draw(evw.Change m0)
@@ -626,20 +696,25 @@ module internal PropagationLaws =
                 |> List.mapi (fun k kv -> k, kv)
                 |> List.fold (fun acc (k, (id, v)) -> if k % 2 = 0 then Map.add id v acc else acc) oldValues
 
+            let defect =
+                honestyDefect
+                    i
+                    ev0
+                    ev1
+                    deps0
+                    deps1
+                    changed
+                    oldValues
+                    newValues
+                    [ "the prior model's values", oldValues
+                      "the edited model's values", newValues
+                      "a mixture of the two", mixed
+                      "no answers at all", Map.empty ]
+
+            let honest = defect.IsNone
+
             if not honesty.Failed then
-                match
-                    honestyDefect
-                        i
-                        ev0
-                        ev1
-                        deps0
-                        deps1
-                        changed
-                        [ "the prior model's values", oldValues
-                          "the edited model's values", newValues
-                          "a mixture of the two", mixed
-                          "no answers at all", Map.empty ]
-                with
+                match defect with
                 | Some why -> honesty.Check(false, fun () -> why)
                 | None -> honesty.Saw()
 
@@ -701,16 +776,46 @@ module internal PropagationLaws =
                 match full with
                 | Error _ -> failed <- failed + 1
                 | Ok _ -> ()
+            // Phase 302 — an edit that MOVES the map: `evalFrom` over the edited map, from a prior
+            // restricted to the SURVIVORS — the ids the edited map still holds and the change set does
+            // not name — with the named ids the edited map holds as the change. Every value such a
+            // prior offers is one an honest change set keeps clean, so the replay must agree with
+            // `eval`. Counted beside the guard, not demanded: a domain whose edits keep the map has
+            // none to offer.
+            | Ok out0 when honest ->
+                movedMap <- movedMap + 1
+
+                let survivors =
+                    out0.Values
+                    |> Map.filter (fun id _ -> Map.containsKey id deps1 && not (Set.contains id changed))
+
+                let changed1 = changed |> Set.filter (fun c -> Map.containsKey c deps1)
+                let viaSurvivors = Propagation.evalFrom ev1 survivors changed1 deps1
+
+                agreement.Check(
+                    (viaSurvivors = full),
+                    fun () ->
+                        at (
+                            sprintf
+                                "%s — over an edit that moved the map, evalFrom from the survivors' prior %A (changed=%A) returned %A, and eval of the edited evaluator %A"
+                                evw.Surface
+                                (survivors |> Map.toList |> List.map fst)
+                                (Set.toList changed1)
+                                viaSurvivors
+                                full
+                        )
+                )
             | _ -> ())
 
         LawKit.results [ purity; honesty; agreement ]
-        @ [ SampleAdequacy.reached
+        @ [ SampleAdequacy.reachedBeside
                 "Conformance.propagationEvaluatorLaws"
                 "evaluator edit"
                 seed
                 [ "change reaching a reader", readerReached
                   "clean node reused from prior", cleanReused
-                  "failing evaluator", failed ] ]
+                  "failing evaluator", failed ]
+                [ "moved-map edit replayed from its survivors", movedMap ] ]
 
     // ---- the prior value, at a DOMAIN'S evaluator (Phase 250) ----
     // `Propagation.evalFromWith` hands a recomputed node its own prior value beside its reads, and the

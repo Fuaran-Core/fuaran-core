@@ -453,6 +453,10 @@ module internal IntegrityLaws =
         let mutable signed = 0
         let mutable falsified = 0
         let mutable opTampered = 0
+        // Phase 302 — the prefix law's second half (a signature does NOT cover a different-length
+        // prefix) is gated on the two prefixes having different heads, which a run of empty chains
+        // never builds; it is counted beside the other three.
+        let mutable prefixMoved = 0
 
         LawKit.run iterations seed (fun rng _ at ->
             let state, recs, _ = LawKit.buildChain hashFn sw gen rng
@@ -485,6 +489,8 @@ module internal IntegrityLaws =
                  let pfx2 = recs |> List.truncate n2
 
                  if n2 <> n && OpStream.head pfx2 <> OpStream.head pfx then
+                     prefixMoved <- prefixMoved + 1
+
                      prefix.Check(
                          not (OpStream.verifyAttestation sink attN pfx2),
                          fun () -> at "a prefix signature covered a different-length prefix"
@@ -505,10 +511,12 @@ module internal IntegrityLaws =
                 falsified <- falsified + 1
                 // op-tamper + full rehash: verifyChain re-accepts, verifyAttestation must reject.
                 let tIdx = rng.IntBelow(List.length recs)
-                let newOp = rng.Draw gen.Op
                 let orig = List.item tIdx recs
 
-                if sw.Encode orig.Op <> sw.Encode newOp then
+                // Phase 302 — redrawn until the replacement encodes differently.
+                match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode orig.Op <> sw.Encode o) with
+                | None -> ()
+                | Some newOp ->
                     opTampered <- opTampered + 1
 
                     let tampered =
@@ -559,7 +567,10 @@ module internal IntegrityLaws =
                 "Conformance.attestationLaws"
                 "signing outcome and op tamper"
                 seed
-                [ "signed", signed; "falsified", falsified; "op-tampered", opTampered ] ]
+                [ "signed", signed
+                  "falsified", falsified
+                  "op-tampered", opTampered
+                  "prefix-moved", prefixMoved ] ]
 
     /// The `noAttestation` vacuity laws (Phase 60) — the default no-op sink issues no attestation
     /// (`attestHead noAttestation ⇒ None`) and verifies nothing (`verifyAttestation noAttestation _ ⇒
@@ -623,7 +634,15 @@ module internal IntegrityLaws =
     ///    pre-image and NOTHING about the construction path — the foundation of cross-host parity (two
     ///    hosts on the same `HashFn` + same pre-image get byte-identical chains);
     ///  - **tamper-detection** — a reorder, a dropped link, and a bit-flip are each caught by
-    ///    `verifyChain` under the supplied fn.
+    ///    `verifyChain` under the supplied fn;
+    ///  - **op-tamper detection, re-minting and content addressing** (Phase 302) — the three arms
+    ///    that need the hash ITSELF. The three above are caught before the hash is consulted (a
+    ///    reorder or a drop by its sequence, a bit-flip by the stored hash it changes), so a constant
+    ///    `HashFn` passed them all. An op replaced with its seq, prev and stored hash kept must fail
+    ///    `verifyChain`; that forgery rehashed end to end must land on a different head; and two
+    ///    drawn envelopes differing only in their op must hash apart under one prev hash. This is the
+    ///    family that carries `proofs.json`'s `content-id-determines-content` for a host's own
+    ///    `HashFn` — sampled, for a collision-resistant one; the default FNV-1a is not, at scale.
     ///
     /// The crypto posture (a re-hashed forgery is caught under a collision-resistant fn but not under the
     /// default FNV-1a) is a separate branch — see `hashFnAdversarialLaws`. `'State` is not compared.
@@ -653,9 +672,30 @@ module internal IntegrityLaws =
                 Some "tamper arm"
             )
 
+        let opTamper =
+            LawKit.LawCell(
+                "op-tamper detection (an op replaced with seq / prev / hash kept is caught by verifyChain under the supplied HashFn)",
+                Some "tamper arm"
+            )
+
+        let reMint =
+            LawKit.LawCell(
+                "re-minting moves the head (a forged chain rehashed under the supplied HashFn does not land on the original head)",
+                Some "tamper arm"
+            )
+
+        let distinguish =
+            LawKit.LawCell(
+                "content addressing (two envelopes differing only in their op hash apart under one prev hash)",
+                Some "tamper arm"
+            )
+
         let mutable reorders = 0
         let mutable drops = 0
         let mutable flips = 0
+        let mutable opTampers = 0
+        let mutable reMints = 0
+        let mutable distinguished = 0
 
         LawKit.run iterations seed (fun rng _ at ->
             // build the chain twice from the same start: same start ⇒ identical chain (determinism).
@@ -741,14 +781,87 @@ module internal IntegrityLaws =
                     tamper.Check(
                         not (OpStream.verifyChain hashFn sw flipped),
                         fun () -> at "a bit-flipped hash passed verifyChain"
-                    ))
+                    )
 
-        LawKit.results [ determinism; parity; tamper ]
+            // Phase 302 — the three arms above are caught before the hash is consulted (a reorder
+            // or a drop by its sequence, a bit-flip by the stored hash it changes), so a CONSTANT
+            // HashFn passed them all. These three are the arms that need the hash itself.
+            if len >= 1 then
+                let tIdx = rng.IntBelow len
+                let victim = List.item tIdx recs
+
+                match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode o <> sw.Encode victim.Op) with
+                | None -> ()
+                | Some newOp ->
+                    // op-tamper: the op changes, seq / prev / stored hash do not — only the hash of
+                    // the new op's envelope can tell.
+                    opTampers <- opTampers + 1
+
+                    let forged =
+                        recs |> List.mapi (fun j r -> if j = tIdx then { r with Op = newOp } else r)
+
+                    opTamper.Check(
+                        not (OpStream.verifyChain hashFn sw forged),
+                        fun () -> at (sprintf "a chain whose op at %d was replaced passed verifyChain" tIdx)
+                    )
+
+                    // re-mint: the forgery rehashed end to end must land on a DIFFERENT head — the
+                    // head is what a host commits to, and a HashFn under which it stays put lets a
+                    // rewritten history pass as the committed one.
+                    reMints <- reMints + 1
+                    let reminted = reforgeCanonical hashFn sw.Encode forged
+
+                    reMint.Check(
+                        OpStream.head reminted <> OpStream.head recs,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "re-minting the chain with its op at %d replaced left the head where it was"
+                                    tIdx
+                            )
+                    )
+
+            // distinguishing: two drawn envelopes that differ only in their op hash apart under
+            // one prev hash — sampled content-addressing for THIS HashFn (the ladder's
+            // content-id-determines-content holds for a collision-resistant one; the default
+            // FNV-1a is not, and collides at scale — see `hashFnAdversarialLaws`).
+            let prev =
+                match recs with
+                | [] -> OpStream.canonicalConfig.Genesis
+                | _ -> (List.item (rng.IntBelow len) recs).PrevHash
+
+            let a = rng.Draw gen.Op
+
+            match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode o <> sw.Encode a) with
+            | None -> ()
+            | Some b ->
+                distinguished <- distinguished + 1
+                let actor = Human "conf"
+                let ha = hashFn prev (OpStream.canonicalConfig.Payload 1 actor (sw.Encode a))
+                let hb = hashFn prev (OpStream.canonicalConfig.Payload 1 actor (sw.Encode b))
+
+                distinguish.Check(
+                    ha <> hb,
+                    fun () ->
+                        at (
+                            sprintf
+                                "two envelopes with different ops hashed alike under one prev hash (%s / %s)"
+                                (sw.Encode a)
+                                (sw.Encode b)
+                        )
+                ))
+
+        LawKit.results [ determinism; parity; tamper; opTamper; reMint; distinguish ]
         @ [ SampleAdequacy.reached
                 "Conformance.hashFnLaws"
                 "tamper arm"
                 seed
-                [ "reorder", reorders; "drop", drops; "bit-flip", flips ] ]
+                [ "reorder", reorders
+                  "drop", drops
+                  "bit-flip", flips
+                  "op-tamper", opTampers
+                  "re-mint", reMints
+                  "distinguish", distinguished ] ]
 
     /// The `HashFn` crypto-posture law (Phase 65) — pins the documented *"the default FNV-1a is not
     /// cryptographic; supply a collision-resistant `HashFn` for adversarial tamper-evidence"* contract

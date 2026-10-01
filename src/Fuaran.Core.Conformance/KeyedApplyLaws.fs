@@ -62,16 +62,16 @@ module internal KeyedApplyLaws =
         let placesInOrder =
             LawKit.LawCell(
                 "ReplaceKeyedChildren places a same-length list position for position and leaves Children where they were",
-                Some "built arm"
+                Some "built arm and op kind"
             )
 
         let structuralLeavesKeyed =
-            LawKit.LawCell("ReplaceChildren leaves the keyed positions where they were", Some "built arm")
+            LawKit.LawCell("ReplaceChildren leaves the keyed positions where they were", Some "built arm and op kind")
 
         let agreement =
             LawKit.LawCell(
                 "applyContainedKeyed refuses an insert as DuplicateId exactly when the domain's id check refuses the tree the unkeyed engine builds",
-                Some "built arm"
+                Some "built arm and op kind"
             )
 
         let identity =
@@ -79,6 +79,7 @@ module internal KeyedApplyLaws =
                 "with no keyed position declared, applyContainedKeyed and canApplyContainedKeyed answer exactly what applyContained and canApplyContained answer"
 
         let mutable keyedHolders = 0
+        let mutable keyedContainers = 0
         let mutable cleanInserts = 0
         let mutable keyedInTree = 0
         let mutable keyedInGraft = 0
@@ -92,7 +93,7 @@ module internal KeyedApplyLaws =
         let keyedPreservation =
             LawKit.LawCell(
                 "an op applyContainedKeyed accepts keeps a tree well formed over its keyed walk",
-                Some "built arm"
+                Some "built arm and op kind"
             )
 
         let mutable declaredKeyed = 0
@@ -170,6 +171,10 @@ module internal KeyedApplyLaws =
                 )
 
                 if canHold n then
+                    // Phase 302 — counted apart from `keyedHolders`: this arm is gated again, on the
+                    // holder also holding structural children, and a witness whose keyed holders are
+                    // all leaves never asserted it.
+                    keyedContainers <- keyedContainers + 1
                     let rebuilt = nodew.ReplaceChildren n (List.rev (nodew.Children n))
 
                     structuralLeavesKeyed.Check(
@@ -346,6 +351,7 @@ module internal KeyedApplyLaws =
                     "built arm and op kind"
                     seed
                     ([ "node holding a keyed position", keyedHolders
+                       "keyed holder that can hold children", keyedContainers
                        "clean insert", cleanInserts
                        "keyed in the tree, structural in the graft", keyedInTree
                        "structural in the tree, keyed in the graft", keyedInGraft
