@@ -149,6 +149,14 @@
       ],
       "check": "fingerprint",
       "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply <the wire-format-fixtures checkout>"
+    },
+    {
+      "source": "conformance/laws/decimal-laws.json",
+      "consumers": [
+        "Fuaran/Fuaran-UI/wire-format-fixtures/laws/decimal-laws.json"
+      ],
+      "check": "fingerprint",
+      "regen": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws <the wire-format-fixtures checkout>"
     }
   ]
 }

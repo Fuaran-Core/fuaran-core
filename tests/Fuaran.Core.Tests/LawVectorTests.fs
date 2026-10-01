@@ -224,6 +224,149 @@ let private announce (text: string) (fatal: bool) =
         failtest text
 
 // ---------------------------------------------------------------------------
+//  Phase 276 — the decimal documents, read back the way a host reads them: from the parsed file,
+//  with the kit called on each vector's INPUT and held to the file's EXPECTED. A vector the kit
+//  disagrees with is named, so a perturbed file goes red here before it reaches a host.
+// ---------------------------------------------------------------------------
+
+/// The union case a `%A` rendering opens with: its leading letters, whatever the payload after them.
+let private caseName (rendered: string) : string =
+    rendered |> Seq.takeWhile Char.IsLetter |> Seq.map string |> String.concat ""
+
+let private decimalVectorsOf (json: string) : Result<JVal list, string> =
+    match Json.parse json with
+    | Error m -> Error("the decimal vector file did not parse: " + m)
+    | Ok doc ->
+        match field "vectors" doc with
+        | Some(JArr items) -> Ok items
+        | _ -> Error "the decimal vector file carries no `vectors` array"
+
+let private allAggFns =
+    [ Sum; Mean; Min; Max; Count; Median; StdDev; First; Last; CountDistinct ]
+
+let private cellOfJson (v: JVal) : Cell option =
+    match str "kind" v, str "text" v with
+    | Some "null", None -> Some Null
+    | Some "int", Some t ->
+        match
+            System.Int32.TryParse(
+                t,
+                Globalization.NumberStyles.AllowLeadingSign,
+                Globalization.CultureInfo.InvariantCulture
+            )
+        with
+        | true, i -> Some(Int i)
+        | _ -> None
+    | Some "decimal", Some t -> Some(Decimal t)
+    | _ -> None
+
+/// The kit's answer to one vector's input, as the `(verdict, member, value)` it must carry, or why
+/// the input could not be read.
+let private decimalAnswer (case: string) (input: JVal) : Result<string * string * string, string> =
+    let accept m v = Ok("accept", m, v)
+    let reject e = Ok("reject", "error", e)
+
+    let cellsOf () =
+        match field "cells" input with
+        | Some(JArr items) ->
+            let cells = items |> List.choose cellOfJson
+
+            if List.length cells = List.length items then
+                Ok cells
+            else
+                Error "a cell did not read"
+        | _ -> Error "input.cells missing"
+
+    let columnClass (e: ColumnError) = caseName (sprintf "%A" e)
+
+    match case with
+    | "canonical" ->
+        match str "text" input with
+        | Some t ->
+            match DecimalText.tryCanonical t with
+            | Some c -> accept "canonical" c
+            | None -> reject "notDecimal"
+        | None -> Error "input.text missing"
+    | "compare"
+    | "add" ->
+        match str "a" input, str "b" input with
+        | Some a, Some b when case = "compare" ->
+            match DecimalText.compare a b with
+            | Some c -> accept "order" (string c)
+            | None -> reject "notDecimal"
+        | Some a, Some b ->
+            match DecimalText.add a b with
+            | Some s -> accept "sum" s
+            | None -> reject "notDecimal"
+        | _ -> Error "input.a / input.b missing"
+    | "toFloat" ->
+        match str "text" input with
+        | Some t ->
+            match DecimalText.tryToFloat t, DecimalText.tryCanonical t with
+            | Some f, _ -> accept "float" (Canon.canonicalFloat f)
+            | None, Some _ -> reject "pastFloatRange"
+            | None, None -> reject "notDecimal"
+        | None -> Error "input.text missing"
+    | "codecDecode" ->
+        match str "document" input with
+        | Some doc ->
+            match ColumnCodec.decode doc with
+            | Ok src -> accept "canonical" (ColumnCodec.encode src)
+            | Error e -> reject (columnClass e)
+        | None -> Error "input.document missing"
+    | "codecEncode" ->
+        cellsOf ()
+        |> Result.bind (fun cells ->
+            match ColumnCodec.tryEncode (LawVectorExport.Decimals.source cells) with
+            | Ok text -> accept "canonical" text
+            | Error e -> reject (columnClass e))
+    | "aggregate" ->
+        match str "fn" input with
+        | Some tag ->
+            match allAggFns |> List.tryFind (fun f -> LawVectorExport.Decimals.aggFnTag f = tag) with
+            | None -> Error("unknown fn " + tag)
+            | Some fn ->
+                cellsOf ()
+                |> Result.bind (fun cells ->
+                    match Column.aggregate fn (Column.create "c" DecimalType cells) with
+                    | Ok cell -> accept "token" (Cell.token cell)
+                    | Error e -> reject (caseName (sprintf "%A" e)))
+        | None -> Error "input.fn missing"
+    | other -> Error("unknown case " + other)
+
+/// `None` when the vector is true of this kit; otherwise what disagreed.
+let private checkDecimalVector (v: JVal) : string option =
+    let id = str "id" v |> Option.defaultValue "<no id>"
+
+    match str "case" v, field "input" v, field "expected" v with
+    | Some case, Some input, Some expected ->
+        match decimalAnswer case input with
+        | Error m -> Some(sprintf "%s: %s" id m)
+        | Ok(verdict, memberName, value) ->
+            // `order` is a JSON number in the file; every other member is a string.
+            let scalar (name: string) =
+                match field name expected with
+                | Some(JStr s) -> Some s
+                | Some(JInt n) -> Some(string n)
+                | _ -> None
+
+            match scalar "verdict", scalar memberName with
+            | Some fileVerdict, Some fileValue when fileVerdict = verdict && fileValue = value -> None
+            | fileVerdict, fileValue ->
+                Some(
+                    sprintf
+                        "%s: the file expects %A %s=%A, the kit answers %s %s=%s"
+                        id
+                        fileVerdict
+                        memberName
+                        fileValue
+                        verdict
+                        memberName
+                        value
+                )
+    | _ -> Some(sprintf "%s: case, input or expected missing" id)
+
+// ---------------------------------------------------------------------------
 //  Phase 235 — the corpus copy of capability-laws.json, pinned byte for byte.
 // ---------------------------------------------------------------------------
 //  The move carried the renderer over unchanged, and this is the pin that says so: the corpus copy
@@ -574,4 +717,128 @@ let tests =
 
               match classifyCapabilityCopy declarationMoved kit with
               | CapabilityDiffers _ -> ()
-              | other -> failtestf "a moved vector id read as %A" other ]
+              | other -> failtestf "a moved vector id read as %A" other
+
+          // ---- Phase 276: the exact decimal's documents ----------------------------------------
+
+          testCase "every rendered decimal vector reads back from the file and is true of this kit"
+          <| fun _ ->
+              match decimalVectorsOf (LawVectorExport.Decimals.render ()) with
+              | Error m -> failtest m
+              | Ok vectors ->
+                  Expect.equal
+                      (List.length vectors)
+                      (List.length (LawVectorExport.Decimals.allVectors ()))
+                      "one rendered vector per authored input"
+
+                  let failures = vectors |> List.choose checkDecimalVector
+                  Expect.isEmpty failures (sprintf "every vector agrees with the kit: %A" failures)
+
+          testCase "the decimal documents reach every case, and both verdicts in every case that can refuse"
+          <| fun _ ->
+              let vectors = LawVectorExport.Decimals.allVectors ()
+
+              let verdicts case =
+                  vectors
+                  |> List.filter (fun v -> v.Case = case)
+                  |> List.map (fun v -> v.Expected |> List.head |> snd)
+                  |> List.distinct
+                  |> List.sort
+
+              // `codecEncode` and `aggregate` refuse too; every case does, so every case shows both.
+              for case in
+                  [ "canonical"
+                    "compare"
+                    "add"
+                    "toFloat"
+                    "codecDecode"
+                    "codecEncode"
+                    "aggregate" ] do
+                  Expect.equal
+                      (verdicts case)
+                      [ "\"accept\""; "\"reject\"" ]
+                      (sprintf "the %s vectors carry an accept and a refusal" case)
+
+              let ids = vectors |> List.map (fun v -> v.Id)
+              Expect.equal (List.distinct ids) ids "vector ids are unique"
+
+          testCase "the decimal checker names a perturbed vector — the oracle leg can go red"
+          <| fun _ ->
+              let kit = LawVectorExport.Decimals.render ()
+
+              for good, bad in
+                  [ "\"canonical\": \"12.5\"", "\"canonical\": \"12.50\""
+                    "\"sum\": \"1\"", "\"sum\": \"1.0\""
+                    "\"order\": -1", "\"order\": 1"
+                    "\"error\": \"TypeMismatch\"", "\"error\": \"MalformedShape\"" ] do
+                  let i = kit.IndexOf(good, StringComparison.Ordinal)
+                  Expect.isGreaterThanOrEqual i 0 (sprintf "the render carries %s to perturb" good)
+                  let perturbed = kit.Substring(0, i) + bad + kit.Substring(i + good.Length)
+
+                  match decimalVectorsOf perturbed with
+                  | Error m -> failtest m
+                  | Ok vectors ->
+                      Expect.equal
+                          (vectors |> List.choose checkDecimalVector |> List.length)
+                          1
+                          (sprintf "perturbing %s is one named disagreement" good)
+
+          testCase "the rendered decimal artefact is LF-only, ASCII-escaped where it must be, and byte-stable"
+          <| fun _ ->
+              let once = LawVectorExport.Decimals.render ()
+              Expect.equal once (LawVectorExport.Decimals.render ()) "two renders produce the same bytes"
+              Expect.isFalse (once.Contains "\r") "no CR may reach a corpus byte-compared across three OSes"
+
+              Expect.stringContains
+                  once
+                  (sprintf "\"kitVersion\": \"%s\"" (LawVectorExport.kitVersion ()))
+                  "stamped with this kit's version"
+
+          testCase "the committed conformance/laws/decimal-laws.json is the one this kit renders"
+          <| fun _ ->
+              let path = LawVectorExport.decimalPath (OwnedConformance.root ())
+
+              if not (File.Exists path) then
+                  failtestf
+                      "this repository carries no %s at '%s' — re-run `--emit-laws` (no argument writes into conformance/) and commit the result"
+                      LawVectorExport.Decimals.fileName
+                      path
+              else
+                  let committed = File.ReadAllText path
+
+                  match decimalVectorsOf committed with
+                  | Error m -> failtest ("the committed decimal vectors did not read: " + m)
+                  | Ok vectors ->
+                      Expect.isEmpty
+                          (vectors |> List.choose checkDecimalVector)
+                          "the committed decimal vectors agree with this kit"
+
+                  Expect.equal
+                      committed
+                      (LawVectorExport.Decimals.render ())
+                      "the committed conformance/laws/decimal-laws.json is not what this kit renders — re-run `--emit-laws` (no argument) and commit conformance/"
+
+          testCase "the corpus copy of laws/decimal-laws.json is this renderer's output"
+          <| fun _ ->
+              match SiblingCorpus.freshness LawVectorExport.familyDirName with
+              | SiblingCorpus.NotChecked(why, true) -> failtest why
+              | SiblingCorpus.NotChecked(why, false) ->
+                  printfn "%s" (banner "DECIMAL CORPUS COPY NOT CHECKED" [ why ])
+                  Console.Out.Flush()
+                  skiptest why
+              | SiblingCorpus.Compare(root, fatal) ->
+                  let copy = LawVectorExport.decimalPath root
+
+                  if not (File.Exists copy) then
+                      announce
+                          (banner "DECIMAL CORPUS COPY MISSING" [ sprintf "expected at  %s" copy; "    " + emitCopy ])
+                          fatal
+                  elif
+                      OwnedConformance.fingerprint (File.ReadAllText copy)
+                      <> OwnedConformance.fingerprint (LawVectorExport.Decimals.render ())
+                  then
+                      announce
+                          (banner
+                              "DECIMAL CORPUS COPY DIFFERS"
+                              [ sprintf "copy  %s" copy; "    " + emitHere; "    " + emitCopy ])
+                          fatal ]

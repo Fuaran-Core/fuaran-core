@@ -185,7 +185,11 @@ let tests =
           testCase "columnarValidatorLaws certify determinism + soundness (Phase 37)"
           <| fun _ ->
               let results = Conformance.columnarValidatorLaws 4242 200
-              Expect.equal (List.length results) 4 "determinism + soundness, and the two Phase 223 guards"
+
+              Expect.equal
+                  (List.length results)
+                  5
+                  "determinism + soundness, the two Phase 223 guards, and the Phase 276 column-type guard"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -197,20 +201,42 @@ let tests =
 
               Expect.equal (Conformance.columnarValidatorLaws 4242 200) results "same seed ⇒ identical report"
 
-          testCase "Phase 223 — a fault-free sample turns columnarValidatorLaws RED, on both fault guards alone"
+          testCase
+              "Phase 223 — a fault-free sample turns columnarValidatorLaws RED, on both fault guards and (Phase 276) the column-type guard alone"
           <| fun _ ->
               // The kit draws this family's sample itself, so the refusal-free generator is the
               // roll's own clean stratum: iteration 0 is a table with every cell in range and none
               // null, by construction, at any seed. One iteration is therefore a run whose soundness
               // law holds as 0 = 0 for both rules — green on every subject law, and exactly what the
-              // two guards exist to refuse.
+              // two guards exist to refuse. It is also an INT table (Phase 276: the decimal tables are
+              // the odd iterations), so the column-type guard refuses it too, naming the decimal cell.
               for seed in [ 1; 4242; 90210 ] do
+                  let results = Conformance.columnarValidatorLaws seed 1
+
                   Expect.equal
-                      (Conformance.columnarValidatorLaws seed 1
-                       |> List.filter (fun r -> not r.Passed)
-                       |> List.map (fun r -> r.Law))
+                      (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
                       [ SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"
                         + "the sample reached every injected null the laws distinguish"
                         SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"
-                        + "the sample reached every injected out-of-range value the laws distinguish" ]
-                      (sprintf "seed %d: both fault guards red, nothing else" seed) ]
+                        + "the sample reached every injected out-of-range value the laws distinguish"
+                        SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"
+                        + "the sample reached every column type the laws distinguish" ]
+                      (sprintf "seed %d: both fault guards and the column-type guard red, nothing else" seed)
+
+                  // The clean stratum can also be EMPTY (every drawn cell null, and nulls dropped), so
+                  // the int cell may be missed beside it; the decimal one always is.
+                  let cx = (List.last results).Counterexample |> Option.defaultValue ""
+                  let missed = cx.Substring(max 0 (cx.IndexOf "never reached"))
+
+                  Expect.stringContains
+                      missed
+                      "decimal cell"
+                      (sprintf "seed %d: the column-type guard names the decimal cell it missed" seed)
+
+          testCase "Phase 276 — twelve iterations reach both column types and every stratum of each, all green"
+          <| fun _ ->
+              // Every stratum at both types, including the decimal stratum's `100.01`, the fault a
+              // reading that truncated or rounded to whole units would call in range.
+              for seed in [ 1; 4242; 90210 ] do
+                  for r in Conformance.columnarValidatorLaws seed 12 do
+                      Expect.isTrue r.Passed (sprintf "seed %d: %s — %A" seed r.Law r.Counterexample) ]

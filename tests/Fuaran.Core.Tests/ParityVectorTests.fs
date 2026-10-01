@@ -131,7 +131,111 @@ let private expected: (string * string) list =
       "cellToken/floats", "f:NaN f:Inf f:-Inf f:0 f:0 f:0.1 f:1E+21"
       "cellToken/scalars", "i:-3 b:1 s:s d:2026-10-01 n:"
       "cellToken/decimal-canonical", "m:1.5"
-      "cellCompare/float-order", "f:-Inf f:0 i:0 f:1 f:Inf f:NaN" ]
+      "cellCompare/float-order", "f:-Inf f:0 i:0 f:1 f:Inf f:NaN"
+      // Phase 276 — the exact decimal (D72). Hand-checkable: the aggregate column is 0.1, 0.2, null,
+      // -0.3, 1.50, 1.5 and the int 2, so `Sum` is exactly 5, `Min` the decimal -0.3, `Max` the int
+      // cell 2 as it stands, `Mean` 5/6, `Median` (0.2 + 1.5) / 2, and the two spellings of 1.5 one
+      // distinct value of five. `one-float-*` are pairs one double cannot tell apart and the order
+      // can. `sum-past-float` is SHA-256 over the exact sum's token, `m:1` + 399 zeros + `.5`.
+      "decimal/canonical/refused-empty", "refused"
+      "decimal/canonical/refused-null", "refused"
+      "decimal/canonical/refused-lone-minus", "refused"
+      "decimal/canonical/refused-leading-plus", "refused"
+      "decimal/canonical/refused-double-minus", "refused"
+      "decimal/canonical/refused-bare-point-leading", "refused"
+      "decimal/canonical/refused-bare-point-trailing", "refused"
+      "decimal/canonical/refused-minus-bare-point", "refused"
+      "decimal/canonical/refused-point-alone", "refused"
+      "decimal/canonical/refused-two-points", "refused"
+      "decimal/canonical/refused-exponent", "refused"
+      "decimal/canonical/refused-exponent-upper", "refused"
+      "decimal/canonical/refused-separator-comma", "refused"
+      "decimal/canonical/refused-separator-underscore", "refused"
+      "decimal/canonical/refused-decimal-comma", "refused"
+      "decimal/canonical/refused-leading-space", "refused"
+      "decimal/canonical/refused-trailing-space", "refused"
+      "decimal/canonical/refused-tab", "refused"
+      "decimal/canonical/refused-hex", "refused"
+      "decimal/canonical/refused-nan", "refused"
+      "decimal/canonical/refused-infinity", "refused"
+      "decimal/canonical/refused-arabic-indic-digit", "refused"
+      "decimal/canonical/refused-fullwidth-digit", "refused"
+      "decimal/canonical/already-canonical", "12.5"
+      "decimal/canonical/zero", "0"
+      "decimal/canonical/leading-zeros", "7"
+      "decimal/canonical/trailing-zeros", "12.5"
+      "decimal/canonical/zero-fraction", "3"
+      "decimal/canonical/leading-zero-fraction", "0.5"
+      "decimal/canonical/negative-zero", "0"
+      "decimal/canonical/negative-zero-fraction", "0"
+      "decimal/canonical/zeros-both-sides", "0"
+      "decimal/canonical/negative-both-sides", "-12.34"
+      "decimal/canonical/thirty-one-places", "0.0000000000000000000000000000001"
+      "decimal/canonical/forty-digits", "1234567890123456789012345678901234567890.5"
+      "decimal/compare/negative-below-positive", "-1"
+      "decimal/compare/positive-above-negative", "1"
+      "decimal/compare/signed-zeros-equal", "0"
+      "decimal/compare/negatives-reversed", "1"
+      "decimal/compare/integer-width", "1"
+      "decimal/compare/fraction-place", "1"
+      "decimal/compare/negative-fraction-place", "-1"
+      "decimal/compare/whole-against-fraction", "1"
+      "decimal/compare/equal-spellings", "0"
+      "decimal/compare/equal-spellings-negative", "0"
+      "decimal/compare/one-float-tenth", "-1"
+      "decimal/compare/one-float-past-2-53", "1"
+      "decimal/compare/refused-left", "refused"
+      "decimal/compare/refused-right", "refused"
+      "decimal/add/carry-through-point", "1"
+      "decimal/add/carry-into-tens", "10"
+      "decimal/add/widening-carry", "1000"
+      "decimal/add/widening-carry-fraction", "100"
+      "decimal/add/narrowing-borrow", "999.999"
+      "decimal/add/borrow-to-fraction", "0.01"
+      "decimal/add/cancel-to-unsigned-zero", "0"
+      "decimal/add/cancel-negative-first", "0"
+      "decimal/add/mixed-negative-larger-first", "-2"
+      "decimal/add/mixed-negative-larger-second", "-2"
+      "decimal/add/mixed-positive-larger-first", "2"
+      "decimal/add/mixed-positive-larger-second", "2"
+      "decimal/add/both-negative", "-4.25"
+      "decimal/add/zero-identity", "12.5"
+      "decimal/add/scale-past-host-decimal", "1.0000000000000000000000000000001"
+      "decimal/add/magnitude-past-host-decimal", "100000000000000000000000000000000000000"
+      "decimal/add/refused", "refused"
+      "decimal/toFloat/tenth", "0.1"
+      "decimal/toFloat/past-2-53", "9007199254740992"
+      "decimal/toFloat/negative", "-12.5"
+      "decimal/toFloat/past-float-range", "refused"
+      "decimal/toFloat/refused", "refused"
+      "decimalCodec/encode-canonical",
+      @"ok:{""columns"":{""c"":{""validity"":[true,false,true,true],""values"":[""12.5"",""0"",""-0.001"",""7""]}},""schema"":[{""name"":""c"",""type"":""decimal""}]}"
+      "decimalCodec/encode-refuses-non-canonical", "refused:MalformedShape"
+      "decimalCodec/decode-canonicalises",
+      @"ok:{""columns"":{""c"":{""validity"":[true,true,true],""values"":[""12.5"",""0"",""3""]}},""schema"":[{""name"":""c"",""type"":""decimal""}]}"
+      "decimalCodec/decode-integer-token",
+      @"ok:{""columns"":{""c"":{""validity"":[true,true,true],""values"":[""42"",""-7"",""0""]}},""schema"":[{""name"":""c"",""type"":""decimal""}]}"
+      "decimalCodec/decode-integer-token-past-int32",
+      @"ok:{""columns"":{""c"":{""validity"":[true,true],""values"":[""3000000000"",""-9007199254740992""]}},""schema"":[{""name"":""c"",""type"":""decimal""}]}"
+      "decimalCodec/decode-whole-exponent-token",
+      @"ok:{""columns"":{""c"":{""validity"":[true],""values"":[""3000000000""]}},""schema"":[{""name"":""c"",""type"":""decimal""}]}"
+      "decimalCodec/decode-refuses-fractional-token", "refused:TypeMismatch"
+      "decimalCodec/decode-refuses-integer-token-past-2-53", "refused:NotJson"
+      "decimalCodec/decode-refuses-whole-float-past-2-53", "refused:TypeMismatch"
+      "decimalCodec/decode-refuses-exponent-text", "refused:MalformedShape"
+      "decimalCodec/decode-refuses-plus-text", "refused:MalformedShape"
+      "decimalCodec/decode-refuses-bool", "refused:TypeMismatch"
+      "decimalAggregate/sum", "m:5"
+      "decimalAggregate/min", "m:-0.3"
+      "decimalAggregate/max", "i:2"
+      "decimalAggregate/mean", "f:0.8333333333333334"
+      "decimalAggregate/median", "f:0.85"
+      "decimalAggregate/stddev", "f:0.8634555897992412"
+      "decimalAggregate/count-distinct", "i:5"
+      "decimalAggregate/sum-tenths-exact", "m:1"
+      "decimalAggregate/sum-past-float", "f71d1eb372ac8e9eb340d9d8f987246b49e50a95e06e2023170affd98d4aa403"
+      "decimalAggregate/mean-past-float", "<overflow>"
+      "decimalAggregate/sum-not-decimal", "<outside-type>" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -155,7 +259,10 @@ let private families =
       "fnv1a32/"
       "floatLayout/"
       "cellToken/"
-      "cellCompare/" ]
+      "cellCompare/"
+      "decimal/"
+      "decimalCodec/"
+      "decimalAggregate/" ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
@@ -260,4 +367,54 @@ let tests =
               Expect.equal
                   (lines |> List.distinct |> List.length)
                   (List.length (ParityVectors.vectors @ ParityVectors.hashSweep))
-                  "no two vectors share a label" ]
+                  "no two vectors share a label"
+
+          // Phase 276 — the decimal rows' committed answers held to an INDEPENDENT oracle wherever one
+          // exists: `System.Decimal` holds every operand below (28 places, 96 bits), so its sum and its
+          // order are what the string arithmetic must agree with. The rows past its range are the ones
+          // the type exists for, and they are hand-checked in the table instead.
+          testCase "the decimal add and compare rows agree with System.Decimal wherever it holds them"
+          <| fun _ ->
+              let inv = System.Globalization.CultureInfo.InvariantCulture
+              let dec (s: string) = System.Decimal.Parse(s, inv)
+
+              let pairs =
+                  [ "0.99", "0.01"
+                    "9.95", "0.05"
+                    "999", "1"
+                    "99.9", "0.1"
+                    "1000", "-0.001"
+                    "100", "-99.99"
+                    "1.5", "-1.50"
+                    "-0.001", "0.001"
+                    "-5", "3"
+                    "3", "-5"
+                    "5", "-3"
+                    "-3", "5"
+                    "-1.5", "-2.75"
+                    "-0", "12.50"
+                    "-1", "1"
+                    "-2", "-10"
+                    "10", "9"
+                    "0.1", "0.09"
+                    "-0.1", "-0.09"
+                    "100", "99.999"
+                    "1.50", "001.5"
+                    "-7.000", "-7" ]
+
+              for a, b in pairs do
+                  let viaDecimal = (dec a + dec b).ToString(inv) |> DecimalText.tryCanonical
+                  Expect.equal (DecimalText.add a b) viaDecimal (sprintf "%s + %s" a b)
+
+                  Expect.equal
+                      (DecimalText.compare a b)
+                      (Some(sign (System.Decimal.Compare(dec a, dec b))))
+                      (sprintf "compare %s %s" a b)
+
+          testCase "the past-float sum row is the digest of the exact sum's token"
+          <| fun _ ->
+              let row =
+                  ParityVectors.vectors
+                  |> List.find (fun (k, _) -> k = "decimalAggregate/sum-past-float")
+
+              Expect.equal (snd row) (Hash.sha256Hex ("m:1" + String.replicate 399 "0" + ".5")) "1e399 + 0.5, exactly" ]

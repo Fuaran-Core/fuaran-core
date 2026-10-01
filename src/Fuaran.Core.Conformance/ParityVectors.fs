@@ -196,6 +196,103 @@ let private exportCorpus: string list =
       String.replicate 111 "a"
       String.replicate 1000 "xy" ]
 
+// ---- Phase 276 — the exact decimal (D72) ----
+// `DecimalText` is string arithmetic written to the Fable-clean subset, and these rows are what make
+// that a measured claim rather than an asserted one: every refused form K4 names and every
+// normalisation K3 performs, the order and the sum at each of their branches, the column codec over a
+// decimal column, and `Column.aggregate` over one. Each answer is ASCII by construction: decimal text
+// is ASCII, and a refusal is its class name.
+
+/// `DecimalText.tryCanonical`'s answer: the canonical text, or `refused`.
+let private decCanon (s: string) : string =
+    match DecimalText.tryCanonical s with
+    | Some c -> c
+    | None -> "refused"
+
+/// `DecimalText.compare`'s answer: `-1` / `0` / `1`, or `refused`.
+let private decCompare (a: string) (b: string) : string =
+    match DecimalText.compare a b with
+    | Some c -> string c
+    | None -> "refused"
+
+/// `DecimalText.add`'s answer: the canonical sum, or `refused`.
+let private decAdd (a: string) (b: string) : string =
+    match DecimalText.add a b with
+    | Some s -> s
+    | None -> "refused"
+
+/// `DecimalText.tryToFloat`'s answer through the canonical float layout, or `refused`.
+let private decToFloat (s: string) : string =
+    match DecimalText.tryToFloat s with
+    | Some f -> Canon.canonicalFloat f
+    | None -> "refused"
+
+/// A codec refusal's class. Exhaustive, so a case added to `ColumnError` is a build error here rather
+/// than a row that reads `<other>`.
+let private columnErrorClass (e: ColumnError) : string =
+    match e with
+    | NotJson _ -> "NotJson"
+    | MissingField _ -> "MissingField"
+    | MalformedShape _ -> "MalformedShape"
+    | UnknownType _ -> "UnknownType"
+    | TypeMismatch _ -> "TypeMismatch"
+    | LengthMismatch _ -> "LengthMismatch"
+    | NonFiniteFloat _ -> "NonFiniteFloat"
+    | Malformed _ -> "Malformed"
+    | RaggedColumns _ -> "RaggedColumns"
+
+/// A one-column decimal source, embedded.
+let private decimalSource (cells: Cell list) : DataSource =
+    Embedded
+        { Schema = [ "c", DecimalType ]
+          Columns = [ Column.create "c" DecimalType cells ] }
+
+/// `ColumnCodec.tryEncode`'s answer: `ok:<canonical bytes>`, or `refused:<class>`.
+let private decimalEncode (cells: Cell list) : string =
+    match ColumnCodec.tryEncode (decimalSource cells) with
+    | Ok text -> "ok:" + text
+    | Error e -> "refused:" + columnErrorClass e
+
+/// `ColumnCodec.decode` of a one-column decimal document whose `values` array is `values` (raw JSON),
+/// re-encoded: `ok:<canonical bytes>`, or `refused:<class>`.
+let private decimalDecode (values: string) : string =
+    let validity =
+        // One `true` per top-level value; the rows below never nest a comma inside a value.
+        values.Split ',' |> Array.map (fun _ -> "true") |> String.concat ","
+
+    let doc =
+        "{\"schema\":[{\"name\":\"c\",\"type\":\"decimal\"}],\"columns\":{\"c\":{\"values\":["
+        + values
+        + "],\"validity\":["
+        + validity
+        + "]}}}"
+
+    match ColumnCodec.decode doc with
+    | Ok src -> "ok:" + ColumnCodec.encode src
+    | Error e -> "refused:" + columnErrorClass e
+
+/// `Column.aggregate` over a decimal column, as the result cell's token or the refusal's class.
+let private decimalAggregate (fn: AggFn) (cells: Cell list) : string =
+    match Column.aggregate fn (Column.create "d" DecimalType cells) with
+    | Ok cell -> Cell.token cell
+    | Error(IncompatibleAggType _) -> "<incompatible>"
+    | Error(AggregateOverflow _) -> "<overflow>"
+    | Error(CellOutsideType _) -> "<outside-type>"
+
+/// The decimal column the aggregate rows read: two spellings of one value (`1.50` built directly,
+/// `1.5` canonical), a negative, an `Int` (the lossless promotion `widens` pins), and a `Null`.
+let private decimalColumnCells: Cell list =
+    [ Decimal "0.1"
+      Decimal "0.2"
+      Null
+      Decimal "-0.3"
+      Decimal "1.50"
+      Decimal "1.5"
+      Int 2 ]
+
+/// A decimal of 400 digits: exact for `Sum`, past the float range for the float-valued aggregates.
+let private pastFloat: string = "1" + String.replicate 399 "0"
+
 /// `agrees:<n>` when `f` and `g` give one value on every corpus input, else `diverges@<index>`.
 let private agreement (f: string -> string) (g: string -> string) : string =
     match exportCorpus |> List.tryFindIndex (fun s -> f s <> g s) with
@@ -393,7 +490,118 @@ let vectors: (string * string) list =
       [ Float nan; Float infinity; Float 1.0; Float -0.0; Int 0; Float -infinity ]
       |> List.sortWith (fun a b -> Cell.compare a b |> Option.defaultValue 0)
       |> List.map Cell.token
-      |> String.concat " " ]
+      |> String.concat " "
+
+      // ---- Phase 276 — the exact decimal (D72). Appended, so every earlier row keeps its place in
+      // the comparison. ----
+      // `DecimalText.tryCanonical` — K4's refused forms, one row each, so a divergence names the form.
+      "decimal/canonical/refused-empty", decCanon ""
+      "decimal/canonical/refused-null", decCanon null
+      "decimal/canonical/refused-lone-minus", decCanon "-"
+      "decimal/canonical/refused-leading-plus", decCanon "+1"
+      "decimal/canonical/refused-double-minus", decCanon "--1"
+      "decimal/canonical/refused-bare-point-leading", decCanon ".5"
+      "decimal/canonical/refused-bare-point-trailing", decCanon "5."
+      "decimal/canonical/refused-minus-bare-point", decCanon "-.5"
+      "decimal/canonical/refused-point-alone", decCanon "."
+      "decimal/canonical/refused-two-points", decCanon "1.2.3"
+      "decimal/canonical/refused-exponent", decCanon "1e3"
+      "decimal/canonical/refused-exponent-upper", decCanon "1.5E-2"
+      "decimal/canonical/refused-separator-comma", decCanon "1,000"
+      "decimal/canonical/refused-separator-underscore", decCanon "1_000"
+      "decimal/canonical/refused-decimal-comma", decCanon "1,5"
+      "decimal/canonical/refused-leading-space", decCanon " 1"
+      "decimal/canonical/refused-trailing-space", decCanon "1 "
+      "decimal/canonical/refused-tab", decCanon "1\t"
+      "decimal/canonical/refused-hex", decCanon "0x10"
+      "decimal/canonical/refused-nan", decCanon "NaN"
+      "decimal/canonical/refused-infinity", decCanon "Infinity"
+      // A digit outside ASCII: a reader that asked "is this a digit?" of the platform would take it.
+      "decimal/canonical/refused-arabic-indic-digit", decCanon "١"
+      "decimal/canonical/refused-fullwidth-digit", decCanon "１"
+      // K3's normalisations: leading zeros, trailing fraction zeros, a zero fraction, a signed zero.
+      "decimal/canonical/already-canonical", decCanon "12.5"
+      "decimal/canonical/zero", decCanon "0"
+      "decimal/canonical/leading-zeros", decCanon "007"
+      "decimal/canonical/trailing-zeros", decCanon "12.50"
+      "decimal/canonical/zero-fraction", decCanon "3.000"
+      "decimal/canonical/leading-zero-fraction", decCanon "0.500"
+      "decimal/canonical/negative-zero", decCanon "-0"
+      "decimal/canonical/negative-zero-fraction", decCanon "-0.000"
+      "decimal/canonical/zeros-both-sides", decCanon "00.00"
+      "decimal/canonical/negative-both-sides", decCanon "-012.340"
+      "decimal/canonical/thirty-one-places", decCanon "0.0000000000000000000000000000001"
+      "decimal/canonical/forty-digits", decCanon "1234567890123456789012345678901234567890.50"
+      // `DecimalText.compare` — sign, place, equal spellings, and values one float cannot tell apart.
+      "decimal/compare/negative-below-positive", decCompare "-1" "1"
+      "decimal/compare/positive-above-negative", decCompare "1" "-1"
+      "decimal/compare/signed-zeros-equal", decCompare "-0" "0.0"
+      "decimal/compare/negatives-reversed", decCompare "-2" "-10"
+      "decimal/compare/integer-width", decCompare "10" "9"
+      "decimal/compare/fraction-place", decCompare "0.1" "0.09"
+      "decimal/compare/negative-fraction-place", decCompare "-0.1" "-0.09"
+      "decimal/compare/whole-against-fraction", decCompare "100" "99.999"
+      "decimal/compare/equal-spellings", decCompare "1.50" "001.5"
+      "decimal/compare/equal-spellings-negative", decCompare "-7.000" "-7"
+      "decimal/compare/one-float-tenth", decCompare "0.1" "0.1000000000000000055511151231257827"
+      "decimal/compare/one-float-past-2-53", decCompare "9007199254740993" "9007199254740992"
+      "decimal/compare/refused-left", decCompare "1e3" "1"
+      "decimal/compare/refused-right", decCompare "1" "+1"
+      // `DecimalText.add` — every carry, borrow and sign branch, and scales no host decimal holds.
+      "decimal/add/carry-through-point", decAdd "0.99" "0.01"
+      "decimal/add/carry-into-tens", decAdd "9.95" "0.05"
+      "decimal/add/widening-carry", decAdd "999" "1"
+      "decimal/add/widening-carry-fraction", decAdd "99.9" "0.1"
+      "decimal/add/narrowing-borrow", decAdd "1000" "-0.001"
+      "decimal/add/borrow-to-fraction", decAdd "100" "-99.99"
+      "decimal/add/cancel-to-unsigned-zero", decAdd "1.5" "-1.50"
+      "decimal/add/cancel-negative-first", decAdd "-0.001" "0.001"
+      "decimal/add/mixed-negative-larger-first", decAdd "-5" "3"
+      "decimal/add/mixed-negative-larger-second", decAdd "3" "-5"
+      "decimal/add/mixed-positive-larger-first", decAdd "5" "-3"
+      "decimal/add/mixed-positive-larger-second", decAdd "-3" "5"
+      "decimal/add/both-negative", decAdd "-1.5" "-2.75"
+      "decimal/add/zero-identity", decAdd "-0" "12.50"
+      "decimal/add/scale-past-host-decimal", decAdd "0.0000000000000000000000000000001" "1"
+      "decimal/add/magnitude-past-host-decimal", decAdd "99999999999999999999999999999999999999" "1"
+      "decimal/add/refused", decAdd "1" ".5"
+      // `DecimalText.tryToFloat` — the one place the type rounds, and where it refuses to.
+      "decimal/toFloat/tenth", decToFloat "0.10"
+      "decimal/toFloat/past-2-53", decToFloat "9007199254740993"
+      "decimal/toFloat/negative", decToFloat "-12.5"
+      "decimal/toFloat/past-float-range", decToFloat pastFloat
+      "decimal/toFloat/refused", decToFloat "1e3"
+      // `ColumnCodec` over a decimal column: the canonical encode (an `Int` written as a decimal
+      // string, a `Null` as the absent slot), the refusal of a non-canonical cell, a decode that
+      // canonicalises, the integer token, and the refusals of a fractional token and of text.
+      "decimalCodec/encode-canonical", decimalEncode [ Decimal "12.5"; Null; Decimal "-0.001"; Int 7 ]
+      "decimalCodec/encode-refuses-non-canonical", decimalEncode [ Decimal "12.50" ]
+      "decimalCodec/decode-canonicalises", decimalDecode "\"012.50\",\"-0\",\"3.000\""
+      "decimalCodec/decode-integer-token", decimalDecode "42,-7,0"
+      "decimalCodec/decode-integer-token-past-int32", decimalDecode "3000000000,-9007199254740992"
+      "decimalCodec/decode-whole-exponent-token", decimalDecode "3e9"
+      "decimalCodec/decode-refuses-fractional-token", decimalDecode "3.5"
+      // Past 2^53 a whole-valued number token is refused twice over: an INTEGER token by the
+      // parser's int53 guard, before the codec sees it, and a whole FLOAT token by the codec.
+      "decimalCodec/decode-refuses-integer-token-past-2-53", decimalDecode "9007199254740994"
+      "decimalCodec/decode-refuses-whole-float-past-2-53", decimalDecode "1e300"
+      "decimalCodec/decode-refuses-exponent-text", decimalDecode "\"1e3\""
+      "decimalCodec/decode-refuses-plus-text", decimalDecode "\"+1\""
+      "decimalCodec/decode-refuses-bool", decimalDecode "true"
+      // `Column.aggregate` over a decimal column: the exact `Sum`, the exact order of `Min` / `Max`
+      // (the winning cell as it stands), the float-valued three, `CountDistinct` over two spellings
+      // of one value, and the refusals: a value past the float range, and text that is not decimal.
+      "decimalAggregate/sum", decimalAggregate Sum decimalColumnCells
+      "decimalAggregate/min", decimalAggregate Min decimalColumnCells
+      "decimalAggregate/max", decimalAggregate Max decimalColumnCells
+      "decimalAggregate/mean", decimalAggregate Mean decimalColumnCells
+      "decimalAggregate/median", decimalAggregate Median decimalColumnCells
+      "decimalAggregate/stddev", decimalAggregate StdDev decimalColumnCells
+      "decimalAggregate/count-distinct", decimalAggregate CountDistinct decimalColumnCells
+      "decimalAggregate/sum-tenths-exact", decimalAggregate Sum (List.replicate 10 (Decimal "0.1"))
+      "decimalAggregate/sum-past-float", Hash.sha256Hex (decimalAggregate Sum [ Decimal pastFloat; Decimal "0.5" ])
+      "decimalAggregate/mean-past-float", decimalAggregate Mean [ Decimal pastFloat; Decimal "0.5" ]
+      "decimalAggregate/sum-not-decimal", decimalAggregate Sum [ Decimal "1"; Decimal "1e3" ] ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

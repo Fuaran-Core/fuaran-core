@@ -13,7 +13,7 @@
       "reason": "seam-not-every-domain-has",
       "discharges": [],
       "cases": "200",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "none"
     },
     {

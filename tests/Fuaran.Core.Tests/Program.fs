@@ -25,9 +25,10 @@ let main argv =
     // third argument is the corpus manifest, read solely for the §11.0 host
     // roster once it carries one — until then the declared roster is used and the
     // report says so.
-    // Write every law set Core is the reference for — the transform-parity
-    // family's reference vectors and (Phase 235, moved from the UI tier) the
-    // capabilityLaws vectors:
+    // Write every law set Core is the reference for — (Phase 235, moved from
+    // the UI tier) the capabilityLaws vectors and (Phase 276) the exact
+    // decimal's documents; the transform-parity vectors left with the compute
+    // strand in Phase 258:
     //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws [<dir>]
     // With no argument (Phase 172) the target is THIS repository's committed
     // `conformance/` — the source of truth the default suite certifies against.

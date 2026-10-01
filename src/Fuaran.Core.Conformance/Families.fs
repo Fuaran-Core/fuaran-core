@@ -697,9 +697,11 @@ module Families =
               none
               (Some SeamNotEveryDomainHas)
               []
-              (Unconditional
-                  "each iteration aggregates Count and Sum over a drawn column and its present-only projection")
-              (NoRefusal, "an aggregate Error only fails the law, and the kit draws no type that can raise one")
+              // Phase 276 — the column TYPE is drawn (int, float or decimal), so a run can miss one, and
+              // the exact decimal `Sum` shares no fold with the other two: guarded per present cell type.
+              (Guarded [ "int cell"; "float cell"; "decimal cell" ])
+              (NoRefusal,
+               "an aggregate Error only fails the law, and no Count or Sum over the kit's drawn columns can raise one")
           // The kit draws its own sample here, and a fault-free draw satisfies the soundness law as
           // 0 = 0. The roll is stratified by iteration index, so three iterations reach both faults;
           // a shorter run can still miss them, which is why the class is not `Unconditional`.
@@ -708,7 +710,7 @@ module Families =
               none
               (Some SeamNotEveryDomainHas)
               []
-              (Guarded [ "null cell"; "out-of-range cell" ])
+              (Guarded [ "null cell"; "out-of-range cell"; "int cell"; "decimal cell" ])
               (Drawn,
                "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially")
           c

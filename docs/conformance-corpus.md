@@ -16,6 +16,7 @@ gate.
 ```
 conformance/
   laws/capability-laws.json    the capability-law vectors (`--emit-laws`, since Phase 235)
+  laws/decimal-laws.json       the exact decimal's documents (`--emit-laws`, since Phase 276)
   apply/skeleton-apply.json    the skeleton-op apply contract (`--emit-apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
   refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, column cells, the wire-profile grammar (`--emit-refusals`, since Phase 299; profiles since Phase 306)
@@ -25,12 +26,38 @@ conformance/
 ### Which law sets Core emits — all of them, and the UI tier emits none
 
 Core is the reference for every law family it ships, so it emits every law set a host certifies a
-reimplementation against. Since Phase 258 that is **one** family under `laws/`, written by the
-`--emit-laws` command from `tests/Fuaran.Core.Tests/LawVectorExport.fs`:
+reimplementation against. Since Phase 276 that is **two** families under `laws/`, both written by
+the `--emit-laws` command from `tests/Fuaran.Core.Tests/LawVectorExport.fs`:
 
 | Family | File | Shape |
 |---|---|---|
 | `capabilityLaws` | `laws/capability-laws.json` | a SELF-CONTAINED family — the `(input, expected verdict)` pairs the law draws from its seed |
+| `decimal` | `laws/decimal-laws.json` | AUTHORED documents — inputs chosen to reach every behaviour DECISIONS.md D72 pins, each answer computed by the kit; no seed |
+
+#### The `decimal` family: what a host must reproduce
+
+A host that mirrors the exact decimal (`ColumnType.DecimalType`, `Cell.Decimal`, `DecimalText`)
+certifies against `laws/decimal-laws.json`. Every vector carries `id`, `case`, `input` and
+`expected`; `expected.verdict` is `accept` or `reject`, and a `reject` names its class in
+`expected.error`. The refusals are vectors like any other: a host that accepts what the kit refuses
+disagrees with it. The seven cases:
+
+| `case` | Input | A host must answer |
+|---|---|---|
+| `canonical` | `text` | the canonical form (K3) — or `notDecimal` for any text outside `-?[0-9]+(\.[0-9]+)?` with ASCII digits (K4: a leading `+`, a bare point, an exponent, a separator, white space, a non-ASCII digit) |
+| `compare` | `a`, `b` | the numeric `order`, `-1` / `0` / `1`, including pairs one double cannot tell apart — or `notDecimal` |
+| `add` | `a`, `b` | the exact canonical `sum`: carries through the point, widening carries, narrowing borrows, cancellation to an unsigned `0`, mixed signs in both orders, scales and magnitudes past any host decimal |
+| `toFloat` | `text` | the nearest double in the canonical float layout — or `pastFloatRange` where the magnitude is past the float range, never an infinity (K7) |
+| `codecDecode` | `document` | the canonical re-encoding of a one-column decimal document — a decimal is a JSON string, an integer token is read exactly, and a fractional token or a whole token past 2^53 is refused (K5), with the codec's error class |
+| `codecEncode` | `cells` | the guarded encode's canonical bytes for column `c` of type `decimal` — or the refusal of a cell whose text is not canonical (`MalformedShape`) |
+| `aggregate` | `fn`, `cells` | the result cell's token (`m:` decimal, `i:` int, `f:` float): `sum` exact, `min` / `max` the winning cell as it stands, `mean` / `median` / `stddev` (population) at each value's nearest double, `countDistinct` over canonical values — or `AggregateOverflow` for a value past the float range, `CellOutsideType` for text that is not decimal |
+
+A `cells` entry is `{ "kind", "text" }` — `decimal` (the text as written, canonical or not), `int`,
+or `null` (no text) — rather than a `Cell.token`, because the token canonicalises and the encode's
+refusal of a non-canonical cell is one of the behaviours to reproduce. The file is stamped with
+`kitVersion` like `capability-laws.json` and re-stamped with it on a version move. The same inputs
+are rows of the cross-pipeline value table (`ParityVectors`, `decimal/`, `decimalCodec/`,
+`decimalAggregate/`), so the receiving gate's value leg compares them under Fable as well.
 
 **`transformLaws` (`laws/transform-laws.json`) was the second until Phase 258.** It is a PARITY
 family — the `Fuaran.Core.DataFrame` reference evaluator's ANSWERS over a declared sample — and it
@@ -61,7 +88,7 @@ any other difference is reported as a divergence.
 Every file is EMITTED, never hand-edited: each expectation is computed by calling the reference
 evaluator or `Ops.apply`, and the suite holds the committed bytes to a fresh render on every run.
 The corpus — <https://github.com/fuaran-ui/fuaran-ui-specification>, resolved on disk under the
-directory name `wire-format-fixtures` — carries the same three files at `laws/` and `apply/`, and
+directory name `wire-format-fixtures` — carries the same files at `laws/` and `apply/`, and
 those are **declared copies**: `copies.json` names each source, its copy's workspace path, the
 `fingerprint` equality it is held to, and the command that refreshes it. The hosts keep reading the
 corpus at the same paths with the same bytes; a copy is what they were always reading, and this

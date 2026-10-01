@@ -491,7 +491,8 @@ let private drawnRefusalSix: (string * string list) list =
     [ "Conformance.casLaws", [ "accepted"; "refused"; "race arm" ]
       "Conformance.idempotencyLaws", [ "accepted"; "refused" ]
       "Conformance.aiSurfaceLaws", [ "accepted"; "refused"; "allowed"; "parked"; "denied" ]
-      "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell" ]
+      // Phase 276 — and the column type of the ranged column, int or decimal.
+      "Conformance.columnarValidatorLaws", [ "null cell"; "out-of-range cell"; "int cell"; "decimal cell" ]
       "Conformance.diffContainedLaws", [ "accepted"; "refused" ] ]
 
 /// ... and each one's reference run as a function of the seed, at the size the census runs it:

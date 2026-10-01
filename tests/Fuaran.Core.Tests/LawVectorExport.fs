@@ -1,8 +1,9 @@
 namespace Fuaran.Core.Tests
 
 // ============================================================================
-//  The host-neutral export of the law vectors this repository owns: today the
-//  `capabilityLaws` vectors (`laws/capability-laws.json`, Phase 235).
+//  The host-neutral export of the law vectors this repository owns: the
+//  `capabilityLaws` vectors (`laws/capability-laws.json`, Phase 235) and the
+//  exact decimal's documents (`laws/decimal-laws.json`, Phase 276).
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
@@ -297,6 +298,293 @@ module LawVectorExport =
         let render () : string = renderAt (kitVersion ())
 
     // -----------------------------------------------------------------------
+    //  the decimal documents (Phase 276)
+    // -----------------------------------------------------------------------
+    //  The exact decimal (DECISIONS.md D72) is a wire commitment every host mirrors: the canonical
+    //  form, the order, the sum, the nearest float, the string on the wire and the refusal of a
+    //  fractional number token. A host certifies against these documents. They are AUTHORED inputs —
+    //  the decimal has no law family that draws them, so there is no seed — each covering a branch
+    //  D72 pins, and every `expected` is computed by CALLING the kit, never restated. The refusals
+    //  are vectors like any other: a host that accepts what this kit refuses disagrees with it.
+    //
+    //  A cell is written as `{ "kind", "text" }` rather than as its `Cell.token`, because the token
+    //  canonicalises, and the codec's refusal of a NON-canonical cell is one of the behaviours a host
+    //  must reproduce.
+
+    module Decimals =
+
+        let fileName = "decimal-laws.json"
+
+        let private jarr (items: string list) : string = "[" + String.concat ", " items + "]"
+
+        let private accept (members: (string * string) list) = ("verdict", jstr "accept") :: members
+
+        let private reject (error: string) =
+            [ "verdict", jstr "reject"; "error", jstr error ]
+
+        /// A cell as the documents write it.
+        let private cellJson (c: Cell) : string =
+            match c with
+            | Null -> jobj [ "kind", jstr "null" ]
+            | Int i -> jobj [ "kind", jstr "int"; "text", jstr (string i) ]
+            | Decimal s -> jobj [ "kind", jstr "decimal"; "text", jstr s ]
+            | other -> failwithf "the decimal documents write no %A cell" other
+
+        let private columnErrorClass (e: ColumnError) : string =
+            match e with
+            | NotJson _ -> "NotJson"
+            | MissingField _ -> "MissingField"
+            | MalformedShape _ -> "MalformedShape"
+            | UnknownType _ -> "UnknownType"
+            | TypeMismatch _ -> "TypeMismatch"
+            | LengthMismatch _ -> "LengthMismatch"
+            | NonFiniteFloat _ -> "NonFiniteFloat"
+            | Malformed _ -> "Malformed"
+            | RaggedColumns _ -> "RaggedColumns"
+
+        let private aggregateErrorClass (e: AggregateError) : string =
+            match e with
+            | IncompatibleAggType _ -> "IncompatibleAggType"
+            | AggregateOverflow _ -> "AggregateOverflow"
+            | CellOutsideType _ -> "CellOutsideType"
+
+        let aggFnTag (fn: AggFn) : string =
+            match fn with
+            | Sum -> "sum"
+            | Mean -> "mean"
+            | Min -> "min"
+            | Max -> "max"
+            | Count -> "count"
+            | Median -> "median"
+            | StdDev -> "stddev"
+            | First -> "first"
+            | Last -> "last"
+            | CountDistinct -> "countDistinct"
+
+        /// A one-column decimal document (column `c`) whose `values` array is `values`, raw JSON.
+        let document (values: string list) : string =
+            "{\"schema\":[{\"name\":\"c\",\"type\":\"decimal\"}],\"columns\":{\"c\":{\"values\":["
+            + String.concat "," values
+            + "],\"validity\":["
+            + (values |> List.map (fun _ -> "true") |> String.concat ",")
+            + "]}}}"
+
+        let source (cells: Cell list) : DataSource =
+            Embedded
+                { Schema = [ "c", DecimalType ]
+                  Columns = [ Column.create "c" DecimalType cells ] }
+
+        // ---- the authored inputs ----
+
+        /// `tryCanonical`: K4's refused forms and K3's normalisations.
+        let canonicalInputs: (string * string) list =
+            [ "refused-empty", ""
+              "refused-lone-minus", "-"
+              "refused-leading-plus", "+1"
+              "refused-double-minus", "--1"
+              "refused-bare-point-leading", ".5"
+              "refused-bare-point-trailing", "5."
+              "refused-minus-bare-point", "-.5"
+              "refused-two-points", "1.2.3"
+              "refused-exponent", "1e3"
+              "refused-exponent-upper", "1.5E-2"
+              "refused-separator-comma", "1,000"
+              "refused-separator-underscore", "1_000"
+              "refused-leading-space", " 1"
+              "refused-trailing-space", "1 "
+              "refused-hex", "0x10"
+              "refused-nan", "NaN"
+              "refused-arabic-indic-digit", "١"
+              "already-canonical", "12.5"
+              "zero", "0"
+              "leading-zeros", "007"
+              "trailing-zeros", "12.50"
+              "zero-fraction", "3.000"
+              "negative-zero", "-0"
+              "negative-zero-fraction", "-0.000"
+              "negative-both-sides", "-012.340"
+              "thirty-one-places", "0.0000000000000000000000000000001"
+              "forty-digits", "1234567890123456789012345678901234567890.50" ]
+
+        /// `compare`: sign, place, equal spellings, values one float cannot tell apart, refusals.
+        let compareInputs: (string * string * string) list =
+            [ "negative-below-positive", "-1", "1"
+              "signed-zeros-equal", "-0", "0.0"
+              "negatives-reversed", "-2", "-10"
+              "integer-width", "10", "9"
+              "fraction-place", "0.1", "0.09"
+              "negative-fraction-place", "-0.1", "-0.09"
+              "equal-spellings", "1.50", "001.5"
+              "one-float-tenth", "0.1", "0.1000000000000000055511151231257827"
+              "one-float-past-2-53", "9007199254740993", "9007199254740992"
+              "refused", "1e3", "1" ]
+
+        /// `add`: every carry, borrow and sign branch, and scales no host decimal holds.
+        let addInputs: (string * string * string) list =
+            [ "carry-through-point", "0.99", "0.01"
+              "widening-carry", "999", "1"
+              "narrowing-borrow", "1000", "-0.001"
+              "cancel-to-unsigned-zero", "1.5", "-1.50"
+              "mixed-negative-larger-first", "-5", "3"
+              "mixed-negative-larger-second", "3", "-5"
+              "mixed-positive-larger-first", "5", "-3"
+              "mixed-positive-larger-second", "-3", "5"
+              "both-negative", "-1.5", "-2.75"
+              "scale-past-host-decimal", "0.0000000000000000000000000000001", "1"
+              "magnitude-past-host-decimal", "99999999999999999999999999999999999999", "1"
+              "refused", "1", ".5" ]
+
+        /// `tryToFloat`: the one place the type rounds (K7), and where it refuses to.
+        let toFloatInputs: (string * string) list =
+            [ "tenth", "0.10"
+              "past-2-53", "9007199254740993"
+              "past-float-range", "1" + String.replicate 399 "0"
+              "refused", "1e3" ]
+
+        /// The codec's decode (K5): `values` arrays, raw JSON.
+        let decodeInputs: (string * string list) list =
+            [ "canonicalises", [ "\"012.50\""; "\"-0\""; "\"3.000\"" ]
+              "integer-token", [ "42"; "-7"; "0" ]
+              "integer-token-past-int32", [ "3000000000"; "-9007199254740992" ]
+              "whole-exponent-token", [ "3e9" ]
+              "refuses-fractional-token", [ "3.5" ]
+              "refuses-integer-token-past-2-53", [ "9007199254740994" ]
+              "refuses-whole-float-past-2-53", [ "1e300" ]
+              "refuses-exponent-text", [ "\"1e3\"" ]
+              "refuses-plus-text", [ "\"+1\"" ]
+              "refuses-bool", [ "true" ] ]
+
+        /// The codec's guarded encode: the canonical bytes, and the refusal of a non-canonical cell.
+        let encodeInputs: (string * Cell list) list =
+            [ "canonical", [ Decimal "12.5"; Null; Decimal "-0.001"; Int 7 ]
+              "refuses-non-canonical", [ Decimal "12.50" ] ]
+
+        /// `Column.aggregate` over a decimal column (K7).
+        let aggregateColumn: Cell list =
+            [ Decimal "0.1"
+              Decimal "0.2"
+              Null
+              Decimal "-0.3"
+              Decimal "1.50"
+              Decimal "1.5"
+              Int 2 ]
+
+        let aggregateInputs: (string * AggFn * Cell list) list =
+            [ "sum", Sum, aggregateColumn
+              "min", Min, aggregateColumn
+              "max", Max, aggregateColumn
+              "mean", Mean, aggregateColumn
+              "median", Median, aggregateColumn
+              "stddev", StdDev, aggregateColumn
+              "count-distinct", CountDistinct, aggregateColumn
+              "sum-tenths-exact", Sum, List.replicate 10 (Decimal "0.1")
+              "mean-past-float", Mean, [ Decimal("1" + String.replicate 399 "0"); Decimal "0.5" ]
+              "sum-not-decimal", Sum, [ Decimal "1"; Decimal "1e3" ] ]
+
+        // ---- the vectors, computed by calling the kit ----
+
+        let allVectors () : Vector list =
+            [ for name, text in canonicalInputs ->
+                  { Id = "canonical-" + name
+                    Case = "canonical"
+                    Input = [ "text", jstr text ]
+                    Expected =
+                      match DecimalText.tryCanonical text with
+                      | Some c -> accept [ "canonical", jstr c ]
+                      | None -> reject "notDecimal" }
+              for name, a, b in compareInputs ->
+                  { Id = "compare-" + name
+                    Case = "compare"
+                    Input = [ "a", jstr a; "b", jstr b ]
+                    Expected =
+                      match DecimalText.compare a b with
+                      | Some c -> accept [ "order", jint c ]
+                      | None -> reject "notDecimal" }
+              for name, a, b in addInputs ->
+                  { Id = "add-" + name
+                    Case = "add"
+                    Input = [ "a", jstr a; "b", jstr b ]
+                    Expected =
+                      match DecimalText.add a b with
+                      | Some s -> accept [ "sum", jstr s ]
+                      | None -> reject "notDecimal" }
+              for name, text in toFloatInputs ->
+                  { Id = "to-float-" + name
+                    Case = "toFloat"
+                    Input = [ "text", jstr text ]
+                    Expected =
+                      match DecimalText.tryToFloat text, DecimalText.tryCanonical text with
+                      | Some f, _ -> accept [ "float", jstr (Canon.canonicalFloat f) ]
+                      | None, Some _ -> reject "pastFloatRange"
+                      | None, None -> reject "notDecimal" }
+              for name, values in decodeInputs ->
+                  let doc = document values
+
+                  { Id = "decode-" + name
+                    Case = "codecDecode"
+                    Input = [ "document", jstr doc ]
+                    Expected =
+                      match ColumnCodec.decode doc with
+                      | Ok src -> accept [ "canonical", jstr (ColumnCodec.encode src) ]
+                      | Error e -> reject (columnErrorClass e) }
+              for name, cells in encodeInputs ->
+                  { Id = "encode-" + name
+                    Case = "codecEncode"
+                    Input = [ "cells", jarr (cells |> List.map cellJson) ]
+                    Expected =
+                      match ColumnCodec.tryEncode (source cells) with
+                      | Ok text -> accept [ "canonical", jstr text ]
+                      | Error e -> reject (columnErrorClass e) }
+              for name, fn, cells in aggregateInputs ->
+                  { Id = "aggregate-" + name
+                    Case = "aggregate"
+                    Input = [ "fn", jstr (aggFnTag fn); "cells", jarr (cells |> List.map cellJson) ]
+                    Expected =
+                      match Column.aggregate fn (Column.create "c" DecimalType cells) with
+                      | Ok cell -> accept [ "token", jstr (Cell.token cell) ]
+                      | Error e -> reject (aggregateErrorClass e) } ]
+
+        let private description =
+            "The exact decimal (D72): authored inputs over every behaviour a host mirrors, each `expected` computed "
+            + "by calling the pinned kit. No seed: nothing is drawn. Every vector expects `verdict` accept or reject; "
+            + "a reject names its class. `canonical` reads `text` (the grammar -?[0-9]+(\\.[0-9]+)? with ASCII digits "
+            + "only) and expects the canonical form: no leading zero, no trailing fraction zero, no point on a whole "
+            + "number, no sign on zero. `compare` expects the numeric `order` of `a` and `b` as -1, 0 or 1. `add` "
+            + "expects the exact canonical `sum`. `toFloat` expects the nearest double in the canonical float layout, "
+            + "and rejects a value past the float range rather than answering an infinity. `codecDecode` decodes a "
+            + "one-column decimal `document` and expects its canonical re-encoding; a decimal is a JSON string on "
+            + "the wire, an integer token is read exactly, and a fractional token or a whole token past 2^53 is "
+            + "refused. `codecEncode` builds column `c` of type decimal from `cells` ({kind, text}; a null cell has "
+            + "no text) and expects the guarded encode's canonical bytes, or the refusal of a cell whose text is not "
+            + "canonical. `aggregate` folds `fn` over the same column and expects the result cell's token (`m:` a "
+            + "decimal, `i:` an int, `f:` a float): Sum is exact, Min and Max return the winning cell as it stands, "
+            + "Mean, Median and StdDev (the population form) read each value at its nearest double, and a value past "
+            + "the float range is refused for them."
+
+        /// Rendered with an explicit `kitVersion`, as `Capabilities.renderAt` is.
+        let renderAt (stamp: string) : string =
+            let sb = StringBuilder()
+            let line (s: string) = sb.Append(s).Append('\n') |> ignore
+
+            line "{"
+            line ("  \"family\": " + jstr "decimal" + ",")
+            line ("  \"kitVersion\": " + jstr stamp + ",")
+            line ("  \"description\": " + jstr description + ",")
+            line "  \"vectors\": ["
+
+            let rendered = allVectors () |> List.map renderVector
+            let last = List.length rendered - 1
+
+            rendered
+            |> List.iteri (fun i v -> line ("    " + v + (if i = last then "" else ",")))
+
+            line "  ]"
+            line "}"
+            sb.ToString()
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
     //  writing
     // -----------------------------------------------------------------------
 
@@ -308,8 +596,12 @@ module LawVectorExport =
     /// Every law set this repository emits, as (path under `corpusDir`, rendered bytes) — the one
     /// list `write` walks, so a family added here cannot be rendered and then forgotten by the
     /// writer.
+    let decimalPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, Decimals.fileName)
+
     let emitted (corpusDir: string) : (string * string) list =
-        [ capabilityPath corpusDir, Capabilities.render () ]
+        [ capabilityPath corpusDir, Capabilities.render ()
+          decimalPath corpusDir, Decimals.render () ]
 
     /// Write the vectors with LF endings, whatever the host platform — the corpus is byte-compared
     /// by several hosts on three operating systems.

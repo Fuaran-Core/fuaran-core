@@ -766,7 +766,8 @@ let tests =
           testCase "aggregateNullSkipLaws certify Column.aggregate's null-skip semantics (Phase 36, split by 257)"
           <| fun _ ->
               let results = Conformance.aggregateNullSkipLaws 4242 200
-              Expect.equal (List.length results) 1 "the null-skip law reported"
+              // Phase 276 — the null-skip law, then the column-type guard.
+              Expect.equal (List.length results) 2 "the null-skip law and the column-type guard reported"
 
               for r in results do
                   Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
@@ -781,6 +782,34 @@ let tests =
                   (Column.aggregate Count col)
                   (Ok(Int 2))
                   "Count over [1; null; 2] counts the two present cells"
+
+              // ... and over a decimal column, a Null is not summed: the exact `Sum` skips it.
+              let dec = Column.create "d" DecimalType [ Decimal "0.1"; Null; Decimal "0.2" ]
+              Expect.equal (Column.aggregate Sum dec) (Ok(Decimal "0.3")) "Sum over [0.1; null; 0.2] is 0.3, exactly"
+
+          // Phase 276 — the column-type guard goes red on a run that never draws a decimal column. One
+          // iteration draws ONE column type, so it can never reach all three: the subject law holds
+          // and the guard alone is red, naming what it missed.
+          testCase "aggregateNullSkipLaws goes red, on its column-type guard alone, when a run draws no decimal column"
+          <| fun _ ->
+              let mutable decimalMissed = 0
+
+              for seed in 1..30 do
+                  let results = Conformance.aggregateNullSkipLaws seed 1
+                  let guard = List.last results
+
+                  Expect.isTrue (List.head results).Passed (sprintf "seed %d: the subject law holds" seed)
+                  Expect.isFalse guard.Passed (sprintf "seed %d: one iteration cannot reach three column types" seed)
+
+                  let cx = guard.Counterexample |> Option.defaultValue ""
+
+                  match cx.IndexOf "never reached" with
+                  | -1 -> failtestf "seed %d: the red guard names nothing it missed: %s" seed cx
+                  | at ->
+                      if (cx.Substring at).Contains "decimal cell" then
+                          decimalMissed <- decimalMissed + 1
+
+              Expect.isGreaterThan decimalMissed 0 "some single-iteration run missed the decimal column and said so"
 
           // Phase 60 — the attestation / replay-as-provenance laws.
           testCase

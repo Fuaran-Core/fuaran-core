@@ -1,7 +1,7 @@
 {
   "kind": "version",
   "producer": "fuaran-core",
-  "$note": "Phase 258 (DECISIONS.md D66): the transform-laws.json row left this file with the compute strand. It certified the Fuaran.Core.DataFrame reference evaluator, and the compute repository (https://github.com/Fuaran-Core/fuaran-core-compute) declares it as its own derived file from 0.33.0, stamped with that repository's version. The two rows here are this repository's.",
+  "$note": "Phase 258 (DECISIONS.md D66): the transform-laws.json row left this file with the compute strand. It certified the Fuaran.Core.DataFrame reference evaluator, and the compute repository (https://github.com/Fuaran-Core/fuaran-core-compute) declares it as its own derived file from 0.33.0, stamped with that repository's version. The rows here are this repository's (the third, laws/decimal-laws.json, since Phase 276).",
   "derives": [
     {
       "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws",
@@ -12,6 +12,11 @@
       "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-apply",
       "writes": "conformance/apply/skeleton-apply.json",
       "copiedTo": "Fuaran/Fuaran-UI/wire-format-fixtures:apply/skeleton-apply.json"
+    },
+    {
+      "emit": "dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws",
+      "writes": "conformance/laws/decimal-laws.json",
+      "copiedTo": "Fuaran/Fuaran-UI/wire-format-fixtures:laws/decimal-laws.json"
     }
   ]
 }
