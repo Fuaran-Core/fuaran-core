@@ -17,6 +17,15 @@ ctor Fuaran.Core.Validator+Summary..ctor(System.Int32, System.Int32, System.Int3
 field Fuaran.Core.Severity+Tags.Error : System.Int32 (literal)
 field Fuaran.Core.Severity+Tags.Info : System.Int32 (literal)
 field Fuaran.Core.Severity+Tags.Warning : System.Int32 (literal)
+field Fuaran.Core.Validator+ReferenceDefect`1+Tags.DanglingReference : System.Int32 (literal)
+field Fuaran.Core.Validator+ReferenceDefect`1+Tags.ForwardReference : System.Int32 (literal)
+field Fuaran.Core.Validator+ReferenceDefect`1+Tags.ReferenceCycle : System.Int32 (literal)
+field Fuaran.Core.Validator+ReferenceDefect`1+Tags.UnusedDeclaration : System.Int32 (literal)
+field Fuaran.Core.Validator.DanglingReferenceCode : System.String (literal)
+field Fuaran.Core.Validator.ForwardReferenceCode : System.String (literal)
+field Fuaran.Core.Validator.IllegalChildCode : System.String (literal)
+field Fuaran.Core.Validator.ReferenceCycleCode : System.String (literal)
+field Fuaran.Core.Validator.UnusedDeclarationCode : System.String (literal)
 method Fuaran.Core.ColumnValidator.inRange(System.String, System.Double, System.Double) : Fuaran.Core.ColumnRule
 method Fuaran.Core.ColumnValidator.notNull(System.String) : Fuaran.Core.ColumnRule
 method Fuaran.Core.ColumnValidator.ofType(System.String, Fuaran.Core.ColumnType) : Fuaran.Core.ColumnRule
@@ -26,9 +35,14 @@ method Fuaran.Core.ColumnValidator.unique(Microsoft.FSharp.Collections.FSharpLis
 method Fuaran.Core.ColumnValidator.validate(Fuaran.Core.ColumnValidator+Registry, Fuaran.Core.Table) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<System.String>>
 method Fuaran.Core.Validator.canonicalCodes`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : System.String
 method Fuaran.Core.Validator.citation`2(Fuaran.Core.Validator+Pack`2<!!0, !!1>, System.String) : System.String
+method Fuaran.Core.Validator.containment`2(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
 method Fuaran.Core.Validator.empty`2() : Fuaran.Core.Validator+Registry`2<!!0, !!1>
+method Fuaran.Core.Validator.forwardReferences`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Validator+ReferenceDefect`1<!!1>>
 method Fuaran.Core.Validator.hasErrors`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : System.Boolean
 method Fuaran.Core.Validator.perNode`2(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!1>>>>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
+method Fuaran.Core.Validator.referenceDefects`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Validator+ReferenceDefect`1<!!1>>
+method Fuaran.Core.Validator.referenceIntegrity`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
+method Fuaran.Core.Validator.referenceOrder`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
 method Fuaran.Core.Validator.register`2(Fuaran.Core.RuleFamily`2<!!0, !!1>, Fuaran.Core.Validator+Registry`2<!!0, !!1>) : Fuaran.Core.Validator+Registry`2<!!0, !!1>
 method Fuaran.Core.Validator.runAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.Validator+Registry`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!1>>
 method Fuaran.Core.Validator.runPack`2(Fuaran.Core.Validator+Pack`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Validator+PackFinding`1<!!1>>
@@ -69,8 +83,18 @@ type Fuaran.Core.Validator (module)
 type Fuaran.Core.Validator+PackCheck`2 (record)
 type Fuaran.Core.Validator+PackFinding`1 (record)
 type Fuaran.Core.Validator+Pack`2 (record)
+type Fuaran.Core.Validator+ReferenceDefect`1 (union)
+type Fuaran.Core.Validator+ReferenceDefect`1+DanglingReference (type)
+type Fuaran.Core.Validator+ReferenceDefect`1+ForwardReference (type)
+type Fuaran.Core.Validator+ReferenceDefect`1+ReferenceCycle (type)
+type Fuaran.Core.Validator+ReferenceDefect`1+Tags (type)
+type Fuaran.Core.Validator+ReferenceDefect`1+UnusedDeclaration (type)
 type Fuaran.Core.Validator+Registry`2 (record)
 type Fuaran.Core.Validator+Summary (record)
 union-case Fuaran.Core.Severity.Error #0()
 union-case Fuaran.Core.Severity.Info #2()
 union-case Fuaran.Core.Severity.Warning #1()
+union-case Fuaran.Core.Validator+ReferenceDefect`1.NewDanglingReference #0(from: !0, target: !0)
+union-case Fuaran.Core.Validator+ReferenceDefect`1.NewForwardReference #2(from: !0, target: !0, declarer: !0)
+union-case Fuaran.Core.Validator+ReferenceDefect`1.NewReferenceCycle #3(cycle: Microsoft.FSharp.Collections.FSharpList`1<!0>)
+union-case Fuaran.Core.Validator+ReferenceDefect`1.NewUnusedDeclaration #1(declarer: !0, declared: !0)

@@ -97,6 +97,28 @@ let private runs =
                200
                (Conformance.placementLaws nodew idw ConformanceTests.containedGen 312 200)
            run "Conformance.loweringLaws" 200 (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
+           // Phase 313 — the structural-integrity families at the reference grammar and the
+           // reference `RefWitness`, whose generators draw both sides of each refusal.
+           run
+               "Conformance.containmentLaws"
+               200
+               (Conformance.containmentLaws
+                   StructuralIntegrityTests.grammar
+                   nodew
+                   idw
+                   StructuralIntegrityTests.grammarGen
+                   313
+                   200)
+           run
+               "Conformance.referenceLaws"
+               200
+               (Conformance.referenceLaws
+                   StructuralIntegrityTests.refw
+                   nodew
+                   idw
+                   StructuralIntegrityTests.refGen
+                   313
+                   200)
            run
                "Conformance.freshIdLaws"
                200

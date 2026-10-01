@@ -1,5 +1,60 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D98: a containment grammar is data the domain declares, never a kind Core knows; references are a witness the engine reads and never rebuilds through
+
+**Recorded by Phase 313. `Fuaran.Core.Ops` (`Ops.applyGrammar` / `applyReferenced` and their dry
+runs and sequence forms, `Ops.isLegalChild`, `Ops.illegalChildren`, `Ops.footprintReferenced`,
+`Footprint.reading`, `RefWitness`, `Rejection.IllegalChild` / `StillReferenced`,
+`Diff.toOpsGrammar`, `Arbitration.arbitrateGrammar` / `arbitrateReferenced`), `Fuaran.Core.Validator`
+(`containment`, `referenceIntegrity`, `referenceOrder`), `Fuaran.Core.Propagation` (`Graph`); rides the
+`0.34.0` draft (STABILITY.md, "A structural-integrity strand").**
+
+*Decided: the grammar is a function from a parent's kind tag to the kind tags it may hold, `None`
+meaning any, handed to each call beside `canHold`.* Every domain with a grammar kept the same table
+and its own refusal, and a domain whose view dropped illegal children silently had nothing to refuse
+with. Core still knows no kind: the grammar is a value, read through ONE predicate
+(`Ops.isLegalChild`), so the engine, the diff, arbitration, the validator family and the kit agree
+about what a legal child is without any of them naming one. It is an argument, not a witness field,
+for the reason `canHold` is (Phase 251): a frozen witness does not grow, and a domain without a grammar
+pays nothing.
+
+*Decided: the grammar and reference forms WRAP the container-aware engine rather than widening it.*
+A step is first decided exactly as `applyContained` decides it; the new clauses run only on a step it
+accepted, against the trees before and after it. So no operation the engine refuses changes class —
+D38's ordering, at the level of a whole engine — and the existing engine, its proofs and its oracle
+are untouched. The grammar clause reads only the pairs the step creates (from a grammatical tree, the
+only ones that can be illegal afterwards); the model in `proofs/Preservation.fst` section 13 checks
+the whole result and proves preservation, refinement and the no-grammar identity, and the equivalence
+of the two readings is `Conformance.containmentLaws`' agreement law at a domain's own grammar.
+
+*Decided: references are a witness of their own, `RefWitness {RefsOf; DeclsOf}`, frozen at birth.* A
+reference resolves when some node declares its id. The engine READS it — `StillReferenced` refuses a
+remove, or a rewrite that declares less, that would leave a resolved reference dangling, and the footprint reads every id a script writes
+a reference to — and never rebuilds through it. An insert or rewrite that brings in an unresolved
+reference is NOT refused: a document under construction refers ahead of what it declares, so whether
+it resolves is the validator family's report, not the engine's verdict.
+
+*Found, and recorded rather than re-filed: among the skeleton ops the remove-versus-reference race was
+already serialised.* A `RemoveNode` writes an unknown parent, so it collides with every structural
+write and every in-place rewrite; the race is live for a DOMAIN op footprinted with
+`Footprint.contentEdit`, which carries no unknown-parent write. `Footprint.reading` closes it there, and
+`Ops.footprintReferenced` names the collision for the skeleton ops instead of leaving it to the
+over-approximation. The read meets a removal's content-write when the declared id is the declaring
+node's id; a domain declaring names that are not node ids folds the destroyed names into its own
+removal footprint.
+
+*Decided: the four reference defects are a typed list first and a rule family second.*
+`Validator.referenceDefects` and `forwardReferences` answer `ReferenceDefect` values a caller can act
+on; `referenceIntegrity` and the opt-in `referenceOrder` render them as coded defects. Cycles are
+`Propagation.sort`'s strongly-connected groups — one linear Tarjan pass, cycles as data — and the graph
+functions are re-exported as `Graph` so a consumer with no evaluator finds them. A forward reference is
+one whose declarer is a LATER BRANCH below the two nodes' lowest common ancestor; an ancestor's or a
+descendant's declaration is never forward.
+
+*Not done here:* a keyed grammar form (the grammar reads `Children`, the surface the engine edits); a
+refusal of dangling references on insert (above); and moving any domain onto the forms, which is each
+consumer's own change.
+
 ## 2026-10-01 — D97: a compacted stream is a VALUE that reads its boundary, the writers refuse what the reader cannot read back, and strict replay never answers live
 
 **Recorded by Phase 301. `Fuaran.Core.OpStream` (`Compacted`, `OpStream.Compacted`, the `try…`
@@ -57,6 +112,7 @@ That is a run that can turn red without a line of the domain changing — named 
 the one adoption cost — and it is taken deliberately: a stream the domain cannot write and read back
 is a stream it cannot keep, and a base certification that is silent about it is the gap Phase 301
 was filed for.
+
 ## 2026-10-01 — D96: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table; `Codegen.fs` splits behind a facade or not at all
 
 **Recorded by Phase 293. `Fuaran.Core.Idl.Codegen` (`FStarTarget`, `Diff`, `Gen`); rides the `0.34.0`

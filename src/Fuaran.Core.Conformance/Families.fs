@@ -643,6 +643,25 @@ module Families =
               (Guarded [ "placement arm (place / move across parents / move within a parent / non-final position)" ])
               (Built,
                "the unknown anchor, the out-of-range index and the three engine refusals (absent parent, duplicate id, move of the root) are built every iteration a holder is drawn")
+          // Phase 313 — the structural-integrity strand. The grammar family takes the base witness
+          // and the domain's grammar (a function, not a witness record); the reference family needs
+          // the `RefWitness` only a domain with cross-node references declares.
+          c
+              "containmentLaws"
+              treeWitness
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "grammar refusal" ])
+              (Drawn,
+               "IllegalChild is reached by drawn ops and by a graft built from the drawn tree's first illegal pair; a grammar the generator never violates reaches neither, which the grammar-refusal guard reports")
+          c
+              "referenceLaws"
+              [ "RefWitness"; "NodeWitness"; "IdWitness"; "OpGen" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "reference arm" ])
+              (Drawn,
+               "StillReferenced is reached only when a drawn remove destroys a declaration a survivor references, and the race only when the tree holds a resolved reference; the reference-arm guard counts both")
           c
               "loweringLaws"
               treeWitness

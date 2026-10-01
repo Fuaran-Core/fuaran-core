@@ -1584,6 +1584,9 @@ let private prodRejClass (r: Rejection<string>) =
     // Phase 286: raised only by the keyed engine, which the oracle does not run — so the class
     // never reaches a comparison, and it has no model counterpart to meet there.
     | KeyedPosition _ -> "KeyedPosition"
+    // Phase 313: raised only by the grammar and reference engines, which the oracle does not run.
+    | IllegalChild _ -> "IllegalChild"
+    | StillReferenced _ -> "StillReferenced"
 
 let private modelRejClass (r: TreeOps.rejection) =
     match r with
@@ -5225,6 +5228,8 @@ let private prodDiffRender (r: Result<SkeletonOp<RNode, string> list, Diff.DiffE
     | Error(Diff.RootIdMismatch(b, a)) -> sprintf "err:RootIdMismatch(%s,%s)" b a
     | Error(Diff.DuplicateIdInTree d) -> sprintf "err:DuplicateIdInTree(%s)" d
     | Error(Diff.TargetNotAContainer(p, k)) -> sprintf "err:TargetNotAContainer(%s,%s)" p k
+    // Phase 313: raised only by `Diff.toOpsGrammar`, which the oracle does not run.
+    | Error(Diff.IllegalChildInTree(c, _, p, _, _)) -> sprintf "err:IllegalChildInTree(%s,%s)" c p
 
 let private modelDiffRender (r: DagFold.outcome<TreeOps.op list, TreeDiff.diff_error>) =
     match r with
