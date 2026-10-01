@@ -1209,6 +1209,17 @@ module Artifact =
     /// one that will not load at all.
     let ofJsonDetailed (root: JVal) : Result<Idl, DecodeError> =
         match Decoder.tryMember "version" root with
+        // A root that is not an object has no `version` either, and is told so in the same
+        // sentence; its refusal is the root's kind, at the root, where the path resolves.
+        | None when
+            (match root with
+             | JObj _ -> false
+             | _ -> true)
+            ->
+            Error(
+                { Decoder.wrongKind "object" root with
+                    Message = "idl.json has no 'version'" }
+            )
         | None ->
             Error(
                 { Decoder.missing "version" with

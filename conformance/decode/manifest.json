@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "description": "Decode reject corpus (Phase 310). SELF-ENUMERATED, as the refusals/ and apply/ families are: not indexed by the corpus root manifest.json. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. This manifest is authoritative for the vector count.",
+  "families": [
+    { "id": "decodeRejects", "kind": "decode-rejects", "file": "decode-rejects.json", "vectors": 24, "adoption": {"fuaran":"proposed","fuaran-go":"proposed","fuaran-py":"proposed","fuaran-rs":"proposed","fuaran-ts":"proposed"}, "description": "The wire-level decode error contract: every decode code, at the path it names, over a shape grammar each host reads with its own combinators." }
+  ]
+}

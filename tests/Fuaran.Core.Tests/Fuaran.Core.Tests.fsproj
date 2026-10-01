@@ -326,6 +326,11 @@
          Reads OwnedConformance.fs for the committed root; appended (append-only). -->
     <Compile Include="RefusalVectorTests.fs" />
     <Compile Include="TotalityTests.fs" />
+
+    <!-- Phase 310 — the typed decode layer: the combinators, the forwards, the codecs' typed refusals and
+         the refusal law, and the decode reject family (`conformance/decode/`) with its emit-decode
+         renderer. Reads RefusalVectorTests.fs for the host roster; appended (append-only). -->
+    <Compile Include="DecodeLayerTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

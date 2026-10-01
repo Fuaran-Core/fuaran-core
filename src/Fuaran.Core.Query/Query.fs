@@ -784,8 +784,8 @@ module QueryCodec =
         fun el ->
             Decoder.tagDispatch "$type" cases el
             |> Result.mapError (fun e ->
-                match e.Code, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, Some(JStr other) ->
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
                     { e with
                         Message = "unknown query error: " + other }
                 | _ -> e)

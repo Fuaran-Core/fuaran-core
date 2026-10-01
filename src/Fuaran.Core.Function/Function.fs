@@ -1465,8 +1465,9 @@ module CapabilityCodec =
         fun el ->
             Decoder.tagDispatch "$type" cases el
             |> Result.mapError (fun e ->
-                match e.Code, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, Some(JStr other) -> { e with Message = what + other }
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with Message = what + other }
                 | _ -> e)
 
     /// A string from a closed set; a miss is `UnknownTag`, in this codec's sentence `<what><value>`.
@@ -2494,8 +2495,9 @@ module CapabilityPipeline =
         fun el ->
             Decoder.tagDispatch "$type" cases el
             |> Result.mapError (fun e ->
-                match e.Code, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, Some(JStr other) -> { e with Message = what + other }
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with Message = what + other }
                 | _ -> e)
 
     let private argSrcToJ (s: ArgSource) : JVal =
