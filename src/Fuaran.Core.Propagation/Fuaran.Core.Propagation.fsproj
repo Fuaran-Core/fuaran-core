@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Propagation</PackageId>
-    <Description>Fuaran.Core.Propagation — change propagation over a reference DAG + tree-level dirty recomputation for a domain tree whose cross-node references are declared bindings on permanent ids. Derives the dependency map from a per-call readsOf function (no witness field), the dependency order + reference-cycle enumeration (Tarjan SCC, cycles as data), and the minimal dirty set from a value change or a structural SkeletonOp (reverse-reachability closure). Owns no evaluator (recompute stays domain-side); staleness is a returned Set. The third incremental-recomputation surface after DataFrame.evalFrom (columnar) and CapabilityPipeline.evalFrom (capability-DAG). FSharp.Core only, Fable-clean.</Description>
+    <Description>Fuaran.Core.Propagation — change propagation over a reference DAG + tree-level dirty recomputation for a domain tree whose cross-node references are declared bindings on permanent ids. Derives the dependency map from a per-call readsOf function (no witness field), the dependency order + reference-cycle enumeration (Tarjan SCC, cycles as data), and the minimal dirty set from a value change or a structural SkeletonOp (reverse-reachability closure). Owns no evaluator (recompute stays domain-side); staleness is a returned Set. An iterative Tarjan (no stack depth limit on a dependency chain) and a prepared Plan reused across incremental ticks. FSharp.Core only, Fable-clean.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Propagation.fs" />

@@ -304,17 +304,18 @@ let conformanceFacadeTests =
 /// `Severity.Error` defect. The "rule" a correct-by-construction function must respect for every
 /// binding — registered into a real `Validator.Registry` so `verifyFunction` drives the framework.
 let countReg: Validator.Registry<RNode, string> =
-    Validator.empty
-    |> Validator.register (
-        Validator.perNode "count≤5" (fun _ n ->
-            match System.Int32.TryParse n.Value with
-            | true, v when v > 5 ->
-                [ { Code = "CNT001"
-                    Severity = Severity.Error
-                    Message = sprintf "count %d exceeds 5" v
-                    Node = Some n.Id } ]
-            | _ -> [])
-    )
+    Validator.ofFamilies
+        [ Validator.perNode "count≤5" (fun _ n ->
+              match System.Int32.TryParse n.Value with
+              | true, v when v > 5 ->
+                  [ { Code = "CNT001"
+                      Severity = Severity.Error
+                      Message = sprintf "count %d exceeds 5" v
+                      Node = Some n.Id
+                      Family = ""
+                      Related = [] } ]
+              | _ -> []) ]
+    |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
 
 /// A full template whose `count` hole ranges over [lo, hi]; title + body are fixed-shape holes.
 let tplCount (lo, hi) =

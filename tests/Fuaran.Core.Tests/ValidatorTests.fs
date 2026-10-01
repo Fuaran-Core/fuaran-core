@@ -11,7 +11,9 @@ let private noEmptyPara =
             [ { Code = "REF001"
                 Severity = Severity.Warning
                 Message = "empty paragraph"
-                Node = Some n.Id } ]
+                Node = Some n.Id
+                Family = ""
+                Related = [] } ]
         else
             [])
 
@@ -21,14 +23,16 @@ let private sectionsNonEmpty =
             [ { Code = "REF002"
                 Severity = Severity.Error
                 Message = "empty section"
-                Node = Some n.Id } ]
+                Node = Some n.Id
+                Family = ""
+                Related = [] } ]
         else
             [])
 
 let private registry =
-    Validator.empty
-    |> Validator.register noEmptyPara
-    |> Validator.register sectionsNonEmpty
+    Validator.ofFamilies [ noEmptyPara; sectionsNonEmpty ]
+    |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
+
 
 [<Tests>]
 let tests =
@@ -59,21 +63,29 @@ let tests =
                   [ { Code = "B"
                       Severity = Severity.Info
                       Message = ""
-                      Node = None }
+                      Node = None
+                      Family = ""
+                      Related = [] }
                     { Code = "A"
                       Severity = Severity.Info
                       Message = ""
-                      Node = None } ]
+                      Node = None
+                      Family = ""
+                      Related = [] } ]
 
               let b: Defect<string> list =
                   [ { Code = "A"
                       Severity = Severity.Info
                       Message = ""
-                      Node = None }
+                      Node = None
+                      Family = ""
+                      Related = [] }
                     { Code = "B"
                       Severity = Severity.Info
                       Message = ""
-                      Node = None } ]
+                      Node = None
+                      Family = ""
+                      Related = [] } ]
 
               Expect.equal
                   (Validator.canonicalCodes a)
@@ -89,7 +101,9 @@ let tests =
                   { Code = code
                     Severity = Severity.Info
                     Message = ""
-                    Node = None }
+                    Node = None
+                    Family = ""
+                    Related = [] }
 
               let aliasing = [ mk "A,B" ]
               let split = [ mk "A"; mk "B" ]
@@ -107,7 +121,9 @@ let tests =
                   { Code = code
                     Severity = Severity.Info
                     Message = ""
-                    Node = None }
+                    Node = None
+                    Family = ""
+                    Related = [] }
 
               Expect.notEqual
                   (Validator.canonicalCodes [ mk ("A" + Hash.foldSep + "B") ])
@@ -126,7 +142,9 @@ let tests =
                   { Code = "X"
                     Severity = sev
                     Message = ""
-                    Node = None }
+                    Node = None
+                    Family = ""
+                    Related = [] }
 
               let defects =
                   [ mk Severity.Error; mk Severity.Error; mk Severity.Warning; mk Severity.Info ]
@@ -148,11 +166,12 @@ let tests =
                         Column.create "name" StringType [ Str "a"; Str "b"; Str "c" ] ] }
 
               let reg =
-                  ColumnValidator.empty
-                  |> ColumnValidator.register (ColumnValidator.notNull "score")
-                  |> ColumnValidator.register (ColumnValidator.inRange "score" 0.0 100.0)
-                  |> ColumnValidator.register (ColumnValidator.ofType "name" StringType)
-                  |> ColumnValidator.register (ColumnValidator.unique [ "id" ])
+                  ColumnValidator.ofRules
+                      [ ColumnValidator.notNull "score"
+                        ColumnValidator.inRange "score" 0.0 100.0
+                        ColumnValidator.ofType "name" StringType
+                        ColumnValidator.unique [ "id" ] ]
+                  |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
 
               let defects = ColumnValidator.validate reg t
               let codes = defects |> List.map (fun d -> d.Code)
@@ -172,7 +191,8 @@ let tests =
                     Columns = [ Column.create "a" IntType [ Null; Int 5 ] ] }
 
               let reg =
-                  ColumnValidator.empty |> ColumnValidator.register (ColumnValidator.notNull "a")
+                  ColumnValidator.ofRules [ ColumnValidator.notNull "a" ]
+                  |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
 
               let defects = ColumnValidator.validate reg t
               Expect.equal (Validator.summary defects).Errors 1 "one error via the shared summary"

@@ -239,7 +239,7 @@ let private changedForOpTests =
               let whole = Propagation.dirtyFromOp nodew idw pre formulaReads op
 
               match Propagation.evalFrom ev prior whole deps with
-              | Error(Propagation.EvalUnknownChange [ "y" ]) -> ()
+              | Error(Propagation.PropagationError.EvalUnknownChange [ "y" ]) -> ()
               | other -> failtestf "expected EvalUnknownChange [y], got %A" other
 
               // (b) touchedBy narrowed to the survivors is accepted and leaves z stale.

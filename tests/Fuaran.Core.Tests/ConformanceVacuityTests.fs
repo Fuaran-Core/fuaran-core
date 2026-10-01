@@ -388,6 +388,19 @@ let private runs =
                    ProjectionTests.wireEncode
                    ProjectionTests.genTree
                    42
+                   200) // Phase 298 — the observer family at a reference witness: an int metric, two flags.
+           run
+               "Conformance.observerLaws"
+               200
+               (Conformance.observerLaws
+                   (ObserverWitness.create (fun (x: int) ->
+                       [ if x > 5 then
+                             "big"
+
+                             if x % 2 = 0 then
+                                 "even" ]))
+                   (ConfRng.intBelow 10)
+                   42
                    200)
            run
                "Conformance.aiSurfaceLawsAt"

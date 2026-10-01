@@ -491,18 +491,17 @@ module Ops =
         match firstDuplicateId t idw node root with
         | Some d -> Error(DuplicateId d)
         | None ->
-            if not (Tree.exists t idw parent root) then
-                Error(UnknownNode(parent, Tree.ids t root))
-            else
-                match Tree.tryFind t idw parent root with
-                | None -> Error(UnknownNode(parent, Tree.ids t root))
-                | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
-                // Phase 161 — the graft's own interior, checked LAST. The ordering is D38's: no
-                // operation that was REFUSED before this phase changes its class, because every
-                // earlier clause still fires first. Only operations that were ACCEPTED can now be
-                // refused, which is what makes this a widening rather than a re-shuffling — and it
-                // is what keeps Phase 137's built-collision conformance arm reaching `DuplicateId`.
-                | Some _ -> validateGraftContainment canHold w t node
+            // one walk locates the parent (Phase 298; an `exists` walk then a `tryFind` walk, with
+            // a `None` arm after the existence check that could not be reached, before)
+            match Tree.tryFind t idw parent root with
+            | None -> Error(UnknownNode(parent, Tree.ids t root))
+            | Some p when not (canHold p) -> Error(NotAContainer(parent, w.KindTag p))
+            // Phase 161 — the graft's own interior, checked LAST. The ordering is D38's: no
+            // operation that was REFUSED before this phase changes its class, because every
+            // earlier clause still fires first. Only operations that were ACCEPTED can now be
+            // refused, which is what makes this a widening rather than a re-shuffling — and it
+            // is what keeps Phase 137's built-collision conformance arm reaching `DuplicateId`.
+            | Some _ -> validateGraftContainment canHold w t node
 
     /// The node whose STRUCTURAL child list holds `target`, searched over every node `t` reaches.
     /// With `t = w` this is `Tree.parentOf w`, word for word; over the keyed walk it also finds a
@@ -574,6 +573,50 @@ module Ops =
                 Error(ReorderMismatch(parent, current, order))
             else
                 Ok()
+
+    /// `MoveNode`'s checks, without building a tree (Phase 298) — what `canApply (MoveNode _)` now
+    /// asks instead of simulating the move through `apply`. In the order the apply path has always
+    /// refused in: moving the root (`CannotRemoveRoot`); an absent target, then an absent new
+    /// parent (`UnknownNode`, enumerating the ids the walk reaches); a new parent that cannot hold
+    /// children (`NotAContainer`); a new parent that is the target or below it
+    /// (`WouldNestUnderSelf`); and a target held directly in a keyed position (`KeyedPosition`, the
+    /// remove half's refusal). On success it hands back the subtree being moved, which the apply
+    /// arm grafts.
+    let private validateMove
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (t: NodeWitness<'Node, 'Id>)
+        (keyed: ('Node -> 'Node list) option)
+        (idw: IdWitness<'Id>)
+        (target: 'Id)
+        (newParent: 'Id)
+        (root: 'Node)
+        : Result<'Node, Rejection<'Id>> =
+        if idw.Equals (w.Id root) target then
+            Error CannotRemoveRoot
+        else
+            match Tree.tryFind t idw target root with
+            | None -> Error(UnknownNode(target, Tree.ids t root))
+            | Some sub ->
+                match Tree.tryFind t idw newParent root with
+                | None -> Error(UnknownNode(newParent, Tree.ids t root))
+                | Some np when not (canHold np) -> Error(NotAContainer(newParent, w.KindTag np))
+                | Some _ ->
+                    // newParent must not be the target itself nor any of its descendants.
+                    let below = Tree.ids t sub |> List.map idw.ToString |> Set.ofList
+
+                    if below.Contains(idw.ToString newParent) then
+                        let relation =
+                            if idw.ToString newParent = idw.ToString target then
+                                NestRelation.Self
+                            else
+                                NestRelation.Descendant
+
+                        Error(WouldNestUnderSelf(target, relation))
+                    else
+                        match keyedHolderOf w t keyed idw target root with
+                        | Some holder -> Error(KeyedPosition(target, w.Id holder))
+                        | None -> Ok sub
 
     /// The node an `UpdateNode` leaves behind (Phase 250): the payload's own content over the
     /// children `existing` already holds. The payload's children are never read. Its keyed
@@ -686,59 +729,27 @@ module Ops =
         | ReorderChildren(parent, order) ->
             validateReorder w t idw parent order root
             |> Result.bind (fun () ->
-                match Tree.tryFind t idw parent root with
-                | None -> Error(UnknownNode(parent, allIds ()))
-                | Some p ->
+                // the permutation is computed from the parent `updateNode` hands over, so the parent
+                // is located once (Phase 298; a second `tryFind` walk with an unreachable `None` arm,
+                // before)
+                let permute (p: 'Node) =
                     let byId = w.Children p |> List.map (fun c -> idw.ToString(w.Id c), c) |> Map.ofList
-                    let reordered = order |> List.map (fun i -> byId.[idw.ToString i])
+                    w.ReplaceChildren p (order |> List.map (fun i -> byId.[idw.ToString i]))
 
-                    Tree.updateNode t idw parent (fun p -> w.ReplaceChildren p reordered) root
-                    |> Option.map Ok
-                    |> Option.defaultValue (Error(UnknownNode(parent, allIds ()))))
+                Tree.updateNode t idw parent permute root
+                |> Option.map Ok
+                |> Option.defaultValue (Error(UnknownNode(parent, allIds ()))))
 
         | MoveNode(target, newParent) ->
-            if eq (w.Id root) target then
-                Error CannotRemoveRoot
-            elif not (Tree.exists t idw target root) then
-                Error(UnknownNode(target, allIds ()))
-            elif not (Tree.exists t idw newParent root) then
-                Error(UnknownNode(newParent, allIds ()))
-            else
-                match Tree.tryFind t idw newParent root with
-                | Some np0 when not (canHold np0) -> Error(NotAContainer(newParent, w.KindTag np0))
-                | _ ->
-
-                    match Tree.tryFind t idw target root with
-                    | None -> Error(UnknownNode(target, allIds ()))
-                    | Some sub ->
-                        // newParent must not be the target itself nor any of its descendants.
-                        let descendantIds = Tree.ids t sub |> Set.ofList |> Set.map idw.ToString
-
-                        if descendantIds.Contains(idw.ToString newParent) then
-                            let relation =
-                                if idw.ToString newParent = idw.ToString target then
-                                    NestRelation.Self
-                                else
-                                    NestRelation.Descendant
-
-                            Error(WouldNestUnderSelf(target, relation))
-                        else
-                            // remove then insert: both halves already validated above.
-                            match applyWith canHold w t keyed idw (RemoveNode target) root with
-                            | Error e -> Error e
-                            | Ok removed ->
-                                // re-target into the removed tree (newParent still present there).
-                                match Tree.tryFind t idw newParent removed with
-                                | None -> Error(UnknownNode(newParent, Tree.ids t removed))
-                                | Some _ ->
-                                    Tree.updateNode
-                                        t
-                                        idw
-                                        newParent
-                                        (fun np -> w.ReplaceChildren np (w.Children np @ [ sub ]))
-                                        removed
-                                    |> Option.map Ok
-                                    |> Option.defaultValue (Error(UnknownNode(newParent, Tree.ids t removed)))
+            // every refusal is `validateMove`'s (Phase 298); after it, remove then graft. newParent
+            // is not below the target, so the removal leaves it in the tree for the graft.
+            validateMove canHold w t keyed idw target newParent root
+            |> Result.bind (fun sub ->
+                applyWith canHold w t keyed idw (RemoveNode target) root
+                |> Result.bind (fun removed ->
+                    Tree.updateNode t idw newParent (fun np -> w.ReplaceChildren np (w.Children np @ [ sub ])) removed
+                    |> Option.map Ok
+                    |> Option.defaultValue (Error(UnknownNode(newParent, Tree.ids t removed)))))
 
         | Batch ops ->
             // all-or-nothing: thread the tree; abort (leaving the original) on first failure.
@@ -842,13 +853,15 @@ module Ops =
         | RemoveNode target -> validateRemove w t keyed idw target root
         | ReorderChildren(parent, order) -> validateReorder w t idw parent order root
         | UpdateNode node -> validateUpdate canHold w t keyed idw node root
-        | MoveNode _
+        // Phase 298 — the move's own checks, no tree built (it simulated through `apply` before)
+        | MoveNode(target, newParent) -> validateMove canHold w t keyed idw target newParent root |> Result.map ignore
         | Batch _ -> applyWith canHold w t keyed idw op root |> Result.map ignore
 
     /// Dry-run validation (Phase 246): would `op` be accepted against `root`? Returns the
     /// exact `Rejection` `apply` would, but builds **no** new tree for the index/structure
-    /// ops. `MoveNode` / `Batch` are order-dependent, so their check simulates through
-    /// `apply` (and discards the result). The AI pre-flight surface — "is this op legal?"
+    /// ops — `MoveNode` included since Phase 298 (`validateMove`). Only `Batch` is
+    /// order-dependent, so its check simulates through `apply` (and discards the result). The
+    /// AI pre-flight surface — "is this op legal?"
     /// — without committing the (potentially large) rebuild.
     let canApply
         (w: NodeWitness<'Node, 'Id>)

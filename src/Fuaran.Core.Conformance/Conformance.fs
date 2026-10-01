@@ -726,6 +726,17 @@ module Conformance =
         : LawResult list =
         SurfaceLaws.projectionLaws pw applyOps wireEncode gen seed iterations
 
+    /// Forward — see `ObserverLaws.observerLaws` (Phase 298): in-memory equals live, a cyclic parent
+    /// declaration terminates, and re-entrant subscribers are isolated, over a domain's
+    /// `ObserverWitness` and input generator.
+    let observerLaws<'Input, 'Flag when 'Input: equality and 'Flag: equality>
+        (w: ObserverWitness<'Input, 'Flag>)
+        (genInput: ConfRng.T -> 'Input * ConfRng.T)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ObserverLaws.observerLaws w genInput seed iterations
+
     /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
     /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.
     let aiSurfaceLawsAt

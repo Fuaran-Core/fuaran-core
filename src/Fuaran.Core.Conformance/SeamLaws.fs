@@ -1189,11 +1189,16 @@ module internal SeamLaws =
         let mutable decimalCells = 0
 
         let reg =
-            ColumnValidator.empty
-            |> ColumnValidator.register (ColumnValidator.notNull "a")
-            |> ColumnValidator.register (ColumnValidator.inRange "a" 0.0 100.0)
-            |> ColumnValidator.register (ColumnValidator.ofType "s" StringType)
-            |> ColumnValidator.register (ColumnValidator.unique [ "a" ])
+            // four distinct rules: `ofRules` refuses only a repeated id (Phase 298), so this is `Ok`
+            match
+                ColumnValidator.ofRules
+                    [ ColumnValidator.notNull "a"
+                      ColumnValidator.inRange "a" 0.0 100.0
+                      ColumnValidator.ofType "s" StringType
+                      ColumnValidator.unique [ "a" ] ]
+            with
+            | Ok r -> r
+            | Error e -> invalidOp (sprintf "the kit's column registry repeats a rule id: %A" e)
 
         LawKit.run iterations seed (fun rng i at ->
             let nRows = rng.IntBelow 6

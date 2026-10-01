@@ -11,11 +11,45 @@ type Severity =
 
 /// A single validation finding. `Code` is the domain's stable defect code (e.g.
 /// FUARAN058, the Calc six, a Doc house-style pack rule). `Node` locates it.
+///
+/// **`Family` and `Related` (Phase 298).** `Family` is the id of the rule family (or column rule,
+/// or `pack/rule`) that produced the finding — the provenance the `PackRule` convention below
+/// promised and the record could not carry. A rule body writes `""` (or builds through
+/// `Defect.create`); the walkers that run it (`Validator.runAll`, `ColumnValidator.validate`,
+/// `Validator.runPack`) STAMP it, so a rule cannot mis-cite itself. `Related` is the supporting
+/// enumeration — the other nodes a finding is about (the members of a cycle, the declaration a
+/// reference resolves to, the legal alternatives) — so the envelope agrees with
+/// `Rejection.UnknownNode(target, addressable)` and `RejectionGuidance.Alternatives` instead of each
+/// domain adding the field to its own copy of this record. `[]` when there is nothing to enumerate.
 type Defect<'Id> =
     { Code: string
       Severity: Severity
       Message: string
-      Node: 'Id option }
+      Node: 'Id option
+      Family: string
+      Related: 'Id list }
+
+/// Constructors for `Defect` (Phase 298): the two provenance fields defaulted, for a rule body
+/// whose walker stamps them.
+module Defect =
+
+    /// A finding with no family yet (`""`, stamped by the walker) and no related nodes.
+    let create (code: string) (severity: Severity) (message: string) (node: 'Id option) : Defect<'Id> =
+        { Code = code
+          Severity = severity
+          Message = message
+          Node = node
+          Family = ""
+          Related = [] }
+
+    /// `d` attributed to `family` — what every walker does to a rule's output.
+    let inFamily (family: string) (d: Defect<'Id>) : Defect<'Id> = { d with Family = family }
+
+/// Why a rule could not be registered (Phase 298): the id is already registered. `registered`
+/// enumerates the ids the registry holds, in registration order, so the refusal names the closed
+/// set (GP5).
+[<RequireQualifiedAccess>]
+type RegistrationError = DuplicateRule of id: string * registered: string list
 
 /// A registered rule family — a named bundle of checks the walker runs over a tree.
 /// The framework owns registration + walking; the rule *body* is domain-supplied.
@@ -44,15 +78,43 @@ type PackRule = { Pack: string; RuleId: string }
 /// stays domain-side; the core owns only the scaffolding.
 module Validator =
 
-    /// A simple ordered registry of rule families.
-    type Registry<'Node, 'Id> =
+    /// An ordered registry of rule families, one family per id (Phase 298: renamed from
+    /// `Registry`, which sat beside `Function`'s registry under the same name).
+    type RuleRegistry<'Node, 'Id> =
         { Families: RuleFamily<'Node, 'Id> list }
 
-    let empty<'Node, 'Id> : Registry<'Node, 'Id> = { Families = [] }
+    /// The pre-298 name of `RuleRegistry` — an alias kept for one draft, removed in the next.
+    type Registry<'Node, 'Id> = RuleRegistry<'Node, 'Id>
 
-    let register (family: RuleFamily<'Node, 'Id>) (reg: Registry<'Node, 'Id>) : Registry<'Node, 'Id> =
-        { reg with
-            Families = reg.Families @ [ family ] }
+    let empty<'Node, 'Id> : RuleRegistry<'Node, 'Id> = { Families = [] }
+
+    /// The registered family ids, in registration order.
+    let enumerate (reg: RuleRegistry<'Node, 'Id>) : string list =
+        reg.Families |> List.map (fun f -> f.Id)
+
+    /// The family registered under `id`, if any.
+    let tryFind (id: string) (reg: RuleRegistry<'Node, 'Id>) : RuleFamily<'Node, 'Id> option =
+        reg.Families |> List.tryFind (fun f -> f.Id = id)
+
+    /// Register `family` after the ones already held — REFUSED as `DuplicateRule` when its id is
+    /// already registered (Phase 298; it used to append, so a second registration doubled every
+    /// finding of the family and two families could share one provenance id).
+    let register
+        (family: RuleFamily<'Node, 'Id>)
+        (reg: RuleRegistry<'Node, 'Id>)
+        : Result<RuleRegistry<'Node, 'Id>, RegistrationError> =
+        if reg.Families |> List.exists (fun f -> f.Id = family.Id) then
+            Error(RegistrationError.DuplicateRule(family.Id, enumerate reg))
+        else
+            Ok
+                { reg with
+                    Families = reg.Families @ [ family ] }
+
+    /// A registry holding `families` in order — `register` folded from `empty`, refusing the first
+    /// repeated id.
+    let ofFamilies (families: RuleFamily<'Node, 'Id> list) : Result<RuleRegistry<'Node, 'Id>, RegistrationError> =
+        (Ok empty, families)
+        ||> List.fold (fun acc f -> acc |> Result.bind (register f))
 
     /// Build a rule family from a per-node predicate — the common shape. The walker
     /// visits every node in preorder and collects whatever defects the rule emits.
@@ -60,9 +122,40 @@ module Validator =
         { Id = id
           Run = fun w root -> Tree.preorder w root |> List.collect (rule w) }
 
-    /// Run every registered family over the tree, concatenating defects in family order.
-    let runAll (w: NodeWitness<'Node, 'Id>) (reg: Registry<'Node, 'Id>) (root: 'Node) : Defect<'Id> list =
-        reg.Families |> List.collect (fun f -> f.Run w root)
+    /// The stock code of a family that THREW instead of returning its findings (Phase 298).
+    [<Literal>]
+    let FamilyFaultCode = "RULE-FAULT"
+
+    /// Run one rule body, total: its findings stamped with `family`, or — when it throws — one
+    /// `Severity.Error` finding coded `RULE-FAULT` naming the family and the exception's message, so
+    /// one broken rule never costs the findings of the others.
+    let internal runGuarded (family: string) (run: unit -> Defect<'Id> list) : Defect<'Id> list =
+        try
+            run () |> List.map (Defect.inFamily family)
+        with ex ->
+            [ { Code = FamilyFaultCode
+                Severity = Severity.Error
+                Message = "rule '" + family + "' failed: " + ex.Message
+                Node = None
+                Family = family
+                Related = [] } ]
+
+    /// Run every registered family over the tree and pair each finding with the id of the family
+    /// that produced it (Phase 298), in family order then each family's own order. Each finding's
+    /// `Family` is stamped with that id; a family that throws contributes one `RULE-FAULT` error and
+    /// the families after it still run.
+    let runAllTagged
+        (w: NodeWitness<'Node, 'Id>)
+        (reg: RuleRegistry<'Node, 'Id>)
+        (root: 'Node)
+        : (string * Defect<'Id>) list =
+        reg.Families
+        |> List.collect (fun f -> runGuarded f.Id (fun () -> f.Run w root) |> List.map (fun d -> f.Id, d))
+
+    /// Run every registered family over the tree, concatenating defects in family order — the
+    /// findings of `runAllTagged`, each carrying its family in `Family`. Total (Phase 298).
+    let runAll (w: NodeWitness<'Node, 'Id>) (reg: RuleRegistry<'Node, 'Id>) (root: 'Node) : Defect<'Id> list =
+        runAllTagged w reg root |> List.map snd
 
     let hasErrors (defects: Defect<'Id> list) : bool =
         defects |> List.exists (fun d -> d.Severity = Severity.Error)
@@ -131,11 +224,21 @@ module Validator =
 
             let cited = citation pack rule.RuleId
 
-            rule.Run subject
+            // the `PackRule` family-id convention, stamped on the defect itself (Phase 298); a rule
+            // that throws is one `RULE-FAULT` finding, as under `runAll`
+            runGuarded (pack.Name + "/" + rule.RuleId) (fun () -> rule.Run subject)
             |> List.map (fun d ->
                 { Rule = stamp
                   Citation = cited
                   Defect = d }))
+
+    /// A tree rule family as a `PackCheck` over the tree's root (Phase 298) — the subject-generic
+    /// rule `PackCheck` already is, with the tree family the instance `fun root -> family.Run w
+    /// root`. So a tree family and a rule over any other subject (a column table, a voicing
+    /// sequence) meet in one pack without `RuleFamily` being retyped.
+    let asCheck (w: NodeWitness<'Node, 'Id>) (family: RuleFamily<'Node, 'Id>) : PackCheck<'Node, 'Id> =
+        { RuleId = family.Id
+          Run = family.Run w }
 
     // ---- Phase 313: the stock structural-integrity families ----
     // Two checks nearly every domain with a grammar or with cross-node references wrote for itself,
@@ -175,7 +278,9 @@ module Validator =
                                "; a " + pk + " holds no children"
                            else
                                "; a " + pk + " holds: " + String.concat ", " legal)
-                      Node = Some(w.Id c) }) }
+                      Node = Some(w.Id c)
+                      Family = "containment"
+                      Related = [ w.Id p ] }) }
 
     /// One reference defect (Phase 313), over a `RefWitness`. `from` is the referring node,
     /// `declarer` a declaring node, `target` / `declared` the referenced or declared id.
@@ -329,29 +434,34 @@ module Validator =
 
         match d with
         | ReferenceDefect.DanglingReference(from, target) ->
-            { Code = DanglingReferenceCode
-              Severity = Severity.Error
-              Message = "the reference to " + q target + " resolves to no declaration"
-              Node = Some from }
+            Defect.create
+                DanglingReferenceCode
+                Severity.Error
+                ("the reference to " + q target + " resolves to no declaration")
+                (Some from)
         | ReferenceDefect.UnusedDeclaration(declarer, declared) ->
-            { Code = UnusedDeclarationCode
-              Severity = Severity.Warning
-              Message = q declared + " is declared and never referenced"
-              Node = Some declarer }
+            Defect.create
+                UnusedDeclarationCode
+                Severity.Warning
+                (q declared + " is declared and never referenced")
+                (Some declarer)
         | ReferenceDefect.ForwardReference(from, target, declarer) ->
-            { Code = ForwardReferenceCode
-              Severity = Severity.Error
-              Message =
-                "the reference to "
-                + q target
-                + " comes before its declaration at "
-                + q declarer
-              Node = Some from }
+            { Defect.create
+                  ForwardReferenceCode
+                  Severity.Error
+                  ("the reference to "
+                   + q target
+                   + " comes before its declaration at "
+                   + q declarer)
+                  (Some from) with
+                Related = [ declarer ] }
         | ReferenceDefect.ReferenceCycle cycle ->
-            { Code = ReferenceCycleCode
-              Severity = Severity.Error
-              Message = "reference cycle through " + (cycle |> List.map q |> String.concat ", ")
-              Node = List.tryHead cycle }
+            { Defect.create
+                  ReferenceCycleCode
+                  Severity.Error
+                  ("reference cycle through " + (cycle |> List.map q |> String.concat ", "))
+                  (List.tryHead cycle) with
+                Related = cycle }
 
     /// The reference-integrity family (Phase 313): `referenceDefects` as defects — dangling
     /// references (`REF-DANGLING`, error), unused declarations (`REF-UNUSED`, warning) and reference
@@ -383,17 +493,21 @@ module ColumnValidator =
     let private locOf (column: string) (row: int) = column + "#" + string row
 
     let private noColDefect (column: string) : Defect<string> =
-        { Code = "COL-NOCOL"
-          Severity = Severity.Error
-          Message = "no such column: " + column
-          Node = Some column }
+        Defect.create "COL-NOCOL" Severity.Error ("no such column: " + column) (Some column)
+
+    /// The id of a stock column rule (Phase 298): the rule's kind and its parameters through
+    /// `Hash.canonicalFields`, so two rules share an id exactly when they are one rule — `unique`
+    /// over `["a,b"]` and over `["a"; "b"]` are two ids, and two `inRange` rules over one column with
+    /// different bounds are two rules (each used to be `kind:column`, joined on `,`).
+    let ruleId (kind: string) (parameters: string list) : string =
+        Hash.canonicalFields (kind :: parameters)
 
     /// Build a rule from an id + body.
     let rule (id: string) (run: Table -> Defect<string> list) : ColumnRule = { Id = id; Run = run }
 
     /// Each cell in `column` must be present (non-null) — a missing column is itself a fault.
     let notNull (column: string) : ColumnRule =
-        rule ("notNull:" + column) (fun t ->
+        rule (ruleId "notNull" [ column ]) (fun t ->
             match Table.tryColumn column t with
             | None -> [ noColDefect column ]
             | Some c ->
@@ -401,14 +515,15 @@ module ColumnValidator =
                 |> List.mapi (fun i cell -> i, cell)
                 |> List.filter (fun (_, cell) -> Cell.isNull cell)
                 |> List.map (fun (i, _) ->
-                    { Code = "COL-NOTNULL"
-                      Severity = Severity.Error
-                      Message = "null in non-null column '" + column + "'"
-                      Node = Some(locOf column i) }))
+                    Defect.create
+                        "COL-NOTNULL"
+                        Severity.Error
+                        ("null in non-null column '" + column + "'")
+                        (Some(locOf column i))))
 
     /// Every PRESENT cell in `column` must carry type `ty` (a `Null` is type-agnostic — use `notNull`).
     let ofType (column: string) (ty: ColumnType) : ColumnRule =
-        rule ("ofType:" + column) (fun t ->
+        rule (ruleId "ofType" [ column; ColumnType.tag ty ]) (fun t ->
             match Table.tryColumn column t with
             | None -> [ noColDefect column ]
             | Some c ->
@@ -417,103 +532,199 @@ module ColumnValidator =
                 |> List.choose (fun (i, cell) ->
                     match Cell.typeOf cell with
                     | Some t' when t' <> ty ->
-                        Some
-                            { Code = "COL-OFTYPE"
-                              Severity = Severity.Error
-                              Message =
-                                "column '"
-                                + column
-                                + "' expected "
-                                + ColumnType.tag ty
-                                + ", got "
-                                + ColumnType.tag t'
-                              Node = Some(locOf column i) }
+                        Some(
+                            Defect.create
+                                "COL-OFTYPE"
+                                Severity.Error
+                                ("column '"
+                                 + column
+                                 + "' expected "
+                                 + ColumnType.tag ty
+                                 + ", got "
+                                 + ColumnType.tag t')
+                                (Some(locOf column i))
+                        )
                     | _ -> None))
 
+    /// The stock code of a range rule whose BOUNDS are not numbers (Phase 298).
+    [<Literal>]
+    let BadRangeCode = "COL-BADRANGE"
+
+    /// The stock code of a cell a range rule cannot read as a number (Phase 298).
+    [<Literal>]
+    let NotANumberCode = "COL-NAN"
+
     /// Every present numeric cell in `column` must lie within `[lo, hi]` (inclusive).
+    ///
+    /// **Total over what it cannot compare (Phase 298).** A NaN bound compares false with every
+    /// value, so the rule used to pass every cell: a NaN `lo` or `hi` is now one `COL-BADRANGE` error
+    /// located at the column, and no cell is read. A NaN cell, and a `Decimal` cell whose text is not
+    /// decimal, are `COL-NAN` errors at the cell — a value the rule cannot place inside or outside
+    /// the range is a finding, never a pass. An infinite bound is a number and is honoured.
     let inRange (column: string) (lo: float) (hi: float) : ColumnRule =
-        rule ("inRange:" + column) (fun t ->
+        rule (ruleId "inRange" [ column; Cell.token (Float lo); Cell.token (Float hi) ]) (fun t ->
             match Table.tryColumn column t with
             | None -> [ noColDefect column ]
+            | Some _ when System.Double.IsNaN lo || System.Double.IsNaN hi ->
+                [ Defect.create
+                      BadRangeCode
+                      Severity.Error
+                      ("column '" + column + "' range bounds are not numbers")
+                      (Some column) ]
             | Some c ->
                 c.Cells
                 |> List.mapi (fun i cell -> i, cell)
                 |> List.choose (fun (i, cell) ->
                     let v =
                         match cell with
-                        | Int n -> Some(float n)
-                        | Float f -> Some f
+                        | Int n -> Some(Some(float n))
+                        | Float f when System.Double.IsNaN f -> Some None
+                        | Float f -> Some(Some f)
                         // The bounds are floats, so a decimal is read at the nearest float: a range
                         // check is a statement about magnitude, and leaving the case out would pass
                         // every decimal column unchecked. Past the float range `tryToFloat` refuses
                         // (Phase 299) rather than answering ∞; such a decimal text is out of every
                         // finite range, so it is read as the infinity of its sign here, where "out
-                        // of range" is the whole question. Text that is not decimal stays unread.
+                        // of range" is the whole question. Text that is not decimal is unreadable
+                        // (Phase 298: a finding, where it used to pass unread).
                         | Decimal s ->
                             match DecimalText.tryToFloat s, DecimalText.compare s DecimalText.zero with
-                            | Some f, _ -> Some f
-                            | None, Some c when c < 0 -> Some -infinity
-                            | None, Some _ -> Some infinity
-                            | None, None -> None
+                            | Some f, _ -> Some(Some f)
+                            | None, Some c when c < 0 -> Some(Some -infinity)
+                            | None, Some _ -> Some(Some infinity)
+                            | None, None -> Some None
                         | _ -> None
 
                     match v with
-                    | Some x when x < lo || x > hi ->
-                        Some
-                            { Code = "COL-INRANGE"
-                              Severity = Severity.Error
-                              Message = "column '" + column + "' value out of range at row " + string i
-                              Node = Some(locOf column i) }
+                    | Some None ->
+                        Some(
+                            Defect.create
+                                NotANumberCode
+                                Severity.Error
+                                ("column '" + column + "' value at row " + string i + " is not a number")
+                                (Some(locOf column i))
+                        )
+                    | Some(Some x) when x < lo || x > hi ->
+                        Some(
+                            Defect.create
+                                "COL-INRANGE"
+                                Severity.Error
+                                ("column '" + column + "' value out of range at row " + string i)
+                                (Some(locOf column i))
+                        )
                     | _ -> None))
+
+    /// One composite key as one string (Phase 298): the cells' tokens through `Hash.canonicalFields`,
+    /// injective over token lists, so a hash set decides key equality.
+    let private keyText (tokens: string list) : string = Hash.canonicalFields tokens
+
+    /// The stock code of a key column whose length is not the table's row count (Phase 298).
+    [<Literal>]
+    let RaggedCode = "COL-RAGGED"
 
     /// The composite key formed by `columns` must be unique across rows — each repeat is located.
     /// A key element is `Cell.token` (Phase 315; a private copy until then), so two cells are one
     /// key value exactly when every consumer keying on the token says so: NaN is one value, `-0.0`
     /// is `0`, and two `Decimal` cells holding `1.5` and `1.50` are one value.
+    ///
+    /// **Linear, and only over a rectangular key (Phase 298).** Each key column is read ONCE into an
+    /// array, so a row's key is O(key width) and the rule is linear in rows (it indexed every row
+    /// through the column's list, quadratically). A key column whose length is not the table's row
+    /// count is one `COL-RAGGED` error naming it, and no key is compared — reading past a short
+    /// column used to yield `Null` cells and report rows as duplicates that had no key at all.
+    /// **`Null` participates as a value:** two rows whose key cells are `Null` in the same positions
+    /// are one key, so a missing key cell repeated is a duplicate (pair the rule with `notNull` to
+    /// forbid missing key cells outright).
     let unique (columns: string list) : ColumnRule =
-        rule ("unique:" + String.concat "," columns) (fun t ->
+        rule (ruleId "unique" columns) (fun t ->
             let missing = columns |> List.filter (fun c -> (Table.tryColumn c t).IsNone)
 
             if not (List.isEmpty missing) then
                 missing |> List.map noColDefect
             else
                 let rc = Table.rowCount t
-                let cols = columns |> List.map (fun c -> Table.tryColumn c t |> Option.get)
 
-                let keyAt i =
-                    cols |> List.map (fun c -> Cell.token (Column.cell i c))
+                let cols =
+                    columns
+                    |> List.map (fun c ->
+                        let col = Table.tryColumn c t |> Option.get
+                        col.Name, List.toArray col.Cells)
 
-                let keyName = String.concat "," columns
+                match cols |> List.filter (fun (_, cells) -> cells.Length <> rc) with
+                | _ :: _ as ragged ->
+                    ragged
+                    |> List.map (fun (name, cells) ->
+                        Defect.create
+                            RaggedCode
+                            Severity.Error
+                            ("key column '"
+                             + name
+                             + "' has "
+                             + string cells.Length
+                             + " rows where the table has "
+                             + string rc)
+                            (Some name))
+                | [] ->
+                    let arrays = cols |> List.map snd
 
-                let rec go i (seen: Set<string list>) acc =
-                    if i >= rc then
-                        List.rev acc
-                    else
-                        let k = keyAt i
+                    let keyAt i =
+                        arrays |> List.map (fun cells -> Cell.token cells[i])
 
-                        if Set.contains k seen then
-                            go
-                                (i + 1)
-                                seen
-                                ({ Code = "COL-UNIQUE"
-                                   Severity = Severity.Error
-                                   Message = "duplicate key (" + keyName + ") at row " + string i
-                                   Node = Some(locOf keyName i) }
-                                 :: acc)
-                        else
-                            go (i + 1) (Set.add k seen) acc
+                    let keyName = String.concat "," columns
+                    let seen = System.Collections.Generic.HashSet<string>()
+                    let found = ResizeArray<Defect<string>>()
 
-                go 0 Set.empty [])
+                    for i in 0 .. rc - 1 do
+                        // one string per key: the tokens through `canonicalFields`, injective over
+                        // token lists, so a HashSet decides membership in O(key width)
+                        if not (seen.Add(keyText (keyAt i))) then
+                            found.Add(
+                                Defect.create
+                                    "COL-UNIQUE"
+                                    Severity.Error
+                                    ("duplicate key (" + keyName + ") at row " + string i)
+                                    (Some(locOf keyName i))
+                            )
 
-    /// An ordered registry of columnar rules.
+                    List.ofSeq found)
+
+    /// An ordered registry of columnar rules, one rule per id.
     type Registry = { Rules: ColumnRule list }
 
     let empty: Registry = { Rules = [] }
 
-    let register (r: ColumnRule) (reg: Registry) : Registry = { reg with Rules = reg.Rules @ [ r ] }
+    /// The registered rule ids, in registration order.
+    let enumerate (reg: Registry) : string list = reg.Rules |> List.map (fun r -> r.Id)
+
+    /// The rule registered under `id`, if any.
+    let tryFind (id: string) (reg: Registry) : ColumnRule option =
+        reg.Rules |> List.tryFind (fun r -> r.Id = id)
+
+    /// Register `r` after the rules already held — REFUSED as `DuplicateRule` when its id is already
+    /// registered (Phase 298), as `Validator.register` refuses.
+    let register (r: ColumnRule) (reg: Registry) : Result<Registry, RegistrationError> =
+        if reg.Rules |> List.exists (fun x -> x.Id = r.Id) then
+            Error(RegistrationError.DuplicateRule(r.Id, enumerate reg))
+        else
+            Ok { reg with Rules = reg.Rules @ [ r ] }
+
+    /// A registry holding `rules` in order, refusing the first repeated id.
+    let ofRules (rules: ColumnRule list) : Result<Registry, RegistrationError> =
+        (Ok empty, rules) ||> List.fold (fun acc r -> acc |> Result.bind (register r))
+
+    /// Run every registered rule and pair each finding with the id of the rule that produced it
+    /// (Phase 298), in rule order then row order; each finding's `Family` is stamped with that id,
+    /// and a rule that throws is one `RULE-FAULT` error while the rules after it still run.
+    let validateTagged (reg: Registry) (t: Table) : (string * Defect<string>) list =
+        reg.Rules
+        |> List.collect (fun r -> Validator.runGuarded r.Id (fun () -> r.Run t) |> List.map (fun d -> r.Id, d))
 
     /// Run every registered rule over the table, concatenating defects in rule order then row order — a
     /// deterministic, byte-canonical defect list for a given `(registry, table)` (the same table yields
-    /// the same defect bytes; `Validator.canonicalCodes` projects the cross-host parity string).
-    let validate (reg: Registry) (t: Table) : Defect<string> list =
-        reg.Rules |> List.collect (fun r -> r.Run t)
+    /// the same defect bytes; `Validator.canonicalCodes` projects the cross-host parity string). The
+    /// findings of `validateTagged`, each carrying its rule in `Family`.
+    let validate (reg: Registry) (t: Table) : Defect<string> list = validateTagged reg t |> List.map snd
+
+    /// A column rule as a `Validator.PackCheck` over the table (Phase 298), so a column rule sits in a
+    /// versioned pack beside rules over any other subject.
+    let asCheck (r: ColumnRule) : Validator.PackCheck<Table, string> = { RuleId = r.Id; Run = r.Run }

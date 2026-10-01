@@ -506,7 +506,8 @@ let tests =
 
                     let defects =
                         ColumnValidator.validate
-                            (ColumnValidator.register (ColumnValidator.unique [ "d" ]) ColumnValidator.empty)
+                            (ColumnValidator.ofRules [ ColumnValidator.unique [ "d" ] ]
+                             |> Result.defaultWith (fun e -> failwithf "registry: %A" e))
                             t
 
                     Expect.equal
@@ -522,7 +523,9 @@ let tests =
                         { Code = code
                           Severity = Severity.Warning
                           Message = code
-                          Node = Some node }
+                          Node = Some node
+                          Family = ""
+                          Related = [] }
 
                     let pack: Validator.Pack<RNode, string> =
                         { Name = "house-style"
