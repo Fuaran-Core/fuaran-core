@@ -252,6 +252,9 @@
          witnesses the census below runs them over. BEFORE ConformanceVacuityTests.fs, which reuses
          those witnesses. -->
     <Compile Include="WitnessTakingFamiliesTests.fs" />
+    <!-- Phase 313 — the structural-integrity strand and its reference grammar / reference
+         witnesses, which the census below runs the two families over. -->
+    <Compile Include="StructuralIntegrityTests.fs" />
     <Compile Include="ConformanceVacuityTests.fs" />
     <Compile Include="ConformanceFamiliesTests.fs" />
     <!-- Phase 185, retargeted by Phase 217 — the Fable surface's membership derived rather than

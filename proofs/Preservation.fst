@@ -3074,3 +3074,174 @@ let keyed_apply_preserves_wf (p:string) (n:ktree) (t:ktree)
   = kapply_insert_is_apply p n t;
     erase_kins p n t;
     apply_preserves_wf (InsertChild p (erase n)) (erase t)
+
+(* ======================================================================================
+   13. THE CONTAINMENT GRAMMAR — `Ops.applyGrammar` (Phase 313).
+
+       `canHold` is unary and child-blind (section 8): it answers whether a node may hold children
+       AT ALL. A grammar answers WHICH — for a parent's kind, the kinds it may hold, `None` meaning
+       any — and it is data the domain declares; the model, like the engine, knows no kind.
+
+       THE MODEL CHECKS THE STEP'S RESULT; THE SHIPPED ENGINE CHECKS THE PAIRS THE STEP CREATES.
+       Each non-batch step is decided by `apply_contained` (section 8.2) and then refused when the
+       tree it would build is not `grammatical`. `Ops.applyGrammar` reads only the parent-to-child
+       pairs the step creates (an insert's node under its parent and the graft's interior, a moved
+       node under its new parent, a rewritten node under its parent and over its kept children),
+       because from a grammatical tree those are the only pairs that can be illegal afterwards. That
+       equivalence is the one thing here that is TESTED rather than proved: it is
+       `Conformance.containmentLaws`' agreement law, asked of the shipped engine at a domain's own
+       grammar. A `Batch` is threaded step by step, all-or-nothing, as `apply_contained_all` is.
+
+       Three facts are proved: an accepted operation keeps every parent's children legal
+       (`grammar_preserves`, the shard's lemma); the grammar engine only ever REFINES the container
+       engine — what it accepts, that engine accepts with the same tree (`grammar_refines`), so the
+       container invariant of section 8.5 holds of it too (`grammar_preserves_contained`); and with
+       no grammar it IS the container engine (`grammar_trivial`). Nothing here is extracted. *)
+
+(* F#: `Ops.isLegalChild`. *)
+[@@ noextract_to "FSharp"]
+let legal_child (g:string -> option (list string)) (pk ck:string) : Tot bool =
+  match g pk with
+  | None -> true
+  | Some l -> mem ck l
+
+(* Every child in `cs` is legal under the parent kind `k`. *)
+[@@ noextract_to "FSharp"]
+let rec kids_legal (g:string -> option (list string)) (k:string) (cs:list tree) : Tot bool (decreases cs) =
+  match cs with
+  | [] -> true
+  | c :: r -> legal_child g k (kind_of c) && kids_legal g k r
+
+(* F#: `Ops.illegalChildren g w t = []` — every parent's children are legal under its kind. *)
+[@@ noextract_to "FSharp"]
+let rec grammatical (g:string -> option (list string)) (t:tree) : Tot bool (decreases t) =
+  match t with
+  | TNode _ k cs -> kids_legal g k cs && grammatical_all g cs
+and grammatical_all (g:string -> option (list string)) (ts:list tree) : Tot bool (decreases ts) =
+  match ts with
+  | [] -> true
+  | t :: r -> grammatical g t && grammatical_all g r
+
+(* The refusal, in the model's envelope vocabulary. The production class is `IllegalChild`, which
+   `TreeOps.rejection` does not carry; nothing here compares envelopes beyond "refused". *)
+[@@ noextract_to "FSharp"]
+let illegal_child : rejection = Rejected "illegalChild" "a child its parent's kind may not hold"
+
+(* ---- 13.1 the grammar engine ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec apply_grammar (g:string -> option (list string)) (ch:tree -> bool) (o:op) (t:tree)
+  : Tot (outcome tree rejection) (decreases o) =
+  match o with
+  | Batch os -> apply_grammar_all g ch os t
+  | _ ->
+    (match apply_contained ch o t with
+     | Error e -> Error e
+     | Ok t' -> if grammatical g t' then Ok t' else Error illegal_child)
+and apply_grammar_all (g:string -> option (list string)) (ch:tree -> bool) (os:list op) (t:tree)
+  : Tot (outcome tree rejection) (decreases os) =
+  match os with
+  | [] -> Ok t
+  | o :: r -> (match apply_grammar g ch o t with
+               | Ok t' -> apply_grammar_all g ch r t'
+               | Error e -> Error e)
+
+(* ---- 13.2 THE LEMMA — an accepted operation keeps every parent's children legal ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec grammar_preserves (g:string -> option (list string)) (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (requires grammatical g t)
+          (ensures (match apply_grammar g ch o t with
+                    | Ok t' -> grammatical g t'
+                    | Error _ -> True)) (decreases o)
+  = match o with
+    | Batch os -> grammar_preserves_all g ch os t
+    | _ -> ()
+and grammar_preserves_all (g:string -> option (list string)) (ch:tree -> bool) (os:list op) (t:tree)
+  : Lemma (requires grammatical g t)
+          (ensures (match apply_grammar_all g ch os t with
+                    | Ok t' -> grammatical g t'
+                    | Error _ -> True)) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      grammar_preserves g ch o t;
+      (match apply_grammar g ch o t with
+       | Ok t' -> grammar_preserves_all g ch r t'
+       | Error _ -> ())
+
+(* ---- 13.3 the grammar engine refines the container engine ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec grammar_refines (g:string -> option (list string)) (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (ensures (match apply_grammar g ch o t with
+                    | Ok t' -> apply_contained ch o t == Ok t'
+                    | Error _ -> True)) (decreases o)
+  = match o with
+    | Batch os -> grammar_refines_all g ch os t
+    | _ -> ()
+and grammar_refines_all (g:string -> option (list string)) (ch:tree -> bool) (os:list op) (t:tree)
+  : Lemma (ensures (match apply_grammar_all g ch os t with
+                    | Ok t' -> apply_contained_all ch os t == Ok t'
+                    | Error _ -> True)) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      grammar_refines g ch o t;
+      (match apply_grammar g ch o t with
+       | Ok t' -> grammar_refines_all g ch r t'
+       | Error _ -> ())
+
+(* So the section 8.5 invariant holds of it as well: both invariants survive one accepted op. *)
+[@@ noextract_to "FSharp"]
+let grammar_preserves_contained (g:string -> option (list string)) (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (requires child_blind ch /\ wf t /\ contained ch t /\ grammatical g t)
+          (ensures (match apply_grammar g ch o t with
+                    | Ok t' -> contained ch t' /\ grammatical g t'
+                    | Error _ -> True))
+  = grammar_preserves g ch o t;
+    grammar_refines g ch o t;
+    contained_preserves ch o t
+
+(* ---- 13.4 with no grammar it IS the container engine ---- *)
+
+(* F#: `fun _ -> None`, named so both sides of the lemma below read one term. *)
+[@@ noextract_to "FSharp"]
+let no_grammar : string -> option (list string) = fun _ -> None
+
+[@@ noextract_to "FSharp"]
+let rec kids_legal_trivial (k:string) (cs:list tree)
+  : Lemma (ensures kids_legal no_grammar k cs) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | _ :: r -> kids_legal_trivial k r
+
+[@@ noextract_to "FSharp"]
+let rec grammatical_trivial (t:tree)
+  : Lemma (ensures grammatical no_grammar t) (decreases t)
+  = match t with
+    | TNode _ k cs -> kids_legal_trivial k cs; grammatical_trivial_all cs
+and grammatical_trivial_all (ts:list tree)
+  : Lemma (ensures grammatical_all no_grammar ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> grammatical_trivial t; grammatical_trivial_all r
+
+[@@ noextract_to "FSharp"]
+let rec grammar_trivial (ch:tree -> bool) (o:op) (t:tree)
+  : Lemma (ensures apply_grammar no_grammar ch o t == apply_contained ch o t) (decreases o)
+  = match o with
+    | Batch os -> grammar_trivial_all ch os t
+    | _ ->
+      (match apply_contained ch o t with
+       | Ok t' -> grammatical_trivial t'
+       | Error _ -> ())
+and grammar_trivial_all (ch:tree -> bool) (os:list op) (t:tree)
+  : Lemma (ensures apply_grammar_all no_grammar ch os t == apply_contained_all ch os t) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      grammar_trivial ch o t;
+      (match apply_contained ch o t with
+       | Ok t' -> grammar_trivial_all ch r t'
+       | Error _ -> ())

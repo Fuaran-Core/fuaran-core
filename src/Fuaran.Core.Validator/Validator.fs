@@ -137,6 +137,236 @@ module Validator =
                   Citation = cited
                   Defect = d }))
 
+    // ---- Phase 313: the stock structural-integrity families ----
+    // Two checks nearly every domain with a grammar or with cross-node references wrote for itself,
+    // each with its own refusal shape and, for cycles, its own depth-first search. The containment
+    // family reads the grammar through `Ops.isLegalChild` — the definition the grammar engine
+    // refuses by — and the reference family finds cycles through `Propagation.sort`, so a defect
+    // here and a refusal there are about the same pairs and the same cycles.
+
+    /// The stock code of a `containment` finding.
+    [<Literal>]
+    let IllegalChildCode = "TREE-ILLEGALCHILD"
+
+    /// A child the containment grammar does not let its parent hold (Phase 313): one
+    /// `Severity.Error` defect per pair `Ops.illegalChildren` reports over the whole tree, in its
+    /// order, located at the CHILD, coded `TREE-ILLEGALCHILD`, its message naming both kinds and the
+    /// children the parent's kind may hold. The family the grammar engine (`Ops.applyGrammar`)
+    /// refuses to create — it reports the same pairs over a tree that arrived whole, decoded, merged
+    /// or authored outside the engine. `allowedChildren` maps a parent's kind tag to the kind tags it
+    /// may hold, `None` meaning any.
+    let containment (allowedChildren: string -> string list option) : RuleFamily<'Node, 'Id> =
+        { Id = "containment"
+          Run =
+            fun w root ->
+                Ops.illegalChildren allowedChildren w root
+                |> List.map (fun (p, c) ->
+                    let pk = w.KindTag p
+                    let legal = allowedChildren pk |> Option.defaultValue []
+
+                    { Code = IllegalChildCode
+                      Severity = Severity.Error
+                      Message =
+                        "a "
+                        + w.KindTag c
+                        + " cannot sit under a "
+                        + pk
+                        + (if List.isEmpty legal then
+                               "; a " + pk + " holds no children"
+                           else
+                               "; a " + pk + " holds: " + String.concat ", " legal)
+                      Node = Some(w.Id c) }) }
+
+    /// One reference defect (Phase 313), over a `RefWitness`. `from` is the referring node,
+    /// `declarer` a declaring node, `target` / `declared` the referenced or declared id.
+    [<RequireQualifiedAccess>]
+    type ReferenceDefect<'Id> =
+        /// `from` refers to `target`, which no node of the tree declares.
+        | DanglingReference of from: 'Id * target: 'Id
+        /// `declarer` declares `declared`, which no node of the tree refers to.
+        | UnusedDeclaration of declarer: 'Id * declared: 'Id
+        /// `from` refers to `target`, declared by `declarer`, which comes AFTER `from` in sibling
+        /// order: below their lowest common ancestor, `declarer`'s branch is a later child than
+        /// `from`'s. A reference to an ancestor's or a descendant's declaration is never forward.
+        | ForwardReference of from: 'Id * target: 'Id * declarer: 'Id
+        /// The nodes of one circular group of the "refers to a declaration of" relation — more than
+        /// one node, or a node referring to its own declaration — as `Propagation.sort` reports it.
+        | ReferenceCycle of cycle: 'Id list
+
+    /// The stock codes of the reference families.
+    [<Literal>]
+    let DanglingReferenceCode = "REF-DANGLING"
+
+    [<Literal>]
+    let UnusedDeclarationCode = "REF-UNUSED"
+
+    [<Literal>]
+    let ForwardReferenceCode = "REF-FORWARD"
+
+    [<Literal>]
+    let ReferenceCycleCode = "REF-CYCLE"
+
+    /// The reference graph of a tree: every node in preorder with its key, the declarers of each
+    /// declared key, and the set of referenced keys.
+    let private referenceIndex (refw: RefWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (w: NodeWitness<'Node, 'Id>) root =
+        let nodes = Tree.preorder w root
+
+        let declarers =
+            nodes
+            |> List.collect (fun n -> refw.DeclsOf n |> List.map (fun d -> idw.ToString d, n))
+            |> List.groupBy fst
+            |> List.map (fun (k, ns) -> k, ns |> List.map snd)
+            |> Map.ofList
+
+        nodes, declarers
+
+    /// The dangling references, unused declarations and reference cycles of a tree (Phase 313), in
+    /// that order: dangling references by referring node in preorder and each node's references in
+    /// its order; unused declarations by declaring node in preorder; then each cycle
+    /// `Propagation.sort` finds over the relation "node `a` refers to an id node `b` declares" (a
+    /// dangling reference adds no edge). Linear in nodes plus references; total, cycles as data.
+    let referenceDefects
+        (refw: RefWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (w: NodeWitness<'Node, 'Id>)
+        (root: 'Node)
+        : ReferenceDefect<'Id> list =
+        let key (i: 'Id) = idw.ToString i
+        let nodes, declarers = referenceIndex refw idw w root
+
+        let referenced = nodes |> List.collect refw.RefsOf |> List.map key |> Set.ofList
+
+        let dangling =
+            nodes
+            |> List.collect (fun n ->
+                refw.RefsOf n
+                |> List.filter (fun r -> not (declarers.ContainsKey(key r)))
+                |> List.map (fun r -> ReferenceDefect.DanglingReference(w.Id n, r)))
+
+        let unused =
+            nodes
+            |> List.collect (fun n ->
+                refw.DeclsOf n
+                |> List.filter (fun d -> not (referenced.Contains(key d)))
+                |> List.map (fun d -> ReferenceDefect.UnusedDeclaration(w.Id n, d)))
+
+        let idOf = nodes |> List.map (fun n -> key (w.Id n), w.Id n) |> Map.ofList
+
+        let deps =
+            nodes
+            |> List.map (fun n ->
+                key (w.Id n),
+                refw.RefsOf n
+                |> List.collect (fun r ->
+                    match declarers.TryFind(key r) with
+                    | Some ds -> ds |> List.map (fun d -> key (w.Id d))
+                    | None -> [])
+                |> Set.ofList)
+            |> Map.ofList
+
+        let cycles =
+            (Propagation.sort deps).Cycles
+            |> List.map (fun cycle -> ReferenceDefect.ReferenceCycle(cycle |> List.choose idOf.TryFind))
+
+        dangling @ unused @ cycles
+
+    /// The forward references of a tree (Phase 313) — opt-in, because order matters only to a domain
+    /// that reads its tree in order (a feature history, a sequential calculation, a document that
+    /// defines before it uses). Every resolved reference whose declaring node comes after the
+    /// referring node in sibling order, by referring node in preorder; a reference to an ancestor's
+    /// or a descendant's declaration is not forward, and a dangling one is `referenceDefects`'.
+    let forwardReferences
+        (refw: RefWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (w: NodeWitness<'Node, 'Id>)
+        (root: 'Node)
+        : ReferenceDefect<'Id> list =
+        let key (i: 'Id) = idw.ToString i
+
+        // every node with its child-index path from the root, in preorder
+        let rec walk acc stack =
+            match stack with
+            | [] -> List.rev acc
+            | (n, path) :: rest ->
+                let below = w.Children n |> List.mapi (fun i c -> c, path @ [ i ])
+                walk ((n, path) :: acc) (below @ rest)
+
+        let placed = walk [] [ root, [] ]
+
+        let pathOf = placed |> List.map (fun (n, path) -> key (w.Id n), path) |> Map.ofList
+
+        let declarers =
+            placed
+            |> List.collect (fun (n, _) -> refw.DeclsOf n |> List.map (fun d -> key d, n))
+            |> List.groupBy fst
+            |> List.map (fun (k, ns) -> k, ns |> List.map snd)
+            |> Map.ofList
+
+        // `later a b`: b's branch is a later child than a's below their lowest common ancestor
+        let rec later (a: int list) (b: int list) =
+            match a, b with
+            | x :: xs, y :: ys when x = y -> later xs ys
+            | x :: _, y :: _ -> y > x
+            | _ -> false // one is a prefix of the other: ancestor or descendant
+
+        placed
+        |> List.collect (fun (n, path) ->
+            refw.RefsOf n
+            |> List.collect (fun r ->
+                match declarers.TryFind(key r) with
+                | None -> []
+                | Some ds ->
+                    ds
+                    |> List.filter (fun d ->
+                        match pathOf.TryFind(key (w.Id d)) with
+                        | Some dp -> later path dp
+                        | None -> false)
+                    |> List.map (fun d -> ReferenceDefect.ForwardReference(w.Id n, r, w.Id d))))
+
+    /// A reference defect as a `Defect`, its ids rendered by `idw`.
+    let private referenceDefect (idw: IdWitness<'Id>) (d: ReferenceDefect<'Id>) : Defect<'Id> =
+        let q (i: 'Id) = "'" + idw.ToString i + "'"
+
+        match d with
+        | ReferenceDefect.DanglingReference(from, target) ->
+            { Code = DanglingReferenceCode
+              Severity = Severity.Error
+              Message = "the reference to " + q target + " resolves to no declaration"
+              Node = Some from }
+        | ReferenceDefect.UnusedDeclaration(declarer, declared) ->
+            { Code = UnusedDeclarationCode
+              Severity = Severity.Warning
+              Message = q declared + " is declared and never referenced"
+              Node = Some declarer }
+        | ReferenceDefect.ForwardReference(from, target, declarer) ->
+            { Code = ForwardReferenceCode
+              Severity = Severity.Error
+              Message =
+                "the reference to "
+                + q target
+                + " comes before its declaration at "
+                + q declarer
+              Node = Some from }
+        | ReferenceDefect.ReferenceCycle cycle ->
+            { Code = ReferenceCycleCode
+              Severity = Severity.Error
+              Message = "reference cycle through " + (cycle |> List.map q |> String.concat ", ")
+              Node = List.tryHead cycle }
+
+    /// The reference-integrity family (Phase 313): `referenceDefects` as defects — dangling
+    /// references (`REF-DANGLING`, error), unused declarations (`REF-UNUSED`, warning) and reference
+    /// cycles (`REF-CYCLE`, error), each located at the referring, declaring or first cycle node.
+    let referenceIntegrity (refw: RefWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : RuleFamily<'Node, 'Id> =
+        { Id = "referenceIntegrity"
+          Run = fun w root -> referenceDefects refw idw w root |> List.map (referenceDefect idw) }
+
+    /// The opt-in ordering family (Phase 313): `forwardReferences` as `REF-FORWARD` errors, located
+    /// at the referring node. Register it beside `referenceIntegrity` in a domain that defines
+    /// before it uses.
+    let referenceOrder (refw: RefWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : RuleFamily<'Node, 'Id> =
+        { Id = "referenceOrder"
+          Run = fun w root -> forwardReferences refw idw w root |> List.map (referenceDefect idw) }
+
 /// A columnar validation rule over a `Table` (Phase 37) — the columnar analogue of `RuleFamily`,
 /// reusing the SAME `Defect` / `Severity` model (one defect vocabulary, GP-consistent). The location
 /// `'Id` is a `string`: a column name, or `column#row` for a cell-level fault. Rules are functions over

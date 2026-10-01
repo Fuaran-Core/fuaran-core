@@ -122,6 +122,16 @@ module RejectionCodec =
             Canon.typed "reorderMismatch" [ "parent", one parent; "expected", many expected; "got", many got ]
         | Rejected(code, message) -> Canon.typed "rejected" [ "code", JStr code; "message", JStr message ]
         | KeyedPosition(target, holder) -> Canon.typed "keyedPosition" [ "target", one target; "holder", one holder ]
+        | IllegalChild(child, childKind, parent, parentKind, legal) ->
+            Canon.typed
+                "illegalChild"
+                [ "child", one child
+                  "childKind", JStr childKind
+                  "parent", one parent
+                  "parentKind", JStr parentKind
+                  "legal", JArr(legal |> List.map JStr) ]
+        | StillReferenced(target, referrers) ->
+            Canon.typed "stillReferenced" [ "target", one target; "referrers", many referrers ]
 
     /// `encode` rendered canonically (`Canon.render`: sorted keys, the pinned escaping). A caller that
     /// must refuse an ill-formed id rather than write it through renders with `Canon.tryRender`.

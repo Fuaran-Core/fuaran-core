@@ -15,6 +15,10 @@
     <!-- Phase 55/54: the columnar token uses Wire.Canon.canonicalFloat (the Fable-clean cross-host
          float layout); a raw ToString("R") is not Fable-supported. Wire is FSharp.Core-only + Fable-clean. -->
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <!-- Phase 313: the stock structural families read the grammar's one definition of a legal child
+         (`Ops.isLegalChild`, in Fuaran.Core.Ops) and report reference cycles through
+         `Propagation.sort`. Both are FSharp.Core-only + Fable-clean; Propagation brings Ops. -->
+    <ProjectReference Include="..\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

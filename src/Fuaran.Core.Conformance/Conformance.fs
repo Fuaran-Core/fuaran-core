@@ -145,6 +145,28 @@ module Conformance =
         : LawResult list =
         TreeLaws.placementLaws nodew idw gen seed iterations
 
+    /// Forward — see `TreeLaws.containmentLaws` (Phase 313).
+    let containmentLaws
+        (allowedChildren: string -> string list option)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.containmentLaws allowedChildren nodew idw gen seed iterations
+
+    /// Forward — see `TreeLaws.referenceLaws` (Phase 313).
+    let referenceLaws
+        (refw: RefWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.referenceLaws refw nodew idw gen seed iterations
+
     /// Forward — see `TreeLaws.loweringLaws` (Phase 312).
     let loweringLaws
         (nodew: NodeWitness<'Node, 'Id>)

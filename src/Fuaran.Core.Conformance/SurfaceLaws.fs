@@ -476,8 +476,9 @@ module internal SurfaceLaws =
     // reason, in `unfrozenWitnesses`. A new witness is therefore a CLASSIFICATION someone makes in
     // the commit that adds it, never one nobody noticed.
 
-    /// The twelve frozen witness records, each with the type the law reads and its pinned field list:
-    /// the six core records Phase 232 froze, then the six conformance-kit inputs Phase 330 brought in.
+    /// The frozen witness records, each with the type the law reads and its pinned field list: the
+    /// six core records Phase 232 froze, the six conformance-kit inputs Phase 330 brought in, and
+    /// Phase 313's `RefWitness`, frozen at birth.
     /// The type arguments are placeholders — a record's field NAMES and ORDER do not depend on them.
     let private frozenWitnesses: (string * System.Type * string list) list =
         [ "IdWitness", typeof<IdWitness<obj>>, [ "ToString"; "OfString"; "Equals" ]
@@ -501,7 +502,10 @@ module internal SurfaceLaws =
             "ReplaceKeyedChildren"
             "PlaceKeyedChild"
             "IdsUnique" ]
-          "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>, [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ] ]
+          "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>, [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ]
+          // Phase 313 — the reference witness, frozen as it ships: a domain constructs it by name,
+          // exactly as it constructs a core witness, so a field add would break it the same way.
+          "RefWitness", typeof<RefWitness<obj, obj>>, [ "RefsOf"; "DeclsOf" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).

@@ -1931,3 +1931,578 @@ module internal TreeLaws =
                 "built arm"
                 seed
                 [ "repeated id built", repaired; "clone placed", cloned ] ]
+
+    // ---- Phase 313: the structural-integrity families ----
+
+    /// The containment-grammar laws (Phase 313) — the teeth on the grammar engine
+    /// (`Ops.applyGrammar` and its dry runs), `Diff.toOpsGrammar`, `Arbitration.arbitrateGrammar` and
+    /// `Validator.containment`, at the domain's own grammar. Each iteration draws a tree, PRUNES it to
+    /// the grammar (its lowering, each insert kept only where the grammar engine accepts it — so the
+    /// start state keeps the grammar), and threads drawn ops through the engine:
+    ///
+    ///   - **agreement** — the engine is `applyContained` then the grammar: it refuses with the same
+    ///     envelope wherever `applyContained` refuses, and with `IllegalChild` exactly where the tree
+    ///     `applyContained` would build breaks the grammar;
+    ///   - **preservation** — an accepted op keeps every parent's children legal (`grammar_preserves`
+    ///     in `proofs/Preservation.fst`, asked of the shipped engine);
+    ///   - **naming** — `IllegalChild` names a pair the step would create, with the parent's kind and
+    ///     what the grammar lets that kind hold; the refusal is also BUILT each iteration the drawn
+    ///     tree carries an illegal pair, by cutting the child out and grafting it back;
+    ///   - the **dry runs** answer the engine's envelope; the **diff** reconstructs a grammar-legal
+    ///     pair through `applyAllGrammar` and refuses an `after` holding an illegal pair, naming the
+    ///     first; **arbitration** admits only scripts the engine accepts, and its accepted scripts
+    ///     land in either order to one grammar-legal tree; and **`Validator.containment`** reports
+    ///     exactly the pairs `Ops.illegalChildren` does.
+    ///
+    /// A grammar the generator never violates exercises only the accepting side, which the
+    /// grammar-refusal guard reports rather than passing. `'Node` and `'Id` need equality. Opt-in: a
+    /// domain with a grammar runs it beside `certify`.
+    let containmentLaws
+        (allowedChildren: string -> string list option)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let canHold = LawKit.canHoldOf gen
+
+        let engine op t =
+            Ops.applyGrammar allowedChildren canHold nodew idw op t
+
+        let legal (t: 'Node) =
+            List.isEmpty (Ops.illegalChildren allowedChildren nodew t)
+
+        let agreement =
+            LawKit.LawCell
+                "the grammar engine is applyContained then the grammar (the same envelope where it refuses, IllegalChild exactly where its result breaks the grammar)"
+
+        let preservation =
+            LawKit.LawCell "an accepted op keeps every parent's children legal"
+
+        let named =
+            LawKit.LawCell(
+                "IllegalChild names a pair the step would create, the parent's kind and what the grammar lets it hold",
+                Some "grammar refusal"
+            )
+
+        let dryRun =
+            LawKit.LawCell "the dry runs answer the engine's envelope (canApplyGrammar, canApplyAllGrammar)"
+
+        let diffBack =
+            LawKit.LawCell "grammar diff reconstruction (applyAllGrammar (toOpsGrammar before after) before = after)"
+
+        let diffRefuses =
+            LawKit.LawCell(
+                "toOpsGrammar refuses an after holding an illegal pair with IllegalChildInTree naming the first, after every toOpsContained refusal",
+                Some "grammar refusal"
+            )
+
+        let arbitration =
+            LawKit.LawCell
+                "arbitrateGrammar admits only what the grammar engine accepts, and its accepted scripts land in either order to one grammar-legal tree"
+
+        let validator =
+            LawKit.LawCell "Validator.containment reports exactly Ops.illegalChildren, child by child"
+
+        let mutable accepted = 0
+        let mutable refused = 0
+
+        let expectNamed (at: string -> string) (result: 'Node) (e: Rejection<'Id>) =
+            match e with
+            | IllegalChild(child, childKind, parent, parentKind, legalKinds) ->
+                let pair =
+                    Ops.illegalChildren allowedChildren nodew result
+                    |> List.tryFind (fun (p, c) -> idw.Equals (nodew.Id p) parent && idw.Equals (nodew.Id c) child)
+
+                named.Check(
+                    (match pair with
+                     | Some(p, c) ->
+                         nodew.KindTag p = parentKind
+                         && nodew.KindTag c = childKind
+                         && legalKinds = (allowedChildren parentKind |> Option.defaultValue [])
+                     | None -> false),
+                    fun () -> at (sprintf "IllegalChild %A names no illegal pair of the tree the step builds" e)
+                )
+            | other -> named.Check(false, fun () -> at (sprintf "expected IllegalChild, got %A" other))
+
+        // The naive specification of one op, step by step as a batch is threaded: the container-aware
+        // engine decides, and a step it accepts into a tree that breaks the grammar is a grammar
+        // refusal (carrying that step's tree, which the refusal must name a pair of). From a
+        // grammar-legal tree every illegal pair of an accepted step's result is one it created.
+        let rec expectedOf (op: SkeletonOp<'Node, 'Id>) (t: 'Node) : Result<'Node, Choice<Rejection<'Id>, 'Node>> =
+            match op with
+            | Batch ops -> ops |> List.fold (fun acc o -> acc |> Result.bind (expectedOf o)) (Ok t)
+            | _ ->
+                match Ops.applyContained canHold nodew idw op t with
+                | Error e -> Error(Choice1Of2 e)
+                | Ok t1 when legal t1 -> Ok t1
+                | Ok t1 -> Error(Choice2Of2 t1)
+
+        let pruned (t: 'Node) =
+            Ops.lower nodew t
+            |> List.fold
+                (fun acc op ->
+                    match engine op acc with
+                    | Ok t' -> t'
+                    | Error _ -> acc)
+                (Ops.skeletonRoot nodew t)
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let drawn = rng.Draw gen.Tree
+            let start = pruned drawn
+
+            validator.Check(
+                (let defects = (Validator.containment allowedChildren).Run nodew drawn
+                 let pairs = Ops.illegalChildren allowedChildren nodew drawn
+
+                 List.length defects = List.length pairs
+                 && List.forall2
+                     (fun (d: Defect<'Id>) (_, c) ->
+                         d.Code = Validator.IllegalChildCode
+                         && (match d.Node with
+                             | Some n -> idw.Equals n (nodew.Id c)
+                             | None -> false))
+                     defects
+                     pairs),
+                fun () -> at "Validator.containment and Ops.illegalChildren disagree over the drawn tree"
+            )
+
+            let mutable cur = start
+
+            for _ in 1..6 do
+                let op = rng.Draw(LawKit.genOp nodew idw gen cur)
+                let g = engine op cur
+                let expected = expectedOf op cur
+
+                agreement.Check(
+                    (match expected, g with
+                     | Error(Choice1Of2 e), Error e' -> e = e'
+                     | Ok t1, Ok t2 -> t1 = t2
+                     | Error(Choice2Of2 _), Error(IllegalChild _) -> true
+                     | _ -> false),
+                    fun () -> at (sprintf "op %A: expected %A, applyGrammar answered %A" op expected g)
+                )
+
+                dryRun.Check(
+                    Ops.canApplyGrammar allowedChildren canHold nodew idw op cur = Result.map ignore g
+                    && Ops.canApplyAllGrammar allowedChildren canHold nodew idw [ op ] cur = (match g with
+                                                                                              | Ok _ -> Ok()
+                                                                                              | Error e -> Error(0, e)),
+                    fun () -> at (sprintf "a dry run disagrees with applyGrammar on %A" op)
+                )
+
+                match g, expected with
+                | Ok t', _ ->
+                    accepted <- accepted + 1
+                    preservation.Check(legal t', fun () -> at (sprintf "op %A was accepted into an illegal tree" op))
+                    cur <- t'
+                | Error(IllegalChild _ as e), Error(Choice2Of2 result) ->
+                    refused <- refused + 1
+                    expectNamed at result e
+                | _ -> ()
+
+            // the built refusal: the drawn tree's first illegal pair, cut out and grafted back
+            match Ops.illegalChildren allowedChildren nodew drawn with
+            | (p, c) :: _ ->
+                match Ops.apply nodew idw (RemoveNode(nodew.Id c)) drawn with
+                | Ok cut ->
+                    let graft = InsertChild(nodew.Id p, c)
+
+                    match Ops.applyContained canHold nodew idw graft cut with
+                    | Ok result ->
+                        refused <- refused + 1
+
+                        expectNamed
+                            at
+                            result
+                            (Ops.applyGrammar allowedChildren canHold nodew idw graft cut
+                             |> function
+                                 | Error e -> e
+                                 | Ok _ -> Rejected("accepted", "the illegal graft was accepted"))
+                    | Error _ -> ()
+                | Error _ -> ()
+            | [] -> ()
+
+            // the diff: a grammar-legal pair reconstructs; the drawn tree, where illegal, is refused
+            match Diff.toOpsGrammar allowedChildren canHold nodew idw start cur with
+            | Ok ops ->
+                let back = Ops.applyAllGrammar allowedChildren canHold nodew idw ops start
+
+                diffBack.Check(
+                    (match back with
+                     | Ok t -> t = cur
+                     | Error _ -> false),
+                    fun () -> at (sprintf "applyAllGrammar (toOpsGrammar) answered %A" back)
+                )
+            | Error e ->
+                diffBack.Check(false, fun () -> at (sprintf "toOpsGrammar refused a grammar-legal pair: %A" e))
+
+            match Ops.illegalChildren allowedChildren nodew drawn with
+            | (p, c) :: _ ->
+                let answer = Diff.toOpsGrammar allowedChildren canHold nodew idw start drawn
+
+                diffRefuses.Check(
+                    (match Diff.toOpsContained canHold nodew idw start drawn, answer with
+                     | Error e, Error e' -> e = e'
+                     | Ok _, Error(Diff.IllegalChildInTree(child, childKind, parent, parentKind, kinds)) ->
+                         idw.Equals child (nodew.Id c)
+                         && idw.Equals parent (nodew.Id p)
+                         && childKind = nodew.KindTag c
+                         && parentKind = nodew.KindTag p
+                         && kinds = (allowedChildren parentKind |> Option.defaultValue [])
+                     | _ -> false),
+                    fun () -> at (sprintf "toOpsGrammar over an illegal after answered %A" answer)
+                )
+            | [] -> ()
+
+            // arbitration: three one-op proposals against the grammar-legal state
+            let proposals =
+                [ for k in 1..3 ->
+                      { Id = k
+                        Holder = "p" + string k
+                        Ops = [ rng.Draw(LawKit.genOp nodew idw gen cur) ] } ]
+
+            let verdict =
+                Arbitration.arbitrateGrammar allowedChildren canHold nodew idw cur proposals
+
+            let landAll (scripts: SkeletonOp<'Node, 'Id> list list) =
+                scripts
+                |> List.fold
+                    (fun acc ops ->
+                        acc
+                        |> Result.bind (fun t ->
+                            Ops.applyAllGrammar allowedChildren canHold nodew idw ops t
+                            |> Result.mapError (fun (i, e, _) -> i, e)))
+                    (Ok cur)
+
+            let scripts = verdict.Accepted |> List.map (fun p -> p.Ops)
+            let forward = landAll scripts
+            let backward = landAll (List.rev scripts)
+
+            arbitration.Check(
+                (match forward, backward with
+                 | Ok a, Ok b -> a = b && legal a
+                 | _ -> false)
+                && verdict.Rejected
+                   |> List.forall (fun (p, why) ->
+                       match why with
+                       | Inapplicable(i, r) ->
+                           Ops.canApplyAllGrammar allowedChildren canHold nodew idw p.Ops cur = Error(i, r)
+                       | Conflicts _ -> true),
+                fun () -> at (sprintf "arbitrateGrammar: forward %A, backward %A" forward backward)
+            ))
+
+        LawKit.results
+            [ agreement
+              preservation
+              named
+              dryRun
+              diffBack
+              diffRefuses
+              arbitration
+              validator ]
+        @ [ SampleAdequacy.reached
+                "Conformance.containmentLaws"
+                "grammar refusal"
+                seed
+                [ "accepted op", accepted; "IllegalChild", refused ] ]
+
+    /// The reference-integrity laws (Phase 313) — the teeth on `Validator.referenceDefects` /
+    /// `forwardReferences` and their families, the reference-aware engine (`Ops.applyReferenced`) and
+    /// `Ops.footprintReferenced`, at the domain's own `RefWitness`. The defects are checked against
+    /// a naive specification held here (a reference with no declarer; a declaration with no
+    /// referrer; the nodes that reach themselves through "refers to a declaration of"; a declaration
+    /// later in preorder that is not the referrer's descendant), never against the validator's own
+    /// walk. Drawn ops are threaded through the engine:
+    ///
+    ///   - **agreement** — the engine refuses with `applyContained`'s envelope wherever it refuses,
+    ///     and refuses an accepted `RemoveNode` with `StillReferenced` exactly when the tree it would
+    ///     build leaves a surviving node's reference dangling, naming every such node;
+    ///   - **preservation** — an accepted remove leaves no reference dangling that resolved before;
+    ///   - **footprint** — `footprintReferenced` contains `footprint` and reads every reference an
+    ///     inserted subtree or an update payload carries; and, BUILT from the drawn tree wherever a
+    ///     node refers to a declaration its declarer's id names, the update of the referrer and the
+    ///     removal of the declarer interfere on the referenced id — the race `independent` refuses.
+    ///
+    /// `'Node` and `'Id` need equality. Opt-in: it needs the `RefWitness` a domain with references
+    /// declares.
+    let referenceLaws
+        (refw: RefWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let canHold = LawKit.canHoldOf gen
+        let key (i: 'Id) = idw.ToString i
+        let none: string -> string list option = fun _ -> None
+        let nodeKey (n: 'Node) = key (nodew.Id n)
+
+        let exact =
+            LawKit.LawCell
+                "referenceDefects reports exactly the dangling references, the unused declarations and the nodes on a reference cycle"
+
+        let forwardExact =
+            LawKit.LawCell "forwardReferences reports exactly the references declared later in sibling order"
+
+        let families =
+            LawKit.LawCell "referenceIntegrity and referenceOrder report those defects, one coded defect each"
+
+        let agreement =
+            LawKit.LawCell
+                "the reference engine is applyContained then StillReferenced, exactly where an accepted remove leaves a surviving reference dangling"
+
+        let preservation =
+            LawKit.LawCell "an accepted remove leaves no reference dangling that resolved before it"
+
+        let footprintReads =
+            LawKit.LawCell "footprintReferenced contains footprint and reads every reference a script writes"
+
+        let race =
+            LawKit.LawCell(
+                "writing a reference to x and removing x interfere on x (RightWritesLeftReads)",
+                Some "reference arm"
+            )
+
+        let mutable removes = 0
+        let mutable stillReferenced = 0
+        let mutable races = 0
+
+        let dangling (t: 'Node) =
+            let declared =
+                Tree.preorder nodew t |> List.collect refw.DeclsOf |> List.map key |> Set.ofList
+
+            [ for n in Tree.preorder nodew t do
+                  for r in refw.RefsOf n do
+                      if not (declared.Contains(key r)) then
+                          yield nodeKey n, key r ]
+
+        let unused (t: 'Node) =
+            let referenced =
+                Tree.preorder nodew t |> List.collect refw.RefsOf |> List.map key |> Set.ofList
+
+            [ for n in Tree.preorder nodew t do
+                  for d in refw.DeclsOf n do
+                      if not (referenced.Contains(key d)) then
+                          yield nodeKey n, key d ]
+
+        let declarersOf (t: 'Node) (r: 'Id) =
+            Tree.preorder nodew t
+            |> List.filter (fun d -> refw.DeclsOf d |> List.exists (fun x -> key x = key r))
+
+        let onCycle (t: 'Node) =
+            let nodes = Tree.preorder nodew t
+
+            let succ (k: string) =
+                nodes
+                |> List.filter (fun n -> nodeKey n = k)
+                |> List.collect refw.RefsOf
+                |> List.collect (fun r -> declarersOf t r |> List.map nodeKey)
+
+            let reachesSelf (k: string) =
+                let rec go (seen: Set<string>) (frontier: string list) =
+                    match frontier with
+                    | [] -> false
+                    | x :: rest ->
+                        let next = succ x
+
+                        if List.contains k next then
+                            true
+                        else
+                            let fresh = next |> List.filter (fun y -> not (seen.Contains y)) |> List.distinct
+                            go (Set.union seen (Set.ofList fresh)) (rest @ fresh)
+
+                go Set.empty [ k ]
+
+            nodes |> List.map nodeKey |> List.filter reachesSelf |> Set.ofList
+
+        let forwardOf (t: 'Node) =
+            let nodes = Tree.preorder nodew t
+            let index = nodes |> List.mapi (fun i n -> nodeKey n, i) |> Map.ofList
+
+            [ for n in nodes do
+                  let below = Tree.ids nodew n |> List.map key |> Set.ofList
+
+                  for r in refw.RefsOf n do
+                      for d in declarersOf t r do
+                          if index.[nodeKey d] > index.[nodeKey n] && not (below.Contains(nodeKey d)) then
+                              yield nodeKey n, key r, nodeKey d ]
+
+        let checkDefects (at: string -> string) (t: 'Node) =
+            let reported = Validator.referenceDefects refw idw nodew t
+
+            let reportedDangling =
+                reported
+                |> List.choose (function
+                    | Validator.ReferenceDefect.DanglingReference(f, r) -> Some(key f, key r)
+                    | _ -> None)
+
+            let reportedUnused =
+                reported
+                |> List.choose (function
+                    | Validator.ReferenceDefect.UnusedDeclaration(d, x) -> Some(key d, key x)
+                    | _ -> None)
+
+            let cycles =
+                reported
+                |> List.choose (function
+                    | Validator.ReferenceDefect.ReferenceCycle c -> Some(c |> List.map key)
+                    | _ -> None)
+
+            exact.Check(
+                reportedDangling = dangling t
+                && reportedUnused = unused t
+                && List.forall (List.isEmpty >> not) cycles
+                && Set.ofList (List.concat cycles) = onCycle t,
+                fun () -> at (sprintf "referenceDefects answered %A" reported)
+            )
+
+            let forward = Validator.forwardReferences refw idw nodew t
+
+            forwardExact.Check(
+                (forward
+                 |> List.choose (function
+                     | Validator.ReferenceDefect.ForwardReference(f, r, d) -> Some(key f, key r, key d)
+                     | _ -> None)) = forwardOf t
+                && List.length forward = List.length (forwardOf t),
+                fun () -> at (sprintf "forwardReferences answered %A" forward)
+            )
+
+            let integrity = (Validator.referenceIntegrity refw idw).Run nodew t
+            let order = (Validator.referenceOrder refw idw).Run nodew t
+
+            families.Check(
+                List.length integrity = List.length reported
+                && List.length order = List.length forward
+                && order |> List.forall (fun d -> d.Code = Validator.ForwardReferenceCode)
+                && List.forall2
+                    (fun (d: Defect<'Id>) r ->
+                        d.Code = (match r with
+                                  | Validator.ReferenceDefect.DanglingReference _ -> Validator.DanglingReferenceCode
+                                  | Validator.ReferenceDefect.UnusedDeclaration _ -> Validator.UnusedDeclarationCode
+                                  | Validator.ReferenceDefect.ForwardReference _ -> Validator.ForwardReferenceCode
+                                  | Validator.ReferenceDefect.ReferenceCycle _ -> Validator.ReferenceCycleCode))
+                    integrity
+                    reported,
+                fun () -> at "the reference families disagree with the defects they report"
+            )
+
+        // The naive specification of one op, step by step as a batch is threaded: the container-aware
+        // engine decides, and an accepted remove that leaves a surviving node's resolved reference
+        // dangling is `StillReferenced`, naming those nodes in preorder.
+        let rec expectedOf (op: SkeletonOp<'Node, 'Id>) (t: 'Node) : Result<'Node, Rejection<'Id>> =
+            match op with
+            | Batch ops -> ops |> List.fold (fun acc o -> acc |> Result.bind (expectedOf o)) (Ok t)
+            | _ ->
+                match Ops.applyContained canHold nodew idw op t with
+                | Error e -> Error e
+                | Ok t1 ->
+                    match op with
+                    | RemoveNode target ->
+                        let was = Set.ofList (dangling t)
+
+                        let fresh =
+                            dangling t1 |> List.filter (fun pair -> not (was.Contains pair)) |> List.map fst
+
+                        let referrers =
+                            Tree.preorder nodew t
+                            |> List.filter (fun n -> List.contains (nodeKey n) fresh)
+                            |> List.map nodew.Id
+
+                        if List.isEmpty referrers then
+                            Ok t1
+                        else
+                            Error(StillReferenced(target, referrers))
+                    | _ -> Ok t1
+
+        let rec written (op: SkeletonOp<'Node, 'Id>) =
+            match op with
+            | InsertChild(_, node) -> Tree.preorder nodew node |> List.collect refw.RefsOf
+            | UpdateNode node -> refw.RefsOf node
+            | Batch inner -> inner |> List.collect written
+            | _ -> []
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let mutable cur = rng.Draw gen.Tree
+            checkDefects at cur
+
+            for _ in 1..6 do
+                let op = rng.Draw(LawKit.genOp nodew idw gen cur)
+                let g = Ops.applyReferenced refw none canHold nodew idw op cur
+
+                let before = Set.ofList (dangling cur)
+
+                let fp = Ops.footprint nodew idw [ op ]
+                let fr = Ops.footprintReferenced refw nodew idw [ op ]
+
+                footprintReads.Check(
+                    Set.isSubset fp.Reads fr.Reads
+                    && fp.StructureWrites = fr.StructureWrites
+                    && fp.ContentWrites = fr.ContentWrites
+                    && fp.UnknownParentWrites = fr.UnknownParentWrites
+                    && (written op |> List.forall (fun r -> fr.Reads.Contains(key r))),
+                    fun () -> at (sprintf "footprintReferenced of %A is %A against footprint %A" op fr fp)
+                )
+
+                let expected = expectedOf op cur
+
+                agreement.Check(
+                    (g = expected),
+                    fun () -> at (sprintf "op %A: expected %A, applyReferenced answered %A" op expected g)
+                )
+
+                match op, g with
+                | RemoveNode _, Ok t' ->
+                    removes <- removes + 1
+
+                    preservation.Check(
+                        Set.isSubset (Set.ofList (dangling t')) before,
+                        fun () -> at (sprintf "the accepted %A left a resolved reference dangling" op)
+                    )
+                | _, Error(StillReferenced _) -> stillReferenced <- stillReferenced + 1
+                | _ -> ()
+
+                match g with
+                | Ok t' -> cur <- t'
+                | Error _ -> ()
+
+            checkDefects at cur
+
+            // the race, built from the tree: a referrer of a declaration its declarer's id names
+            let candidates =
+                [ for n in Tree.preorder nodew cur do
+                      for r in refw.RefsOf n do
+                          for d in declarersOf cur r do
+                              if nodeKey d = key r && not (idw.Equals (nodew.Id d) (nodew.Id cur)) then
+                                  yield n, r, d ]
+
+            match candidates with
+            | (n, r, d) :: _ ->
+                races <- races + 1
+
+                let a = Ops.footprintReferenced refw nodew idw [ UpdateNode n ]
+                let b = Ops.footprintReferenced refw nodew idw [ RemoveNode(nodew.Id d) ]
+
+                race.Check(
+                    not (Ops.independent a b)
+                    && Ops.interference a b
+                       |> List.exists (function
+                           | Interference.RightWritesLeftReads s -> s.Contains(key r)
+                           | _ -> false),
+                    fun () ->
+                        at (
+                            sprintf "the update of %s and the removal of %s do not interfere on it" (nodeKey n) (key r)
+                        )
+                )
+            | [] -> ())
+
+        LawKit.results [ exact; forwardExact; families; agreement; preservation; footprintReads; race ]
+        @ [ SampleAdequacy.reached
+                "Conformance.referenceLaws"
+                "reference arm"
+                seed
+                [ "accepted remove", removes
+                  "StillReferenced", stillReferenced
+                  "race built", races ] ]

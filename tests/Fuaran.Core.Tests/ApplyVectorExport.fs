@@ -222,6 +222,10 @@ module ApplyVectorExport =
         // Phase 286 — raised only by `Ops.applyContainedKeyed`, which no apply vector runs, so no
         // pinned vector carries it; the projection names it so the match stays total.
         | KeyedPosition(target, holder) -> Canon.typed "keyedPosition" [ "target", JStr target; "holder", JStr holder ]
+        // Phase 313 — raised only by the grammar and reference engines, which no apply vector runs.
+        | IllegalChild(child, _, parent, parentKind, _) ->
+            Canon.typed "illegalChild" [ "child", JStr child; "parent", JStr parent; "parentKind", JStr parentKind ]
+        | StillReferenced(target, _) -> Canon.typed "stillReferenced" [ "target", JStr target ]
 
     // -----------------------------------------------------------------------
     //  the authored cases

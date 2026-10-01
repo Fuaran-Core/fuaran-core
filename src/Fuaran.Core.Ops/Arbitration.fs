@@ -284,3 +284,49 @@ module Arbitration =
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
         arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw) baseTree proposals
+
+    /// `arbitrateContained` under the domain's containment grammar as well (Phase 313):
+    /// applicability is `Ops.canApplyAllGrammar allowedChildren canHold`, so a proposal that would
+    /// leave a child under a parent whose kind may not hold it is `Inapplicable` with the
+    /// `IllegalChild` envelope — naming the legal children — instead of admitted and refused when the
+    /// merged script lands. Independence is `Ops.footprint`'s: every check the grammar adds reads a
+    /// parent the op already reads (an insert's parent, a move's destination) or rewrites a node in
+    /// place, which the pinned unknown-parent clause already serialises, so the accepted scripts stay
+    /// confluent under the grammar engine (`Conformance.containmentLaws`).
+    ///
+    /// It is `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllGrammar allowedChildren canHold
+    /// nodew idw)`; with `allowedChildren = fun _ -> None` it is exactly `arbitrateContained`.
+    let arbitrateGrammar
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        : Arbitration<'Node, 'Id> =
+        arbitrateWith
+            (Ops.footprint nodew idw)
+            (Ops.canApplyAllGrammar allowedChildren canHold nodew idw)
+            baseTree
+            proposals
+
+    /// `arbitrateGrammar` under a `RefWitness` as well (Phase 313): independence is
+    /// `Ops.footprintReferenced`, so a proposal that writes a reference to a node another proposal
+    /// removes conflicts with it and the citation names the referenced id; applicability is
+    /// `Ops.canApplyAllReferenced`, so a proposal whose remove would leave a reference of the BASE
+    /// dangling is `Inapplicable` with `StillReferenced`. It is `arbitrateWith (Ops.footprintReferenced
+    /// refw nodew idw) (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)`.
+    let arbitrateReferenced
+        (refw: RefWitness<'Node, 'Id>)
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        : Arbitration<'Node, 'Id> =
+        arbitrateWith
+            (Ops.footprintReferenced refw nodew idw)
+            (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)
+            baseTree
+            proposals

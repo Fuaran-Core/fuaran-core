@@ -355,6 +355,19 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.containmentLaws",
+      "module": "Conformance",
+      "entry": "containmentLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "1600",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.dagBreakReasonLaws",
       "module": "Conformance",
       "entry": "dagBreakReasonLaws",
@@ -846,6 +859,19 @@
       "refusal": "drawn"
     },
     {
+      "id": "Conformance.referenceLaws",
+      "module": "Conformance",
+      "entry": "referenceLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["RefWitness", "NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "1400",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.registryLaws",
       "module": "Conformance",
       "entry": "registryLaws",
@@ -930,7 +956,7 @@
       "optIn": true,
       "reason": "no-witness-to-certify",
       "discharges": [],
-      "cases": "13",
+      "cases": "14",
       "adequacy": "unconditional",
       "refusal": "none"
     },

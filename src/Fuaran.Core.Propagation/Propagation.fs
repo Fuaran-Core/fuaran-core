@@ -597,3 +597,28 @@ module Propagation =
         (deps: Map<string, Set<string>>)
         : Result<EvalOutcome<'v>, PropagationError> =
         evalForWith (fun resolve _ id -> evalNode resolve id) targets deps
+
+/// The dependency-graph algorithms of `Propagation`, under a name a consumer with NO evaluator finds
+/// them by (Phase 313). A domain checking reference cycles, ordering declarations or inverting a
+/// "refers to" relation needs the topological sort, not change propagation, and looked for a graph
+/// module rather than an evaluation one — so each re-implemented the depth-first search, several
+/// without a visited set. These are `Propagation`'s functions, not copies: one Tarjan pass, one
+/// definition of a cycle (a strongly-connected group of more than one id, or a self-reference), and
+/// cycles reported as DATA, never as a divergence (GP4). Linear in ids plus edges. String-keyed, as
+/// `Propagation` is: a map from each id to the ids it depends on.
+[<RequireQualifiedAccess>]
+module Graph =
+
+    /// `Propagation.TopoResult`: `Order` dependencies-first, `Cycles` each circular group.
+    type TopoResult = Propagation.TopoResult
+
+    /// `Propagation.sort` — the dependencies-first order of `deps` and its cycles. An edge to an id
+    /// the map does not hold is ignored for ordering (a dangling edge is not a cycle).
+    let sort (deps: Map<string, Set<string>>) : TopoResult = Propagation.sort deps
+
+    /// `Propagation.cycleThrough` — the cycle group containing `target`, if any.
+    let cycleThrough (target: string) (deps: Map<string, Set<string>>) : string list option =
+        Propagation.cycleThrough target deps
+
+    /// `Propagation.dependents` — the inverted map: each id to the ids that depend on it.
+    let dependents (deps: Map<string, Set<string>>) : Map<string, Set<string>> = Propagation.dependents deps

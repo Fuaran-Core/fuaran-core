@@ -63,7 +63,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 (D66) and whose own generated census lists them; every family here ships from
 `Fuaran.Core.Conformance`.
 
-75 families, across `Conformance`, `FoldConfluence`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
+77 families, across `Conformance`, `FoldConfluence`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -94,6 +94,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.concurrencyLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `guarded-reached` | `none` |
 | `Conformance.constructThenEncodeLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 12 | `unconditional` | `none` |
 | `Conformance.containerLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 600 | `guarded-reached` | `built` |
+| `Conformance.containmentLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1600 | `guarded-reached` | `drawn` |
 | `Conformance.dagBreakReasonLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 480 | `unconditional` | `built` |
 | `Conformance.dagLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 900 | `unconditional` | `drawn-miss-is-red` |
 | `Conformance.deferredLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
@@ -132,13 +133,14 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.reconcileLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1500 | `guarded-reached` | `drawn` |
 | `Conformance.reconcileLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1500 | `guarded-reached` | `drawn` |
 | `Conformance.reducer` | `Fuaran.Core.Conformance` | base run | — | `StreamGen` | — | 400 | `guarded-reached` | `drawn` |
+| `Conformance.referenceLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `RefWitness`, `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `drawn` |
 | `Conformance.registryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
 | `Conformance.snapshotLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.snapshotLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | — | 600 | `guarded-reached` | `drawn` |
 | `Conformance.verifyHonestyLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 400 | `unconditional` | `drawn-miss-is-red` |
 | `Conformance.witnessLaws` | `Fuaran.Core.Conformance` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 500 | `unconditional` | `none` |
-| `Conformance.witnessSurfaceLaws` | `Fuaran.Core.Conformance` | opt-in | `no-witness-to-certify` | — | — | 13 | `unconditional` | `none` |
+| `Conformance.witnessSurfaceLaws` | `Fuaran.Core.Conformance` | opt-in | `no-witness-to-certify` | — | — | 14 | `unconditional` | `none` |
 | `FoldConfluence.laneFoldLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
 | `FoldConfluence.laneFoldLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
 | `WireNullTolerance.laws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 15 | `unconditional` | `built` |

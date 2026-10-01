@@ -60,6 +60,20 @@ type Rejection<'Id> =
     /// see the node and answer `UnknownNode`, as they always have. Declared LAST so every existing
     /// case keeps its tag.
     | KeyedPosition of target: 'Id * holder: 'Id
+    /// An insert, move or in-place rewrite that would leave `child` (of kind `childKind`) under
+    /// `parent` (of kind `parentKind`) where the domain's containment grammar does not let that kind
+    /// hold it (Phase 313). `legal` is what the grammar lets `parentKind` hold — the repair the
+    /// envelope enumerates, as `UnknownNode` enumerates the addressable ids; `[]` when the grammar
+    /// lets it hold nothing. Only the grammar forms (`Ops.applyGrammar`, `Ops.applyReferenced` and
+    /// their dry runs) raise this, and always after every check the container-aware engine makes,
+    /// so no operation it refuses changes class. Declared after `KeyedPosition` so every existing
+    /// case keeps its tag.
+    | IllegalChild of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
+    /// A `RemoveNode` that would destroy a declaration other nodes still reference (Phase 313):
+    /// `target`'s subtree declares an id no node outside it declares, and `referrers` — in preorder —
+    /// are the nodes outside it that reference one. Only the reference-aware forms
+    /// (`Ops.applyReferenced` and its dry runs) raise this, after every other check. Declared last.
+    | StillReferenced of target: 'Id * referrers: 'Id list
 
 /// The skeleton edit ops shared by every domain — five structural, and since Phase 250 one
 /// generic in-place content edit (`UpdateNode`). Finer per-kind property edits (`SetInput`,
@@ -186,7 +200,8 @@ module Rejection =
 
     /// The stable code of a rejection — one per class, camel-case, and for the skeleton classes the
     /// `$type` the canonical encoder writes: `unknownNode`, `duplicateId`, `cannotRemoveRoot`,
-    /// `wouldNestUnderSelf`, `notAContainer`, `reorderMismatch`, `keyedPosition`. Two answers differ
+    /// `wouldNestUnderSelf`, `notAContainer`, `reorderMismatch`, `keyedPosition` — and since Phase 313
+    /// `illegalChild` and `stillReferenced`. Two answers differ
     /// from the case tag. `reorderOnLeaf` is a `ReorderMismatch` whose parent holds no children
     /// (`expected = []`): nothing to reorder, rather than a wrong permutation, so a caller need not
     /// pre-check the leaf to tell them apart. And a domain's `Rejected` answers its OWN code verbatim
@@ -203,6 +218,8 @@ module Rejection =
         | ReorderMismatch _ -> "reorderMismatch"
         | Rejected(code, _) -> code
         | KeyedPosition _ -> "keyedPosition"
+        | IllegalChild _ -> "illegalChild"
+        | StillReferenced _ -> "stillReferenced"
 
     /// The rejection as guidance an agent can act on: a message naming the failure in the domain's
     /// `nouns`, and the alternatives the envelope enumerates — the addressable ids of an
@@ -244,6 +261,24 @@ module Rejection =
                 + q holder
                 + "; vacating or relocating it is a domain edit"
               Alternatives = [] }
+        | IllegalChild(child, childKind, parent, parentKind, legal) ->
+            { Message =
+                q child
+                + " ("
+                + childKind
+                + ") cannot sit under "
+                + q parent
+                + " ("
+                + parentKind
+                + ")"
+              Alternatives = legal }
+        | StillReferenced(target, referrers) ->
+            { Message =
+                q target
+                + " declares what other "
+                + nouns.Node
+                + "s still reference; remove or retarget the references first"
+              Alternatives = referrers |> List.map idText }
 
 /// The footprint builders (Phase 315) — the address shapes `Ops.footprint` folds a skeleton op into,
 /// public so a domain whose op vocabulary is NOT `SkeletonOp` lowers its own ops into the same
@@ -305,6 +340,35 @@ module Footprint =
           StructureWrites = Set.singleton newParent
           ContentWrites = Set.singleton id
           UnknownParentWrites = Set.singleton id }
+
+    /// Ids a script READS and writes nothing at (Phase 313) — the references an op writes into a
+    /// node. Writing a reference to `x` depends on `x` existing, so the reference is a read of `x`,
+    /// and a concurrent script that destroys `x` then fails `independent` with it
+    /// (`Interference.RightWritesLeftReads`). A domain op that edits a node's references is
+    /// `union (contentEdit id) (reading referenced)`: `contentEdit` alone carries no unknown-parent
+    /// write, so without the read such an op is independent of the removal of the node it now
+    /// references, and the two merge into a dangling reference. `Ops.footprintReferenced` adds the
+    /// same reads to the skeleton ops' footprint.
+    let reading (ids: string list) : Footprint = { empty with Reads = Set.ofList ids }
+
+/// A domain's REFERENCES (Phase 313): which ids a node refers to, and which ids it declares for
+/// others to refer to — the cross-node links a calculation, a feature tree, a set of defined terms or
+/// a cross-referenced document carries beside its containment. A witness of its own for the reason
+/// `KeyedWitness` is (Phase 189): the engine never rebuilds through it, it only reads it.
+///
+/// - `RefsOf` — the ids this node refers to, in the domain's own order. `[]` for a node that refers
+///   to nothing.
+/// - `DeclsOf` — the ids this node declares as reference targets. A node that is itself the target
+///   declares its own id (`fun n -> [ w.Id n ]` for a domain where every node is referable); a
+///   domain whose names are not node ids declares the names.
+///
+/// A reference RESOLVES when some node of the tree declares its id. What Core does with the witness:
+/// `Validator.referenceIntegrity` reports the dangling, unused, forward and cyclic references;
+/// `Ops.footprintReferenced` reads every id a script writes a reference to; and the reference-aware
+/// engine (`Ops.applyReferenced`) refuses a `RemoveNode` that would leave a reference dangling.
+type RefWitness<'Node, 'Id> =
+    { RefsOf: 'Node -> 'Id list
+      DeclsOf: 'Node -> 'Id list }
 
 /// The generic apply engine over the skeleton ops. Total: every failure is a typed
 /// `Rejection` envelope. Generic over the `NodeWitness` / `IdWitness` — no domain
@@ -1569,6 +1633,351 @@ module Ops =
 
         go [] (w.Children root |> List.map (fun c -> w.Id root, c))
 
+    // ---- the containment grammar and the reference witness (Phase 313) ----
+    // `canHold` is unary and child-blind by design (Phase 161): it answers whether a node can hold
+    // children AT ALL. A grammar answers which: for a parent's kind tag, the kind tags it may hold
+    // (`None` = any). The grammar is DATA the domain declares, never a kind Core knows (DECISIONS,
+    // Phase 313), and every surface that reads it — the engine below, `Diff.toOpsGrammar`,
+    // `Arbitration.arbitrateGrammar`, `Validator.containment`, `Conformance.containmentLaws` — reads
+    // it through `isLegalChild`, so they share ONE definition of a legal child.
+    //
+    // The grammar and reference forms WRAP the container-aware engine rather than widening it: each
+    // non-batch step is first decided exactly as `applyContained` decides it, and the new clauses run
+    // only on a step it accepted, against the tree before and after it. So no operation the engine
+    // refuses changes class (the D38 ordering, at the level of a whole engine), and a `Batch` stays
+    // all-or-nothing because it is threaded step by step through the same wrapper.
+
+    /// Is a node of kind `childKind` a legal child of a node of kind `parentKind` under
+    /// `allowedChildren` (Phase 313)? `None` for the parent's kind admits every child; `Some legal`
+    /// admits exactly the kinds `legal` lists (ordinal comparison of the kind tags). The one
+    /// definition every grammar-reading surface uses.
+    let isLegalChild (allowedChildren: string -> string list option) (parentKind: string) (childKind: string) : bool =
+        match allowedChildren parentKind with
+        | None -> true
+        | Some legal -> List.contains childKind legal
+
+    /// Every parent→child pair of `node`'s subtree whose child the grammar does not let its parent
+    /// hold (Phase 313), parents in preorder and each parent's children in order. Empty exactly when
+    /// the subtree keeps the grammar. Walks `Children` — the structural surface the engine edits.
+    let illegalChildren
+        (allowedChildren: string -> string list option)
+        (w: NodeWitness<'Node, 'Id>)
+        (node: 'Node)
+        : ('Node * 'Node) list =
+        Tree.preorder w node
+        |> List.collect (fun p ->
+            let pk = w.KindTag p
+
+            w.Children p
+            |> List.filter (fun c -> not (isLegalChild allowedChildren pk (w.KindTag c)))
+            |> List.map (fun c -> p, c))
+
+    /// The `IllegalChild` envelope for `child` under `parent`, enumerating what the grammar lets the
+    /// parent's kind hold.
+    let private illegalChild
+        (allowedChildren: string -> string list option)
+        (w: NodeWitness<'Node, 'Id>)
+        (parent: 'Node)
+        (child: 'Node)
+        : Rejection<'Id> =
+        let pk = w.KindTag parent
+        IllegalChild(w.Id child, w.KindTag child, w.Id parent, pk, allowedChildren pk |> Option.defaultValue [])
+
+    /// The grammar clause of one accepted non-batch step: the parent→child pairs the step CREATES,
+    /// checked in a fixed order. An insert creates its node under the parent, then every pair inside
+    /// the graft (preorder); a move creates the moved node under its new parent — the pairs inside
+    /// the moved subtree already stood in the tree, and refusing the move for them would be an
+    /// invariant-repair gate rather than a check of the move (D38's reasoning for `NotAContainer`);
+    /// an in-place rewrite can change the node's kind, so it creates the node under its parent and
+    /// each of its kept children under it. Removes and reorders create none.
+    let private grammarRefusal
+        (allowedChildren: string -> string list option)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Rejection<'Id> option =
+        let legal (parent: 'Node) (child: 'Node) =
+            isLegalChild allowedChildren (w.KindTag parent) (w.KindTag child)
+
+        match op with
+        | InsertChild(parent, node) ->
+            match Tree.tryFind w idw parent before with
+            | Some p when not (legal p node) -> Some(illegalChild allowedChildren w p node)
+            | _ ->
+                illegalChildren allowedChildren w node
+                |> List.tryHead
+                |> Option.map (fun (p, c) -> illegalChild allowedChildren w p c)
+        | MoveNode(target, newParent) ->
+            match Tree.tryFind w idw newParent before, Tree.tryFind w idw target before with
+            | Some np, Some t when not (legal np t) -> Some(illegalChild allowedChildren w np t)
+            | _ -> None
+        | UpdateNode node ->
+            let target = w.Id node
+
+            match Tree.tryFind w idw target after with
+            | None -> None
+            | Some rewritten ->
+                match Tree.parentOf w idw target after with
+                | Some p when not (legal p rewritten) -> Some(illegalChild allowedChildren w p rewritten)
+                | _ ->
+                    w.Children rewritten
+                    |> List.tryFind (fun c -> not (legal rewritten c))
+                    |> Option.map (illegalChild allowedChildren w rewritten)
+        | RemoveNode _
+        | ReorderChildren _
+        | Batch _ -> None
+
+    /// The reference clause of one accepted non-batch step: a `RemoveNode` whose subtree declares an
+    /// id no node outside it declares, while a node outside it refers to that id, is
+    /// `StillReferenced`, naming every such referrer in preorder. A reference that already dangled
+    /// before the remove is not the remove's doing and is not reported.
+    let private referenceRefusal
+        (refw: RefWitness<'Node, 'Id>)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (before: 'Node)
+        : Rejection<'Id> option =
+        match op with
+        | RemoveNode target ->
+            match Tree.subtree w idw target before with
+            | None -> None
+            | Some sub ->
+                let key (i: 'Id) = idw.ToString i
+                let removed = Tree.ids w sub |> List.map key |> Set.ofList
+
+                let outside =
+                    Tree.preorder w before
+                    |> List.filter (fun n -> not (removed.Contains(key (w.Id n))))
+
+                let keptDecls = outside |> List.collect refw.DeclsOf |> List.map key |> Set.ofList
+
+                let orphaned =
+                    Tree.preorder w sub
+                    |> List.collect refw.DeclsOf
+                    |> List.map key
+                    |> Set.ofList
+                    |> fun d -> Set.difference d keptDecls
+
+                if Set.isEmpty orphaned then
+                    None
+                else
+                    match
+                        outside
+                        |> List.filter (fun n -> refw.RefsOf n |> List.exists (fun r -> orphaned.Contains(key r)))
+                    with
+                    | [] -> None
+                    | referrers -> Some(StillReferenced(target, referrers |> List.map w.Id))
+        | _ -> None
+
+    /// The wrapped engine: `applyContained` decides each non-batch step, and `check` — handed the
+    /// step, the tree before it and the tree after it — runs only on a step it accepted. A `Batch` is
+    /// threaded through this same function, all-or-nothing, exactly as the engine threads one.
+    let rec private applyChecked
+        (check: SkeletonOp<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<'Node, Rejection<'Id>> =
+        match op with
+        | Batch ops ->
+            let rec go node =
+                function
+                | [] -> Ok node
+                | o :: rest ->
+                    match applyChecked check canHold w idw o node with
+                    | Ok node' -> go node' rest
+                    | Error e -> Error e
+
+            go root ops
+        | _ ->
+            match applyContained canHold w idw op root with
+            | Error e -> Error e
+            | Ok after ->
+                match check op root after with
+                | Some r -> Error r
+                | None -> Ok after
+
+    /// The sequence form of `applyChecked`: first refusal wins, `applyAllWith`'s triple.
+    let private applyAllChecked
+        (check: SkeletonOp<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        let rec go i node =
+            function
+            | [] -> Ok node
+            | o :: rest ->
+                match applyChecked check canHold w idw o node with
+                | Ok node' -> go (i + 1) node' rest
+                | Error e -> Error(i, e, node)
+
+        go 0 root ops
+
+    let private grammarCheck allowedChildren (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) =
+        fun op before after -> grammarRefusal allowedChildren w idw op before after
+
+    let private referenceCheck
+        (refw: RefWitness<'Node, 'Id>)
+        allowedChildren
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        =
+        fun op before after ->
+            match grammarRefusal allowedChildren w idw op before after with
+            | Some r -> Some r
+            | None -> referenceRefusal refw w idw op before
+
+    /// Grammar-aware apply (Phase 313) — `applyContained` with the domain's containment grammar
+    /// beside `canHold`. Every step the container-aware engine refuses is refused with the same
+    /// envelope; a step it accepts is then refused with `IllegalChild` when it would leave a child
+    /// under a parent whose kind `allowedChildren` does not let hold it (see the section head for
+    /// which pairs each op creates). For a tree that keeps the grammar, every tree this returns keeps
+    /// it — `Conformance.containmentLaws`, and `grammar_preserves` in `proofs/Preservation.fst`.
+    /// With `allowedChildren = fun _ -> None` it answers exactly what `applyContained` answers.
+    let applyGrammar
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<'Node, Rejection<'Id>> =
+        applyChecked (grammarCheck allowedChildren w idw) canHold w idw op root
+
+    /// The dry run of `applyGrammar`: its exact envelope, and no tree returned. The grammar clause
+    /// reads the step's result, so unlike `canApplyContained` this builds the edited tree.
+    let canApplyGrammar
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<unit, Rejection<'Id>> =
+        applyGrammar allowedChildren canHold w idw op root |> Result.map ignore
+
+    /// The sequence form of `applyGrammar` — `applyAllWith`'s contract (first refusal wins; the
+    /// failing index, the envelope and the tree the accepted prefix reached) under the grammar.
+    let applyAllGrammar
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        applyAllChecked (grammarCheck allowedChildren w idw) canHold w idw ops root
+
+    /// The dry run of `applyAllGrammar`, in `canApplyAllWith`'s shape — the `canApply` a domain with
+    /// a grammar hands `Arbitration.arbitrateWith` (`Arbitration.arbitrateGrammar` is that
+    /// composition).
+    let canApplyAllGrammar
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<unit, int * Rejection<'Id>> =
+        match applyAllGrammar allowedChildren canHold w idw ops root with
+        | Ok _ -> Ok()
+        | Error(i, e, _) -> Error(i, e)
+
+    /// Reference-aware apply (Phase 313) — `applyGrammar` under a `RefWitness` as well: a
+    /// `RemoveNode` it accepts is then refused with `StillReferenced` when the removed subtree
+    /// declares an id that no surviving node declares and a surviving node refers to. So an accepted
+    /// op never leaves dangling a reference that resolved before it. A reference an INSERT or an
+    /// in-place rewrite brings in is not refused here: whether it resolves is
+    /// `Validator.referenceIntegrity`'s report, because a document under construction legitimately
+    /// refers ahead of what it has declared. Pass `fun _ -> None` for a domain with no grammar.
+    let applyReferenced
+        (refw: RefWitness<'Node, 'Id>)
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<'Node, Rejection<'Id>> =
+        applyChecked (referenceCheck refw allowedChildren w idw) canHold w idw op root
+
+    /// The dry run of `applyReferenced`.
+    let canApplyReferenced
+        (refw: RefWitness<'Node, 'Id>)
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (op: SkeletonOp<'Node, 'Id>)
+        (root: 'Node)
+        : Result<unit, Rejection<'Id>> =
+        applyReferenced refw allowedChildren canHold w idw op root |> Result.map ignore
+
+    /// The sequence form of `applyReferenced`, `applyAllWith`'s contract.
+    let applyAllReferenced
+        (refw: RefWitness<'Node, 'Id>)
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        applyAllChecked (referenceCheck refw allowedChildren w idw) canHold w idw ops root
+
+    /// The dry run of `applyAllReferenced`, in `canApplyAllWith`'s shape.
+    let canApplyAllReferenced
+        (refw: RefWitness<'Node, 'Id>)
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<unit, int * Rejection<'Id>> =
+        match applyAllReferenced refw allowedChildren canHold w idw ops root with
+        | Ok _ -> Ok()
+        | Error(i, e, _) -> Error(i, e)
+
+    /// `footprint` under a `RefWitness` (Phase 313): every id the script writes a reference to is
+    /// READ — the references every node of an inserted subtree carries, and those of an `UpdateNode`
+    /// payload — so a script that writes a reference to `x` fails `independent` against a script that
+    /// destroys `x`, by `Interference.RightWritesLeftReads` / `LeftWritesRightReads` naming `x`.
+    /// Every other address is `footprint`'s, so this only ever ADDS collisions: it is as sound as
+    /// `footprint` is, and `independent` over it is never more permissive.
+    ///
+    /// Among the skeleton ops alone the remove-versus-reference race was already serialised, by the
+    /// pinned unknown-parent clause (a remove collides with every structural write, an update is one).
+    /// What this adds is the collision NAMED for the reference, and the same read for a domain op that
+    /// writes a reference and no structure (`Footprint.reading`), where no other clause catches it.
+    /// The read meets a removal's content-write when the declared id IS the declaring node's id; a
+    /// domain declaring names that are not node ids folds the names a removal destroys into its own
+    /// removal footprint.
+    let footprintReferenced
+        (refw: RefWitness<'Node, 'Id>)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint =
+        let rec written (op: SkeletonOp<'Node, 'Id>) : 'Id list =
+            match op with
+            | InsertChild(_, node) -> Tree.preorder w node |> List.collect refw.RefsOf
+            | UpdateNode node -> refw.RefsOf node
+            | Batch inner -> inner |> List.collect written
+            | RemoveNode _
+            | MoveNode _
+            | ReorderChildren _ -> []
+
+        Footprint.union (footprint w idw ops) (Footprint.reading (ops |> List.collect written |> List.map idw.ToString))
+
 /// Where a node is to sit among its destination's children (Phase 312) — stated by naming a
 /// sibling or an end, or by an index. Placement is OVER the existing ops: `InsertChild` and
 /// `MoveNode` append and `ReorderChildren` states order by id (Phase 95), and `TreePlacement`
@@ -1811,6 +2220,12 @@ module Diff =
         /// the operator's ruling (B) of 2026-09-20; positional construction and matching are
         /// unaffected.)
         | TargetNotAContainer of target: 'Id * kindTag: string
+        /// (Grammar-aware diff, Phase 313) the `after` tree places `child` (of kind `childKind`)
+        /// under `parent` (of kind `parentKind`) where the domain's containment grammar does not let
+        /// that kind hold it, so no grammar-legal script reaches it. The pair is the first
+        /// `Ops.illegalChildren` reports over `after`, and the payload is `Rejection.IllegalChild`'s,
+        /// `legal` enumerating what the grammar lets `parentKind` hold. Declared last.
+        | IllegalChildInTree of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
 
     /// Derive a script such that `Ops.applyAll (toOps w idw before after) before`
     /// reproduces `after` structurally. Relocated subtrees diff to `MoveNode` (never
@@ -1977,3 +2392,30 @@ module Diff =
         match Ops.firstUncontained canHold w after with
         | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
         | None -> toOps w idw before after
+
+    /// Grammar-aware diff (Phase 313) — `toOpsContained` with the domain's containment grammar
+    /// beside `canHold`. Every refusal `toOpsContained` makes is made first and unchanged; then an
+    /// `after` that holds a child its parent's kind may not hold is refused with
+    /// `IllegalChildInTree`, naming the first such pair (`Ops.illegalChildren`). Otherwise the
+    /// script is `toOpsContained`'s, and every parent→child pair it creates is one the final tree
+    /// holds — a shell is inserted under its `after` parent and never moved, a survivor is moved
+    /// once, to its `after` parent — so for a `before` that keeps the grammar, `Ops.applyAllGrammar`
+    /// accepts the script wherever the tree it builds keeps it (`Conformance.containmentLaws`).
+    /// Structural only, as `toOps` is: a survivor keeps `before`'s content, kind included.
+    let toOpsGrammar
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        match toOpsContained canHold w idw before after with
+        | Error e -> Error e
+        | Ok ops ->
+            match Ops.illegalChildren allowedChildren w after with
+            | (p, c) :: _ ->
+                let pk = w.KindTag p
+
+                Error(IllegalChildInTree(w.Id c, w.KindTag c, w.Id p, pk, allowedChildren pk |> Option.defaultValue []))
+            | [] -> Ok ops

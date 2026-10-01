@@ -361,10 +361,10 @@ host in the same change-set — whatever the caller count in this repository say
 
 ## Witness-record field freeze (the 1.0 contract)
 
-The twelve public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
-`AiSurfaceWitness`, `ProjectionWitness`, and since Phase 330 the six conformance-kit inputs
+The thirteen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
+`AiSurfaceWitness`, `ProjectionWitness`, since Phase 330 the six conformance-kit inputs
 `CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
-`KeyedWitness`, `EvaluatorWitness`) are
+`KeyedWitness`, `EvaluatorWitness`, and since Phase 313 `RefWitness`, frozen at birth) are
 **plain records**: adding a field is a compile-break for *every* adopter's construction site, with no
 gradual-migration path. At `1.0` their field sets **freeze**. (The freeze originally named only the
 four base records; `AiSurfaceWitness` and `ProjectionWitness` are equally public, equally
@@ -3066,6 +3066,64 @@ discharge to `footprintLawsAt` changes that row and is left to a change that own
 **Class: additive.** `api/Fuaran.Core.Conformance.txt` gains two members
 (`Conformance.footprintLawsAt`, `FoldConfluence.laneDag`); no existing member moves, and no wire byte.
 The roster gains one family, and `docs/conformance-families.md` / `.json` are regenerated.
+
+### A structural-integrity strand: a containment grammar and a reference witness (Phase 313, DECISIONS.md D96) — BREAKING (source): `union-widening` of `Rejection` and `Diff.DiffError`; the rest `additive`
+
+**What changed.** Core's containment was unary (`canHold`, child-blind by design) and its references
+were nobody's. Two strands, beside what was there:
+
+- **The grammar.** `allowedChildren : string -> string list option` — a parent's kind tag to the kind
+  tags it may hold, `None` meaning any — is handed beside `canHold` to `Ops.applyGrammar`,
+  `canApplyGrammar`, `applyAllGrammar`, `canApplyAllGrammar`, `Diff.toOpsGrammar` and
+  `Arbitration.arbitrateGrammar`. Each is the container-aware form it sits beside, then the grammar:
+  a step `applyContained` refuses is refused with the same envelope, and a step it accepts is refused
+  with **`Rejection.IllegalChild(child, childKind, parent, parentKind, legal)`** when it would leave a
+  child under a parent whose kind may not hold it — `legal` enumerating what that kind may hold.
+  `Ops.isLegalChild` is the one definition and `Ops.illegalChildren` the whole-tree reading;
+  `Validator.containment` reports the same pairs over a tree that arrived whole (`TREE-ILLEGALCHILD`).
+  The diff refuses an `after` holding an illegal pair with **`Diff.IllegalChildInTree`**, after every
+  `toOpsContained` refusal.
+- **References.** `RefWitness<'Node, 'Id> = { RefsOf; DeclsOf }` (frozen at birth, beside the twelve).
+  `Validator.referenceDefects` answers `Validator.ReferenceDefect` — `DanglingReference`,
+  `UnusedDeclaration`, `ReferenceCycle` (through `Propagation.sort`) — and `forwardReferences` the
+  opt-in `ForwardReference`; `referenceIntegrity` (`REF-DANGLING`, `REF-UNUSED` warning, `REF-CYCLE`)
+  and `referenceOrder` (`REF-FORWARD`) are their rule families. `Ops.applyReferenced` (with its dry run
+  and sequence forms) is `applyGrammar` that also refuses a `RemoveNode` leaving a resolved reference
+  dangling — **`Rejection.StillReferenced(target, referrers)`**. `Ops.footprintReferenced` reads every
+  id a script writes a reference to, `Footprint.reading` is the builder for a domain op that does, and
+  `Arbitration.arbitrateReferenced` composes the pair.
+- **`Graph`** (in `Fuaran.Core.Propagation`): `sort`, `cycleThrough`, `dependents` and `TopoResult`,
+  `Propagation`'s own, under the name a consumer with no evaluator looks for.
+- **Kit:** `Conformance.containmentLaws` (opt-in, `SeamNotEveryDomainHas`) and
+  `Conformance.referenceLaws` (opt-in, `NeedsWitnessCapability`), both guarded, both checked against a
+  naive specification rather than the code under test.
+
+**What breaks.** An exhaustive `match` over `Rejection` adds `IllegalChild` and `StillReferenced`; one
+over `Diff.DiffError` adds `IllegalChildInTree`. All three are declared last, so every existing tag
+keeps its number, and only the new forms raise them. `RejectionCodec` encodes them as `illegalChild`
+and `stillReferenced`; `Rejection.code` answers the same words. `Fuaran.Core.Validator` now references
+`Fuaran.Core.Propagation` (and through it `Fuaran.Core.Ops`). No existing member changes behaviour.
+
+**What a consumer does.** A domain with a grammar declares it once and executes through
+`applyGrammar` / `applyAllGrammar`, deletes its own parent-kind table check and refusal, and runs
+`containmentLaws` at its grammar. A domain with references supplies a `RefWitness`, registers
+`referenceIntegrity` (and `referenceOrder` if it defines before it uses), executes through
+`applyReferenced` where a dangling reference must be refused at the remove, footprints its own
+reference-writing ops with `Footprint.reading`, and runs `referenceLaws`. A cycle checker with no
+visited set becomes one `Graph.sort`.
+
+**The ladder.** `proofs/Preservation.fst` section 13 models the grammar engine over its result and
+proves `grammar_preserves` (an accepted op keeps every parent's children legal, batches included),
+`grammar_refines` (it accepts only what the container engine accepts, with the same tree, so section
+8.5's invariant holds of it too — `grammar_preserves_contained`) and `grammar_trivial` (no grammar is
+the container engine). The shipped engine reads only the pairs a step creates; that it agrees with the
+model from a grammatical tree is `containmentLaws`' agreement law, tested, not proved. Nothing new is
+extracted.
+
+**Class: breaking (source)** — the three union widenings; every other member is additive. The slot was
+already breaking (source). `api/Fuaran.Core.Ops.txt`, `.Validator.txt`, `.Propagation.txt` and
+`.Conformance.txt` are regenerated; the roster gains two families and `docs/conformance-families.md` /
+`.json` are regenerated. No wire byte moves.
 
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
