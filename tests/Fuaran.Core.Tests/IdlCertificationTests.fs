@@ -874,6 +874,185 @@ let sanitisationFloor =
 
               Expect.equal (Map.toList filtered) [ "data-ok", "fine" ] "only the safe data- entry survives") ]
 
+// ---------------------------------------------------------------------------
+// Phase 291 — the floor is total, and the URL floor is the UI floor's.
+//
+// Every case here states its EXPECTED OUTPUT as a literal rather than comparing the
+// scrub with itself, because a literal is the one oracle two pipelines can share: a
+// pipeline that lowercased the string and took its indices from the copy (U+0130 is
+// one unit in .NET's `ToLowerInvariant` and two in a JavaScript `toLowerCase`) would
+// replace the wrong characters, and only the exact bytes show it.
+// ---------------------------------------------------------------------------
+
+/// U+0130, built by code point so the corpus does not depend on this file's encoding.
+let private dotI = string (char 0x0130)
+
+/// Run `f` and require it to finish: a sanitiser that does not terminate on hostile
+/// input has failed whatever it would have returned. The bound is generous (a correct
+/// run is microseconds); it exists so a regression fails this test rather than hanging
+/// the suite.
+let private terminates (label: string) (f: unit -> 'a) : 'a =
+    let task = System.Threading.Tasks.Task.Run(fun () -> f ())
+
+    if not (task.Wait(TimeSpan.FromSeconds 20.0)) then
+        failtestf "%s did not terminate within 20s" label
+
+    task.Result
+
+let private containsScheme (scheme: string) (s: string) : bool =
+    s.ToLowerInvariant().Contains(scheme + ":")
+
+[<Tests>]
+let sanitisationTotality =
+    testList
+        "Phase 291 — the sanitisation floor is total and case-insensitive on the original string"
+        [ testCase "İ runs of 1, 3, 11 and 12 before a scheme, with and without a tail, are replaced exactly" (fun _ ->
+              for scheme in [ "javascript"; "vbscript" ] do
+                  for n in [ 1; 3; 11; 12 ] do
+                      let run = String.replicate n dotI
+
+                      for tail in [ ""; "alert(1)" ] do
+                          let label = sprintf "%s after %d x U+0130, tail %A" scheme n tail
+
+                          let plain =
+                              terminates label (fun () -> Sanitize.scrubMarkdown (run + scheme + ":" + tail))
+
+                          Expect.equal plain (run + "about:blank" + tail) (label + ": exact bytes")
+                          Expect.isFalse (containsScheme scheme plain) (label + ": scheme absent")
+
+                          let inHref =
+                              terminates (label + " in href") (fun () ->
+                                  Sanitize.scrubMarkdown ("<a href=\"" + run + scheme + ":" + tail + "\">x</a>"))
+
+                          Expect.equal
+                              inHref
+                              ("<a href=\"" + run + "about:blank" + tail + "\">x</a>")
+                              (label + " in href: exact bytes")
+
+                          Expect.isFalse (containsScheme scheme inHref) (label + " in href: scheme absent"))
+
+          testCase "case is folded on the original string: every spelling of the scheme is replaced" (fun _ ->
+              Expect.equal (Sanitize.scrubMarkdown "JAVASCRIPT:x") "about:blankx" "upper"
+              Expect.equal (Sanitize.scrubMarkdown "JaVaScRiPt:x") "about:blankx" "mixed"
+              Expect.equal (Sanitize.scrubMarkdown "VbScRiPt:x") "about:blankx" "vbscript mixed"
+
+              Expect.equal
+                  (Sanitize.scrubMarkdown "a javascript:1 b JAVASCRIPT:2 c")
+                  "a about:blank1 b about:blank2 c"
+                  "several occurrences, one cursor"
+
+              // The cursor advances past a replacement, so the resurrection guard of Phase 96
+              // must still hold: `about:blank` interposed between the halves cannot rebuild it.
+              let spliced = Sanitize.scrubMarkdown "javascjavascript:ript:alert(1)"
+              Expect.isFalse (containsScheme "javascript" spliced) "no scheme reconstructed from the halves"
+
+              Expect.isFalse
+                  (containsScheme "vbscript" (Sanitize.scrubMarkdown "vbscvbscript:ript:x"))
+                  "same for vbscript:")
+
+          testCase "a lone surrogate before a scheme is neither a bypass nor a loop" (fun _ ->
+              for lone in [ string (char 0xD800); string (char 0xDC00); string (char 0xDBFF) ] do
+                  for scheme in [ "javascript"; "vbscript" ] do
+                      let label = sprintf "%s after lone surrogate %04X" scheme (int lone[0])
+
+                      let plain =
+                          terminates label (fun () -> Sanitize.scrubMarkdown (lone + scheme + ":x"))
+
+                      Expect.equal plain (lone + "about:blankx") (label + ": exact bytes")
+
+                      let doubled =
+                          terminates (label + " doubled") (fun () ->
+                              Sanitize.scrubMarkdown (lone + lone + dotI + scheme + ":" + lone))
+
+                      Expect.equal
+                          doubled
+                          (lone + lone + dotI + "about:blank" + lone)
+                          (label + " doubled: exact bytes"))
+
+          testCase "the handler and element scans take no index from a lowered copy" (fun _ ->
+              for n in [ 1; 3; 12 ] do
+                  let run = String.replicate n dotI
+
+                  Expect.equal
+                      (terminates "handler after İ run" (fun () ->
+                          Sanitize.scrubMarkdown ("<a title=\"" + run + "\" onclick=\"alert(1)\">x</a>")))
+                      ("<a title=\"" + run + "\">x</a>")
+                      (sprintf "handler after %d x U+0130: exact bytes" n)
+
+                  Expect.equal
+                      (terminates "element after İ run" (fun () ->
+                          Sanitize.scrubMarkdown (run + "<SCRIPT>alert(1)</SCRIPT>after")))
+                      (run + "after")
+                      (sprintf "element after %d x U+0130: exact bytes" n)
+
+                  Expect.equal
+                      (terminates "mixed after İ run" (fun () ->
+                          Sanitize.scrubMarkdown (
+                              "<a title=\"" + run + "\" ONCLICK=\"x\" href=\"" + run + "JAVASCRIPT:y\">z</a>"
+                          )))
+                      ("<a title=\"" + run + "\" href=\"" + run + "about:blanky\">z</a>")
+                      (sprintf "handler and scheme after %d x U+0130: exact bytes" n)) ]
+
+/// One clause of the URL floor, as the UI floor's `normalizeUrlForFloor` and
+/// `isProtocolRelative` hold it: the input, and the sanitised URL or `None` for a refusal.
+let private urlFloorClauses: (string * string * string option) list =
+    [
+      // The four protocol-relative spellings: a browser reads `\` as `/` and takes the rest
+      // as an authority.
+      "slash slash", "//evil.example/x", None
+      "slash backslash", "/\\evil.example/x", None
+      "backslash backslash", "\\\\evil.example/x", None
+      "backslash slash", "\\/evil.example/x", None
+      // Normalisation first: leading C0 and space are removed, then TAB / LF / CR anywhere,
+      // so a pair hidden behind either is still the pair.
+      "tab between the slashes", "/\t/evil.example", None
+      "LF between the slashes", "/\n/evil.example", None
+      "CR between the slashes", "/\r/evil.example", None
+      "leading control before the pair", "\u0001//evil.example", None
+      "leading NUL before the pair", "\u0000//evil.example", None
+      "leading space and tab before the pair", " \t//evil.example", None
+      "mixed pair behind controls", "\u001F\\\t/evil.example", None
+      "trailing controls are removed too", "//evil.example\u0001\u0002", None
+      // What stays allowed, because the browser reads it as a same-origin path.
+      "a single leading backslash", "\\evil.example", Some "\\evil.example"
+      "a plain absolute path", "/about", Some "/about"
+      "a relative path", "about/us", Some "about/us"
+      "interior VT is kept, not stripped", "/\u000B/host/x", Some "/\u000B/host/x"
+      "interior FF is kept, not stripped", "/\u000C/host/x", Some "/\u000C/host/x"
+      "interior tab inside a path is removed", "/a\tb", Some "/ab"
+      "edge controls are removed", "\u0001 /about \u0002", Some "/about"
+      "empty", "", Some ""
+      "only controls", "\u0001\u0002 \t", Some ""
+      // Scheme clauses the two floors already shared; kept so the table is the whole floor.
+      "javascript behind a tab", "java\tscript:alert(1)", None
+      "javascript behind a leading control", "\u0001javascript:alert(1)", None
+      "vbscript", "vbscript:x", None
+      "file", "file:///etc/passwd", None
+      "unknown scheme", "data:text/html,x", None
+      "https", "https://example.com/a?b#c", Some "https://example.com/a?b#c"
+      "mailto", "mailto:a@b.example", Some "mailto:a@b.example"
+      "https behind a leading control", "\u0001https://example.com", Some "https://example.com" ]
+
+[<Tests>]
+let urlFloorParity =
+    testList
+        "Phase 291 — the URL floor holds every clause the UI floor holds"
+        [ testCase
+              "each clause: the pair spellings are refused, a path is kept, the scheme floor is unchanged"
+              (fun _ ->
+                  for name, input, expected in urlFloorClauses do
+                      Expect.equal (Sanitize.sanitizeUrl input) expected name)
+
+          testCase "a refusal reaches the codegen boundary as the deny sentinel" (fun _ ->
+              for name, input, expected in urlFloorClauses do
+                  let blank = Sanitize.sanitizeUrlOrBlank input
+
+                  match expected with
+                  | None -> Expect.equal blank "about:blank" name
+                  | Some accepted -> Expect.equal blank accepted name)
+
+          testCase "a null URL is refused" (fun _ -> Expect.equal (Sanitize.sanitizeUrl null) None "null") ]
+
 /// `Trust.harden`, unwrapped — Phase 180 widened its return to
 /// `Result<_, CodegenError>` because the hardener now refuses an undeclared policy
 /// rather than gating nothing through it. Every case below hardens `refIdl`, which

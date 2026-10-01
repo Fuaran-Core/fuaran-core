@@ -53,6 +53,37 @@ module Sanitize =
 
     let private trimAndLower (s: string) : string = s.Trim().ToLowerInvariant()
 
+    /// ASCII case fold of ONE UTF-16 unit: `A`-`Z` to `a`-`z`, everything else unchanged.
+    ///
+    /// Deliberately not `Char.ToLowerInvariant` and not a lowered copy of the string
+    /// (Phase 291). Under Fable a string lowercase is `toLowerCase()`, which is not
+    /// length-preserving (U+0130 becomes two units), so an index taken from a lowered
+    /// copy and applied to the original lands on the wrong characters, one position per
+    /// such character. Every token this module scans for (an element name, `on`, a URL
+    /// scheme) is ASCII and a browser compares each of them ASCII case-insensitively, so
+    /// the per-unit ASCII fold is the whole of what a scan needs, and it is the same
+    /// function on both pipelines: no index ever comes from a string of another length.
+    let private foldAscii (c: char) : char =
+        if c >= 'A' && c <= 'Z' then char (int c + 32) else c
+
+    /// The first index at or after `start` where `needle` occurs in `hay`, comparing each
+    /// unit of `hay` through `foldAscii`, or `-1`. `needle` MUST already be lower-case
+    /// ASCII (every caller passes a literal). The index is into `hay` itself.
+    let private indexOfFolded (hay: string) (needle: string) (start: int) : int =
+        let last = hay.Length - needle.Length
+        let mutable i = if start < 0 then 0 else start
+        let mutable found = -1
+
+        while found < 0 && i <= last do
+            let mutable k = 0
+
+            while k < needle.Length && foldAscii hay[i + k] = needle[k] do
+                k <- k + 1
+
+            if k = needle.Length then found <- i else i <- i + 1
+
+        found
+
     /// Split a URL into `(schemeOpt, url)`. A URL with no `:` before the first
     /// `/ ? #` (relative path, fragment, empty) has no scheme. Whitespace + C0
     /// controls are stripped from the scheme candidate so `java\tscript:` etc.
@@ -82,27 +113,61 @@ module Sanitize =
                 let cleaned = raw |> Seq.filter (fun ch -> int ch > 0x20) |> Seq.toArray |> String
                 Some(trimAndLower cleaned)
 
+    /// The WHATWG URL Standard's own pre-parse normalisation, ASCII-exact, in this order:
+    /// (1) remove leading and trailing C0-or-space (ALL of U+0000-U+0020, not merely the
+    /// whitespace subset); (2) remove every U+0009 / U+000A / U+000D from what remains.
+    ///
+    /// Deliberately NOT `String.Trim()`: a native trim answers a different question on each
+    /// host and removes non-ASCII whitespace the parser keeps, and the floor's purpose is
+    /// that a value vetted on one host is safe on another. Step 2 is those three code
+    /// points ONLY: U+000B / U+000C are removed at the edges and KEPT in the interior, so
+    /// `/<VT>/host/x` is an ordinary same-origin path and stays one. Mirrors the UI
+    /// module's `normalizeUrlForFloor` clause for clause (Phase 291).
+    let private normalizeUrlForFloor (s: string) : string =
+        if isNull s then
+            ""
+        else
+            let mutable lo = 0
+            let mutable hi = s.Length - 1
+
+            while lo <= hi && s[lo] <= ' ' do
+                lo <- lo + 1
+
+            while hi >= lo && s[hi] <= ' ' do
+                hi <- hi - 1
+
+            s.Substring(lo, hi - lo + 1)
+            |> Seq.filter (fun c -> c <> '\t' && c <> '\n' && c <> '\r')
+            |> Seq.toArray
+            |> String
+
+    /// `true` when a schemeless URL starts with two units drawn from `/` and `\`, in any
+    /// mix. All four spellings (`//h`, `/\h`, `\\h`, `\/h`) resolve off-origin, because a
+    /// browser reads `\` as `/` and then takes what follows as an AUTHORITY. A SINGLE
+    /// leading backslash reads as `/`, an ordinary same-origin path, and is allowed.
+    let private isProtocolRelative (url: string) : bool =
+        let slashish (c: char) = c = '/' || c = '\\'
+        url.Length >= 2 && slashish url[0] && slashish url[1]
+
     /// The sanitised URL, or `None` when the scheme is rejected / unknown /
-    /// protocol-relative. Default-deny: an unknown scheme is refused.
+    /// protocol-relative. Default-deny: an unknown scheme is refused. The returned URL is
+    /// the normalised one (`normalizeUrlForFloor`), as the UI floor's is.
     let sanitizeUrl (url: string) : string option =
         if isNull url then
             None
         else
-            let trimmed = url.Trim()
+            let normalised = normalizeUrlForFloor url
 
-            if trimmed = "" then
-                Some trimmed
-            elif
-                (extractScheme trimmed).IsNone
-                && (trimmed.StartsWith "//" || trimmed.StartsWith "/\\")
-            then
-                // Protocol-relative (`//host`) resolves off-origin — reject.
-                None
+            if normalised = "" then
+                Some normalised
             else
-                match extractScheme trimmed with
-                | None -> Some trimmed
+                match extractScheme normalised with
+                | None when isProtocolRelative normalised ->
+                    // Protocol-relative (`//host`, in any `/` `\` mix) resolves off-origin.
+                    None
+                | None -> Some normalised
                 | Some scheme when rejectedUrlSchemes.Contains scheme -> None
-                | Some scheme when allowedUrlSchemes.Contains scheme -> Some trimmed
+                | Some scheme when allowedUrlSchemes.Contains scheme -> Some normalised
                 | Some _ -> None
 
     /// The URL if accepted, else the deny sentinel `"about:blank"`.
@@ -183,17 +248,18 @@ module Sanitize =
                 [ "script"; "iframe"; "object"; "embed"; "form"; "link"; "meta" ]
 
             for tag in dangerousElements do
+                // `tag` is lower-case ASCII, so both tags are valid `indexOfFolded` needles.
                 let openTag = "<" + tag
                 let closeTag = "</" + tag + ">"
                 let mutable keepGoing = true
 
                 while keepGoing do
-                    let i = result.IndexOf(openTag, StringComparison.OrdinalIgnoreCase)
+                    let i = indexOfFolded result openTag 0
 
                     if i < 0 then
                         keepGoing <- false
                     else
-                        let j = result.IndexOf(closeTag, i, StringComparison.OrdinalIgnoreCase)
+                        let j = indexOfFolded result closeTag i
 
                         if j >= 0 then
                             result <- result.Remove(i, j + closeTag.Length - i)
@@ -221,13 +287,14 @@ module Sanitize =
                 let mutable keepGoing = true
 
                 while keepGoing do
-                    let lower = s.ToLowerInvariant()
+                    // Scanned on `s` itself, folding per unit (`foldAscii`), so every index
+                    // below is an index into the string it is applied to (Phase 291).
                     let mutable found = -1
                     let mutable i = 0
                     let mutable insideTag = false
 
-                    while i < lower.Length - 3 && found < 0 do
-                        let ch = lower[i]
+                    while i < s.Length - 3 && found < 0 do
+                        let ch = s[i]
 
                         if ch = '<' then
                             insideTag <- true
@@ -236,9 +303,9 @@ module Sanitize =
                         elif
                             insideTag
                             && (ch = ' ' || ch = '\t' || ch = '\n')
-                            && lower[i + 1] = 'o'
-                            && lower[i + 2] = 'n'
-                            && Char.IsLetter lower[i + 3]
+                            && foldAscii s[i + 1] = 'o'
+                            && foldAscii s[i + 2] = 'n'
+                            && Char.IsLetter s[i + 3]
                         then
                             found <- i
 
@@ -287,14 +354,21 @@ module Sanitize =
             // pattern, so replacement both terminates and cannot resurrect.
             for proto in [ "javascript:"; "vbscript:" ] do
                 let mutable keepGoing = true
+                // The cursor advances past every replacement, so the loop is bounded by the
+                // string's length however the input is shaped. Resuming at the cursor loses
+                // nothing: `about:blank` holds neither a `j` nor a `v`, so no match can begin
+                // inside it, and none can end inside it either (the only `:` in it comes
+                // after `about`, which is not the tail of either scheme).
+                let mutable searchFrom = 0
 
                 while keepGoing do
-                    let i = result.ToLowerInvariant().IndexOf(proto, StringComparison.Ordinal)
+                    let i = indexOfFolded result proto searchFrom
 
                     if i < 0 then
                         keepGoing <- false
                     else
                         // `about:blank` keeps the surrounding attribute structurally valid.
                         result <- result.Substring(0, i) + "about:blank" + result.Substring(i + proto.Length)
+                        searchFrom <- i + "about:blank".Length
 
             result
