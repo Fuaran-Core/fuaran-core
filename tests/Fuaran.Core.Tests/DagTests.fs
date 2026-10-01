@@ -320,8 +320,8 @@ let tests =
 
               Expect.equal
                   (List.length results)
-                  7
-                  "verifyDag + determinism + tamper + JSONL round-trip + the three Phase 296 refusals"
+                  9
+                  "verifyDag + determinism + tamper + JSONL round-trip + the three Phase 296 refusals + the two Phase 329 verified-append laws"
 
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "dag laws pass"
 
@@ -494,3 +494,166 @@ let refusalTests =
                   "field parents is not an array of strings"
 
               refused (good + "\n\n" + good.Replace("\"kind\":\"inc\"", "\"kind\":\"bogus\"")) "unknown op kind: bogus" ]
+
+// ---- Phase 329 — the verified append: the parent is replayed and a handed-in state that is not its
+// state is refused ----
+
+[<Tests>]
+let verifiedTests =
+    let x = Human "x"
+
+    // genesis g (5); fork heads a = g+3 (8) and b = g+4 (9); the merge m of (a, b) with Inc 0 (12).
+    let g, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+    let a, d2 = Dag.append h sw x (Inc 3) g d1 |> Reference.built
+    let b, d3 = Dag.append h sw x (Inc 4) g d2 |> Reference.built
+    let m, d4 = Dag.merge h sw x (Inc 0) a b d3 |> Reference.built
+
+    let checkedAs r =
+        r |> Result.mapError Dag.VerifiedAppendRejection.Checked
+
+    testList
+        "Dag verified append (Phase 329)"
+        [ testCase "handed the parent's own state, the verified forms answer exactly as the checked forms"
+          <| fun _ ->
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 1) 8 a d4)
+                  (Dag.appendChecked h sw x (Inc 1) 8 a d4 |> checkedAs)
+                  "an append onto a fork head"
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Dec 9) 8 a d4)
+                  (Error(Dag.VerifiedAppendRejection.Checked(DagAppendRejection.Domain "would go negative")))
+                  "the domain's rejection at a verified state is the checked form's, verbatim"
+
+              // the merge's parents replay to 5 + 3 + 4, without the merge op
+              match Dag.mergeVerified h sw 0 x (Inc 0) 12 a b d3 with
+              | Ok(12, id, d) as verified ->
+                  Expect.equal verified (Dag.mergeChecked h sw x (Inc 0) 12 a b d3 |> checkedAs) "the checked merge"
+                  Expect.equal id m "the same merge node"
+                  Expect.equal (Dag.tryReplayTo sw 0 d id) (Ok 12) "whose own replay is the state returned"
+              | other -> failtestf "expected the verified merge, got %A" other
+
+          testCase "the genesis parent replays to the initial state itself"
+          <| fun _ ->
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 5) 0 "" Dag.empty)
+                  (Dag.appendChecked h sw x (Inc 5) 0 "" Dag.empty |> checkedAs)
+                  "a genesis append handed the initial state"
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 5) 3 "" d4)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(3, 0)))
+                  "a genesis append handed any other state"
+
+          testCase "forking from an older node while holding the latest head's state is refused, both states named"
+          <| fun _ ->
+              // At the merge's 12, Dec 7 applies; at g's own 5 it does not — the checked form admits
+              // an op that never applied at that point in the graph.
+              Expect.isOk (Dag.appendChecked h sw x (Dec 7) 12 g d4) "the checked form admits it"
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Dec 7) 12 g d4)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(12, 5)))
+                  "the verified form refuses the pairing"
+
+          testCase "appending to one head while holding another's is refused, both states named"
+          <| fun _ ->
+              // At b's own 9, Dec 9 applies; at a's 8 it does not — the checked form refuses a valid op.
+              Expect.equal
+                  (Dag.appendChecked h sw x (Dec 9) 8 b d3)
+                  (Error(DagAppendRejection.Domain "would go negative"))
+                  "the checked form refuses a valid op"
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Dec 9) 8 b d3)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(8, 9)))
+                  "the verified form names the mis-pairing instead"
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 1) 9 a d3)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 8)))
+                  "and the other way round"
+
+          testCase "passing one side's state after a merge is refused, both states named"
+          <| fun _ ->
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 1) 8 m d4)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(8, 12)))
+                  "an append onto the merge holding a's state"
+
+              Expect.equal
+                  (Dag.mergeVerified h sw 0 x (Inc 0) 9 a b d3)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 12)))
+                  "a merge handed b's state alone"
+
+          testCase "a parent whose replay is itself refused surfaces the replay fault"
+          <| fun _ ->
+              // The plain append does not apply the op (D83), so a rejecting node can be built — one
+              // that rejects wherever it drains, since no state in this DAG reaches 20.
+              let bad, e1 = Dag.append h sw x (Dec 20) g d4 |> Reference.built
+
+              let fault = Dag.ReplayFault.Rejected(bad, "would go negative")
+
+              Expect.equal (Dag.tryReplayTo sw 0 e1 bad) (Error fault) "the parent does not replay"
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 1) 0 bad e1)
+                  (Error(Dag.VerifiedAppendRejection.ParentReplay fault))
+                  "an append onto it"
+
+              Expect.equal
+                  (Dag.mergeVerified h sw 0 x (Inc 0) 0 m bad e1)
+                  (Error(Dag.VerifiedAppendRejection.ParentReplay fault))
+                  "a merge with it"
+
+              let node id parent : DagNode<CounterOp> =
+                  { Id = id
+                    Parents = [ parent ]
+                    Actor = x
+                    Op = Inc 1 }
+
+              let cyclic: Dag.T<CounterOp> =
+                  { Nodes = Map.ofList [ "p", node "p" "q"; "q", node "q" "p" ] }
+
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 1) 0 "p" cyclic)
+                  (Error(Dag.VerifiedAppendRejection.ParentReplay(Dag.ReplayFault.CyclicHistory "p")))
+                  "a cyclic history"
+
+          testCase "the graph refusals are judged before anything is replayed"
+          <| fun _ ->
+              Expect.equal
+                  (Dag.appendVerified h sw 0 x (Inc 1) 0 "nope" d4)
+                  (Error(
+                      Dag.VerifiedAppendRejection.Checked(DagAppendRejection.Fault(DagAppendFault.UnknownParent "nope"))
+                  ))
+                  "an unknown parent"
+
+              Expect.equal
+                  (Dag.mergeVerified h sw 0 x (Inc 0) 0 "" a d4)
+                  (Error(Dag.VerifiedAppendRejection.Checked(DagAppendRejection.Fault DagAppendFault.EmptyParentId)))
+                  "the genesis marker as a merge parent"
+
+          testCase "the …With forms take the caller's equality; one that skips the comparison verifies nothing"
+          <| fun _ ->
+              let skips = fun (_: int) (_: int) -> true
+
+              Expect.equal
+                  (Dag.appendVerifiedWith skips h sw 0 x (Dec 7) 12 g d4)
+                  (Dag.appendChecked h sw x (Dec 7) 12 g d4 |> checkedAs)
+                  "a comparison that always agrees is the checked form, mis-pairing and all"
+
+              Expect.equal
+                  (Dag.mergeVerifiedWith skips h sw 0 x (Inc 0) 9 a b d3)
+                  (Dag.mergeChecked h sw x (Inc 0) 9 a b d3 |> checkedAs)
+                  "for a merge too"
+
+              // a coarser domain equality: states agreeing on parity are one state to this caller
+              let parity = fun (p: int) (q: int) -> p % 2 = q % 2
+
+              Expect.isOk (Dag.appendVerifiedWith parity h sw 0 x (Inc 1) 10 a d4) "10 and 8 agree on parity"
+
+              Expect.equal
+                  (Dag.appendVerifiedWith parity h sw 0 x (Inc 1) 9 a d4)
+                  (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 8)))
+                  "9 and 8 do not" ]

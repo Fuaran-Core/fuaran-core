@@ -1,5 +1,64 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D87: the verified append is the call-site check D83 left to the caller — an ordinary function a caller chooses, not a debug build, and it pays one replay per call
+
+**Recorded by Phase 329. `Fuaran.Core.OpStream.Dag`, `Fuaran.Core.Conformance`; additive, riding the
+`0.33.0` draft (STABILITY.md, "The DAG's checked append gains a verifying variant").**
+
+*What D83 left to the caller.* D83 declined to make `Dag.append` apply the op, because a DAG holds no
+state, and shipped `appendChecked` / `mergeChecked` taking the parent's state from the caller — exactly
+as `OpStream.append` takes the stream's. The one assumption that leaves unverified is the PAIRING of
+that state with the parent named. On a linear stream there is one place to append, so the caller's
+state can only be stale; on a DAG the parent is chosen per call, so a caller can hand over the state of
+a DIFFERENT node — fork from an older node while holding the latest head's state, append to one head
+while holding another's, pass one side's state after a merge. The op is then judged at a state that
+never existed at that point in the graph: a rejected op is admitted, or a valid one refused. The
+reconcile and replay refusals recompute state from history and catch a wrongly admitted op later, on
+whatever machine reconciles; nothing caught it where it was made.
+
+*The ruling.* `Dag.appendVerified` and `Dag.mergeVerified` replay the named parent's ancestor closure
+from a caller-supplied initial state — the genesis parent `""` replays to that state itself; a merge
+replays the union of both parents' closures, without the merge op — compare the result with the
+handed-in state, and refuse a difference with `StateMismatch`, carrying both states. The refusals are
+ordered: the graph refusals first (nothing is replayed for a parent the DAG does not hold), then a
+parent whose replay fails (`ParentReplay`, the fault `tryReplayTo` names), then the mismatch;
+otherwise the answer is exactly the checked form's. The merge's union is drained in the order
+`tryReplayTo` folds the merge node's own closure in, so an accepted merge returns that node's replay.
+It claims nothing order-free: D80's refuted premise stands, and the verified merge agrees with
+`tryReplayTo` by construction rather than with every interleaving of the branches. `tryReplayTo` is
+now that union replay at one root — the same fold, shared rather than written twice.
+
+*An ordinary function, not conditional compilation.* The variant was asked for as a debug aid, and it
+ships as a public function a caller chooses in its tests and its own debug builds. Core packages ship
+one build; a `#if DEBUG` path would exist for no consumer.
+
+*Equality is supplied, not derived.* `StreamWitness` carries `Apply`, `Encode` and `Decode` — an
+encoder of OPS, none of states — so the comparison comes from the state's type (`appendVerified`,
+`mergeVerified`, constrained `'State : equality`) or from the caller (`appendVerifiedWith`,
+`mergeVerifiedWith`), for a state with no structural equality or one whose structural equality is
+finer than the domain's. D78's rule names the form: `…With` is the same function with a parameter
+injected. The comparison comes FIRST, as the stream's `…With` members take their `StreamConfig`; D78's
+"last before `seed`" is the position for a law family, and these have no seed.
+
+*A new union, not a case.* `Dag.VerifiedAppendRejection<'State, 'Rej>` wraps `DagAppendRejection`
+(`Checked`) beside `ParentReplay` and `StateMismatch`, so no existing union gains a case and every
+exhaustive match over the checked forms' refusal still compiles. It is nested in `Dag` because it
+carries `Dag.ReplayFault`.
+
+*The cost, which is why it is a variant.* One replay of the parent's closure per call — what
+`tryReplayTo` costs at that parent, linear in the closure plus the drain's ordering. A DAG of n nodes
+built through the verified forms costs a replay per node, quadratic overall, which is the cost D83
+declined to put on every append. The checked forms stay the production path.
+
+*The law.* `dagLaws` gains two cells. On every drawn append (onto genesis and each of the four built
+nodes) and the drawn merge (of the two fork heads), the verified form answers exactly as the checked
+form when handed the parent's replayed state; handed another node's state — a fork's sibling, an older
+node holding a later state, the merge holding one side's, the merge handed either head's — it refuses
+with `StateMismatch` naming both. The refusal arm is reached only where two nodes' states differ, so it
+is a strict cell: a generator whose nodes never differ in state starves it and the family reds as
+never reached, which is the kit's rule (D78) rather than a new one. Run against a verifier whose
+comparison was skipped, the family went red on exactly that cell.
+
 ## 2026-10-01 — D86: the algebra's remaining symmetries are built (`Schema.patch`, the pull, an index carried through an edit), and five omissions are recorded as deliberate so they are not filed again
 
 **Recorded by Phase 317. Riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`, "The remaining

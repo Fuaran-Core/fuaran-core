@@ -241,6 +241,18 @@ module internal StreamLaws =
 
         let rejectedOp =
             LawKit.LawCell "appendChecked refuses exactly the ops the witness rejects"
+        // Phase 329 — the verified forms, on every drawn append (onto genesis and each of the four
+        // nodes) and merge (of the two fork heads): handed the parent's replayed state they answer
+        // exactly as the checked forms (and a parent whose replay fails surfaces the replay fault);
+        // handed ANOTHER node's state — a fork's sibling, an older node holding a later state, the
+        // merge holding one side's, a merge handed either head's — they refuse with `StateMismatch`
+        // naming both. The refusal arm is reached only where the two states differ, so a generator
+        // whose nodes never differ in state starves it, and the strict cell reds as never reached.
+        let verifiedAgrees =
+            LawKit.LawCell "appendVerified / mergeVerified answer as the checked forms at the parent's replayed state"
+
+        let verifiedRefuses =
+            LawKit.LawCell "appendVerified / mergeVerified refuse another node's state with StateMismatch"
         // The tamper arm runs only when the fresh draw differs from the op it replaces — a
         // generator that keeps drawing the same op never tampers, and `tamper` then reports "never
         // reached" rather than green (Phase 302). A census-visible guard naming the starved arm is
@@ -253,7 +265,7 @@ module internal StreamLaws =
             let opB = rng.Draw gen.Op
             let opM = rng.Draw gen.Op
 
-            let _, _, _, m, dag = LawKit.randomDag hashFn sw false op0 opA opB opM
+            let g, a, b, m, dag = LawKit.randomDag hashFn sw false op0 opA opB opM
 
             verify.Check(Dag.verifyDag hashFn sw dag, fun () -> at "verifyDag rejected an intact DAG")
 
@@ -324,9 +336,118 @@ module internal StreamLaws =
                                     checkedAppend
                             )
                     )
-            | Error _ -> ())
+            | Error _ -> ()
 
-        LawKit.results [ verify; determinism; tamper; roundtrip; unknownHead; collision; rejectedOp ]
+            // Phase 329 — the verified forms. Drawn after every arm above, so a recorded seed still
+            // reproduces the sample those arms saw.
+            let s0 = gen.State0
+            let verifier = Human "verifier"
+            let probe = rng.Draw gen.Op
+
+            let replayOf (p: string) =
+                if p = "" then Ok s0 else Dag.tryReplayTo sw s0 dag p
+
+            // The merge's parents' union closure, without the merge op, in the drain order
+            // `tryReplayTo` folds a merge node's closure in: `g`, then the fork heads smallest id
+            // first (one head, where the two coincide). Computed here rather than read off the
+            // implementation, so the law checks the order the verified merge replays in.
+            let unionOfHeads =
+                g :: (List.distinct [ a; b ] |> List.sort)
+                |> List.fold
+                    (fun acc id ->
+                        acc
+                        |> Result.bind (fun st ->
+                            sw.Apply dag.Nodes.[id].Op st
+                            |> Result.mapError (fun e -> Dag.ReplayFault.Rejected(id, e))))
+                    (Ok s0)
+
+            let agrees
+                (what: string)
+                (replayed: Result<'State, Dag.ReplayFault<'Rej>>)
+                (verified: 'State -> Result<'State * string * Dag.T<'Op>, Dag.VerifiedAppendRejection<'State, 'Rej>>)
+                (checkedForm: 'State -> Result<'State * string * Dag.T<'Op>, DagAppendRejection<'Rej>>)
+                =
+                match replayed with
+                | Error fault ->
+                    // any handed state: the parent's replay fault is surfaced before it is compared
+                    match verified s0 with
+                    | Error(Dag.VerifiedAppendRejection.ParentReplay f) when f = fault -> verifiedAgrees.Saw()
+                    | other ->
+                        verifiedAgrees.Check(
+                            false,
+                            fun () ->
+                                at (sprintf "%s: the parent replays to %A, the verified form gave %A" what fault other)
+                        )
+                | Ok st ->
+                    let v = verified st
+
+                    let c = checkedForm st |> Result.mapError Dag.VerifiedAppendRejection.Checked
+
+                    verifiedAgrees.Check(
+                        (v = c),
+                        fun () -> at (sprintf "%s at the replayed state: verified %A, checked %A" what v c)
+                    )
+
+            let refuses
+                (what: string)
+                (handed: Result<'State, Dag.ReplayFault<'Rej>>)
+                (replayed: Result<'State, Dag.ReplayFault<'Rej>>)
+                (verified: 'State -> Result<'State * string * Dag.T<'Op>, Dag.VerifiedAppendRejection<'State, 'Rej>>)
+                =
+                match handed, replayed with
+                | Ok sh, Ok sr when sh <> sr ->
+                    match verified sh with
+                    | Error(Dag.VerifiedAppendRejection.StateMismatch(h', r')) when h' = sh && r' = sr ->
+                        verifiedRefuses.Saw()
+                    | other ->
+                        verifiedRefuses.Check(
+                            false,
+                            fun () ->
+                                at (sprintf "%s (%A, the parent's is %A): the verified form gave %A" what sh sr other)
+                        )
+                | _ -> ()
+
+            let appendOnto p =
+                fun st -> Dag.appendVerified hashFn sw s0 verifier probe st p dag
+
+            for p in [ ""; g; a; b; m ] do
+                agrees
+                    (sprintf "an append onto %s" (if p = "" then "genesis" else p))
+                    (replayOf p)
+                    (appendOnto p)
+                    (fun st -> Dag.appendChecked hashFn sw verifier probe st p dag)
+
+            agrees
+                "a merge of the fork heads"
+                unionOfHeads
+                (fun st -> Dag.mergeVerified hashFn sw s0 verifier probe st a b dag)
+                (fun st -> Dag.mergeChecked hashFn sw verifier probe st a b dag)
+
+            refuses "an append onto a fork head holding its sibling's state" (replayOf b) (replayOf a) (appendOnto a)
+            refuses "an append onto a fork head holding its sibling's state" (replayOf a) (replayOf b) (appendOnto b)
+
+            refuses
+                "an append onto the genesis node holding the latest head's state"
+                (replayOf m)
+                (replayOf g)
+                (appendOnto g)
+
+            refuses "an append onto the merge holding one side's state" (replayOf a) (replayOf m) (appendOnto m)
+
+            for side in [ a; b ] do
+                refuses "a merge handed one head's state" (replayOf side) unionOfHeads (fun st ->
+                    Dag.mergeVerified hashFn sw s0 verifier probe st a b dag))
+
+        LawKit.results
+            [ verify
+              determinism
+              tamper
+              roundtrip
+              unknownHead
+              collision
+              rejectedOp
+              verifiedAgrees
+              verifiedRefuses ]
 
     /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a

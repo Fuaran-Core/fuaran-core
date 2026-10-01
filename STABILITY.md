@@ -3509,6 +3509,47 @@ appending in a loop should collect and call `appendMany`.
 **Rollback.** Pin `0.32.0`. Nothing persisted moves: every hash, pre-image and line byte is the
 same, and a store `0.33.0` refuses is one `0.32.0` was misreading.
 
+### The light set: the small exports consumers copied (Phase 315, DECISIONS.md "the light set") — `additive`, with three BREAKING items beside it: a case payload (`Rejection.WouldNestUnderSelf`, breaking-source), a type that moves package (`RejectionGuidance`, AiSurface → Ops, source-compatible), and refusals of input that was accepted (an empty actor id on read; `ColumnValidator.unique` reading decimals by value)
+
+**Additive.** `OpStream.sha256Hash` (the named SHA-256 `HashFn`, byte-for-byte `Hash.sha256Hex (prev +
+"|" + payload)`); `Hash.fnv1a32` (the raw value `fnv1a` renders); `OpStream.chainHashOf` and
+`OpStream.appendChainOnly` (the record hash, and an append with no state and no apply); the
+`Footprint` builders `empty` / `union` / `contentEdit` / `insertUnder` / `removeNode` / `moveTo`;
+`Rejection.code` / `Rejection.explain` with `RejectionNouns`, and `RejectionCodec.encode` / `render` in
+AiSurface; `NestRelation`; `FloatLayout` public (`finite`, `roundTrip`); `Cell.token` / `Cell.compare`;
+`Validator.Pack` / `PackCheck` / `PackFinding` / `citation` / `runPack`; `ActorInvalid` with
+`Actor.validate` / `Actor.human` / `Actor.agent`. The guard classes `Column`, `Tree`, `Validator` and
+`Wire` as `additive`. No emitted byte moves: the chain hash, the apply vectors, the law vectors and
+every committed parity row are unchanged, and the parity table gains `sha256Hash/*`, `fnv1a32/*`,
+`floatLayout/*`, `cellToken/*` and `cellCompare/*` rows, appended.
+
+**BREAKING — `Rejection.WouldNestUnderSelf of target * relation: NestRelation`** (the guard's `retype`
+on `Ops`). The case carried the target alone, so a move under itself and a move into its own subtree
+were one refusal; the relation is now a field. A pattern `WouldNestUnderSelf id` no longer compiles:
+write `WouldNestUnderSelf(id, _)`, or match the relation. `WouldNestUnderSelf _` compiles unchanged, and
+the class every host and vector names is unchanged.
+
+**BREAKING (binary only) — `RejectionGuidance` is declared in `Fuaran.Core.Ops`** (the guard's
+`removal` on `AiSurface`). Same namespace, same fields: a source that names it compiles unchanged; an
+assembly compiled against the old location rebuilds.
+
+**BREAKING (behaviour) — an empty actor id is refused on read.** `OpStream.fromJsonl` (and the readers
+built on it, `Dag.fromJsonl` included) refuse an actor whose `id` is empty with
+`JsonlFaultReason.ActorInvalid(member, ActorInvalid.EmptyId)` — the guard's `union-widening` on
+`OpStream`, the new reason being declared last. A store holding such a record is no longer read; the
+legacy bare-string reader (`fromJsonlLegacyActor`) is unchanged. The `Human` / `Agent` cases still
+construct anything — validate at the boundary with `Actor.validate` / `Actor.human` / `Actor.agent`.
+
+**BREAKING (behaviour) — `ColumnValidator.unique` keys on `Cell.token`.** Its private token wrote a
+`Decimal` as its raw text; `Cell.token` writes the canonical text, so two cells holding `1.5` and `1.50`
+are now one key value and the second is a `COL-UNIQUE` defect. No other cell's key moves. A table that
+passed `Table.validate` holds only canonical decimals and sees no difference. `CountDistinct` now reads
+the same token; its counts do not move (its ±∞ spelling changed, which no count can see).
+
+**Not moved.** `Query.invocationKey` keeps its own cell encoding — it is injective on cells, which
+`Cell.token` deliberately is not (DECISIONS.md "the light set"). No `appendAll` is added: Phase 296's
+`appendMany` is that function.
+
 ### The remaining algebra symmetries: `Schema.patch`, propagation pull, an index carried through an edit (Phase 317, DECISIONS.md "the algebra's remaining symmetries are built") — BREAKING: `record-widening` of `SchemaDelta`, and a value move (`Tree.Index` stamps); the rest `additive`
 
 The shard classed this change additive; one record gained a field and one stamp changed its
@@ -3557,6 +3598,51 @@ definition, so the class above is the honest one. Each item says what a consumer
 `api/Fuaran.Core.Ops.txt` and `api/Fuaran.Core.Tree.txt` move, regenerated through the approval mode;
 `Column` reads `record-widening`, the other three `additive`.
 
+### The DAG's checked append gains a verifying variant (Phase 329, DECISIONS.md "the verified append is the call-site check D83 left to the caller") — ADDITIVE on the public surface; `dagLaws` gains two laws, and a stream generator whose DAG nodes never differ in state now reds the family as never reached
+
+**What changed.**
+
+- **`Dag.appendVerified` / `Dag.mergeVerified`** (`'State : equality`) and **`Dag.appendVerifiedWith`
+  / `Dag.mergeVerifiedWith`** (the caller's comparison, first) — `additive`. Each takes the checked
+  form's arguments with the initial state `state0` after the witness, replays the named parent's
+  ancestor closure from it (the genesis parent `""` replays to `state0`; a merge replays the union of
+  both parents' closures, without the merge op, in the order `tryReplayTo` drains the merge node's
+  closure), and refuses a handed-in state that differs. Refusals in order: the graph refusals, then a
+  parent whose replay fails, then the mismatch; otherwise the result is exactly `appendChecked`'s /
+  `mergeChecked`'s. One replay per call, linear in the parent's closure — a choice for tests and debug
+  builds, never the production path.
+- **`Dag.VerifiedAppendRejection<'State, 'Rej>`** — a NEW union (`Checked of DagAppendRejection<'Rej>`
+  | `ParentReplay of Dag.ReplayFault<'Rej>` | `StateMismatch of handed * replayed`), `additive`. No
+  existing union gains a case.
+- **`Dag.tryReplayTo`** is now the shared union replay at one root. Same fold, same order, same faults;
+  its tests are unchanged and green.
+- **`Conformance.dagLaws`** gains "appendVerified / mergeVerified answer as the checked forms at the
+  parent's replayed state" and "appendVerified / mergeVerified refuse another node's state with
+  StateMismatch": nine results where there were seven. The new draws come after every earlier arm's,
+  so a recorded seed reproduces the sample the seven laws saw. The family's signature is unchanged and
+  `api/Fuaran.Core.Conformance.txt` did not move; the census row reads `900` cases where it read `700`
+  (`docs/conformance-families.{md,json}` regenerated).
+
+**Class.** One baseline moved, `api/Fuaran.Core.OpStream.Dag.txt`, by additions only: the four
+functions and the union's members. No wire surface moved. The slot is untagged and already breaking,
+so this rides it.
+
+**What adopting it costs.** Nothing for a caller of the checked forms. A domain certifying `dagLaws`
+reads two more results; a generator whose drawn ops never make two of the family's nodes differ in
+state never reaches the refusal law, and that strict cell then reports "never reached" — the same
+verdict a constant generator already gets from the tamper law. A caller that wants the check swaps
+`appendChecked hashFn w actor op state parentId dag` for `appendVerified hashFn w state0 actor op state
+parentId dag` and matches `VerifiedAppendRejection.Checked` where it matched the checked refusal.
+
+**Shown failing first.** With the comparison in the verifiers' shared step skipped (a perturbation of
+the tree, reverted), `dagLaws` at the reference counter went red on exactly the refusal law, at seed 99
+iteration 0: an append onto a fork head holding its sibling's state was admitted. The seven earlier
+laws and the agreement law stayed green. `DagTests.fs` pins the three mis-pairings, the genesis
+parent, a parent whose replay is refused (a rejecting node, a cyclic history), the graph refusals'
+precedence, and that a `…With` comparison which always agrees verifies nothing.
+
+**Rollback.** Pin `0.32.0`, or stop calling the verified forms. Nothing persisted moves.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a
@@ -3579,47 +3665,6 @@ parity vectors byte-identical on both pipelines. Two package ids are new in this
 The phase's source is a downstream spreadsheet-shaped consumer's measurement (Phase 250). It built
 a sheet over `Column.Ops`, `DataFrame.Incremental` and `Propagation`, and found five places where
 the three strands met only through glue it kept by hand. Each entry below closes one of them.
-
-### The light set: the small exports consumers copied (Phase 315, DECISIONS.md "the light set") — `additive`, with three BREAKING items beside it: a case payload (`Rejection.WouldNestUnderSelf`, breaking-source), a type that moves package (`RejectionGuidance`, AiSurface → Ops, source-compatible), and refusals of input that was accepted (an empty actor id on read; `ColumnValidator.unique` reading decimals by value)
-
-**Additive.** `OpStream.sha256Hash` (the named SHA-256 `HashFn`, byte-for-byte `Hash.sha256Hex (prev +
-"|" + payload)`); `Hash.fnv1a32` (the raw value `fnv1a` renders); `OpStream.chainHashOf` and
-`OpStream.appendChainOnly` (the record hash, and an append with no state and no apply); the
-`Footprint` builders `empty` / `union` / `contentEdit` / `insertUnder` / `removeNode` / `moveTo`;
-`Rejection.code` / `Rejection.explain` with `RejectionNouns`, and `RejectionCodec.encode` / `render` in
-AiSurface; `NestRelation`; `FloatLayout` public (`finite`, `roundTrip`); `Cell.token` / `Cell.compare`;
-`Validator.Pack` / `PackCheck` / `PackFinding` / `citation` / `runPack`; `ActorInvalid` with
-`Actor.validate` / `Actor.human` / `Actor.agent`. The guard classes `Column`, `Tree`, `Validator` and
-`Wire` as `additive`. No emitted byte moves: the chain hash, the apply vectors, the law vectors and
-every committed parity row are unchanged, and the parity table gains `sha256Hash/*`, `fnv1a32/*`,
-`floatLayout/*`, `cellToken/*` and `cellCompare/*` rows, appended.
-
-**BREAKING — `Rejection.WouldNestUnderSelf of target * relation: NestRelation`** (the guard's `retype`
-on `Ops`). The case carried the target alone, so a move under itself and a move into its own subtree
-were one refusal; the relation is now a field. A pattern `WouldNestUnderSelf id` no longer compiles:
-write `WouldNestUnderSelf(id, _)`, or match the relation. `WouldNestUnderSelf _` compiles unchanged, and
-the class every host and vector names is unchanged.
-
-**BREAKING (binary only) — `RejectionGuidance` is declared in `Fuaran.Core.Ops`** (the guard's
-`removal` on `AiSurface`). Same namespace, same fields: a source that names it compiles unchanged; an
-assembly compiled against the old location rebuilds.
-
-**BREAKING (behaviour) — an empty actor id is refused on read.** `OpStream.fromJsonl` (and the readers
-built on it, `Dag.fromJsonl` included) refuse an actor whose `id` is empty with
-`JsonlFaultReason.ActorInvalid(member, ActorInvalid.EmptyId)` — the guard's `union-widening` on
-`OpStream`, the new reason being declared last. A store holding such a record is no longer read; the
-legacy bare-string reader (`fromJsonlLegacyActor`) is unchanged. The `Human` / `Agent` cases still
-construct anything — validate at the boundary with `Actor.validate` / `Actor.human` / `Actor.agent`.
-
-**BREAKING (behaviour) — `ColumnValidator.unique` keys on `Cell.token`.** Its private token wrote a
-`Decimal` as its raw text; `Cell.token` writes the canonical text, so two cells holding `1.5` and `1.50`
-are now one key value and the second is a `COL-UNIQUE` defect. No other cell's key moves. A table that
-passed `Table.validate` holds only canonical decimals and sees no difference. `CountDistinct` now reads
-the same token; its counts do not move (its ±∞ spelling changed, which no count can see).
-
-**Not moved.** `Query.invocationKey` keeps its own cell encoding — it is injective on cells, which
-`Cell.token` deliberately is not (DECISIONS.md "the light set"). No `appendAll` is added: Phase 296's
-`appendMany` is that function.
 
 ### `UpdateNode` — the in-place skeleton op (Phase 250) — BREAKING, `union-widening`
 
