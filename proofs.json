@@ -2640,6 +2640,17 @@
           "the theorems hold on the shipped DecimalText over the pool — idempotence, the order, the sum"
         ]
       }
+    },
+    {
+      "id": "tree-placement-lowers-to-insert-and-reorder",
+      "level": "proved",
+      "claim": "A PLACED INSERT IS ONE INSERT PLUS AT MOST ONE REORDER (Phase 312). `TreePlacement.place`'s script once the position `k` is resolved — `[InsertChild(parent, node)]` when `k` is the parent's child count, else `[Batch [InsertChild(parent, node); ReorderChildren(parent, List.insertAt k (id node) (ids cs))]]` — is modelled as `place_script`, and on every WELL-FORMED tree, with the parent present, the insert's own uniqueness clause passing (`first_dup n t = None`, the check `InsertChild` makes) and `k <= length cs`, `apply_all` of it is `Ok (ins_at p k n t)`: the tree whose parent's children are `insertAt k n cs` and in which nothing else has changed (`placed_insert_is_insert_plus_reorder`). So the reorder leg is always accepted, lands the node exactly at position `k`, and moves no other child and touches no other node. `place_at_end_is_bare_insert` is the end case alone (the script IS the single insert), `reorder_leg_is_not_identity` its converse (at every earlier position the wanted order differs from the appended one, so the reorder leg is dropped exactly when it would be the identity), and `placement_lands_at_position` pins the zero-based reading by evaluation. NOT claimed: the anchor's resolution to a position (`positionOf`: the sibling lookup and the range check) and the engine dry run that precedes it, which the theorem takes as given; container capability (`canHold` is not modelled, as the model's header says, so `placeContained` is covered only at `canHold = fun _ -> true`); and `TreePlacement.move` and `clone`, which are not modelled. `Conformance.placementLaws` samples the same law at a domain's witness; that is a law run, not this proof.",
+      "phase": "fuaran-core#312",
+      "evidence": {
+        "theorem": "placed_insert_is_insert_plus_reorder",
+        "model": "proofs/TreeOps.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
     }
   ]
 }

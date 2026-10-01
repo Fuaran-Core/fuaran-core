@@ -2619,3 +2619,307 @@ let digest_fields_injective (render:(string & string) -> string) (show:nat -> st
           (ensures t1 == t2) =
   fields_recover_shape render show (shape t1) (shape t2);
   preorder_arity_injective t1 t2
+
+(* ======================================================================================
+   22. A PLACED INSERT IS ONE INSERT PLUS AT MOST ONE REORDER (Phase 312) — F#:
+       `TreePlacement.place` in Ops.fs.
+
+       `place` lowers an insert AT A POSITION to the skeleton alphabet, which has no positional
+       insert: `InsertChild` always appends. With `cs` the parent's current children and `k` the
+       resolved position (`0 <= k <= length cs`), the child order the caller wants is
+       `List.insertAt k (id node) (ids cs)`, and the script is the bare `InsertChild` when `k` is
+       the end (appending already lands there), else one `Batch` of that insert followed by a
+       `ReorderChildren` to the wanted order.
+
+       WHAT IS PROVED. `placed_insert_is_insert_plus_reorder`: on a well-formed tree, with the
+       parent present and the insert's own uniqueness clause passing (`first_dup n t = None`, the
+       very check `InsertChild` makes), the script is ACCEPTED and reaches `ins_at p k n t` — the
+       tree in which the parent's children are `insertAt k n cs` and nothing else has changed. So
+       the reorder the script carries is always accepted (its order is a permutation of the
+       children the insert left), it lands the new node exactly at position `k`, and it moves no
+       other child and touches no other node. `place_at_end_is_bare_insert` is the end case on its
+       own: there the script IS the single insert. `reorder_leg_is_not_identity` is the converse —
+       at every earlier position the wanted order differs from the appended one — so the reorder
+       leg is dropped exactly when it would have been the identity, and never otherwise.
+
+       WHY WELL-FORMEDNESS, again. `reorder_at` (like `Tree.updateNode`) acts at EVERY node
+       carrying the parent id, and `arrange` resolves children by id, last-wins. Under `wf` the
+       parent is one node, and the children after the insert carry distinct ids (the existing ones
+       by `wf`, the new one by `first_dup`), so `arrange` rebuilds the wanted list exactly.
+
+       WHAT IS NOT CLAIMED. Resolving the anchor to a position (`positionOf`: the sibling lookup,
+       the range check) and the engine dry run that precedes it are `place`'s and are not modelled:
+       the theorem takes `k` as given, and asks `k <= length cs` because `List.insertAt` raises past
+       the end, where the model's `insert_at` appends. Container capability (`canHold`) is not
+       modelled, as the header says, so `placeContained` is covered only at `canHold = fun _ ->
+       true`. `TreePlacement.move` and `clone` are not modelled.
+   ====================================================================================== *)
+
+(* F#: `List.insertAt k x l` — `take k l @ [x] @ drop k l`. Past the end F# raises; the model
+   appends there, and every statement below asks only at `k <= len l`. *)
+let rec insert_at (#a:Type) (k:nat) (x:a) (l:list a) : Tot (list a) (decreases l) =
+  if k = 0 then x :: l
+  else match l with
+       | [] -> [x]
+       | h :: r -> h :: insert_at (k - 1) x r
+
+(* F#: `childIds` inside `TreePlacement` — `Tree.tryFind parent root`, then `w.Children` (the ids
+   are taken by `kid_ids` where the script needs them). Empty when the parent is absent, where the
+   engine's dry run has already refused the insert. *)
+let placed_kids (p:string) (t:tree) : Tot (list tree) =
+  match find_in p t with
+  | None -> []
+  | Some m -> kids_of m
+
+(* F#: `TreePlacement.place` once the position `k` is resolved — `[InsertChild(parent, node)]`
+   when `k = List.length others`, else
+   `[Batch [InsertChild(parent, node); ReorderChildren(parent, List.insertAt k (w.Id node) others)]]`. *)
+let place_script (p:string) (k:nat) (n:tree) (t:tree) : Tot (list op) =
+  let cs = placed_kids p t in
+  if k = len cs then [InsertChild p n]
+  else [Batch [InsertChild p n; ReorderChildren p (insert_at k (tid_of n) (kid_ids cs))]]
+
+(* The specification the script is held to: a DIRECT insert at a position, at every node carrying
+   the parent id (as `ins` and `Tree.updateNode` do), and nothing else. No F# counterpart — it is
+   the edit `place` exists to express in an alphabet that lacks it. *)
+let rec ins_at (p:string) (k:nat) (n:tree) (t:tree) : Tot tree (decreases t) =
+  match t with
+  | TNode i kd cs ->
+    let cs' = ins_at_all p k n cs in
+    if i = p then TNode i kd (insert_at k n cs') else TNode i kd cs'
+and ins_at_all (p:string) (k:nat) (n:tree) (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> ins_at p k n t :: ins_at_all p k n r
+
+(* ---- `insert_at`, as a list operation ---- *)
+
+(* At the end it IS the append `InsertChild` performs — the reason the end needs no reorder. *)
+let rec insert_at_len (#a:Type) (x:a) (l:list a)
+  : Lemma (ensures insert_at (len l) x l == app l [x]) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> insert_at_len x r
+
+(* … and anywhere earlier it is NOT, for an element the list does not already hold. *)
+let rec insert_at_not_end (#a:eqtype) (k:nat) (x:a) (l:list a)
+  : Lemma (requires k < len l /\ not (mem x l)) (ensures insert_at k x l <> app l [x])
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> if k = 0 then () else insert_at_not_end (k - 1) x r
+
+let rec mem_insert_at (#a:eqtype) (y x:a) (k:nat) (l:list a)
+  : Lemma (ensures mem y (insert_at k x l) == (y = x || mem y l)) (decreases l)
+  = if k = 0 then ()
+    else match l with
+         | [] -> ()
+         | _ :: r -> mem_insert_at y x (k - 1) r
+
+let rec kid_ids_insert_at (k:nat) (n:tree) (cs:list tree)
+  : Lemma (ensures kid_ids (insert_at k n cs) == insert_at k (tid_of n) (kid_ids cs))
+          (decreases cs)
+  = if k = 0 then ()
+    else match cs with
+         | [] -> ()
+         | _ :: r -> kid_ids_insert_at (k - 1) n r
+
+let rec kid_ids_append (xs ys:list tree)
+  : Lemma (ensures kid_ids (app xs ys) == app (kid_ids xs) (kid_ids ys)) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: r -> kid_ids_append r ys
+
+let rec kid_ids_len (cs:list tree)
+  : Lemma (ensures len (kid_ids cs) == len cs) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | _ :: r -> kid_ids_len r
+
+(* The wanted order is a permutation of the order the bare insert leaves — which is why
+   `validateReorder` accepts the reorder leg. No uniqueness is needed for this half. *)
+let rec same_multiset_insert_at (x:string) (k:nat) (l:list string)
+  : Lemma (ensures same_multiset (app l [x]) (insert_at k x l)) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> if k = 0 then same_multiset_insert_at x 0 r
+                else same_multiset_insert_at x (k - 1) r
+
+(* `arrange` by the ids of a list drawn from distinct-id children rebuilds that very list. *)
+let rec arrange_exact (l ts:list tree)
+  : Lemma (requires no_dups (kid_ids ts) /\ (forall (c:tree). mem c l ==> mem c ts))
+          (ensures arrange (kid_ids l) ts == l) (decreases l)
+  = match l with
+    | [] -> ()
+    | c :: r -> pick_last_unique c ts; arrange_exact r ts
+
+(* ---- the tree facts ---- *)
+
+(* A lookup in a well-formed tree answers with a well-formed subtree. *)
+let rec found_wf (x:string) (t:tree) (m:tree)
+  : Lemma (requires wf t /\ find_in x t == Some m) (ensures wf m) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = x then () else found_all_wf x cs m
+and found_all_wf (x:string) (ts:list tree) (m:tree)
+  : Lemma (requires wf_all ts /\ find_all x ts == Some m) (ensures wf m) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> (match find_in x t with
+                 | Some _ -> found_wf x t m
+                 | None -> found_all_wf x r m)
+
+let rec ins_at_absent (p:string) (k:nat) (n:tree) (t:tree)
+  : Lemma (requires not (mem p (ids t))) (ensures ins_at p k n t == t) (decreases t)
+  = match t with TNode _ _ cs -> ins_at_all_absent p k n cs
+and ins_at_all_absent (p:string) (k:nat) (n:tree) (ts:list tree)
+  : Lemma (requires not (mem p (ids_all ts))) (ensures ins_at_all p k n ts == ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ins_at_absent p k n t; ins_at_all_absent p k n r
+
+(* At the end position the bare insert IS the positional one. The hypothesis names `k` through the
+   lookup, so under `wf` it fixes `k` at the one node carrying `p`. *)
+let rec ins_is_ins_at_end (p:string) (k:nat) (n:tree) (t:tree)
+  : Lemma (requires wf t /\ (match find_in p t with
+                             | None -> True
+                             | Some m -> k == len (kids_of m)))
+          (ensures ins p n t == ins_at p k n t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = p then (ins_all_absent p n cs; ins_at_all_absent p k n cs; insert_at_len n cs)
+      else ins_is_ins_at_end_all p k n cs
+and ins_is_ins_at_end_all (p:string) (k:nat) (n:tree) (ts:list tree)
+  : Lemma (requires wf_all ts /\ (match find_all p ts with
+                                  | None -> True
+                                  | Some m -> k == len (kids_of m)))
+          (ensures ins_all p n ts == ins_at_all p k n ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      (match find_in p t with
+       | Some _ -> find_in_some_iff p t; find_all_some_iff p r; inter_nil_iff (ids t) (ids_all r)
+       | None -> ());
+      ins_is_ins_at_end p k n t;
+      ins_is_ins_at_end_all p k n r
+
+(* Anywhere else the insert followed by the reorder to the wanted order IS the positional insert:
+   at the parent the existing children are untouched by both edits (the parent id does not occur
+   below its own node), the new node carries a fresh id, and `arrange` rebuilds `insertAt k n cs`
+   exactly; everywhere else both sides recurse, or are the identity. *)
+let rec reorder_ins_is_ins_at (p:string) (k:nat) (o:list string) (n:tree) (t:tree)
+  : Lemma (requires wf t /\ not (mem p (ids n)) /\ not (mem (tid_of n) (ids t)) /\
+                    (match find_in p t with
+                     | None -> True
+                     | Some m -> o == insert_at k (tid_of n) (kid_ids (kids_of m))))
+          (ensures reorder_at p o (ins p n t) == ins_at p k n t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if i = p then begin
+        ins_all_absent p n cs;
+        ins_at_all_absent p k n cs;
+        reorder_all_app p o cs [n];
+        reorder_all_absent p o cs;
+        reorder_absent p o n;
+        wf_all_kid_ids_no_dups cs;
+        kid_ids_append cs [n];
+        (if mem (tid_of n) (kid_ids cs) then kid_ids_sub (tid_of n) cs else ());
+        inter_nil_iff (kid_ids cs) [tid_of n];
+        no_dups_app (kid_ids cs) [tid_of n];
+        kid_ids_insert_at k n cs;
+        let aux (c:tree) : Lemma (mem c (insert_at k n cs) ==> mem c (app cs [n])) =
+          mem_insert_at c n k cs; mem_app c cs [n]; assert (mem c [n] == (c = n))
+        in
+        FStar.Classical.forall_intro aux;
+        arrange_exact (insert_at k n cs) (app cs [n])
+      end
+      else reorder_ins_is_ins_at_all p k o n cs
+and reorder_ins_is_ins_at_all (p:string) (k:nat) (o:list string) (n:tree) (ts:list tree)
+  : Lemma (requires wf_all ts /\ not (mem p (ids n)) /\ not (mem (tid_of n) (ids_all ts)) /\
+                    (match find_all p ts with
+                     | None -> True
+                     | Some m -> o == insert_at k (tid_of n) (kid_ids (kids_of m))))
+          (ensures reorder_all p o (ins_all p n ts) == ins_at_all p k n ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      (match find_in p t with
+       | Some _ -> find_in_some_iff p t; find_all_some_iff p r; inter_nil_iff (ids t) (ids_all r)
+       | None -> ());
+      reorder_ins_is_ins_at p k o n t;
+      reorder_ins_is_ins_at_all p k o n r
+
+(* ---- THE LEMMA ---- *)
+
+let placed_insert_is_insert_plus_reorder (p:string) (k:nat) (n:tree) (t:tree)
+  : Lemma (requires wf t /\ has_id p t /\ first_dup n t == None /\ k <= len (placed_kids p t))
+          (ensures apply_all (place_script p k n t) t == Ok (ins_at p k n t))
+  = first_dup_none_iff n t;
+    inter_nil_iff (ids n) (ids t);
+    find_in_some_iff p t;
+    match find_in p t with
+    | None -> ()
+    | Some m ->
+      find_in_id p t m;
+      found_wf p t m;
+      assert (apply (InsertChild p n) t == Ok (ins p n t));
+      if k = len (kids_of m) then ins_is_ins_at_end p k n t
+      else begin
+        match m with
+        | TNode _ _ cs ->
+          let w = insert_at k (tid_of n) (kid_ids cs) in
+          (* the reorder leg is accepted: the parent is still found, now carrying `cs @ [n]`, and
+             the wanted order is a permutation of that *)
+          find_ins p p n t;
+          ins_all_absent p n cs;
+          kid_ids_append cs [n];
+          same_multiset_insert_at (tid_of n) k (kid_ids cs);
+          assert (apply (ReorderChildren p w) (ins p n t) == Ok (reorder_at p w (ins p n t)));
+          (* … and it lands exactly on the positional insert *)
+          reorder_ins_is_ins_at p k w n t;
+          assert (apply_all [InsertChild p n; ReorderChildren p w] t == Ok (ins_at p k n t))
+      end
+
+(* The end case on its own: the script is the single insert, and that insert IS the positional
+   one. *)
+let place_at_end_is_bare_insert (p:string) (n:tree) (t:tree)
+  : Lemma (requires wf t /\ has_id p t /\ first_dup n t == None)
+          (ensures place_script p (len (placed_kids p t)) n t == [InsertChild p n] /\
+                   apply (InsertChild p n) t == Ok (ins_at p (len (placed_kids p t)) n t))
+  = find_in_some_iff p t;
+    match find_in p t with
+    | None -> ()
+    | Some m -> ins_is_ins_at_end p (len (kids_of m)) n t
+
+(* … and its converse: at every earlier position the wanted order is NOT the order the bare insert
+   leaves, so the reorder leg is dropped exactly when it would be the identity and never otherwise.
+   Every reorder `place` emits therefore moves something. *)
+let reorder_leg_is_not_identity (p:string) (k:nat) (n:tree) (t:tree)
+  : Lemma (requires wf t /\ has_id p t /\ first_dup n t == None /\ k < len (placed_kids p t))
+          (ensures insert_at k (tid_of n) (kid_ids (placed_kids p t)) <>
+                   app (kid_ids (placed_kids p t)) [tid_of n])
+  = first_dup_none_iff n t;
+    inter_nil_iff (ids n) (ids t);
+    find_in_some_iff p t;
+    match find_in p t with
+    | None -> ()
+    | Some m ->
+      (match m with
+       | TNode _ _ cs ->
+         (if mem (tid_of n) (kid_ids cs) then
+            (kid_ids_sub (tid_of n) cs; find_in_sub p (tid_of n) t m)
+          else ());
+         kid_ids_len cs;
+         insert_at_not_end k (tid_of n) (kid_ids cs))
+
+(* WHICH POSITION IT MEANS, pinned by evaluation: zero-based, and the existing children keep their
+   relative order around the new one. A `k` read off-by-one, or an `insert_at` counting from the
+   end, would make every statement above true of the wrong edit and this one false. *)
+let place_tree : tree = TNode "root" "doc" [ TNode "a" "sec" []; TNode "b" "sec" [] ]
+
+let placement_lands_at_position ()
+  : Lemma (ensures apply_all (place_script "root" 1 (TNode "n" "para" []) place_tree) place_tree ==
+                   Ok (TNode "root" "doc" [ TNode "a" "sec" []; TNode "n" "para" [];
+                                            TNode "b" "sec" [] ]))
+  = assert_norm (apply_all (place_script "root" 1 (TNode "n" "para" []) place_tree) place_tree ==
+                 Ok (TNode "root" "doc" [ TNode "a" "sec" []; TNode "n" "para" [];
+                                          TNode "b" "sec" [] ]))

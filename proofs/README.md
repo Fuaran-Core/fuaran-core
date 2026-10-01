@@ -2558,6 +2558,29 @@ extracted `TreeOps.fields` of `TreeOps.shape`, with the model's (id, kind) rende
 production label renders it — so the theorem is known to be about the string the memo keys on. The
 mis-nesting bridge is its go-red: it now loses on the result hash and on no verdict.
 
+### A placed insert is one insert plus at most one reorder (Phase 312)
+
+`TreePlacement.place` inserts at a POSITION in an alphabet whose `InsertChild` only appends. Once the
+position `k` is resolved it emits the bare `InsertChild` when `k` is the end, else one `Batch` of
+that insert and a `ReorderChildren` to `List.insertAt k (id node) (ids cs)`. Section 22 of
+`TreeOps.fst` models that script (`place_script`) beside the edit it stands for — a direct insert at
+a position, `ins_at` — and proves them equal:
+
+- **`placed_insert_is_insert_plus_reorder`** — on a well-formed tree, with the parent present, the
+  insert's own uniqueness clause passing and `k <= length cs`, `apply_all` of the script is
+  `Ok (ins_at p k n t)`. The reorder leg is always accepted, lands the node at exactly `k`, and moves
+  nothing else. Well-formedness is what makes it exact: `reorder_at` acts at every node carrying the
+  parent id and `arrange` resolves children by id, so the theorem needs the parent to be one node
+  and the children after the insert to carry distinct ids.
+- **`place_at_end_is_bare_insert`** / **`reorder_leg_is_not_identity`** — at the end the script IS
+  the single insert, and at every earlier position the wanted order differs from the appended one,
+  so the reorder leg is dropped exactly when it would be the identity.
+- **`placement_lands_at_position`** — the zero-based reading, pinned by evaluation.
+
+Not modelled: resolving an `Anchor` to `k` (the sibling lookup and the range check) and the dry run
+that precedes it, which the theorem takes as given; `canHold`; and `TreePlacement.move` / `clone`.
+Row `tree-placement-lowers-to-insert-and-reorder`.
+
 ### Two things this model cost that the first two did not
 
 Both are extensions of the Phase 131 findings rather than new classes, and both are worth knowing
@@ -2598,7 +2621,10 @@ before the fourth model is written.
    that the digest pre-image is injective over ordered trees (`preorder_arity_injective`, with
    the label-preorder alias `preorder_alone_aliases` evaluated beside it) and that its rendered
    field list recovers the tree under the two renderer premises (`digest_fields_injective`,
-   conditional and named as such above). F\* 2026.09.06,
+   conditional and named as such above); and, since Phase 312, that a placed insert's script is
+   one insert plus at most one reorder and reaches exactly the positional insert
+   (`placed_insert_is_insert_plus_reorder`, with `place_at_end_is_bare_insert` and
+   `reorder_leg_is_not_identity` beside it). F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
    `admit`.
 2. **Differentially tested.** The extracted model agrees with `Ops.apply` and `Ops.footprint` over
@@ -2620,6 +2646,9 @@ before the fourth model is written.
    over the four address sets this record carries** (Phase 143, above). Nothing is claimed about
    what a WIDER record would admit, about the general move-versus-structural-write theorem, or about
    the remove × remove, remove × move and remove × reorder pairs, which that phase did not examine.
+   Of `TreePlacement` (Phase 312), nothing beyond `place`'s script at a given position: not the
+   anchor's resolution, not the contained forms beyond `canHold = fun _ -> true`, not `move` or
+   `clone`.
 
 ## Theorem 3 — chain integrity (Phase 136)
 
