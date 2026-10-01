@@ -2217,9 +2217,10 @@ module internal TreeLaws =
     /// walk. Drawn ops are threaded through the engine:
     ///
     ///   - **agreement** — the engine refuses with `applyContained`'s envelope wherever it refuses,
-    ///     and refuses an accepted `RemoveNode` with `StillReferenced` exactly when the tree it would
-    ///     build leaves a surviving node's reference dangling, naming every such node;
-    ///   - **preservation** — an accepted remove leaves no reference dangling that resolved before;
+    ///     and refuses an accepted step with `StillReferenced` exactly when, in the tree it would build,
+    ///     a node refers to an id the tree declared before the step and no longer does (a remove's
+    ///     subtree, a rewrite that declares less), naming every such node;
+    ///   - **preservation** — an accepted op leaves no reference dangling that resolved before it;
     ///   - **footprint** — `footprintReferenced` contains `footprint` and reads every reference an
     ///     inserted subtree or an update payload carries; and, BUILT from the drawn tree wherever a
     ///     node refers to a declaration its declarer's id names, the update of the referrer and the
@@ -2252,10 +2253,10 @@ module internal TreeLaws =
 
         let agreement =
             LawKit.LawCell
-                "the reference engine is applyContained then StillReferenced, exactly where an accepted remove leaves a surviving reference dangling"
+                "the reference engine is applyContained then StillReferenced, exactly where an accepted step leaves a resolved reference dangling"
 
         let preservation =
-            LawKit.LawCell "an accepted remove leaves no reference dangling that resolved before it"
+            LawKit.LawCell "an accepted op leaves no reference dangling that resolved before it"
 
         let footprintReads =
             LawKit.LawCell "footprintReferenced contains footprint and reads every reference a script writes"
@@ -2389,9 +2390,14 @@ module internal TreeLaws =
                 fun () -> at "the reference families disagree with the defects they report"
             )
 
+        let declaredKeys (t: 'Node) =
+            Tree.preorder nodew t |> List.collect refw.DeclsOf |> List.map key |> Set.ofList
+
         // The naive specification of one op, step by step as a batch is threaded: the container-aware
-        // engine decides, and an accepted remove that leaves a surviving node's resolved reference
-        // dangling is `StillReferenced`, naming those nodes in preorder.
+        // engine decides, and an accepted step after which a node refers to an id the tree declared
+        // before the step and no longer declares is `StillReferenced`, naming those nodes in preorder.
+        // Only a remove or a rewrite can do that; an insert, a move or a reorder that did would be a
+        // defect the spec names rather than a refusal it expects.
         let rec expectedOf (op: SkeletonOp<'Node, 'Id>) (t: 'Node) : Result<'Node, Rejection<'Id>> =
             match op with
             | Batch ops -> ops |> List.fold (fun acc o -> acc |> Result.bind (expectedOf o)) (Ok t)
@@ -2399,23 +2405,18 @@ module internal TreeLaws =
                 match Ops.applyContained canHold nodew idw op t with
                 | Error e -> Error e
                 | Ok t1 ->
-                    match op with
-                    | RemoveNode target ->
-                        let was = Set.ofList (dangling t)
+                    let lost = Set.difference (declaredKeys t) (declaredKeys t1)
 
-                        let fresh =
-                            dangling t1 |> List.filter (fun pair -> not (was.Contains pair)) |> List.map fst
+                    let referrers =
+                        Tree.preorder nodew t1
+                        |> List.filter (fun n -> refw.RefsOf n |> List.exists (fun r -> lost.Contains(key r)))
+                        |> List.map nodew.Id
 
-                        let referrers =
-                            Tree.preorder nodew t
-                            |> List.filter (fun n -> List.contains (nodeKey n) fresh)
-                            |> List.map nodew.Id
-
-                        if List.isEmpty referrers then
-                            Ok t1
-                        else
-                            Error(StillReferenced(target, referrers))
-                    | _ -> Ok t1
+                    match referrers, op with
+                    | [], _ -> Ok t1
+                    | _, RemoveNode target -> Error(StillReferenced(target, referrers))
+                    | _, UpdateNode node -> Error(StillReferenced(nodew.Id node, referrers))
+                    | _ -> Error(Rejected("spec", "an insert, a move or a reorder orphaned a declaration"))
 
         let rec written (op: SkeletonOp<'Node, 'Id>) =
             match op with
@@ -2431,8 +2432,6 @@ module internal TreeLaws =
             for _ in 1..6 do
                 let op = rng.Draw(LawKit.genOp nodew idw gen cur)
                 let g = Ops.applyReferenced refw none canHold nodew idw op cur
-
-                let before = Set.ofList (dangling cur)
 
                 let fp = Ops.footprint nodew idw [ op ]
                 let fr = Ops.footprintReferenced refw nodew idw [ op ]
@@ -2453,16 +2452,20 @@ module internal TreeLaws =
                     fun () -> at (sprintf "op %A: expected %A, applyReferenced answered %A" op expected g)
                 )
 
-                match op, g with
-                | RemoveNode _, Ok t' ->
-                    removes <- removes + 1
+                match g with
+                | Ok t' ->
+                    match op with
+                    | RemoveNode _ -> removes <- removes + 1
+                    | _ -> ()
+
+                    let declaredBefore = declaredKeys cur
 
                     preservation.Check(
-                        Set.isSubset (Set.ofList (dangling t')) before,
+                        dangling t' |> List.forall (fun (_, r) -> not (declaredBefore.Contains r)),
                         fun () -> at (sprintf "the accepted %A left a resolved reference dangling" op)
                     )
-                | _, Error(StillReferenced _) -> stillReferenced <- stillReferenced + 1
-                | _ -> ()
+                | Error(StillReferenced _) -> stillReferenced <- stillReferenced + 1
+                | Error _ -> ()
 
                 match g with
                 | Ok t' -> cur <- t'

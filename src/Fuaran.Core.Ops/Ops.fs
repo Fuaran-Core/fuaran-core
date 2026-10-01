@@ -69,10 +69,11 @@ type Rejection<'Id> =
     /// so no operation it refuses changes class. Declared after `KeyedPosition` so every existing
     /// case keeps its tag.
     | IllegalChild of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
-    /// A `RemoveNode` that would destroy a declaration other nodes still reference (Phase 313):
-    /// `target`'s subtree declares an id no node outside it declares, and `referrers` — in preorder —
-    /// are the nodes outside it that reference one. Only the reference-aware forms
-    /// (`Ops.applyReferenced` and its dry runs) raise this, after every other check. Declared last.
+    /// A `RemoveNode` or an `UpdateNode` that would take away a declaration other nodes still
+    /// reference (Phase 313): after it, the tree no longer declares an id it declared before, and
+    /// `referrers` — in preorder — are the nodes that still refer to one. `target` is the removed
+    /// node or the rewritten one. Only the reference-aware forms (`Ops.applyReferenced` and its dry
+    /// runs) raise this, after every other check. Declared last.
     | StillReferenced of target: 'Id * referrers: 'Id list
 
 /// The skeleton edit ops shared by every domain — five structural, and since Phase 250 one
@@ -1729,48 +1730,46 @@ module Ops =
         | ReorderChildren _
         | Batch _ -> None
 
-    /// The reference clause of one accepted non-batch step: a `RemoveNode` whose subtree declares an
-    /// id no node outside it declares, while a node outside it refers to that id, is
-    /// `StillReferenced`, naming every such referrer in preorder. A reference that already dangled
-    /// before the remove is not the remove's doing and is not reported.
+    /// The reference clause of one accepted non-batch step: the ids the tree declared before the step
+    /// and no longer declares after it are ORPHANED, and a node of the resulting tree that refers to
+    /// one is a referrer — `StillReferenced`, naming the step's target (a remove's target, a
+    /// rewrite's node) and every referrer in preorder. Only a `RemoveNode` (its subtree's
+    /// declarations leave) and an `UpdateNode` (the rewritten node may declare less) can orphan an id;
+    /// an insert, a move or a reorder keeps every declaration. A reference that already dangled before
+    /// the step is not the step's doing and is not reported.
     let private referenceRefusal
         (refw: RefWitness<'Node, 'Id>)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (before: 'Node)
+        (after: 'Node)
         : Rejection<'Id> option =
+        let key (i: 'Id) = idw.ToString i
+
+        let declared (t: 'Node) =
+            Tree.preorder w t |> List.collect refw.DeclsOf |> List.map key |> Set.ofList
+
+        let refuse (target: 'Id) =
+            let orphaned = Set.difference (declared before) (declared after)
+
+            if Set.isEmpty orphaned then
+                None
+            else
+                match
+                    Tree.preorder w after
+                    |> List.filter (fun n -> refw.RefsOf n |> List.exists (fun r -> orphaned.Contains(key r)))
+                with
+                | [] -> None
+                | referrers -> Some(StillReferenced(target, referrers |> List.map w.Id))
+
         match op with
-        | RemoveNode target ->
-            match Tree.subtree w idw target before with
-            | None -> None
-            | Some sub ->
-                let key (i: 'Id) = idw.ToString i
-                let removed = Tree.ids w sub |> List.map key |> Set.ofList
-
-                let outside =
-                    Tree.preorder w before
-                    |> List.filter (fun n -> not (removed.Contains(key (w.Id n))))
-
-                let keptDecls = outside |> List.collect refw.DeclsOf |> List.map key |> Set.ofList
-
-                let orphaned =
-                    Tree.preorder w sub
-                    |> List.collect refw.DeclsOf
-                    |> List.map key
-                    |> Set.ofList
-                    |> fun d -> Set.difference d keptDecls
-
-                if Set.isEmpty orphaned then
-                    None
-                else
-                    match
-                        outside
-                        |> List.filter (fun n -> refw.RefsOf n |> List.exists (fun r -> orphaned.Contains(key r)))
-                    with
-                    | [] -> None
-                    | referrers -> Some(StillReferenced(target, referrers |> List.map w.Id))
-        | _ -> None
+        | RemoveNode target -> refuse target
+        | UpdateNode node -> refuse (w.Id node)
+        | InsertChild _
+        | MoveNode _
+        | ReorderChildren _
+        | Batch _ -> None
 
     /// The wrapped engine: `applyContained` decides each non-batch step, and `check` — handed the
     /// step, the tree before it and the tree after it — runs only on a step it accepted. A `Batch` is
@@ -1833,7 +1832,7 @@ module Ops =
         fun op before after ->
             match grammarRefusal allowedChildren w idw op before after with
             | Some r -> Some r
-            | None -> referenceRefusal refw w idw op before
+            | None -> referenceRefusal refw w idw op before after
 
     /// Grammar-aware apply (Phase 313) — `applyContained` with the domain's containment grammar
     /// beside `canHold`. Every step the container-aware engine refuses is refused with the same
@@ -1892,9 +1891,10 @@ module Ops =
         | Error(i, e, _) -> Error(i, e)
 
     /// Reference-aware apply (Phase 313) — `applyGrammar` under a `RefWitness` as well: a
-    /// `RemoveNode` it accepts is then refused with `StillReferenced` when the removed subtree
-    /// declares an id that no surviving node declares and a surviving node refers to. So an accepted
-    /// op never leaves dangling a reference that resolved before it. A reference an INSERT or an
+    /// `RemoveNode` or `UpdateNode` it accepts is then refused with `StillReferenced` when the tree
+    /// after it no longer declares an id it declared before and a node of that tree still refers to
+    /// it — a removed subtree's declarations, or what a rewrite stops declaring. So an accepted op
+    /// never leaves dangling a reference that resolved before it. A reference an INSERT or an
     /// in-place rewrite brings in is not refused here: whether it resolves is
     /// `Validator.referenceIntegrity`'s report, because a document under construction legitimately
     /// refers ahead of what it has declared. Pass `fun _ -> None` for a domain with no grammar.

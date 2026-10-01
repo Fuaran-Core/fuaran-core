@@ -484,6 +484,48 @@ let tests =
                         (Ops.apply nodew idw (RemoveNode "zz") (linked ()))
                         "an engine refusal keeps its class"
 
+                testCase "a rewrite that stops declaring a referenced name is StillReferenced too"
+                <| fun _ ->
+                    // names that are not node ids: a node declares the name its HoleName carries
+                    let named: RefWitness<RNode, string> =
+                        { RefsOf = refw.RefsOf
+                          DeclsOf = fun n -> if n.HoleName = "" then [] else [ n.HoleName ] }
+
+                    let def =
+                        { RNode.leaf "d" "para" "" with
+                            HoleName = "total" }
+
+                    let user = RNode.leaf "u" "para" "" |> withRefs [ "total" ]
+                    let tree = RNode.node "root" "section" [ def; user ]
+
+                    Expect.equal
+                        (Ops.applyReferenced
+                            named
+                            (fun _ -> None)
+                            (fun _ -> true)
+                            nodew
+                            idw
+                            (UpdateNode(RNode.leaf "d" "para" ""))
+                            tree)
+                        (Error(StillReferenced("d", [ "u" ])))
+                        "d stops declaring `total`, which u refers to"
+
+                    Expect.isOk
+                        (Ops.applyReferenced
+                            named
+                            (fun _ -> None)
+                            (fun _ -> true)
+                            nodew
+                            idw
+                            (UpdateNode { def with Value = "new" })
+                            tree)
+                        "a rewrite that keeps the declaration lands"
+
+                    Expect.equal
+                        (Ops.applyReferenced named (fun _ -> None) (fun _ -> true) nodew idw (RemoveNode "d") tree)
+                        (Error(StillReferenced("d", [ "u" ])))
+                        "and the remove of the declarer"
+
                 testCase "the reference sequence and dry-run forms answer the engine"
                 <| fun _ ->
                     let unlinkB1 = UpdateNode(RNode.leaf "b1" "para" "")

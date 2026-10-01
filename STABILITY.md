@@ -3145,8 +3145,8 @@ were nobody's. Two strands, beside what was there:
   `UnusedDeclaration`, `ReferenceCycle` (through `Propagation.sort`) — and `forwardReferences` the
   opt-in `ForwardReference`; `referenceIntegrity` (`REF-DANGLING`, `REF-UNUSED` warning, `REF-CYCLE`)
   and `referenceOrder` (`REF-FORWARD`) are their rule families. `Ops.applyReferenced` (with its dry run
-  and sequence forms) is `applyGrammar` that also refuses a `RemoveNode` leaving a resolved reference
-  dangling — **`Rejection.StillReferenced(target, referrers)`**. `Ops.footprintReferenced` reads every
+  and sequence forms) is `applyGrammar` that also refuses a `RemoveNode`, or an `UpdateNode` that stops
+  declaring an id, leaving a resolved reference dangling — **`Rejection.StillReferenced(target, referrers)`**. `Ops.footprintReferenced` reads every
   id a script writes a reference to, `Footprint.reading` is the builder for a domain op that does, and
   `Arbitration.arbitrateReferenced` composes the pair.
 - **`Graph`** (in `Fuaran.Core.Propagation`): `sort`, `cycleThrough`, `dependents` and `TopoResult`,

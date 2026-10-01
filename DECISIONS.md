@@ -29,7 +29,7 @@ of the two readings is `Conformance.containmentLaws`' agreement law at a domain'
 
 *Decided: references are a witness of their own, `RefWitness {RefsOf; DeclsOf}`, frozen at birth.* A
 reference resolves when some node declares its id. The engine READS it — `StillReferenced` refuses a
-remove that would leave a resolved reference dangling, and the footprint reads every id a script writes
+remove, or a rewrite that declares less, that would leave a resolved reference dangling, and the footprint reads every id a script writes
 a reference to — and never rebuilds through it. An insert or rewrite that brings in an unresolved
 reference is NOT refused: a document under construction refers ahead of what it declares, so whether
 it resolves is the validator family's report, not the engine's verdict.

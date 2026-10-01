@@ -313,8 +313,8 @@ module Arbitration =
     /// `arbitrateGrammar` under a `RefWitness` as well (Phase 313): independence is
     /// `Ops.footprintReferenced`, so a proposal that writes a reference to a node another proposal
     /// removes conflicts with it and the citation names the referenced id; applicability is
-    /// `Ops.canApplyAllReferenced`, so a proposal whose remove would leave a reference of the BASE
-    /// dangling is `Inapplicable` with `StillReferenced`. It is `arbitrateWith (Ops.footprintReferenced
+    /// `Ops.canApplyAllReferenced`, so a proposal whose remove or rewrite would leave a reference of the
+    /// BASE dangling is `Inapplicable` with `StillReferenced`. It is `arbitrateWith (Ops.footprintReferenced
     /// refw nodew idw) (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)`.
     let arbitrateReferenced
         (refw: RefWitness<'Node, 'Id>)
