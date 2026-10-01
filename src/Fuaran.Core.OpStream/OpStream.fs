@@ -850,7 +850,19 @@ module OpStream =
                     && Seq.forall (fun c -> c >= '0' && c <= '9') digits
                     && (digits = "0" || digits.[0] <> '0')
 
-                let value = if grammatical then System.Int64.Parse v else 0L
+                // Read from the DIGITS, never through a host number reader (Phase 306). The
+                // `System.Int64.Parse v` this replaces read under the CURRENT culture: under one
+                // whose negative sign is not U+002D (fa-IR, he-IL) it threw on `-5` — a token the
+                // grammar test above had just accepted — out of a function that returns a `Result`.
+                // At most ten digits, so the fold cannot leave int64.
+                let value =
+                    if grammatical then
+                        let magnitude =
+                            digits |> Seq.fold (fun acc c -> acc * 10L + int64 (int c - int '0')) 0L
+
+                        if v.StartsWith "-" then -magnitude else magnitude
+                    else
+                        0L
 
                 if
                     grammatical

@@ -864,6 +864,34 @@ let tests =
               Expect.equal (Json.readInt32 "2147483647") (Some Int32.MaxValue) "the high edge"
               Expect.equal (Json.readInt32 "007") (Some 7) "leading zeros are the grammar's to refuse, not the reader's"
 
+          testCase "the JSONL scanner reads an integer field the same under every culture, and never throws"
+          <| fun _ ->
+              // It read through `Int64.Parse` under the current culture, which THROWS on `-5` where
+              // the negative sign is not U+002D.
+              let read (text: string) =
+                  OpStream.Jsonl.parseLine 1 text
+                  |> Result.bind (OpStream.Jsonl.intField "n")
+                  |> Result.mapError (fun f -> f.Reason)
+
+              let documents =
+                  [ "{\"n\":-5}", Ok -5
+                    "{\"n\":0}", Ok 0
+                    "{\"n\":2147483647}", Ok Int32.MaxValue
+                    "{\"n\":-2147483648}", Ok Int32.MinValue
+                    "{\"n\":2147483648}", Error(JsonlFaultReason.ExpectedInteger "n")
+                    "{\"n\":-2147483649}", Error(JsonlFaultReason.ExpectedInteger "n")
+                    "{\"n\":01}", Error(JsonlFaultReason.InvalidLiteral "01") ]
+
+              for culture in [ "en-US"; "fa-IR"; "he-IL" ] do
+                  let saved = Globalization.CultureInfo.CurrentCulture
+                  Globalization.CultureInfo.CurrentCulture <- Globalization.CultureInfo culture
+
+                  try
+                      for (text, expected) in documents do
+                          Expect.equal (read text) expected (sprintf "%s under %s" text culture)
+                  finally
+                      Globalization.CultureInfo.CurrentCulture <- saved
+
           testCase "Json.render of negative zero is the one divergence from Canon that a parse collapses"
           <| fun _ ->
               Expect.equal (Json.render (JFloat -0.0)) "-0" "the author-ordered layout keeps the sign"
