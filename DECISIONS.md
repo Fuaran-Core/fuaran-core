@@ -1,5 +1,156 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D84: the renderers do not recurse, an ill-formed string is refused wherever a digest depends on it, a float aggregate names its overflow, the profile grammar is its canonical strings, and the §21 limits are an open question
+
+**Recorded by Phase 306. BREAKING, riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`,
+"Totality against the machine in Wire and Column").** Each ruling below is about the machine the
+code runs on rather than the model it is proved over: a thread's stack, the float range, the UTF-16
+units that are not characters, the strings a reader took that its writer never wrote. A proof over
+the model cannot see any of them, which is how each survived a directory of proofs.
+
+*One iterative writer, and the renderers RENDER rather than refuse.* `Json.render`, `Canon.render`,
+`Canon.renderOrdered` and both `tryRender`s were each a recursive function mapping itself over a
+list, so their stack depth was the value's nesting depth: a constructed value about 1,400 deep killed
+the process on a 1 MB thread, and a stack overflow is uncatchable on .NET. The parse cap protected
+only the read side, and `render_total` in `proofs/WireCanon.fst` rests on F\*'s `Tot`, which says the
+function is defined everywhere and says nothing about the stack. One writer (`Json.writeWith`) now
+stands behind all of them, with its pending work on an explicit stack in the heap, and the two scans
+the guarded renderers refuse on are iterative too. The phase offered a choice — render at any depth,
+or have `tryRender` refuse past `defaultMaxDepth` — and the first is taken: a value built in memory is
+not untrusted wire data, depth is not a fault in it, and the text of one nested past the cap is
+refused BY NAME on the read side (`MaxDepthExceeded`), which is the cap doing its job. The bytes of
+every renderer are unchanged.
+
+*Refusal over replacement, wherever a digest depends on the string.* A UTF-16 string may hold a
+surrogate with no partner; such a unit has no code point and UTF-8 has no encoding for it, so every
+encoder substitutes. Until Phase 290 `Hash.utf8Bytes` read the next unit as the low half unchecked
+(over all 66,060,288 (high surrogate, non-low unit) pairs, 97.6% encoded byte-identically to a
+well-formed astral character); since Phase 290 it writes the replacement character, as the platform
+does, and then `"\uD800"`, `"\uDFFF"` and `"�"` are one byte string. Replacement only changes
+WHICH strings collide. Injectivity needs the refusal, and it is now made at each of the three places a
+digest pre-image is built: the parser (Phase 299, on read), the guarded renderers (`Canon.tryRender`
+and `Json.tryRender`, which name the first such string by path, a member's key before its value), and
+the guarded encoder (`Hash.tryUtf8Bytes` / `Hash.trySha256Hex`, which name the unit and its index).
+The unguarded forms are unchanged and say what they are: platform parity, not injectivity.
+`Json.tryRender` is included though the phase names only the canonical one, because its contract is
+that an `Ok` is text `parse` reads back, and a lone surrogate broke that the same way a NaN did. A
+non-finite float is looked for first in both, so every refusal either already made keeps its message.
+
+*What that buys is a theorem, and the bridge to the shipped encoder is an independent oracle.*
+`proofs/Utf8.fst` models `Hash.utf8Bytes` and its guard and proves the encoding injective on
+well-formed strings; `proofs/WireCanon.fst` section 16 carries canonical injectivity through it — two
+canonical values `Canon.tryRender` accepted, whose renderings have the same UTF-8 bytes, have the same
+normal form — and `proofs/JsonParse.fst` section 12 proves every string and member key the parser
+returns is well-formed, so the theorem's hypothesis holds of everything the parser admits. `Utf8.fst`
+is checked and NOT extracted (its units are integers, which do not survive the extraction), so what
+stands beside `Hash.utf8Bytes` in the suite is `System.Text.Encoding.UTF8` — every code unit, every
+high surrogate against the units that bound the low range, and a seeded sample — the first
+independent-oracle differential in the proof leg. SHA-256's collision resistance stays a premise.
+
+*A lone surrogate written as a `\u` escape in an F# string literal is not a lone surrogate.* The F#
+compiler replaces an unpaired surrogate escape in a literal with U+FFFD. So Phase 290's ill-formed
+rows — in `HashTests` and in `ParityVectors`, the `utf8Bytes/ill-formed-*` family — were, on .NET,
+well-formed strings of replacement characters: they encoded to the same `EF BF BD` a correct encoder
+gives a surrogate, and passed without ever handing the encoder an ill-formed unit. Both are rebuilt
+from `char` values; the expected bytes did not move, which is how it went unseen. The rule for this
+repository: an unpaired surrogate in a test or a vector is BUILT, never written.
+
+*The float aggregates: the plain formula first, and a form that cannot overflow where it did.*
+`Median [1e308; 1e308]`, `Mean [1.7e308; 1.7e308; -1.7e308]` and `StdDev [1e200; -1e200]` each
+overflowed an intermediate though the answer is representable. The phase named Welford's recurrence
+with scaling; its later amendment required that the one-pass rewrite answer every aggregate to the
+bit. Both are kept, in this order: each aggregate is computed by the formula it always used, in the
+fold order it always used, and ONLY where that leaves the float range over finite input is it
+recomputed — `Median` as `a/2 + b/2`, `Mean` and `StdDev` by a Welford recurrence over values scaled
+by a power of two until the largest magnitude is at most one. Welford throughout was DECLINED: it
+moves every `StdDev` in the last place, against the amendment, to repair cases the fallback repairs
+without moving anything. A float `Sum` has no second form — the running total is the answer — so a
+total that leaves the range over finite input is `AggregateOverflow`, as an int `Sum` past int32
+always was. A column that itself holds a NaN or an infinity is not an overflow. `StdDev` is the
+POPULATION form (it divides by `n`) and says so; a sample form is NOT added, because a new `AggFn`
+case is a `union-widening` for every exhaustive match downstream and nothing has asked for one.
+Noted for the streaming accumulators the compute repository is to hold to this function: `Mean`
+streams as a sum and a count and is this function to the bit; the plain `StdDev` needs the mean
+before the deviations, so a one-pass streamed `StdDev` is not, and that phase chooses between keeping
+the numbers and a tolerance.
+
+*One pass, with the refusals in the order they had.* `aggregate` built three intermediate lists
+(admitted cells, present cells, numbers). It folds once now, into the one accumulator its aggregate
+needs. The refusal precedence is preserved exactly: a cell outside its column's type anywhere in the
+column, then a non-numeric column, then the first decimal past the float range. The suite carries the
+pre-change function verbatim and compares the two over a generated pool, by the bits of each float.
+
+*The profile grammar is its canonical strings.* `name "@" number "." number`, where a name is an ASCII
+letter followed by ASCII letters, digits, `.`, `_` and `-`, and a number is `0` or a non-zero digit
+followed by digits, at most `Int32.MaxValue`. `Profile.tryParse` accepts exactly what
+`Profile.render` writes over a valid profile; it read `core@01.0`, `core@+1.0`, a version followed by
+NUL characters and any name at all before. The name alphabet is a choice, made narrow on purpose: it
+covers `core` and every profile this repository's suite and corpus carry, and a name with a space, an
+`@` or a control character in it had no reader that agreed with its writer. The record is public, so a profile outside the grammar can
+still be built by hand: `Profile.tryRender` (and `Versioning.tryRender` for an envelope) is the
+guarded form, and `render` documents that it assumes a valid one — the `encode` / `tryEncode`
+convention the codecs already follow. `Json.readInt32` holds its token to a sign and digits before
+the host reader sees it, because that reader has always tolerated trailing NUL characters.
+
+*`bump` saturates and `tryBump` refuses.* A counter at `Int32.MaxValue` has no successor;
+`baseProfile.Minor + 1` there wrapped NEGATIVE. `tryBump` names the counter; `bump` returns the
+profile unchanged for a caller with no error channel. `proofs/WireVersioning.fst` modelled the
+counters as naturals, where `+ 1` is total, so every theorem about a bump was true of the model and
+false of the code at one value; the limit is in the model now, each theorem that needs the bump to
+have happened says so, and `saturated_breaking_bump_is_not_foreign` exhibits what saturation costs. The one
+caller in this repository, `Diff.bumpProfile`, keeps the saturating form: a vocabulary 2^31 additive
+revisions old is not a case its report needs an arm for, and a caller that must know has `tryBump`.
+
+*Surplus members of a column source are must-ignore — stated, not changed.* A member of the source
+other than `schema`, `columns` and `ref`, and under an explicit schema a member of `columns` the
+schema does not name, is read past. Refusing was the alternative and is DECLINED: it is the wire's
+forward-compatibility rule, a host wraps the source in its own discriminator, and the table that
+results is the schema's and is checked by `validate`. The asymmetry is recorded rather than hidden —
+`validate` refuses the TABLE a surplus column would have meant, and the codec's model proves both
+halves (`decode_drops_a_column_outside_the_schema`, `validate_refuses_a_column_outside_the_schema`).
+
+*`Json.render (JFloat -0.0)` stays `-0`.* It re-parses as `JInt 0`, so the first author-ordered
+render of a negative zero is not a fixed point of parse-then-render and every later one is. Making it
+`0` would move bytes that chain pre-images are built from; it is documented as the one divergence from
+`Canon.render` that a parse collapses, and pinned by a test.
+
+*`Hash.fnv1a`'s unit is the UTF-16 code unit.* It always was; nothing said so. A twin that folds
+UTF-8 bytes or code points agrees on ASCII and on nothing else. The `fnv1a/astral-code-units` parity
+vector pins the shortest input on which the three readings differ.
+
+*The codec's first model, and what it found.* `proofs/WireColumn.fst` models `Table.validate` and
+`ColumnCodec` at the `JVal` and retires `Fuaran.Core.Column`'s coverage exclusion. Its theorem is the
+round trip UP TO A NORMAL FORM — columns in schema order, an `Int` widened into its float or decimal
+column — because the literal `decode (encode t) = Ok t` is false of the shipped codec three ways, each
+proved as a refutation. Two of its findings were about the code and are settled here. First,
+`Table.validate` checks that the schema's names and the columns' names are the same SET and never that
+they are in the same order, where the type's doc said column order follows the schema. The code is
+kept and the doc is corrected: the schema is the order authority, the encoder looks each column up by
+name, the decoder returns schema order, and a table built in another order encodes correctly. Making
+`validate` refuse one is DECLINED — it would refuse tables that encode and decode correctly today, to
+make a doc sentence true that the round-trip theorem states more exactly. Second, the suite's
+generative codec law asserts the literal round trip and passes only because its generator builds
+tables already in normal form; the model's differential now samples OUTSIDE the normal form — an
+`Int` in a float and in a decimal column, columns out of schema order — and holds production's
+`decode (encode t)` to the model's `normal_table`, with the literal comparison as its go-red.
+
+*QUESTION (open, for a ruling): the WIRE_FORMAT §21 limits.* The parser admits documents §21 says a
+conformant host refuses: nesting past 256 (`Json.defaultMaxDepth` is 512), a string past 2^20 code
+points, an array past 100,000 items. Two answers are available and this phase takes neither.
+(a) ENFORCE IN CORE: lower the default cap to 256 and add the two size refusals — breaking for a
+consumer whose documents sit between the limits, and it makes Core's parser a §21 host. (b) STATE
+THAT CORE IS NOT A §21 HOST: the spine's parser is a substrate with a nesting cap of its own for the
+stack's sake, the limits are the conforming host's to enforce, and `proofs/Limits.fst` keeps them as
+named premises. What argues for (a) is that a limit two hosts enforce and a third does not is a
+document one of them cannot read; what argues for (b) is that Core's parser reads op streams and
+store files that are not §21 documents at all. Until it is ruled, nothing here claims §21 conformance
+for `Json.parse`.
+
+*Not done here, and where it goes.* The JSONL scanner that Phase 296 unifies reads its integers
+through `Json.readInt32` when it lands; that phase has not shipped and there is no scanner to change.
+The shared wire corpus takes its copy of `conformance/refusals/` — which gains the profile grammar's
+vectors — at the hosts' next pin raise. The Fable half of the new parity rows is measured at the cut.
+
 ## 2026-09-30 — D79: the parser holds to the JSON grammar, NaN sorts last, the column codec carries only a table it can decode, and `RowCodec` is obsoleted
 
 **Recorded by Phase 299. BREAKING, riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`, "Column

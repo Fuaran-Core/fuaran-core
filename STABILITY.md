@@ -3148,6 +3148,73 @@ fingerprint — a Fable consumer re-runs its parity leg against this draft.
 **Not done here.** The extracted parser model still reads the pre-299 grammar; the parser
 differential carves out exactly these refusals until Phase 306 restates `proofs/JsonParse.fst`.
 
+### Totality against the machine in Wire and Column (Phase 306, DECISIONS.md D84) — BREAKING: refusals of input that was accepted (`Versioning.Profile.tryParse`, `Json.tryRender`, `Canon.tryRender`, `Json.readInt32`), a refusal where an infinity was answered (float `Sum`), and value moves at the edge of the float range (`Mean`, `Median`, `StdDev`); `additive` beside them
+
+**What changed.** The four renderers are iterative and render a value of any nesting depth (they
+killed the process at a depth of about 1,400 on a 1 MB stack); their bytes are unchanged. A string
+that is not well-formed UTF-16 is refused by the guarded renderers and by a new guarded encoder and
+digest. The float aggregates no longer answer an infinity over finite input, and `aggregate` folds
+in one pass. The profile grammar is a bijection on its canonical strings, and a profile counter no
+longer wraps negative. No wire byte an encoder EMITS moves (`api/wire/` is unchanged).
+
+**The break a `Wire` consumer meets, one line each:**
+
+- `Versioning.Profile.tryParse` refuses what `Profile.render` never writes: a leading zero
+  (`core@01.0`), a sign (`core@+1.0`, `core@-0.0`), anything after the digits (a NUL, a space), and a
+  name that is not an ASCII letter followed by ASCII letters, digits, `.`, `_` or `-`. A
+  `requiredProfile` that is not canonical now reads as absent.
+- `Canon.tryRender` and `Json.tryRender` refuse a value holding a string or a member key with an
+  unpaired surrogate, naming the first by path (a member's key before its value). A non-finite float
+  is still looked for first and its message is unchanged. Over a value with neither they are exactly
+  `Ok (render v)`.
+- `Json.readInt32` refuses a token that is not an optional sign and digits — `"7\u0000"` read as `7`.
+- `Versioning.bump` SATURATES at `Int32.MaxValue` (the profile comes back unchanged) where the
+  counter wrapped negative; `Versioning.tryBump` is the refusing form.
+- `Corpus.fuzzRoundTrip` is unchanged in what it checks; its well-formedness test is now
+  `Json.firstIllFormedString`.
+
+**The break a `Column` consumer meets (the compute repository's raise checklist):**
+
+- A float `Sum` whose running total leaves the float range over FINITE input is
+  `AggregateOverflow` (`<column>: sum overflowed the float range`); it answered `±∞`. A column that
+  itself holds a NaN or an infinity still answers what IEEE arithmetic gives.
+- `Mean`, `Median` and `StdDev` over finite input answer a finite value where an intermediate
+  overflowed — `Median [1e308; 1e308]` is `1e308`, not `∞`. Every answer that was finite before is
+  the same value to the bit; the suite compares the two folds over a generated pool.
+- `StdDev` is documented as the POPULATION form (it divides by `n`). Its values did not move.
+- `Column.aggregate`'s refusals keep their precedence (a cell outside its column's type, then a
+  non-numeric column, then the first decimal past the float range); it no longer builds three
+  intermediate lists.
+- `ColumnCodec.decodeJson` documents surplus members as must-ignore. Nothing it accepted is refused.
+
+**Additive:** `Json.firstIllFormedUnit`, `Json.isWellFormedUtf16`, `Json.firstIllFormedString`;
+`Versioning.Profile.isValidName`, `isValid`, `tryRender`; `Versioning.tryBump`, `Versioning.tryRender`;
+in `Fuaran.Core.Tree`, the `IllFormedUtf16` record and `Hash.firstIllFormedUnit`,
+`Hash.tryUtf8Bytes`, `Hash.trySha256Hex`. `api/Fuaran.Core.Wire.txt` and `api/Fuaran.Core.Tree.txt`
+are regenerated; `api/Fuaran.Core.Column.txt` and `api/wire/` do not move.
+
+**Not changed, and said so:** `Hash.utf8Bytes` and `Hash.sha256Hex` still answer the platform's
+replacement bytes over an ill-formed string — the unguarded, platform-parity path, which has second
+pre-images there by construction. `Json.render (JFloat -0.0)` is still `-0`, the one divergence from
+`Canon.render` that a parse collapses. `Hash.fnv1a`'s unit is, as it always was, the UTF-16 code unit.
+
+**Vectors.** `ParityVectors` gains the Phase 306 rows (`fnv1a/astral-code-units`, `tryUtf8Bytes/*`,
+`canonTryRender/*`, `jsonTryRender/*`, `render/depth-10000-*`, five `aggregate/*` rows and six
+`profile/*` rows), appended; its `utf8Bytes/ill-formed-*` rows are built from code units now, with the
+same expected bytes (an F# string literal's unpaired `\u` surrogate is compiled as U+FFFD, so on .NET
+those rows had not been measuring an ill-formed unit). `conformance/refusals/` gains a `profile` codec
+— the grammar's refusals beside its acceptances — and one `column` acceptance for surplus members;
+every host is still `proposed`. A Fable consumer re-runs its parity leg against this draft.
+
+**Proofs.** `proofs/Utf8.fst` (new, checked and not extracted) proves the UTF-8 encoding injective on
+well-formed UTF-16; `proofs/WireCanon.fst` carries canonical injectivity to the bytes a digest is
+taken over, models `Canon.renderOrdered` and proves it injective outright, and restates the guard
+over both refusals; `proofs/JsonParse.fst` is restated to Phase 299's grammar and surrogate refusal —
+the differential's carve-out is deleted — and proves every string the parser returns well-formed and
+the int53 guard EXACT on the grammar; `proofs/WireVersioning.fst` restates the bump over the
+refusal; `proofs/WireColumn.fst` (new) is the columnar codec's first model, and
+`Fuaran.Core.Column`'s coverage exclusion is gone. The ladder rows are in `proofs.json`.
+
 ### The lane DAG's reconcile applies shared history once and refuses a rejecting lane set the same way under every arrival order; `append` / `merge` refuse a splice-bearing parent id (Phase 300, DECISIONS.md "the reconcile partitions the region above its base") — BREAKING: `Dag.reconcileMany`'s signature and error type change, scripts change value where they were wrong, halts become folds, and `append` / `merge` raise where they accepted
 
 **What changed.**
