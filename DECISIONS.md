@@ -1,5 +1,65 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D99: a decode refusal is a code from a closed set and a path from the root; the code set is the wire-level decode contract every host mirrors
+
+**Recorded by Phase 310. `Fuaran.Core.Wire` (`DecodeCode`, `PathSegment`, `DecodeError`, `Decoder<'T>`,
+the `Decoder`, `DecodePath` and `DecodeError` modules, `Corpus.RejectVector` / `runRejects` /
+`mutations` / `refusalLaws`), the `…Detailed` entry points of `Idl.Decode`, `Artifact`, `Proposal`,
+`CapabilityCodec` and `CapabilityPipeline`, and the `conformance/decode/` family; rides the `0.34.0`
+draft (STABILITY.md, "A decode layer with typed, path-carrying refusals").**
+
+*Decided: the code set is closed, and it is the CONTRACT.* `InvalidJson`, `MissingField`, `WrongKind`,
+`UnknownTag`, `OutOfRange`, `UndeclaredMember`, `LimitExceeded`, `NotAdmitted`, `SchemaFault` — named on
+the wire by their case names, as `JsonErrorKind` and `ColumnError` already are. A host mirrors the set
+and adds no code of its own; where a host draws a distinction finer than the set (the UI host tells an
+unknown node kind from an unknown case, and an empty node id from any other value outside its domain),
+its code is an INSTANCE of one of these, and a test holds the UI host's eight §4d codes to the set with
+no residue. `NotAdmitted` and `SchemaFault` are in the set because two different remedies hid behind
+one sentence without them: a known spelling this reader's policy refuses (the UI host's
+`KIND_NOT_ADMITTED`; a proposal minting a host-surface type) is not an unknown one, and a vocabulary
+that names a type it never declares is not the document's fault.
+
+*Decided: the path is steps from the root, and a `MissingField` path names the member that is
+absent.* Keys and indices, root first; carried on the wire as an array of strings and integers so no
+host parses a rendered path back; rendered `$["a"][0]`, the spelling `Json.firstNonFinite` already
+used. The law is that a refusal's path RESOLVES in the document it was raised over — every step for
+every code but `MissingField`, whose last step names a member the object at the rest does not carry,
+and `InvalidJson`, which names the root. `Corpus.refusalLaws` holds every codec with a typed entry
+point to it over structural mutations of real encodings, and it found two refusals that named nothing
+on its first run (a dispatch that reworded an inner unknown tag with its own tag's sentence; an
+artifact reader that answered a non-object root with a member under it).
+
+*Decided: the sentence stays, beside the code.* `DecodeError.Message` is the sentence the string
+forms always returned, byte for byte, so a codec moved onto the layer reads the same to every existing
+caller: its string entry point is the typed one with `DecodeError.describe`. The string combinators in
+`Decode` are forwards onto `Decoder` for one draft and leave at the next breaking one.
+
+*Decided: an optional member is three-valued.* Absent is `Ok None`; present and refused is the
+refusal, never absence. Every hand-rolled optional reader this replaced read an ill-typed member as
+absent and substituted its default, so a malformed member went silently unread. The codecs moved onto
+the layer now refuse it (STABILITY.md lists where). The one reader that keeps the old reading is
+`Diff`'s snapshot, a tolerant CLASSIFIER by design (a revision written before a key existed must still
+compare), and it discards a refusal deliberately at three named adapters over the layer, not through a
+private copy of it.
+
+*Decided: the strict member policy is the layer's.* Phase 251's `ReadPolicy.Strict` was two private
+copies of one members check (the capability and query codecs); `Decoder.members` / `closed` /
+`undeclared` are that check once, with the member's path, and both codecs read through it.
+
+*Decided: the reject family is vectors over a SHAPE grammar, and it pins the code and the path, not
+the sentence.* A host certifies by reading each input through its own combinators for the shape and
+reproducing the code and the path; the sentence beside a refusal is the host's own. The grammar is
+small on purpose — six shape kinds, enough to reach every code — and is described in the family file
+itself, so a host needs nothing but the file.
+
+*Not done here:* the generated F# decoder still reports a `string` (its error contract mirroring this
+one moves every generated decoder's public type and the committed generated fixtures, and lives in the
+generator); `QueryCodec` keeps `QueryError` as its published refusal and reads through the layer
+underneath; the columnar codec keeps `ColumnError`, which already spelled the layer's faults through
+Phase 299's `…With` forms; the versioning envelope reads through the layer and keeps its `string`
+refusal; and the op-stream, DAG and projection readers, which publish `string` refusals of their own,
+are not moved.
+
 ## 2026-10-01 — D98: a containment grammar is data the domain declares, never a kind Core knows; references are a witness the engine reads and never rebuilds through
 
 **Recorded by Phase 313. `Fuaran.Core.Ops` (`Ops.applyGrammar` / `applyReferenced` and their dry
