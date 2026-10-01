@@ -784,7 +784,9 @@ module Json =
                 // and a JS Number reproduce without loss). BEYOND 2^53, silent float
                 // coercion drops digits AND diverges cross-host (a 19-digit id becomes a
                 // different id), so reject it as a named MalformedNumber rather than
-                // corrupt it. (Fable-clean: Int32.TryParse + Double.TryParse only.)
+                // corrupt it — unless it is the canonical layout of a double (Phase 253,
+                // below), which no reading can corrupt. (Fable-clean: Int32.TryParse +
+                // Double.TryParse + the shared `FloatLayout` only.)
                 match readInt32 tok with
                 | Some v -> JInt v
                 | None ->
@@ -812,10 +814,32 @@ module Json =
                         | true, v -> JFloat v
                         | _ -> fail MalformedNumber ("malformed number: " + tok)
                     else
-                        fail
-                            MalformedNumber
-                            ("integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: "
-                             + tok)
+                        // Phase 253 — past 2^53 the token is admitted EXACTLY when it is the
+                        // canonical float layout (`FloatLayout.finite`) of the double it reads as.
+                        // The float layout writes every finite double whose base-10 exponent is 15
+                        // or 16 in fixed point (WIRE_FORMAT §2 rule 5), so 1e16 is the integer-shaped
+                        // `10000000000000000`; refusing it left a document Core wrote unreadable by
+                        // Core. Such a token survives parse-then-render byte for byte, which is the
+                        // property the refusal below is named for; every other token past 2^53 —
+                        // 2^53 + 1, a 19-digit id — still fails it, and is refused as before.
+                        // (DECISIONS: "an integer token past 2^53 is read when it is a canonical float".)
+                        match
+                            System.Double.TryParse(
+                                tok,
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture
+                            )
+                        with
+                        | true, v when
+                            not (System.Double.IsNaN v || System.Double.IsInfinity v)
+                            && FloatLayout.finite v = tok
+                            ->
+                            JFloat v
+                        | _ ->
+                            fail
+                                MalformedNumber
+                                ("integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: "
+                                 + tok)
 
         let rec parseValue (depth: int) : JVal =
             skipWs ()

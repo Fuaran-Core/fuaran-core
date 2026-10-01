@@ -755,7 +755,8 @@ module Families =
               none
               (Some SeamNotEveryDomainHas)
               []
-              (Unconditional "each iteration renders a drawn float and the three non-finite tokens")
+              (Unconditional
+                  "each iteration BUILDS one float in each of four strata — a small-magnitude spread, the whole normal range, the subnormals and the integral range past 2^53 — and every run asserts the edges (the largest finite, the smallest subnormal, the neighbours of 2^53) and the three non-finite tokens (Phase 253)")
               (NoRefusal, "no refused outcome is read")
           c
               "chainBreakReasonLaws"

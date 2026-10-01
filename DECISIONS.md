@@ -1,5 +1,49 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D90: an integer token past 2^53 is read when it is a canonical float — the read side moves, not the layout
+
+**Recorded by Phase 253. `Fuaran.Core.Wire`; ADDITIVE, riding the `0.34.0` draft (STABILITY.md, "`Json.parse`
+reads every float `Canon.render` writes").** `Canon.canonicalFloat` wrote `1e16` as `10000000000000000`
+and `9007199254740994.0` as `9007199254740994`, and `Json.parse` refused both: its int53 guard refuses
+every integer token past 2^53. So a document Core wrote could not be read back by Core. The
+canonical-float family stayed green because its sample never left |f| < 1e6. Measured: about a third of
+the fixed-point layouts past 2^53 are not even the double's exact value — 1.8205257897171752e16 is
+written `18205257897171750` — because the layout is the shortest digit string that round-trips, padded
+with zeros to the decimal point.
+
+Two repairs were open, one on each side of the wire.
+
+*Render a float past 2^53 with an exponent* (`1E+16`). Rejected. WIRE_FORMAT §2 rule 5 makes the
+fixed-point window (base-10 exponent -4 to 16) mandatory for every finite double across the whole range,
+every conformant host emits it, and the cross-pipeline vector `canonicalFloat/e16` pins
+`10000000000000000`. Changing it changes the bytes of every value holding such a float: a digest over
+one moves, and Core's bytes part from every other host's until all of them follow. That is a breaking
+wire change in this repository's own classification ("the same structure emitted as different bytes"),
+made against the specification the encoder is held to.
+
+*Read the integer token past 2^53 at parse.* Chosen, narrowly: **the token is read exactly when it is
+the canonical layout (`FloatLayout.finite`) of the finite double it parses to**, as that `JFloat`. That
+admits every float the encoder can write and nothing else. The guard's purpose was never the number
+2^53; its message names it — the token "cannot round-trip without precision loss". A canonical layout
+re-renders to itself, byte for byte, so no reading of it moves a digit of the wire. Every token that
+does not — 2^53 + 1, a 19-digit identifier, `18205257897171752` (the exact value of a double whose
+layout is `…750`) — is still refused, with the same message. The admission is by SPELLING, not by value,
+because spelling is what survives a round trip and what a digest is taken over.
+
+*What it costs, said plainly.* The guard used to promise that an accepted integer token's value is
+int53-safe. It now promises that, or that the token is the canonical layout of a double — and that
+double's exact value can differ from the token's digits. A producer that writes an identifier past 2^53
+as a bare number, and whose digits happen to be a canonical float layout, has it read as a float.
+An identifier in that range travels as a string; the guard keeps refusing every other spelling.
+
+*Cross-host byte identity is untouched*: no emitted byte moves, so no host has anything to follow. The
+read side was already stricter here than the UI wire format's own reader, which treats any number token
+past ±(2^53−1) in an untyped position as a double; Core now reads the subset of those that a canonical
+writer can produce. The proof models move with the parser (`JsonParse.fst`'s float reader gains the
+`FCanonical` verdict and the int53 theorems are restated; `WireCanon.fst` gains the premise that the
+floats outside its canonical subset are read back), and the canonical-float family samples the whole
+double range with a parse-and-re-render law, so the class cannot return unseen.
+
 ## 2026-10-01 — D89: the kit's last three `…With` entries are reordered with no forward, and the six kit witness records are frozen
 
 **Recorded by Phase 330. `Fuaran.Core.Conformance`; BREAKING, riding the `0.33.0` draft (STABILITY.md,
