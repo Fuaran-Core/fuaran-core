@@ -2375,7 +2375,7 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.33.0 — DRAFT
+## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
 On 2026-10-01 the candidate was packed from commit `095d6f9` (every one of the 17 packable projects,
@@ -2395,7 +2395,7 @@ transpiled at 0.33.0, compute packages skipped — and value leg green, 307/307 
 on both pipelines at 0.33.0.** No run named a defect in Core's code. Only this ledger has changed
 since `727f2e5`, so the packages a release builds are the ones the gate measured.
 
-**It is a MINOR slot because the change that opens it is BREAKING.** `0.32.0` is tagged, so it is a
+**It is a MINOR release because the change that opened it is BREAKING.** `0.32.0` is tagged, so it is a
 consumer's contract and nothing rides it. Phase 258 removes four packages from this repository's
 roster — `removal`, breaking for a consumer that takes them from here — and a breaking change opens a
 minor slot rather than a patch one. `<Version>` and the laws corpus here (`conformance/laws/capability-laws.json`) were
