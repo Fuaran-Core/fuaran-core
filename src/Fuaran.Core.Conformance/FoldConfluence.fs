@@ -127,9 +127,9 @@ module FoldConfluence =
 
     let private shapeTag (s: MergeConflictShape) : string =
         match s with
-        | ConcurrentUpdate -> "concurrent-update"
-        | InsertPositionClash -> "insert-position-clash"
-        | MoveVsRemove -> "move-vs-remove"
+        | MergeConflictShape.ConcurrentUpdate -> "concurrent-update"
+        | MergeConflictShape.InsertPositionClash -> "insert-position-clash"
+        | MergeConflictShape.MoveVsRemove -> "move-vs-remove"
 
     /// The canonical, arrival-order-independent rendering of a conflict report: one line per
     /// distinct (shape, address, unordered op pair), sorted ordinally. `Dag.conflicts` is

@@ -3643,6 +3643,21 @@ precedence, and that a `…With` comparison which always agrees verifies nothing
 
 **Rollback.** Pin `0.32.0`, or stop calling the verified forms. Nothing persisted moves.
 
+### The conflict-shape renderer distinguishes the three shapes again (`Fuaran.Core.Conformance`, DECISIONS.md D88) — a behaviour correction on the draft
+
+**A behaviour correction in the conformance kit.** `FoldConfluence.canonicalConflictReport` rendered
+every conflict on this draft as `concurrent-update`: its shape renderer matched the three
+`MergeConflictShape` cases unqualified, and once Phase 296 made the union `[<RequireQualifiedAccess>]`
+the first arm became a variable pattern that caught every shape. Two reports differing only in shape
+compared equal in the canonical rendering, and conflicts at one address over one op pair collapsed to
+one line. Each shape again renders as its own name (`concurrent-update`, `insert-position-clash`,
+`move-vs-remove`). The defect never reached a tag — `v0.32.0` renders the three shapes apart — so a
+consumer moving from `0.32.0` sees no change; only a rendering taken from an untagged draft build
+moves. Nothing on the wire or in a chain moves, and no public surface moves. FS0049 and FS0026 are now
+build errors repository-wide (`Directory.Build.props`), so a pattern of this kind cannot ship again.
+
+**Rollback.** None needed: the corrected rendering is `0.32.0`'s.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

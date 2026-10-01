@@ -7,8 +7,14 @@
          (Phase 135's `Incremental.reasonString`, Phase 266's `(_, Anti)`). Escalated by number rather
          than by TreatWarningsAsErrors, which would turn every other warning into a gate the day a
          toolchain adds one. The extracted proof oracle switches FS0025 OFF in its own project file,
-         with the reason beside it. -->
-    <WarningsAsErrors>$(WarningsAsErrors);FS0025</WarningsAsErrors>
+         with the reason beside it.
+         FS0049 and FS0026 join it (DECISIONS.md D88): an uppercase identifier in a pattern that is
+         not a case in scope binds a VARIABLE, so the arm is a silent catch-all that matches every
+         value (`FoldConfluence.shapeTag` rendered all three conflict shapes as one once its union
+         became `[<RequireQualifiedAccess>]`); and a rule that can never be matched is dead code,
+         usually the arm that catch-all swallowed. Both were warnings a green build printed and
+         nobody read. The oracle needs no exception for either: the extracted code raises neither. -->
+    <WarningsAsErrors>$(WarningsAsErrors);FS0025;FS0049;FS0026</WarningsAsErrors>
     <WarnOn>3390;$(WarnOn)</WarnOn>
     <!-- 0.1.11 (2026-07-22): the Phase 94 pilot-5 lenient wave (c5e7863) landed in
          Column.fs + DataFrame.fs AFTER 0.1.10 was packed, so the feed's 0.1.10

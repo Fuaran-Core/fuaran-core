@@ -1,5 +1,23 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D88: a pattern identifier that is not a case, and a rule that is never matched, are build errors
+
+**`Directory.Build.props`; `Fuaran.Core.Conformance`. A behaviour correction riding the `0.33.0` draft
+(STABILITY.md, "The conflict-shape renderer distinguishes the three shapes again").** Phase 296 made
+`MergeConflictShape` `[<RequireQualifiedAccess>]`, and `FoldConfluence.shapeTag` went on matching
+`ConcurrentUpdate`, `InsertPositionClash` and `MoveVsRemove` unqualified. With the cases out of scope
+those names are VARIABLE patterns: the first arm bound every shape and rendered it as
+`concurrent-update`, the other two arms could never be reached, and the canonical conflict report — the
+rendering "halts identically" is judged by — could not tell an insert-position clash from a concurrent
+update. The compiler said so on every build, as FS0049 on the first arm and FS0026 on the other two,
+and the build was green. So the two codes join FS0025 in `WarningsAsErrors`, by number for D75's
+reason: an uppercase identifier in a pattern that is not a case in scope is a silent catch-all, and a
+rule never matched is dead code — almost always the arm such a catch-all swallowed. Neither is a style
+finding; each is a wrong answer the type checker can already see. At the escalation the whole solution,
+the extracted proof oracle included, raised neither code anywhere else, so no site needed rewriting and
+the oracle needs no exception beside its FS0025 one. A deliberate catch-all is written `_` (or a
+lowercase binder), which neither code flags.
+
 ## 2026-10-01 — D87: the verified append is the call-site check D83 left to the caller — an ordinary function a caller chooses, not a debug build, and it pays one replay per call
 
 **Recorded by Phase 329. `Fuaran.Core.OpStream.Dag`, `Fuaran.Core.Conformance`; additive, riding the

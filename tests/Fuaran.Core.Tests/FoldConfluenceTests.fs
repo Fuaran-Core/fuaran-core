@@ -555,6 +555,42 @@ let foldConfluenceTests =
                   (Dag.conflicts planFootprint b a)
                   "the raw report swaps Left/Right — comparing raw reports would fail for presentation, not divergence"
 
+          testCase "the canonical conflict report distinguishes the three shapes"
+          <| fun _ ->
+              // Three conflicts that differ ONLY in their shape. The renderer once matched the cases
+              // unqualified after `MergeConflictShape` became `[<RequireQualifiedAccess>]`, so its
+              // first arm was a variable pattern that caught every shape: all three rendered as
+              // "concurrent-update", collapsed to one line, and two reports differing in shape
+              // compared equal.
+              let conflictOf shape =
+                  { Left = "op-left"
+                    Right = "op-right"
+                    Address = "n1"
+                    Shape = shape }
+
+              let shapes =
+                  [ MergeConflictShape.ConcurrentUpdate
+                    MergeConflictShape.InsertPositionClash
+                    MergeConflictShape.MoveVsRemove ]
+
+              let report =
+                  FoldConfluence.canonicalConflictReport id (shapes |> List.map conflictOf)
+
+              Expect.equal
+                  (report.Split '\n' |> List.ofArray)
+                  [ "concurrent-update|n1|op-left|op-right"
+                    "insert-position-clash|n1|op-left|op-right"
+                    "move-vs-remove|n1|op-left|op-right" ]
+                  "each shape renders as its own line"
+
+              for s in shapes do
+                  for t in shapes do
+                      if s <> t then
+                          Expect.notEqual
+                              (FoldConfluence.canonicalConflictReport id [ conflictOf s ])
+                              (FoldConfluence.canonicalConflictReport id [ conflictOf t ])
+                              (sprintf "a %A report and a %A report must not compare equal" s t)
+
           testCase "Dag.reconcileMany is Dag.reconcile at N = 2"
           <| fun _ ->
               let hashFn = OpStream.defaultHash
