@@ -2675,6 +2675,57 @@ alone, already in the kit's closure, so the kit's package graph gains one packag
 runner's comparison unit grows by 86 lines at the consumer's next Core raise.
 
 **Class: additive.** `api/Fuaran.Core.Conformance.txt` gains one member (`ParityVectors.sanitiseSweep`).
+
+### An authored `doc` annotation, emitted as the member's `///` summary (Phase 255) — BREAKING (source): `Annotations` widened; additive on the artifact wire and the generated emission
+
+**What changed.** `Annotations` gains a fourth slot, `Doc: string option` — what the member IS, as
+authored prose — beside `Deprecated`, `InProcessOnly` and `Since`. It rides every annotatable
+declaration the set already reaches: kinds and tree-ops, their fields, the node envelope's fields,
+record fields, union cases, and enum cases through `Declare.enumAnnotate` (which takes the whole set,
+so it needed no change). `Annotations.Empty` is unchanged in meaning (`Doc = None`), and `IsEmpty`
+counts the new slot.
+
+- **The artifact** writes it as a `doc` key inside the existing `annotations` object (and inside an
+  enum's `caseAnnotations` entries), verbatim, and reads it back; absent means none. An artifact that
+  declares no doc renders byte-for-byte what it did, so only one that declares a doc gains the key and a
+  new content hash. A reader older than this slot ignores the key. The stability classifier needs no
+  change: it compares the canonical annotation object, so a doc on a member that declared nothing grades
+  `additive`, and a doc added to an annotated member, moved or withdrawn grades `host-surface-only`, as
+  for the other three slots.
+- **The F# generator** emits the doc FIRST in the member's `///` block, ahead of the deprecation,
+  in-process and since notes, one `///` line per authored line. Every line break an author can type ends
+  a line, so no authored text can fall out of a comment into the generated source; trailing whitespace
+  and blank lines at either end are dropped; a whitespace-only doc emits nothing. A character XML 1.0
+  cannot carry (a C0 control other than tab, an unpaired surrogate, U+FFFE / U+FFFF) becomes U+FFFD,
+  because the compiler checks every doc block as XML (FS3390) and nothing else can spell it.
+- **The block follows the compiler's mode, and that is the correction this entry records.** The F#
+  compiler reads a `///` block whose first line does not begin with `<` as TEXT: it wraps it in
+  `<summary>` and XML-encodes it itself. Encoding `<` and `&` in such a block as well — the first
+  design — makes the documentation file carry `&amp;lt;` and a reader see `&lt;'T>` where the author
+  wrote `<'T>`, which was measured, not inferred. So a text block is emitted verbatim. A block whose
+  first line DOES begin with `<` is read as XML and authored text is not valid XML in general, so a doc
+  that opens with `<` is emitted as an explicit `<summary>` holding every line of the block, the notes
+  included, with `<` and `&` encoded. The test project compiles a generated module covering both modes
+  with FS3390 as an error, and a drift guard holds that module to the generator.
+- **The TypeScript backend** does not render the doc: its emitted JavaScript has no per-member
+  declaration to carry a summary, and its annotation comments are `//` lines naming their subject.
+
+**What adopting it costs — the consumer edits.**
+
+- Every `Annotations` value written as a FULL record literal (`{ Deprecated = …; InProcessOnly = …;
+  Since = … }`) adds `Doc = None` (FS0764 until it does). A `{ Annotations.Empty with … }` expression
+  compiles unchanged (one full literal in this repository's own test fixtures took the edit).
+- A vocabulary that declares no doc regenerates byte-identical artifacts and generated modules. One that
+  declares a doc regenerates with exactly the added `///` lines — plus the `<summary>` pair, and the
+  encoded notes, for a doc that opens with `<`.
+- A consumer re-pins to adopt; the documentation reaches its own users when it ships an XML
+  documentation file.
+
+**Class: breaking (source).** `api/Fuaran.Core.Idl.txt` reports `record-widening` (`Annotations` gains
+`Doc`; the constructor gains a parameter). The wire baseline for `Fuaran.Core.Idl` moves by the members
+added under every `annotations` object (`additive` moves; its stated class since the newest tag was
+already `breaking`). `api/Fuaran.Core.Idl.Codegen.txt` does not move: the emitter's signatures are
+unchanged and only what it writes for a documented member differs.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

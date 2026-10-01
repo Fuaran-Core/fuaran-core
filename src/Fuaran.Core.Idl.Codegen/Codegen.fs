@@ -583,34 +583,116 @@ module Gen =
     let private said (v: string option) : string option =
         v |> Option.filter (fun x -> not (System.String.IsNullOrWhiteSpace x))
 
+    /// Phase 255 — authored doc prose made safe to carry in a `///` line, whichever way
+    /// the F# compiler then reads the block. A character XML 1.0 cannot carry at all — a
+    /// C0 control other than tab, an unpaired surrogate, U+FFFE / U+FFFF — becomes
+    /// U+FFFD rather than vanishing silently: the compiler checks every doc block as XML
+    /// (FS3390), and no escape spells those characters. `<` and `&` are NOT touched
+    /// here; whether they need encoding depends on the block's mode, which is
+    /// [[annotationDocLines]]'s decision.
+    let private xmlSafeChars (s: string) : string =
+        let b = System.Text.StringBuilder()
+        let replacement = char 0xFFFD
+        let isHigh (c: char) = int c >= 0xD800 && int c <= 0xDBFF
+        let isLow (c: char) = int c >= 0xDC00 && int c <= 0xDFFF
+        let mutable i = 0
+
+        while i < s.Length do
+            let c = s[i]
+
+            if isHigh c && i + 1 < s.Length && isLow s[i + 1] then
+                b.Append(c).Append(s[i + 1]) |> ignore
+                i <- i + 1
+            elif
+                (int c < 0x20 && c <> '\t')
+                || isHigh c
+                || isLow c
+                || int c = 0xFFFE
+                || int c = 0xFFFF
+            then
+                b.Append(replacement) |> ignore
+            else
+                b.Append(c) |> ignore
+
+            i <- i + 1
+
+        b.ToString()
+
+    /// Phase 255 — `<` and `&` encoded, for a block the compiler reads as XML.
+    let private xmlEncode (s: string) : string =
+        s.Replace("&", "&amp;").Replace("<", "&lt;")
+
+    /// Phase 255 — an authored doc as its LINE TEXTS, one per authored line. Every line
+    /// break an author can type (`\r\n`, `\r`, `\n`, U+0085 and the Unicode line and
+    /// paragraph separators, which an editor may break on) ends a line, so no authored
+    /// text can fall out of a comment into the generated source. Trailing whitespace is
+    /// dropped, and so are blank lines at either end (a doc written as a multi-line
+    /// literal usually ends in one); a blank line INSIDE the doc is kept as `""`. A doc
+    /// that is only whitespace yields nothing, as an unsaid slot does.
+    let private docTextLines (doc: string) : string list =
+        let breaks = [| '\r'; '\n'; char 0x85; char 0x2028; char 0x2029 |]
+
+        doc.Replace("\r\n", "\n").Split(breaks)
+        |> Array.map (fun l -> xmlSafeChars (l.TrimEnd()))
+        |> Array.toList
+        |> List.skipWhile (fun l -> l = "")
+        |> List.rev
+        |> List.skipWhile (fun l -> l = "")
+        |> List.rev
+
     /// The `///` doc lines for an annotation set, at the given indent. Empty for an
     /// empty set, which is what keeps an unannotated vocabulary's emission
-    /// byte-identical.
+    /// byte-identical. The authored doc (Phase 255) comes FIRST — it says what the
+    /// member is, and the notes after it say what is true about it — so a block that
+    /// gains a doc gains exactly its lines and nothing else moves.
+    ///
+    /// **The block's MODE is the F# compiler's, and the emitter follows it rather than
+    /// fighting it.** A `///` block whose first line does not begin with `<` is TEXT:
+    /// the compiler wraps it in `<summary>` and XML-encodes it itself, so the authored
+    /// prose is emitted verbatim — encoding it here as well would show a reader
+    /// `&lt;'T>` where the author wrote `<'T>`. A block whose first line DOES begin
+    /// with `<` is XML, taken as written, and authored text there is not valid XML in
+    /// general (FS3390). So a doc that opens with `<` is emitted as an explicit
+    /// `<summary>` holding every line of the block, the notes included, encoded — the
+    /// one case where a block gains lines around it as well as the doc's own.
     let private annotationDocLines (indent: string) (a: Annotations) : string list =
-        [ match a.Deprecated with
-          | Some d ->
-              let replacement =
-                  match said d.Replacement with
-                  | Some r -> sprintf " Use `%s` instead." r
-                  | None -> ""
+        let docTexts =
+            match a.Doc with
+            | Some d -> docTextLines d
+            | None -> []
 
-              indent + "/// **Deprecated.**" + replacement
+        let noteTexts =
+            [ match a.Deprecated with
+              | Some d ->
+                  let replacement =
+                      match said d.Replacement with
+                      | Some r -> sprintf " Use `%s` instead." r
+                      | None -> ""
 
-              match said d.Message with
-              | Some m -> indent + "/// " + m
+                  "**Deprecated.**" + replacement
+
+                  match said d.Message with
+                  | Some m -> m
+                  | None -> ()
               | None -> ()
-          | None -> ()
 
-          if a.InProcessOnly then
-              indent
-              + "/// **In-process only** — this member has no wire projection: a value here"
+              if a.InProcessOnly then
+                  "**In-process only** — this member has no wire projection: a value here"
+                  "is carried inside one host process and is LOST across any wire boundary."
 
-              indent
-              + "/// is carried inside one host process and is LOST across any wire boundary."
+              match said a.Since with
+              | Some v -> sprintf "Since `%s`." v
+              | None -> () ]
 
-          match said a.Since with
-          | Some v -> indent + sprintf "/// Since `%s`." v
-          | None -> () ]
+        let line (text: string) =
+            if text = "" then indent + "///" else indent + "/// " + text
+
+        match docTexts with
+        | first :: _ when first.TrimStart().StartsWith "<" ->
+            (indent + "/// <summary>")
+            :: ((docTexts @ noteTexts) |> List.map (xmlEncode >> line))
+            @ [ indent + "/// </summary>" ]
+        | _ -> (docTexts @ noteTexts) |> List.map line
 
     /// The single `System.Obsolete` attribute an annotation set earns, or `None`.
     ///

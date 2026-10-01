@@ -324,8 +324,8 @@ type Deprecation =
 ///
 /// **Bounded, and a record rather than a list, deliberately.** A `list` of
 /// annotation cases makes two `Since` stamps or two contradictory `Deprecated`
-/// notes representable, and nothing downstream could choose between them. Three
-/// named slots cannot state that.
+/// notes representable, and nothing downstream could choose between them. Named
+/// slots cannot state that.
 ///
 /// **Nothing here is on the wire.** An annotation changes no encoding in either
 /// direction: [[Encode]] and [[Decode]] never read this record, so an annotated
@@ -349,6 +349,18 @@ type Annotations =
         /// as a string rather than parsed: the engine is domain-generic and a
         /// domain's version line is its own business.
         Since: string option
+        /// What the member IS (Phase 255) — authored prose, the summary a reader of
+        /// the generated declaration meets first. The other three slots say what is
+        /// true ABOUT a member that already has a meaning; this one states the
+        /// meaning, so a vocabulary documents itself once, here, rather than in every
+        /// layer generated from it.
+        ///
+        /// Free text, verbatim: line breaks are kept, and nothing is escaped or
+        /// stripped on the way into the artifact. Making it safe inside a generated
+        /// comment is each EMITTER's job (the F# backend splits it into `///` lines and
+        /// encodes it only where the compiler will not), because what "safe" means is a
+        /// property of the target language, not of the prose.
+        Doc: string option
     }
 
     /// No annotations — the default, and what every declaration written before
@@ -357,12 +369,16 @@ type Annotations =
     static member Empty =
         { Deprecated = None
           InProcessOnly = false
-          Since = None }
+          Since = None
+          Doc = None }
 
     /// Whether this set says nothing. The emitters and the artifact both branch on
     /// it, so the "absent is the default and omitted" rule has one definition.
     member this.IsEmpty =
-        this.Deprecated.IsNone && not this.InProcessOnly && this.Since.IsNone
+        this.Deprecated.IsNone
+        && not this.InProcessOnly
+        && this.Since.IsNone
+        && this.Doc.IsNone
 
 /// Whether a field is always present, omitted on the wire when absent, or
 /// omitted on the wire when equal to an identity default (omit-on-absence and
