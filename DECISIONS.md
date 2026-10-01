@@ -146,6 +146,19 @@ document one of them cannot read; what argues for (b) is that Core's parser read
 store files that are not §21 documents at all. Until it is ruled, nothing here claims §21 conformance
 for `Json.parse`.
 
+**RULED (operator, 2026-10-01): (b). Core is not a §21 host.** Read against the section itself, the
+question was framed too narrowly. §21 is the UI wire format's: it sets EIGHT limits, five of them
+over things Core's parser has no notion of (node depth, total nodes, document bytes, expression
+nodes, skeleton rows); it requires the refusal to be `LIMIT_EXCEEDED` in that format's own error
+envelope and forbids reporting it as malformed JSON; and its conformance section names the five
+wire-format hosts, each of which enforces every limit at its own decoder. Core is the substrate
+beneath them and was never the layer the obligation is about. Its nesting cap (512) is its own stack
+guard, deliberately looser than §21's 256 — so Core never refuses a document §21 says a host MUST
+accept — and its refusal there is its own `MaxDepthExceeded`. `proofs/Limits.fst` keeps the limits as
+named premises for the models that reason "within the format's limits"; nothing in Core enforces them,
+and nothing in Core claims §21 conformance. No shared limits-taking entry point is added: the hosts
+already carry the enforcement, in the units and with the error the section requires.
+
 *The JSONL scanner reads its integers from the digits.* Phase 296 landed its one scanner while this
 phase was in flight, and its integer reader called `System.Int64.Parse` under the current culture —
 which THROWS on `-5` under a culture whose negative sign is not U+002D, out of a function that returns

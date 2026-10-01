@@ -966,6 +966,11 @@ module Json =
     /// Nesting is capped at `defaultMaxDepth` (Phase 10) so deep input is a named `Error`,
     /// not a stack-overflow crash; use `parseWith` to override the cap. For a *foreign* document
     /// that spells absent members `null`, see `parseTolerantOfNull`.
+    ///
+    /// The cap is THIS PARSER'S OWN stack guard, not the wire format's resource limits. Those
+    /// (WIRE_FORMAT §21 — nesting, string and array sizes among them) belong to the wire-format
+    /// hosts that decode on top of this parser, which enforce them with the format's own error;
+    /// this parser enforces none of them and claims no §21 conformance (DECISIONS.md D84).
     let parse (input: string) : Result<JVal, string> = parseWith defaultMaxDepth input
 
     /// `parse` under an explicit `NullPolicy` — the string-error wrapper over
