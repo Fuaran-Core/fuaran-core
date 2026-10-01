@@ -603,6 +603,8 @@ let private realCases () =
         (caseNames ProofOracleTests.proofOracleTests |> Set.ofList)
         (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
     |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
+    |> Set.union (caseNames ProofOracleCompactedTests.compactedOracleTests |> Set.ofList)
+    |> Set.union (caseNames ProofOracleCompactedTests.captureOracleTests |> Set.ofList)
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.

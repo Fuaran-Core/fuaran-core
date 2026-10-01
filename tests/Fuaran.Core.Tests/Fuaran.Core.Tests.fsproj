@@ -139,6 +139,9 @@
          beside the production Dag.reconcileMany over the Phase 100 lane generators (which it
          reads from FoldConfluenceTests.fs above) and over the wire corpus's ops/ fixtures. -->
     <Compile Include="ProofOracleTests.fs" />
+    <!-- Phase 301 — the bridge for Chain.fst sections 7b/7c (the compacted stream, the capture journal);
+         ProofsLadderTests.fs below reads its case names. -->
+    <Compile Include="ProofOracleCompactedTests.fs" />
     <!-- The second-vocabulary readiness spike - throwaway measurement code, kept for its
          findings. Declares a slice of a foreign vocabulary against the IDL and certifies it
          against a corpus of sample documents written in that vocabulary's wire shape,

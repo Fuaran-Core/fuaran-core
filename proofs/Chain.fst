@@ -2242,6 +2242,692 @@ let compacted_tail_tamper_detected
     (ensures not (verify_across h show enc_op pay snap (replace_at tail k r'))) =
   chain_tamper_detected h show enc_op actor_ok inj snap.sprev snap.sseq tail k r r'
 
+(* ---- 7b. The compacted stream lives on (Phase 301; F#: `Compacted`, `OpStream.Compacted`) ----
+
+   Until Phase 301 compaction was TERMINAL. `append` numbers a record from the length of the list
+   it is handed and links it to that list's last hash, falling back to the genesis — exactly right
+   for a stream that starts at its genesis, and wrong for a tail, which starts at the snapshot's
+   boundary. So the record appended onto a compacted tail carried the wrong sequence (onto an empty
+   tail, sequence zero linked to the genesis), and no verifier accepted the result. `Compacted`'s
+   members read the BOUNDARY instead: the next sequence is `sseq + plen tail`, the link of an empty
+   tail is `sprev`. This section proves that reading right, three ways:
+
+     - `append_after_compact` — the compaction of the appended full stream IS the appended
+       compaction, snapshot and tail alike, so the record `appendTo` mints is the record `append`
+       mints; and the appended original verifies exactly when its discarded prefix does and the
+       appended compaction verifies across (with the prefix verified, the shard's iff).
+     - `compact_compose` — compacting again `k` records past a boundary `n` is compacting the full
+       stream at `n + k`, refusals included, provided the tail starts at its boundary (the seam
+       `compactFrom` checks, as `Snapshots.replayFrom` does).
+     - `key_index_rebuild_parity` — the key index of the discarded prefix, continued over the tail,
+       is the key index of the whole stream: the first-wins fold splits at any boundary.
+
+   Production counts `compactFrom`'s boundary in the ORIGIN's numbering (`atSeq`); the model takes
+   the offset `k = atSeq - sseq`, which is what the theorem composes. *)
+
+(* F#: `List.length`, as a numeral. *)
+let rec plen (#a: Type) (l: list a) : Tot pos (decreases l) =
+  match l with
+  | [] -> PZero
+  | _ :: t -> PSucc (plen t)
+
+(* F#: `l @ [x]`. Extracted: the differential runs `append_full` and `append_to`. *)
+let rec snoc (#a: Type) (l: list a) (x: a) : Tot (list a) (decreases l) =
+  match l with
+  | [] -> [x]
+  | h :: t -> h :: snoc t x
+
+(* F#: the stream's head under a seed — the last record's hash, or the seed itself (`headWith`'s
+   genesis fallback, `Compacted.head`'s boundary fallback). *)
+let rec last_hash (#op: eqtype) (prev: string) (rs: list (record op)) : Tot string (decreases rs) =
+  match rs with
+  | [] -> prev
+  | r :: t -> last_hash r.rhash t
+
+(* F#: `OpStream.appendWith` — the record at sequence `List.length records`, linked to the head. *)
+let append_full
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (genesis: string)
+  (rs: list (record op))
+  (a: string)
+  (o: op)
+  : Tot (list (record op)) =
+  snoc rs (append_rec h show enc_op (last_hash genesis rs) (plen rs) a o)
+
+(* F#: `OpStream.Compacted.appendTo` — the record at `Snapshot.Seq + List.length Tail`, linked to the
+   tail's last hash or, on an empty tail, to the snapshot's boundary hash. *)
+let append_to
+  (#op: eqtype)
+  (#st: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (a: string)
+  (o: op)
+  : Tot (list (record op)) =
+  snoc tail (append_rec h show enc_op (last_hash snap.sprev tail) (padd snap.sseq (plen tail)) a o)
+
+(* F#: the seam `compactFrom` checks before it replays — the tail's first record sits at the
+   snapshot's boundary (an empty tail trivially does). *)
+let starts_at (#op: eqtype) (n: pos) (tail: list (record op)) : Tot bool =
+  match tail with
+  | [] -> true
+  | r :: _ -> r.rseq = n
+
+(* F#: `OpStream.Compacted.compactFrom`, clause for clause: the seam, the range, the replay of the
+   cut records from the snapshot's state NUMBERED FROM ITS BOUNDARY (so a refusal names the origin
+   index, as `compact`'s does), the boundary hash, the snapshot sealed in the same payload, and the
+   rest of the tail. The refusal strings render production's typed faults the way `compact`'s do. *)
+let compact_from
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (k: pos)
+  : Tot (compacted op st) =
+  if not (starts_at snap.sseq tail)
+  then CompactRefused "OpStream.snapshot: the tail does not start at the snapshot's boundary"
+  else if not (within k tail)
+  then CompactRefused "OpStream.snapshotAt: seq out of range"
+  else
+    match replay_go apply snap.sseq snap.sstate (take k tail) with
+    | Halted i _ -> CompactRefused ("OpStream.snapshotAt: prefix replay failed at " ^ show i)
+    | Replayed s ->
+      let prev = hash_at_boundary snap.sprev k tail in
+      let n' = padd snap.sseq k in
+      Compacted ({ sseq = n'; sstate = s; sprev = prev; shash = h prev (pay n' s) }) (drop k tail)
+
+(* ---- the list arithmetic the three theorems spend ---- *)
+
+let rec within_snoc (#a: Type) (n: pos) (l: list a) (x: a)
+  : Lemma (requires within n l) (ensures within n (snoc l x)) (decreases l) =
+  match n, l with
+  | PZero, _ -> ()
+  | PSucc m, _ :: t -> within_snoc m t x
+
+let rec take_snoc (#a: Type) (n: pos) (l: list a) (x: a)
+  : Lemma (requires within n l) (ensures take n (snoc l x) == take n l) (decreases l) =
+  match n, l with
+  | PZero, _ -> ()
+  | PSucc m, _ :: t -> take_snoc m t x
+
+let rec drop_snoc (#a: Type) (n: pos) (l: list a) (x: a)
+  : Lemma (requires within n l) (ensures drop n (snoc l x) == snoc (drop n l) x) (decreases l) =
+  match n, l with
+  | PZero, _ -> ()
+  | PSucc m, _ :: t -> drop_snoc m t x
+
+let rec boundary_snoc (#op: eqtype) (p: string) (n: pos) (l: list (record op)) (x: record op)
+  : Lemma (requires within n l) (ensures hash_at_boundary p n (snoc l x) == hash_at_boundary p n l)
+    (decreases l) =
+  match n, l with
+  | PZero, _ -> ()
+  | PSucc m, r :: t -> boundary_snoc r.rhash m t x
+
+(* The tail's length counted on from the boundary is the stream's length. *)
+let rec plen_split (#a: Type) (n: pos) (l: list a)
+  : Lemma (requires within n l) (ensures padd n (plen (drop n l)) == plen l) (decreases l) =
+  match n, l with
+  | PZero, _ -> padd_zero (plen l)
+  | PSucc m, _ :: t ->
+    plen_split m t;
+    padd_succ m (plen (drop m t))
+
+(* The tail's head seeded at the boundary hash is the stream's head. *)
+let rec last_hash_split (#op: eqtype) (p: string) (n: pos) (l: list (record op))
+  : Lemma (requires within n l) (ensures last_hash (hash_at_boundary p n l) (drop n l) == last_hash p l)
+    (decreases l) =
+  match n, l with
+  | PZero, _ -> ()
+  | PSucc m, r :: t -> last_hash_split r.rhash m t
+
+let rec within_compose (#a: Type) (n: pos) (k: pos) (l: list a)
+  : Lemma (requires within n l) (ensures within k (drop n l) == within (padd n k) l) (decreases l) =
+  match n, l with
+  | PZero, _ -> padd_zero k
+  | PSucc m, _ :: t ->
+    within_compose m k t;
+    padd_succ m k
+
+let rec drop_compose (#a: Type) (n: pos) (k: pos) (l: list a)
+  : Lemma (requires within n l) (ensures drop k (drop n l) == drop (padd n k) l) (decreases l) =
+  match n, l with
+  | PZero, _ -> padd_zero k
+  | PSucc m, _ :: t ->
+    drop_compose m k t;
+    padd_succ m k
+
+let rec boundary_compose (#op: eqtype) (p: string) (n: pos) (k: pos) (l: list (record op))
+  : Lemma (requires within n l)
+    (ensures hash_at_boundary (hash_at_boundary p n l) k (drop n l) == hash_at_boundary p (padd n k) l)
+    (decreases l) =
+  match n, l with
+  | PZero, _ -> padd_zero k
+  | PSucc m, r :: t ->
+    boundary_compose r.rhash m k t;
+    padd_succ m k
+
+(* THE SPLIT, for a replay of the first `n + k` records: an accepted replay of the first `n` hands
+   its state to a replay of the next `k`, numbered on from `i + n`. *)
+let rec replay_take_compose
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (i: pos)
+  (s: st)
+  (rs: list (record op))
+  (n: pos)
+  (k: pos)
+  : Lemma
+    (requires within n rs)
+    (ensures
+      (match replay_go apply i s (take n rs) with
+       | Halted j e -> True
+       | Replayed s' ->
+         replay_go apply i s (take (padd n k) rs) == replay_go apply (padd i n) s' (take k (drop n rs))))
+    (decreases rs) =
+  match n, rs with
+  | PZero, _ -> padd_zero k; padd_zero i
+  | PSucc m, r :: rest ->
+    padd_succ m k;
+    padd_succ i m;
+    (match apply r.rop s with
+     | Applied s' -> replay_take_compose apply (PSucc i) s' rest m k
+     | Refused _ -> ())
+
+(* A replay of the first `n + k` records halts inside the first `n` exactly where the replay of the
+   first `n` does — so a compaction that succeeded at `n` hands `n + k` an accepted prefix. *)
+let rec replay_take_prefix_halts
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (apply: op -> st -> applied st rej)
+  (i: pos)
+  (s: st)
+  (rs: list (record op))
+  (n: pos)
+  (k: pos)
+  : Lemma
+    (requires within n rs)
+    (ensures
+      (match replay_go apply i s (take n rs) with
+       | Halted j e -> replay_go apply i s (take (padd n k) rs) == Halted j e
+       | Replayed _ -> True))
+    (decreases rs) =
+  match n, rs with
+  | PZero, _ -> ()
+  | PSucc m, r :: rest ->
+    padd_succ m k;
+    (match apply r.rop s with
+     | Applied s' -> replay_take_prefix_halts apply (PSucc i) s' rest m k
+     | Refused _ -> ())
+
+(* THEOREM (Phase 301). The compaction of the appended stream is the appended compaction — snapshot
+   and tail alike — so `appendTo` onto `compact rs n` mints exactly the record `append` mints onto
+   `rs`, at the origin's sequence and linked to the origin's head, whatever the boundary (an empty
+   tail included). And, by `compact_preserves_verify` on the appended stream, the appended original
+   verifies exactly when its discarded prefix verifies and the appended compaction verifies across.
+   No hypothesis on the hash, the payload or the reducer. *)
+let append_after_compact
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (a: string)
+  (o: op)
+  : Lemma
+    (requires compact h show pay apply genesis s0 rs n == Compacted snap tail)
+    (ensures
+      compact h show pay apply genesis s0 (append_full h show enc_op genesis rs a o) n ==
+      Compacted snap (append_to h show enc_op snap tail a o) /\
+      verify_chain h show enc_op genesis (append_full h show enc_op genesis rs a o) ==
+      (verify_chain h show enc_op genesis (take n rs) &&
+       verify_across h show enc_op pay snap (append_to h show enc_op snap tail a o))) =
+  let r = append_rec h show enc_op (last_hash genesis rs) (plen rs) a o in
+  within_snoc n rs r;
+  take_snoc n rs r;
+  drop_snoc n rs r;
+  boundary_snoc genesis n rs r;
+  plen_split n rs;
+  last_hash_split genesis n rs;
+  let rs' = append_full h show enc_op genesis rs a o in
+  assert (compact h show pay apply genesis s0 rs' n == Compacted snap (append_to h show enc_op snap tail a o));
+  compact_preserves_verify h show enc_op pay apply genesis s0 rs' n snap
+    (append_to h show enc_op snap tail a o)
+
+(* COROLLARY — the sentence the phase was chartered with: over a prefix that verified, the appended
+   original verifies exactly when the appended compaction verifies across. Verify, then compact,
+   then keep writing. *)
+let append_after_compact_verifies_iff
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (a: string)
+  (o: op)
+  : Lemma
+    (requires
+      compact h show pay apply genesis s0 rs n == Compacted snap tail /\
+      verify_chain h show enc_op genesis (take n rs))
+    (ensures
+      verify_chain h show enc_op genesis (append_full h show enc_op genesis rs a o) ==
+      verify_across h show enc_op pay snap (append_to h show enc_op snap tail a o)) =
+  append_after_compact h show enc_op pay apply genesis s0 rs n snap tail a o
+
+(* THEOREM (Phase 301). Re-compacting `k` records past a compaction at `n` is compacting the full
+   stream at `n + k` — the same snapshot (sequence, state, boundary hash, seal) and the same tail,
+   or the same refusal with the same message — for every stream, reducer, hash and payload, given
+   only that the tail starts at its boundary. *)
+let compact_compose
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (k: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  : Lemma
+    (requires compact h show pay apply genesis s0 rs n == Compacted snap tail /\ starts_at n tail)
+    (ensures compact_from h show pay apply snap tail k == compact h show pay apply genesis s0 rs (padd n k)) =
+  within_compose n k rs;
+  if within k tail
+  then (
+    replay_take_compose apply PZero s0 rs n k;
+    replay_take_prefix_halts apply PZero s0 rs n k;
+    padd_zero n;
+    boundary_compose genesis n k rs;
+    drop_compose n k rs)
+  else ()
+
+(* ---- the key index across a compaction (F#: `KeyIndex`, `Compacted.Keys`, `Compacted.keyIndex`) ---- *)
+
+(* F#: `EntryRef` under its key. *)
+type kentry = { kkey: string; kseq: pos; khash: string }
+
+let rec kmem (k: string) (idx: list kentry) : Tot bool (decreases idx) =
+  match idx with
+  | [] -> false
+  | e :: t -> e.kkey = k || kmem k t
+
+(* F#: `KeyIndex.add` — FIRST-WINS: a key already indexed keeps its entry. *)
+let kadd (idx: list kentry) (k: string) (seq: pos) (hash: string) : Tot (list kentry) =
+  if kmem k idx then idx else snoc idx ({ kkey = k; kseq = seq; khash = hash })
+
+(* F#: `Compacted.keyIndex`'s fold — `KeyIndex.ofStream` continued from an index, an op `key_of`
+   answers `Missing` for carrying no key. *)
+let rec index_onto (#op: eqtype) (key_of: op -> found string) (idx: list kentry) (rs: list (record op))
+  : Tot (list kentry) (decreases rs) =
+  match rs with
+  | [] -> idx
+  | r :: t ->
+    let idx' = (match key_of r.rop with
+                | Found k -> kadd idx k r.rseq r.rhash
+                | Missing -> idx) in
+    index_onto key_of idx' t
+
+(* THEOREM (Phase 301). The first-wins fold splits at ANY boundary: the index of the first `n`
+   records, continued over the rest, is the index of the whole stream. So `Keys` (the discarded
+   prefix's) plus the tail's is `KeyIndex.ofStream` of the uncompacted stream — and a retry of a
+   pre-compaction key is the `Duplicate` it was before the compaction. *)
+let rec key_index_rebuild_parity
+  (#op: eqtype)
+  (key_of: op -> found string)
+  (idx: list kentry)
+  (rs: list (record op))
+  (n: pos)
+  : Lemma
+    (requires within n rs)
+    (ensures index_onto key_of (index_onto key_of idx (take n rs)) (drop n rs) == index_onto key_of idx rs)
+    (decreases rs) =
+  match n, rs with
+  | PZero, _ -> ()
+  | PSucc m, r :: t ->
+    let idx' = (match key_of r.rop with
+                | Found k -> kadd idx k r.rseq r.rhash
+                | Missing -> idx) in
+    key_index_rebuild_parity key_of idx' t m
+
+(* COROLLARY — at the compaction `compact` produced. *)
+let key_index_compact_parity
+  (#op: eqtype)
+  (#st: Type)
+  (#rej: Type)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (pay: pos -> st -> string)
+  (apply: op -> st -> applied st rej)
+  (genesis: string)
+  (s0: st)
+  (rs: list (record op))
+  (n: pos)
+  (snap: snapshot st)
+  (tail: list (record op))
+  (key_of: op -> found string)
+  : Lemma
+    (requires compact h show pay apply genesis s0 rs n == Compacted snap tail)
+    (ensures index_onto key_of (index_onto key_of [] (take n rs)) tail == index_onto key_of [] rs) =
+  key_index_rebuild_parity key_of [] rs n
+
+(* ---- 7c. The capture journal (Phase 301; F#: `EffectCapture`, `captureEffect`, `firstCaptureBreak`,
+   `verifyCaptures`, `replayEffectStrict`) ----
+
+   Section 6 at the CAPTURE payload. A capture is chained exactly as a record is — `Hash` is the hash
+   of its predecessor's `Hash` and its own pre-image, walked by the one walker production shares — so
+   what section 6 proves of records has a capture instance, and until this phase it was only TESTED
+   (`Conformance.captureReplayLaws`). The pre-image is `{"capture":true,"seq":…,"eff":…,"det":…,
+   "value":…}`, with the effect identity and the label JSON-quoted (`esc` is production's escaper,
+   which the model does not own, as it does not own the hash) and the value embedded raw.
+
+   Four results: an intact journal verifies (`intact_captures_verify`); STRICT replay of a recorded
+   session answers every value it recorded and consumes the journal (`replay_record` — `replay
+   (record s) = s` for a complete journal, the sentence the phase was chartered with); a journal
+   missing the last capture is refused as exhausted rather than answered live
+   (`truncated_journal_exhausted`); and a capture whose value was changed no longer verifies, given
+   that the hash determines the value (`capture_value_tamper_detected`, the premise stated bundled
+   — section 6b's decomposition of the record envelope has not been repeated for this one). *)
+
+(* F#: `EffectCapture`. *)
+type capture = { pseq: pos; peff: string; pdet: string; pval: string; pprev: string; phash: string }
+
+(* F#: `capturePayload`. *)
+let cap_payload (show: pos -> string) (esc: string -> string) (s: pos) (e: string) (d: string) (v: string)
+  : Tot string =
+  "{\"capture\":true,\"seq\":" ^ show s ^ ",\"eff\":" ^ esc e ^ ",\"det\":" ^ esc d ^ ",\"value\":" ^ v ^ "}"
+
+(* F#: `firstCaptureBreakWith`, through the one walker: sequence, then prev-link, then the capture's
+   own recomputed hash. The reason strings are `ChainBreakReason.toString`'s — one rendering for the
+   digest failure whichever walker found it. *)
+let rec first_capture_break_from
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (cs: list capture)
+  : Tot (found cbreak) (decreases cs) =
+  match cs with
+  | [] -> Missing
+  | c :: rest ->
+    if not (c.pseq = i)
+    then Found ({ cindex = i; creason = "sequence-number mismatch"; cexpected = show i; cgot = show c.pseq })
+    else if not (c.pprev = prev)
+    then Found ({ cindex = i; creason = "prev-hash link broken"; cexpected = prev; cgot = c.pprev })
+    else
+      let expected = h prev (cap_payload show esc c.pseq c.peff c.pdet c.pval) in
+      if not (c.phash = expected)
+      then
+        Found
+          ({ cindex = i; creason = "hash mismatch (tampered op/actor/seq)"; cexpected = expected; cgot = c.phash })
+      else first_capture_break_from h show esc c.phash (PSucc i) rest
+
+(* F#: `verifyCaptures` (genesis `""`) / its `cfg.Genesis` form. *)
+let verify_captures
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (genesis: string)
+  (cs: list capture)
+  : Tot bool =
+  match first_capture_break_from h show esc genesis PZero cs with
+  | Missing -> true
+  | Found _ -> false
+
+(* One effect evaluation of a session: its identity, its determinism label, and the realised value
+   as the domain codec encodes it. *)
+type creq = { qeff: string; qdet: string; qval: string }
+
+(* F#: `captureEffectWith` folded over a session from an empty journal — a `deterministic` effect
+   journals nothing, any other appends the capture at the journal's length, linked to its head. *)
+let rec record_session
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (qs: list creq)
+  : Tot (list capture) (decreases qs) =
+  match qs with
+  | [] -> []
+  | q :: t ->
+    if q.qdet = "deterministic"
+    then record_session h show esc prev i t
+    else
+      let c =
+        { pseq = i; peff = q.qeff; pdet = q.qdet; pval = q.qval; pprev = prev;
+          phash = h prev (cap_payload show esc i q.qeff q.qdet q.qval) }
+      in
+      c :: record_session h show esc c.phash (PSucc i) t
+
+(* F#: `CaptureReplayFault`. *)
+type rfault =
+  | RExhausted : string -> rfault
+  | RIdentity : string -> string -> rfault
+  | RLabel : string -> string -> rfault
+  | RNotCanonical : string -> rfault
+
+type rstep =
+  | RValue : string -> list capture -> rstep
+  | RFault : rfault -> rstep
+
+(* F#: `replayEffectStrict`, clause for clause, before the domain decode: the label's canonical
+   form (`canonical` is `isDeterminismLabel`, a parameter as the hash is), the `deterministic`
+   pass-through (the live value, nothing consumed), then the journal ONLY. *)
+let replay_strict (canonical: string -> bool) (q: creq) (cs: list capture) : Tot rstep =
+  if not (canonical q.qdet)
+  then RFault (RNotCanonical q.qdet)
+  else if q.qdet = "deterministic"
+  then RValue q.qval cs
+  else
+    match cs with
+    | [] -> RFault (RExhausted q.qeff)
+    | c :: rest ->
+      if not (c.peff = q.qeff)
+      then RFault (RIdentity q.qeff c.peff)
+      else if not (c.pdet = q.qdet) then RFault (RLabel q.qdet c.pdet) else RValue c.pval rest
+
+type rsession =
+  | RDone : list string -> list capture -> rsession
+  | RStopped : rfault -> rsession
+
+(* A driver folding `replay_strict` over a session, threading the journal. *)
+let rec replay_session (canonical: string -> bool) (qs: list creq) (cs: list capture)
+  : Tot rsession (decreases qs) =
+  match qs with
+  | [] -> RDone [] cs
+  | q :: t ->
+    match replay_strict canonical q cs with
+    | RFault f -> RStopped f
+    | RValue v rest ->
+      match replay_session canonical t rest with
+      | RDone vs r -> RDone (v :: vs) r
+      | RStopped f -> RStopped f
+
+let rec values_of (qs: list creq) : Tot (list string) (decreases qs) =
+  match qs with
+  | [] -> []
+  | q :: t -> q.qval :: values_of t
+
+let rec labels_ok (canonical: string -> bool) (qs: list creq) : Tot bool (decreases qs) =
+  match qs with
+  | [] -> true
+  | q :: t -> canonical q.qdet && labels_ok canonical t
+
+let rec intact_captures_from
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (qs: list creq)
+  : Lemma (ensures first_capture_break_from h show esc prev i (record_session h show esc prev i qs) == Missing)
+    (decreases qs) =
+  match qs with
+  | [] -> ()
+  | q :: t ->
+    if q.qdet = "deterministic"
+    then intact_captures_from h show esc prev i t
+    else intact_captures_from h show esc (h prev (cap_payload show esc i q.qeff q.qdet q.qval)) (PSucc i) t
+
+(* THEOREM (Phase 301). A journal recorded from its genesis verifies. *)
+let intact_captures_verify
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (genesis: string)
+  (qs: list creq)
+  : Lemma (ensures verify_captures h show esc genesis (record_session h show esc genesis PZero qs)) =
+  intact_captures_from h show esc genesis PZero qs
+
+(* THEOREM (Phase 301) — `replay (record s) = s`. Strict replay of a recorded session over its own
+   complete journal answers every value the session realised, in order, and leaves nothing in the
+   journal: a non-deterministic effect from its capture, a deterministic one from the live source,
+   which is reproducible by definition. The domain decode is production's last step and is a
+   round trip the codec owns; what is proved is that it is handed the recorded encoding. *)
+let rec replay_record
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (canonical: string -> bool)
+  (prev: string)
+  (i: pos)
+  (qs: list creq)
+  : Lemma
+    (requires labels_ok canonical qs)
+    (ensures replay_session canonical qs (record_session h show esc prev i qs) == RDone (values_of qs) [])
+    (decreases qs) =
+  match qs with
+  | [] -> ()
+  | q :: t ->
+    if q.qdet = "deterministic"
+    then replay_record h show esc canonical prev i t
+    else replay_record h show esc canonical (h prev (cap_payload show esc i q.qeff q.qdet q.qval)) (PSucc i) t
+
+(* THEOREM (Phase 301). Replayed against a journal that lacks the capture of its LAST
+   non-deterministic effect — the tail truncation the lenient `replayEffect` answers live — the
+   session stops exhausted, naming that effect. Strict replay never substitutes the live source. *)
+let rec truncated_journal_exhausted
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (canonical: string -> bool)
+  (prev: string)
+  (i: pos)
+  (qs: list creq)
+  (q: creq)
+  : Lemma
+    (requires labels_ok canonical (snoc qs q) /\ not (q.qdet = "deterministic"))
+    (ensures
+      replay_session canonical (snoc qs q) (record_session h show esc prev i qs) == RStopped (RExhausted q.qeff))
+    (decreases qs) =
+  match qs with
+  | [] -> ()
+  | q0 :: t ->
+    if q0.qdet = "deterministic"
+    then truncated_journal_exhausted h show esc canonical prev i t q
+    else
+      truncated_journal_exhausted h show esc canonical (h prev (cap_payload show esc i q0.qeff q0.qdet q0.qval))
+        (PSucc i) t q
+
+(* The premise the tamper theorem spends, BUNDLED: at one predecessor, sequence, identity and label,
+   the hash determines the value. Section 6b decomposed the record envelope's premise into the
+   hash's and the codecs'; the capture envelope's has not been decomposed. *)
+[@@ noextract_to "FSharp"]
+let cap_value_injective (h: string -> string -> string) (show: pos -> string) (esc: string -> string)
+  : Type =
+  p: string -> s: pos -> e: string -> d: string -> v: string -> v': string ->
+  Lemma (requires h p (cap_payload show esc s e d v) == h p (cap_payload show esc s e d v'))
+    (ensures v == v')
+
+let rec replace_value (cs: list capture) (n: pos) (v': string) : Tot (list capture) (decreases cs) =
+  match cs, n with
+  | [], _ -> []
+  | c :: t, PZero -> { c with pval = v' } :: t
+  | c :: t, PSucc m -> c :: replace_value t m v'
+
+let rec capture_value_at (cs: list capture) (n: pos) : Tot (found string) (decreases cs) =
+  match cs, n with
+  | [], _ -> Missing
+  | c :: _, PZero -> Found c.pval
+  | _ :: t, PSucc m -> capture_value_at t m
+
+let rec capture_tamper_from
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (inj: cap_value_injective h show esc)
+  (prev: string)
+  (i: pos)
+  (cs: list capture)
+  (n: pos)
+  (v: string)
+  (v': string)
+  : Lemma
+    (requires
+      first_capture_break_from h show esc prev i cs == Missing /\ capture_value_at cs n == Found v /\
+      not (v = v'))
+    (ensures Found? (first_capture_break_from h show esc prev i (replace_value cs n v')))
+    (decreases cs) =
+  match cs, n with
+  | c :: t, PZero ->
+    if c.phash = h prev (cap_payload show esc c.pseq c.peff c.pdet v')
+    then inj prev c.pseq c.peff c.pdet c.pval v'
+    else ()
+  | c :: t, PSucc m -> capture_tamper_from h show esc inj c.phash (PSucc i) t m v v'
+
+(* THEOREM (Phase 301). A capture whose value was changed — its sequence, identity, label and links
+   left alone — no longer verifies, given `cap_value_injective`. *)
+let capture_value_tamper_detected
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (inj: cap_value_injective h show esc)
+  (genesis: string)
+  (cs: list capture)
+  (n: pos)
+  (v: string)
+  (v': string)
+  : Lemma
+    (requires verify_captures h show esc genesis cs /\ capture_value_at cs n == Found v /\ not (v = v'))
+    (ensures not (verify_captures h show esc genesis (replace_value cs n v'))) =
+  capture_tamper_from h show esc inj genesis PZero cs n v v'
 (* ======================================================================================
    8. The signed head (Phase 193; F#: `Attestation`, `IAttestationSink`, `OpStream.head`,
       `attestHead`, `verifyAttestation`).

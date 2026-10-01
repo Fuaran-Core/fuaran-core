@@ -858,6 +858,492 @@ let offset = (fun ( n  :  pos ) ( r  :  replayed<'st, 'rej> ) -> (match (r) with
      end))
 
 
+let rec plen = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     PZero
+     end
+| (uu___)::t -> begin
+     PSucc ((plen t))
+     end))
+
+
+let rec snoc = (fun ( l  :  Prims.list<'a> ) ( x  :  'a ) -> (match (l) with
+| [] -> begin
+     (x)::[]
+     end
+| (h)::t -> begin
+     (h)::(snoc t x)
+     end))
+
+
+let rec last_hash = (fun ( prev  :  Prims.string ) ( rs  :  Prims.list<record<'op>> ) -> (match (rs) with
+| [] -> begin
+     prev
+     end
+| (r)::t -> begin
+     (last_hash r.rhash t)
+     end))
+
+
+let append_full = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( enc_op  :  'op  ->  Prims.string ) ( genesis  :  Prims.string ) ( rs  :  Prims.list<record<'op>> ) ( a  :  Prims.string ) ( o  :  'op ) -> (snoc rs (append_rec h show enc_op (last_hash genesis rs) (plen rs) a o)))
+
+
+let append_to = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( enc_op  :  'op  ->  Prims.string ) ( snap  :  snapshot<'st> ) ( tail  :  Prims.list<record<'op>> ) ( a  :  Prims.string ) ( o  :  'op ) -> (snoc tail (append_rec h show enc_op (last_hash snap.sprev tail) (padd snap.sseq (plen tail)) a o)))
+
+
+let starts_at = (fun ( n  :  pos ) ( tail  :  Prims.list<record<'op>> ) -> (match (tail) with
+| [] -> begin
+     true
+     end
+| (r)::uu___ -> begin
+     (Prims.op_Equals r.rseq n)
+     end))
+
+
+let compact_from = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( pay  :  pos  ->  'st  ->  Prims.string ) ( apply  :  'op  ->  'st  ->  applied<'st, 'rej> ) ( snap  :  snapshot<'st> ) ( tail  :  Prims.list<record<'op>> ) ( k  :  pos ) ->  
+if (not ((starts_at snap.sseq tail))) then begin
+     CompactRefused ("OpStream.snapshot: the tail does not start at the snapshot\'s boundary")
+     end else begin
+      
+if (not ((within k tail))) then begin
+     CompactRefused ("OpStream.snapshotAt: seq out of range")
+     end else begin
+     (match ((replay_go apply snap.sseq snap.sstate (take k tail))) with
+| Halted (i, uu___) -> begin
+     CompactRefused ((Prims.strcat "OpStream.snapshotAt: prefix replay failed at " (show i)))
+     end
+| Replayed (s) -> begin
+     (
+
+let prev = (hash_at_boundary snap.sprev k tail)
+in (
+
+let n' = (padd snap.sseq k)
+in Compacted ({sseq = n'; sstate = s; sprev = prev; shash = (h prev (pay n' s))}, (drop k tail))))
+     end)
+     end
+     end)
+
+type kentry = {kkey : Prims.string; kseq : pos; khash : Prims.string}
+
+
+let __proj__Mkkentry__item__kkey : kentry  ->  Prims.string = (fun ( projectee  :  kentry ) -> (match (projectee) with
+| {kkey = kkey; kseq = kseq; khash = khash} -> begin
+     kkey
+     end))
+
+
+let __proj__Mkkentry__item__kseq : kentry  ->  pos = (fun ( projectee  :  kentry ) -> (match (projectee) with
+| {kkey = kkey; kseq = kseq; khash = khash} -> begin
+     kseq
+     end))
+
+
+let __proj__Mkkentry__item__khash : kentry  ->  Prims.string = (fun ( projectee  :  kentry ) -> (match (projectee) with
+| {kkey = kkey; kseq = kseq; khash = khash} -> begin
+     khash
+     end))
+
+
+let rec kmem : Prims.string  ->  Prims.list<kentry>  ->  Prims.bool = (fun ( k  :  Prims.string ) ( idx  :  Prims.list<kentry> ) -> (match (idx) with
+| [] -> begin
+     false
+     end
+| (e)::t -> begin
+     ((Prims.op_Equals e.kkey k) || (kmem k t))
+     end))
+
+
+let kadd : Prims.list<kentry>  ->  Prims.string  ->  pos  ->  Prims.string  ->  Prims.list<kentry> = (fun ( idx  :  Prims.list<kentry> ) ( k  :  Prims.string ) ( seq  :  pos ) ( hash  :  Prims.string ) ->  
+if (kmem k idx) then begin
+     idx
+     end else begin
+     (snoc idx {kkey = k; kseq = seq; khash = hash})
+     end)
+
+
+let rec index_onto = (fun ( key_of  :  'op  ->  found<Prims.string> ) ( idx  :  Prims.list<kentry> ) ( rs  :  Prims.list<record<'op>> ) -> (match (rs) with
+| [] -> begin
+     idx
+     end
+| (r)::t -> begin
+     (
+
+let idx' = (match ((key_of r.rop)) with
+| Found (k) -> begin
+     (kadd idx k r.rseq r.rhash)
+     end
+| Missing -> begin
+     idx
+     end)
+in (index_onto key_of idx' t))
+     end))
+
+type capture = {pseq : pos; peff : Prims.string; pdet : Prims.string; pval : Prims.string; pprev : Prims.string; phash : Prims.string}
+
+
+let __proj__Mkcapture__item__pseq : capture  ->  pos = (fun ( projectee  :  capture ) -> (match (projectee) with
+| {pseq = pseq; peff = peff; pdet = pdet; pval = pval; pprev = pprev; phash = phash} -> begin
+     pseq
+     end))
+
+
+let __proj__Mkcapture__item__peff : capture  ->  Prims.string = (fun ( projectee  :  capture ) -> (match (projectee) with
+| {pseq = pseq; peff = peff; pdet = pdet; pval = pval; pprev = pprev; phash = phash} -> begin
+     peff
+     end))
+
+
+let __proj__Mkcapture__item__pdet : capture  ->  Prims.string = (fun ( projectee  :  capture ) -> (match (projectee) with
+| {pseq = pseq; peff = peff; pdet = pdet; pval = pval; pprev = pprev; phash = phash} -> begin
+     pdet
+     end))
+
+
+let __proj__Mkcapture__item__pval : capture  ->  Prims.string = (fun ( projectee  :  capture ) -> (match (projectee) with
+| {pseq = pseq; peff = peff; pdet = pdet; pval = pval; pprev = pprev; phash = phash} -> begin
+     pval
+     end))
+
+
+let __proj__Mkcapture__item__pprev : capture  ->  Prims.string = (fun ( projectee  :  capture ) -> (match (projectee) with
+| {pseq = pseq; peff = peff; pdet = pdet; pval = pval; pprev = pprev; phash = phash} -> begin
+     pprev
+     end))
+
+
+let __proj__Mkcapture__item__phash : capture  ->  Prims.string = (fun ( projectee  :  capture ) -> (match (projectee) with
+| {pseq = pseq; peff = peff; pdet = pdet; pval = pval; pprev = pprev; phash = phash} -> begin
+     phash
+     end))
+
+
+let cap_payload : (pos  ->  Prims.string)  ->  (Prims.string  ->  Prims.string)  ->  pos  ->  Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.string = (fun ( show  :  pos  ->  Prims.string ) ( esc  :  Prims.string  ->  Prims.string ) ( s  :  pos ) ( e  :  Prims.string ) ( d  :  Prims.string ) ( v  :  Prims.string ) -> (Prims.strcat "{\"capture\":true,\"seq\":" (Prims.strcat (show s) (Prims.strcat ",\"eff\":" (Prims.strcat (esc e) (Prims.strcat ",\"det\":" (Prims.strcat (esc d) (Prims.strcat ",\"value\":" (Prims.strcat v "}")))))))))
+
+
+let rec first_capture_break_from : (Prims.string  ->  Prims.string  ->  Prims.string)  ->  (pos  ->  Prims.string)  ->  (Prims.string  ->  Prims.string)  ->  Prims.string  ->  pos  ->  Prims.list<capture>  ->  found<cbreak> = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( esc  :  Prims.string  ->  Prims.string ) ( prev  :  Prims.string ) ( i  :  pos ) ( cs  :  Prims.list<capture> ) -> (match (cs) with
+| [] -> begin
+     Missing
+     end
+| (c)::rest -> begin
+      
+if (not ((Prims.op_Equals c.pseq i))) then begin
+     Found ({cindex = i; creason = "sequence-number mismatch"; cexpected = (show i); cgot = (show c.pseq)})
+     end else begin
+      
+if (not ((Prims.op_Equals c.pprev prev))) then begin
+     Found ({cindex = i; creason = "prev-hash link broken"; cexpected = prev; cgot = c.pprev})
+     end else begin
+     (
+
+let expected = (h prev (cap_payload show esc c.pseq c.peff c.pdet c.pval))
+in  
+if (not ((Prims.op_Equals c.phash expected))) then begin
+     Found ({cindex = i; creason = "hash mismatch (tampered op/actor/seq)"; cexpected = expected; cgot = c.phash})
+     end else begin
+     (first_capture_break_from h show esc c.phash (PSucc (i)) rest)
+     end)
+     end
+     end
+     end))
+
+
+let verify_captures : (Prims.string  ->  Prims.string  ->  Prims.string)  ->  (pos  ->  Prims.string)  ->  (Prims.string  ->  Prims.string)  ->  Prims.string  ->  Prims.list<capture>  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( esc  :  Prims.string  ->  Prims.string ) ( genesis  :  Prims.string ) ( cs  :  Prims.list<capture> ) -> (match ((first_capture_break_from h show esc genesis PZero cs)) with
+| Missing -> begin
+     true
+     end
+| Found (uu___) -> begin
+     false
+     end))
+
+type creq = {qeff : Prims.string; qdet : Prims.string; qval : Prims.string}
+
+
+let __proj__Mkcreq__item__qeff : creq  ->  Prims.string = (fun ( projectee  :  creq ) -> (match (projectee) with
+| {qeff = qeff; qdet = qdet; qval = qval} -> begin
+     qeff
+     end))
+
+
+let __proj__Mkcreq__item__qdet : creq  ->  Prims.string = (fun ( projectee  :  creq ) -> (match (projectee) with
+| {qeff = qeff; qdet = qdet; qval = qval} -> begin
+     qdet
+     end))
+
+
+let __proj__Mkcreq__item__qval : creq  ->  Prims.string = (fun ( projectee  :  creq ) -> (match (projectee) with
+| {qeff = qeff; qdet = qdet; qval = qval} -> begin
+     qval
+     end))
+
+
+let rec record_session : (Prims.string  ->  Prims.string  ->  Prims.string)  ->  (pos  ->  Prims.string)  ->  (Prims.string  ->  Prims.string)  ->  Prims.string  ->  pos  ->  Prims.list<creq>  ->  Prims.list<capture> = (fun ( h  :  Prims.string  ->  Prims.string  ->  Prims.string ) ( show  :  pos  ->  Prims.string ) ( esc  :  Prims.string  ->  Prims.string ) ( prev  :  Prims.string ) ( i  :  pos ) ( qs  :  Prims.list<creq> ) -> (match (qs) with
+| [] -> begin
+     []
+     end
+| (q)::t -> begin
+      
+if (Prims.op_Equals q.qdet "deterministic") then begin
+     (record_session h show esc prev i t)
+     end else begin
+     (
+
+let c = {pseq = i; peff = q.qeff; pdet = q.qdet; pval = q.qval; pprev = prev; phash = (h prev (cap_payload show esc i q.qeff q.qdet q.qval))}
+in (c)::(record_session h show esc c.phash (PSucc (i)) t))
+     end
+     end))
+
+type rfault =
+| RExhausted of Prims.string
+| RIdentity of Prims.string * Prims.string
+| RLabel of Prims.string * Prims.string
+| RNotCanonical of Prims.string
+
+
+let uu___is_RExhausted : rfault  ->  Prims.bool = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RExhausted (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RExhausted__item___0 : rfault  ->  Prims.string = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RExhausted (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_RIdentity : rfault  ->  Prims.bool = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RIdentity (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RIdentity__item___0 : rfault  ->  Prims.string = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RIdentity (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__RIdentity__item___1 : rfault  ->  Prims.string = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RIdentity (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_RLabel : rfault  ->  Prims.bool = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RLabel (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RLabel__item___0 : rfault  ->  Prims.string = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RLabel (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__RLabel__item___1 : rfault  ->  Prims.string = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RLabel (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_RNotCanonical : rfault  ->  Prims.bool = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RNotCanonical (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RNotCanonical__item___0 : rfault  ->  Prims.string = (fun ( projectee  :  rfault ) -> (match (projectee) with
+| RNotCanonical (_0) -> begin
+     _0
+     end))
+
+type rstep =
+| RValue of Prims.string * Prims.list<capture>
+| RFault of rfault
+
+
+let uu___is_RValue : rstep  ->  Prims.bool = (fun ( projectee  :  rstep ) -> (match (projectee) with
+| RValue (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RValue__item___0 : rstep  ->  Prims.string = (fun ( projectee  :  rstep ) -> (match (projectee) with
+| RValue (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__RValue__item___1 : rstep  ->  Prims.list<capture> = (fun ( projectee  :  rstep ) -> (match (projectee) with
+| RValue (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_RFault : rstep  ->  Prims.bool = (fun ( projectee  :  rstep ) -> (match (projectee) with
+| RFault (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RFault__item___0 : rstep  ->  rfault = (fun ( projectee  :  rstep ) -> (match (projectee) with
+| RFault (_0) -> begin
+     _0
+     end))
+
+
+let replay_strict : (Prims.string  ->  Prims.bool)  ->  creq  ->  Prims.list<capture>  ->  rstep = (fun ( canonical  :  Prims.string  ->  Prims.bool ) ( q  :  creq ) ( cs  :  Prims.list<capture> ) ->  
+if (not ((canonical q.qdet))) then begin
+     RFault (RNotCanonical (q.qdet))
+     end else begin
+      
+if (Prims.op_Equals q.qdet "deterministic") then begin
+     RValue (q.qval, cs)
+     end else begin
+     (match (cs) with
+| [] -> begin
+     RFault (RExhausted (q.qeff))
+     end
+| (c)::rest -> begin
+      
+if (not ((Prims.op_Equals c.peff q.qeff))) then begin
+     RFault (RIdentity (q.qeff, c.peff))
+     end else begin
+      
+if (not ((Prims.op_Equals c.pdet q.qdet))) then begin
+     RFault (RLabel (q.qdet, c.pdet))
+     end else begin
+     RValue (c.pval, rest)
+     end
+     end
+     end)
+     end
+     end)
+
+type rsession =
+| RDone of Prims.list<Prims.string> * Prims.list<capture>
+| RStopped of rfault
+
+
+let uu___is_RDone : rsession  ->  Prims.bool = (fun ( projectee  :  rsession ) -> (match (projectee) with
+| RDone (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RDone__item___0 : rsession  ->  Prims.list<Prims.string> = (fun ( projectee  :  rsession ) -> (match (projectee) with
+| RDone (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__RDone__item___1 : rsession  ->  Prims.list<capture> = (fun ( projectee  :  rsession ) -> (match (projectee) with
+| RDone (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_RStopped : rsession  ->  Prims.bool = (fun ( projectee  :  rsession ) -> (match (projectee) with
+| RStopped (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RStopped__item___0 : rsession  ->  rfault = (fun ( projectee  :  rsession ) -> (match (projectee) with
+| RStopped (_0) -> begin
+     _0
+     end))
+
+
+let rec replay_session : (Prims.string  ->  Prims.bool)  ->  Prims.list<creq>  ->  Prims.list<capture>  ->  rsession = (fun ( canonical  :  Prims.string  ->  Prims.bool ) ( qs  :  Prims.list<creq> ) ( cs  :  Prims.list<capture> ) -> (match (qs) with
+| [] -> begin
+     RDone ([], cs)
+     end
+| (q)::t -> begin
+     (match ((replay_strict canonical q cs)) with
+| RFault (f) -> begin
+     RStopped (f)
+     end
+| RValue (v, rest) -> begin
+     (match ((replay_session canonical t rest)) with
+| RDone (vs, r) -> begin
+     RDone ((v)::vs, r)
+     end
+| RStopped (f) -> begin
+     RStopped (f)
+     end)
+     end)
+     end))
+
+
+let rec values_of : Prims.list<creq>  ->  Prims.list<Prims.string> = (fun ( qs  :  Prims.list<creq> ) -> (match (qs) with
+| [] -> begin
+     []
+     end
+| (q)::t -> begin
+     (q.qval)::(values_of t)
+     end))
+
+
+let rec labels_ok : (Prims.string  ->  Prims.bool)  ->  Prims.list<creq>  ->  Prims.bool = (fun ( canonical  :  Prims.string  ->  Prims.bool ) ( qs  :  Prims.list<creq> ) -> (match (qs) with
+| [] -> begin
+     true
+     end
+| (q)::t -> begin
+     ((canonical q.qdet) && (labels_ok canonical t))
+     end))
+
+
+let rec replace_value : Prims.list<capture>  ->  pos  ->  Prims.string  ->  Prims.list<capture> = (fun ( cs  :  Prims.list<capture> ) ( n  :  pos ) ( v'  :  Prims.string ) -> (match (((cs), (n))) with
+| ([], uu___) -> begin
+     []
+     end
+| ((c)::t, PZero) -> begin
+     ({pseq = c.pseq; peff = c.peff; pdet = c.pdet; pval = v'; pprev = c.pprev; phash = c.phash})::t
+     end
+| ((c)::t, PSucc (m)) -> begin
+     (c)::(replace_value t m v')
+     end))
+
+
+let rec capture_value_at : Prims.list<capture>  ->  pos  ->  found<Prims.string> = (fun ( cs  :  Prims.list<capture> ) ( n  :  pos ) -> (match (((cs), (n))) with
+| ([], uu___) -> begin
+     Missing
+     end
+| ((c)::uu___, PZero) -> begin
+     Found (c.pval)
+     end
+| ((uu___)::t, PSucc (m)) -> begin
+     (capture_value_at t m)
+     end))
+
+
 let rec chain_head = (fun ( rs  :  Prims.list<record<'op>> ) -> (match (rs) with
 | [] -> begin
      ""

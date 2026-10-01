@@ -3067,6 +3067,61 @@ discharge to `footprintLawsAt` changes that row and is left to a change that own
 (`Conformance.footprintLawsAt`, `FoldConfluence.laneDag`); no existing member moves, and no wire byte.
 The roster gains one family, and `docs/conformance-families.md` / `.json` are regenerated.
 
+### The compacted stream lives on, checked JSONL writers, strict effect replay (Phase 301, DECISIONS.md D96) — ADDITIVE
+
+**What changed.** Compaction was terminal. `append` numbers a record from the length of the list it is
+handed and links it to that list's last hash, falling back to the genesis, so an append onto a
+compacted tail continued at the wrong sequence (onto an empty tail, at sequence zero linked to the
+genesis) and no verifier accepted the result; compacting the tail again renumbered it from zero; a key
+index rebuilt from the tail forgot every key the discarded prefix produced, so an idempotent retry of
+a pre-compaction key applied a second time. The JSONL writers embedded each `Encode` output unchecked,
+and an encoding with a line break or whitespace around its value read back changed and failed
+`verifyChain` / `verifyCaptures`. `replayEffect` answered an exhausted journal from the live source,
+so a journal cut short at its tail replayed with live values and no signal. Beside what was there:
+
+- `Compacted<'Op,'State>` (`Snapshot`, `Tail`, `Keys` — the discarded history's key index) and
+  `CompactedOutcome<'Op,'State>`, with `OpStream.Compacted.compactAt` / `compactFrom` / `head` /
+  `appendTo` / `appendIfTo` / `appendIdempotentTo` / `keyIndex` / `verify` / `replayFrom`. Every
+  member reads the snapshot's BOUNDARY: the next sequence is `Snapshot.Seq` plus the tail's length,
+  the head of an empty tail is `Snapshot.PrevHash`, the key index is `Keys` plus the tail's.
+  `compactFrom` takes its boundary in the origin's numbering and refuses a prefix op at its origin
+  index. Proved in `proofs/Chain.fst` §7b: `append_after_compact`, `compact_compose`,
+  `key_index_rebuild_parity`.
+- Checked writers beside the unchanged ones, each `Result<_, JsonlWriteFault>` and byte-identical to
+  its unchecked twin on `Ok`: `OpStream.tryToJsonl`, `OpStream.tryCaptureToJsonl`,
+  `OpStream.Snapshots.tryToJsonl`, `Dag.tryToJsonl`, `Dag.tryToJsonlWithCheckpoints`, all through the
+  one check `OpStream.Jsonl.checkRaw` (`JsonlWriteFaultReason`: `MultiLine`, `NotTrimStable`,
+  `Unreadable`). A line or paragraph separator inside a string is NOT refused: the canonical escaper
+  emits it raw and the reader splits on `\n` alone, so it round-trips.
+- Strict replay: `OpStream.replayEffectStrict` (`CaptureReplayFault`: `Exhausted`,
+  `IdentityMismatch`, `LabelMismatch`, `LabelNotCanonical`, `Undecodable`), `OpStream.isDeterminismLabel`
+  (case-exact, held equal to `Effect.tryDeterminismOfTag` by a test), and the journal anchor
+  `captureHead` / `captureHeadWith` / `verifyCapturesAt` / `verifyCapturesAtWith`. Proved in §7c:
+  `intact_captures_verify`, `replay_record`, `truncated_journal_exhausted`,
+  `capture_value_tamper_detected`.
+- `Conformance.streamLaws` and `Conformance.captureReplayLaws` each gain one law cell, the JSONL round
+  trip through the checked writer, after their existing cells.
+
+**What adopting it costs.** Nothing to compile: no existing member, type or emitted byte moves, and
+the snapshot and record lines a compacted stream writes are the lines it wrote. **One run can go red
+that was green:** the base run (`certify`, `certifyStream`, `streamLaws`) now certifies LINEAR
+PERSISTENCE, so a domain whose `Encode` is not one single-line JSON value — `i5` rather than `"i5"`,
+or a value with a trailing space — fails the new cell, naming the record and member. That domain's
+streams never round-tripped through `toJsonl` / `fromJsonl`; the cell reports what was already true.
+This repository's own reducer fixture was such a domain and now encodes a JSON string. A host that
+compacts and keeps writing moves to `Compacted` and persists `Keys` beside the compacted file
+(DECISIONS.md D96); a host that writes JSONL moves to the `try…` writers.
+
+**What it does not do.** The pre-Phase-296 `OpStream.replayFrom` forward still does not check the
+seam (it is `Obsolete` and leaves after this draft); `Snapshots.replayFrom` and `Compacted.replayFrom`
+do. Nothing binds `Keys` into a hash, and no line format for it is minted here (D96). The capture
+envelope's injectivity premise is stated bundled, not decomposed as the record envelope's was.
+
+**Class: additive.** `api/Fuaran.Core.OpStream.txt` and `api/Fuaran.Core.OpStream.Dag.txt` gain
+members only; the surface guard classes both moves additive. The roster's two families each gain a
+cell (counts pinned by the suite move with them), and `docs/conformance-families.md` / `.json` are
+regenerated. `proofs.json` gains five proved rows and two tested ones; Chain's prover budget is
+re-seeded (`proofs/modules.json`).
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

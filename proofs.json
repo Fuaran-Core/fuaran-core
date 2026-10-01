@@ -2679,6 +2679,91 @@
         "model": "proofs/TreeOps.fst",
         "prover": "proofs/fstar-pin.json"
       }
+    },
+    {
+      "id": "append-after-compact",
+      "level": "proved",
+      "claim": "A COMPACTED STREAM KEEPS WRITING (Phase 301). For every stream, reducer, hash and snapshot payload, every boundary n and the (snapshot, tail) that compact produces at n, the compaction of the APPENDED stream is the appended compaction — `compact (append_full rs a o) n == Compacted snap (append_to snap tail a o)`, snapshot and tail alike — so the record `OpStream.Compacted.appendTo` mints onto the tail is the record `append` mints onto the whole stream: at sequence `snap.Seq + length tail` and linked to the tail's last hash or, on an EMPTY tail, to the snapshot's boundary hash. Until this phase the only append was `append`, which numbers from the length of the list it is handed and links to its last record or the genesis, so an append onto a tail continued at the wrong sequence and no verifier accepted the result. With it (`compact_preserves_verify` on the appended stream) the appended original verifies exactly when its discarded prefix verifies and the appended compaction verifies across, and `append_after_compact_verifies_iff` is the chartered sentence with its premise: over a prefix that verified, `verifyChain (rs @ [r]) = verifyAcross snap (appendTo snap tail r)`. NOT claimed: the compare-and-append and idempotent forms beyond the record they share with `appendTo` (`appendIfTo` compares `Compacted.head`, which is the head `append_to` links to; `appendIdempotentTo` is `appendTo` behind a key lookup), and any persisted form of the compacted stream. Proved with no assume and no admit.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "theorem": "append_after_compact",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "compact-compose",
+      "level": "proved",
+      "claim": "RE-COMPACTION IS COMPACTION (Phase 301). Compacting a compacted stream again k records past its boundary n — `compact_from snap tail k`, the model of `OpStream.Compacted.compactFrom` at `atSeq = n + k` — is compacting the full stream at n + k: the same snapshot (sequence, state, boundary hash and seal, in the snapshot's own payload) and the same tail, or the same refusal with the same message, for every stream, reducer, hash and payload, given only that the tail starts at its boundary (`starts_at`, the seam `compactFrom` checks before it replays, as `Snapshots.replayFrom` does). The refusal half is the part a test would not have found: a prefix refusal is reported at the ORIGIN index, because the cut records are replayed numbered from the snapshot's boundary, exactly as `compact` numbers them. Until this phase there was no re-compaction and a compaction of the tail with `compact` renumbered it from zero. NOT claimed: anything of a tail whose first record is not at its boundary, which `compactFrom` refuses by name (`TailSeqMismatch`). Proved with no assume and no admit.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "theorem": "compact_compose",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "key-index-rebuild-parity",
+      "level": "proved",
+      "claim": "THE KEY INDEX SURVIVES COMPACTION (Phase 301). The first-wins key-index fold splits at ANY boundary: the index of the first n records, continued over the rest, is the index of the whole stream (`key_index_rebuild_parity`), and at a compaction `compact` produced, the discarded prefix's index (`Compacted.Keys`) continued over the tail is `KeyIndex.ofStream` of the uncompacted stream (`key_index_compact_parity`). So `OpStream.Compacted.keyIndex` answers every key the stream ever produced, with the entry it first produced, and an idempotent retry of a pre-compaction key is the `Duplicate` it was before the compaction — where a key index rebuilt from the tail alone forgot the prefix's keys and let the retry apply again. NOT claimed: the persistence of `Keys`, which no hash binds and which the host carries beside the compacted stream (DECISIONS, the Phase 301 entry). Proved with no assume and no admit.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "theorem": "key_index_rebuild_parity",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "verify-captures",
+      "level": "proved",
+      "claim": "THE CAPTURE JOURNAL IS A CHAIN (Phase 301). Section 6 at the capture payload `{\"capture\":true,\"seq\":…,\"eff\":…,\"det\":…,\"value\":…}`: a journal recorded from its genesis by `captureEffect` — a `deterministic` effect journalling nothing, any other appending at the journal's length linked to its head — verifies (`intact_captures_verify`), and a journal one of whose captures had its VALUE changed, its sequence, identity, label and links left alone, does not (`capture_value_tamper_detected`), given the premise `cap_value_injective` that at one predecessor, sequence, identity and label the hash determines the value. That premise is stated BUNDLED: section 6b decomposed the record envelope's premise into the hash's and the codecs' and this phase did not repeat the decomposition for the capture envelope. Until this phase `verifyCaptures` was only tested (`Conformance.captureReplayLaws`). The escaper the payload quotes the identity and the label with is a parameter, as the hash is. Proved with no assume and no admit.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "theorem": "intact_captures_verify",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "replay-record",
+      "level": "proved",
+      "claim": "REPLAY OF A RECORDED SESSION IS THE SESSION (Phase 301). STRICT replay (`OpStream.replayEffectStrict`, modelled before the domain decode as `replay_strict`) of a recorded session over its own complete journal answers every value the session realised, in order, and leaves nothing in the journal (`replay_record` — `replay (record s) = s`): a non-deterministic effect from its capture, a deterministic one from the live source, given only that every label is canonical. Beside it, `truncated_journal_exhausted`: the same session replayed against a journal that lacks the capture of its LAST non-deterministic effect stops `Exhausted`, naming that effect — the tail truncation the lenient `replayEffect` answers from the live source with no signal. NOT claimed: the domain decode, a round trip the value codec owns (the theorem says the decoder is handed the recorded encoding); the label vocabulary itself (`isDeterminismLabel` is a parameter, held equal to `Effect.tryDeterminismOfTag` by a test); and a truncation the session never reaches, which only an anchored head (`verifyCapturesAt`) detects. Proved with no assume and no admit.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "theorem": "replay_record",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "compacted-stream-differential",
+      "level": "tested",
+      "claim": "The extracted model of the compacted stream agrees with production over a seeded pool of sixty counter streams of every length up to seven: `compact_from` against `OpStream.Compacted.compactFrom` at EVERY (n, k) pair of every stream in both snapshot modes, out-of-range boundaries included, and over a STARVED snapshot whose state was set back to the initial one so the prefix refusal is met and its origin index compared; `append_to` against `Compacted.appendTo` at every boundary, the empty tail included; `append_full` against `append`; and `index_onto` against `KeyIndex.ofStream` and `Compacted.keyIndex` at every boundary. PRODUCTION is also held to the theorems' own statements on its own values — `compactFrom (compactAt rs n) (n + k) = compactAt rs (n + k)` and `Compacted.verify (appendTo …) = verifyChain (append …)` — so a model that agreed with production while both drifted from the theorem would still be caught. A model handed a different hash must disagree, and the differential was reddened by hand before it was trusted by perturbing the extracted oracle to number an appended record and a re-compaction from the tail rather than the boundary — the defect the phase closes — which failed both comparisons. Agreement is over that pool, never over all inputs.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Chain.fst",
+        "cases": [
+          "the re-compaction oracle agrees with production at every (n, k), and production composes",
+          "a re-compaction model handed a DIFFERENT hash disagrees with production — the comparison can lose",
+          "append after compaction: the oracle's appendTo mints production's record, at every boundary",
+          "the key-index oracle agrees with production, and the fold splits at every boundary"
+        ]
+      }
+    },
+    {
+      "id": "capture-journal-differential",
+      "level": "tested",
+      "claim": "The extracted model of the capture journal agrees with production over a seeded pool of 120 sessions of up to six effect evaluations over two identities and five labels (the deterministic one included): `record_session` against `captureEffect` capture for capture, `first_capture_break_from` against `firstCaptureBreak` on every intact journal and on every single-capture tamper of its value, sequence and prev-link (each detected, by both), and `replay_session` against a fold of `replayEffectStrict` over the complete journal and over the journal missing its last capture (each stopping `Exhausted`, by both). A model handed a different hash must disagree. Agreement is over that pool, never over all inputs.",
+      "phase": "fuaran-core#301",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Chain.fst",
+        "cases": [
+          "the capture oracle agrees with production — record, walk, tamper and strict replay",
+          "a capture model handed a DIFFERENT hash disagrees with production — the comparison can lose"
+        ]
+      }
     }
   ]
 }
