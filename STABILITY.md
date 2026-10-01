@@ -2675,6 +2675,60 @@ alone, already in the kit's closure, so the kit's package graph gains one packag
 runner's comparison unit grows by 86 lines at the consumer's next Core raise.
 
 **Class: additive.** `api/Fuaran.Core.Conformance.txt` gains one member (`ParityVectors.sanitiseSweep`).
+
+### Off-walk identity in the footprint and arbitration: a keyed footprint, a domain's own arbitration pair, and the container rule at the partition (Phase 247) — ADDITIVE
+
+**What changed.** `Ops.footprint` reads an inserted subtree's ids over `Children` alone, so two scripts
+that each graft a subtree carrying the same id in a keyed position were declared independent and
+collided only at replay; and `Arbitration.arbitrate` checks applicability with `Ops.canApplyAll`, under
+which every node can hold children, so it admitted an insert under a leaf that the domain's own engine
+then refused (or, under plain `apply` with a witness that ignores a leaf's new children, dropped). Five
+members close both, beside what was there:
+
+- `Ops.footprintKeyed keyw nodew idw ops` — the footprint of the script `Ops.applyContainedKeyed` runs.
+  An `InsertChild`'s authored id set is the graft's keyed walk (`Tree.idsKeyed`), and an `UpdateNode`
+  payload's keyed subtrees, which the keyed engine checks as new content, are read and content-written
+  too. Two scripts bringing in one keyed id now fail `Ops.independent` with `Interference.SameTarget`
+  on it, and `Dag.conflicts` over it reports `ConcurrentUpdate` at that id. For a witness whose
+  `KeyedChildren` is `fun _ -> []` it returns exactly `Ops.footprint`.
+- `Ops.canApplyAllKeyed keyw canHold nodew idw ops root` — the sequence dry run over the keyed engine
+  (the `canApplyAllWith` mirror of `applyContainedKeyed`), first-refusal index and envelope.
+- `Arbitration.arbitrateWith footprint canApply baseTree proposals` — the partition with the domain's own
+  independence and applicability (the `concurrencyLawsWith` precedent). `arbitrate nodew idw` is now
+  defined as `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw)`; its output is
+  unchanged on every input.
+- `Arbitration.arbitrateContained canHold nodew idw` — the common case: `arbitrateWith` at
+  `Ops.footprint` and `Ops.canApplyAllWith canHold`, so an insert under a node `canHold` refuses is
+  `Inapplicable(_, NotAContainer _)`. A keyed domain composes `arbitrateWith (Ops.footprintKeyed …)
+  (Ops.canApplyAllKeyed …)`.
+- `Conformance.keyedArbitrationLaws` / `keyedArbitrationLawsWith` — a new opt-in family
+  (`NeedsWitnessCapability`; `KeyedWitness`, `NodeWitness`, `IdWitness`, `OpGen`). It runs the
+  partition through `arbitrateWith` and BUILDS the two admissions this phase closes: an insert under a
+  node `OpGen.CanHold` refuses (must be `Inapplicable(NotAContainer)`), and two grafts carrying one id in
+  a keyed position through `PlaceKeyedChild` (never both admitted; the later is `Conflicts` citing the
+  earlier with `SameTarget` on the id). It also holds the accepted scripts to LAND under
+  `applyContainedKeyed` in any order, to one tree whose keyed walk repeats no id. Handed `arbitrate`'s
+  footprint or `arbitrate`'s applicability through the `With` form, the clash arm or the container arm
+  goes red. A generator with no `CanHold`, or a witness with no keyed position, makes the matching arm
+  vacuous BY DECLARATION, and the guard line says so.
+
+**What adopting it costs.** Nothing for a consumer who keeps calling `arbitrate` / `footprint`: neither's
+output moves. A domain with a container capability switches to `arbitrateContained canHold`; one with
+keyed positions to the keyed `arbitrateWith` pair and `footprintKeyed` wherever it feeds a footprint to
+`Dag.conflicts` / `Dag.reconcile`.
+
+**What it does not do.** A keyed-slot write still has no address kind of its own: the shard's fifth
+`Footprint` address set (`KeyedWrites`) and a `KeyedSlotClash` conflict shape are NOT in this entry. A
+fifth field on the published `Footprint` record breaks every full-record construction, and a sound
+landing needs `Dag.conflicts` and `MergeConflictShape` (and the `DagFold` model of them) to read the new
+set in the same change — otherwise `Dag.conflicts` would report nothing for a pair `Ops.independent`
+rejects on a slot, and `Dag.reconcile` would fold two lanes writing one slot as clean. It is left for a
+change that can move those together and class itself breaking (source).
+
+**Class: additive.** `api/Fuaran.Core.Ops.txt` gains four members (`Ops.footprintKeyed`,
+`Ops.canApplyAllKeyed`, `Arbitration.arbitrateWith`, `Arbitration.arbitrateContained`) and
+`api/Fuaran.Core.Conformance.txt` two (`Conformance.keyedArbitrationLaws`,
+`Conformance.keyedArbitrationLawsWith`); no existing member moves, and no wire byte.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

@@ -894,6 +894,33 @@ module Ops =
         : Result<unit, int * Rejection<'Id>> =
         canApplyAllWith (fun _ -> true) w idw ops root
 
+    /// Dry-run a sequence over the keyed engine (Phase 247) — the `canApplyAllWith` mirror of
+    /// `applyContainedKeyed`: each step is checked against the tree the earlier steps leave, under
+    /// `canHold` and over the keyed walk, so it reports the first-refusal index and the envelope a
+    /// keyed executor would meet — a `DuplicateId` on an id held in a keyed position, a
+    /// `KeyedPosition`, a `NotAContainer` — and discards the materialised tree. It is the `canApply` a
+    /// keyed domain hands `Arbitration.arbitrateWith`. For a domain whose `KeyedChildren` is
+    /// `fun _ -> []` it answers exactly what `canApplyAllWith canHold` answers.
+    let canApplyAllKeyed
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (canHold: 'Node -> bool)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (root: 'Node)
+        : Result<unit, int * Rejection<'Id>> =
+        let t = Tree.traversal nodew keyw
+
+        let rec go i node =
+            function
+            | [] -> Ok()
+            | o :: rest ->
+                match applyWith canHold nodew t (Some keyw.KeyedChildren) idw o node with
+                | Ok node' -> go (i + 1) node' rest
+                | Error e -> Error(i, e)
+
+        go 0 root ops
+
     // ---- the index, maintained through an edit (Phase 317) ----
     // `Tree.Index.build` is O(n) and `isFreshFor` reports staleness after every op, so a consumer
     // holding an index across an edit session either rebuilt it per op or read it stale. `afterOp`
@@ -1322,16 +1349,21 @@ module Ops =
 
     let private unionFootprint (a: Footprint) (b: Footprint) : Footprint = Footprint.union a b
 
-    /// The read/write footprint of an op-script (Phase 78) — a pure, total derivation over the skeleton
-    /// five through the node/id witnesses (the `NodeWitness` reads the ids out of an inserted `'Node`
-    /// subtree; the `IdWitness` keys every address by its string form). `Batch` folds its inner ops.
-    /// Total: no tree, no failure case — it never throws (GP4) and mints no ids. Over-approximating by
-    /// design — see `Footprint` and STABILITY.md for the pinned conservative cases.
-    let footprint (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (ops: SkeletonOp<'Node, 'Id> list) : Footprint =
+    // The one fold behind `footprint` and `footprintKeyed` (Phase 247). `carried` reads the ids an
+    // inserted subtree carries; `introduced` the ids an `UpdateNode` payload brings in beyond its own
+    // target. The unkeyed form passes `Tree.ids w` and nothing, which is exactly the fold `footprint`
+    // was before the keyed form existed.
+    let private footprintOver
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (carried: 'Node -> 'Id list)
+        (introduced: 'Node -> 'Id list)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint =
         let key (i: 'Id) = idw.ToString i
 
         let subtreeKeys (node: 'Node) =
-            Tree.ids w node |> List.map key |> Set.ofList
+            carried node |> List.map key |> Set.ofList
 
         let rec ofOp (op: SkeletonOp<'Node, 'Id>) : Footprint =
             match op with
@@ -1341,7 +1373,8 @@ module Ops =
                 // (known) structure-write; the inserted subtree is authored into being — a content-write.
                 //
                 // Phase 137: the dup-check named here is now the one `validateInsert` actually performs
-                // — `firstDuplicateId` reads exactly this `Tree.ids w node` set against the whole tree,
+                // — `firstDuplicateId` reads exactly this `Tree.ids w node` set against the whole tree
+                // (the keyed walk of the graft under `footprintKeyed`, as the keyed engine reads it),
                 // so `Reads` describes a read that happens rather than one the footprint assumed. The
                 // set is unchanged: the validator's other half (is the subtree unique WITHIN ITSELF?) is
                 // internal to the op and reads no tree state, so it adds nothing to the footprint and
@@ -1385,13 +1418,56 @@ module Ops =
                 // the remove/move pay: an update is independent only of a structure-free script,
                 // so two updates of different nodes are reported dependent.
                 let target = key (w.Id node)
+                // Phase 247 — under the keyed engine the payload's keyed subtrees are new content
+                // (`validateUpdate` checks their ids for duplicates), so they are read and written as
+                // an insert's subtree is. Empty for the unkeyed form.
+                let incoming = introduced node |> List.map key |> Set.ofList
 
-                { Reads = Set.singleton target
+                { Reads = Set.add target incoming
                   StructureWrites = Set.empty
-                  ContentWrites = Set.singleton target
+                  ContentWrites = Set.add target incoming
                   UnknownParentWrites = Set.singleton target }
 
         List.fold (fun acc op -> unionFootprint acc (ofOp op)) emptyFootprint ops
+
+    /// The read/write footprint of an op-script (Phase 78) — a pure, total derivation over the skeleton
+    /// five through the node/id witnesses (the `NodeWitness` reads the ids out of an inserted `'Node`
+    /// subtree; the `IdWitness` keys every address by its string form). `Batch` folds its inner ops.
+    /// Total: no tree, no failure case — it never throws (GP4) and mints no ids. Over-approximating by
+    /// design — see `Footprint` and STABILITY.md for the pinned conservative cases.
+    ///
+    /// **The unkeyed form (Phase 247).** It reads an inserted subtree's ids over `Children` alone, so
+    /// an id a domain holds in a keyed position inside the graft is not in the footprint: two scripts
+    /// that each insert a subtree carrying the same keyed id are declared independent and collide only
+    /// at replay. A domain with keyed positions calls `footprintKeyed` with its `KeyedWitness`; for a
+    /// domain with none the two answer identically.
+    let footprint (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (ops: SkeletonOp<'Node, 'Id> list) : Footprint =
+        footprintOver w idw (Tree.ids w) (fun _ -> []) ops
+
+    /// `footprint` over the keyed walk (Phase 247) — the footprint of the script
+    /// `Ops.applyContainedKeyed` runs. The id set an `InsertChild` authors is the graft's keyed walk,
+    /// `Tree.idsKeyed nodew keyw node`, so an id held in a keyed position anywhere inside the inserted
+    /// subtree is read and content-written as a structural one is; and an `UpdateNode` payload's keyed
+    /// subtrees, which the keyed engine checks as new content, are read and content-written too. Two
+    /// scripts that each bring in the same keyed id therefore fail `independent` with
+    /// `Interference.SameTarget` on it — the collision `footprint` cannot see.
+    ///
+    /// Every other address is `footprint`'s: the keyed engine edits through `Children` alone, so the
+    /// structural writes are unchanged, and an op that locates a node below a keyed position names it by
+    /// the same id key. For a domain whose `KeyedChildren` is `fun _ -> []` this returns exactly what
+    /// `footprint` returns. Total, no throws (GP4); it mints no ids.
+    let footprintKeyed
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        : Footprint =
+        footprintOver
+            nodew
+            idw
+            (Tree.idsKeyed nodew keyw)
+            (fun n -> keyw.KeyedChildren n |> List.collect (Tree.idsKeyed nodew keyw))
+            ops
 
     /// Every clause of `independent` two footprints fail, with the addresses each fails on (Phase
     /// 248) — the explanation of a `false` verdict, so a refused party can see WHAT it collides on
