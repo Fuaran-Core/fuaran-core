@@ -4,11 +4,20 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Dag+Checkpoint`1..ctor(System.String, !0, System.String)
 ctor Fuaran.Core.Dag+T`1..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.DagNode`1<!0>>)
 ctor Fuaran.Core.DagBreak..ctor(System.String, Fuaran.Core.DagBreakReason, System.String, System.String)
 ctor Fuaran.Core.DagNode`1..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.Actor, !0)
 ctor Fuaran.Core.LaneRejection`2..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<!0>, System.String, !1)
 ctor Fuaran.Core.MergeConflict`1..ctor(!0, !0, System.String, Fuaran.Core.MergeConflictShape)
+field Fuaran.Core.Dag+CheckpointBreak+Tags.Node : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointBreak+Tags.Seal : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointBreak+Tags.Uncovered : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointBreak+Tags.UnknownNode : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointFault`1+Tags.Replay : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointFault`1+Tags.Uncovered : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointFault`1+Tags.UnknownNode : System.Int32 (literal)
+field Fuaran.Core.Dag+CheckpointFault`1+Tags.Unreached : System.Int32 (literal)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.CyclicHistory : System.Int32 (literal)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.Rejected : System.Int32 (literal)
 field Fuaran.Core.Dag+ReplayFault`1+Tags.UnknownHead : System.Int32 (literal)
@@ -45,10 +54,16 @@ method Fuaran.Core.Dag.appendVerified`3(Microsoft.FSharp.Core.FSharpFunc`2<Syste
 method Fuaran.Core.Dag.append`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Actor, !!0, System.String, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Fuaran.Core.Dag+T`1<!!0>>, Fuaran.Core.DagAppendFault>
 method Fuaran.Core.Dag.betweenOps`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
 method Fuaran.Core.Dag.between`1(Fuaran.Core.Dag+T`1<!!0>, System.String, System.String) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DagNode`1<!!0>>
+method Fuaran.Core.Dag.checkpointAt`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, !!0, Fuaran.Core.Dag+T`1<!!1>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+CheckpointFault`1<!!2>>
+method Fuaran.Core.Dag.checkpointFrom`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+CheckpointFault`1<!!2>>
+method Fuaran.Core.Dag.compactAt`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, !!0, Fuaran.Core.Dag+T`1<!!1>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>>, Fuaran.Core.Dag+CheckpointFault`1<!!2>>
+method Fuaran.Core.Dag.compactFrom`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>>, Fuaran.Core.Dag+CheckpointFault`1<!!2>>
 method Fuaran.Core.Dag.conflicts`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Microsoft.FSharp.Collections.FSharpList`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!!0>>
 method Fuaran.Core.Dag.empty`1() : Fuaran.Core.Dag+T`1<!!0>
+method Fuaran.Core.Dag.firstBreakFrom`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Dag+CheckpointBreak>
 method Fuaran.Core.Dag.firstBreak`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.DagBreak>
 method Fuaran.Core.Dag.fromJsonlVerified`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Dag+T`1<!!0>, System.String>
+method Fuaran.Core.Dag.fromJsonlWithCheckpoints`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!!1, System.String>>, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<Fuaran.Core.Dag+T`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Dag+Checkpoint`1<!!1>>>, System.String>
 method Fuaran.Core.Dag.fromJsonl`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Dag+T`1<!!0>, System.String>
 method Fuaran.Core.Dag.heads`1(Fuaran.Core.Dag+T`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Dag.isAcyclic`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : System.Boolean
@@ -61,15 +76,24 @@ method Fuaran.Core.Dag.merge`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String,
 method Fuaran.Core.Dag.reconcileManyWith`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+Reach`1<!!0>, System.String, !!1, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.ReconcileFault`2<!!0, !!2>>
 method Fuaran.Core.Dag.reconcileMany`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, !!1, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.ReconcileFault`2<!!0, !!2>>
 method Fuaran.Core.Dag.reconcile`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Fuaran.Core.Dag+T`1<!!0>, System.String, System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.MergeConflict`1<!!0>>>
+method Fuaran.Core.Dag.replayFromWith`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!1>, Fuaran.Core.Dag+Reach`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.Dag+CheckpointFault`1<!!2>>
+method Fuaran.Core.Dag.replayFrom`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!1>, Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.Dag+CheckpointFault`1<!!2>>
 method Fuaran.Core.Dag.replayTo`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, System.Tuple`2<System.String, !!2>>
+method Fuaran.Core.Dag.sealAt`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, System.String, !!0) : Fuaran.Core.Dag+Checkpoint`1<!!0>
+method Fuaran.Core.Dag.toJsonlWithCheckpoints`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, System.String>, Fuaran.Core.Dag+T`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Dag+Checkpoint`1<!!1>>) : System.Tuple`2<System.String, System.String>
 method Fuaran.Core.Dag.toJsonl`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.Dag+T`1<!!0>) : System.String
 method Fuaran.Core.Dag.tryReplayToWith`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Dag+Reach`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.Dag+ReplayFault`1<!!2>>
 method Fuaran.Core.Dag.tryReplayTo`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, !!1, Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Fuaran.Core.Dag+ReplayFault`1<!!2>>
 method Fuaran.Core.Dag.tryTopoOrder`1(Fuaran.Core.Dag+T`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String>
+method Fuaran.Core.Dag.verifyCheckpoint`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Dag+CheckpointBreak>
+method Fuaran.Core.Dag.verifyDagFrom`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.StreamWitness`3<!!1, !!0, !!2>, Fuaran.Core.Dag+Checkpoint`1<!!0>, Fuaran.Core.Dag+T`1<!!1>) : System.Boolean
 method Fuaran.Core.Dag.verifyDag`3(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<System.String, System.String>>, Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Fuaran.Core.Dag+T`1<!!0>) : System.Boolean
 method Fuaran.Core.DagAppendFaultModule.toString(Fuaran.Core.DagAppendFault) : System.String
 method Fuaran.Core.DagBreakReasonModule.ofString(System.String) : Fuaran.Core.DagBreakReason
 method Fuaran.Core.DagBreakReasonModule.toString(Fuaran.Core.DagBreakReason) : System.String
+record-field Fuaran.Core.Dag+Checkpoint`1.Hash #2 : System.String
+record-field Fuaran.Core.Dag+Checkpoint`1.Node #0 : System.String
+record-field Fuaran.Core.Dag+Checkpoint`1.State #1 : !0
 record-field Fuaran.Core.Dag+T`1.Nodes #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.DagNode`1<!0>>
 record-field Fuaran.Core.DagBreak.Expected #2 : System.String
 record-field Fuaran.Core.DagBreak.Got #3 : System.String
@@ -88,6 +112,19 @@ record-field Fuaran.Core.MergeConflict`1.Left #0 : !0
 record-field Fuaran.Core.MergeConflict`1.Right #1 : !0
 record-field Fuaran.Core.MergeConflict`1.Shape #3 : Fuaran.Core.MergeConflictShape
 type Fuaran.Core.Dag (module)
+type Fuaran.Core.Dag+CheckpointBreak (union)
+type Fuaran.Core.Dag+CheckpointBreak+Node (type)
+type Fuaran.Core.Dag+CheckpointBreak+Seal (type)
+type Fuaran.Core.Dag+CheckpointBreak+Tags (type)
+type Fuaran.Core.Dag+CheckpointBreak+Uncovered (type)
+type Fuaran.Core.Dag+CheckpointBreak+UnknownNode (type)
+type Fuaran.Core.Dag+CheckpointFault`1 (union)
+type Fuaran.Core.Dag+CheckpointFault`1+Replay (type)
+type Fuaran.Core.Dag+CheckpointFault`1+Tags (type)
+type Fuaran.Core.Dag+CheckpointFault`1+Uncovered (type)
+type Fuaran.Core.Dag+CheckpointFault`1+UnknownNode (type)
+type Fuaran.Core.Dag+CheckpointFault`1+Unreached (type)
+type Fuaran.Core.Dag+Checkpoint`1 (record)
 type Fuaran.Core.Dag+ReachModule (module)
 type Fuaran.Core.Dag+Reach`1 (record)
 type Fuaran.Core.Dag+ReplayFault`1 (union)
@@ -126,6 +163,14 @@ type Fuaran.Core.ReconcileFault`2+LanesInterfere (type)
 type Fuaran.Core.ReconcileFault`2+LanesRejected (type)
 type Fuaran.Core.ReconcileFault`2+SharedHistoryRejected (type)
 type Fuaran.Core.ReconcileFault`2+Tags (type)
+union-case Fuaran.Core.Dag+CheckpointBreak.NewNode #2(Item: Fuaran.Core.DagBreak)
+union-case Fuaran.Core.Dag+CheckpointBreak.NewSeal #1(expected: System.String, got: System.String)
+union-case Fuaran.Core.Dag+CheckpointBreak.NewUncovered #3(nodeId: System.String)
+union-case Fuaran.Core.Dag+CheckpointBreak.NewUnknownNode #0(nodeId: System.String)
+union-case Fuaran.Core.Dag+CheckpointFault`1.NewReplay #1(Item: Fuaran.Core.Dag+ReplayFault`1<!0>)
+union-case Fuaran.Core.Dag+CheckpointFault`1.NewUncovered #3(nodeId: System.String)
+union-case Fuaran.Core.Dag+CheckpointFault`1.NewUnknownNode #0(nodeId: System.String)
+union-case Fuaran.Core.Dag+CheckpointFault`1.NewUnreached #2(headId: System.String)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewCyclicHistory #1(headId: System.String)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewRejected #2(nodeId: System.String, reject: !0)
 union-case Fuaran.Core.Dag+ReplayFault`1.NewUnknownHead #0(headId: System.String)

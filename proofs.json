@@ -2640,6 +2640,34 @@
           "the theorems hold on the shipped DecimalText over the pool — idempotence, the order, the sum"
         ]
       }
+    },
+    {
+      "id": "dag-checkpoint-replay",
+      "level": "tested",
+      "claim": "A checkpoint on the lane DAG is a checkpoint and not a cache: on generated DAGs with branch points, for every node and an absent id, `Dag.replayFrom` from a checkpoint `Dag.checkpointAt` took gives `Dag.tryReplayTo`'s answer from the initial state whenever the checkpoint covers the head, and otherwise the refusal an independent reading of the graph predicts — an unknown head, a head that does not reach the checkpoint's node, or the first node above the checkpoint that does not descend from it. That last refusal is load-bearing: the drain folds a branch that left below the checkpoint and merges above it BEFORE part of the checkpoint's own closure, so a replay that resumed from the checkpoint would fold it in an order the full replay never uses, and on a witness whose ops do not commute it reaches a state the full replay does not. `replayFromWith` answers as `replayFrom`. Sampled, not proved: whether `proofs/DagFold.fst`'s drain theorems extend to a history that begins at a checkpointed origin is OPEN and not claimed here.",
+      "phase": "fuaran-core#288",
+      "evidence": {
+        "family": "Conformance.checkpointLaws",
+        "cases": [
+          "checkpointLaws certify the reference stream witness green",
+          "checkpointLaws certify a witness whose ops do not commute",
+          "a replay that ignored a branch from below the checkpoint is caught by the laws"
+        ]
+      }
+    },
+    {
+      "id": "dag-checkpoint-truncation",
+      "level": "tested",
+      "claim": "The seal and the truncation, sampled: `Dag.verifyCheckpoint` accepts a sealed checkpoint and refuses it with its seal changed, its node moved to another node or to an absent id, or its state swapped for one that encodes differently; `Dag.compactAt` refuses exactly a DAG holding a node neither behind nor after the checkpoint's node, and otherwise keeps the node and everything after it, verifies from the checkpoint under `Dag.verifyDagFrom`, and replays every node it keeps as the full DAG does; a kept node with its op changed, or the checkpoint with its seal or state changed, fails `verifyDagFrom`; and the compacted DAG lives on — an append onto its checkpoint's node replays as on the full DAG, and `Dag.compactFrom` at a later node answers as `compactAt` of the full DAG there. The seal binds the state to the node and is exactly as trustworthy as the act that sealed it: it does not re-fold the discarded history, so verify, then compact. A sample that never branches reds the family's guard rather than reading green.",
+      "phase": "fuaran-core#288",
+      "evidence": {
+        "family": "Conformance.checkpointLaws",
+        "cases": [
+          "checkpointLaws certify the reference stream witness green",
+          "checkpointLaws under SHA-256 certify green too",
+          "a sample that never branches reads INCONCLUSIVE, not green"
+        ]
+      }
     }
   ]
 }

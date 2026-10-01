@@ -209,6 +209,17 @@ module Conformance =
         : LawResult list =
         StreamLaws.reachLaws sw gen hashFn seed iterations
 
+    /// Forward — see `StreamLaws.checkpointLaws` (Phase 288).
+    let checkpointLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (stateEncode: 'State -> string)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        StreamLaws.checkpointLaws sw gen stateEncode hashFn seed iterations
+
     /// Forward — see `StreamLaws.captureReplayLaws`.
     let captureReplayLaws
         (encode: 'v -> string)

@@ -2876,6 +2876,58 @@ a case named `IntValue` / `FloatValue` / `TextValue` / `TreeValue`, resolves the
 **Class: additive.** `api/Fuaran.Core.Function.txt` and `api/Fuaran.Core.Query.txt` gain members and
 types only; `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` gain the two
 refusal roots' documents, every existing document unchanged.
+
+
+### A checkpoint on the lane DAG: a sealed state at a node, bounded replay from it, and a DAG that may begin at one (Phase 288, DECISIONS.md D93) — ADDITIVE
+
+**What changed.** The linear stream has had a checkpoint since Phase 244; the lane DAG had none, so every
+replay folded a head's whole ancestor closure and a DAG file was its complete history or did not verify.
+`Fuaran.Core.OpStream.Dag` now ships the linear `Snapshot`'s counterpart:
+
+- `Dag.Checkpoint<'State>` — `{ Node; State; Hash }`: the fold of `Node`'s ancestor closure, sealed with
+  the linear snapshot's strict pre-image at sequence zero chained from the node id (computed through
+  `OpStream.Snapshots`, not copied). `Dag.checkpointAt` folds to a node and seals; `Dag.sealAt` seals a
+  state the domain vouches for (the genesis-import shape); `Dag.checkpointFrom` takes the next checkpoint
+  from an earlier one. `Dag.verifyCheckpoint` recomputes the seal and refuses by name
+  (`CheckpointBreak.UnknownNode` / `Seal`).
+- `Dag.replayFrom w cp dag head` folds only the history above the checkpoint over its state, and answers
+  as `tryReplayTo` from the initial state for every head the checkpoint covers; `Dag.replayFromWith`
+  takes Phase 289's index. Refusals are the typed `Dag.CheckpointFault` — `UnknownNode`, `Replay` (the
+  replay's own fault), `Unreached`, and `Uncovered`: a node above the checkpoint that does not descend
+  from its node, which the full replay folds before part of the checkpoint's closure (DECISIONS.md D93).
+- `Dag.compactAt` / `Dag.compactFrom` truncate the history behind a checkpoint's node and keep the node,
+  so the compacted DAG lives on — append onto the node, checkpoint and compact again. `Dag.firstBreakFrom`
+  / `Dag.verifyDagFrom` verify a DAG that begins at a checkpoint: a changed byte in a kept node or in the
+  checkpoint fails them.
+- `Dag.toJsonlWithCheckpoints` / `Dag.fromJsonlWithCheckpoints`: checkpoints ride a SIDECAR beside the
+  lane file, one line each, the line being the linear snapshot line of the snapshot the checkpoint is
+  sealed as. The lane is `toJsonl`'s bytes; a DAG file with no sidecar reads exactly as `fromJsonl` reads
+  it.
+- `Conformance.checkpointLaws` (opt-in, `StrongerPromise`, `Guarded [ "DAG shape" ]`): taking, the seal,
+  replay equivalence and its refusals, truncation, tamper, the compacted DAG living on, and the lane
+  bytes; a sample with no covered replay over a lane merge, no uncovered refusal or no compaction keeping
+  history above its checkpoint reds the guard rather than reading green. `proofs.json` gains two
+  `tested` rows evidenced by it; whether `proofs/DagFold.fst` extends to a checkpointed origin is recorded
+  as open, not claimed.
+
+**What did NOT change, deliberately.** `Dag.T<'Op>` gains no field: the shard's optional origin field
+"with a default" does not exist in F# (a record field has no default, so it would have been a
+`record-widening` breaking every `{ Nodes = … }` literal), so the checkpoint travels beside the history
+as a snapshot travels beside its tail. No existing function's signature, answer or emitted byte moves,
+and no linear-stream file changed. The shard's `checkpointAt w stateEncode hashFn …` takes this module's
+argument order instead (`hashFn stateEncode w …`, as `OpStream.Snapshots.take` does). Beyond the shard's
+list: `sealAt`, `checkpointFrom` and `compactFrom` (a compacted DAG checkpointing and compacting again),
+`replayFromWith`, and `firstBreakFrom` beside `verifyDagFrom`.
+
+**What adopting it costs.** Nothing for a consumer that takes no checkpoint. One that does keeps the
+checkpoint beside its DAG, reads and writes it through the sidecar, replays with `replayFrom`, and treats
+an `Uncovered` refusal as "take the checkpoint later, or replay from the origin". Verify the DAG before
+compacting it: the discarded closure is folded and dropped, and nothing can find a tamper in it again.
+
+**Class: additive.** `api/Fuaran.Core.OpStream.Dag.txt` gains the `Checkpoint` record, the
+`CheckpointFault` and `CheckpointBreak` unions and twelve functions; `api/Fuaran.Core.Conformance.txt`
+gains `Conformance.checkpointLaws`. No wire bytes move.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

@@ -790,6 +790,459 @@ module internal StreamLaws =
                   "reconcile folded", folded
                   "reconcile refused", refused ] ]
 
+    /// Checkpoint laws on the lane DAG (Phase 288) — the teeth on `Dag.checkpointAt`, `verifyCheckpoint`,
+    /// `replayFrom` / `replayFromWith`, `compactAt` / `compactFrom` and `verifyDagFrom`. Each iteration
+    /// grows one DAG from the caller's drawn ops on a kit-drawn shape (appends onto heads and older nodes,
+    /// merges of two heads, merges of two arbitrary nodes, a second root) and takes a checkpoint at EVERY
+    /// node of it:
+    ///
+    ///  - **taking** — `checkpointAt` seals the state `tryReplayTo` reaches at the node, and refuses
+    ///    exactly where that replay does, with its fault;
+    ///  - **the seal** — `verifyCheckpoint` accepts the sealed checkpoint, and refuses it with its seal
+    ///    changed, its node moved to another node or to an absent id, and (a separate cell) its state
+    ///    swapped for another node's state that encodes differently;
+    ///  - **replay equivalence** — for every node and an absent id, `replayFrom` gives `tryReplayTo`'s
+    ///    answer from the initial state whenever the checkpoint covers the head, and otherwise the named
+    ///    refusal an independent reading of the graph predicts (`UnknownHead`, `Unreached`, or `Uncovered`
+    ///    naming the first node above the checkpoint, in replay order, that does not descend from it);
+    ///    `replayFromWith` answers as `replayFrom`;
+    ///  - **truncation** — `compactAt` refuses exactly a DAG holding a node neither behind nor after the
+    ///    checkpoint's node (the first, by id); otherwise the checkpoint is `checkpointAt`'s, the compacted
+    ///    DAG keeps the node and everything after it, every node it keeps is the full DAG's, it verifies
+    ///    from the checkpoint as the full DAG does, and every node it keeps replays as on the full DAG;
+    ///  - **tamper** — a kept node after the checkpoint with its op changed, the checkpoint with its seal
+    ///    changed, and the checkpoint with its state swapped each fail `verifyDagFrom`;
+    ///  - **lives on** — an append onto the checkpoint's node of the compacted DAG is the full DAG's node
+    ///    and replays as it does, an empty history above the checkpoint has its node as the only head, and
+    ///    `compactFrom` at any later node answers as `compactAt` of the full DAG there;
+    ///  - the lane written beside a sidecar is `toJsonl`'s bytes.
+    ///
+    /// `'State` and `'Rej` need equality; ops are compared through `Encode`. `stateEncode` must be the
+    /// canonical encoder the domain seals with (the strict snapshot's).
+    ///
+    /// `Guarded [ "DAG shape" ]` (the Phase 245 guard): replay equivalence over a chain says nothing a
+    /// linear snapshot does not, and whether the drawn shape holds a branch point depends on what the
+    /// caller supplies — the same op drawn onto the same parent is one node. So the family DEMANDS a
+    /// covered replay whose history above the checkpoint holds a merge of two incomparable lanes, an
+    /// uncovered refusal (a branch from below the checkpoint merging above it), and a compaction that
+    /// keeps history above its checkpoint; a run without any of them reds the guard rather than reading
+    /// green. Samples with no lane merge, rejected replays, refused compactions and compactions that keep
+    /// a band behind the checkpoint are counted beside them.
+    let checkpointLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (stateEncode: 'State -> string)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let family = "Conformance.checkpointLaws"
+        let dimension = "DAG shape"
+
+        let takeCell =
+            LawKit.LawCell
+                "checkpointAt seals the state tryReplayTo reaches at its node, and refuses exactly where that replay does"
+
+        let sealCell =
+            LawKit.LawCell
+                "verifyCheckpoint accepts a sealed checkpoint and refuses it with its seal changed or its node moved"
+
+        let stateSealCell =
+            LawKit.LawCell
+                "verifyCheckpoint refuses a checkpoint whose state is swapped for one that encodes differently"
+
+        let replayCell =
+            LawKit.LawCell
+                "replayFrom answers as tryReplayTo for every head the checkpoint covers, and refuses an unknown, unreached or uncovered head by name"
+
+        let indexedCell = LawKit.LawCell "replayFromWith answers as replayFrom"
+
+        let compactCell =
+            LawKit.LawCell
+                "compactAt refuses exactly a DAG holding a node its checkpoint does not cover; otherwise the compacted DAG verifies from the checkpoint and every node it keeps replays as on the full DAG"
+
+        let tamperCell =
+            LawKit.LawCell "a changed node kept by a compaction, or a changed checkpoint, fails verifyDagFrom"
+
+        let livesCell =
+            LawKit.LawCell
+                "a compacted DAG lives on: an append onto its checkpoint's node replays as on the full DAG, and compacting it again answers as compacting the full DAG"
+
+        let laneCell =
+            LawKit.LawCell "the lane written beside a checkpoint sidecar is toJsonl's bytes"
+
+        let mutable coveredMerge = 0
+        let mutable uncovered = 0
+        let mutable compactedAbove = 0
+        let mutable noLaneMerge = 0
+        let mutable rejected = 0
+        let mutable compactRefused = 0
+        let mutable banded = 0
+        let actor = Human "checkpoint"
+
+        let asFault (r: Result<'State, Dag.ReplayFault<'Rej>>) : Result<'State, Dag.CheckpointFault<'Rej>> =
+            r |> Result.mapError Dag.CheckpointFault.Replay
+
+        let rendered (r: Result<Dag.Checkpoint<'State> * Dag.T<'Op>, Dag.CheckpointFault<'Rej>>) =
+            r |> Result.map (fun (cp, d) -> cp, d.Nodes |> Map.toList |> List.map fst)
+
+        LawKit.run iterations seed (fun rng i at ->
+            // ---- grow a DAG on a kit-drawn shape ----
+            let mutable dag: Dag.T<'Op> = Dag.empty
+            let mutable nodes: string list = []
+
+            let add (built: Result<string * Dag.T<'Op>, DagAppendFault>) =
+                match built with
+                | Ok(id, d) ->
+                    dag <- d
+
+                    if not (List.contains id nodes) then
+                        nodes <- nodes @ [ id ]
+                | Error _ -> () // a content-id collision under the caller's hash: the step is skipped
+
+            add (Dag.append hashFn sw actor (rng.Draw gen.Op) "" dag)
+
+            for _ in 1 .. 2 + rng.IntBelow 11 do
+                let heads = Dag.heads dag
+                let op = rng.Draw gen.Op
+                let kind = rng.IntBelow 12
+
+                if List.isEmpty nodes || kind = 11 then
+                    add (Dag.append hashFn sw actor op "" dag)
+                elif kind >= 6 && kind <= 9 && List.length heads >= 2 then
+                    let l = rng.Choose heads
+                    let r = rng.Choose(heads |> List.filter (fun h -> h <> l))
+                    add (Dag.merge hashFn sw actor op l r dag)
+                elif kind = 10 then
+                    add (Dag.merge hashFn sw actor op (rng.Choose nodes) (rng.Choose nodes) dag)
+                else
+                    let onto =
+                        if rng.IntBelow 2 = 0 then
+                            rng.Choose heads
+                        else
+                            rng.Choose nodes
+
+                    add (Dag.append hashFn sw actor op onto dag)
+
+            let full = dag
+            let reach = Dag.Reach.ofDag full
+            let absent = "absent-" + string i
+
+            let anc = nodes |> List.map (fun id -> id, Dag.ancestorsOf full id) |> Map.ofList
+
+            let replayed =
+                nodes
+                |> List.map (fun id -> id, Dag.tryReplayTo sw gen.State0 full id)
+                |> Map.ofList
+
+            // a merge of two nodes neither of which reaches the other
+            let laneMergeIn (ids: string list) =
+                ids
+                |> List.exists (fun id ->
+                    match full.Nodes.[id].Parents with
+                    | [ p; q ] -> p <> q && not (anc.[q].Contains p) && not (anc.[p].Contains q)
+                    | _ -> false)
+
+            if not (laneMergeIn nodes) then
+                noLaneMerge <- noLaneMerge + 1
+
+            // a state another node reaches that encodes differently from `st`
+            let otherState (st: 'State) =
+                nodes
+                |> List.tryPick (fun o ->
+                    match replayed.[o] with
+                    | Ok s when stateEncode s <> stateEncode st -> Some s
+                    | _ -> None)
+
+            // what replayFrom must answer, read from the graph without the function under test
+            let expected (c: string) (h: string) : Result<'State, Dag.CheckpointFault<'Rej>> =
+                if not (full.Nodes.ContainsKey h) then
+                    Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.UnknownHead h))
+                elif not (anc.[h].Contains c) then
+                    Error(Dag.CheckpointFault.Unreached h)
+                else
+                    let order =
+                        match Dag.tryTopoOrder full h with
+                        | Ok o -> o
+                        | Error _ -> []
+
+                    match
+                        order
+                        |> List.filter (fun d -> not (anc.[c].Contains d))
+                        |> List.tryFind (fun d -> not (anc.[d].Contains c))
+                    with
+                    | Some u -> Error(Dag.CheckpointFault.Uncovered u)
+                    | None -> asFault replayed.[h]
+
+            // the first node (id order) a compaction at `c` would strand
+            let stranded (c: string) =
+                full.Nodes
+                |> Map.toList
+                |> List.map fst
+                |> List.tryFind (fun id -> not (anc.[c].Contains id) && not (anc.[id].Contains c))
+
+            for c in nodes do
+                match Dag.checkpointAt hashFn stateEncode sw gen.State0 full c with
+                | Error f ->
+                    takeCell.Check(
+                        (match replayed.[c] with
+                         | Error g -> f = Dag.CheckpointFault.Replay g
+                         | Ok _ -> false),
+                        fun () -> at (sprintf "checkpointAt %s refused %A where tryReplayTo gave %A" c f replayed.[c])
+                    )
+                | Ok cp ->
+                    takeCell.Check(
+                        (cp.Node = c && Ok cp.State = replayed.[c]),
+                        fun () -> at (sprintf "checkpointAt %s sealed %A where tryReplayTo gave %A" c cp replayed.[c])
+                    )
+
+                    // ---- the seal ----
+                    let verdict (k: Dag.Checkpoint<'State>) =
+                        Dag.verifyCheckpoint hashFn stateEncode sw k full
+
+                    sealCell.Check((verdict cp = Ok()), fun () -> at (sprintf "the sealed %A does not verify" cp))
+
+                    let isSeal =
+                        function
+                        | Error(Dag.CheckpointBreak.Seal _) -> true
+                        | _ -> false
+
+                    let reHashed = { cp with Hash = cp.Hash + "0" }
+
+                    sealCell.Check(
+                        isSeal (verdict reHashed),
+                        fun () -> at (sprintf "a changed seal verifies: %A" reHashed)
+                    )
+
+                    for other in nodes |> List.filter (fun o -> o <> c) do
+                        let moved = { cp with Node = other }
+
+                        sealCell.Check(
+                            isSeal (verdict moved),
+                            fun () -> at (sprintf "the checkpoint at %s moved to %s verifies" c other)
+                        )
+
+                    sealCell.Check(
+                        (verdict { cp with Node = absent } = Error(Dag.CheckpointBreak.UnknownNode absent)),
+                        fun () ->
+                            at (sprintf "the checkpoint at %s moved to an absent node is not refused as unknown" c)
+                    )
+
+                    match otherState cp.State with
+                    | Some s ->
+                        stateSealCell.Check(
+                            isSeal (verdict { cp with State = s }),
+                            fun () -> at (sprintf "the checkpoint at %s verifies with the state %A" c s)
+                        )
+                    | None -> ()
+
+                    // ---- replay equivalence ----
+                    for h in nodes @ [ absent ] do
+                        let r = Dag.replayFrom sw cp full h
+                        let e = expected c h
+
+                        replayCell.Check(
+                            (r = e),
+                            fun () -> at (sprintf "replayFrom %s to %s: %A, expected %A" c h r e)
+                        )
+
+                        let ri = Dag.replayFromWith sw cp reach h
+
+                        indexedCell.Check(
+                            (ri = r),
+                            fun () -> at (sprintf "replayFromWith %s to %s: %A, replayFrom %A" c h ri r)
+                        )
+
+                        match r with
+                        | Ok _ when laneMergeIn (Dag.between full c h |> List.map (fun n -> n.Id)) ->
+                            coveredMerge <- coveredMerge + 1
+                        | Error(Dag.CheckpointFault.Uncovered _) -> uncovered <- uncovered + 1
+                        | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Rejected _)) -> rejected <- rejected + 1
+                        | _ -> ()
+
+                    // ---- truncation ----
+                    let later = nodes |> List.filter (fun id -> id <> c && anc.[id].Contains c)
+
+                    match Dag.compactAt hashFn stateEncode sw gen.State0 full c with
+                    | Error(Dag.CheckpointFault.Uncovered u) ->
+                        compactRefused <- compactRefused + 1
+
+                        compactCell.Check(
+                            (stranded c = Some u),
+                            fun () ->
+                                at (sprintf "compactAt %s refused %s; the first stranded node is %A" c u (stranded c))
+                        )
+                    | Error other ->
+                        compactCell.Check(
+                            false,
+                            fun () -> at (sprintf "compactAt %s refused %A after checkpointAt took it" c other)
+                        )
+                    | Ok(cp2, small) ->
+                        let sameNode (id: string) (n: DagNode<'Op>) =
+                            match Map.tryFind id full.Nodes with
+                            | Some m -> m.Parents = n.Parents && m.Actor = n.Actor && sw.Encode m.Op = sw.Encode n.Op
+                            | None -> false
+
+                        let kept = small.Nodes |> Map.forall sameNode
+
+                        let keptLater =
+                            small.Nodes.ContainsKey c && later |> List.forall small.Nodes.ContainsKey
+
+                        let verifies = Dag.verifyDagFrom hashFn stateEncode sw cp2 small
+                        let fullVerifies = Dag.verifyDagFrom hashFn stateEncode sw cp full
+
+                        let replaysAgree =
+                            small.Nodes
+                            |> Map.toList
+                            |> List.forall (fun (h, _) -> Dag.replayFrom sw cp2 small h = Dag.replayFrom sw cp full h)
+
+                        compactCell.Check(
+                            (stranded c = None
+                             && cp2 = cp
+                             && kept
+                             && keptLater
+                             && verifies
+                             && fullVerifies
+                             && replaysAgree),
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "compactAt %s: stranded %A, same checkpoint %b, nodes the full DAG's %b, keeps the node and its descendants %b, verifies %b, the full DAG verifies %b, replays agree %b"
+                                        c
+                                        (stranded c)
+                                        (cp2 = cp)
+                                        kept
+                                        keptLater
+                                        verifies
+                                        fullVerifies
+                                        replaysAgree
+                                )
+                        )
+
+                        if not (List.isEmpty later) then
+                            compactedAbove <- compactedAbove + 1
+
+                        if small.Nodes.Count > 1 + List.length later then
+                            banded <- banded + 1
+
+                        // ---- tamper ----
+                        let fails (k: Dag.Checkpoint<'State>) (d: Dag.T<'Op>) =
+                            not (Dag.verifyDagFrom hashFn stateEncode sw k d)
+
+                        match later with
+                        | [] -> ()
+                        | _ ->
+                            let victim = rng.Choose later
+                            let n = small.Nodes.[victim]
+                            let fresh = rng.Draw gen.Op
+
+                            if sw.Encode fresh <> sw.Encode n.Op then
+                                let forged =
+                                    { small with
+                                        Nodes = Map.add victim { n with Op = fresh } small.Nodes }
+
+                                tamperCell.Check(
+                                    fails cp2 forged,
+                                    fun () ->
+                                        at (sprintf "a kept node %s with its op changed verifies from %s" victim c)
+                                )
+
+                        tamperCell.Check(
+                            fails { cp2 with Hash = cp2.Hash + "0" } small,
+                            fun () -> at (sprintf "the compaction at %s verifies with a changed seal" c)
+                        )
+
+                        match otherState cp2.State with
+                        | Some s ->
+                            tamperCell.Check(
+                                fails { cp2 with State = s } small,
+                                fun () -> at (sprintf "the compaction at %s verifies with the state %A" c s)
+                            )
+                        | None -> ()
+
+                        // ---- lives on ----
+                        if List.isEmpty later then
+                            livesCell.Check(
+                                (Dag.heads small = [ c ]),
+                                fun () -> at (sprintf "the compaction at %s has heads %A" c (Dag.heads small))
+                            )
+
+                        let op = rng.Draw gen.Op
+
+                        match Dag.append hashFn sw actor op c small, Dag.append hashFn sw actor op c full with
+                        | Ok(id1, small'), Ok(id2, full') ->
+                            let onSmall = Dag.replayFrom sw cp2 small' id1
+                            let onFull = asFault (Dag.tryReplayTo sw gen.State0 full' id2)
+
+                            livesCell.Check(
+                                (id1 = id2
+                                 && onSmall = onFull
+                                 && Dag.verifyDagFrom hashFn stateEncode sw cp2 small'),
+                                fun () ->
+                                    at (
+                                        sprintf
+                                            "an append onto %s: ids %s / %s, replays %A / %A"
+                                            c
+                                            id1
+                                            id2
+                                            onSmall
+                                            onFull
+                                    )
+                            )
+                        | Error _, Error _ -> () // a collision under the caller's hash refuses on both
+                        | a, b ->
+                            livesCell.Check(
+                                false,
+                                fun () ->
+                                    at (
+                                        sprintf
+                                            "an append onto %s: the compacted DAG gave %A, the full one %A"
+                                            c
+                                            (Result.map fst a)
+                                            (Result.map fst b)
+                                    )
+                            )
+
+                        for n in later do
+                            let viaSmall = rendered (Dag.compactFrom hashFn stateEncode sw cp2 small n)
+                            let viaFull = rendered (Dag.compactAt hashFn stateEncode sw gen.State0 full n)
+
+                            livesCell.Check(
+                                (viaSmall = viaFull),
+                                fun () ->
+                                    at (sprintf "compacting %s again at %s: %A; the full DAG: %A" c n viaSmall viaFull)
+                            )
+
+                        // ---- the sidecar beside the lane ----
+                        let lane, _ = Dag.toJsonlWithCheckpoints sw.Encode stateEncode small [ cp2 ]
+
+                        laneCell.Check(
+                            (lane = Dag.toJsonl sw.Encode small),
+                            fun () -> at (sprintf "the lane beside the compaction at %s is not toJsonl's" c)
+                        ))
+
+        LawKit.results
+            [ takeCell
+              sealCell
+              stateSealCell
+              replayCell
+              indexedCell
+              compactCell
+              tamperCell
+              livesCell
+              laneCell ]
+        @ [ SampleAdequacy.reachedBeside
+                family
+                dimension
+                seed
+                [ "covered replay over a lane merge", coveredMerge
+                  "uncovered refusal", uncovered
+                  "compaction keeping history above its checkpoint", compactedAbove ]
+                [ "no lane merge", noLaneMerge
+                  "replay rejected", rejected
+                  "compaction refused", compactRefused
+                  "compaction keeping a band behind its checkpoint", banded ] ]
+
     /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a
     /// realized effect value (the stand-in for a live non-deterministic source); the kit certifies:
