@@ -4,9 +4,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.OpStream</PackageId>
-    <Description>Fuaran.Core.OpStream — append-only hash-chained op stream + deterministic replay + JSONL persistence, generic over an (apply, encode, decode) witness. The highest-genericity core layer; the linear spine the branching-DAG generalisation builds on. FSharp.Core only; encode Fable-clean, decode .NET-guarded.</Description>
+    <Description>Fuaran.Core.OpStream — append-only hash-chained op stream + deterministic replay + JSONL persistence, generic over an (apply, encode, decode) witness. The highest-genericity core layer; the linear spine the branching-DAG generalisation builds on. FSharp.Core only; Fable-clean on encode and decode alike - the one JSONL scanner (OpStream.Jsonl) is self-contained and runs under both pipelines.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Phase 296: one file per concern; the `OpStream` module (OpStream.fs) is unchanged in surface. -->
+    <Compile Include="Actor.fs" />
+    <Compile Include="Chain.fs" />
+    <Compile Include="Snapshot.fs" />
+    <Compile Include="Capture.fs" />
+    <Compile Include="Attributed.fs" />
+    <Compile Include="Jsonl.fs" />
     <Compile Include="OpStream.fs" />
   </ItemGroup>
   <ItemGroup>

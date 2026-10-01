@@ -3,40 +3,12 @@ module Fuaran.Core.Tests.OpStreamTests
 open Expecto
 open Fuaran.Core
 
-// A minimal stream domain: a counter with inc/dec ops, encoded via the Core.Wire
-// helpers and decoded via the Core.Wire combinators (so the test exercises the real
-// wire surface too). Dec below zero is a domain rejection.
-type CounterOp =
-    | Inc of int
-    | Dec of int
+// The counter stream domain — the one reference copy, `Reference.Counter` (Phase 296): inc/dec
+// ops through the Core.Wire helpers and combinators, `Dec` below zero the domain's rejection.
+open Fuaran.Core.Tests.Reference.Counter
 
-let private encodeOp =
-    function
-    | Inc n -> Json.render (Json.kindObj "inc" [ "n", JInt n ])
-    | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
-
-let private decodeOp (s: string) : Result<CounterOp, string> =
-    let parsed =
-        Decode.parse s
-        |> Result.bind (fun el ->
-            Decode.kindOf el
-            |> Result.bind (fun k -> Decode.intField "n" el |> Result.map (fun n -> k, n)))
-
-    match parsed with
-    | Ok("inc", n) -> Ok(Inc n)
-    | Ok("dec", n) -> Ok(Dec n)
-    | Ok(k, _) -> Error("unknown op kind: " + k)
-    | Error e -> Error e
-
-let private applyOp op (st: int) =
-    match op with
-    | Inc n -> Ok(st + n)
-    | Dec n -> if st - n < 0 then Error "would go negative" else Ok(st - n)
-
-let private sw: StreamWitness<CounterOp, int, string> =
-    { Apply = applyOp
-      Encode = encodeOp
-      Decode = decodeOp }
+let private encodeOp = encode
+let private sw = witness
 
 // Phase 27 — value codecs for captured boundary values (clock ticks / RNG draws as int,
 // network bodies as string), exercising the real Core.Wire encode/decode surface.
@@ -148,10 +120,10 @@ let tests =
           <| fun _ ->
               // a syntactically-fine line whose op kind is unknown ⇒ the witness Decode Errors
               let bad =
-                  "{\"seq\":0,\"actor\":\"x\",\"op\":{\"kind\":\"bogus\",\"n\":1},\"prevHash\":\"\",\"hash\":\"h\"}"
+                  "{\"seq\":0,\"actor\":{\"kind\":\"human\",\"id\":\"x\"},\"op\":{\"kind\":\"bogus\",\"n\":1},\"prevHash\":\"\",\"hash\":\"h\"}"
 
               match OpStream.fromJsonl sw bad with
-              | Error m -> Expect.stringContains m "line 0" "names the failing line"
+              | Error m -> Expect.stringContains m "line 1" "names the failing line"
               | Ok _ -> failtest "expected a decode Error"
 
           // ---- Phase 255: pluggable payload format + migration shim (finding F4) ----
@@ -224,7 +196,7 @@ let tests =
                   match OpStream.firstChainBreak OpStream.defaultHash sw tampered with
                   | Some b ->
                       Expect.equal b.Index 1 "break at record 1"
-                      Expect.equal b.Reason HashMismatch "names the digest check, typed (0.23.0)"
+                      Expect.equal b.Reason ChainBreakReason.HashMismatch "names the digest check, typed (0.23.0)"
                   | None -> failtest "expected a break"
               | Error e -> failtestf "unexpected %A" e
 
@@ -373,7 +345,7 @@ let tests =
                   Expect.equal b.Index 0 "break localised to capture 0"
                   // 0.23.0 — the capture walk's own digest spelling collapses into the one typed
                   // `HashMismatch` case; which walker ran is carried by which function was called.
-                  Expect.equal b.Reason HashMismatch "names the digest check, typed (0.23.0)"
+                  Expect.equal b.Reason ChainBreakReason.HashMismatch "names the digest check, typed (0.23.0)"
               | None -> failtest "expected a capture break"
 
           testCase "capture journal round-trips through JSONL and still verifies"
@@ -436,7 +408,7 @@ let tests =
 
               match OpStream.fromJsonl sw line with
               | Error m ->
-                  Expect.stringContains m "line 0" "names the failing line"
+                  Expect.stringContains m "line 1" "names the failing line"
                   Expect.stringContains m "unknown actor kind \"service\"" "names the kind it does not know"
               | Ok recs -> failtestf "an unknown kind must not decode, got %A" recs
 
@@ -505,7 +477,7 @@ let attributedTests =
           testCase "encodeEnvelope / decodeEnvelope round-trip (both turn variants)"
           <| fun _ ->
               let enc = OpStream.Attributed.encodeEnvelope encodeOp
-              let dec = OpStream.Attributed.decodeEnvelope decodeOp
+              let dec = OpStream.Attributed.decodeEnvelope decode
 
               for a in [ attr "alice" "s1" (Some 2) "at-1" (Inc 5); attr "bob" "s2" None "" (Dec 3) ] do
                   match dec (enc a) with
@@ -668,32 +640,344 @@ let chainBreakReasonTests =
           <| fun _ ->
               Expect.equal
                   (ChainBreakReason.ofString "hash mismatch, probably")
-                  (Unrecognised "hash mismatch, probably")
+                  (ChainBreakReason.Unrecognised "hash mismatch, probably")
                   "a reason that merely LOOKS like a digest failure is not one"
 
               Expect.equal
                   (ChainBreakReason.ofString "hash mismatch (tampered capture)")
-                  HashMismatch
+                  ChainBreakReason.HashMismatch
                   "the capture walk's own legacy spelling still classifies"
 
               Expect.equal
-                  (ChainBreakReason.toString (Unrecognised "verbatim"))
+                  (ChainBreakReason.toString (ChainBreakReason.Unrecognised "verbatim"))
                   "verbatim"
                   "an unrecognised reason renders as itself, losing nothing"
 
           testCase "toString renders the pre-0.23.0 bytes, so a consumer that logged them still does"
           <| fun _ ->
               Expect.equal
-                  (ChainBreakReason.toString SequenceMismatch)
+                  (ChainBreakReason.toString ChainBreakReason.SequenceMismatch)
                   "sequence-number mismatch"
                   "the sequence spelling is unchanged"
 
               Expect.equal
-                  (ChainBreakReason.toString PrevHashLinkBroken)
+                  (ChainBreakReason.toString ChainBreakReason.PrevHashLinkBroken)
                   "prev-hash link broken"
                   "the prev-link spelling is unchanged"
 
               Expect.equal
-                  (ChainBreakReason.toString HashMismatch)
+                  (ChainBreakReason.toString ChainBreakReason.HashMismatch)
                   "hash mismatch (tampered op/actor/seq)"
                   "the op-walk digest spelling is the one rendering for the single case" ]
+
+// ---- Phase 296 — one scanner that refuses, the batch append, the snapshot family ----
+
+/// A canonical record line with one member's raw value replaced — the shapes the lenient scanner
+/// read as `Ok` with a misread value.
+let private lineWith (field: string) (raw: string) =
+    let members =
+        [ "seq", "0"
+          "actor", "{\"kind\":\"human\",\"id\":\"x\"}"
+          "op", encodeOp (Inc 1)
+          "prevHash", "\"\""
+          "hash", "\"h\"" ]
+        |> List.map (fun (k, v) -> if k = field then k, raw else k, v)
+
+    "{"
+    + (members |> List.map (fun (k, v) -> "\"" + k + "\":" + v) |> String.concat ",")
+    + "}"
+
+let private refusedAs (text: string) (lineNo: int) (expect: string) =
+    match OpStream.fromJsonl sw text with
+    | Error m ->
+        Expect.stringContains m (sprintf "line %d:" lineNo) "names the 1-based line"
+        Expect.stringContains m expect "names the reason"
+    | Ok recs -> failtestf "expected a refusal (%s), read %A" expect recs
+
+let private enc (s: int) = string s
+
+let private dec (s: string) =
+    match System.Int32.TryParse s with
+    | true, n -> Ok n
+    | _ -> Error "not an int"
+
+[<Tests>]
+let scannerRefusalTests =
+    testList
+        "OpStream.Jsonl (Phase 296)"
+        [ testCase "an unquoted value where a string is required is refused, never cut to its inner characters"
+          <| fun _ ->
+              refusedAs (lineWith "prevHash" "null") 1 "field prevHash is not a string"
+              refusedAs (lineWith "hash" "12") 1 "field hash is not a string"
+
+          testCase "an integer field is held to the JSON grammar"
+          <| fun _ ->
+              refusedAs (lineWith "seq" "0x2") 1 "invalid literal '0x2'"
+              refusedAs (lineWith "seq" "\"0\"") 1 "field seq is not an integer"
+              refusedAs (lineWith "seq" "1.0") 1 "field seq is not an integer"
+              refusedAs (lineWith "seq" "01") 1 "invalid literal '01'"
+
+          testCase "a non-hex \\u digit, an unknown escape and a lone surrogate are refused"
+          <| fun _ ->
+              refusedAs (lineWith "hash" "\"\\u00zz\"") 1 "invalid escape \\u00zz"
+              refusedAs (lineWith "hash" "\"\\q\"") 1 "invalid escape \\q"
+              refusedAs (lineWith "hash" "\"\\ud800x\"") 1 "invalid escape"
+
+          testCase "a truncated line, a line ending after ':' and a non-object line are refused at a position"
+          <| fun _ ->
+              refusedAs "{\"seq\":" 1 "the line ends inside the object (position 7)"
+              refusedAs "{\"seq\":0" 1 "the line ends inside the object"
+              refusedAs "[1,2]" 1 "expected a JSON object (position 0)"
+              refusedAs (lineWith "seq" "0" + " trailing") 1 "content after the closing '}'"
+
+          testCase "the line number counts EVERY line, blank lines included"
+          <| fun _ ->
+              match build () with
+              | Ok(_, recs) ->
+                  let good = OpStream.toJsonl sw recs
+                  refusedAs (good + "\n\n\n" + lineWith "prevHash" "null") 6 "field prevHash is not a string"
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "one snapshot line at the head is read; one anywhere else, or a second, is refused"
+          <| fun _ ->
+              match build () with
+              | Ok(_, recs) ->
+                  match
+                      OpStream.Snapshots.compact
+                          SnapshotMode.Strict
+                          OpStream.canonicalConfig
+                          OpStream.defaultHash
+                          enc
+                          sw
+                          0
+                          recs
+                          1
+                  with
+                  | Ok(snap, tail) ->
+                      let snapLine = OpStream.Snapshots.toJsonl enc snap
+                      let body = OpStream.toJsonl sw tail
+
+                      match OpStream.fromJsonlWithSnapshots sw (snapLine + "\n" + body) with
+                      | Ok(t, [ s ]) ->
+                          Expect.equal s snapLine "the head snapshot is returned verbatim"
+                          Expect.equal t tail "the tail records"
+                      | other -> failtestf "expected one snapshot and the tail, got %A" other
+
+                      refusedAs (body + "\n" + snapLine) 3 "a snapshot line that is not the first line"
+
+                      refusedAs
+                          (snapLine + "\n" + snapLine + "\n" + body)
+                          2
+                          "a snapshot line that is not the first line"
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "a record line carrying a snapshot member is a record, not a dropped snapshot"
+          <| fun _ ->
+              match build () with
+              | Ok(_, recs) ->
+                  let line = OpStream.toJsonl sw [ List.head recs ]
+                  let withMember = line.Substring(0, line.Length - 1) + ",\"snapshot\":true}"
+
+                  match OpStream.fromJsonlWithSnapshots sw withMember with
+                  | Ok([ r ], []) -> Expect.equal r (List.head recs) "read as the record it is"
+                  | other -> failtestf "expected one record and no snapshot, got %A" other
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "the shared scanner is public: topFields keeps raw spans byte-for-byte, rawSpan reads one"
+          <| fun _ ->
+              let line = "{\"a\":{\"x\" : [1, 2]},\"b\":\"s\\n\",\"a\":3}"
+
+              Expect.equal
+                  (OpStream.Jsonl.topFields line)
+                  (Ok [ "a", "{\"x\" : [1, 2]}"; "b", "\"s\\n\"" ])
+                  "raw spans, first-wins on a repeated key"
+
+              Expect.equal (OpStream.Jsonl.rawSpan "b" line) (Ok(Some "\"s\\n\"")) "one member's raw span"
+              Expect.equal (OpStream.Jsonl.rawSpan "z" line) (Ok None) "an absent member"
+              Expect.isError (OpStream.Jsonl.rawSpan "a" "{\"a\":1") "a malformed line is refused whole"
+              Expect.equal (OpStream.Jsonl.unquote "\"s\\u0041\\n\"") (Ok "sA\n") "unquote decodes"
+              Expect.isError (OpStream.Jsonl.unquote "null") "unquote is total: null is not a string"
+
+          testCase "captureFromJsonl and decodeEnvelope read through the same refusing scanner"
+          <| fun _ ->
+              Expect.isError
+                  (OpStream.captureFromJsonl
+                      "{\"capture\":true,\"seq\":0,\"eff\":\"clock\",\"det\":\"clock\",\"value\":1,\"prevHash\":null,\"hash\":\"h\"}")
+                  "a capture whose prevHash is null"
+
+              Expect.isError
+                  (OpStream.Attributed.decodeEnvelope
+                      decode
+                      "{\"actor\":\"a\",\"session\":\"s\",\"turn\":0x1,\"at\":\"t\",\"op\":{}}")
+                  "an envelope whose turn is a hex spelling" ]
+
+[<Tests>]
+let batchAppendTests =
+    testList
+        "OpStream.appendMany (Phase 296)"
+        [ testCase "appendMany chains the same records as a fold of append, from empty and onto a stream"
+          <| fun _ ->
+              let ops = [ Inc 5; Inc 3; Dec 2; Inc 1 ]
+
+              let foldFrom (start: int * OpRecord<CounterOp> list) =
+                  ops
+                  |> List.fold
+                      (fun acc op ->
+                          acc
+                          |> Result.bind (fun (st, recs) ->
+                              OpStream.append OpStream.defaultHash sw (Human "tester") op st recs))
+                      (Ok start)
+                  |> Result.mapError (fun e -> 0, e)
+
+              Expect.equal
+                  (OpStream.appendMany OpStream.defaultHash sw (Human "tester") ops 0 OpStream.empty)
+                  (foldFrom (0, OpStream.empty))
+                  "byte-identical to the fold"
+
+              match OpStream.append OpStream.defaultHash sw (Human "tester") (Inc 2) 0 OpStream.empty with
+              | Ok(st, recs) ->
+                  Expect.equal
+                      (OpStream.appendMany OpStream.defaultHash sw (Human "tester") ops st recs)
+                      (foldFrom (st, recs))
+                      "onto a non-empty stream too"
+              | Error e -> failtestf "append failed: %s" e
+
+          testCase "appendMany is all or nothing: the first rejection is named by its index"
+          <| fun _ ->
+              Expect.equal
+                  (OpStream.appendMany OpStream.defaultHash sw (Human "tester") [ Inc 1; Dec 5; Inc 1 ] 0 OpStream.empty)
+                  (Error(1, "would go negative"))
+                  "the second op rejects; nothing chained"
+
+          testCase "headWith and appendIfWith read the config's genesis on an empty stream"
+          <| fun _ ->
+              Expect.equal
+                  (OpStream.headWith legacyCfg OpStream.empty)
+                  "genesis"
+                  "an empty stream's head is the genesis"
+
+              Expect.equal (OpStream.head OpStream.empty) "" "the canonical head is unchanged"
+
+              match
+                  OpStream.appendIfWith legacyCfg OpStream.defaultHash sw "genesis" (Human "t") (Inc 1) 0 OpStream.empty
+              with
+              | Ok(_, [ r ]) ->
+                  Expect.equal r.PrevHash "genesis" "chained from the genesis"
+
+                  Expect.isTrue
+                      (OpStream.verifyChainWith legacyCfg OpStream.defaultHash sw [ r ])
+                      "and verifies under it"
+              | other -> failtestf "expected one record, got %A" other
+
+              Expect.equal
+                  (OpStream.appendIfWith legacyCfg OpStream.defaultHash sw "" (Human "t") (Inc 1) 0 OpStream.empty
+                   |> Result.map ignore)
+                  (Error(AppendRejection.StaleHead("", "genesis")))
+                  "the canonical empty head is stale under another genesis"
+
+          testCase "tryRehash keeps the typed break rehash used to discard"
+          <| fun _ ->
+              match buildWith legacyCfg with
+              | Ok(_, recs) ->
+                  let tampered =
+                      recs |> List.mapi (fun i r -> if i = 1 then { r with Hash = "x" } else r)
+
+                  match OpStream.tryRehash legacyCfg OpStream.canonicalConfig OpStream.defaultHash sw tampered with
+                  | Error b ->
+                      Expect.equal b.Index 1 "the record that breaks"
+                      Expect.equal b.Reason ChainBreakReason.HashMismatch "and why"
+                  | Ok _ -> failtest "a broken source chain must not be rehashed"
+              | Error e -> failtestf "build failed: %A" e ]
+
+[<Tests>]
+let snapshotFamilyTests =
+    let compactAt mode recs atSeq =
+        OpStream.Snapshots.compact mode OpStream.canonicalConfig OpStream.defaultHash enc sw 0 recs atSeq
+
+    testList
+        "OpStream.Snapshots (Phase 296)"
+        [ testCase "the mode is carried on the snapshot and through its line"
+          <| fun _ ->
+              match build () with
+              | Ok(_, recs) ->
+                  for mode in [ SnapshotMode.Strict; SnapshotMode.ChainOnly ] do
+                      match compactAt mode recs 2 with
+                      | Ok(snap, tail) ->
+                          Expect.equal snap.Mode mode "taken in the mode asked for"
+
+                          Expect.isTrue
+                              (OpStream.Snapshots.verify OpStream.canonicalConfig OpStream.defaultHash enc sw snap tail)
+                              "verifies under its own mode"
+
+                          Expect.equal
+                              (OpStream.Snapshots.ofJsonl dec (OpStream.Snapshots.toJsonl enc snap))
+                              (Ok snap)
+                              "the line round-trips the snapshot, mode included"
+                      | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "firstBreak localises: the snapshot's own hash, or the tail record that breaks"
+          <| fun _ ->
+              let cfg = OpStream.canonicalConfig
+
+              match
+                  build ()
+                  |> Result.map snd
+                  |> Result.bind (fun recs -> compactAt SnapshotMode.Strict recs 1 |> Result.mapError string)
+              with
+              | Ok(snap, tail) ->
+                  Expect.isNone (OpStream.Snapshots.firstBreak cfg OpStream.defaultHash enc sw snap tail) "intact"
+
+                  match OpStream.Snapshots.firstBreak cfg OpStream.defaultHash enc sw { snap with State = 99 } tail with
+                  | Some(SnapshotBreak.SnapshotHash _) -> ()
+                  | other -> failtestf "a swapped state must break the snapshot's hash, got %A" other
+
+                  let bent = tail |> List.mapi (fun i r -> if i = 1 then { r with Hash = "x" } else r)
+
+                  match OpStream.Snapshots.firstBreak cfg OpStream.defaultHash enc sw snap bent with
+                  | Some(SnapshotBreak.Tail b) -> Expect.equal b.Index 1 "the tail position that breaks"
+                  | other -> failtestf "expected a tail break, got %A" other
+              | Error e -> failtestf "setup failed: %s" e
+
+          testCase "replayFrom refuses a tail that does not start at the snapshot's boundary"
+          <| fun _ ->
+              match build () with
+              | Ok(st, recs) ->
+                  match compactAt SnapshotMode.ChainOnly recs 1 with
+                  | Ok(snap, tail) ->
+                      Expect.equal (OpStream.Snapshots.replayFrom sw snap tail) (Ok st) "the seam holds"
+
+                      Expect.equal
+                          (OpStream.Snapshots.replayFrom sw snap (List.tail tail))
+                          (Error(SnapshotFault.TailSeqMismatch(1, 2)))
+                          "a tail that skips a record"
+                  | Error e -> failtestf "compact failed: %A" e
+              | Error e -> failtestf "build failed: %A" e
+
+          testCase "take keeps the prefix rejection the string forms discarded"
+          <| fun _ ->
+              let bad =
+                  [ { Seq = 0
+                      Actor = Human "t"
+                      Op = Dec 3
+                      PrevHash = ""
+                      Hash = "h" } ]
+
+              let take atSeq =
+                  OpStream.Snapshots.take
+                      SnapshotMode.Strict
+                      OpStream.canonicalConfig
+                      OpStream.defaultHash
+                      enc
+                      sw
+                      0
+                      bad
+                      atSeq
+
+              Expect.equal
+                  (take 1)
+                  (Error(SnapshotFault.PrefixRejected(0, "would go negative")))
+                  "the index and the domain's own rejection"
+
+              Expect.equal (take 2) (Error(SnapshotFault.SeqOutOfRange(2, 1))) "a boundary past the end" ]

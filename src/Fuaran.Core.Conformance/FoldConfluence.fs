@@ -214,7 +214,9 @@ module FoldConfluence =
 
                 let head, d' =
                     ops
-                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (parentOf i hs, d)
+                    |> List.fold
+                        (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> LawKit.dagBuilt)
+                        (parentOf i hs, d)
 
                 hs @ [ head ], d')
             ([], d0)
@@ -238,7 +240,9 @@ module FoldConfluence =
         (baseOp: 'Op)
         (lanes: 'Op list list)
         : LaneFoldOutcome =
-        let baseId, d0 = Dag.append hashFn w (Human "base") baseOp "" Dag.empty
+        let baseId, d0 =
+            Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> LawKit.dagBuilt
+
         let heads, dag = chainLanes w hashFn (fun _ _ -> baseId) d0 lanes
         foldHeads w footprintOf hashState state0 dag baseId heads
 
@@ -371,7 +375,8 @@ module FoldConfluence =
         // identically under every order. The criss-cross needs a merge op, which a lane generator does
         // not supply, so it is drawn by `reconcileLaws`, over the tree algebra's no-op batch.
         let outcomesOf (shape: int) (ls: 'Op list list) =
-            let baseId, d0 = Dag.append hashFn w (Human "base") gen.BaseOp "" Dag.empty
+            let baseId, d0 =
+                Dag.append hashFn w (Human "base") gen.BaseOp "" Dag.empty |> LawKit.dagBuilt
 
             let overHeads (heads: string list) (dag: Dag.T<'Op>) =
                 arrivalOrders (List.length heads)

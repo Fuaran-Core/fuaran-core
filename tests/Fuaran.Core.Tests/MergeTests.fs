@@ -25,11 +25,11 @@ let conflictShapeTests =
 
               match Dag.conflicts fp a b with
               | [ c ] ->
-                  Expect.equal c.Shape ConcurrentUpdate "both touch z's content lifecycle"
+                  Expect.equal c.Shape MergeConflictShape.ConcurrentUpdate "both touch z's content lifecycle"
                   Expect.equal c.Address "z" "the shared address is z"
                   Expect.equal c.Left (InsertChild("p", RNode.leaf "z" "para" "v")) "Left is delta-A's op"
                   Expect.equal c.Right (RemoveNode "z") "Right is delta-B's op"
-              | other -> failtestf "expected a single ConcurrentUpdate on z, got %A" other
+              | other -> failtestf "expected a single MergeConflictShape.ConcurrentUpdate on z, got %A" other
 
           testCase "insert-position clash: two inserts under the SAME named parent"
           <| fun _ ->
@@ -38,9 +38,9 @@ let conflictShapeTests =
 
               match Dag.conflicts fp a b with
               | [ c ] ->
-                  Expect.equal c.Shape InsertPositionClash "both shift p's siblings"
+                  Expect.equal c.Shape MergeConflictShape.InsertPositionClash "both shift p's siblings"
                   Expect.equal c.Address "p" "the shared parent p"
-              | other -> failtestf "expected a single InsertPositionClash on p, got %A" other
+              | other -> failtestf "expected a single MergeConflictShape.InsertPositionClash on p, got %A" other
 
           testCase "move-vs-remove: a remove races the other branch's structural write (conservative)"
           <| fun _ ->
@@ -51,9 +51,9 @@ let conflictShapeTests =
 
               match Dag.conflicts fp a b with
               | [ c ] ->
-                  Expect.equal c.Shape MoveVsRemove "the remove of a1 races b's structural write"
+                  Expect.equal c.Shape MergeConflictShape.MoveVsRemove "the remove of a1 races b's structural write"
                   Expect.equal c.Address "a1" "keyed by the removed node"
-              | other -> failtestf "expected a single MoveVsRemove on a1, got %A" other
+              | other -> failtestf "expected a single MergeConflictShape.MoveVsRemove on a1, got %A" other
 
           testCase "disjoint deltas return [] — no false positives"
           <| fun _ ->
@@ -130,13 +130,15 @@ let private forkDag (a: SkeletonOp<RNode, string> list) (b: SkeletonOp<RNode, st
         let mutable d = d0
 
         for op in ops do
-            let id, d' = Dag.append h sw (Human "x") op head d
+            let id, d' = Dag.append h sw (Human "x") op head d |> Reference.built
             head <- id
             d <- d'
 
         head, d
 
-    let baseId, d1 = Dag.append h sw (Human "x") (RemoveNode "root") "" Dag.empty
+    let baseId, d1 =
+        Dag.append h sw (Human "x") (RemoveNode "root") "" Dag.empty |> Reference.built
+
     let headA, d2 = chain a baseId d1
     let headB, dag = chain b baseId d2
     baseId, headA, headB, dag
@@ -184,7 +186,10 @@ let reconcileTests =
               match Dag.reconcile fp dag baseId headA headB with
               | Error cs ->
                   Expect.equal cs (Dag.conflicts fp a b) "the Error carries Dag.conflicts' report verbatim"
-                  Expect.isTrue (cs |> List.exists (fun c -> c.Shape = ConcurrentUpdate)) "a concurrent-update conflict"
+
+                  Expect.isTrue
+                      (cs |> List.exists (fun c -> c.Shape = MergeConflictShape.ConcurrentUpdate))
+                      "a concurrent-update conflict"
               | Ok script -> failtestf "expected an Error conflict report, got Ok %A" script
 
           testCase "reconcile is a pure function of (base, headA, headB)"

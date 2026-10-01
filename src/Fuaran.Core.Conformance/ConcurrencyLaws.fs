@@ -333,7 +333,7 @@ module internal ConcurrencyLaws =
             let mutable d = d0
 
             for op in ops do
-                let id, d' = Dag.append hashFn sw (Human actor) op head d
+                let id, d' = Dag.append hashFn sw (Human actor) op head d |> LawKit.dagBuilt
                 head <- id
                 d <- d'
 
@@ -346,7 +346,9 @@ module internal ConcurrencyLaws =
 
             // a genesis base node carrying the no-op (it is in the base closure, which the
             // partition excludes), then branch A forked off it under its own actor.
-            let genesis, d1 = Dag.append hashFn sw (Human "base") noOp "" Dag.empty
+            let genesis, d1 =
+                Dag.append hashFn sw (Human "base") noOp "" Dag.empty |> LawKit.dagBuilt
+
             let headA0, d2 = chain "lane-a" a genesis d1
 
             // The shape, cycled by iteration. A criss-cross is built only over two NON-EMPTY
@@ -389,8 +391,13 @@ module internal ConcurrencyLaws =
                 | 2, _ -> "duplicate-head", genesis, headA0, headA0, d2, a, [], []
                 | 3, Some(b, merged) ->
                     let headB0, d3 = chain "lane-b" b genesis d2
-                    let m1, d4 = Dag.merge hashFn sw (Human "merge-1") noOp headA0 headB0 d3
-                    let m2, d5 = Dag.merge hashFn sw (Human "merge-2") noOp headA0 headB0 d4
+
+                    let m1, d4 =
+                        Dag.merge hashFn sw (Human "merge-1") noOp headA0 headB0 d3 |> LawKit.dagBuilt
+
+                    let m2, d5 =
+                        Dag.merge hashFn sw (Human "merge-2") noOp headA0 headB0 d4 |> LawKit.dagBuilt
+
                     let c = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
                     let d = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
                     let h1, d6 = chain "lane-a" c m1 d5
@@ -453,15 +460,20 @@ module internal ConcurrencyLaws =
                     )
                 else
                     // shared history once: the script from replayTo(base) ≡ replayTo(merge of the heads).
-                    let m, dm = Dag.merge hashFn sw (Human "merge") noOp headA headB dag
+                    let m, dm =
+                        Dag.merge hashFn sw (Human "merge") noOp headA headB dag |> LawKit.dagBuilt
+
+                    // Both heads are nodes the kit just built, so the only fault left is the domain's.
+                    let replayRej (h: string) =
+                        match Dag.tryReplayTo sw tree dm h with
+                        | Ok st -> Ok st
+                        | Error(Dag.ReplayFault.Rejected(_, rej)) -> Error rej
+                        | Error f -> invalidOp (sprintf "the kit's own DAG did not replay: %A" f)
 
                     let viaScript =
-                        Dag.replayTo sw tree dm baseId
-                        |> Result.mapError snd
-                        |> Result.bind (applyAll script)
-                        |> Result.map hashOf
+                        replayRej baseId |> Result.bind (applyAll script) |> Result.map hashOf
 
-                    let viaMerge = Dag.replayTo sw tree dm m |> Result.mapError snd |> Result.map hashOf
+                    let viaMerge = replayRej m |> Result.map hashOf
 
                     sharedOnce.Check(
                         (viaScript = viaMerge),

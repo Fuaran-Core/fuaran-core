@@ -19,6 +19,13 @@ namespace Fuaran.Core
 module internal LawKit =
 
     /// The stamp every counterexample opens with: the seed and the iteration that reproduce it.
+    /// A DAG node the kit builds itself — fresh actors, parents it just appended — cannot be refused
+    /// (Phase 296); a refusal here is a defect in the kit, raised with the fault's own text.
+    let dagBuilt (r: Result<string * Dag.T<'Op>, DagAppendFault>) : string * Dag.T<'Op> =
+        match r with
+        | Ok built -> built
+        | Error f -> invalidOp ("the law kit built a DAG node the DAG refused: " + DagAppendFault.toString f)
+
     let failAt (seed: int) (i: int) (msg: string) : string =
         "seed=" + string seed + " iter=" + string i + ": " + msg
 
@@ -383,19 +390,19 @@ module internal LawKit =
         (opM: 'Op)
         : string * string * string * string * Dag.T<'Op> =
         let actor = Human "conf"
-        let g, d1 = Dag.append hashFn sw actor op0 "" Dag.empty
+        let g, d1 = Dag.append hashFn sw actor op0 "" Dag.empty |> dagBuilt
 
         let a, b, d3 =
             if bFirst then
-                let b, d2 = Dag.append hashFn sw actor opB g d1
-                let a, d3 = Dag.append hashFn sw actor opA g d2
+                let b, d2 = Dag.append hashFn sw actor opB g d1 |> dagBuilt
+                let a, d3 = Dag.append hashFn sw actor opA g d2 |> dagBuilt
                 a, b, d3
             else
-                let a, d2 = Dag.append hashFn sw actor opA g d1
-                let b, d3 = Dag.append hashFn sw actor opB g d2
+                let a, d2 = Dag.append hashFn sw actor opA g d1 |> dagBuilt
+                let b, d3 = Dag.append hashFn sw actor opB g d2 |> dagBuilt
                 a, b, d3
 
-        let m, dag = Dag.merge hashFn sw actor opM a b d3
+        let m, dag = Dag.merge hashFn sw actor opM a b d3 |> dagBuilt
         g, a, b, m, dag
 
     // ---- the dispatch-seam runner ----------------------------------------------------------------

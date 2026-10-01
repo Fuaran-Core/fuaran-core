@@ -3410,6 +3410,105 @@ extractions are regenerated and the differential host compares the label, its in
 
 **Rollback.** None: the chain is the set's projection and the set cannot be reconstructed from it.
 
+### One JSONL scanner that refuses; the DAG's typed refusals; the snapshot family with its mode on the snapshot (Phase 296, DECISIONS.md "one JSONL scanner, shared rather than copied") — BREAKING: `Dag.append` / `Dag.merge` change return type, `Snapshot` gains a field (`record-widening`), four unions become qualified-access, and input that was accepted is refused; the rest `additive`, with obsolete forwards for this draft
+
+The shard classed this change additive; it is not, and the class above is the honest one. Each
+breaking item is listed with what a consumer does about it.
+
+**What changed — the scanner.**
+
+- **One scanner.** `OpStream.Jsonl` is the one JSONL line scanner in the repository, public. The DAG
+  package carried a verbatim copy (and a copy of the actor decoder) under a comment citing D2; it
+  reads through `OpStream.Jsonl` now. The five per-reader record loops collapse onto
+  `Jsonl.scanRecords`. Public: `topFields` / `rawSpan` (raw member spans, byte-for-byte — the opaque
+  canonical payload a consumer embeds keeps its bytes), `unquote` (total), `parseLine`, the typed
+  accessors `rawField` / `tryRawField` / `stringField` / `intField` / `stringsField` / `actorField`,
+  `refuse`, `lineNumber` / `lineText`, and `scanRecords`. New types `JsonlFault`,
+  `JsonlFaultReason`, `JsonlLine` (`additive`).
+- **It refuses what it used to misread** — BREAKING for a stream that carried such a line. Every
+  reader (`fromJsonl`, `fromJsonlWithSnapshots`, `fromJsonlLegacyActor`, `fromJsonlVerified`,
+  `captureFromJsonl`, `Attributed.decodeEnvelope`, `snapshotFromJsonlResult`, `Dag.fromJsonl`) now
+  refuses: an unquoted value where a string is required (`"prevHash":null` read as `"ul"`, `"id":12`
+  as `""`); a `\u` escape without four hex digits, an unknown escape letter, an unpaired surrogate; a
+  line that ends inside its object (after `:` it used to index past the end, with a message that
+  differed by host); a line that is not an object; trailing content after the closing `}`; a bare
+  value that is not `true` / `false` / `null` / a JSON number; an integer member outside the JSON
+  grammar or the 32-bit range (`"seq":0x2`, `"seq":"1"`, `"seq":1.0`, `"turn":01`); a DAG `parents`
+  member that is not an array of strings (`["a" "b"]` used to read as two parents); an actor object
+  missing a member its kind requires. **A store that reads `Ok` is one the scanner parsed.** Sweep a
+  persisted store by reading it once: every line the old scanner misread is now named.
+- **The error text.** Each refusal renders `line N: <reason> (position P)` — `N` is **1-based over
+  every line of the text, blank lines counted** (it was 0-based over the non-blank lines), `P` the
+  scanner's own 0-based position in that line. A consumer matching `line 0` matches `line 1`. A
+  single-object reader (`snapshotFromJsonlResult`, `decodeEnvelope`) renders `<reason> (position P)`.
+- **Snapshot lines.** One snapshot line is admitted, and only as the first line of the stream; one
+  after a record, or a second one, is refused (`JsonlFaultReason.SnapshotNotAtHead`) — they were
+  accepted anywhere and in any number. A record line carrying a `snapshot` member is read as the
+  record it is (it was dropped as a snapshot). `compact` writes exactly the admitted shape.
+
+**What changed — the DAG.**
+
+- **`Dag.append` / `Dag.merge` return `Result<string * Dag.T<'Op>, DagAppendFault>`** — BREAKING,
+  `retype`. Phase 300's `tryAppend` / `tryMerge` were the same refusals typed beside raising plain
+  forms; they are folded back into the plain names (removed: they were added on this draft and never
+  released). A call site that built a DAG it knows to be sound unwraps the `Ok`.
+  `DagAppendFault` gains `UnknownParent` (a non-empty parent the DAG does not hold — it used to
+  build a node `verifyDag` then rejected) and `ContentIdCollision` (an id the DAG holds for a node
+  whose parents modulo order, actor or encoded op differ — it used to REPLACE the held node
+  silently, and under the 32-bit FNV-1a default a collision is about 0.3% likely at 5,000 nodes and
+  even odds near 77,000). The same node appended twice deduplicates, by design. `Dag.fromJsonl`
+  applies the same rule to a repeated id. `union-widening` on a union this draft added.
+- **`Dag.appendChecked` / `Dag.mergeChecked`** apply the op at a state the caller holds and refuse
+  an op the domain rejects before it enters the DAG (`DagAppendRejection<'Rej>`: `Fault` | `Domain`)
+  — `additive`. The plain forms do not apply the op; see the DECISIONS entry for why.
+- **`Dag.ReplayFault.UnknownHead`**; `tryReplayTo` refuses a head the DAG does not hold (it replayed
+  to the initial state). `Dag.replayTo` is `[<Obsolete>]` for this draft and delegates: a domain
+  rejection is returned as before, an unknown head or a cyclic history RAISES
+  (`ArgumentException`) where it answered `Ok` with the initial state or a silent partial fold.
+- **`[<RequireQualifiedAccess>]` on `ChainBreakReason`, `DagBreakReason`, `MergeConflictShape` and
+  `Dag.ReplayFault`** (D1's rule) — BREAKING, source only: write `ChainBreakReason.HashMismatch`,
+  `Dag.ReplayFault.CyclicHistory`. `ChainBreakReason.Unrecognised` and `DagBreakReason.Unrecognised`
+  no longer shadow one another in `namespace Fuaran.Core`. The wire strings are unchanged.
+
+**What changed — the linear stream.**
+
+- **`Snapshot<'State>` gains `Mode: SnapshotMode`** (`Strict` | `ChainOnly`) — BREAKING,
+  `record-widening`: a full-literal construction must name the mode. **`OpStream.Snapshots`** is
+  the one family — `take`, `compact`, `firstBreak` (localising: `SnapshotBreak.SnapshotHash` or
+  `SnapshotBreak.Tail` of a `ChainBreak`), `verify`, `replayFrom`, `toJsonl`, `ofJsonl` — taking the
+  mode and the `StreamConfig`, reading the mode from the snapshot after `take`, and returning the
+  typed `SnapshotFault<'Rej>` (`SeqOutOfRange`, `PrefixRejected` with the domain's rejection,
+  `TailSeqMismatch`, `TailRejected`) the string forms discarded. `Snapshots.replayFrom` refuses a tail
+  whose first `Seq` is not the snapshot's boundary. The pre-image bytes, the line bytes and every
+  hash are unchanged. The seventeen-member matrix (`snapshotAt*`, `compact*`, `verifyAcross*`,
+  `replayFrom`, `snapshotToJsonl*`, `snapshotStateHashedFromJsonl`, `snapshotFromJsonl*`) stays as
+  `[<Obsolete>]` forwards for this draft, each pinning the mode its name says and answering exactly
+  as before — `verifyAcrossWithOpt` is public now (it was internal). Their `Error` text keeps the
+  `OpStream.snapshotAt:` prefix whichever member reports, because the proof model of compaction
+  pins those strings; the typed fault is the corrected surface.
+- **One chain walker** serves `firstChainBreakWith`, `tryRehash`, `Snapshots.firstBreak` and
+  `firstCaptureBreakWith`, where four were written. **`tryRehash`** returns the `ChainBreak` `rehash`
+  discarded; `rehash`'s message now names the record and the reason.
+- **The configured genesis reaches every seed**: `headWith`, `appendIfWith`, `captureEffectWith`,
+  `firstCaptureBreakWith` read `cfg.Genesis` (the canonical forms keep `""`) — `additive`.
+- **`appendMany` / `appendManyWith`** chain a batch of ops in one walk and one copy, all or nothing
+  (`Error(index, rejection)`) — `additive`. `append` and `appendIf` walk the stream once where they
+  walked three and four times; `appendIdempotent*` index the new record without walking again;
+  `Attributed.groupBy` (behind `byActor` / `bySession`) is linear where it copied each group per
+  record.
+
+**Measured (a 5,000-record loop, Release, median of five, the same chain bytes in every arm).** The
+pre-296 append body re-run verbatim: 185–280 ms. The shipped `append` in the same loop: 296 ms when
+run first, ~600 ms when run after the other arms — the per-call cost is the copy `@` makes and the
+garbage it leaves, and the walks saved are inside the noise. `appendMany` over the same 5,000 ops:
+12.3 ms, **about 5% of the loop**. The shard asked for `append` to be O(1) per call behind the
+unchanged `OpRecord list`; that is not reachable — an immutable list reaches its end only by walking
+it, and a copy is the price of putting a record there — so the batch form is the remedy, and a caller
+appending in a loop should collect and call `appendMany`.
+
+**Rollback.** Pin `0.32.0`. Nothing persisted moves: every hash, pre-image and line byte is the
+same, and a store `0.33.0` refuses is one `0.32.0` was misreading.
+
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
 **It is a MINOR release because the change that opened it is BREAKING.** `0.31.0` is tagged, so it is a

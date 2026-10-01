@@ -54,9 +54,9 @@ let private toModelFootprint (f: Footprint) : DagFold.footprint =
 
 let private ofModelShape (s: DagFold.shape) : MergeConflictShape =
     match s with
-    | DagFold.ConcurrentUpdate -> ConcurrentUpdate
-    | DagFold.InsertPositionClash -> InsertPositionClash
-    | DagFold.MoveVsRemove -> MoveVsRemove
+    | DagFold.ConcurrentUpdate -> MergeConflictShape.ConcurrentUpdate
+    | DagFold.InsertPositionClash -> MergeConflictShape.InsertPositionClash
+    | DagFold.MoveVsRemove -> MergeConflictShape.MoveVsRemove
 
 let private ofModelConflict (c: DagFold.conflict<'Op>) : MergeConflict<'Op> =
     { Left = c.left
@@ -127,7 +127,9 @@ let private productionDag
     (lanes: 'Op list list)
     : string * string list * Dag.T<'Op> =
     let hashFn = OpStream.defaultHash
-    let baseId, d0 = Dag.append hashFn w (Human "base") baseOp "" Dag.empty
+
+    let baseId, d0 =
+        Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> Reference.built
 
     let heads, dag =
         lanes
@@ -138,7 +140,7 @@ let private productionDag
 
                 let head, d' =
                     ops
-                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (baseId, d)
+                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> Reference.built) (baseId, d)
 
                 hs @ [ head ], d')
             ([], d0)
@@ -1282,7 +1284,8 @@ let private mergedUnion
                 if h = acc then
                     acc, d
                 else
-                    Dag.merge OpStream.defaultHash w (Human "merge") mergeOp acc h d)
+                    Dag.merge OpStream.defaultHash w (Human "merge") mergeOp acc h d
+                    |> Reference.built)
             (h0, dag)
 
 let private drainedOrder (r: DagFold.drain_result) : string list option =
@@ -1370,7 +1373,7 @@ let private foldPullFold
 
                 let head, d' =
                     ops
-                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd) (merged, d)
+                    |> List.fold (fun (h, dd) op -> Dag.append hashFn w actor op h dd |> Reference.built) (merged, d)
 
                 hs @ [ head ], d')
             ([], dagM)
@@ -2125,7 +2128,9 @@ let private dagUnder
     (baseOp: 'Op)
     (lanes: 'Op list list)
     : Dag.T<'Op> =
-    let baseId, d0 = Dag.append hashFn w (Human "base") baseOp "" Dag.empty
+    let baseId, d0 =
+        Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> Reference.built
+
     let mutable d = d0
 
     for (i, ops) in List.indexed lanes do
@@ -2133,7 +2138,7 @@ let private dagUnder
         let mutable h = baseId
 
         for op in ops do
-            let id, d' = Dag.append hashFn w actor op h d
+            let id, d' = Dag.append hashFn w actor op h d |> Reference.built
             h <- id
             d <- d'
 
@@ -9004,14 +9009,24 @@ let private reconcileShapes (a: PlanOp list) (b: PlanOp list) (c: PlanOp list) (
 
     let chain (actor: string) (ops: PlanOp list) (parent: string) (dag: Dag.T<PlanOp>) =
         ops
-        |> List.fold (fun (p, dd) op -> Dag.append h planW (Human actor) op p dd) (parent, dag)
+        |> List.fold (fun (p, dd) op -> Dag.append h planW (Human actor) op p dd |> Reference.built) (parent, dag)
 
-    let g, d0 = Dag.append h planW (Human "base") planLaneGen.BaseOp "" Dag.empty
+    let g, d0 =
+        Dag.append h planW (Human "base") planLaneGen.BaseOp "" Dag.empty
+        |> Reference.built
+
     let ha, d1 = chain "lane-a" a g d0
     let hb, d2 = chain "lane-b" b g d1
     let hff, d3 = chain "lane-b" b ha d1
-    let m1, d4 = Dag.merge h planW (Human "merge-1") planLaneGen.BaseOp ha hb d2
-    let m2, d5 = Dag.merge h planW (Human "merge-2") planLaneGen.BaseOp ha hb d4
+
+    let m1, d4 =
+        Dag.merge h planW (Human "merge-1") planLaneGen.BaseOp ha hb d2
+        |> Reference.built
+
+    let m2, d5 =
+        Dag.merge h planW (Human "merge-2") planLaneGen.BaseOp ha hb d4
+        |> Reference.built
+
     let h1, d6 = chain "lane-a" c m1 d5
     let h2, d7 = chain "lane-b" d m2 d6
     let mb = Dag.mergeBase d7 h1 h2 |> Option.defaultValue g
@@ -11182,7 +11197,7 @@ let proofOracleTests =
 
               Expect.equal
                   (dagVerdictReason m)
-                  (Some ContentIdMismatch)
+                  (Some DagBreakReason.ContentIdMismatch)
                   "and it disagrees by naming the check that failed"
 
           testCase "a model handed a DIFFERENT hash reports a break on an intact linear chain"
@@ -11197,7 +11212,10 @@ let proofOracleTests =
               Expect.equal p ChainIntact "production built this chain and sees it intact"
               Expect.notEqual m p "a model recomputing hashes with a different function must disagree"
 
-              Expect.equal (chainVerdictReason m) (Some HashMismatch) "and it disagrees by naming the check that failed"
+              Expect.equal
+                  (chainVerdictReason m)
+                  (Some ChainBreakReason.HashMismatch)
+                  "and it disagrees by naming the check that failed"
 
           // ---- what the theorem's one premise buys, measured in BOTH directions ----
 
@@ -11233,7 +11251,10 @@ let proofOracleTests =
               let rp, rm =
                   dagVerdicts OpStream.defaultHash OpStream.defaultHash planW (tamper real)
 
-              Expect.equal (dagVerdictReason rp) (Some ContentIdMismatch) "under an injective hash the tamper is found"
+              Expect.equal
+                  (dagVerdictReason rp)
+                  (Some DagBreakReason.ContentIdMismatch)
+                  "under an injective hash the tamper is found"
 
               Expect.equal rm rp "and the model finds it identically"
 
@@ -11287,11 +11308,13 @@ let proofOracleTests =
                           if List.length s.CorpusParents = want && not (isBuilt s.Fixture) then
                               let id, d =
                                   match s.CorpusParents |> List.map coreIdOf with
-                                  | [] -> Dag.append OpStream.defaultHash rawW s.Actor s.OpJson "" dag
-                                  | [ Some p ] -> Dag.append OpStream.defaultHash rawW s.Actor s.OpJson p dag
+                                  | [] ->
+                                      Dag.append OpStream.defaultHash rawW s.Actor s.OpJson "" dag |> Reference.built
+                                  | [ Some p ] ->
+                                      Dag.append OpStream.defaultHash rawW s.Actor s.OpJson p dag |> Reference.built
                                   | [ Some l; Some r ] ->
                                       merges <- merges + 1
-                                      Dag.merge OpStream.defaultHash rawW s.Actor s.OpJson l r dag
+                                      Dag.merge OpStream.defaultHash rawW s.Actor s.OpJson l r dag |> Reference.built
                                   | _ -> failtestf "%s: it names a parent no earlier fixture built" s.Fixture
 
                               dag <- d
@@ -11329,8 +11352,14 @@ let proofOracleTests =
                   // model's own pre-image measured against the id production minted.
                   match built with
                   | (_, _, a) :: (_, _, b) :: _ ->
-                      let lr, _ = Dag.merge OpStream.defaultHash rawW (Human "m") "{}" a b Dag.empty
-                      let rl, _ = Dag.merge OpStream.defaultHash rawW (Human "m") "{}" b a Dag.empty
+                      let lr, _ =
+                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" a b Dag.empty
+                          |> Reference.built
+
+                      let rl, _ =
+                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" b a Dag.empty
+                          |> Reference.built
+
                       Expect.equal lr rl "merge(A,B) and merge(B,A) converge to one content id"
 
                       Expect.equal
@@ -11759,7 +11788,7 @@ let proofOracleTests =
               // refused with a typed fault, so the premise holds of everything production BUILDS.
               let ambiguous = List.head keys + "," + List.item 1 keys
 
-              match Dag.tryAppend OpStream.defaultHash planW (Human "w") planLaneGen.BaseOp ambiguous dag with
+              match Dag.append OpStream.defaultHash planW (Human "w") planLaneGen.BaseOp ambiguous dag with
               | Error(DagAppendFault.CommaInParentId p) -> Expect.equal p ambiguous "the refusal names the offending id"
               | other -> failtestf "a comma-bearing parent id must be refused, got %A" (Result.map fst other)
 
@@ -11776,6 +11805,7 @@ let proofOracleTests =
                       (List.head keys)
                       (List.item 1 keys)
                       dag
+                  |> Reference.built
 
               let spoiled =
                   { Dag.Nodes =
@@ -11791,7 +11821,11 @@ let proofOracleTests =
               | Some b ->
                   // Typed since Phase 147 — `Reason` was the string this case compared when it was
                   // written, and comparing the case is what that phase made possible.
-                  Expect.equal b.Reason MissingParent "a comma-bearing parent id is caught as a missing parent"
+                  Expect.equal
+                      b.Reason
+                      DagBreakReason.MissingParent
+                      "a comma-bearing parent id is caught as a missing parent"
+
                   Expect.equal b.Got ambiguous "and the break names the offending id"
               | None -> failtest "a DAG naming a parent that is not a node must not verify"
 

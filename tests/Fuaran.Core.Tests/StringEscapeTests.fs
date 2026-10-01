@@ -245,7 +245,7 @@ let tests =
           testCase "the DAG folds the canonical spelling into a node's content id, and its JSONL round-trips"
           <| fun _ ->
               let actor = Agent("m\n", "1\t", "id\r")
-              let id, dag = Dag.append h sw actor (Note "x") "" Dag.empty
+              let id, dag = Dag.append h sw actor (Note "x") "" Dag.empty |> Reference.built
 
               Expect.equal
                   id

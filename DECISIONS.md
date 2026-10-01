@@ -146,10 +146,94 @@ document one of them cannot read; what argues for (b) is that Core's parser read
 store files that are not §21 documents at all. Until it is ruled, nothing here claims §21 conformance
 for `Json.parse`.
 
-*Not done here, and where it goes.* The JSONL scanner that Phase 296 unifies reads its integers
-through `Json.readInt32` when it lands; that phase has not shipped and there is no scanner to change.
-The shared wire corpus takes its copy of `conformance/refusals/` — which gains the profile grammar's
+*The JSONL scanner reads its integers from the digits.* Phase 296 landed its one scanner while this
+phase was in flight, and its integer reader called `System.Int64.Parse` under the current culture —
+which THROWS on `-5` under a culture whose negative sign is not U+002D, out of a function that returns
+a `Result`. `OpStream` may not reference `Wire`, so it cannot call `Json.readInt32`; it folds the
+digits its own grammar test has already accepted, which is culture-free by construction.
+
+*Not done here, and where it goes.* The shared wire corpus takes its copy of `conformance/refusals/` — which gains the profile grammar's
 vectors — at the hosts' next pin raise. The Fable half of the new parity rows is measured at the cut.
+
+## 2026-10-01 — D83: one JSONL scanner, shared rather than copied; a colliding node is refused under the default hash; the snapshot mode is a value on the snapshot; and `append` does not apply the op
+
+**Recorded by Phase 296. `Fuaran.Core.OpStream`, `Fuaran.Core.OpStream.Dag`, `Fuaran.Core.Conformance`;
+rides the `0.33.0` draft (STABILITY.md "One JSONL scanner that refuses…").**
+
+*D2 does not forbid the shared scanner.* The DAG package carried a verbatim copy of the linear
+package's JSONL scanner and actor decoder, under a comment that the copy kept the DAG's
+"no-`Core.Wire` posture (D2)". D2 is a rule about the WIRE dependency: the op-stream packages stay
+FSharp.Core-only and Fable-clean, so they take no reference on `Fuaran.Core.Wire`. The scanner is not
+`Wire` — it is the linear package's own code — and the DAG package has referenced the linear package
+by project since it was cut. Sharing it adds no dependency edge, and the copy's cost was already being
+paid: every scanner fix since Phase 45 was applied twice, and Phase 260 had to change the actor
+decoder in two places. The scanner is PUBLIC (`OpStream.Jsonl`) rather than `internal` behind an
+`InternalsVisibleTo`, because the reason to expose it outlives the DAG: a consumer that embeds an
+opaque canonical payload in a line — the UI tier's envelope readers are the measured case — hand-scans
+for exactly the raw member span `topFields` / `rawSpan` return, and a third copy is the defect this
+entry closes. The scanner refuses at the levels it reads (structure, string escapes, bare literals,
+and the KIND of a member through the typed accessors); the interior grammar of an array or object
+member stays the business of whoever decodes the raw span, which is what a raw span is for.
+
+*The collision refusal, under the default hash.* `Dag.append`, `Dag.merge` and `Dag.fromJsonl` did
+`Map.add id node`: a second node minting an id the DAG held REPLACED the first, silently, and
+`verifyDag` still passed because the survivor's id was its own content hash. Under the 32-bit FNV-1a
+default that is not a theoretical event — about 0.3% at 5,000 nodes and even odds near 77,000 — so it
+is refused (`DagAppendFault.ContentIdCollision`) and the node held first stays. The comparison is over
+the node, not the id: parents modulo order (the content id is parent-order-independent since Phase
+64.1), the actor, and the op through its encoding (no equality is demanded of `'Op`). Comparing the
+parents is what makes the refusal catch the splice the second-pass review named — a `merge(x, y)` id
+equals the id of a node whose one parent is the comma-spliced `"x,y"` — which no colliding `HashFn`
+test alone would pin, because that collision needs no hash weakness at all. An IDENTICAL node is one
+node: content addressing converges by design, so the same op by the same actor on the same parent
+deduplicates and returns `Ok`, and a caller that must count appends keys them itself. A host that
+cannot accept FNV-1a's collision rate swaps the `HashFn`; the refusal makes the rate visible rather
+than silent, it does not lower it.
+
+*The snapshot mode is a value on the snapshot.* Seventeen members formed a strict / chain-only ×
+canonical / config matrix, and the mode lived in which member a caller had called — so a reader
+re-parsed the line to pick a verifier. `SnapshotMode` (`Strict` | `ChainOnly`) is now a field of
+`Snapshot<'State>`, and `OpStream.Snapshots` is one family taking the mode once (`take`, `compact`) and
+reading it from the snapshot thereafter (`firstBreak`, `verify`, `toJsonl`, `ofJsonl`). The state
+encoder is always the state's JSON and, under `Strict` only, also its hash pre-image; the family never
+calls it for a chain-only hash. This is the shape Phase 288's checkpoint builds on: one pre-image per
+mode, one verifier, one line, and a typed `SnapshotFault` / `SnapshotBreak` rather than strings. The
+matrix stays as obsolete forwards for this draft, each pinning the mode its name says, so a strict
+verifier handed a chain-only snapshot still refuses it — "answers as before" is held, not
+approximated. The forwards keep the `OpStream.snapshotAt:` error prefix the shard asked to correct,
+because the proof model of compaction (`proofs/Chain.fst` and the oracle extracted from it) pins those
+exact strings and the oracle suite compares them; the typed fault is the correction, and the strings
+retire with the forwards.
+
+*Declined: `Dag.append` applying the op.* The shard asked `append` and `merge` to apply the op through
+the witness, so a rejected op could not enter the DAG. A DAG holds no state: whether an op applies
+depends on the state its parent's closure replays to, which the DAG can only supply by replaying it
+(linear per append, quadratic per built DAG) or by trusting a state the caller hands in. And the
+refusal it would buy is already the reconcile's: Phase 300's `reconcileMany` refuses a lane that does
+not apply on its own, because a DAG also arrives from a file or another writer, where no append ran.
+Making the plain forms apply would have turned every lane generator in the conformance kit that draws
+a rejecting op into a build failure, changing what `laneFoldLaws` measures. So the plain forms stay
+graph operations with typed graph refusals, and `appendChecked` / `mergeChecked` take the parent's
+state — exactly as `OpStream.append` takes the stream's — and refuse a rejected op before it enters
+(`DagAppendRejection.Domain`). The acceptance's "append of an op the witness rejects is a typed
+refusal" is met there; `dagLaws` asserts that the check agrees with `Apply` on every drawn op.
+
+*Refuted: an O(1) `append` behind the unchanged list.* The shard asked `append`, `appendIf`,
+`appendIdempotent` and `captureEffect` to be O(1) per call with the public `OpRecord list` unchanged.
+An immutable list reaches its end only by walking it, and putting a record there costs a copy, so no
+representation behind that projection makes one call constant. Measured on a 5,000-record loop
+(Release, median of five, identical chain bytes in every arm): the pre-296 body 185–280 ms, the
+one-walk `append` 296 ms run first and ~600 ms run after the other arms — the copy and its garbage
+dominate, and the walks saved are inside the noise — and `appendMany` over the same ops 12.3 ms, about
+5% of the loop. The shard's alternative, a batch form, is what ships; a caller appending in a loop
+collects and calls `appendMany`.
+
+*The file split.* `OpStream.fs` is split by concern — `Actor.fs`, `Chain.fs`, `Snapshot.fs`,
+`Capture.fs`, `Attributed.fs`, `Jsonl.fs` carry the namespace-level types and their companion modules,
+and `OpStream.fs` the `OpStream` module — with the API baseline byte-identical across the split (the
+public-surface family is the check). The module's own members stay in one file: splitting them behind
+a forwarding facade would restate some seventy signatures and their documentation a second time for
+no change a consumer can see, and is not done here.
 
 ## 2026-09-30 — D79: the parser holds to the JSON grammar, NaN sorts last, the column codec carries only a table it can decode, and `RowCodec` is obsoleted
 

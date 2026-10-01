@@ -67,7 +67,7 @@ let private h = OpStream.defaultHash
 
 let private chain (actor: string) (ops: COp list) (parent: string) (d: Dag.T<COp>) =
     ops
-    |> List.fold (fun (p, dd) op -> Dag.append h w (Human actor) op p dd) (parent, d)
+    |> List.fold (fun (p, dd) op -> Dag.append h w (Human actor) op p dd |> Reference.built) (parent, d)
 
 let private replayFrom (s: int) (script: COp list) =
     script |> List.fold (fun acc op -> acc |> Result.bind (apply op)) (Ok s)
@@ -77,7 +77,7 @@ let private stateAt (dag: Dag.T<COp>) (id: string) =
 
 /// `replayTo base` then the script, beside `replayTo` of a merge node over the two heads.
 let private againstMerge (dag: Dag.T<COp>) (baseId: string) (a: string) (b: string) (script: COp list) =
-    let m, dm = Dag.merge h w (Human "merge") Nop a b dag
+    let m, dm = Dag.merge h w (Human "merge") Nop a b dag |> Reference.built
     stateAt dm baseId |> Result.bind (fun s -> replayFrom s script), stateAt dm m
 
 [<Tests>]
@@ -86,7 +86,7 @@ let reconcileShapeTests =
         "Dag.reconcile shapes (Phase 300)"
         [ testCase "a fast-forward applies the shared history once, even under a single-cell footprint"
           <| fun _ ->
-              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
               let a, d1 = chain "lane-a" [ Inc 7 ] g d0
               let b, dag = chain "lane-b" [ Inc 1 ] a d1
 
@@ -104,7 +104,7 @@ let reconcileShapeTests =
 
           testCase "a duplicate head is deduplicated"
           <| fun _ ->
-              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
               let a, dag = chain "lane-a" [ Inc 7; Inc 1 ] g d0
 
               Expect.equal
@@ -117,11 +117,11 @@ let reconcileShapeTests =
           testCase "a criss-cross over mergeBase's tie-break applies the other branch once"
           <| fun _ ->
               // two lanes off one base, two merges of them under two actors, then a lane off each
-              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
               let x, d1 = chain "lane-x" [ Inc 1000 ] g d0
               let y, d2 = chain "lane-y" [ Inc 100 ] g d1
-              let m1, d3 = Dag.merge h w (Human "merge-1") Nop x y d2
-              let m2, d4 = Dag.merge h w (Human "merge-2") Nop x y d3
+              let m1, d3 = Dag.merge h w (Human "merge-1") Nop x y d2 |> Reference.built
+              let m2, d4 = Dag.merge h w (Human "merge-2") Nop x y d3 |> Reference.built
               let h1, d5 = chain "lane-x" [ Inc 10 ] m1 d4
               let h2, dag = chain "lane-y" [ Inc 1 ] m2 d5
 
@@ -169,7 +169,7 @@ let reconcileShapeTests =
 
           testCase "reconcileMany names the rejecting lane set, sorted by head, whatever the head order"
           <| fun _ ->
-              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
               let a, d1 = chain "lane-a" [ Dec 5 ] g d0
               let b, d2 = chain "lane-b" [ Inc 10 ] g d1
               let c, dag = chain "lane-c" [ Dec 7 ] g d2
@@ -192,7 +192,7 @@ let reconcileShapeTests =
 
           testCase "shared history that does not replay is refused without blaming a lane"
           <| fun _ ->
-              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
               let a, d1 = chain "lane-a" [ Dec 3 ] g d0
               let b, dag = chain "lane-b" [ Inc 1 ] a d1
 
@@ -202,32 +202,28 @@ let reconcileShapeTests =
 
           testCase "merge refuses an empty parent and a comma-bearing one; append refuses a comma-bearing one"
           <| fun _ ->
-              let g, dag = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, dag = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
 
               Expect.equal
-                  (Dag.tryMerge h w (Human "m") Nop "" g dag |> Result.map fst)
+                  (Dag.merge h w (Human "m") Nop "" g dag |> Result.map fst)
                   (Error DagAppendFault.EmptyParentId)
                   "merge(\"\", x) is refused"
 
               Expect.equal
-                  (Dag.tryMerge h w (Human "m") Nop g "" dag |> Result.map fst)
+                  (Dag.merge h w (Human "m") Nop g "" dag |> Result.map fst)
                   (Error DagAppendFault.EmptyParentId)
                   "merge(x, \"\") is refused"
 
               Expect.equal
-                  (Dag.tryMerge h w (Human "m") Nop g "p,q" dag |> Result.map fst)
+                  (Dag.merge h w (Human "m") Nop g "p,q" dag |> Result.map fst)
                   (Error(DagAppendFault.CommaInParentId "p,q"))
                   "a comma-bearing merge parent is refused"
 
-              Expect.throwsT<System.ArgumentException>
-                  (fun () -> Dag.merge h w (Human "m") Nop "" g dag |> ignore)
-                  "the plain form raises"
-
-              Expect.isOk (Dag.tryAppend h w (Human "a") (Inc 1) "" dag) "\"\" is still append's genesis"
+              Expect.isOk (Dag.append h w (Human "a") (Inc 1) "" dag) "\"\" is still append's genesis"
 
           testCase "a merge id can no longer be minted through append"
           <| fun _ ->
-              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+              let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
               let x, d1 = chain "lane-x" [ Inc 1 ] g d0
               let y, d2 = chain "lane-y" [ Inc 2 ] g d1
 
@@ -237,17 +233,13 @@ let reconcileShapeTests =
                   else
                       y, x
 
-              let mergeId, _ = Dag.merge h w (Human "m") Nop x y d2
+              let mergeId, _ = Dag.merge h w (Human "m") Nop x y d2 |> Reference.built
 
               // the splice: an append naming the one parent "lo,hi" hashes the merge's pre-image
-              match Dag.tryAppend h w (Human "m") Nop (lo + "," + hi) d2 with
+              match Dag.append h w (Human "m") Nop (lo + "," + hi) d2 with
               | Error(DagAppendFault.CommaInParentId _) -> ()
               | Ok(id, _) -> failtestf "the splice is buildable again: %s (merge %s)" id mergeId
               | Error f -> failtestf "refused for the wrong reason: %A" f
-
-              Expect.throwsT<System.ArgumentException>
-                  (fun () -> Dag.append h w (Human "m") Nop (lo + "," + hi) d2 |> ignore)
-                  "the plain form raises"
 
           // The shard's replay premise, REFUTED: "replaying the script from replayTo base equals
           // replayTo (merge heads), under the diamond" is false of a history whose merged branches do
@@ -260,10 +252,10 @@ let reconcileShapeTests =
               let found =
                   [ 0..63 ]
                   |> List.tryPick (fun k ->
-                      let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty
+                      let g, d0 = Dag.append h w (Human "base") Nop "" Dag.empty |> Reference.built
                       let a, d1 = chain ("lane-a-" + string k) [ SetTo 1 ] g d0
                       let z, d2 = chain ("lane-z-" + string k) [ SetTo 2 ] g d1
-                      let m, dag = Dag.merge h w (Human "merge") Nop a z d2
+                      let m, dag = Dag.merge h w (Human "merge") Nop a z d2 |> Reference.built
 
                       match Dag.reconcile blind dag g a m with
                       | Ok script ->
