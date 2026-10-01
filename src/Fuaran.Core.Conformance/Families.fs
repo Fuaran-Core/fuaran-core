@@ -297,6 +297,19 @@ module Families =
               [ "independence-diamond" ]
               (Guarded [ "script-pair independence" ])
               (NoRefusal, "a refused op is skipped; no law reads it")
+          // Phase 249 — `footprintLaws`' soundness law at the domain's own ops: the domain's stream
+          // witness, footprint projection and generator, so a hand-written footprint over a domain
+          // op is certified rather than trusted. Guarded on both the independent pair the law reads
+          // and the interfering pair without which the sample cannot tell a sound footprint from an
+          // empty one.
+          c
+              "footprintLawsAt"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "script-pair independence" ])
+              (NoRefusal,
+               "a refused draw is skipped while threading and counted beside the guard; an Apply error on an independent pair only fails the soundness law")
           c
               "concurrencyLaws"
               treeWitness
@@ -361,6 +374,18 @@ module Families =
               (Guarded [ "DAG shape" ])
               (Drawn,
                "the unknown head and the cyclic load are built every iteration, but a replay rejection and a reconcile refusal come from the caller's drawn ops and their agreement laws hold when none is drawn; the refusals are counted beside the DAG-shape guard, not demanded, since a domain whose ops never reject cannot produce one")
+          // Phase 288 — the checkpoint on the lane DAG. The shape is drawn by the kit, but whether it
+          // holds a branch point depends on the caller's ops (the same op on the same parent is one
+          // node), so a covered replay over a lane merge, an uncovered refusal and a compaction that
+          // keeps history above its checkpoint are demanded by the DAG-shape guard.
+          c
+              "checkpointLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "DAG shape" ])
+              (Drawn,
+               "the uncovered refusal comes from the kit's drawn shape and is demanded by the DAG-shape guard, and a refused compaction is counted beside it; a replay rejection comes from the caller's drawn ops, and its agreement law holds when none is drawn, so it is counted beside the guard, not demanded")
           // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
           // found and left for this phase. Each was `Unconditional` on the strength of what every
           // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an
@@ -607,6 +632,34 @@ module Families =
               (Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ])
               (Built,
                "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms")
+          // Phase 312 — the placement algebra, tree lowering and fresh ids. Each takes the base run's
+          // witness (freshIdLaws also a `setId` and the minting strategy it certifies, neither a
+          // witness record) and promises more than the base contract does, so each is elected.
+          c
+              "placementLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "placement arm (place / move across parents / move within a parent / non-final position)" ])
+              (Built,
+               "the unknown anchor, the out-of-range index and the three engine refusals (absent parent, duplicate id, move of the root) are built every iteration a holder is drawn")
+          c
+              "loweringLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded
+                  [ "lowered tree (well-formed / in the containment invariant / filled shell / built repeated id)" ])
+              (Built,
+               "the repeated-id tree whose script must be refused DuplicateId is built by appending a copy of a drawn node under a holder; its guard counts it")
+          c
+              "freshIdLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "built arm (repeated id built / clone placed)" ])
+              (NoRefusal,
+               "no law reads a refused outcome: a minted id, a repaired tree and an accepted clone are the subjects, and a refused clone fails the clone law outright")
           // Phase 286 — the same declaration, handed to the engine: the collisions the unkeyed
           // engine is blind to are BUILT through `PlaceKeyedChild`, and the engine's refusal is
           // held to the domain's own walk over them.

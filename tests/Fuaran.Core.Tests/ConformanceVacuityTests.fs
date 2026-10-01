@@ -90,6 +90,24 @@ let private runs =
                "Conformance.containerLaws"
                200
                (Conformance.containerLaws nodew idw ContainedOpsTests.containerGen 1610 200)
+           // Phase 312 — the placement algebra, tree lowering and fresh ids, at the contained
+           // reference generator (a leaf kind, so every container clause is live).
+           run
+               "Conformance.placementLaws"
+               200
+               (Conformance.placementLaws nodew idw ConformanceTests.containedGen 312 200)
+           run "Conformance.loweringLaws" 200 (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
+           run
+               "Conformance.freshIdLaws"
+               200
+               (Conformance.freshIdLaws
+                   nodew
+                   idw
+                   ConformanceTests.containedGen
+                   (fun i (n: RNode) -> { n with Id = i })
+                   (FreshIds.derived idw)
+                   312
+                   200)
            run
                "Conformance.mergeConflictLaws"
                300
@@ -106,6 +124,17 @@ let private runs =
                "Conformance.footprintLaws"
                300
                (Conformance.footprintLaws nodew idw ConformanceTests.opGen encNode 4242 300)
+           // Phase 249 — the same soundness law at the keyed reference's own stream witness.
+           run
+               "Conformance.footprintLawsAt"
+               300
+               (Conformance.footprintLawsAt
+                   FootprintLawsAtTests.keyedW
+                   FootprintLawsAtTests.keyedFootprint
+                   FootprintLawsAtTests.keyedHash
+                   FootprintLawsAtTests.keyedGen
+                   2490
+                   300)
            run
                "Conformance.concurrencyLaws"
                300
@@ -194,6 +223,16 @@ let private runs =
                "Conformance.reachLaws"
                100
                (Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 289 100)
+           run
+               "Conformance.checkpointLaws"
+               100
+               (Conformance.checkpointLaws
+                   ConformanceTests.sw
+                   ConformanceTests.streamGen
+                   (fun (s: int) -> string s)
+                   OpStream.defaultHash
+                   288
+                   100)
            run
                "Conformance.casLaws"
                200

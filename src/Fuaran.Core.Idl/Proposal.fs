@@ -533,6 +533,9 @@ module Proposal =
 
     /// Apply the delta to a vocabulary, returning a NEW value.
     ///
+    /// Refuses a vocabulary [[Declare.errors]] reports (Phase 292) — the result, so a base
+    /// that is itself ill-formed is refused too.
+    ///
     /// Refuses a collision rather than overwriting: a proposal whose "new" kind
     /// tag already exists is not additive, and the interesting fact about it is
     /// exactly that — silently replacing the existing declaration would produce a
@@ -659,7 +662,21 @@ module Proposal =
                                                         k) })
                                 ))
 
+        // Phase 292 — the vocabulary a delta produces is held to the same well-formedness
+        // rules a loaded one is (DECISIONS D95): a proposal is authored data, and a delta
+        // adding a kind with a dangling type name or a wrong-typed default must be refused
+        // here, naming every error, rather than priced as though it were a vocabulary.
         List.fold step (Ok idl) delta
+        |> Result.bind (fun proposed ->
+            match Declare.errors proposed with
+            | [] -> Ok proposed
+            | errs ->
+                Error(
+                    sprintf
+                        "the proposed vocabulary is not well-formed (%d error(s)): %s"
+                        (List.length errs)
+                        (String.concat "; " errs)
+                ))
 
     /// The kind tags a delta touches — the sampler's cross-section for the spike's
     /// generative leg. A delta that only widens a record or an enum touches no

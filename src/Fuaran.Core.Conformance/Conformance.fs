@@ -135,6 +135,40 @@ module Conformance =
         : LawResult list =
         TreeLaws.keyedChildrenLaws keyw nodew idw gen seed iterations
 
+    /// Forward — see `TreeLaws.placementLaws` (Phase 312).
+    let placementLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.placementLaws nodew idw gen seed iterations
+
+    /// Forward — see `TreeLaws.loweringLaws` (Phase 312).
+    let loweringLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.loweringLaws nodew idw gen seed iterations
+
+    /// Forward — see `TreeLaws.freshIdLaws` (Phase 312). `setId` rebuilds a node with a new id and
+    /// `mint` is the strategy certified — `FreshIds.derived idw`, `FreshIds.sequential idw prefix`, or
+    /// the domain's own.
+    let freshIdLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (setId: 'Id -> 'Node -> 'Node)
+        (mint: 'Id -> Set<string> -> 'Id)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.freshIdLaws nodew idw gen setId mint seed iterations
+
     /// Forward — see `KeyedApplyLaws.keyedApplyLaws` (Phase 286).
     let keyedApplyLaws
         (keyw: KeyedWitness<'Node, 'Id>)
@@ -208,6 +242,17 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         StreamLaws.reachLaws sw gen hashFn seed iterations
+
+    /// Forward — see `StreamLaws.checkpointLaws` (Phase 288).
+    let checkpointLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (stateEncode: 'State -> string)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        StreamLaws.checkpointLaws sw gen stateEncode hashFn seed iterations
 
     /// Forward — see `StreamLaws.captureReplayLaws`.
     let captureReplayLaws
@@ -336,6 +381,18 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         ConcurrencyLaws.footprintLaws nodew idw gen encode seed iterations
+
+    /// Forward — see `ConcurrencyLaws.footprintLawsAt` (Phase 249): `footprintLaws`' soundness law
+    /// at the domain's own ops, stream witness and generator, rather than the skeleton op algebra.
+    let footprintLawsAt
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (footprintOf: 'Op -> Footprint)
+        (hashState: 'State -> string)
+        (gen: StreamGen<'Op, 'State>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ConcurrencyLaws.footprintLawsAt sw footprintOf hashState gen seed iterations
 
     /// Forward — see `ConcurrencyLaws.mergeConflictLaws`.
     let mergeConflictLaws

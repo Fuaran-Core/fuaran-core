@@ -203,22 +203,9 @@ module FStarTarget =
         | SList inner -> "list (" + slotType inner + ")"
         | SMap inner -> "list (string & " + slotType inner + ")"
 
-    /// An F* string literal.
-    let private lit (s: string) : string =
-        let sb = System.Text.StringBuilder()
-        sb.Append '"' |> ignore
-
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append "\\\"" |> ignore
-            | '\\' -> sb.Append "\\\\" |> ignore
-            | '\n' -> sb.Append "\\n" |> ignore
-            | '\r' -> sb.Append "\\r" |> ignore
-            | '\t' -> sb.Append "\\t" |> ignore
-            | c -> sb.Append c |> ignore
-
-        sb.Append '"' |> ignore
-        sb.ToString()
+    /// An F* string literal — [[SourceLit.fstarString]] (Phase 292), the F* policy of the one
+    /// escaper every emitter splices IDL-authored text through.
+    let private lit (s: string) : string = SourceLit.fstarString s
 
     /// F*'s reserved words, plus the primitive type names a constructor's own telescope
     /// refers to. A declared member called `open` or `type` is perfectly ordinary in a wire
@@ -355,6 +342,8 @@ module FStarTarget =
     /// numeric default is therefore refused here and is not a defect in the declaration.
     let rec private defaultLit (idl: Idl) (where: string) (s: Slot) (v: IdlValue) : Result<string, CodegenError> =
         match s, v with
+        | SStr, VStr t when not (SourceLit.isWellFormed t) ->
+            unmodellable "a string default holding an unpaired surrogate, which F* cannot spell" where
         | SStr, VStr t -> Ok(lit t)
         | SBool, VBool b -> Ok(if b then "true" else "false")
         | SList _, VList [] -> Ok "[]"

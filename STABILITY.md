@@ -2933,6 +2933,197 @@ a case named `IntValue` / `FloatValue` / `TextValue` / `TreeValue`, resolves the
 **Class: additive.** `api/Fuaran.Core.Function.txt` and `api/Fuaran.Core.Query.txt` gain members and
 types only; `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` gain the two
 refusal roots' documents, every existing document unchanged.
+
+
+### A checkpoint on the lane DAG: a sealed state at a node, bounded replay from it, and a DAG that may begin at one (Phase 288, DECISIONS.md D93) — ADDITIVE
+
+**What changed.** The linear stream has had a checkpoint since Phase 244; the lane DAG had none, so every
+replay folded a head's whole ancestor closure and a DAG file was its complete history or did not verify.
+`Fuaran.Core.OpStream.Dag` now ships the linear `Snapshot`'s counterpart:
+
+- `Dag.Checkpoint<'State>` — `{ Node; State; Hash }`: the fold of `Node`'s ancestor closure, sealed with
+  the linear snapshot's strict pre-image at sequence zero chained from the node id (computed through
+  `OpStream.Snapshots`, not copied). `Dag.checkpointAt` folds to a node and seals; `Dag.sealAt` seals a
+  state the domain vouches for (the genesis-import shape); `Dag.checkpointFrom` takes the next checkpoint
+  from an earlier one. `Dag.verifyCheckpoint` recomputes the seal and refuses by name
+  (`CheckpointBreak.UnknownNode` / `Seal`).
+- `Dag.replayFrom w cp dag head` folds only the history above the checkpoint over its state, and answers
+  as `tryReplayTo` from the initial state for every head the checkpoint covers; `Dag.replayFromWith`
+  takes Phase 289's index. Refusals are the typed `Dag.CheckpointFault` — `UnknownNode`, `Replay` (the
+  replay's own fault), `Unreached`, and `Uncovered`: a node above the checkpoint that does not descend
+  from its node, which the full replay folds before part of the checkpoint's closure (DECISIONS.md D93).
+- `Dag.compactAt` / `Dag.compactFrom` truncate the history behind a checkpoint's node and keep the node,
+  so the compacted DAG lives on — append onto the node, checkpoint and compact again. `Dag.firstBreakFrom`
+  / `Dag.verifyDagFrom` verify a DAG that begins at a checkpoint: a changed byte in a kept node or in the
+  checkpoint fails them.
+- `Dag.toJsonlWithCheckpoints` / `Dag.fromJsonlWithCheckpoints`: checkpoints ride a SIDECAR beside the
+  lane file, one line each, the line being the linear snapshot line of the snapshot the checkpoint is
+  sealed as. The lane is `toJsonl`'s bytes; a DAG file with no sidecar reads exactly as `fromJsonl` reads
+  it.
+- `Conformance.checkpointLaws` (opt-in, `StrongerPromise`, `Guarded [ "DAG shape" ]`): taking, the seal,
+  replay equivalence and its refusals, truncation, tamper, the compacted DAG living on, and the lane
+  bytes; a sample with no covered replay over a lane merge, no uncovered refusal or no compaction keeping
+  history above its checkpoint reds the guard rather than reading green. `proofs.json` gains two
+  `tested` rows evidenced by it; whether `proofs/DagFold.fst` extends to a checkpointed origin is recorded
+  as open, not claimed.
+
+**What did NOT change, deliberately.** `Dag.T<'Op>` gains no field: the shard's optional origin field
+"with a default" does not exist in F# (a record field has no default, so it would have been a
+`record-widening` breaking every `{ Nodes = … }` literal), so the checkpoint travels beside the history
+as a snapshot travels beside its tail. No existing function's signature, answer or emitted byte moves,
+and no linear-stream file changed. The shard's `checkpointAt w stateEncode hashFn …` takes this module's
+argument order instead (`hashFn stateEncode w …`, as `OpStream.Snapshots.take` does). Beyond the shard's
+list: `sealAt`, `checkpointFrom` and `compactFrom` (a compacted DAG checkpointing and compacting again),
+`replayFromWith`, and `firstBreakFrom` beside `verifyDagFrom`.
+
+**What adopting it costs.** Nothing for a consumer that takes no checkpoint. One that does keeps the
+checkpoint beside its DAG, reads and writes it through the sidecar, replays with `replayFrom`, and treats
+an `Uncovered` refusal as "take the checkpoint later, or replay from the origin". Verify the DAG before
+compacting it: the discarded closure is folded and dropped, and nothing can find a tamper in it again.
+
+**Class: additive.** `api/Fuaran.Core.OpStream.Dag.txt` gains the `Checkpoint` record, the
+`CheckpointFault` and `CheckpointBreak` unions and twelve functions; `api/Fuaran.Core.Conformance.txt`
+gains `Conformance.checkpointLaws`. No wire bytes move.
+
+
+### A placement algebra, tree lowering and fresh ids: `TreePlacement`, `Ops.lower`, `FreshIds` (Phase 312) — ADDITIVE
+
+**What changed.** `InsertChild` and `MoveNode` append and order is stated by `ReorderChildren` naming
+ids (Phase 95), so every consumer that wanted a node anywhere but last derived the sibling
+permutation itself, and every consumer that cloned, pasted or repaired a tree hand-rolled a
+derive-and-probe id loop. Core now ships both, as helpers over the existing ops and witnesses:
+
+- `Fuaran.Core.Ops`: `Anchor<'Id>` (`First | Last | Before of 'Id | After of 'Id | Index of int`,
+  positions counted among the destination's children OTHER than the node placed), `PlaceError<'Id>`
+  (`Refused of Rejection` carrying the engine's own envelope, `UnknownAnchor` enumerating the
+  siblings, `IndexOutOfRange` naming the count), and the `TreePlacement` module — `place` / `move` /
+  `clone` and their `…Contained` forms — each LOWERED to a skeleton script: `[InsertChild]` or
+  `[Batch [InsertChild; ReorderChildren]]`, `[MoveNode]` or `[Batch [MoveNode; ReorderChildren]]`
+  across parents, `[ReorderChildren]` or `[]` within one, and a clone's copy renamed by
+  `FreshIds.repairDuplicates` and then placed. No new op.
+- `Ops.shellOf` / `Ops.skeletonRoot` / `Ops.lower`: a tree as its root's shell plus the preorder
+  `InsertChild` script that rebuilds it, `applyAll (lower t) (skeletonRoot t) = Ok t` for every
+  well-formed tree, and the same script under `applyAllWith canHold` for a tree in the containment
+  invariant.
+- `Fuaran.Core.Tree`: the `FreshIds` module — `derived` (`<id>-copy`, `-copy-2`, …), `sequential`
+  (`<prefix>-1`, `-2`, … with no hidden counter) and `repairDuplicates` (rename every later
+  occurrence and every id a caller-supplied taken set holds, return the mapping), each over
+  `IdWitness` and a taken set of `ToString` keys.
+- `Conformance.placementLaws`, `Conformance.loweringLaws` (both over the base witness) and
+  `Conformance.freshIdLaws` (also a `setId` and the minting strategy it certifies) — all opt-in,
+  `StrongerPromise`, guarded on the arms they draw.
+
+**What did NOT change, deliberately.** `IdWitness` gains no `fresh` (D5): minting is a helper over
+`ToString` / `OfString` and a taken set, so the same inputs mint the same id on every host and every
+replay. No existing function's signature or answer moves, and no wire bytes move. The shard named the
+module `Placement`; `Fuaran.Core.Placement` is already a public type (where a capability's body runs),
+so the module is `TreePlacement` (DECISIONS.md, Phase 312).
+
+**What adopting it costs.** Nothing for a consumer that does not call it. A consumer retiring its own
+placement verbs gets the same script for an anchor-relative insert and a cross-parent move, and a
+`ReorderChildren` (or nothing) where it emitted `Batch [MoveNode; ReorderChildren]` for a move within
+one parent — the same tree, a smaller footprint. A domain whose ids are not strings with a suffix
+(a `Guid`, an integer) passes its own strategy of the shape `'Id -> Set<string> -> 'Id` and certifies
+it with `freshIdLaws`. A consumer that opens `Fuaran.Core` beside a namespace of its own declaring
+`Anchor`, `PlaceError`, `TreePlacement` or `FreshIds` resolves the later-opened one.
+
+**Class: additive.** `api/Fuaran.Core.Ops.txt`, `api/Fuaran.Core.Tree.txt` and
+`api/Fuaran.Core.Conformance.txt` gain members and types only.
+
+**Phase 292 — a vocabulary is validated data, and the generator escapes everything it splices:
+`Declare.errors` at every loading path, one source-literal escaper, a total codec and sampler. Class:
+`additive` — refusals where silence was, new members only; one reference-interpreter canonical-form
+correction, stated below.**
+
+- **`Declare.errors : Idl -> string list`** — every well-formedness rule in one call: the three existing
+  checks plus references, duplicates, defaults of their slot's type, `HostOnly` is `TFn`, a transparent
+  case that cannot encode to an object (at its declaration and at every instantiation), `id` / `kind`
+  reserved beside the nested kind body, identifier grammar for every emitted name, single-line
+  annotation slots and categories, well-formed UTF-16 (DECISIONS D95). `Artifact.ofJson` /
+  `Artifact.parse` and `Proposal.applyDelta` refuse a vocabulary it reports, naming every error; the
+  `classify` command reports them before classifying (exit 2, refused). A field-less kind or record is
+  well-formed.
+- **`SourceLit`** — the one escaper: `fsString`, `fsAttribute`, `fsDocLines` / `fsDocXml`, `tsString`,
+  `tsStringSingle`, `tsKey`, `tsIsIdentifier`, `tsCommentLines`, `fstarString`, `isWellFormed`. The
+  generator's five private escapers are gone, and every splice of IDL-authored text — discriminator,
+  enum wire strings, category, annotation prose, object keys — goes through it. A deprecation message,
+  replacement or version, or a category, carrying a line break used to end its comment and put the rest
+  into the generated module as code; it is now one comment line per authored line. A declared string
+  default carrying CR or LF is now escaped (`fsDefaultStr` escaped neither).
+- **`TypeParams.substitute` / `TypeParams.bind`** — one type-parameter substitution, keyed by name and
+  bound only at matching arity, shared by `Encode`, `Decode`, `Sample` and the generator. `Decode`'s
+  bare transparent arm refuses an arity mismatch (it threw).
+- **`Encode`** refuses a non-finite float inside a verbatim `json` / hosted value, naming its token and
+  path (there it aliases the string; at a `float` slot the quoted token stays WIRE_FORMAT §7's
+  spelling), and an ill-formed UTF-16 string, as `Canon.tryRender` does. **The omit-at-default test
+  compares in the slot's value space**: a value equal to the default after encoding is omitted, so
+  `VInt 2` and `VFloat 2.0` at a float slot defaulting to `2` now encode identically (absent) — the
+  reference interpreter's one canonical-form change, bringing it to what the generated F# and
+  TypeScript encoders already wrote (they compare host values). Decoding is unchanged: a present field
+  equal to its default still reads.
+- **`Sample.trySampleNodes` / `Sample.SampleRefusal`** — the total sampler: no tag to cycle over (it
+  divided by zero), a tag naming no kind, an empty enum or union, a dangling name, an unbound type
+  variable or a type with no finite value is a typed refusal; every drawn value is one the encoder
+  accepts (the `VStr "?"` / `VUnion("?", [])` placeholders are gone; a bare kind and an op draw their
+  fields under the presence rules; an op is drawn at the depth floor). `sampleNodes` keeps its
+  signature and its vectors, and raises the refusal as `InvalidOperationException`. Seeded streams are
+  unchanged for a vocabulary with no `TKind` / `TOp` slot.
+- **Scaffold and defaults.** `Gen.fsharpValue` writes a scalar or enum through the declared-default
+  literal: a whole float at a float slot is `2.0` (it wrote `2`, FS0001), a non-finite float is refused.
+  A `VEnum` default or value is resolved through `IdlEnum.CaseOf` and a wire string the enum does not
+  admit is refused by both backends (the F# one fell through to an undeclared identifier).
+
+**What adopting it costs.** A vocabulary that loaded and breaks a rule no longer loads — fix what the
+refusal names. Generated modules regenerate byte-identically for every vocabulary whose text needs no
+escaping (every committed generated fixture here does); one whose text carries a line break, quote or
+control character emits it escaped or split, which is the point. A consumer that opens
+`Fuaran.Core.Idl` beside its own `SourceLit` or `TypeParams` resolves the later-opened one.
+
+**Class: additive.** `api/Fuaran.Core.Idl.txt` gains members and types only;
+`api/Fuaran.Core.Idl.Codegen.txt` does not move.
+
+### Footprint soundness at a domain's own ops, and the lane DAG `foldOnce` folds (Phase 249) — ADDITIVE
+
+**What changed.** Every soundness law over a footprint — `footprintLaws`, `mergeConflictLaws`,
+`reconcileLaws`, `concurrencyLawsWith`, `keyedArbitrationLawsWith` — is typed over `SkeletonOp`, so a
+domain whose ops are its own, each with a hand-written footprint, had no law that certified that
+footprint. `FoldConfluence.laneFoldLaws` takes the projection but certifies arrival-order invariance,
+and a footprint that misses an id is symmetric: two grafts bringing in one keyed id are refused the
+same way under every order, and the pack passes it. And `FoldConfluence.foldOnce` returned only a
+canonicalised outcome, so a domain that wanted a halt's typed `MergeConflict` list rebuilt the lane
+DAG beside it, free to drift. Two members, beside what was there:
+
+- `Conformance.footprintLawsAt sw footprintOf hashState gen seed iterations` — a new opt-in family
+  (`StrongerPromise`; `StreamWitness`, `StreamGen`): Phase 78's soundness law at the domain's own
+  ops. It reaches a state by threading drawn ops from `gen.State0`, draws two scripts from it (each
+  applies on its own), and holds every pair `Dag.conflicts footprintOf` reports nothing for to
+  commute under the domain's `Apply` — both orders apply and land on states `hashState` cannot tell
+  apart — with footprint determinism beside it. The guard demands an independent pair AND an
+  interfering one (a sample that never puts two ops on one address cannot tell a sound footprint from
+  an empty one) and counts refused draws beside them. Named by the kit's rule: `…At` is the
+  domain-witness form; it carries no `hashFn`, because it chains nothing.
+- `FoldConfluence.laneDag hashFn w baseOp lanes : Dag.T<'Op> * string * string list` — the DAG one
+  trial folds: `baseOp` under `Human "base"`, each lane chained onto it under `Human "lane-<i>"`,
+  answered as the DAG, the base id and the heads in lane order (an empty lane's head is the base) —
+  what `Dag.reconcileMany w footprintOf dag baseId state0 heads` takes. `foldOnce` is now defined over
+  it, and `laneFoldLawsWith`'s shaped draws build their base through the same private helper, so the
+  DAG a domain reads conflicts off and the DAG the pack folds cannot diverge. `foldOnce`'s output is
+  unchanged on every input.
+
+**What adopting it costs.** Nothing: no existing member, type or emitted byte moves. A domain that
+folds lanes over its own ops adds `footprintLawsAt` beside `laneFoldLaws`, handing it the same witness,
+footprint and state hash; one that built its own lane DAG to read typed conflicts replaces it with
+`laneDag`.
+
+**What it does not do.** The claims ladder's `independence-diamond` row — the fold theorem's one
+domain hypothesis, stated about a domain's OWN ops — still names `footprintLaws` as what discharges
+it, which samples the skeleton algebra the `tree-independence-diamond` row already proves. Moving the
+discharge to `footprintLawsAt` changes that row and is left to a change that owns the ladder.
+
+**Class: additive.** `api/Fuaran.Core.Conformance.txt` gains two members
+(`Conformance.footprintLawsAt`, `FoldConfluence.laneDag`); no existing member moves, and no wire byte.
+The roster gains one family, and `docs/conformance-families.md` / `.json` are regenerated.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

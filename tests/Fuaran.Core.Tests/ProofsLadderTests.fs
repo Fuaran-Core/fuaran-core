@@ -596,11 +596,13 @@ let private realModules () =
 /// row's evidence names a case that exists", and a row evidenced by a conformance family is as
 /// checkable as one evidenced by a differential. What the clause must never become is a set so wide
 /// that any string is in it — which is why this is an enumeration of suites and not a walk of the
-/// whole tree.
+/// whole tree. Phase 288 adds the second conformance suite on the same footing: the checkpoint rows
+/// are evidenced by `Conformance.checkpointLaws`, whose cases live in `CheckpointTests`.
 let private realCases () =
     Set.union
         (caseNames ProofOracleTests.proofOracleTests |> Set.ofList)
         (caseNames ContainedOpsTests.containerLawTests |> Set.ofList)
+    |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.

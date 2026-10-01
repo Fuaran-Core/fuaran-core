@@ -1572,3 +1572,488 @@ module Dag =
                         |> List.map (fun (j, _) -> reach.Ids.[j])) }
 
             reconcileRegion w footprintOf dag r baseState
+
+    // ---- checkpoints (Phase 288) ----
+    // The linear stream has had a checkpoint since Phase 244 — a `Snapshot` sealed into the chain, a
+    // replay that resumes from it, a compaction that truncates behind it. This is the DAG's: a state at
+    // a node, sealed with the SAME pre-image (a checkpoint at node N is the strict snapshot at sequence
+    // zero of the history that begins at N, chained from N's content id the way a linear snapshot chains
+    // from its boundary record's hash, reached through `OpStream.Snapshots` rather than copied), a replay
+    // that folds only the history above it, and a DAG that BEGINS at one.
+    //
+    // The checkpoint travels BESIDE the DAG, as a snapshot travels beside its tail: `T<'Op>` gains no
+    // field, so no record literal a consumer wrote stops compiling and no existing answer moves. A DAG
+    // compacted at a checkpoint keeps the checkpoint's own node, so it lives on — an append onto that node
+    // is an ordinary append, the node is the head of an empty history above it, and the reachability
+    // index builds over the compacted DAG unchanged. Core says what a checkpoint is and how a history
+    // verifies and replays through one; when to take one stays the domain's call (GP6).
+    //
+    // ONE condition is new, and it is a property of the replay order rather than of this module: the
+    // drain folds a head's closure smallest-id-first, so a branch that left BEFORE the checkpoint's node
+    // and merges after it is interleaved with the checkpoint's own closure. No state at the checkpoint can
+    // stand for that prefix, so such a node is refused by name (`Uncovered`) wherever it would be folded
+    // after the checkpoint — never folded in an order the full replay would not use.
+
+    /// A checkpoint on the lane DAG (Phase 288): `State` is the fold of `Node`'s ancestor closure — the
+    /// node's own op included, the state `tryReplayTo` reaches at `Node` — and `Hash` seals the two
+    /// together. The seal is the linear `Snapshot`'s strict hash of `State` at sequence zero with `Node`
+    /// as its boundary hash, so a changed state, a changed node id or a changed seal each fail
+    /// `verifyCheckpoint`. The linear `Snapshot<'State>`'s counterpart on the DAG.
+    type Checkpoint<'State> =
+        { Node: string
+          State: 'State
+          Hash: string }
+
+    /// Why a checkpoint could not be taken, a DAG not compacted at one, or a replay from one not run
+    /// (Phase 288).
+    [<RequireQualifiedAccess>]
+    type CheckpointFault<'Rej> =
+        /// The node named is not a node of the DAG — the checkpoint's own, or the one a checkpoint was
+        /// asked to be taken at.
+        | UnknownNode of nodeId: string
+        /// The replay itself failed: the node's closure when a checkpoint is taken from the initial state,
+        /// the history above the checkpoint when one is replayed from. `tryReplayTo`'s fault, verbatim.
+        | Replay of ReplayFault<'Rej>
+        /// The head's history does not hold the checkpoint's node, so the checkpoint says nothing about it.
+        | Unreached of headId: string
+        /// A node folded after the checkpoint that does not descend from the checkpoint's node — a branch
+        /// that left before it and merges after it — or, for a compaction, a node of the DAG that is
+        /// neither at or behind the checkpoint's node nor after it. The first such node, in replay order
+        /// for a replay and in id order for a compaction.
+        | Uncovered of nodeId: string
+
+    /// Where a checkpoint, or a DAG that begins at one, fails to verify (Phase 288) — the
+    /// `SnapshotBreak` of the DAG.
+    [<RequireQualifiedAccess>]
+    type CheckpointBreak =
+        /// The checkpoint's node is not a node of the DAG.
+        | UnknownNode of nodeId: string
+        /// The seal does not recompute from the carried node and state: the recomputed seal, the carried one.
+        | Seal of expected: string * got: string
+        /// A node's own integrity fault, exactly as `firstBreak` reports it: a tampered node, or a parent
+        /// the DAG does not hold where the history may not be truncated — after the checkpoint's node.
+        | Node of DagBreak
+        /// A node that is neither at or behind the checkpoint's node nor descends from it: history the
+        /// checkpoint does not cover (a second root, a branch from before the checkpoint).
+        | Uncovered of nodeId: string
+
+    /// The seal of `state` at `node`, computed by `OpStream.Snapshots`' own verifier: handed the strict
+    /// snapshot at sequence zero whose boundary hash is `node` and whose hash is still empty, it names the
+    /// hash that snapshot should carry. An empty tail has no chain to break, so the snapshot's own hash is
+    /// the only break it can report, and `None` means that hash IS the empty string.
+    let private sealOf
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (node: string)
+        (state: 'State)
+        : string =
+        let unsealed: Snapshot<'State> =
+            { Seq = 0
+              State = state
+              PrevHash = node
+              Hash = ""
+              Mode = SnapshotMode.Strict }
+
+        match OpStream.Snapshots.firstBreak OpStream.canonicalConfig hashFn stateEncode w unsealed [] with
+        | Some(SnapshotBreak.SnapshotHash(expected, _)) -> expected
+        | Some(SnapshotBreak.Tail _)
+        | None -> ""
+
+    /// The checkpoint as the linear snapshot it is sealed as — its sidecar line is that snapshot's line.
+    let private asSnapshot (cp: Checkpoint<'State>) : Snapshot<'State> =
+        { Seq = 0
+          State = cp.State
+          PrevHash = cp.Node
+          Hash = cp.Hash
+          Mode = SnapshotMode.Strict }
+
+    /// Seal `state` at `nodeId` WITHOUT replaying anything (Phase 288) — the genesis-import shape, where a
+    /// converted history begins at a node whose state was translated from elsewhere rather than folded
+    /// from its op. The domain vouches for the state; the seal makes it tamper-evident from here on. Use
+    /// `checkpointAt` / `checkpointFrom` wherever the state CAN be folded.
+    let sealAt
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (nodeId: string)
+        (state: 'State)
+        : Checkpoint<'State> =
+        { Node = nodeId
+          State = state
+          Hash = sealOf hashFn stateEncode w nodeId state }
+
+    /// Take a checkpoint at `nodeId` (Phase 288): fold the node's ancestor closure from `state0` exactly
+    /// as `tryReplayTo` does, and seal the state it reaches. Refused by name: a node the DAG does not hold
+    /// (`UnknownNode`), and a closure that does not replay (`Replay`, the replay's own fault). The state is
+    /// folded, so a checkpoint taken here is the replay's answer by construction; it is the SEAL that a
+    /// later reader checks, so verify the DAG (`verifyDag`) before checkpointing it.
+    let checkpointAt
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (dag: T<'Op>)
+        (nodeId: string)
+        : Result<Checkpoint<'State>, CheckpointFault<'Rej>> =
+        if not (dag.Nodes.ContainsKey nodeId) then
+            Error(CheckpointFault.UnknownNode nodeId)
+        else
+            match tryReplayTo w state0 dag nodeId with
+            | Error f -> Error(CheckpointFault.Replay f)
+            | Ok st -> Ok(sealAt hashFn stateEncode w nodeId st)
+
+    /// Recompute a checkpoint's seal from the state it carries (Phase 288). `Error UnknownNode` for a
+    /// checkpoint whose node the DAG does not hold, `Error Seal(expected, got)` for one whose seal does
+    /// not recompute — a changed state, node id or seal. Like the linear snapshot's hash this binds the
+    /// state to the node; it does not re-fold the history (which a compacted DAG no longer holds), so a
+    /// checkpoint is exactly as trustworthy as the act that sealed it.
+    let verifyCheckpoint
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (cp: Checkpoint<'State>)
+        (dag: T<'Op>)
+        : Result<unit, CheckpointBreak> =
+        if not (dag.Nodes.ContainsKey cp.Node) then
+            Error(CheckpointBreak.UnknownNode cp.Node)
+        else
+            let expected = sealOf hashFn stateEncode w cp.Node cp.State
+
+            if expected <> cp.Hash then
+                Error(CheckpointBreak.Seal(expected, cp.Hash))
+            else
+                Ok()
+
+    /// The ids in `order` outside `behind` — the history above a checkpoint, in replay order — or the
+    /// first of them that does not descend from `node`. `order` is topological, so a node's parents are
+    /// judged before it: it descends from `node` exactly when one of its parents IS `node` or did.
+    let private above
+        (dag: T<'Op>)
+        (node: string)
+        (order: string list)
+        (behind: Set<string>)
+        : Result<string list, string> =
+        let delta = order |> List.filter (fun id -> not (Set.contains id behind))
+
+        let rec go (desc: Set<string>) =
+            function
+            | [] -> Ok delta
+            | (id: string) :: rest ->
+                if dag.Nodes.[id].Parents |> List.exists (fun p -> p = node || Set.contains p desc) then
+                    go (Set.add id desc) rest
+                else
+                    Error id
+
+        go Set.empty delta
+
+    /// The replay both `replayFrom` forms share, over the head's order and the checkpoint's closure as
+    /// one of them computes them.
+    let private replayAbove
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (cp: Checkpoint<'State>)
+        (dag: T<'Op>)
+        (headId: string)
+        (order: unit -> Result<string list, string>)
+        (behind: unit -> Set<string>)
+        : Result<'State, CheckpointFault<'Rej>> =
+        if not (dag.Nodes.ContainsKey cp.Node) then
+            Error(CheckpointFault.UnknownNode cp.Node)
+        elif not (dag.Nodes.ContainsKey headId) then
+            Error(CheckpointFault.Replay(ReplayFault.UnknownHead headId))
+        else
+            match order () with
+            | Error _ -> Error(CheckpointFault.Replay(ReplayFault.CyclicHistory headId))
+            | Ok ids when not (List.contains cp.Node ids) -> Error(CheckpointFault.Unreached headId)
+            | Ok ids ->
+                match above dag cp.Node ids (behind ()) with
+                | Error id -> Error(CheckpointFault.Uncovered id)
+                | Ok delta ->
+                    let rec go st =
+                        function
+                        | [] -> Ok st
+                        | (id: string) :: rest ->
+                            match w.Apply dag.Nodes.[id].Op st with
+                            | Ok st' -> go st' rest
+                            | Error e -> Error(CheckpointFault.Replay(ReplayFault.Rejected(id, e)))
+
+                    go cp.State delta
+
+    /// Bounded replay from a checkpoint (Phase 288): fold only the history above the checkpoint's node —
+    /// `betweenOps dag cp.Node headId`, in that order — over `cp.State`. On the full DAG and on one
+    /// compacted at the checkpoint alike, for every head it does not refuse, the answer is
+    /// `tryReplayTo w state0 dag headId`'s (`Conformance.checkpointLaws`). Refused by name, in order: the
+    /// checkpoint's node absent (`UnknownNode`), the head absent (`Replay UnknownHead`), a cyclic history
+    /// (`Replay CyclicHistory`), a head whose history does not hold the checkpoint's node (`Unreached`), a
+    /// node above the checkpoint that does not descend from its node (`Uncovered` — the full replay folds
+    /// it BEFORE part of the checkpoint's closure, so resuming from the checkpoint would fold it in an order
+    /// the full replay does not use), and a domain rejection (`Replay Rejected`, the node the full replay
+    /// would name). The seal is not checked here — `verifyCheckpoint` is that act.
+    let replayFrom
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (cp: Checkpoint<'State>)
+        (dag: T<'Op>)
+        (headId: string)
+        : Result<'State, CheckpointFault<'Rej>> =
+        replayAbove w cp dag headId (fun () -> tryTopoOrder dag headId) (fun () -> ancestorsOf dag cp.Node)
+
+    /// `replayFrom` over a reachability index (Phase 288, on Phase 289's `Reach`): the same answer on
+    /// `Reach.dag reach`, with the head's order and the checkpoint's closure read from the index — so on a
+    /// full history the walk the replay saves is not paid back in closure walks.
+    let replayFromWith
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (cp: Checkpoint<'State>)
+        (reach: Reach<'Op>)
+        (headId: string)
+        : Result<'State, CheckpointFault<'Rej>> =
+        replayAbove w cp reach.Graph headId (fun () -> Reach.tryTopoOrder reach headId) (fun () ->
+            Reach.ancestors reach cp.Node)
+
+    /// Take a checkpoint at `nodeId` from an EARLIER checkpoint (Phase 288): `replayFrom w origin dag
+    /// nodeId`, sealed — how a DAG that begins at a checkpoint takes its next one, since its history
+    /// behind `origin` is gone and `checkpointAt` would fold from the wrong start. Refusals are
+    /// `replayFrom`'s, with an absent `nodeId` named as `UnknownNode` as `checkpointAt` names it.
+    let checkpointFrom
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (origin: Checkpoint<'State>)
+        (dag: T<'Op>)
+        (nodeId: string)
+        : Result<Checkpoint<'State>, CheckpointFault<'Rej>> =
+        if dag.Nodes.ContainsKey origin.Node && not (dag.Nodes.ContainsKey nodeId) then
+            Error(CheckpointFault.UnknownNode nodeId)
+        else
+            replayFrom w origin dag nodeId
+            |> Result.map (fun st -> sealAt hashFn stateEncode w nodeId st)
+
+    /// Every node reachable from `seeds` along child edges, the seeds included, keeping to `within`.
+    let private forwardFrom (dag: T<'Op>) (within: string -> bool) (seeds: string list) : Set<string> =
+        let children =
+            dag.Nodes
+            |> Map.fold
+                (fun (m: Map<string, string list>) id n ->
+                    n.Parents
+                    |> List.fold (fun m p -> Map.add p (id :: (Map.tryFind p m |> Option.defaultValue [])) m) m)
+                Map.empty
+
+        let rec go (acc: Set<string>) (stack: string list) =
+            match stack with
+            | [] -> acc
+            | id :: rest ->
+                if Set.contains id acc || not (within id) then
+                    go acc rest
+                else
+                    go (Set.add id acc) ((Map.tryFind id children |> Option.defaultValue []) @ rest)
+
+        go Set.empty seeds
+
+    /// The strict descendants of `node` the DAG holds.
+    let private after (dag: T<'Op>) (node: string) : Set<string> =
+        forwardFrom dag (fun _ -> true) [ node ] |> Set.remove node
+
+    /// The DAG a compaction at `node` keeps, or the first node (id order) it would strand. Kept: the node
+    /// itself, everything after it, and the BAND — every node behind it on a path from a "side parent" (a
+    /// node behind the checkpoint that a node after it names as a parent, other than the checkpoint's own
+    /// node) to it. Keeping the band means no node after the checkpoint ever names a parent the compacted
+    /// DAG does not hold, so `firstBreakFrom` can refuse every missing parent after the checkpoint, and the
+    /// checkpoint's closure in the compacted DAG still holds every side parent, so the replay above it is
+    /// the full DAG's. On the usual shape — nothing after the checkpoint reaches behind it except through
+    /// it — the band is empty.
+    let private cut (dag: T<'Op>) (node: string) : Result<T<'Op>, string> =
+        let behind = ancestorsOf dag node
+        let later = after dag node
+
+        match
+            dag.Nodes
+            |> Map.toList
+            |> List.tryFind (fun (id, _) -> not (Set.contains id behind) && not (Set.contains id later))
+        with
+        | Some(id, _) -> Error id
+        | None ->
+            let side =
+                later
+                |> Set.toList
+                |> List.collect (fun id -> dag.Nodes.[id].Parents)
+                |> List.filter (fun p -> p <> node && Set.contains p behind)
+                |> List.distinct
+
+            let band = forwardFrom dag (fun id -> Set.contains id behind) side
+            let keep = Set.unionMany [ band; later; Set.singleton node ]
+
+            Ok
+                { dag with
+                    Nodes = dag.Nodes |> Map.filter (fun id _ -> Set.contains id keep) }
+
+    /// Compact the DAG at `nodeId` (Phase 288): `(checkpoint, compacted)`, the checkpoint `checkpointAt`
+    /// takes and the DAG truncated behind its node — which it KEEPS, so the compacted DAG lives on: append
+    /// onto the node as onto any node, and an empty history above it has the node as its head. Every
+    /// replay `replayFrom` answers on the compacted DAG is the full DAG's, and `verifyDagFrom` verifies it
+    /// (`Conformance.checkpointLaws`). Refused by name: `checkpointAt`'s refusals, and `Uncovered` for a
+    /// node that is neither at or behind `nodeId` nor after it — history the checkpoint cannot stand for.
+    ///
+    /// **Verify, then compact** — the linear `compact`'s rule, for the same reason: the closure behind the
+    /// node is folded and discarded, and once it is gone nothing can find a tamper in it again.
+    let compactAt
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (dag: T<'Op>)
+        (nodeId: string)
+        : Result<Checkpoint<'State> * T<'Op>, CheckpointFault<'Rej>> =
+        checkpointAt hashFn stateEncode w state0 dag nodeId
+        |> Result.bind (fun cp ->
+            cut dag nodeId
+            |> Result.map (fun d -> cp, d)
+            |> Result.mapError CheckpointFault.Uncovered)
+
+    /// Compact again, from the checkpoint a DAG already begins at (Phase 288): `checkpointFrom`, then the
+    /// same cut — so a compacted DAG is compacted later exactly as the full DAG would be at that node.
+    let compactFrom
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (origin: Checkpoint<'State>)
+        (dag: T<'Op>)
+        (nodeId: string)
+        : Result<Checkpoint<'State> * T<'Op>, CheckpointFault<'Rej>> =
+        checkpointFrom hashFn stateEncode w origin dag nodeId
+        |> Result.bind (fun cp ->
+            cut dag nodeId
+            |> Result.map (fun d -> cp, d)
+            |> Result.mapError CheckpointFault.Uncovered)
+
+    /// The first fault in a DAG that BEGINS at a checkpoint (Phase 288) — `firstBreak` with the
+    /// checkpoint's node as the root whose content id the checkpoint carries. In order: the checkpoint
+    /// (`verifyCheckpoint`'s breaks), then each node in id order — a content id that does not recompute
+    /// (`Node`, `ContentIdMismatch`); after the checkpoint's node, a parent the DAG does not hold (`Node`,
+    /// `MissingParent`), since nothing after the checkpoint may be truncated; and a node neither at or
+    /// behind the checkpoint's node nor after it (`Uncovered`). Behind the checkpoint's node a missing
+    /// parent is the truncation, and is not a fault. `None` for an intact history: a DAG `compactAt`
+    /// produced, every append onto it, and the full DAG itself when every node is at, behind or after the
+    /// checkpoint's node.
+    let firstBreakFrom
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (cp: Checkpoint<'State>)
+        (dag: T<'Op>)
+        : CheckpointBreak option =
+        match verifyCheckpoint hashFn stateEncode w cp dag with
+        | Error b -> Some b
+        | Ok() ->
+            let behind = ancestorsOf dag cp.Node
+            let later = after dag cp.Node
+
+            dag.Nodes
+            |> Map.toList
+            |> List.tryPick (fun (id, n) ->
+                let h = nodeHash hashFn w.Encode n.Parents n.Actor n.Op
+
+                if id <> h then
+                    Some(
+                        CheckpointBreak.Node
+                            { NodeId = id
+                              Reason = DagBreakReason.ContentIdMismatch
+                              Expected = h
+                              Got = id }
+                    )
+                elif Set.contains id later then
+                    n.Parents
+                    |> List.tryFind (fun p -> not (dag.Nodes.ContainsKey p))
+                    |> Option.map (fun missing ->
+                        CheckpointBreak.Node
+                            { NodeId = id
+                              Reason = DagBreakReason.MissingParent
+                              Expected = ""
+                              Got = missing })
+                elif Set.contains id behind then
+                    None
+                else
+                    Some(CheckpointBreak.Uncovered id))
+
+    /// Verify a DAG that begins at a checkpoint (Phase 288): `firstBreakFrom … |> Option.isNone`. The
+    /// counterpart of `verifyDag` for a truncated history — a changed byte in a node it keeps, or in the
+    /// checkpoint, fails it.
+    let verifyDagFrom
+        (hashFn: HashFn)
+        (stateEncode: 'State -> string)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (cp: Checkpoint<'State>)
+        (dag: T<'Op>)
+        : bool =
+        firstBreakFrom hashFn stateEncode w cp dag |> Option.isNone
+
+    // ---- the checkpoint sidecar (Phase 288) ----
+    // Checkpoints never enter a lane file: the lane is `toJsonl`'s bytes, so every content hash and every
+    // file written before this phase reads exactly as it did. They ride a SIDECAR beside it, one line per
+    // checkpoint, and the line is the linear snapshot line of the snapshot the checkpoint is sealed as:
+    // `{"snapshot":true,"seq":0,"state":<state>,"prevHash":<node id>,"hash":<seal>}` (DECISIONS.md, the
+    // Phase 288 entry). A reader refuses any other sequence and a chain-only line, since a checkpoint's
+    // seal always binds its state.
+
+    /// One sidecar line, read through the one scanner.
+    let private checkpointOf
+        (stateDecode: string -> Result<'State, string>)
+        (line: JsonlLine)
+        : Result<Checkpoint<'State>, JsonlFault> =
+        let refuse = OpStream.Jsonl.refuse line
+
+        match OpStream.Jsonl.tryRawField "snapshot" line, OpStream.Jsonl.tryRawField "stateHashed" line with
+        | Some "true", (None | Some "true") ->
+            OpStream.Jsonl.intField "seq" line
+            |> Result.bind (fun seq ->
+                if seq <> 0 then
+                    Error(refuse (sprintf "a checkpoint is the snapshot at seq 0; this line is at seq %d" seq))
+                else
+                    OpStream.Jsonl.rawField "state" line)
+            |> Result.bind (fun raw ->
+                OpStream.Jsonl.stringField "prevHash" line
+                |> Result.bind (fun node ->
+                    OpStream.Jsonl.stringField "hash" line
+                    |> Result.bind (fun hash ->
+                        if node = "" then
+                            Error(refuse "a checkpoint names its node in prevHash, and this one is empty")
+                        else
+                            stateDecode raw
+                            |> Result.mapError refuse
+                            |> Result.map (fun st -> { Node = node; State = st; Hash = hash }))))
+        | Some "true", Some _ -> Error(refuse "a checkpoint's seal binds its state; a chain-only line is not one")
+        | _ -> Error(refuse "not a checkpoint line: a checkpoint is a snapshot line (\"snapshot\":true)")
+
+    /// Write a DAG and its checkpoints (Phase 288): `(lane, sidecar)`. The lane is `toJsonl encode dag`,
+    /// byte for byte; the sidecar is one line per checkpoint, in the order given, each the linear snapshot
+    /// line (`OpStream.Snapshots.toJsonl`) of the snapshot the checkpoint is sealed as. No checkpoints, an
+    /// empty sidecar.
+    let toJsonlWithCheckpoints
+        (encode: 'Op -> string)
+        (stateEncode: 'State -> string)
+        (dag: T<'Op>)
+        (checkpoints: Checkpoint<'State> list)
+        : string * string =
+        toJsonl encode dag,
+        checkpoints
+        |> List.map (fun cp -> OpStream.Snapshots.toJsonl stateEncode (asSnapshot cp))
+        |> String.concat "\n"
+
+    /// Read a DAG and its optional checkpoint sidecar (Phase 288). The lane is read by `fromJsonl`, so a
+    /// DAG file with NO sidecar (`None`) reads exactly as `fromJsonl` reads it, with no checkpoints. A
+    /// sidecar is read through the one scanner, a line per checkpoint, in file order; a line that is not a
+    /// strict snapshot line at sequence zero with a node in `prevHash`, or whose state `stateDecode`
+    /// refuses, is an `Error` reading `checkpoint sidecar: line N: <reason> (position P)`. Structural only,
+    /// as `fromJsonl` is: verify with `verifyCheckpoint` / `verifyDagFrom` before trusting either.
+    let fromJsonlWithCheckpoints
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (stateDecode: string -> Result<'State, string>)
+        (text: string)
+        (sidecar: string option)
+        : Result<T<'Op> * Checkpoint<'State> list, string> =
+        fromJsonl w text
+        |> Result.bind (fun dag ->
+            match sidecar with
+            | None -> Ok(dag, [])
+            | Some side ->
+                OpStream.Jsonl.scanRecords (checkpointOf stateDecode) side
+                |> Result.map (fun cps -> dag, cps)
+                |> Result.mapError (fun f -> "checkpoint sidecar: " + JsonlFault.toString f))

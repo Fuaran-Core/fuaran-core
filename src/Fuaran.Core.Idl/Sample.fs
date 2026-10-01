@@ -30,13 +30,49 @@ module Sample =
     // to reproduce here from its seed alone.
     // -----------------------------------------------------------------------
 
+    /// Why a vocabulary could not be sampled (Phase 292) — the typed refusal
+    /// [[trySampleNodes]] returns where the sampler used to throw (a division by zero
+    /// choosing from an empty list) or to draw a placeholder the encoder then refused
+    /// (`VStr "?"` at an enum, `VUnion("?", [])` at a union).
+    ///
+    /// `At` names the slot — the type, or the kind tag — and `Reason` says why nothing in
+    /// it can be drawn: an empty enum, union, kind or op set, a name the vocabulary does not
+    /// declare, an unbound type variable, or a type with no finite value.
+    type SampleRefusal =
+        { At: string
+          Reason: string }
+
+        /// The refusal as one sentence.
+        member this.Describe = sprintf "cannot sample %s: %s" this.At this.Reason
+
+    /// Raised inside the sampler and caught at [[trySampleNodes]], so the refusal unwinds
+    /// the recursion without threading a `Result` through every draw (which would have to
+    /// thread the RNG too). Never escapes this module.
+    exception private Unsampleable of at: string * reason: string
+
+    let private refuse (at: string) (reason: string) : 'a = raise (Unsampleable(at, reason))
+
+    /// How far below the depth floor a draw may go before the type is declared to have no
+    /// finite value. The floor arms terminate every vocabulary with a leaf kind well above
+    /// this; what reaches it is a cycle no floor arm can break (a record whose required
+    /// field is itself, a domain with no leaf kind), which used to overflow the stack.
+    let private bottom = -24
+
     type private Rng = { mutable State: uint64 }
 
     let private nextInt (r: Rng) : int =
         r.State <- r.State * 6364136223846793005UL + 1442695040888963407UL
         int ((r.State >>> 33) &&& 0x7FFFFFFFUL)
 
-    let private pick (r: Rng) (xs: 'a list) : 'a = xs.[nextInt r % List.length xs]
+    /// A draw from a non-empty list; an empty one is refused as nothing to choose from at
+    /// `at`, never divided by.
+    let private pickAt (r: Rng) (at: string) (xs: 'a list) : 'a =
+        match xs with
+        | [] -> refuse at "there is nothing to choose from (it declares no case)"
+        | _ -> xs.[nextInt r % List.length xs]
+
+    /// A draw from one of the sampler's own pools, which are never empty.
+    let private pick (r: Rng) (xs: 'a list) : 'a = pickAt r "a pool" xs
 
     /// Strings chosen to break a hand-rolled escaper: the two characters JSON
     /// must escape, a control character (the \u00xx path), a surrogate pair, and
@@ -153,7 +189,22 @@ module Sample =
         | [] -> idl.Kinds |> List.map (fun k -> k.Tag)
         | ks -> ks |> List.map (fun k -> k.Tag)
 
+    /// The op tags an op may take AT THE DEPTH FLOOR — [[floorKindTags]]' rule over the op
+    /// vocabulary, with the same fallback.
+    let private floorOps (idl: Idl) : IdlKind list =
+        match
+            idl.Ops
+            |> List.filter (fun o ->
+                o.Fields
+                |> List.forall (fun f -> f.Opt <> Required || not (reachesNodeAtFloor idl Set.empty f.Type)))
+        with
+        | [] -> idl.Ops
+        | os -> os
+
     let rec private sampleType (idl: Idl) (r: Rng) (depth: int) (t: IdlType) : IdlValue =
+        if depth < bottom then
+            refuse (sprintf "%A" t) "it has no finite value — every draw at the depth floor recurses"
+
         match t with
         | TStr -> VStr(pick r stringPool)
         | TInt -> VInt(pick r intPool)
@@ -174,7 +225,7 @@ module Sample =
         | THosted { Wire = Some w } ->
             match Encode.valueJson idl w (sampleType idl r depth w) with
             | Ok j -> VJson j
-            | Error _ -> VJson(JObj [])
+            | Error m -> refuse (sprintf "the hosted wire form %A" w) m
         | TJson
         | THosted _ ->
             VJson(
@@ -184,11 +235,12 @@ module Sample =
                 | 2 -> JArr [ JInt(pick r intPool); JStr(pick r stringPool) ]
                 | _ -> JObj [ "z", JInt(pick r intPool); "a", JStr(pick r stringPool) ]
             )
-        | TVar _ -> VStr(pick r stringPool)
+        // An unbound variable has no type to draw from; the encoder refuses it by name.
+        | TVar v -> refuse ("type variable '" + v + "'") "it is not bound by an enclosing union instantiation"
         | TEnum name ->
             match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
-            | Some e -> VEnum(pick r e.WireCases)
-            | None -> VStr "?"
+            | Some e -> VEnum(pickAt r ("enum '" + name + "'") e.WireCases)
+            | None -> refuse ("enum '" + name + "'") "the vocabulary does not declare it"
         | TList inner ->
             // Bounded, and empty is a legitimate sample — an empty collection is
             // NOT absence, and the two must stay distinguishable on the wire.
@@ -200,7 +252,7 @@ module Sample =
         | TRecord name ->
             match idl.Records |> List.tryFind (fun rc -> rc.Name = name) with
             | Some rc -> VRecord(sampleFields idl r (depth - 1) rc.Fields)
-            | None -> VRecord []
+            | None -> refuse ("record '" + name + "'") "the vocabulary does not declare it"
         | TUnion(name, args) ->
             match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
             | Some u ->
@@ -214,29 +266,35 @@ module Sample =
                     else
                         u.Cases
 
-                let c = pick r candidates
+                // Substitute the type parameters RECURSIVELY and BY NAME (Phase 292 —
+                // [[TypeParams]], shared with the codec and the generator). A shallow swap
+                // leaves `TList (TVar "T")` alone, so the sampler would generate a string
+                // where the slot's codec expects a float; the copy this replaced mapped
+                // every variable to the FIRST argument, which drew a two-parameter union's
+                // second parameter at the first's type.
+                match TypeParams.bind u args with
+                | None ->
+                    refuse
+                        ("union '" + name + "'")
+                        (sprintf
+                            "it is applied to %d type argument(s) and declares %d"
+                            (List.length args)
+                            (List.length u.Params))
+                | Some subst ->
+                    let c = pickAt r ("union '" + name + "'") candidates
 
-                // Substitute the type parameter RECURSIVELY. A shallow swap leaves
-                // `TList (TVar "T")` alone, so the sampler would generate a string
-                // where the slot's codec expects a float — which surfaces as an
-                // unrelated "not iterable" inside the TS escaper rather than as a
-                // real divergence.
-                let rec subst (ft: IdlType) =
-                    match ft with
-                    | TVar _ ->
-                        match args with
-                        | a :: _ -> a
-                        | [] -> ft
-                    | TList inner -> TList(subst inner)
-                    | TMap vt -> TMap(subst vt)
-                    | TUnion(n, uargs) -> TUnion(n, uargs |> List.map subst)
-                    | _ -> ft
-
-                VUnion(
-                    c.Tag,
-                    sampleFields idl r (depth - 1) (c.Fields |> List.map (fun f -> { f with Type = subst f.Type }))
-                )
-            | None -> VUnion("?", [])
+                    VUnion(
+                        c.Tag,
+                        sampleFields
+                            idl
+                            r
+                            (depth - 1)
+                            (c.Fields
+                             |> List.map (fun f ->
+                                 { f with
+                                     Type = TypeParams.substitute subst f.Type }))
+                    )
+            | None -> refuse ("union '" + name + "'") "the vocabulary does not declare it"
         | TNode ->
             // At the floor a REQUIRED node cannot be omitted, so the shallowest legal
             // one is produced instead: a kind whose required fields reach no further
@@ -247,14 +305,30 @@ module Sample =
                 else
                     idl.Kinds |> List.map (fun k -> k.Tag)
 
-            sampleNode idl r (depth - 1) (pick r tags)
+            sampleNode idl r (depth - 1) (pickAt r "a node slot (the vocabulary's kinds)" tags)
+        // A bare kind and an op draw their fields through [[sampleFields]] (Phase 292), so
+        // an `Optional` field is sometimes absent, an `OmitDefault` one sometimes at its
+        // default and a `HostOnly` one never drawn — the presence rules every other owner's
+        // fields are drawn under, which these two arms used to ignore.
         | TKind ->
-            let k = pick r idl.Kinds
-            VUnion(k.Tag, [ for f in k.Fields -> f.Name, sampleType idl r (depth - 1) f.Type ])
-        | TOp when depth <= 0 || List.isEmpty idl.Ops -> VStr "?"
+            let k =
+                if depth <= 0 then
+                    pickAt
+                        r
+                        "a bare-kind slot"
+                        (floorKindTags idl
+                         |> List.choose (fun tag -> idl.Kinds |> List.tryFind (fun k -> k.Tag = tag)))
+                else
+                    pickAt r "a bare-kind slot (the vocabulary's kinds)" idl.Kinds
+
+            VUnion(k.Tag, sampleFields idl r (depth - 1) k.Fields)
+        // At the floor an op is still drawn — the old `VStr "?"` there was a value the
+        // encoder refused — from the ops whose required fields recurse no further.
         | TOp ->
-            let o = pick r idl.Ops
-            VUnion(o.Tag, [ for f in o.Fields -> f.Name, sampleType idl r (depth - 1) f.Type ])
+            let o =
+                pickAt r "an op slot (the vocabulary's ops)" (if depth <= 0 then floorOps idl else idl.Ops)
+
+            VUnion(o.Tag, sampleFields idl r (depth - 1) o.Fields)
 
     and private sampleFields (idl: Idl) (r: Rng) (depth: int) (fields: IdlField list) : (string * IdlValue) list =
         fields
@@ -319,7 +393,7 @@ module Sample =
         let fields =
             match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
             | Some k -> sampleFields idl r depth k.Fields
-            | None -> []
+            | None -> refuse ("kind '" + kindTag + "'") "the vocabulary does not declare it"
 
         match envelope with
         | [] -> VNode(id, kindTag, fields)
@@ -328,7 +402,36 @@ module Sample =
     /// `count` deterministic sample nodes over `kindTags`, cycling the tags so the
     /// vocabulary is covered evenly rather than by chance. Same seed gives the
     /// same vectors on any host and any runtime.
-    let sampleNodes (idl: Idl) (kindTags: string list) (seed: int) (count: int) : IdlValue list =
+    ///
+    /// **Total (Phase 292).** A vocabulary the sampler cannot draw from — no tag given (the
+    /// cycle used to divide by zero), a tag naming no kind, an empty enum, union or op set
+    /// reached by a slot, a name the vocabulary does not declare, an unbound type variable,
+    /// a type with no finite value — is a typed [[SampleRefusal]], and every value it does
+    /// draw is one the encoder accepts: there is no placeholder left that it refuses.
+    let trySampleNodes
+        (idl: Idl)
+        (kindTags: string list)
+        (seed: int)
+        (count: int)
+        : Result<IdlValue list, SampleRefusal> =
         let r = { State = uint64 seed * 2862933555777941757UL + 3037000493UL }
 
-        [ for i in 0 .. count - 1 -> sampleNode idl r 3 (kindTags.[i % List.length kindTags]) ]
+        match kindTags with
+        | [] when count > 0 ->
+            Error
+                { At = "the kind tags"
+                  Reason = "none was given to cycle over" }
+        | _ ->
+            try
+                Ok [ for i in 0 .. count - 1 -> sampleNode idl r 3 (kindTags.[i % List.length kindTags]) ]
+            with Unsampleable(at, reason) ->
+                Error { At = at; Reason = reason }
+
+    /// [[trySampleNodes]] for a vocabulary the caller knows to be sampleable: the same
+    /// vectors, and a refusal raised as `InvalidOperationException` carrying
+    /// [[SampleRefusal.Describe]]. Prefer [[trySampleNodes]] over a vocabulary read from
+    /// outside.
+    let sampleNodes (idl: Idl) (kindTags: string list) (seed: int) (count: int) : IdlValue list =
+        match trySampleNodes idl kindTags seed count with
+        | Ok vs -> vs
+        | Error refusal -> invalidOp refusal.Describe

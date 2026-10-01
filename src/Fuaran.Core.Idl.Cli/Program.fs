@@ -149,25 +149,40 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
         match inputs with
         | Error e -> refuse e
         | Ok(declared, manifestText, beforeText, afterText) ->
-            match Diff.runVerdict manifestText beforeText afterText with
-            | Error e -> refuse e
-            | Ok(text, verdict) ->
-                printf "%s" text
-                let actual = Diff.verdictClass verdict
+            // Phase 292 — both artifacts are read as VOCABULARIES first, so a vocabulary that
+            // is not well-formed is reported with every error `Declare.errors` names, before
+            // any classification: a verdict about an artifact no loader would accept is a
+            // verdict about nothing. The diff itself still reads the published JSON.
+            let unreadable =
+                [ "before", beforeText; "after", afterText ]
+                |> List.choose (fun (side, text) ->
+                    match Artifact.parse text with
+                    | Ok _ -> None
+                    | Error e -> Some(sprintf "%s: %s" side e))
 
-                match declared with
-                | None -> Diff.exitCode actual
-                | Some expected ->
-                    if expected = actual then
-                        printfn "expect: %s — MATCHED" (Diff.classLabel expected)
-                        0
-                    else
-                        printfn
-                            "expect: %s — but the artifacts classify as %s"
-                            (Diff.classLabel expected)
-                            (Diff.classLabel actual)
+            if not (List.isEmpty unreadable) then
+                refuse (String.concat "\n" unreadable)
+            else
 
-                        1
+                match Diff.runVerdict manifestText beforeText afterText with
+                | Error e -> refuse e
+                | Ok(text, verdict) ->
+                    printf "%s" text
+                    let actual = Diff.verdictClass verdict
+
+                    match declared with
+                    | None -> Diff.exitCode actual
+                    | Some expected ->
+                        if expected = actual then
+                            printfn "expect: %s — MATCHED" (Diff.classLabel expected)
+                            0
+                        else
+                            printfn
+                                "expect: %s — but the artifacts classify as %s"
+                                (Diff.classLabel expected)
+                                (Diff.classLabel actual)
+
+                            1
 
 /// Phase 702 — price a vocabulary-change proposal against a vocabulary without cutting a
 /// branch or writing a declaration. Phase 230 moved it here from the repository's own test

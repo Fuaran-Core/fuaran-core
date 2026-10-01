@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-01 — D93: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table; `Codegen.fs` splits behind a facade or not at all
+## 2026-10-01 — D96: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table; `Codegen.fs` splits behind a facade or not at all
 
 **Recorded by Phase 293. `Fuaran.Core.Idl.Codegen` (`FStarTarget`, `Diff`, `Gen`); rides the `0.34.0`
 draft (STABILITY.md, "The F\* target encodes the wire shape it declares").** Three decisions, each
@@ -56,6 +56,174 @@ it comes, is motion and nothing else.
 inputs: a projection or case-refine edit still classifies `unchanged`. Carrying it needs a `Change`
 case and a `Snapshot` member — both published shapes with a baseline of their own — and a flag on
 the `classify` command, which is a different package's surface; it is a successor's, not a residue.
+## 2026-10-01 — D95: `idl.json` is untrusted input at every loading path, and the generator splices IDL-authored text only through one escaper with a policy per target
+
+**Recorded by Phase 292. `Fuaran.Core.Idl` (`Declare.errors`, `SourceLit`, `TypeParams`,
+`Sample.trySampleNodes`) and `Fuaran.Core.Idl.Codegen`; rides the `0.34.0` draft (STABILITY.md, "A
+vocabulary is validated data").**
+
+*Decided: a vocabulary read from outside is DATA, and data is validated where it enters.* The IDL
+tier's premise is that a vocabulary is a value a domain supplies, and `idl.json` is how it travels —
+hand-edited, generated elsewhere, carried in a pull request. The engine checked nothing about it: the
+three well-formedness checks it had (`wireShapeErrors`, `enumWireErrors`, `hostedWireErrors`) ran only
+in tests, there was no referential check at all, and the source comment claiming the encoder modules
+had "no injection surface at all" held only for a vocabulary somebody trusted. So every loading path
+now refuses what `Declare.errors` names, naming every error rather than the first: `Artifact.ofJson`
+(and so `Artifact.parse`), `Proposal.applyDelta` (over the vocabulary a delta produces), and the
+`fuaran-core-idl classify` command, which reads both artifacts as vocabularies before it classifies.
+The rules are the three old checks plus references (every enum, record and union name resolves, a
+union is applied at its arity, a type variable is a parameter of the union declaring it), duplicates
+(kind tags, op tags, one namespace for type names, case tags, type parameters, field names), defaults
+of their slot's type (checked by the encoder, so "fits" means "encodes"), `HostOnly` is `TFn`, the two
+second-pass rules (a transparent case cannot encode to an object, at its declaration or at an
+instantiation; `id` and `kind` are reserved beside the nested kind body), and text: every name the
+generators spell as an identifier is one (`[A-Za-z_][A-Za-z0-9_]*`), a category and a deprecation's
+replacement, message and version are single-line, and nothing declared is ill-formed UTF-16.
+
+*Decided: one escaper, `SourceLit`, with a policy per TARGET rather than per call site.* What "safe" means
+is a property of where the text lands, not of the text: an F# string (and an F# attribute argument,
+which is one), a TypeScript string (double- or single-quoted), an F* string, an F# `///` / `//` comment
+line and a TypeScript `//` comment line, and a TypeScript object key. A literal escapes the delimiter
+and the backslash, names `\n` `\r` `\t`, and writes every other C0 control, U+0085, U+2028 and U+2029 as
+`\uXXXX`; its source text holds no line break, and its value is the authored string. A comment cannot
+escape, so it is split at every line break into one comment line per authored line, with what no
+comment can carry replaced by U+FFFD. An unpaired surrogate has no spelling in an F# or an F* literal —
+measured, not assumed: the F# compiler reads `"\uD800"` as U+FFFD, and the pinned F* prover refuses it
+as a syntax error — so those policies write U+FFFD and the backends refuse such a VALUE before it
+reaches them; TypeScript spells it. Every policy is the identity on the text the generator always
+emitted, which is why every committed generated fixture regenerates byte-identically.
+
+*The two halves are deliberately both kept.* Validation alone leaves a vocabulary built in code — which
+no loader sees — free to splice source; escaping alone leaves an identifier, which cannot be escaped,
+free to be source text. So a name is held to the identifier grammar at declaration, and every other
+splice of authored text goes through `SourceLit`; a source-reading test refuses the hand-rolled shapes
+the removed splices had, and a vocabulary of hostile text built in code is emitted by every backend
+with its payload never reaching source.
+
+*Not decided here.* Whether a declared name is a legal identifier IN EACH LANGUAGE beyond the lexical
+grammar — an F# keyword as a case tag, a lower-case union case — is the emitter's compile question, not
+an injection one; a field-less kind's `{ }` is the same class. Both are Phase 303's, which owns "the
+emitter compiles what it emits".
+
+## 2026-10-01 — D94: placement lowers to the skeleton ops it always needed, a tree lowers to its shell plus an insert script, and minting stays off the witness
+
+**Recorded by Phase 312. `Fuaran.Core.Ops` (`Anchor`, `PlaceError`, `TreePlacement`, `Ops.lower` /
+`skeletonRoot` / `shellOf`) and `Fuaran.Core.Tree` (`FreshIds`); rides the `0.34.0` draft
+(STABILITY.md, "A placement algebra, tree lowering and fresh ids").** The shard asked for the
+placement, lowering and minting helpers consumers had each re-derived, and for this record: that
+placement lowers to skeleton ops, and that minting stays off the witness.
+
+*Placement is a LOWERING, never an op.* Phase 95 removed the ordinal from `InsertChild` / `MoveNode`
+because an index is a projection over one snapshot of a child list and an id is checkable; nothing
+here reverses that. An `Anchor` is resolved against the tree the placement is computed over and
+lowered to the ops that already exist — an append, plus a `ReorderChildren` naming every sibling id
+when the append alone does not give the anchored order — so the op stream, the apply engine, the
+footprint, inversion and arbitration see nothing new, and a script computed against a stale tree is
+refused by `ReorderChildren`'s permutation check rather than silently landing somewhere else. The
+two legs ride one `Batch` so the placement is atomic. `Anchor.Index` exists because a document
+domain's ops are index-bearing; it means a position among the destination's children OTHER than the
+node placed (`0 .. count`), which is exactly what those ops meant for an insert and for a move after
+its removal, so they re-express as `TreePlacement.place` / `move` at `Anchor.Index` with the same
+trees and the same `(parent, index, count)` refusal (`PlacementTests`).
+
+*Within its own parent, a move is a reorder.* The obvious lowering — `MoveNode` then
+`ReorderChildren`, which one host shipped — reaches the same tree, but `MoveNode` writes the node and
+an UNKNOWN parent in its footprint (the pinned over-approximation), so it collides with every
+concurrent structural write; `ReorderChildren` writes the one parent. A move to where the node already
+is lowers to `[]`. The dry run is the engine's own (`canApplyContained`), first, so a placement the
+engine would refuse carries the engine's envelope unchanged (`PlaceError.Refused`) and the anchor is
+only resolved for an op that would be accepted.
+
+*A tree lowers to its shell plus an insert script.* `Ops.lower` is the UI host's streaming lowering,
+already generic over the witness: each child inserted as its own shell in preorder, so sibling order
+is rebuilt by appends alone and a streamed and a batched emission are one script. No separate
+container-aware lowering ships: every node that holds children is an insert's parent, so the same
+script under `applyAllWith canHold` rebuilds every tree in the containment invariant and refuses one
+outside it at its first offender. A leaf is never shelled (`shellOf` returns a childless node as it
+is), because a witness may leave `ReplaceChildren` partial on nodes that cannot hold children.
+
+*Minting stays off the witness (D5 kept).* `IdWitness` still carries no `fresh`. `FreshIds` mints over
+`ToString` / `OfString` and a caller-supplied taken set of keys, deterministically, with no hidden
+state — `sequential` re-derives its next number from the taken set rather than carrying the counter
+one host's version kept, so a replay mints the same ids. A strategy is any `'Id -> Set<string> -> 'Id`;
+the two shipped ones suit string-shaped ids, and a `Guid` or integer domain supplies its own and
+certifies it with `Conformance.freshIdLaws`. `repairDuplicates` is one function for two uses: with an
+empty taken set it renames a tree's later occurrences, with a target tree's keys it prepares a clone
+or a paste.
+
+*Named `TreePlacement`, not `Placement`.* The shard spelled the module `Placement`, lifted from a
+host's module name. `Fuaran.Core.Placement` is already a public type in `Fuaran.Core.Function` (where a
+capability's body runs); a module of the same name in another assembly would make `Placement.x`
+resolve differently depending on which packages a consumer references and opens — a permanent
+ambiguity on a public surface that a `ModuleSuffix` would only hide at the CLR level. The error type is
+`PlaceError` for the same reason.
+
+## 2026-10-01 — D93: the lane DAG's checkpoint is the linear snapshot's counterpart, a DAG may begin at one, and when to take one stays the domain's call
+
+**Recorded by Phase 288. `Fuaran.Core.OpStream.Dag` (`Dag.Checkpoint`, `sealAt` / `checkpointAt` /
+`checkpointFrom`, `verifyCheckpoint`, `replayFrom` / `replayFromWith`, `compactAt` / `compactFrom`,
+`firstBreakFrom` / `verifyDagFrom`, `toJsonlWithCheckpoints` / `fromJsonlWithCheckpoints`) and
+`Conformance.checkpointLaws`; rides the `0.34.0` draft (STABILITY.md, "A checkpoint on the lane DAG").**
+
+*The counterpart, not a second design.* A checkpoint at node N is `{ Node; State; Hash }`, where `State`
+is the fold of N's ancestor closure and `Hash` is the linear `Snapshot`'s strict seal of that state at
+sequence zero, chained from N's content id the way a linear snapshot chains from its boundary record's
+hash — read the other way, the strict snapshot at the start of the history that begins at N. The seal is
+computed by `OpStream.Snapshots`' own verifier, so there is one pre-image, one verifier and one line
+format: a checkpoint's sidecar line IS that snapshot's line, `{"snapshot":true,"seq":0,"state":<state>,
+"prevHash":<node id>,"hash":<seal>}`. A sidecar reader refuses any other sequence, a chain-only line
+(a checkpoint's seal always binds its state), and an empty `prevHash`. No linear-stream file changed.
+
+*A DAG may begin at one — and the checkpoint travels BESIDE the DAG, not inside `Dag.T`.* The shard asked
+for an optional origin field on `Dag.T<'Op>` "with a default". F# records have no field defaults: a
+field added to `T` is a `record-widening` that stops every full record literal compiling, and downstream
+consumers build `{ Nodes = … }` literals in their own suites; the checkpoint's state is also a `'State`,
+which `T<'Op>` has no parameter for. So the origin rides beside the history, as a linear snapshot rides
+beside its tail, and every function that reads a truncated history takes it as an argument:
+`replayFrom w cp dag head` replays from it and `verifyDagFrom` verifies through it. `compactAt` KEEPS the
+checkpoint's own node, which is what makes the compacted history live on with no new machinery: an
+append onto the node is an ordinary `append`, an empty history above the checkpoint has the node as its
+only head, the reachability index builds over the compacted DAG unchanged, and `checkpointFrom` /
+`compactFrom` take the next checkpoint from the last. That answers the second-pass amendment (the
+linear `compact` was terminal) without sharing a `Compacted` abstraction, which the DAG does not need:
+its nodes carry no sequence numbers to continue, only parents, and the parent is still there.
+
+*Verification through a checkpoint.* `firstBreakFrom` is `firstBreak` with the checkpoint's node as the
+root whose content id the checkpoint carries: the seal recomputes, every node's content id recomputes,
+nothing after the checkpoint's node names a parent the DAG does not hold, and every node is at, behind or
+after the checkpoint's node. Behind it a missing parent IS the truncation. To keep "nothing after the
+checkpoint is missing" checkable, `compactAt` keeps the BAND — every node behind the checkpoint on a path
+from a "side parent" (a node behind the checkpoint that a node after it names as a parent, other than the
+checkpoint's own node) to it; on the usual shape the band is empty. A truncated lane read WITHOUT its
+sidecar is a `MissingParent` break under plain `verifyDag`, as it should be.
+
+*The coverage condition — a premise of the shard that was false, and the refusal that replaces it.* The
+shard's law said `replayFrom cp` agrees with the full replay "for every head reachable from the
+checkpoint's node". On a DAG with a branch point BELOW the checkpoint that is not so: the drain folds a
+head's closure smallest id first, so a branch that left before the checkpoint's node and merges after it
+is folded BEFORE part of the checkpoint's own closure. A log witness under node ids it chooses shows it —
+`0g`, `2a`, `3b` on one lane, `1c` off `0g`, merged by `4m`: the full replay is `0g1c2a3b4m`, while
+resuming at `3b` and folding the rest gives `0g2a3b1c4m`. No state at the checkpoint can stand for that
+prefix. So `replayFrom` refuses, by name, the first node above the checkpoint (in replay order) that does
+not descend from the checkpoint's node (`CheckpointFault.Uncovered`), and `compactAt` refuses a DAG
+holding a node neither behind nor after it. The condition is graph-only — a descent, not an id order — so
+the same history is admitted or refused alike under every hash function. The law is restated to match:
+for every head the checkpoint covers the answers agree, and every other head is refused with the reason
+the graph predicts (`Conformance.checkpointLaws`, which a replay with the refusal removed reds).
+
+*When to take a checkpoint stays the domain's call (GP6).* Core says what a checkpoint is, how it
+chains, how a replay resumes from one and how a truncated history verifies through it; the domain
+supplies the state codec and picks the node. `sealAt` is the genesis-import shape: a converted history
+begins at an ordinary genesis node whose state was translated rather than folded, and the domain vouches
+for that state once.
+
+*What it does not claim.* The seal binds the state to the node; it does not re-fold the discarded
+history, so a checkpoint is exactly as trustworthy as the act that sealed it — verify, then compact,
+the linear compaction's rule. The replay is bounded in the ops it APPLIES; on a full history the graph
+walks that find the delta are still linear unless the reachability index answers them
+(`replayFromWith`). And whether `proofs/DagFold.fst` extends to a checkpointed origin is open: the
+`proofs.json` rows are `tested`, and the question sits in the README's "not claimed" list.
+
 ## 2026-10-01 — D92: the lane DAG's reachability index is a drain order plus per-node ancestor bitsets — an additional way to ask, never a change to what the unindexed functions answer
 
 **Recorded by Phase 289. `Fuaran.Core.OpStream.Dag` (`Dag.Reach`, `appendIndexed` / `mergeIndexed`,
