@@ -149,6 +149,74 @@ module Arbitration =
         |> List.map (fun a -> a, Ops.footprint nodew idw a.Ops)
         |> interferingWith (Ops.footprint nodew idw proposal.Ops)
 
+    /// `arbitrate` with the domain's own footprint and applicability (Phase 247) — the same
+    /// deterministic, total partition, in the same three steps, with the two judgements the
+    /// partition rests on supplied by the domain rather than read off the skeleton defaults:
+    ///
+    ///   - `footprint` decides independence. It is what `Conflicts` is computed and explained with,
+    ///     so a domain that holds identity `Ops.footprint` cannot see — an id in a keyed position
+    ///     (`Ops.footprintKeyed`), a label, a slot — records it there and has a clash refused rather
+    ///     than admitted.
+    ///   - `canApply` decides applicability against the base, in `Ops.canApplyAll`'s shape: the
+    ///     first refused op's index and its envelope, which `Inapplicable` carries verbatim. A domain
+    ///     whose engine refuses what the plain check admits — an insert under a node that cannot hold
+    ///     children (`Ops.canApplyAllWith canHold`), a duplicate over the keyed walk
+    ///     (`Ops.canApplyAllKeyed`) — has the proposal refused here instead of admitted and dropped
+    ///     (or refused) when the merged script lands.
+    ///
+    /// `arbitrate nodew idw` IS `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew
+    /// idw)`. Every guarantee `arbitrate` states holds of this form for the functions handed to it:
+    /// the pinned order, totality, the partition, pairwise `Ops.independent` accepted footprints and
+    /// the re-cited `Conflicts`. The one that is the DOMAIN'S to keep is the confluence claim — the
+    /// accepted scripts apply in any order to one tree — which holds when `footprint` is sound for
+    /// the engine the domain lands the scripts with, and `canApply` refuses what that engine refuses
+    /// (`Conformance.keyedArbitrationLaws` certifies the keyed composition). Neither function may
+    /// throw: arbitration is total only when they are. The base is never mutated (GP4).
+    let arbitrateWith
+        (footprint: SkeletonOp<'Node, 'Id> list -> Footprint)
+        (canApply: SkeletonOp<'Node, 'Id> list -> 'Node -> Result<unit, int * Rejection<'Id>>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        : Arbitration<'Node, 'Id> =
+        // the pinned deterministic order — ascending proposal id.
+        let pinned = proposals |> List.sortBy (fun p -> p.Id)
+
+        // greedy pass: accepted accumulates (proposal, footprint) in reverse pinned
+        // order; a conflict at decision time is provisional (re-cited below), and carries the
+        // proposal's footprint so the re-citation does not derive it a second time.
+        let step (accepted, rejected) (p: OpScriptProposal<'Node, 'Id>) =
+            match canApply p.Ops baseTree with
+            | Error(i, rej) -> accepted, (p, None, Inapplicable(i, rej)) :: rejected
+            | Ok() ->
+                let fp = footprint p.Ops
+
+                if accepted |> List.forall (fun (_, afp) -> Ops.independent fp afp) then
+                    (p, fp) :: accepted, rejected
+                else
+                    accepted, (p, Some fp, Conflicts([], [])) :: rejected
+
+        let acceptedRev, rejectedRev = pinned |> List.fold step ([], [])
+        let accepted = List.rev acceptedRev
+
+        // Re-cite every conflict against the FULL accepted set (a later-accepted
+        // proposal may also interfere) — the complete rebase target, pinned order.
+        // Non-empty by construction: the interferer seen at decision time was
+        // accepted before the conflict and stays accepted.
+        let rejected =
+            List.rev rejectedRev
+            |> List.map (fun (p, fp, reason) ->
+                match reason, fp with
+                | Conflicts _, Some fp ->
+                    let explained = interferingWith fp accepted
+                    p, Conflicts(List.map fst explained, explained)
+                | _ -> p, reason)
+
+        let acceptedProposals = accepted |> List.map fst
+
+        { Accepted = acceptedProposals
+          MergedScript = acceptedProposals |> List.collect (fun p -> p.Ops)
+          Rejected = rejected }
+
     /// Arbitrate N op-script proposals against one base tree (Phase 85) —
     /// decide which subset can land together. A deterministic, total partition
     /// (GP4: analysis only — the base is never mutated, and no input throws):
@@ -192,40 +260,27 @@ module Arbitration =
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        // the pinned deterministic order — ascending proposal id.
-        let pinned = proposals |> List.sortBy (fun p -> p.Id)
+        arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw) baseTree proposals
 
-        // greedy pass: accepted accumulates (proposal, footprint) in reverse pinned
-        // order; a conflict at decision time is provisional (re-cited below).
-        let step (accepted, rejected) (p: OpScriptProposal<'Node, 'Id>) =
-            match Ops.canApplyAll nodew idw p.Ops baseTree with
-            | Error(i, rej) -> accepted, (p, Inapplicable(i, rej)) :: rejected
-            | Ok() ->
-                let fp = Ops.footprint nodew idw p.Ops
-
-                if accepted |> List.forall (fun (_, afp) -> Ops.independent fp afp) then
-                    (p, fp) :: accepted, rejected
-                else
-                    accepted, (p, Conflicts([], [])) :: rejected
-
-        let acceptedRev, rejectedRev = pinned |> List.fold step ([], [])
-        let accepted = List.rev acceptedRev
-
-        // Re-cite every conflict against the FULL accepted set (a later-accepted
-        // proposal may also interfere) — the complete rebase target, pinned order.
-        // Non-empty by construction: the interferer seen at decision time was
-        // accepted before the conflict and stays accepted.
-        let rejected =
-            List.rev rejectedRev
-            |> List.map (fun (p, reason) ->
-                match reason with
-                | Inapplicable _ -> p, reason
-                | Conflicts _ ->
-                    let explained = interferingWith (Ops.footprint nodew idw p.Ops) accepted
-                    p, Conflicts(List.map fst explained, explained))
-
-        let acceptedProposals = accepted |> List.map fst
-
-        { Accepted = acceptedProposals
-          MergedScript = acceptedProposals |> List.collect (fun p -> p.Ops)
-          Rejected = rejected }
+    /// `arbitrate` under a container capability (Phase 247) — the `applyContained` /
+    /// `canApplyAllWith` precedent, at the partition: applicability is
+    /// `Ops.canApplyAllWith canHold`, so a proposal that inserts or moves under a node `canHold`
+    /// refuses, or grafts a subtree whose interior breaks it, is `Inapplicable` with the
+    /// `NotAContainer` envelope rather than admitted. `arbitrate` checks with `Ops.canApplyAll`,
+    /// under which every node can hold children, so it admits such a proposal; landing the merged
+    /// script through `Ops.applyAllWith canHold` then refuses it, and plain `Ops.applyAll` keeps
+    /// whatever the domain's `ReplaceChildren` does with a leaf's new children — for a witness that
+    /// ignores them, the insert is silently dropped. Independence is `Ops.footprint`'s, unchanged.
+    ///
+    /// It is `arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw)`; a
+    /// domain with keyed positions composes the keyed pair the same way —
+    /// `arbitrateWith (Ops.footprintKeyed keyw nodew idw) (Ops.canApplyAllKeyed keyw canHold nodew idw)`.
+    /// With `canHold = fun _ -> true` it is exactly `arbitrate`.
+    let arbitrateContained
+        (canHold: 'Node -> bool)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        : Arbitration<'Node, 'Id> =
+        arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw) baseTree proposals

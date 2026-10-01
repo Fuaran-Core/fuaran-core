@@ -622,6 +622,25 @@ module Families =
                   [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision / accepted op over the keyed walk) and op kind" ])
               (Built,
                "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms")
+          // Phase 247 — arbitration at a domain's own footprint and applicability, held to the keyed
+          // engine the accepted scripts land with. The container-illegal proposal and the keyed-id
+          // clash are BUILT; the rest of the rejected bucket is drawn, as in `arbitrationLaws`.
+          c
+              "keyedArbitrationLaws"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded
+                  [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind (delegates to keyedArbitrationLawsWith)" ])
+              (Drawn, "delegates to keyedArbitrationLawsWith")
+          c
+              "keyedArbitrationLawsWith"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind" ])
+              (Drawn,
+               "the container-illegal proposal and the keyed-id clash are built and must be refused; Inapplicable also comes from the kit's corruption roll and Conflicts from drawn scripts, so the guard covers the arbitration bucket")
 
           // Phase 211 — the same contract, at a DOMAIN'S evaluator. Every arm the agreement law
           // distinguishes is DRAWN from the domain's own edits: a change that reached a reader, a

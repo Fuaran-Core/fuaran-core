@@ -510,6 +510,32 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.keyedArbitrationLaws",
+      "module": "Conformance",
+      "entry": "keyedArbitrationLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "1400",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
+      "id": "Conformance.keyedArbitrationLawsWith",
+      "module": "Conformance",
+      "entry": "keyedArbitrationLawsWith",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "1400",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.keyedChildrenLaws",
       "module": "Conformance",
       "entry": "keyedChildrenLaws",

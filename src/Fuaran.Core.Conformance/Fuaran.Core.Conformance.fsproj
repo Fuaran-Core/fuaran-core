@@ -33,6 +33,7 @@
     <Compile Include="StreamLaws.fs" />
     <Compile Include="IntegrityLaws.fs" />
     <Compile Include="ConcurrencyLaws.fs" />
+    <Compile Include="KeyedArbitrationLaws.fs" />
     <Compile Include="SeamLaws.fs" />
     <Compile Include="FunctionLaws.fs" />
     <Compile Include="PropagationLaws.fs" />
