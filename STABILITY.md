@@ -2972,6 +2972,59 @@ it with `freshIdLaws`. A consumer that opens `Fuaran.Core` beside a namespace of
 
 **Class: additive.** `api/Fuaran.Core.Ops.txt`, `api/Fuaran.Core.Tree.txt` and
 `api/Fuaran.Core.Conformance.txt` gain members and types only.
+
+**Phase 292 — a vocabulary is validated data, and the generator escapes everything it splices:
+`Declare.errors` at every loading path, one source-literal escaper, a total codec and sampler. Class:
+`additive` — refusals where silence was, new members only; one reference-interpreter canonical-form
+correction, stated below.**
+
+- **`Declare.errors : Idl -> string list`** — every well-formedness rule in one call: the three existing
+  checks plus references, duplicates, defaults of their slot's type, `HostOnly` is `TFn`, a transparent
+  case that cannot encode to an object (at its declaration and at every instantiation), `id` / `kind`
+  reserved beside the nested kind body, identifier grammar for every emitted name, single-line
+  annotation slots and categories, well-formed UTF-16 (DECISIONS D95). `Artifact.ofJson` /
+  `Artifact.parse` and `Proposal.applyDelta` refuse a vocabulary it reports, naming every error; the
+  `classify` command reports them before classifying (exit 2, refused). A field-less kind or record is
+  well-formed.
+- **`SourceLit`** — the one escaper: `fsString`, `fsAttribute`, `fsDocLines` / `fsDocXml`, `tsString`,
+  `tsStringSingle`, `tsKey`, `tsIsIdentifier`, `tsCommentLines`, `fstarString`, `isWellFormed`. The
+  generator's five private escapers are gone, and every splice of IDL-authored text — discriminator,
+  enum wire strings, category, annotation prose, object keys — goes through it. A deprecation message,
+  replacement or version, or a category, carrying a line break used to end its comment and put the rest
+  into the generated module as code; it is now one comment line per authored line. A declared string
+  default carrying CR or LF is now escaped (`fsDefaultStr` escaped neither).
+- **`TypeParams.substitute` / `TypeParams.bind`** — one type-parameter substitution, keyed by name and
+  bound only at matching arity, shared by `Encode`, `Decode`, `Sample` and the generator. `Decode`'s
+  bare transparent arm refuses an arity mismatch (it threw).
+- **`Encode`** refuses a non-finite float inside a verbatim `json` / hosted value, naming its token and
+  path (there it aliases the string; at a `float` slot the quoted token stays WIRE_FORMAT §7's
+  spelling), and an ill-formed UTF-16 string, as `Canon.tryRender` does. **The omit-at-default test
+  compares in the slot's value space**: a value equal to the default after encoding is omitted, so
+  `VInt 2` and `VFloat 2.0` at a float slot defaulting to `2` now encode identically (absent) — the
+  reference interpreter's one canonical-form change, bringing it to what the generated F# and
+  TypeScript encoders already wrote (they compare host values). Decoding is unchanged: a present field
+  equal to its default still reads.
+- **`Sample.trySampleNodes` / `Sample.SampleRefusal`** — the total sampler: no tag to cycle over (it
+  divided by zero), a tag naming no kind, an empty enum or union, a dangling name, an unbound type
+  variable or a type with no finite value is a typed refusal; every drawn value is one the encoder
+  accepts (the `VStr "?"` / `VUnion("?", [])` placeholders are gone; a bare kind and an op draw their
+  fields under the presence rules; an op is drawn at the depth floor). `sampleNodes` keeps its
+  signature and its vectors, and raises the refusal as `InvalidOperationException`. Seeded streams are
+  unchanged for a vocabulary with no `TKind` / `TOp` slot.
+- **Scaffold and defaults.** `Gen.fsharpValue` writes a scalar or enum through the declared-default
+  literal: a whole float at a float slot is `2.0` (it wrote `2`, FS0001), a non-finite float is refused.
+  A `VEnum` default or value is resolved through `IdlEnum.CaseOf` and a wire string the enum does not
+  admit is refused by both backends (the F# one fell through to an undeclared identifier).
+
+**What adopting it costs.** A vocabulary that loaded and breaks a rule no longer loads — fix what the
+refusal names. Generated modules regenerate byte-identically for every vocabulary whose text needs no
+escaping (every committed generated fixture here does); one whose text carries a line break, quote or
+control character emits it escaped or split, which is the point. A consumer that opens
+`Fuaran.Core.Idl` beside its own `SourceLit` or `TypeParams` resolves the later-opened one.
+
+**Class: additive.** `api/Fuaran.Core.Idl.txt` gains members and types only;
+`api/Fuaran.Core.Idl.Codegen.txt` does not move.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

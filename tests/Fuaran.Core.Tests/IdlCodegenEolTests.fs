@@ -88,6 +88,31 @@ let private expectLfOnly (what: string) (emitted: string) =
     Expect.isFalse (emitted.Contains "\r") (what + " carries no carriage return")
     Expect.stringContains emitted lfProbe (what + " carries the authored prose, LF-terminated")
 
+/// The annotation-prose form of [[expectLfOnly]] (Phase 292). Annotation prose is
+/// IDL-authored text, and a line break in it used to reach the generated comment raw:
+/// the second authored line then sat on its own line OUTSIDE the comment, as live
+/// source — which is the shape the previous assertion here (the probe verbatim, LF
+/// between its lines) pinned. The prose must now arrive split, one comment line per
+/// authored line, or escaped inside a string literal (the `Obsolete` argument), and no
+/// line of the artefact may carry the second line any other way.
+let private expectLfComment (what: string) (emitted: string) =
+    Expect.isFalse (emitted.Contains "\r") (what + " carries no carriage return")
+    Expect.stringContains emitted "phase-129 probe line one" (what + " carries the first authored line")
+
+    let carriers =
+        emitted.Split('\n')
+        |> Array.filter (fun l -> l.Contains "phase-129 probe line two")
+
+    Expect.isNonEmpty carriers (what + " carries the second authored line")
+
+    for l in carriers do
+        let inComment = l.TrimStart().StartsWith "//"
+        let escapedInLiteral = l.Contains "\\r\\nphase-129 probe line two"
+
+        Expect.isTrue
+            (inComment || escapedInLiteral)
+            (sprintf "%s: the second authored line is a comment or escaped data, never source: %s" what l)
+
 [<Tests>]
 let tests =
     testList
@@ -98,7 +123,7 @@ let tests =
               // Phase 195 — the type emitter's channel carries its refusal now.
               match Gen.fsharpTypes annotatedIdl with
               | Error e -> failtestf "the type emitter rejected the spike vocabulary: %A" e
-              | Ok emitted -> expectLfOnly "the emitted F# type declarations" emitted
+              | Ok emitted -> expectLfComment "the emitted F# type declarations" emitted
           }
 
           test "fsharpModuleWith: declared support carrying a CR emits an LF artefact" {
@@ -110,7 +135,7 @@ let tests =
           test "typescriptModule: authored prose carrying a CR emits an LF artefact" {
               match Gen.typescriptModule annotatedIdl kinds with
               | Error e -> failtestf "the TypeScript backend rejected the spike vocabulary: %A" e
-              | Ok emitted -> expectLfOnly "the emitted TypeScript module" emitted
+              | Ok emitted -> expectLfComment "the emitted TypeScript module" emitted
           }
 
           // The three above go red on ANY checkout with the normalisation removed (measured).

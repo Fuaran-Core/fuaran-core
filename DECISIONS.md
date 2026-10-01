@@ -1,5 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D95: `idl.json` is untrusted input at every loading path, and the generator splices IDL-authored text only through one escaper with a policy per target
+
+**Recorded by Phase 292. `Fuaran.Core.Idl` (`Declare.errors`, `SourceLit`, `TypeParams`,
+`Sample.trySampleNodes`) and `Fuaran.Core.Idl.Codegen`; rides the `0.34.0` draft (STABILITY.md, "A
+vocabulary is validated data").**
+
+*Decided: a vocabulary read from outside is DATA, and data is validated where it enters.* The IDL
+tier's premise is that a vocabulary is a value a domain supplies, and `idl.json` is how it travels —
+hand-edited, generated elsewhere, carried in a pull request. The engine checked nothing about it: the
+three well-formedness checks it had (`wireShapeErrors`, `enumWireErrors`, `hostedWireErrors`) ran only
+in tests, there was no referential check at all, and the source comment claiming the encoder modules
+had "no injection surface at all" held only for a vocabulary somebody trusted. So every loading path
+now refuses what `Declare.errors` names, naming every error rather than the first: `Artifact.ofJson`
+(and so `Artifact.parse`), `Proposal.applyDelta` (over the vocabulary a delta produces), and the
+`fuaran-core-idl classify` command, which reads both artifacts as vocabularies before it classifies.
+The rules are the three old checks plus references (every enum, record and union name resolves, a
+union is applied at its arity, a type variable is a parameter of the union declaring it), duplicates
+(kind tags, op tags, one namespace for type names, case tags, type parameters, field names), defaults
+of their slot's type (checked by the encoder, so "fits" means "encodes"), `HostOnly` is `TFn`, the two
+second-pass rules (a transparent case cannot encode to an object, at its declaration or at an
+instantiation; `id` and `kind` are reserved beside the nested kind body), and text: every name the
+generators spell as an identifier is one (`[A-Za-z_][A-Za-z0-9_]*`), a category and a deprecation's
+replacement, message and version are single-line, and nothing declared is ill-formed UTF-16.
+
+*Decided: one escaper, `SourceLit`, with a policy per TARGET rather than per call site.* What "safe" means
+is a property of where the text lands, not of the text: an F# string (and an F# attribute argument,
+which is one), a TypeScript string (double- or single-quoted), an F* string, an F# `///` / `//` comment
+line and a TypeScript `//` comment line, and a TypeScript object key. A literal escapes the delimiter
+and the backslash, names `\n` `\r` `\t`, and writes every other C0 control, U+0085, U+2028 and U+2029 as
+`\uXXXX`; its source text holds no line break, and its value is the authored string. A comment cannot
+escape, so it is split at every line break into one comment line per authored line, with what no
+comment can carry replaced by U+FFFD. An unpaired surrogate has no spelling in an F# or an F* literal —
+measured, not assumed: the F# compiler reads `"\uD800"` as U+FFFD, and the pinned F* prover refuses it
+as a syntax error — so those policies write U+FFFD and the backends refuse such a VALUE before it
+reaches them; TypeScript spells it. Every policy is the identity on the text the generator always
+emitted, which is why every committed generated fixture regenerates byte-identically.
+
+*The two halves are deliberately both kept.* Validation alone leaves a vocabulary built in code — which
+no loader sees — free to splice source; escaping alone leaves an identifier, which cannot be escaped,
+free to be source text. So a name is held to the identifier grammar at declaration, and every other
+splice of authored text goes through `SourceLit`; a source-reading test refuses the hand-rolled shapes
+the removed splices had, and a vocabulary of hostile text built in code is emitted by every backend
+with its payload never reaching source.
+
+*Not decided here.* Whether a declared name is a legal identifier IN EACH LANGUAGE beyond the lexical
+grammar — an F# keyword as a case tag, a lower-case union case — is the emitter's compile question, not
+an injection one; a field-less kind's `{ }` is the same class. Both are Phase 303's, which owns "the
+emitter compiles what it emits".
+
 ## 2026-10-01 — D94: placement lowers to the skeleton ops it always needed, a tree lowers to its shell plus an insert script, and minting stays off the witness
 
 **Recorded by Phase 312. `Fuaran.Core.Ops` (`Anchor`, `PlaceError`, `TreePlacement`, `Ops.lower` /
