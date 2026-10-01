@@ -6023,10 +6023,11 @@ discovered). `Capability.fst` models `compose` skipping the totality guard and `
 exact-type `validateParams`; both move with Phase 295, which converges the invocable seams.
 `Arbitrate.fst` dry-runs `canApplyAll` over the unkeyed footprint; it moves with Phase 247's keyed
 arbitration (`arbitrateWith` / `arbitrateContained`, shipped on the production side) and Phase 334's
-keyed fifth footprint set. The F* target's envelope and key order (`Fuaran.Core.Idl.Codegen`'s F*
-emitter, and the generated vocabulary models it writes) move with Phase 293. Each of those phases
-should re-cut its model in the same change-set; the twins in the moved model are where a stale one
-goes red first.
+keyed fifth footprint set. Each of those phases should re-cut its model in the same change-set; the
+twins in the moved model are where a stale one goes red first. (The F* target's envelope and key
+order — `Fuaran.Core.Idl.Codegen`'s F* emitter and the generated vocabulary models it writes — were
+the fourth item here; Phase 293 moved them, landing beside this phase, and the `Proofs.Vocabulary`
+family holds the regenerated models to it.)
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
 Phase 209. The resolver now answers for `deps[id]` and nothing else, a read outside it is the typed
