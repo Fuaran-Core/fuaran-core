@@ -136,6 +136,31 @@ module internal LawKit =
 
         member d.Shuffle(xs: 'a list) : 'a list = d.Draw(ConfRng.shuffle xs)
 
+    /// How many times a tamper or collision arm redraws its replacement before it gives up
+    /// (Phase 302).
+    [<Literal>]
+    let redrawBound = 16
+
+    /// Draw a REPLACEMENT until it differs from what it replaces, at most `redrawBound` times
+    /// (Phase 302). A tamper arm is gated on the replacement being genuinely different — an op
+    /// that encodes like the one it replaces is no forgery — and a single draw that happens to
+    /// coincide skipped the arm. Redrawing makes the arm reached on every iteration the
+    /// generator CAN distinguish; `None` means it could not in `redrawBound` draws, and the
+    /// arm's guard or strict cell then reports the zero rather than a green over nothing.
+    let drawDistinct (rng: Draws) (draw: ConfRng.T -> 'a * ConfRng.T) (differs: 'a -> bool) : 'a option =
+        let mutable found = None
+        let mutable k = 0
+
+        while found.IsNone && k < redrawBound do
+            let v = rng.Draw draw
+
+            if differs v then
+                found <- Some v
+
+            k <- k + 1
+
+        found
+
     /// The loop every family runs: `iterations` bodies over one cursor seeded from `seed`, each
     /// handed the cursor, its index and the counterexample stamp for that index.
     let run (iterations: int) (seed: int) (body: Draws -> int -> (string -> string) -> unit) : unit =
@@ -282,6 +307,34 @@ module internal LawKit =
             opKinds
             |> List.map (fun k -> k, (counts |> Map.tryFind k |> Option.defaultValue 0))
 
+    /// Does the domain's per-node `encode` tell drawn nodes apart at all? — Phase 302. The four
+    /// confluence families (`footprintLaws`, `concurrencyLawsWith`, `reconcileLawsWith`,
+    /// `arbitrationLaws`) compare result trees through `Tree.encodeHash nodew encode`, so an
+    /// `encode` that ignores its input collapses every comparison to tree SHAPE and the families
+    /// stay green over a comparison that cannot fail on content. `NoteTree` per drawn tree; the
+    /// count is of drawn nodes whose encoding differs from the first one the run saw, so a demand
+    /// of one is "encode distinguished at least two drawn nodes". Folded into each family's existing
+    /// guard, as `OpKindTally` is, so no reader that pins a result count sees a new result.
+    type EncodeSpread<'Node, 'Id>(nodew: NodeWitness<'Node, 'Id>, encode: 'Node -> string) =
+        let mutable first: string option = None
+        let mutable distinguished = 0
+
+        member _.Note(n: 'Node) =
+            let e = encode n
+
+            match first with
+            | None -> first <- Some e
+            | Some f ->
+                if e <> f then
+                    distinguished <- distinguished + 1
+
+        member s.NoteTree(tree: 'Node) =
+            for n in Tree.preorder nodew tree do
+                s.Note n
+
+        /// The demand, as a guard count.
+        member _.Demand: string * int = "encode-distinguished node", distinguished
+
     // ---- shared builders -----------------------------------------------------------------------
 
     /// Thread up to `n` random ops through the container-aware `apply`, keeping the accepted ones —
@@ -317,6 +370,39 @@ module internal LawKit =
             | Error _ -> ()
 
         accepted, r
+
+    /// Draw a pair of NON-EMPTY one-op scripts over `tree` that `footprintOf` declares independent,
+    /// at most `redrawBound` times (Phase 302). The four-op scripts the confluence families draw
+    /// almost always carry a remove, a move or an update, whose unknown-parent write interferes with
+    /// every structure write — measured at this repository's reference witness, `footprintLaws` drew
+    /// three hundred pairs and not one independent pair of non-empty scripts, so its soundness law
+    /// had been asserted over empty scripts only. A law about independent pairs is given some to
+    /// read; `None` means none was found, and the family's guard reports the zero.
+    let drawIndependentPair
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
+        (tree: 'Node)
+        (rng: Draws)
+        : (SkeletonOp<'Node, 'Id> list * SkeletonOp<'Node, 'Id> list) option =
+        let mutable found = None
+        let mutable k = 0
+
+        while found.IsNone && k < redrawBound do
+            let a = rng.Draw(collectScript None nodew idw gen 1 tree)
+            let b = rng.Draw(collectScript None nodew idw gen 1 tree)
+
+            if
+                not (List.isEmpty a)
+                && not (List.isEmpty b)
+                && Ops.independent (footprintOf a) (footprintOf b)
+            then
+                found <- Some(a, b)
+
+            k <- k + 1
+
+        found
 
     /// `n` drawn ops threaded through `OpStream.append` from `gen.State0` under the `Human "conf"`
     /// actor: the chain a stream family builds per iteration. Returns the live state, the records

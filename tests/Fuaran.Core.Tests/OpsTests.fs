@@ -205,7 +205,12 @@ let tests =
                     CanHold = None }
 
               let results = Conformance.normalizeLaws nodew idw opGen 1234 200
-              Expect.equal (List.length results) 3 "preservation + idempotence + non-growth"
+
+              Expect.equal
+                  (List.length results)
+                  4
+                  "preservation + idempotence + non-growth + the non-identity-script guard (Phase 302)"
+
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) (sprintf "all pass: %A" results) ]
 
 // ---------------------------------------------------------------------------

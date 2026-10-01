@@ -688,32 +688,82 @@ module internal SeamLaws =
     let queryLawsAt (family: string) (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
         let known = QueryRegistry.enumerate w.Queries |> List.map (fun q -> q.Id)
 
-        LawKit.seamLaws
-            { Lookup =
-                fun id ->
-                    match QueryRegistry.tryFind id w.Queries with
-                    | None -> Error(NoSuchQuery(id, known))
-                    | Some q -> Ok q
-              Validate = Query.validateParams
-              Body = fun args q -> w.Resolver args q
-              Dispatch = w.Dispatch
-              Gen = w.GenQuery
-              Rendering =
-                { Family = family
-                  Laws =
-                    "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
-                    "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)",
-                    "the domain's host agrees with its query registry (reaches the resolver iff admitted; refuses with the registry's error)"
-                  Runner = "resolver"
-                  BodyFailedName = "ExecutionFailed"
-                  TryBodyFailed =
-                    fun e ->
-                        match e with
-                        | ExecutionFailed(m, _) -> Some m
-                        | _ -> None
-                  BodyFailed = fun m -> ExecutionFailed(m, []) } }
-            seed
-            iterations
+        // Phase 302 — the result law. Nothing bound a resolver's answer to the query's declared
+        // `ResultSchema`: `Query.invoke` hands a `Ready` result back as the resolver built it, and the
+        // seam laws compare the host with the registry, never the answer with the declaration — so a
+        // resolver answering a table of a different schema, or rows `Table.validate` refuses, was
+        // green. The law carries it, Core-side `invoke` is unchanged (DECISIONS: a new `QueryError`
+        // case would break every exhaustive match over it).
+        let bound =
+            LawKit.LawCell
+                "a settled query result is bound to its declaration (Rows.Schema = ResultSchema, and Table.validate accepts the rows)"
+
+        LawKit.run iterations (seed + 7919) (fun rng _ at ->
+            let id, args = rng.Draw w.GenQuery
+
+            match QueryRegistry.tryFind id w.Queries with
+            | None -> ()
+            | Some q ->
+                match w.Dispatch id args (fun q' -> w.Resolver args q') with
+                | Ok(Ready r) ->
+                    let schemaOk = r.Rows.Schema = q.ResultSchema
+
+                    let rowsOk =
+                        match Table.validate r.Rows with
+                        | Ok() -> None
+                        | Error e -> Some e
+
+                    bound.Check(
+                        schemaOk && rowsOk.IsNone,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "query %s settled with schema %A (declared %A)%s"
+                                    id
+                                    r.Rows.Schema
+                                    q.ResultSchema
+                                    (match rowsOk with
+                                     | Some e -> sprintf " and rows Table.validate refuses: %A" e
+                                     | None -> "")
+                            )
+                    )
+                | _ -> ())
+
+        let isGuard (r: LawResult) =
+            let p = SampleAdequacy.guardOpening
+            r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p
+
+        let seam =
+            LawKit.seamLaws
+                { Lookup =
+                    fun id ->
+                        match QueryRegistry.tryFind id w.Queries with
+                        | None -> Error(NoSuchQuery(id, known))
+                        | Some q -> Ok q
+                  Validate = Query.validateParams
+                  Body = fun args q -> w.Resolver args q
+                  Dispatch = w.Dispatch
+                  Gen = w.GenQuery
+                  Rendering =
+                    { Family = family
+                      Laws =
+                        "query dispatch at the domain has three outcomes (settled, pending, refused typed); Ok(Failed _) never escapes",
+                        "a refused dispatch runs no resolver at the domain's host (refused: none; dispatched: exactly one)",
+                        "the domain's host agrees with its query registry (reaches the resolver iff admitted; refuses with the registry's error)"
+                      Runner = "resolver"
+                      BodyFailedName = "ExecutionFailed"
+                      TryBodyFailed =
+                        fun e ->
+                            match e with
+                            | ExecutionFailed(m, _) -> Some m
+                            | _ -> None
+                      BodyFailed = fun m -> ExecutionFailed(m, []) } }
+                seed
+                iterations
+
+        (seam |> List.filter (isGuard >> not))
+        @ LawKit.results [ bound ]
+        @ (seam |> List.filter isGuard)
 
     // ---- signature-typed function registry (Phase 50) ----
     // The teeth on `FunctionEntry` / `FunctionRegistry` + `findBySignature`: the artifact-function

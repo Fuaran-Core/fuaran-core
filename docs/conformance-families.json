@@ -428,7 +428,7 @@
       "optIn": false,
       "discharges": [],
       "cases": "600",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "none"
     },
     {
@@ -465,7 +465,7 @@
       "witness": ["NodeWitness", "IdWitness", "OpGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": ["independence-diamond"],
+      "discharges": [],
       "cases": "900",
       "adequacy": "guarded-reached",
       "refusal": "none"
@@ -478,7 +478,7 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": true,
       "reason": "stronger-promise",
-      "discharges": [],
+      "discharges": ["independence-diamond"],
       "cases": "600",
       "adequacy": "guarded-reached",
       "refusal": "none"
@@ -531,7 +531,7 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "600",
+      "cases": "1200",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
@@ -675,7 +675,7 @@
       "reason": "stronger-promise",
       "discharges": [],
       "cases": "600",
-      "adequacy": "unconditional",
+      "adequacy": "guarded-reached",
       "refusal": "none"
     },
     {
@@ -790,7 +790,7 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "900",
+      "cases": "1200",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
@@ -803,7 +803,7 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "900",
+      "cases": "1200",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     },

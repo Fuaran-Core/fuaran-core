@@ -73,29 +73,32 @@ module internal KeyedArbitrationLaws =
         let actionability =
             LawKit.LawCell(
                 "every rejection is actionable (Inapplicable = the domain's canApply envelope; Conflicts cites interfering accepted ids with their clauses)",
-                Some "arbitration bucket"
+                Some "arbitration bucket, built arm and op kind"
             )
 
         let lands =
             LawKit.LawCell(
                 "the accepted scripts land under applyContainedKeyed in any order, to one tree whose keyed walk repeats no id",
-                Some "arbitration bucket"
+                Some "arbitration bucket, built arm and op kind"
             )
 
         let containerRefused =
             LawKit.LawCell(
                 "a proposal inserting under a node the container capability refuses is Inapplicable(NotAContainer), never admitted",
-                Some "built arm"
+                Some "arbitration bucket, built arm and op kind"
             )
 
         let clashRefused =
             LawKit.LawCell(
                 "two proposals bringing in the same keyed id are never both admitted; the later is Conflicts citing the earlier with SameTarget on that id",
-                Some "built arm"
+                Some "arbitration bucket, built arm and op kind"
             )
 
         let mutable acceptedSeen = 0
         let mutable rejectedSeen = 0
+        // Phase 302 — the actionability law's `Conflicts` half, counted apart from the rejections
+        // the built inapplicable proposals alone can supply.
+        let mutable conflictsSeen = 0
         let mutable containerArms = 0
         let mutable clashArms = 0
         let mutable declaredKeyed = 0
@@ -222,6 +225,7 @@ module internal KeyedArbitrationLaws =
                         fun () -> at (sprintf "Inapplicable ≠ the domain's canApply envelope (proposal %d)" p.Id)
                     )
                 | Conflicts(ids, explained) ->
+                    conflictsSeen <- conflictsSeen + 1
                     let fp = footprintOf p.Ops
 
                     let cited =
@@ -369,6 +373,8 @@ module internal KeyedArbitrationLaws =
                 family
                 dimension
                 seed
-                ([ "accepted proposal", acceptedSeen; "rejected proposal", rejectedSeen ]
+                ([ "accepted proposal", acceptedSeen
+                   "rejected proposal", rejectedSeen
+                   "conflicts rejection", conflictsSeen ]
                  @ builtArms
                  @ kinds.Demands) ]

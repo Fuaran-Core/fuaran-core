@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D100: every gated arm is counted where its evidence is built and reds at zero; a query result is bound by a law, not by a refusal; a premise names the family that carries it and is discharged by nothing
+
+**Recorded by Phase 302. `Fuaran.Core.Conformance` (the kit's runner `LawKit`, `SampleAdequacy`, the
+family roster, and the families named below); rides the `0.34.0` draft (STABILITY.md, "The kit's
+non-degeneracy floor").**
+
+*Decided: the floor is a property of the runner, not of each family's discipline.* An audit ran every
+family against broken witnesses — a constant encoder, a constant `HashFn`, a case-blind `Equals`, a
+refusal-free stream generator, a node `encode` that ignores its input — and every cell that stayed
+green had one shape: evidence drawn, then gated on a difference the defective witness cannot produce,
+with the skip uncounted. Phase 297's `LawCell` already makes an UNCOVERED law red at zero evidence. What
+this decision adds is that a COVERED law — one that reads green at zero because a guard counts its arm —
+is only covered where (1) the guard's counter is taken INSIDE the gate the law is asserted under, and
+(2) the guard the cell names is one the family emits. The suite holds (2) to the sources: every covered
+dimension a topic file names must open a guard dimension some reference run emits.
+
+*Decided: a replacement is redrawn, bounded, before an arm gives up.* A single draw that happened to
+encode like the op it replaces skipped the arm; sixteen draws make the arm reached on every iteration
+the generator CAN distinguish, and a run that never could is reported by the arm's guard or strict
+cell. Not unbounded — a generator with one op must terminate — and not raising the iteration count,
+which is the remedy Phase 106 recorded as the trap.
+
+*Decided: where a law is about a pair the generator rarely draws, the family draws one.* Measured at
+this repository's reference witness, `footprintLaws` drew three hundred pairs of four-op scripts and
+not one independent pair of NON-EMPTY scripts: a remove, move or update carries an unknown-parent write
+that interferes with every structure write. Every independent pair it had counted held an empty
+script, so the soundness law behind `independence-diamond` had commuted nothing. The confluence
+families now draw a short independent pair (bounded) where the drawn pair interferes, and count only
+non-empty ones. This BIASES the sample toward the law's subject, which is the point of a law about
+independent pairs; the monotonicity and determinism laws still read the drawn pair.
+
+*Decided: the query result is bound by a law; `Query.invoke` does not refuse.* A resolver that answers
+a table of another schema, or rows `Table.validate` refuses, was green everywhere. Two routes: a new
+`QueryError` case that `invoke` raises Core-side, or a law in `queryLawsWith` / `queryLawsAt`. A new case
+is breaking for every exhaustive match over `QueryError`, and it would make Core judge a host's answer
+on every call to catch what a conformance run catches once. The law carries it; a host that wants the
+refusal at run time calls `Table.validate` and compares the schema itself.
+
+*Decided: a premise names the family that carries it and is discharged by nothing.*
+`content-id-determines-content` is the cryptographic premise of the theorems that take it, and the
+ladder's rule is that a premise is discharged by nothing — sampling cannot prove injectivity. Its claim
+now says it holds for a host's collision-resistant `HashFn`, is false for the default FNV-1a at scale,
+and is CARRIED, sampled, by `hashFnLaws`' three new arms; the row names no `dischargedBy`. The
+discharge that was wrong moved instead: `independence-diamond` is about a domain's own ops, so it is
+discharged by `footprintLawsAt` (Phase 249), not by `footprintLaws`, which samples the skeleton algebra
+that `tree-independence-diamond` already proves.
+
+*Not done here, and why.* The proof-coverage clause that maps every public operation in `api/*.txt`
+to a ladder row, a family or a recorded exclusion is NOT in this phase: it is an inventory of the whole
+public surface, curated row by row, and the coverage checker and its exclusion file belong to a
+concurrent phase's region. The tree differentials' structural comparison — the other half of that
+task — is here. Two smaller audit findings are recorded rather than fixed: `keyedArbitrationLawsWith`
+waives its keyed-clash demand when the DRAWN trees never carry a keyed child, which reads as "declares
+no keyed position" although a witness can declare positions its generator never fills (the witness has
+no declaration to read instead); and a covered cell's dimension is checked against guard dimensions by
+source scan, not by the type system.
+
 ## 2026-10-01 — D99: a decode refusal is a code from a closed set and a path from the root; the code set is the wire-level decode contract every host mirrors
 
 **Recorded by Phase 310. `Fuaran.Core.Wire` (`DecodeCode`, `PathSegment`, `DecodeError`, `Decoder<'T>`,

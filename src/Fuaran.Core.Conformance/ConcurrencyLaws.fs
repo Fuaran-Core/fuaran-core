@@ -47,6 +47,8 @@ module internal ConcurrencyLaws =
         let mutable independentPairs = 0
         // Phase 297 — the kind of every DRAWN op, folded into the guard below.
         let kinds = LawKit.OpKindTally()
+        // Phase 302 — does `encode` tell drawn nodes apart at all? See `LawKit.EncodeSpread`.
+        let spread = LawKit.EncodeSpread(nodew, encode)
 
         let subsetFp (s: Footprint) (f: Footprint) =
             Set.isSubset s.Reads f.Reads
@@ -77,8 +79,21 @@ module internal ConcurrencyLaws =
                 fun () -> at (sprintf "a %d-op prefix footprint ⊄ the full footprint" k)
             )
 
+            spread.NoteTree tree
+
             // soundness: an independent pair must commute under apply (content-hash equality).
-            if Ops.independent fa fb then
+            // Phase 302 — over two NON-EMPTY scripts: an empty script's footprint is independent of
+            // every footprint, so a run of empty scripts met the guard while commuting nothing. Where
+            // the drawn pair interferes, a short independent pair is drawn instead (bounded).
+            let pair =
+                if not (List.isEmpty a) && not (List.isEmpty b) && Ops.independent fa fb then
+                    Some(a, b)
+                else
+                    LawKit.drawIndependentPair nodew idw gen (Ops.footprint nodew idw) tree rng
+
+            match pair with
+            | None -> ()
+            | Some(a, b) ->
                 independentPairs <- independentPairs + 1
                 let applyAll ops t = Ops.applyAll nodew idw ops t
 
@@ -103,7 +118,7 @@ module internal ConcurrencyLaws =
                 "Conformance.footprintLaws"
                 "script-pair independence and op kind"
                 seed
-                ([ "independent pair", independentPairs ] @ kinds.Demands) ]
+                ([ "independent pair", independentPairs; spread.Demand ] @ kinds.Demands) ]
 
     /// The footprint soundness law at a DOMAIN'S OWN ops (Phase 249) — Phase 78's soundness law
     /// (`footprintLaws`) lifted off `SkeletonOp`. `footprintLaws`, `mergeConflictLaws`,
@@ -444,6 +459,8 @@ module internal ConcurrencyLaws =
         let mutable crissCross = 0
         // Phase 297 — the kind of every DRAWN op, folded into the second guard below.
         let kinds = LawKit.OpKindTally()
+        // Phase 302 — does `encode` tell drawn nodes apart at all? See `LawKit.EncodeSpread`.
+        let spread = LawKit.EncodeSpread(nodew, encode)
         // The no-op the base node and the merge nodes carry, so `Dag.replayTo` of either is the
         // history above it and nothing else.
         let noOp: SkeletonOp<'Node, 'Id> = Batch []
@@ -468,8 +485,20 @@ module internal ConcurrencyLaws =
 
         LawKit.run iterations seed (fun rng i at ->
             let tree = rng.Draw gen.Tree
-            let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
-            let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            let a0 = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            let b0 = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+
+            // Phase 302 — every other disjoint trial, and every criss-cross trial, starts from a
+            // short INDEPENDENT pair where one can be drawn (bounded): the four-op scripts above
+            // nearly always interfere, so the clean disjoint fold, the independent-delta
+            // cross-validation and the criss-cross shape were reached by luck or not at all.
+            let a, b =
+                if i % 8 = 4 || i % 4 = 3 then
+                    match LawKit.drawIndependentPair nodew idw gen (Ops.footprint nodew idw) tree rng with
+                    | Some p -> p
+                    | None -> a0, b0
+                else
+                    a0, b0
 
             // a genesis base node carrying the no-op (it is in the base closure, which the
             // partition excludes), then branch A forked off it under its own actor.
@@ -525,8 +554,17 @@ module internal ConcurrencyLaws =
                     let m2, d5 =
                         Dag.merge hashFn sw (Human "merge-2") noOp headA0 headB0 d4 |> LawKit.dagBuilt
 
-                    let c = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
-                    let d = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
+                    // Phase 302 — the lanes above the two merges are an independent pair where one
+                    // can be drawn, so the criss-cross trial can fold clean and its shared-history
+                    // law is asserted; drawn as before otherwise.
+                    let c, d =
+                        match LawKit.drawIndependentPair nodew idw gen (Ops.footprint nodew idw) merged rng with
+                        | Some p -> p
+                        | None ->
+                            let c = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
+                            let d = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 3 merged)
+                            c, d
+
                     let h1, d6 = chain "lane-a" c m1 d5
                     let h2, dag = chain "lane-b" d m2 d6
                     // `mergeBase` picks one of the two maximal common ancestors; the other branch is
@@ -538,11 +576,7 @@ module internal ConcurrencyLaws =
                     let headB, dag = chain "lane-b" b genesis d2
                     "disjoint", genesis, headA0, headB, dag, a, b, []
 
-            match shapeName with
-            | "fast-forward" -> fastForward <- fastForward + 1
-            | "duplicate-head" -> duplicateHead <- duplicateHead + 1
-            | "criss-cross" -> crissCross <- crissCross + 1
-            | _ -> disjoint <- disjoint + 1
+            spread.NoteTree tree
 
             let result = Dag.reconcile fp dag baseId headA headB
 
@@ -554,7 +588,14 @@ module internal ConcurrencyLaws =
 
             match result with
             | Ok script ->
-                cleanFolds <- cleanFolds + 1
+                // Phase 302 — a shape is counted where its law is ASSERTED: on a clean fold. Counted
+                // as built, a run whose every non-disjoint trial conflicted read the shared-history
+                // law as reached.
+                match shapeName with
+                | "fast-forward" -> fastForward <- fastForward + 1
+                | "duplicate-head" -> duplicateHead <- duplicateHead + 1
+                | "criss-cross" -> crissCross <- crissCross + 1
+                | _ -> disjoint <- disjoint + 1
 
                 determinism.Check(
                     (script = shared @ exclA @ exclB),
@@ -567,6 +608,9 @@ module internal ConcurrencyLaws =
                 )
 
                 if shapeName = "disjoint" then
+                    // Phase 302 — the clean-fold count is the disjoint arm's, where `clean` is asserted;
+                    // a clean fast-forward is the shared-history law's evidence, not this one's.
+                    cleanFolds <- cleanFolds + 1
                     // clean-merge replay: script ≡ A-then-B ≡ B-then-A on the base tree (content hash).
                     let viaScript = applyAll script tree |> Result.map hashOf
                     let ab = applyAll a tree |> Result.bind (applyAll b) |> Result.map hashOf
@@ -623,7 +667,13 @@ module internal ConcurrencyLaws =
                 )
 
             // footprint cross-validation: footprint-independent exclusive deltas ⇒ conflict-free (Ok).
-            if Ops.independent (Ops.footprint nodew idw exclA) (Ops.footprint nodew idw exclB) then
+            // Phase 302 — over two NON-EMPTY deltas: an empty delta is independent of anything, so a
+            // fast-forward or a duplicate head met the guard every cycle while testing nothing.
+            if
+                not (List.isEmpty exclA)
+                && not (List.isEmpty exclB)
+                && Ops.independent (Ops.footprint nodew idw exclA) (Ops.footprint nodew idw exclB)
+            then
                 independentDeltas <- independentDeltas + 1
 
                 cross.Check(
@@ -638,7 +688,7 @@ module internal ConcurrencyLaws =
                 "Conformance.reconcileLawsWith"
                 "reconcile outcome"
                 seed
-                [ "clean fold", cleanFolds; "conflicted fold", conflictedFolds ]
+                [ "clean disjoint fold", cleanFolds; "conflicted fold", conflictedFolds ]
             SampleAdequacy.reached
                 "Conformance.reconcileLawsWith"
                 "reconcile shape"
@@ -651,7 +701,7 @@ module internal ConcurrencyLaws =
                 "Conformance.reconcileLawsWith"
                 "delta-pair independence and op kind"
                 seed
-                ([ "independent delta pair", independentDeltas ] @ kinds.Demands) ]
+                ([ "independent delta pair", independentDeltas; spread.Demand ] @ kinds.Demands) ]
 
 
     /// `reconcileLawsWith` pinned to `OpStream.defaultHash` — the laws and the guard are its.
@@ -751,17 +801,31 @@ module internal ConcurrencyLaws =
         let mutable independentPairs = 0
         // Phase 297 — the kind of every DRAWN op, folded into the coverage guard below.
         let kinds = LawKit.OpKindTally()
+        // Phase 302 — does `encode` tell drawn nodes apart at all? See `LawKit.EncodeSpread`.
+        let spread = LawKit.EncodeSpread(nodew, encode)
 
         LawKit.run iterations seed (fun rng _ at ->
             let tree = rng.Draw gen.Tree
             let a = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
             let b = rng.Draw(LawKit.collectScript (Some kinds) nodew idw gen 4 tree)
+            spread.NoteTree tree
 
-            if
-                not (List.isEmpty a)
-                && not (List.isEmpty b)
-                && Ops.independent (footprintOf a) (footprintOf b)
-            then
+            // Phase 302 — where the drawn pair interferes, a short independent pair is drawn instead
+            // (bounded): measured at the reference witness, independent pairs of four-op scripts
+            // arose about once in three hundred draws.
+            let pair =
+                if
+                    not (List.isEmpty a)
+                    && not (List.isEmpty b)
+                    && Ops.independent (footprintOf a) (footprintOf b)
+                then
+                    Some(a, b)
+                else
+                    LawKit.drawIndependentPair nodew idw gen footprintOf tree rng
+
+            match pair with
+            | None -> ()
+            | Some(a, b) ->
                 independentPairs <- independentPairs + 1
 
                 let mutable interleavings = [ a @ b; b @ a ]
@@ -820,7 +884,7 @@ module internal ConcurrencyLaws =
                 "Conformance.concurrencyLawsWith"
                 "independent pair (coverage) and op kind"
                 seed
-                ([ "independent pair", independentPairs ] @ kinds.Demands) ]
+                ([ "independent pair", independentPairs; spread.Demand ] @ kinds.Demands) ]
 
     /// The confluence / interleaving laws (Phase 80) pinned to the real `Ops.footprint` — the shape
     /// a domain runs. See `concurrencyLawsWith` for the law text, the sampling bound, and the
@@ -901,8 +965,13 @@ module internal ConcurrencyLaws =
         // accepted, or never rejected, certifies those green having never applied them.
         let mutable acceptedSeen = 0
         let mutable rejectedSeen = 0
+        // Phase 302 — the actionability law has two halves, and a run whose only rejections were
+        // the built inapplicable proposals never checked a `Conflicts` citation.
+        let mutable conflictsSeen = 0
         // Phase 297 — the kind of every DRAWN op, folded into the guard below.
         let kinds = LawKit.OpKindTally()
+        // Phase 302 — does `encode` tell drawn nodes apart at all? See `LawKit.EncodeSpread`.
+        let spread = LawKit.EncodeSpread(nodew, encode)
 
         let mkProposal id ops : OpScriptProposal<'Node, 'Id> =
             { Id = id
@@ -911,6 +980,7 @@ module internal ConcurrencyLaws =
 
         LawKit.run iterations seed (fun rng _ at ->
             let tree = rng.Draw gen.Tree
+            spread.NoteTree tree
             let extra = rng.IntBelow 4
             let count = extra + 2 // 2..5 proposals
 
@@ -1025,6 +1095,7 @@ module internal ConcurrencyLaws =
                         fun () -> at (sprintf "Inapplicable ≠ the canApplyAll envelope (proposal %d)" p.Id)
                     )
                 | Conflicts(ids, _) ->
+                    conflictsSeen <- conflictsSeen + 1
                     let fp = Ops.footprint nodew idw p.Ops
 
                     let citesInterferingAccepted =
@@ -1077,5 +1148,8 @@ module internal ConcurrencyLaws =
                 "Conformance.arbitrationLaws"
                 "arbitration bucket and op kind"
                 seed
-                ([ "accepted proposal", acceptedSeen; "rejected proposal", rejectedSeen ]
+                ([ "accepted proposal", acceptedSeen
+                   "rejected proposal", rejectedSeen
+                   "conflicts rejection", conflictsSeen
+                   spread.Demand ]
                  @ kinds.Demands) ]

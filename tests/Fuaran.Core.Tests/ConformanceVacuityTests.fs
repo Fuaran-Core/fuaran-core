@@ -1096,3 +1096,256 @@ let vacuityTests =
               Expect.isFalse
                   (declarationOnly.Contains("| " + SampleAdequacy.vacuousToken + " |"))
                   "and never claims a family ran empty" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 302 — the non-degeneracy floor, re-measured
+// ---------------------------------------------------------------------------
+//
+// The audit that opened Phase 302 ran every family against deliberately broken witnesses and found
+// the kit blind in one shape: an arm whose evidence is drawn and then gated on a difference the
+// defective witness cannot produce, so the law is skipped and nothing counts the skip. Each case
+// below is one cell of that matrix that was GREEN, and is the go-red that keeps it red.
+
+let private redLaws (results: LawResult list) =
+    results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
+
+let private hasRed (fragment: string) (results: LawResult list) =
+    results |> List.exists (fun r -> not r.Passed && r.Law.Contains fragment)
+
+let private constantEncoder: StreamWitness<Counter.CounterOp, int, string> =
+    { ConformanceTests.sw with
+        Encode = fun _ -> "{}" }
+
+let private constantHash: HashFn = fun _ _ -> "h"
+
+let private caseBlindIdw: IdWitness<string> =
+    { idw with
+        Equals = fun a b -> a.ToLowerInvariant() = b.ToLowerInvariant() }
+
+let private constantNodeEncode (_: RNode) = "x"
+
+/// The phase's own premise, checked rather than trusted: `Conformance.fs`, `LawKit.fs` and the
+/// topic files carry `LawCell(name, Some "<dimension>")` — a cell that reads green at zero evidence
+/// because a guard counts its arm. A covered dimension no guard emits is a cell that can be starved
+/// with nothing to say so. Every covered dimension named in the sources must OPEN a guard
+/// dimension some reference run emits (a guard may append a "(…vacuous BY DECLARATION)" note).
+let private coveredDimensions () : (string * string) list =
+    let dir = Snapshots.repoFile "src/Fuaran.Core.Conformance"
+
+    let pattern =
+        System.Text.RegularExpressions.Regex(
+            "LawCell\\(\\s*(?:\"(?:[^\"\\\\]|\\\\.)*\"|[A-Za-z]\\w*)\\s*,\\s*Some \"([^\"]+)\"|coveredBy = Some \"([^\"]+)\"|LawCell\\((?:precedesLaw|agreementLaw), Some \"([^\"]+)\"\\)"
+        )
+
+    [ for file in System.IO.Directory.GetFiles(dir, "*.fs") do
+          let text = System.IO.File.ReadAllText file
+
+          for m in pattern.Matches text do
+              let dim =
+                  [ 1; 2; 3 ]
+                  |> List.map (fun g -> m.Groups.[g])
+                  |> List.find (fun g -> g.Success)
+
+              yield System.IO.Path.GetFileName file, dim.Value ]
+
+let private guardDimensions () : string list =
+    let reached = "the sample reached every "
+    let spans = "the sample spans the "
+
+    [ for r in runs.Value do
+          for law in r.Results do
+              if law.Law.StartsWith SampleAdequacy.guardOpening then
+                  let at = law.Law.IndexOf "): "
+                  let sentence = law.Law.Substring(at + 3)
+
+                  if sentence.StartsWith reached then
+                      yield sentence.Substring(reached.Length).Replace(" the laws distinguish", "")
+                  elif sentence.StartsWith spans then
+                      yield sentence.Substring(spans.Length) ]
+    |> List.distinct
+
+[<Tests>]
+let floorTests =
+    testList
+        "Conformance.Floor (Phase 302)"
+        [ testCase
+              "certify is red under each defect of the audit matrix — constant encoder, constant HashFn, case-blind Equals, refusal-free stream"
+          <| fun _ ->
+              let certifyAt sw' idw' hashFn streamGen' =
+                  (Conformance.certify nodew idw' ConformanceTests.opGen sw' streamGen' hashFn 4242 200).Results
+
+              let enc =
+                  certifyAt constantEncoder idw OpStream.defaultHash ConformanceTests.streamGen
+
+              Expect.isTrue (hasRed "tampered chain" enc) (sprintf "constant encoder: %A" (redLaws enc))
+
+              let hash = certifyAt ConformanceTests.sw idw constantHash ConformanceTests.streamGen
+              Expect.isTrue (hasRed "detects a tampered op" hash) (sprintf "constant HashFn: %A" (redLaws hash))
+
+              let eq =
+                  certifyAt ConformanceTests.sw caseBlindIdw OpStream.defaultHash ConformanceTests.streamGen
+
+              Expect.isTrue (hasRed "IdWitness identities agree" eq) (sprintf "case-blind Equals: %A" (redLaws eq))
+
+              let free =
+                  certifyAt ConformanceTests.sw idw OpStream.defaultHash ConformanceTests.refusalFreeStreamGen
+
+              Expect.isTrue
+                  (hasRed "sample adequacy (Conformance.reducer)" free)
+                  (sprintf "refusal-free StreamGen: %A" (redLaws free))
+
+              let reference =
+                  certifyAt ConformanceTests.sw idw OpStream.defaultHash ConformanceTests.streamGen
+
+              Expect.isEmpty (redLaws reference) "and the reference witness is green"
+
+          testCase "certifyStream is red under the constant encoder and the constant HashFn"
+          <| fun _ ->
+              let enc =
+                  (Conformance.certifyStream constantEncoder ConformanceTests.streamGen OpStream.defaultHash 4242 200)
+                      .Results
+
+              let hash =
+                  (Conformance.certifyStream ConformanceTests.sw ConformanceTests.streamGen constantHash 4242 200)
+                      .Results
+
+              Expect.isTrue (hasRed "tampered chain" enc) (sprintf "constant encoder: %A" (redLaws enc))
+              Expect.isTrue (hasRed "detects a tampered op" hash) (sprintf "constant HashFn: %A" (redLaws hash))
+
+          testCase "hashFnLaws is red under a constant HashFn — the three arms that need the hash itself"
+          <| fun _ ->
+              let results =
+                  Conformance.hashFnLaws ConformanceTests.sw ConformanceTests.streamGen constantHash 4242 200
+
+              for fragment in [ "op-tamper detection"; "re-minting moves the head"; "content addressing" ] do
+                  Expect.isTrue (hasRed fragment results) (sprintf "%s is red: %A" fragment (redLaws results))
+
+              let honest =
+                  Conformance.hashFnLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200
+
+              Expect.isEmpty (redLaws honest) "and green under the default HashFn"
+
+          testCase "a constant node encode starves all four confluence families on the encode-distinguished guard"
+          <| fun _ ->
+              let gen = ConformanceTests.opGen
+
+              for name, results in
+                  [ "footprintLaws", Conformance.footprintLaws nodew idw gen constantNodeEncode 4242 300
+                    "concurrencyLaws", Conformance.concurrencyLaws nodew idw gen constantNodeEncode 8080 300
+                    "reconcileLaws", Conformance.reconcileLaws nodew idw gen constantNodeEncode 5353 300
+                    "arbitrationLaws", Conformance.arbitrationLaws nodew idw gen constantNodeEncode 8585 300 ] do
+                  let guard =
+                      results
+                      |> List.filter (fun r -> not r.Passed)
+                      |> List.choose (fun r -> r.Counterexample)
+                      |> List.exists (fun cx -> cx.Contains "never reached" && cx.Contains "encode-distinguished node")
+
+                  Expect.isTrue guard (sprintf "%s names the starved encode: %A" name (redLaws results))
+
+          testCase "footprintLaws counts only non-empty independent pairs, and reaches them at the reference"
+          <| fun _ ->
+              let results =
+                  Conformance.footprintLaws nodew idw ConformanceTests.opGen encNode 4242 300
+
+              Expect.isEmpty (redLaws results) "the reference reaches non-empty independent pairs"
+
+              let lone =
+                  Conformance.footprintLaws nodew idw ConformanceTests.loneLeafGen encNode 4242 100
+
+              Expect.isTrue
+                  (hasRed "script-pair independence" lone)
+                  (sprintf
+                      "a generator whose every op is refused builds only empty scripts, and is told so: %A"
+                      (redLaws lone))
+
+          testCase "diffLaws and normalizeLaws are Guarded, and red over a generator whose every op is refused"
+          <| fun _ ->
+              let diff = Conformance.diffLaws nodew idw ConformanceTests.loneLeafGen 4242 100
+              Expect.isTrue (hasRed "non-identity pair" diff) (sprintf "diffLaws: %A" (redLaws diff))
+
+              let norm = Conformance.normalizeLaws nodew idw ConformanceTests.loneLeafGen 1234 100
+              Expect.isTrue (hasRed "non-identity script" norm) (sprintf "normalizeLaws: %A" (redLaws norm))
+
+              for family in [ "Conformance.diffLaws"; "Conformance.normalizeLaws" ] do
+                  match SampleAdequacy.census |> List.tryFind (fun (id, _) -> id = family) with
+                  | Some(_, Guarded _) -> ()
+                  | other -> failtestf "%s left `Unconditional` (Phase 302): %A" family other
+
+          testCase "idempotencyLaws answers a non-functional keyOf with a counterexample, never a throw"
+          <| fun _ ->
+              let calls = ref 0
+
+              let drifting (op: Counter.CounterOp) =
+                  calls.Value <- calls.Value + 1
+                  sprintf "%A#%d" op calls.Value
+
+              let results =
+                  Conformance.idempotencyLaws
+                      drifting
+                      ConformanceTests.sw
+                      ConformanceTests.stratifiedStreamGen
+                      OpStream.defaultHash
+                      4242
+                      50
+
+              Expect.isTrue
+                  (results
+                   |> List.exists (fun r ->
+                       not r.Passed
+                       && (r.Counterexample
+                           |> Option.exists (fun cx -> cx.Contains "keyOf is not a function"))))
+                  (sprintf "the duplicate law names the defect: %A" (redLaws results))
+
+          testCase
+              "queryLawsWith binds a settled result to its declared schema — a resolver that answers another schema is red"
+          <| fun _ ->
+              let w = WitnessTakingFamiliesTests.queryWitness
+
+              let lying (args: (string * Cell) list) (q: Query) =
+                  match w.Resolver args q with
+                  | Ready r ->
+                      Ready
+                          { r with
+                              Rows =
+                                  { Schema = [ "other", IntType ]
+                                    Columns = [ Column.create "other" IntType [ Int 11 ] ] } }
+                  | d -> d
+
+              let results = Conformance.queryLawsWith { w with Resolver = lying } 4242 200
+              Expect.isTrue (hasRed "bound to its declaration" results) (sprintf "%A" (redLaws results))
+
+              let honest = Conformance.queryLawsWith w 4242 200
+              Expect.isEmpty (redLaws honest) "and the reference resolver is green"
+
+          testCase "propagationEvaluatorLaws is red on an evaluator that asks for a read it does not declare"
+          <| fun _ ->
+              let w = ConformanceTests.sheetw
+
+              let peeking =
+                  { w with
+                      EvalNode =
+                          fun m resolve id ->
+                              resolve "undeclared-peek" |> ignore
+                              w.EvalNode m resolve id }
+
+              let results = Conformance.propagationEvaluatorLaws peeking 4242 100
+
+              Expect.isTrue
+                  (results
+                   |> List.exists (fun r ->
+                       not r.Passed
+                       && (r.Counterexample |> Option.exists (fun cx -> cx.Contains "do not hold"))))
+                  (sprintf "%A" (redLaws results))
+
+          testCase "every covered cell names a dimension a guard emits — the zero is always reported somewhere"
+          <| fun _ ->
+              let guards = guardDimensions ()
+              let covered = coveredDimensions ()
+              Expect.isNonEmpty covered "the scan found the covered cells it is about"
+
+              let orphans =
+                  covered
+                  |> List.filter (fun (_, dim) -> not (guards |> List.exists (fun g -> g.StartsWith dim)))
+                  |> List.distinct
+
+              Expect.isEmpty orphans "a covered cell whose dimension no guard emits can be starved silently" ]

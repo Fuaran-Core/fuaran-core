@@ -23,8 +23,10 @@ namespace Fuaran.Core
 //  families an aggregate runs off this file's source.
 //
 //  ---- Out of conformance scope by design ----------------------------------
-//  Certification proves **faithful carriage + integrity** — that a host's codec
-//  round-trips values byte-identically, that its reducer is total and replays
+//  Certification proves **faithful carriage + integrity** — that a host's op
+//  encodings read back from the chain's JSONL and re-write byte-identically
+//  (`streamLaws`' JSONL cell, Phase 301; no other codec round trip is run, Phase
+//  302), that its reducer is total and replays
 //  deterministically, and that its chains/DAGs are tamper-evident. It deliberately
 //  does NOT grade the following; each is a host- or domain-level concern the kit
 //  leaves open on purpose, so "conformant" is a precise claim and not an implied
@@ -38,7 +40,8 @@ namespace Fuaran.Core
 //    - Attribution *content* — WHETHER an `Actor` / `Session` id is truthful. The
 //      chain proves attribution was not *tampered*; it never proves it was *honest*.
 //    - Hash-strength *selection* — the collision-resistance of the supplied `HashFn`.
-//      `hashFnLaws` certify parity + tamper-detection under ANY `HashFn`;
+//      `hashFnLaws` certify parity + tamper-detection for the SUPPLIED `HashFn`
+//      and go red on one that cannot detect an op tamper (Phase 302);
 //      `hashFnAdversarialLaws` pin the posture, but the strong-crypto *choice* is
 //      the host's (Core ships no cryptographic hash — GP3).
 // ============================================================================
@@ -795,11 +798,22 @@ module Conformance =
         : ConformanceReport =
         let witness = witnessLaws nodew idw opGen seed iterations
 
+        // Phase 302 — the stream side's adequacy. `streamLaws` guards the accepted side (Phase
+        // 245); the refused side was guarded only through `certifyStream`'s `reducer`, so a
+        // refusal-free `StreamGen` certified green here on the accept path alone. `reducer`'s two
+        // guards are folded in — its subject laws are `certifyStream`'s, not this aggregate's.
+        let reducerGuards () =
+            let p = SampleAdequacy.guardOpening
+
+            reducer sw.Apply streamGen None (seed + 4) iterations
+            |> List.filter (fun r -> r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p)
+
         let rest =
             if witness |> List.forall (fun r -> r.Passed) then
                 opAlgebra nodew idw opGen (seed + 1) iterations
                 @ diffLaws nodew idw opGen (seed + 3) iterations
                 @ streamLaws sw streamGen hashFn (seed + 2) iterations
+                @ reducerGuards ()
             else
                 [] // witness defect — the downstream laws would be noise
 

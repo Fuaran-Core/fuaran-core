@@ -235,8 +235,8 @@ let integrityLawTests =
 
               Expect.equal
                   (List.length dflt)
-                  4
-                  "determinism + parity + tamper laws and the tamper-arm guard reported (Phase 297)"
+                  7
+                  "determinism + parity + tamper laws, the op-tamper / re-mint / distinguishing laws (Phase 302) and the tamper-arm guard reported"
 
               if dflt |> List.exists (fun r -> not r.Passed) then
                   let fails =

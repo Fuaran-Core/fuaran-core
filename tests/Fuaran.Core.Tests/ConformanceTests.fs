@@ -287,14 +287,16 @@ let conformanceFacadeTests =
 
               Expect.equal
                   (report.Results |> List.length)
-                  21
+                  24
+                  // Phase 302: the diff laws gained their non-identity guard and certify folds the
+                  // reducer's accepted/refused guards (the stream side's refusals). Before that,
                   // algebra gained the insert-uniqueness law in Phase 137, the
                   // WellFormed-preservation law in Phase 139, and — Phase 220 — its two
                   // accepted/refused adequacy guards; the stream laws gained their accepted-op
                   // and tampered-chain guards in Phase 245; the witness laws gained the
                   // identities-agree law in Phase 290; the stream laws gained the JSONL round
                   // trip in Phase 301.
-                  "witness (5) + algebra (5 + 2 guards) + diff (3) + stream (4 + 2 guards) laws reported" ]
+                  "witness (5) + algebra (5 + 2 guards) + diff (3 + 1 guard) + stream (4 + 2 guards) + reducer (2 guards) laws reported" ]
 
 // ---- Phase 48: artifact-function property-verification ----
 

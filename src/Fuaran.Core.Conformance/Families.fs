@@ -210,7 +210,9 @@ module Families =
               treeWitness
               None
               []
-              (Unconditional "each iteration diffs a pair and re-applies the emitted script")
+              // Phase 302 — moved out of `Unconditional`: every law holds over the identity pair,
+              // and `after` is `before` whenever every derived op is refused.
+              (Guarded [ "non-identity pair" ])
               (NoRefusal, "a refused op is skipped while building `after`; no law reads it")
           // Phase 245 — moved out of `Unconditional`, where "each iteration applies, replays and
           // tampers the same chain" was true only of a generator whose ops the domain accepts. The
@@ -252,7 +254,9 @@ module Families =
               treeWitness
               (Some StrongerPromise)
               []
-              (Unconditional "each iteration normalises a drawn script and compares both ways")
+              // Phase 302 — moved out of `Unconditional`: all three laws hold over a script that does
+              // nothing, which is all a run whose every drawn op is refused collects.
+              (Guarded [ "non-identity script" ])
               (NoRefusal, "a refused op is skipped; no law reads it")
           // Phase 161. Every arm is BUILT — a perturbed child list, an operation over a drawn tree,
           // a graft carrying its own interior offender — but whether the WITNESS honours the rebuild
@@ -294,8 +298,11 @@ module Families =
               "footprintLaws"
               treeWitness
               (Some StrongerPromise)
-              [ "independence-diamond" ]
-              (Guarded [ "script-pair independence" ])
+              // Phase 302 — `independence-diamond` is about a domain's OWN ops; this family samples
+              // the skeleton algebra, which `tree-independence-diamond` already proves. The row's
+              // discharge moved to `footprintLawsAt`.
+              []
+              (Guarded [ "script-pair independence"; "encode-distinguished node" ])
               (NoRefusal, "a refused op is skipped; no law reads it")
           // Phase 249 — `footprintLaws`' soundness law at the domain's own ops: the domain's stream
           // witness, footprint projection and generator, so a hand-written footprint over a domain
@@ -306,7 +313,7 @@ module Families =
               "footprintLawsAt"
               streamWitness
               (Some StrongerPromise)
-              []
+              [ "independence-diamond" ]
               (Guarded [ "script-pair independence" ])
               (NoRefusal,
                "a refused draw is skipped while threading and counted beside the guard; an Apply error on an independent pair only fails the soundness law")
@@ -423,10 +430,13 @@ module Families =
               "hashFnLaws"
               streamWitness
               (Some StrongerPromise)
+              // Phase 302 — the op-tamper, re-mint and distinguishing arms are the ones that need the
+              // hash itself; the family CARRIES `content-id-determines-content` (proofs.json names it)
+              // but discharges nothing, because a premise is discharged by nothing.
               []
-              (Guarded [ "tamper arm (reorder / drop / bit-flip)" ])
+              (Guarded [ "tamper arm (reorder / drop / bit-flip / op-tamper / re-mint / distinguish)" ])
               (Drawn,
-               "reorder, drop and bit-flip are built and must fail verifyChain, but only over a drawn chain long enough to perturb; guarded on tamper arm (Phase 297)")
+               "every tamper is built and must fail verifyChain (or move the head), but only over a drawn chain long enough to perturb and a replacement op that encodes differently; guarded on tamper arm (Phases 297, 302)")
           // Phase 297 — moved out of `Unconditional`: the re-attribution tamper runs only over a
           // non-empty lifted stream, which the domain's generator decides; the family counts it.
           c

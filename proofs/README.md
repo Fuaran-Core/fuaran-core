@@ -642,7 +642,7 @@ over-read.
 
 | Row | Class | Discharged by / closes |
 |---|---|---|
-| `independence-diamond` | `domain-obligation` | `Conformance.footprintLaws` |
+| `independence-diamond` | `domain-obligation` | `Conformance.footprintLawsAt` |
 | `dag-outside-the-model` | `model-bridge` | `unscheduled` |
 | `extractor-and-compiler-trusted` | `premise` | — |
 | `sets-are-lists` | `model-bridge` | `permanent` |

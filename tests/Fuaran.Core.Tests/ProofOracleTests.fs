@@ -1572,6 +1572,18 @@ let private prodTreeHash (t: RNode) =
 let private modelTreeHash (t: TreeOps.tree) =
     Tree.encodeHash modelTreeW (fun n -> encWitnessNode (mTid n) (mKind n)) t
 
+/// A tree as the differentials compare it (Phase 302): id, kind tag and children, recursively — the
+/// part of a tree the model carries. The accepted-result comparison read `Tree.encodeHash` digests,
+/// so its verdict rested on a hash: Phase 290 made the digest see the shape, and this makes the
+/// comparison not depend on the digest at all. The mis-nesting mutant still loses it.
+type private TreeShape = TreeShape of id: string * kind: string * children: TreeShape list
+
+let rec private prodShape (t: RNode) : TreeShape =
+    TreeShape(t.Id, t.Kind, t.Children |> List.map prodShape)
+
+let rec private modelShape (t: TreeOps.tree) : TreeShape =
+    TreeShape(mTid t, mKind t, modelTreeW.Children t |> List.map modelShape)
+
 let private prodRejClass (r: Rejection<string>) =
     match r with
     | UnknownNode _ -> "UnknownNode"
@@ -1657,7 +1669,8 @@ let private treeProbeWith
             let ph = prodTreeHash pt
             let mh = modelTreeHash mt
 
-            (if ph <> mh then
+            // Phase 302 — compared STRUCTURALLY; the digests stay in the message only.
+            (if prodShape pt <> modelShape mt then
                  [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
              else
                  []),
@@ -4119,7 +4132,8 @@ let private presProbe
             let ph = prodTreeHash pt
             let mh = modelTreeHash mt
 
-            (if ph <> mh then
+            // Phase 302 — compared STRUCTURALLY; the digests stay in the message only.
+            (if prodShape pt <> modelShape mt then
                  [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
              else
                  []),
@@ -4469,7 +4483,8 @@ let private contProbe
             let ph = prodTreeHash pt
             let mh = modelTreeHash mt
 
-            (if ph <> mh then
+            // Phase 302 — compared STRUCTURALLY; the digests stay in the message only.
+            (if prodShape pt <> modelShape mt then
                  [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
              else
                  []),
@@ -4860,7 +4875,8 @@ let private scriptProbe
             let ph = prodTreeHash pt
             let mh = modelTreeHash mt
 
-            (if ph <> mh then
+            // Phase 302 — compared STRUCTURALLY; the digests stay in the message only.
+            (if prodShape pt <> modelShape mt then
                  [ sprintf "accepted result differs — %s\n  production: %s\n  oracle:     %s" where ph mh ]
              else
                  []),
