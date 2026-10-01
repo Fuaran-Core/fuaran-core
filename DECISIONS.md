@@ -1,5 +1,60 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D101: a ladder row states what it is true OF, and a premise production violates is either a refusal or a row that says so
+
+**Recorded by Phase 309. `proofs/`, `proofs.json`, the proof leg's kit (`proofs/kit/check-proof-leg.ps1`)
+and the `Proofs.*` families; rides the `0.34.0` draft (STABILITY.md, "The ladder tells the truth about
+production").**
+
+*Decided: the honesty rule.* A row in `proofs.json` names the object it is true of, and no wider one.
+Where production violates a premise a row leans on, exactly one of two things is true: production
+REFUSES the violating input (so the premise is a property of every value the code lets through), or
+the row SAYS that it does not hold there. A premise that production quietly violates while the row
+reads as unconditional is the defect this decision exists to prevent. Applied by this phase:
+
+- `node-ids-distinct` hid a REPLACEMENT: until Phase 296, `Dag.append` / `Dag.merge` overwrote a held
+  node on a content-id collision (`Map.add`) while `verifyDag` still passed, and under the 32-bit
+  FNV-1a default such a collision is expected near 77,000 nodes. The refusal side is now a theorem
+  (`append_refuses_differing_node`, `append_never_replaces`), and the row narrows to what is left:
+  the hash is injective on the nodes a store HOLDS.
+- `content-id-determines-content` is false for `OpStream.defaultHash` at scale (Phase 302 already says
+  so); `chain_tamper_evident_iff_hash_distinguishes` now states, with no premise, what that costs —
+  an op tamper is hidden exactly where the hash collides on that record's envelope, and nowhere else.
+- `Dag.replayTo` carried no row while every store is replayed through it; it is a theorem over the
+  proved drain now (`replay_to_is_fold_over_drain`, `replay_to_unknown_head_is_refused`,
+  `replay_to_deterministic`).
+- `witness-surface-scope` is marked `"discharge": "domain-declared"`: its law checks a domain's
+  DECLARATION and cannot check past it, so a domain that declares nothing passes. A green run of such
+  a law is not a discharge, and the contract table and the coverage line now say which rows are which.
+- the id-witness equality every model consumes (`Equals a b <==> ToString a = ToString b`) is named,
+  as `id_key_faithful` in `TreeOps.fst`, and carried on `lawful-abstract-witness`, whose law samples
+  exactly it.
+- stale counts (`invert-round-trip`'s "four", `apply-preserves-wf`'s and `contained-preserves`' "five")
+  and the diff's stated reason for `kinds_agree` ("no skeleton operation edits a node", false since
+  Phase 250's `UpdateNode`) are corrected; the diff is a SHAPE diff until Phase 305.
+
+*Decided: the extractor premise is discharged on sampled inputs, by twins that live in the model they
+sample.* Each extracted model ends with a `twins` list asserted by `assert_norm`, so F*'s normaliser
+evaluates every fixture; the list is extracted with the model and run by the host against the
+extracted oracle. One twin module beside all the models was rejected: it would reference every model,
+so the Phase 328 cone selector would put every model into every cone and the saving it exists for
+would be gone. The kit's step 2c (`-Twins`) refuses an extracted model that declares none.
+
+*Decided: the README's numbers are a projection.* The header count, the contract table and the
+contract prose's counts are generated from `proofs.json` (`CORE_APPROVE_LADDER=1`, the
+`Proofs.Ladder` family), because two hand-kept copies of one number disagree eventually — the header
+said "eight in all" over a ladder of twenty-four models.
+
+*Declined, with the evidence: a "grammar conformance not claimed" row beside `parse_total`.* Its
+premise — that `JsonParse.fst` proves a number grammar wider than RFC 8259 — stopped holding when
+Phase 299 held `parseNumber` to the JSON number grammar and Phase 306 restated the model
+(`is_json_number`, `number_grammar_is_checked_first`); the twins sample it. A row disclaiming a
+width the model no longer has would itself break the honesty rule above.
+
+*Not done here, and why:* `tree-algebra-well-formed-states` keeps its discharge until
+`Tree.Index.build` refuses duplicates and `arbitrate` checks its base — neither had shipped when this
+phase was cut.
+
 ## 2026-10-01 — D100: every gated arm is counted where its evidence is built and reds at zero; a query result is bound by a law, not by a refusal; a premise names the family that carries it and is discharged by nothing
 
 **Recorded by Phase 302. `Fuaran.Core.Conformance` (the kit's runner `LawKit`, `SampleAdequacy`, the

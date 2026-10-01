@@ -1769,6 +1769,32 @@ let single_column_table = (fun ( n  :  Prims.list<WireCanon.ch> ) ( ty  :  colum
 
 let reordered_table = (fun ( a  :  Prims.list<WireCanon.ch> ) ( b  :  Prims.list<WireCanon.ch> ) -> {schema = (((a), (IntType)))::(((b), (IntType)))::[]; columns = ({name = b; ctype = IntType; cells = []})::({name = a; ctype = IntType; cells = []})::[]})
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "try-canonical-trims-zeros"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({tname = "try-canonical-refuses-a-bare-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({tname = "of-tag-reads-int"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::[]
+
 
 
 

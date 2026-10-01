@@ -391,6 +391,32 @@ let evolution_of : Prims.list<(severity * Prims.list<WireCanon.ch>)>  ->  evolut
 
 let classify_field_add_ignoring_optionality : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) -> SAdditive)
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "classify-a-removal-is-breaking"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("b"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Breaking (((WireCanon.CPlain ("b"))::[])::[], ((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "classify-an-addition-is-additive"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Additive (((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "a-required-field-breaks-emitters"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify_field_add required_chars) SBreakingForEmitters))})::[]
+
 
 
 

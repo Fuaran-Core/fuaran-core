@@ -357,6 +357,44 @@ let mx_3 : proposal = {pid = (Prims.parse_int "3"); holder = "three"; script = (
 
 let mx_1_last : proposal = {pid = (Prims.parse_int "4"); holder = "one"; script = mx_both}
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twin_base : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("x", "sec", []))::(TreeOps.TNode ("y", "sec", []))::[])
+
+
+let twin_p1 : proposal = {pid = (Prims.parse_int "1"); holder = "A"; script = (TreeOps.InsertChild ("x", TreeOps.TNode ("n1", "para", [])))::[]}
+
+
+let twin_p2 : proposal = {pid = (Prims.parse_int "2"); holder = "B"; script = (TreeOps.InsertChild ("y", TreeOps.TNode ("n2", "para", [])))::[]}
+
+
+let twin_p2x : proposal = {pid = (Prims.parse_int "2"); holder = "B"; script = (TreeOps.InsertChild ("x", TreeOps.TNode ("n2", "para", [])))::[]}
+
+
+let twins : Prims.list<twin> = ({tname = "arbitrate-pins-and-accepts-disjoint-proposals"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (arbitrate twin_base ((twin_p2)::(twin_p1)::[])) {accepted = (twin_p1)::(twin_p2)::[]; merged = (TreeOps.InsertChild ("x", TreeOps.TNode ("n1", "para", [])))::(TreeOps.InsertChild ("y", TreeOps.TNode ("n2", "para", [])))::[]; rejected = []}))})::({tname = "arbitrate-rejects-an-interfering-proposal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (arbitrate twin_base ((twin_p1)::(twin_p2x)::[])).rejected ((((twin_p2x), (Conflicts (((Prims.parse_int "1"))::[]))))::[])))})::[]
+
 
 
 

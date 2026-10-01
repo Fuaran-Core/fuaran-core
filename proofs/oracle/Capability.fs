@@ -1884,6 +1884,32 @@ let rec mem_binding : (Prims.string * Prims.string)  ->  invocation  ->  Prims.b
      ((Prims.op_Equals x y) || (mem_binding x t))
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "determinism-tag-of-clock-and-network"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({tname = "det-of-tag-reads-its-canonical-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({tname = "det-of-tag-refuses-another-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::[]
+
 
 
 

@@ -2093,6 +2093,32 @@ and fields_wf : Prims.list<(Prims.list<och> * jval)>  ->  Prims.bool = (fun ( fs
      (((ochs_well_formed k) && (jval_wf v)) && (fields_wf t))
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "a-negative-fraction-is-a-number"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CMinus)::(CD0)::(CDot)::(CD5)::[])) true))})::({tname = "a-leading-zero-then-digit-is-not"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_json_number ((CD0)::(CD1)::[])) false))})::({tname = "parse-string-stops-at-the-quote"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse_string ((CQuote)::(CLa)::(CQuote)::(CSpace)::[])) (POk ((OLit (CLa))::[], (CSpace)::[]))))})::({tname = "parse-reads-true"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::[])) (ROk (JBool (true)))))})::({tname = "parse-refuses-trailing-characters"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (parse (fun ( uu___1  :  Prims.list<ch> ) -> FFinite) "c" RejectNull [] ((CLt)::(CLr)::(CLu)::(CLe)::(CSpace)::(CComma)::[])) (RErr (TrailingCharacters, "trailing characters", (CComma)::[]))))})::[]
+
 
 
 

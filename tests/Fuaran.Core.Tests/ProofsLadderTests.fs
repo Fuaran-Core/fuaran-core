@@ -387,7 +387,31 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 "a `premise` is discharged by nothing"
                             @ misplaced "assumed-class" "closes" closes "a `premise` is closed by nothing"
 
-                levelFindings @ phaseFindings @ provedFindings @ testedFindings @ classFindings)
+                // ---- Phase 309: an obligation its law checks only against the domain's own word ----
+                // `"discharge": "domain-declared"` marks a `domain-obligation` whose named law can
+                // check the domain's DECLARATION and cannot check past it (a domain that declares
+                // nothing passes it). One form, and only on the class it qualifies.
+                let dischargeFindings =
+                    match strMember row "discharge" with
+                    | None -> []
+                    | Some "domain-declared" when level = Some "assumed" && cls = Some "domain-obligation" -> []
+                    | Some "domain-declared" ->
+                        [ finding
+                              id
+                              "assumed-class"
+                              "carries `discharge`: \"domain-declared\" — only an assumed `domain-obligation` is checked against a domain's own declaration" ]
+                    | Some v ->
+                        [ finding
+                              id
+                              "assumed-class"
+                              (sprintf "`discharge` is \"%s\"; its one form is `domain-declared` (Phase 309)" v) ]
+
+                levelFindings
+                @ phaseFindings
+                @ provedFindings
+                @ testedFindings
+                @ classFindings
+                @ dischargeFindings)
             |> List.concat
 
         let covered =
@@ -464,6 +488,9 @@ let contractFromLadder (ladderText: string) : (string * string * string) list =
 
             let third =
                 match strMember r "dischargedBy", strMember r "closes" with
+                | Some d, _ when strMember r "discharge" = Some "domain-declared" ->
+                    // Phase 309 — the law is named, and so is the limit of what its run says.
+                    sprintf "`%s` (domain-declared, not discharged)" d
                 | Some d, _ -> sprintf "`%s`" d
                 | _, Some cl -> sprintf "`%s`" cl
                 | None, None -> noThirdColumn
@@ -540,6 +567,153 @@ let checkContract (ladderText: string) (readmeText: string) : string list =
                   (String.concat ", " (List.map key actual)) ]
         else
             []
+
+// ---------------------------------------------------------------------------
+//  Phase 309 — the README's numbers and contract table, REGENERATED from the ladder
+//
+//  The header used to say "eight in all" over a ladder that had long since grown past it, and the
+//  contract section's counts and table were held to `proofs.json` by checks that could only say
+//  they were wrong. The three are now a PROJECTION: `regenerateReadme` renders the header's summary
+//  block, the contract table's rows and the contract prose's four counts from the ladder, the
+//  family below holds the committed README to that rendering, and `CORE_APPROVE_LADDER=1` writes it
+//  — the same idiom as the API baselines. Prose around the blocks is untouched: what a number says
+//  is generated, what it means is written.
+// ---------------------------------------------------------------------------
+
+let ladderSummaryBegin =
+    "<!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->"
+
+let ladderSummaryEnd = "<!-- ladder-summary:end -->"
+
+/// The header's summary line: every level counted, the proved rows' models counted, and the
+/// assumed rows by class.
+let renderLadderSummary (ladderText: string) : string =
+    use doc = JsonDocument.Parse ladderText
+
+    let rows =
+        match doc.RootElement.TryGetProperty "claims" with
+        | true, c when c.ValueKind = JsonValueKind.Array -> c.EnumerateArray() |> List.ofSeq
+        | _ -> []
+
+    let at level =
+        rows |> List.filter (fun r -> strMember r "level" = Some level)
+
+    let assumedIn cls =
+        at "assumed"
+        |> List.filter (fun r -> strMember r "class" = Some cls)
+        |> List.length
+
+    let provedModels =
+        at "proved"
+        |> List.choose (fun r ->
+            match r.TryGetProperty "evidence" with
+            | true, e -> strMember e "model"
+            | _ -> None)
+        |> List.distinct
+        |> List.length
+
+    sprintf
+        "**The ladder, counted:** %d claims — %d proved across %d models, %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`), %d policy."
+        (List.length rows)
+        (List.length (at "proved"))
+        provedModels
+        (List.length (at "tested"))
+        (List.length (at "assumed"))
+        (assumedIn "domain-obligation")
+        (assumedIn "model-bridge")
+        (assumedIn "premise")
+        (List.length (at "policy"))
+
+/// The README as the ladder says it must read: the summary block, the contract table's rows and the
+/// contract prose's counts replaced; everything else byte for byte. `Error` names what could not be
+/// located, because a block that cannot be found is a block that is no longer generated.
+let regenerateReadme (ladderText: string) (readmeText: string) : Result<string, string> =
+    let nl = if readmeText.Contains "\r\n" then "\r\n" else "\n"
+    let lines = readmeText.Replace("\r\n", "\n").Split('\n') |> List.ofArray
+
+    // 1. the summary block
+    let summaryBegin = lines |> List.tryFindIndex (fun l -> l = ladderSummaryBegin)
+
+    let summaryEnd = lines |> List.tryFindIndex (fun l -> l = ladderSummaryEnd)
+
+    match summaryBegin, summaryEnd with
+    | Some b, Some e when e > b ->
+        let lines = lines[..b] @ [ renderLadderSummary ladderText ] @ lines[e..]
+
+        // 2. the contract table's rows: every `| \`id\` | ...` line in the contract section
+        match lines |> List.tryFindIndex (fun l -> l.TrimEnd() = contractHeading) with
+        | None -> Error(sprintf "the README carries no `%s` section" contractHeading)
+        | Some start ->
+            let sectionEnd =
+                lines
+                |> List.indexed
+                |> List.tryFind (fun (i, l) -> i > start && l.StartsWith "## ")
+                |> Option.map fst
+                |> Option.defaultValue (List.length lines)
+
+            let isRow (l: string) =
+                let m = contractRowForm.Match(l.Trim())
+                m.Success && Set.contains m.Groups[2].Value classes
+
+            let rowIdx = [ start .. sectionEnd - 1 ] |> List.filter (fun i -> isRow lines[i])
+
+            match rowIdx with
+            | [] -> Error "the contract table carries no row this family can parse"
+            | first :: _ ->
+                let last = List.last rowIdx
+
+                let rendered =
+                    contractFromLadder ladderText
+                    |> List.map (fun (id, cls, third) -> sprintf "| `%s` | `%s` | %s |" id cls third)
+
+                let lines = lines[.. first - 1] @ rendered @ lines[last + 1 ..]
+                let text = String.Join("\n", lines)
+
+                // 3. the contract prose's counts, inside the section only
+                let head = text.IndexOf(contractHeading, StringComparison.Ordinal)
+
+                let next =
+                    text.IndexOf("\n## ", head + contractHeading.Length, StringComparison.Ordinal)
+
+                let stop = if next < 0 then text.Length else next
+                let section = text.Substring(head, stop - head)
+
+                use doc = JsonDocument.Parse ladderText
+
+                let assumed =
+                    doc.RootElement.GetProperty("claims").EnumerateArray()
+                    |> Seq.filter (fun r -> strMember r "level" = Some "assumed")
+                    |> List.ofSeq
+
+                let count cls =
+                    assumed |> List.filter (fun r -> strMember r "class" = Some cls) |> List.length
+
+                let section' =
+                    let s =
+                        Regex.Replace(
+                            section,
+                            @"the \d+ assumed rows",
+                            sprintf "the %d assumed rows" (List.length assumed)
+                        )
+
+                    classOrder
+                    |> List.fold
+                        (fun (acc: string) cls ->
+                            let rx =
+                                Regex(
+                                    sprintf @"(\*\*`%s`.*?)(\d+)( rows\.)" (Regex.Escape cls),
+                                    RegexOptions.Singleline
+                                )
+
+                            rx.Replace(
+                                acc,
+                                (fun (m: Match) -> m.Groups[1].Value + string (count cls) + m.Groups[3].Value),
+                                1
+                            ))
+                        s
+
+                Ok((text.Substring(0, head) + section' + text.Substring(stop)).Replace("\n", nl))
+    | _ -> Error(sprintf "the README carries no `%s` … `%s` block" ladderSummaryBegin ladderSummaryEnd)
 
 // ---------------------------------------------------------------------------
 //  Reading the two inputs out of the tree
@@ -676,6 +850,33 @@ let proofsLadderTests =
                   let model = Path.Combine(repoRoot, "proofs", m + ".fst")
                   Expect.isTrue (File.Exists model) (sprintf "the leg checks '%s' but %s is not there" m model)
 
+          testCase "the twin roster runs exactly the models check.ps1 extracts (Phase 309)"
+          <| fun _ ->
+              // The host half of twin evaluation's coverage. The kit's TWIN step holds each extracted
+              // model's SOURCE to declaring `twins`; this holds the HOST to running them — a model
+              // whose fixtures the normaliser certified and nothing ran would read as covered. Both
+              // directions: an extracted model the roster misses, and a roster entry for a model the
+              // leg no longer extracts.
+              let script = File.ReadAllText checkScriptPath
+              let proofOnly = parseScriptList "proofOnly" script |> Set.ofList
+
+              let extracted =
+                  parseModules script
+                  |> List.filter (fun m -> not (Set.contains m proofOnly))
+                  |> Set.ofList
+
+              let rostered = ProofOracleTests.twinRoster |> List.map fst |> Set.ofList
+
+              Expect.isNonEmpty extracted "check.ps1's extracted set parses"
+
+              Expect.equal
+                  rostered
+                  extracted
+                  (sprintf
+                      "the twin roster and the extracted set differ — unrun: %A; stale: %A"
+                      (Set.difference extracted rostered)
+                      (Set.difference rostered extracted))
+
           testCase "the case names a tested row may cite are readable from the test tree"
           <| fun _ ->
               // Read from the TREE, not from the source text, so a sibling appending a case is
@@ -761,6 +962,35 @@ let proofsLadderTests =
                   classesUsed
                   (Set.ofList classOrder)
                   "every class in the closed set is carried by at least one row, so obligation-law and bridge-closes both bite"
+
+          testCase
+              "proofs/README.md's counts and contract table are the ladder's projection (CORE_APPROVE_LADDER=1 regenerates them)"
+          <| fun _ ->
+              // Phase 309 — generated, not hand-kept. Red here means the README's summary block,
+              // contract rows or contract counts are not what `proofs.json` renders to; with
+              // CORE_APPROVE_LADDER=1 the family writes the rendering instead (commit the result).
+              let ladderText = File.ReadAllText ladderPath
+              let readmeText = File.ReadAllText proofsReadmePath
+
+              match regenerateReadme ladderText readmeText with
+              | Error why -> failtestf "the README's generated blocks could not be located: %s" why
+              | Ok expected when expected = readmeText -> ()
+              | Ok expected when Environment.GetEnvironmentVariable "CORE_APPROVE_LADDER" = "1" ->
+                  File.WriteAllText(proofsReadmePath, expected)
+              | Ok expected ->
+                  let a = readmeText.Replace("\r\n", "\n").Split('\n')
+                  let b = expected.Replace("\r\n", "\n").Split('\n')
+
+                  let firstDiff =
+                      Seq.zip a b
+                      |> Seq.tryFindIndex (fun (x, y) -> x <> y)
+                      |> Option.defaultValue (min a.Length b.Length)
+
+                  failtestf
+                      "proofs/README.md is not the ladder's projection — first differing line %d:\n  committed: %s\n  generated: %s\nRe-run with CORE_APPROVE_LADDER=1 and commit the README."
+                      (firstDiff + 1)
+                      (if firstDiff < a.Length then a[firstDiff] else "<end>")
+                      (if firstDiff < b.Length then b[firstDiff] else "<end>")
 
           testCase "the committed proofs.json and proofs/README.md's contract table agree, row for row"
           <| fun _ ->

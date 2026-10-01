@@ -3215,3 +3215,49 @@ let spelling_ok_is_satisfiable (_: unit) : Lemma (ensures spelling_ok witness_sp
   assert_norm (mem (CPlain "t") literal_letters /\ mem (CPlain "r") literal_letters /\
                mem (CPlain "l") literal_letters /\ mem (CPlain "s") literal_letters)
 #pop-options
+
+(* ======================================================================================
+   TWINS (Phase 309) — the extractor premise, sampled at this model.
+
+   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
+   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
+   compiles would pass every other step. Each fixture below applies this model's own functions to
+   a concrete input and compares the result with the value the model means there, and the
+   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
+   to `true` under the model's own semantics. The list is extracted with the rest of the model,
+   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
+   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
+   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
+   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
+   2c) refuses an extracted model that declares no twins.
+   ====================================================================================== *)
+
+noeq type twin = { tname : string; tholds : unit -> bool }
+
+let rec twins_hold (l:list twin) : Tot bool =
+  match l with
+  | [] -> true
+  | t :: r -> t.tholds () && twins_hold r
+let twin_wire : wire string string =
+  { int_str = (fun s -> [ CPlain s ]);
+    float_str = (fun s -> [ CPlain s ]);
+    fclass = (fun _ -> FFinite);
+    is_zero = (fun _ -> false);
+    pos_zero = "0";
+    key_le = (fun _ _ -> true);
+    tok_read = (fun _ -> Error "no");
+    str_ok = (fun _ -> true) }
+
+let twins : list twin = [
+  { tname = "escape-escapes-a-quote-and-a-control";
+    tholds = (fun () ->
+      escape [ CQuote; CPlain "a"; CCtrl false HDa ]
+      = [ CBackslash; CQuote; CPlain "a"; CBackslash; CLu; CHexCh HD0; CHexCh HD0; CHexCh HD0; CHexCh HDa ]) };
+  { tname = "quoted-quotes";
+    tholds = (fun () -> quoted [ CPlain "hi" ] = [ CQuote; CPlain "hi"; CQuote ]) };
+  { tname = "render-an-array";
+    tholds = (fun () ->
+      render twin_wire (JArr [ JBool true; JStr [] ])
+      = [ CLBrack; CPlain "t"; CPlain "r"; CLu; CHexCh HDe; CComma; CQuote; CQuote; CRBrack ]) } ]
+
+let _ = assert_norm (twins_hold twins == true)

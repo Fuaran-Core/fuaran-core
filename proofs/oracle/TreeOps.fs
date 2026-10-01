@@ -1046,6 +1046,35 @@ and ins_at_all : Prims.string  ->  Prims.nat  ->  tree  ->  Prims.list<tree>  ->
 
 let place_tree : tree = TNode ("root", "doc", (TNode ("a", "sec", []))::(TNode ("b", "sec", []))::[])
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twin_tree : tree = TNode ("root", "doc", (TNode ("a", "sec", []))::[])
+
+
+let twins : Prims.list<twin> = ({tname = "apply-inserts-under-a-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (InsertChild ("a", TNode ("n", "para", []))) twin_tree) (DagFold.Ok (TNode ("root", "doc", (TNode ("a", "sec", (TNode ("n", "para", []))::[]))::[])))))})::({tname = "apply-refuses-to-remove-the-root"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (RemoveNode ("root")) twin_tree) (DagFold.Error (CannotRemoveRoot))))})::({tname = "apply-refuses-a-mismatched-reorder"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (ReorderChildren ("root", ("b")::[])) twin_tree) (DagFold.Error (ReorderMismatch ("root", ("a")::[], ("b")::[])))))})::({tname = "apply-updates-a-kind-in-place"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (apply (UpdateNode (TNode ("a", "aside", []))) twin_tree) (DagFold.Ok (TNode ("root", "doc", (TNode ("a", "aside", []))::[])))))})::({tname = "wf-sees-a-repeated-id"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (wf (TNode ("r", "d", (TNode ("a", "s", []))::(TNode ("a", "s", []))::[]))) false))})::[]
+
 
 
 

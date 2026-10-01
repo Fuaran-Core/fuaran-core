@@ -696,3 +696,42 @@ let maximal_is_not_maximum ()
     assert_norm (all_applicable mx_base [mx_2; mx_3]);
     assert_norm (pairwise_independent [mx_2; mx_3]);
     assert_norm ((arbitrate mx_base [mx_1_last; mx_2; mx_3]).accepted == [mx_2; mx_3])
+
+(* ======================================================================================
+   TWINS (Phase 309) — the extractor premise, sampled at this model.
+
+   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
+   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
+   compiles would pass every other step. Each fixture below applies this model's own functions to
+   a concrete input and compares the result with the value the model means there, and the
+   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
+   to `true` under the model's own semantics. The list is extracted with the rest of the model,
+   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
+   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
+   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
+   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
+   2c) refuses an extracted model that declares no twins.
+   ====================================================================================== *)
+
+noeq type twin = { tname : string; tholds : unit -> bool }
+
+let rec twins_hold (l:list twin) : Tot bool =
+  match l with
+  | [] -> true
+  | t :: r -> t.tholds () && twins_hold r
+let twin_base : tree = TNode "root" "doc" [ TNode "x" "sec" []; TNode "y" "sec" [] ]
+let twin_p1 : proposal = { pid = 1; holder = "A"; script = [ InsertChild "x" (TNode "n1" "para" []) ] }
+let twin_p2 : proposal = { pid = 2; holder = "B"; script = [ InsertChild "y" (TNode "n2" "para" []) ] }
+let twin_p2x : proposal = { pid = 2; holder = "B"; script = [ InsertChild "x" (TNode "n2" "para" []) ] }
+
+let twins : list twin = [
+  { tname = "arbitrate-pins-and-accepts-disjoint-proposals";
+    tholds = (fun () ->
+      arbitrate twin_base [ twin_p2; twin_p1 ]
+      = { accepted = [ twin_p1; twin_p2 ];
+          merged = [ InsertChild "x" (TNode "n1" "para" []); InsertChild "y" (TNode "n2" "para" []) ];
+          rejected = [] }) };
+  { tname = "arbitrate-rejects-an-interfering-proposal";
+    tholds = (fun () -> (arbitrate twin_base [ twin_p1; twin_p2x ]).rejected = [ (twin_p2x, Conflicts [ 1 ]) ]) } ]
+
+let _ = assert_norm (twins_hold twins == true)

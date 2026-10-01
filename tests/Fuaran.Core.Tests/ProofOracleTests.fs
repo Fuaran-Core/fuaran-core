@@ -42,6 +42,41 @@ module ModelQuery = Query
 // open.
 module ModelDecimal = DecimalText
 
+// Phase 309 — TWIN EVALUATION. Every extracted model ends with a `twins` list: fixtures that apply
+// the model's own functions to a concrete input and compare the result with the value the model
+// means there, asserted `true` by F*'s NORMALISER (`assert_norm (twins_hold twins == true)` in the
+// model). The list is extracted with the model, so what runs here is the extracted F# evaluating
+// the very closures the normaliser evaluated: a `false` is the F# backend computing something other
+// than the model on that input, which no byte diff of the extraction can see. Declared before
+// `open Fuaran.Core` so that each model's top-level module name means the model and not a
+// production module of the same name. `Proofs.Ladder` holds this roster to `check.ps1`'s extracted
+// set, and the kit's TWIN step holds each model's source to declaring the list.
+let twinRoster: (string * (string * (unit -> bool)) list) list =
+    [ "DagFold", DagFold.twins |> List.map (fun t -> t.tname, t.tholds)
+      "WireDecode", WireDecode.twins |> List.map (fun t -> t.tname, t.tholds)
+      "TreeOps", TreeOps.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Skeleton", Skeleton.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Chain", Chain.twins |> List.map (fun t -> t.tname, t.tholds)
+      "JsonParse", JsonParse.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Preservation", Preservation.twins |> List.map (fun t -> t.tname, t.tholds)
+      "TreeDiff", TreeDiff.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Limits", Limits.twins |> List.map (fun t -> t.tname, t.tholds)
+      "WireCanon", WireCanon.twins |> List.map (fun t -> t.tname, t.tholds)
+      "WireVersioning", WireVersioning.twins |> List.map (fun t -> t.tname, t.tholds)
+      "WireColumn", WireColumn.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Capability", Capability.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Propagation", Propagation.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Query", Query.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Arbitrate", Arbitrate.twins |> List.map (fun t -> t.tname, t.tholds)
+      "DecimalText", DecimalText.twins |> List.map (fun t -> t.tname, t.tholds) ]
+
+/// Every twin that does NOT hold on the extracted F#, as "<model>/<twin>" — empty is clean.
+let twinFailures (roster: (string * (string * (unit -> bool)) list) list) : string list =
+    [ for model, ts in roster do
+          for name, holds in ts do
+              if not (holds ()) then
+                  yield model + "/" + name ]
+
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldConfluenceTests
@@ -1337,6 +1372,75 @@ let private drainDisagreements (lt: string -> string -> bool) (dag: Dag.T<'Op>) 
     | Error e, _ -> [ sprintf "head %s: production reports a cyclic closure it cannot have: %s" head e ], widest
 
 // ---------------------------------------------------------------------------
+//  Phase 309 — `Dag.tryReplayTo` beside the extracted `replay_to` (DagFold.fst section 16).
+//
+//  The model replays a head as production does: refuse a head the DAG does not hold, drain the
+//  head's closure with section 13's id-ordered drain, refuse a drain that did not place the whole
+//  closure, then apply each drained node's op in order. Both sides are rendered to one string —
+//  the state through the domain's own hash, a refusal by its case and the id it names — so a
+//  disagreement says which clause moved.
+// ---------------------------------------------------------------------------
+
+let private renderProductionReplay (hashState: 'State -> string) (r: Result<'State, Dag.ReplayFault<'Rej>>) : string =
+    match r with
+    | Ok s -> "ok " + hashState s
+    | Error(Dag.ReplayFault.UnknownHead h) -> "unknown-head " + h
+    | Error(Dag.ReplayFault.CyclicHistory h) -> "cyclic " + h
+    | Error(Dag.ReplayFault.Rejected(id, e)) -> sprintf "rejected %s %A" id e
+
+let private renderModelReplay
+    (hashState: 'State -> string)
+    (r: DagFold.outcome<'State, DagFold.replay_fault<'Rej>>)
+    : string =
+    match r with
+    | DagFold.Ok s -> "ok " + hashState s
+    | DagFold.Error(DagFold.RUnknownHead h) -> "unknown-head " + h
+    | DagFold.Error(DagFold.RCyclicHistory h) -> "cyclic " + h
+    | DagFold.Error(DagFold.RRejected(id, e)) -> sprintf "rejected %s %A" id e
+
+/// The extracted `replay_to` over a model DAG, at production's id order, with fuel for every node.
+let private modelReplay
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (state0: 'State)
+    (d: DagFold.dag<'Op>)
+    (head: string)
+    : DagFold.outcome<'State, DagFold.replay_fault<'Rej>> =
+    let fuel = drainFuel d.nodes
+    DagFold.replay_to (modelApply w) ordLt fuel d fuel state0 head
+
+/// One head, both sides: `None` when they agree, the disagreement otherwise; and which arm it was.
+let private replayDisagreement
+    (w: StreamWitness<'Op, 'State, 'Rej>)
+    (hashState: 'State -> string)
+    (state0: 'State)
+    (bridge: Dag.T<'Op> -> DagFold.dag<'Op>)
+    (dag: Dag.T<'Op>)
+    (head: string)
+    : string option * string =
+    let p = renderProductionReplay hashState (Dag.tryReplayTo w state0 dag head)
+    let m = renderModelReplay hashState (modelReplay w state0 (bridge dag) head)
+    let arm = p.Split(' ').[0]
+
+    if p = m then
+        None, arm
+    else
+        Some(sprintf "head %s: the replay differs\n  production: %s\n  model:      %s" head p m), arm
+
+/// The go-red bridge: the model is handed the DAG with ONE node of the head's closure dropped — the
+/// node the store would have lost to a silent `Map.add` replacement before Phase 296, which is the
+/// failure the `node-ids-distinct` row hid. Everything else is production's.
+let private droppingOneNode (head: string) (dag: Dag.T<'Op>) : DagFold.dag<'Op> =
+    let anc = Dag.ancestorsOf dag head
+
+    let victim = anc |> Set.toList |> List.filter (fun id -> id <> head) |> List.tryHead
+
+    let m = toModelDag dag
+
+    match victim with
+    | None -> m
+    | Some v -> { DagFold.nodes = m.nodes |> List.filter (fun n -> n.nid <> v) }
+
+// ---------------------------------------------------------------------------
 //  Phase 158 — delta recovery over a MERGED HEAD, and `Dag.mergeBase`, beside production's own.
 //
 //  Section 14 of `proofs/DagFold.fst` proves that over a head whose lane hangs off an already
@@ -1627,16 +1731,22 @@ let private modelFpParts (f: DagFold.footprint) =
       asSet f.unknown_parent_writes ]
 
 type private TreeTally =
-    { Diffs: string list
-      Accepted: int
-      Rejected: int
-      Classes: Set<string> }
+    {
+        Diffs: string list
+        Accepted: int
+        Rejected: int
+        Classes: Set<string>
+        /// The op kinds that were ACCEPTED somewhere (Phase 309) — the pool's adequacy over the
+        /// whole alphabet, `UpdateNode` and `Batch` included.
+        AcceptedKinds: Set<string>
+    }
 
 let private emptyTreeTally =
     { Diffs = []
       Accepted = 0
       Rejected = 0
-      Classes = Set.empty }
+      Classes = Set.empty
+      AcceptedKinds = Set.empty }
 
 /// One (op, state) asked of both sides. `opBridge` carries the op across given the STATE it is
 /// asked at — the faithful bridge ignores the state; the Phase 290 mis-nesting mutant reads it.
@@ -1693,13 +1803,14 @@ let private treeProbeWith
         | Error pe, DagFold.Ok _ ->
             [ sprintf "production REJECTED (%s) but the oracle accepted — %s" (prodRejClass pe) where ], 0, 0, None
 
-    { Diffs = acc.Diffs @ fpDiff @ applyDiff
-      Accepted = acc.Accepted + accepted
-      Rejected = acc.Rejected + rejected
-      Classes =
-        match cls with
-        | Some c -> Set.add c acc.Classes
-        | None -> acc.Classes }
+    { acc with
+        Diffs = acc.Diffs @ fpDiff @ applyDiff
+        Accepted = acc.Accepted + accepted
+        Rejected = acc.Rejected + rejected
+        Classes =
+            match cls with
+            | Some c -> Set.add c acc.Classes
+            | None -> acc.Classes }
 
 /// Ops that REACH each rejection class the plain `apply` can raise, against the base tree
 /// `root(doc)[a(section)[a1,a2], b(section)[b1]]`. The generator keeps only accepted ops, so the
@@ -1713,11 +1824,40 @@ let private treeRefusals: SkeletonOp<RNode, string> list =
       MoveNode("a", "no-such-parent") // UnknownNode (new parent)
       ReorderChildren("a", [ "a1" ]) // ReorderMismatch
       ReorderChildren("no-such-parent", []) // UnknownNode (reorder)
-      Batch [ InsertChild("b", RNode.leaf "b133" "para" "v"); RemoveNode "root" ] // all-or-nothing
-      // Phase 250 — the in-place update, asked at every state like the rest: an accepted rewrite
-      // of a container (its children kept), and an absent target (UnknownNode).
-      UpdateNode(RNode.node "a" "aside" [])
-      UpdateNode(RNode.leaf "no-such-node" "para" "v") ]
+      Batch [ InsertChild("b", RNode.leaf "b133" "para" "v"); RemoveNode "root" ] ] // all-or-nothing
+// Phase 309 retired the two hand-written `UpdateNode` cases Phase 250 supplied here (an accepted
+// rewrite of a container and an absent target): the pool below now DRAWS updates and batches
+// itself, so both arms are reached by generation rather than by a list.
+
+/// The update and batch draws the generated pool carries (Phase 309) — the two shapes Phase 297's
+/// `genOp` draws for a law family and the lane generator does not. Every node any reached state
+/// holds is rewritten in place (same id, a kind the witness can see moved), and every adjacent pair
+/// of generated ops is bundled as a `Batch`. Each is then asked at EVERY state, like the rest of
+/// the pool: an update is accepted where its target is held and refused (`UnknownNode`) where a
+/// state has removed or never had it, and a batch exercises all-or-nothing over real members.
+let private drawnUpdatesAndBatches
+    (states: RNode list)
+    (generated: SkeletonOp<RNode, string> list)
+    : SkeletonOp<RNode, string> list =
+    let updates =
+        states
+        |> List.collect (Tree.preorder nodew)
+        |> List.distinctBy (fun n -> n.Id)
+        |> List.map (fun n -> UpdateNode(RNode.node n.Id ("edited-" + n.Kind) []))
+
+    let batches = generated |> List.pairwise |> List.map (fun (a, b) -> Batch [ a; b ])
+
+    updates @ batches
+
+/// The op kind, for the tally — `LawKit.opKindOf`'s vocabulary.
+let private skeletonKind (op: SkeletonOp<RNode, string>) : string =
+    match op with
+    | InsertChild _ -> "insert"
+    | RemoveNode _ -> "remove"
+    | MoveNode _ -> "move"
+    | ReorderChildren _ -> "reorder"
+    | Batch _ -> "batch"
+    | UpdateNode _ -> "update"
 
 let private treeProbe (bridge: RNode -> TreeOps.tree) op st acc =
     treeProbeWith bridge (fun _ -> toModelOpWith bridge) op st acc
@@ -1749,9 +1889,15 @@ let private treeDifferentialWith
                 ([ treeBase ], treeBase)
             |> fst
 
-        for op in generated @ treeRefusals do
+        for op in generated @ drawnUpdatesAndBatches states generated @ treeRefusals do
             for st in states do
+                let before = tally.Accepted
                 tally <- treeProbeWith bridge opBridge op st tally
+
+                if tally.Accepted > before then
+                    tally <-
+                        { tally with
+                            AcceptedKinds = Set.add (skeletonKind op) tally.AcceptedKinds }
 
     tally
 
@@ -4325,6 +4471,9 @@ let private presDifferential
                 ([ treeBase ], treeBase)
             |> fst
 
+        // Phase 309 — updates and batches by generation, as the tree differential draws them.
+        let drawn = drawnUpdatesAndBatches states generated
+
         for st in states do
             n <- n + 1
             let existing = Tree.ids nodew st
@@ -4332,7 +4481,7 @@ let private presDifferential
 
             let disputed = parents |> List.collect (fun p -> disputedInserts existing p n)
 
-            for op in generated @ treeRefusals @ disputed do
+            for op in generated @ drawn @ treeRefusals @ disputed do
                 tally <- presProbe modelApply op st tally
 
     tally
@@ -10551,6 +10700,226 @@ let proofOracleTests =
                   Expect.equal ord production "the model and production agree once the back edge is gone"
                   Expect.isTrue (DagFold.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
               | m, p -> failtestf "the acyclic control disagreed: model=%A production=%A" m p
+
+          // ---- Phase 309: twin evaluation — the extracted F# against the normaliser ----
+
+          testCase "twin evaluation: every extracted model's normalised fixtures hold on the extracted F#"
+          <| fun _ ->
+              // The extractor premise, discharged on the sampled inputs. Each closure here is one
+              // the prover evaluated to `true` under the model's semantics; the extracted F# must
+              // agree on every one of them.
+              Expect.isNonEmpty twinRoster "the roster names the extracted models"
+
+              for model, ts in twinRoster do
+                  Expect.isNonEmpty ts (sprintf "%s declares at least one twin" model)
+
+              match twinFailures twinRoster with
+              | [] -> ()
+              | fs ->
+                  failtestf
+                      "the extracted F# disagrees with F*'s normaliser on %d fixture(s): %s — the extraction COMPILES and computes something else"
+                      (List.length fs)
+                      (String.concat ", " fs)
+
+          testCase "twin evaluation can lose: a drain at the HEAD of the frontier misses the DagFold fixture"
+          <| fun _ ->
+              // The teeth, on the fixture itself. `pick_head` is as legitimate a selector as
+              // `pick_min` by everything the model asks of one (`picks_from_frontier`), and it is the
+              // natural mis-extraction of a fold the backend got backwards — so the twin's input,
+              // drained that way, must give a different order from the one the normaliser certified.
+              let ns = DagFold.twin_dag.nodes
+
+              let certified = DagFold.drain_order DagFold.twin_lt DagFold.twin_fuel ns
+
+              let perturbed =
+                  DagFold.kahn DagFold.pick_head DagFold.twin_fuel ns (DagFold.ids_of ns) []
+
+              Expect.equal certified [ "a"; "b"; "c"; "m" ] "the certified drain is the twin's expected order"
+              Expect.notEqual perturbed certified "a selector taking the frontier's head must miss the fixture"
+
+          // ---- Phase 309: Dag.tryReplayTo beside the extracted replay_to ----
+
+          testCase "the extracted replay_to is production's tryReplayTo over every union, with a missing-head arm"
+          <| fun _ ->
+              // `replay_to_is_fold_over_drain` and `replay_to_unknown_head_is_refused`, measured.
+              // Every lane head, the merged union head (whose closure is every node, so the drain's
+              // tie-break decides the order the ops are applied in), and a head the DAG does not
+              // hold — the arm the pre-296 `replayTo` answered with the initial state as `Ok`.
+              let mutable rng = ConfRng.ofSeed 3090
+              let arms = System.Collections.Generic.Dictionary<string, int>()
+
+              let tally arm =
+                  arms[arm] <-
+                      (match arms.TryGetValue arm with
+                       | true, n -> n + 1
+                       | _ -> 1)
+
+              let checkAll (w: StreamWitness<'Op, 'State, 'Rej>) hashState state0 label (dag: Dag.T<'Op>) heads =
+                  for h in heads @ [ "no-such-node" ] do
+                      match replayDisagreement w hashState state0 toModelDag dag h with
+                      | None, arm -> tally arm
+                      | Some d, _ -> failtestf "%s\n%s" label d
+
+              for i in 1..60 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
+
+                  checkAll
+                      planW
+                      planHash
+                      planLaneGen.State0
+                      (sprintf "plan iter %d" i)
+                      merged
+                      (unionHead :: baseId :: hs)
+
+              for i in 1..30 do
+                  let lanes, r' = treeLaneGen.Lanes 4 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag treeW treeLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion treeW treeLaneGen.BaseOp baseId hs dag
+
+                  checkAll
+                      treeW
+                      treeHash
+                      treeLaneGen.State0
+                      (sprintf "tree iter %d" i)
+                      merged
+                      (unionHead :: baseId :: hs)
+
+              let count arm =
+                  match arms.TryGetValue arm with
+                  | true, n -> n
+                  | _ -> 0
+
+              Expect.isGreaterThan (count "ok") 0 "some heads replayed to a state"
+              Expect.isGreaterThan (count "unknown-head") 0 "the missing-head arm ran"
+
+          testCase "a CYCLIC closure is refused as CyclicHistory by both — and the acyclic control replays"
+          <| fun _ ->
+              let node id parents : DagNode<PlanOp> =
+                  { Id = id
+                    Parents = parents
+                    Actor = Human "cyclic"
+                    Op = planLaneGen.BaseOp }
+
+              let build ns : Dag.T<PlanOp> =
+                  { Nodes = ns |> List.map (fun (n: DagNode<PlanOp>) -> n.Id, n) |> Map.ofList }
+
+              let cyclic =
+                  build [ node "a" []; node "b" [ "a"; "d" ]; node "c" [ "b" ]; node "d" [ "c" ] ]
+
+              let acyclic =
+                  build [ node "a" []; node "b" [ "a" ]; node "c" [ "b" ]; node "d" [ "c" ] ]
+
+              match replayDisagreement planW planHash planLaneGen.State0 toModelDag cyclic "d" with
+              | None, arm -> Expect.equal arm "cyclic" "both refuse the cyclic closure, naming the head"
+              | Some d, _ -> failtest d
+
+              match replayDisagreement planW planHash planLaneGen.State0 toModelDag acyclic "d" with
+              | None, arm -> Expect.equal arm "ok" "the acyclic control replays on both sides"
+              | Some d, _ -> failtest d
+
+          testCase
+              "a model handed a store that LOST one closure node disagrees with tryReplayTo — the measurement can fail"
+          <| fun _ ->
+              // The teeth, and the failure the `node-ids-distinct` row used to hide: before Phase 296
+              // a second node minting a held id REPLACED the first, so the store silently lost a
+              // node of some head's history. A model replaying a DAG with one closure node gone must
+              // disagree with production somewhere over the pool, or the green case above certifies
+              // nothing about which nodes were folded.
+              let mutable rng = ConfRng.ofSeed 3091
+              let mutable found = 0
+              let mutable example = ""
+
+              for _ in 1..60 do
+                  let lanes, r' = planLaneGen.Lanes 3 rng
+                  rng <- r'
+                  let baseId, hs, dag = productionDag planW planLaneGen.BaseOp lanes
+                  let unionHead, merged = mergedUnion planW planLaneGen.BaseOp baseId hs dag
+
+                  match
+                      replayDisagreement planW planHash planLaneGen.State0 (droppingOneNode unionHead) merged unionHead
+                  with
+                  | None, _ -> ()
+                  | Some d, _ ->
+                      found <- found + 1
+
+                      if example = "" then
+                          example <- d
+
+              Expect.isGreaterThan
+                  found
+                  0
+                  "a store missing a closure node must replay differently — this comparison cannot lose"
+
+              Expect.stringContains example "the replay differs" "the disagreement names what moved"
+
+          testCase "the extracted add_node refuses a differing node and never replaces — beside Dag.append"
+          <| fun _ ->
+              // `append_refuses_differing_node` and `append_never_replaces`, held to production's
+              // `addNode`: the same node twice deduplicates on both sides, and a node that mints a
+              // held id with different content is refused on both sides — production through a
+              // HashFn that collides on purpose, the model through `same` at production's notion of
+              // sameness (parents modulo order, op through its encoding; the model node carries no
+              // actor, and the colliding pair here differs in its op).
+              let collide: HashFn = fun _ _ -> "same-id"
+              let enc = planW.Encode
+
+              let mnode (p: string list) (op: PlanOp) : DagFold.node<PlanOp> =
+                  { DagFold.nid = "same-id"
+                    DagFold.nparents = p
+                    DagFold.nop = op }
+
+              let same (a: DagFold.node<PlanOp>) (b: DagFold.node<PlanOp>) =
+                  List.sort a.nparents = List.sort b.nparents && enc a.nop = enc b.nop
+
+              let ops =
+                  let lanes, _ = planLaneGen.Lanes 3 (ConfRng.ofSeed 3092)
+                  lanes |> List.concat |> List.distinctBy enc
+
+              Expect.isGreaterThan (List.length ops) 1 "two ops that encode differently were drawn"
+              let op1 = List.item 0 ops
+              let op2 = List.item 1 ops
+
+              // Production.
+              let id1, d1 =
+                  Dag.append collide planW (Human "x") op1 "" Dag.empty |> Reference.built
+
+              match Dag.append collide planW (Human "x") op1 "" d1 with
+              | Ok(id, d) ->
+                  Expect.equal id id1 "the same node twice is one node"
+                  Expect.equal d.Nodes.Count 1 "and the DAG is unchanged"
+              | Error f -> failtestf "production refused an identical node: %A" f
+
+              match Dag.append collide planW (Human "x") op2 "" d1 with
+              | Error(DagAppendFault.ContentIdCollision id) -> Expect.equal id id1 "production names the colliding id"
+              | other -> failtestf "production must refuse a differing node minting a held id: %A" other
+
+              // The model.
+              let m0: DagFold.dag<PlanOp> = { DagFold.nodes = [] }
+
+              let m1 =
+                  match DagFold.add_node same (mnode [] op1) m0 with
+                  | DagFold.Appended(_, d) -> d
+                  | DagFold.Collision _ -> failtest "the model refused a node into an empty DAG"
+
+              match DagFold.add_node same (mnode [] op1) m1 with
+              | DagFold.Appended(id, d) ->
+                  Expect.equal id "same-id" "the model deduplicates"
+                  Expect.equal d m1 "and leaves the DAG unchanged"
+              | DagFold.Collision _ -> failtest "the model refused an identical node"
+
+              match DagFold.add_node same (mnode [] op2) m1 with
+              | DagFold.Collision id -> Expect.equal id "same-id" "the model refuses the differing node by name"
+              | DagFold.Appended _ -> failtest "the model must refuse a differing node minting a held id"
+
+              // The go-red: a `same` that accepts everything is the pre-296 replacement's twin — it
+              // admits the differing node, which production refuses.
+              match DagFold.add_node (fun _ _ -> true) (mnode [] op2) m1 with
+              | DagFold.Appended _ -> ()
+              | DagFold.Collision _ -> failtest "a permissive sameness admits the differing node"
           // ---- Phase 158: delta recovery over a MERGED HEAD, and mergeBase, beside production's ----
 
           testCase "the extracted recovery and mergeBase are production's over every FOLD-PULL-FOLD union"
@@ -10775,6 +11144,14 @@ let proofOracleTests =
                       Expect.isTrue
                           (Set.contains cls t.Classes)
                           (sprintf "the sample reached a %s rejection (reached: %A)" cls t.Classes)
+
+                  // Phase 309 — the whole alphabet was ACCEPTED somewhere, the two kinds the lane
+                  // generator never draws included: an update and a batch reach the differential
+                  // by generation, not by two hand-written cases.
+                  for kind in [ "insert"; "remove"; "move"; "reorder"; "batch"; "update" ] do
+                      Expect.isTrue
+                          (Set.contains kind t.AcceptedKinds)
+                          (sprintf "the pool ACCEPTED a %s somewhere (accepted kinds: %A)" kind t.AcceptedKinds)
 
           testCase "a tree oracle handed a blind bridge DISAGREES with Ops.apply"
           <| fun _ ->

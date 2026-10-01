@@ -1273,6 +1273,218 @@ let rec lanes_by = (fun ( opof  :  Prims.string  ->  'op ) ( ls  :  Prims.list<P
      ((ops_by opof l))::(lanes_by opof t)
      end))
 
+type replay_fault<'rej> =
+| RUnknownHead of Prims.string
+| RCyclicHistory of Prims.string
+| RRejected of Prims.string * 'rej
+
+
+let uu___is_RUnknownHead = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RUnknownHead (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RUnknownHead__item___0 = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RUnknownHead (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_RCyclicHistory = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RCyclicHistory (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RCyclicHistory__item___0 = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RCyclicHistory (_0) -> begin
+     _0
+     end))
+
+
+let uu___is_RRejected = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RRejected (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__RRejected__item___0 = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RRejected (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__RRejected__item___1 = (fun ( projectee  :  replay_fault<'rej> ) -> (match (projectee) with
+| RRejected (_0, _1) -> begin
+     _1
+     end))
+
+
+let rec replay_ids = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( ns  :  Prims.list<node<'op>> ) ( ids  :  Prims.list<Prims.string> ) ( s  :  'state ) -> (match (ids) with
+| [] -> begin
+     Ok (s)
+     end
+| (id)::t -> begin
+     (match ((lookup ns id)) with
+| Missing -> begin
+     (replay_ids apply ns t s)
+     end
+| Found (n) -> begin
+     (match ((apply n.nop s)) with
+| Ok (s') -> begin
+     (replay_ids apply ns t s')
+     end
+| Error (e) -> begin
+     Error (RRejected (id, e))
+     end)
+     end)
+     end))
+
+
+let replay_to = (fun ( apply  :  'op  ->  'state  ->  outcome<'state, 'rej> ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( kfuel  :  Prims.list<node<'op>> ) ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( s0  :  'state ) ( head  :  Prims.string ) -> (match ((lookup d.nodes head)) with
+| Missing -> begin
+     Error (RUnknownHead (head))
+     end
+| Found (uu___) -> begin
+     (
+
+let cn = (closure_nodes d.nodes (ancestors_of d fuel head))
+in (
+
+let order = (drain_order lt kfuel cn)
+in  
+if (sub_ids (ids_of cn) order) then begin
+     (replay_ids apply d.nodes order s0)
+     end else begin
+     Error (RCyclicHistory (head))
+     end))
+     end))
+
+
+let is_unknown_head = (fun ( r  :  outcome<'state, replay_fault<'rej>> ) -> (match (r) with
+| Error (RUnknownHead (uu___)) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let is_cyclic = (fun ( r  :  outcome<'state, replay_fault<'rej>> ) -> (match (r) with
+| Error (RCyclicHistory (uu___)) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+type append_result<'op> =
+| Appended of Prims.string * dag<'op>
+| Collision of Prims.string
+
+
+let uu___is_Appended = (fun ( projectee  :  append_result<'op> ) -> (match (projectee) with
+| Appended (_0, _1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Appended__item___0 = (fun ( projectee  :  append_result<'op> ) -> (match (projectee) with
+| Appended (_0, _1) -> begin
+     _0
+     end))
+
+
+let __proj__Appended__item___1 = (fun ( projectee  :  append_result<'op> ) -> (match (projectee) with
+| Appended (_0, _1) -> begin
+     _1
+     end))
+
+
+let uu___is_Collision = (fun ( projectee  :  append_result<'op> ) -> (match (projectee) with
+| Collision (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Collision__item___0 = (fun ( projectee  :  append_result<'op> ) -> (match (projectee) with
+| Collision (_0) -> begin
+     _0
+     end))
+
+
+let add_node = (fun ( same  :  node<'op>  ->  node<'op>  ->  Prims.bool ) ( n  :  node<'op> ) ( d  :  dag<'op> ) -> (match ((lookup d.nodes n.nid)) with
+| Found (m) -> begin
+      
+if (same m n) then begin
+     Appended (n.nid, d)
+     end else begin
+     Collision (n.nid)
+     end
+     end
+| Missing -> begin
+     Appended (n.nid, {nodes = (n)::d.nodes})
+     end))
+
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twin_lt : Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( x  :  Prims.string ) ( y  :  Prims.string ) -> ((((Prims.op_Equals x "a") && (not ((Prims.op_Equals y "a")))) || ((Prims.op_Equals x "b") && ((Prims.op_Equals y "c") || (Prims.op_Equals y "m")))) || ((Prims.op_Equals x "c") && (Prims.op_Equals y "m"))))
+
+
+let twin_dag : dag<Prims.string> = {nodes = ({nid = "m"; nparents = ("b")::("c")::[]; nop = "m"})::({nid = "c"; nparents = ("a")::[]; nop = "c"})::({nid = "b"; nparents = ("a")::[]; nop = "b"})::({nid = "a"; nparents = []; nop = "a"})::[]}
+
+
+let twin_fuel : Prims.list<node<Prims.string>> = (app twin_dag.nodes twin_dag.nodes)
+
+
+let twin_apply : Prims.string  ->  Prims.string  ->  outcome<Prims.string, Prims.string> = (fun ( o  :  Prims.string ) ( s  :  Prims.string ) ->  
+if (Prims.op_Equals o "x") then begin
+     Error ("refused")
+     end else begin
+     Ok ((Prims.strcat s o))
+     end)
+
+
+let twins : Prims.list<twin> = ({tname = "independent-disjoint-footprints"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []}) true))})::({tname = "dependent-shared-structure-write"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []}) false))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::[]
+
 
 
 
