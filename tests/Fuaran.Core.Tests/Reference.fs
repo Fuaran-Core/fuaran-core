@@ -132,3 +132,49 @@ let twoSameName () =
         "doc"
         [ RNode.node "g1" "group" [ RNode.hole "gx1" "field" "x" (ValueHole AnyString) ]
           RNode.node "g2" "group" [ RNode.hole "gx2" "field" "x" (ValueHole AnyString) ] ]
+
+/// The reference STREAM domain (Phase 296) — a counter with inc/dec ops, where a `Dec` below zero is
+/// the domain's rejection. One copy: the linear stream, idempotent-append, DAG and conformance
+/// suites each carried their own until Phase 296, and the DAG's decoded an unknown op kind as `Inc`.
+/// Encoded through the Core.Wire helpers and decoded through its combinators, so the suites exercise
+/// the real wire surface too; the decoder REFUSES an op kind it does not know.
+module Counter =
+
+    type CounterOp =
+        | Inc of int
+        | Dec of int
+
+    let encode (op: CounterOp) : string =
+        match op with
+        | Inc n -> Json.render (Json.kindObj "inc" [ "n", JInt n ])
+        | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
+
+    let decode (s: string) : Result<CounterOp, string> =
+        let parsed =
+            Decode.parse s
+            |> Result.bind (fun el ->
+                Decode.kindOf el
+                |> Result.bind (fun k -> Decode.intField "n" el |> Result.map (fun n -> k, n)))
+
+        match parsed with
+        | Ok("inc", n) -> Ok(Inc n)
+        | Ok("dec", n) -> Ok(Dec n)
+        | Ok(k, _) -> Error("unknown op kind: " + k)
+        | Error e -> Error e
+
+    let apply (op: CounterOp) (st: int) : Result<int, string> =
+        match op with
+        | Inc n -> Ok(st + n)
+        | Dec n -> if st - n < 0 then Error "would go negative" else Ok(st - n)
+
+    let witness: StreamWitness<CounterOp, int, string> =
+        { Apply = apply
+          Encode = encode
+          Decode = decode }
+
+/// A DAG node a test builds from nodes it just appended cannot be refused (Phase 296: `Dag.append` /
+/// `Dag.merge` return `Result`); a refusal fails the test with the fault's own text.
+let built (r: Result<string * Dag.T<'Op>, DagAppendFault>) : string * Dag.T<'Op> =
+    match r with
+    | Ok v -> v
+    | Error f -> failwith ("the DAG refused a node the test built: " + DagAppendFault.toString f)

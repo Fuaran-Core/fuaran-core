@@ -363,7 +363,7 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": [],
-      "cases": "400",
+      "cases": "700",
       "adequacy": "unconditional",
       "refusal": "drawn-miss-is-red"
     },

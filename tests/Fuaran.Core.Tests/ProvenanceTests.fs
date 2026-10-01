@@ -120,7 +120,7 @@ let tests =
                       // 0.23.0 — the reason is typed. `HashMismatch` is the digest check, which is
                       // the one a re-attribution fails: the record keeps its sequence and its
                       // prev-link, and only the pre-image the hash was taken over has moved.
-                      Expect.equal b.Reason HashMismatch "the break names the digest check"
+                      Expect.equal b.Reason ChainBreakReason.HashMismatch "the break names the digest check"
                   | None -> failtest "expected a chain break"
               | Error e -> failtestf "build failed: %A" e
 
@@ -259,10 +259,10 @@ let tests =
           <| fun _ ->
               let sink = testSink "kms-secret"
               // a branch+merge op-DAG with mixed human/agent attribution
-              let g, d1 = Dag.append h sw alice (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw bot (Inc 3) g d1
-              let c, d3 = Dag.append h sw alice (Inc 4) g d2
-              let m, dag = Dag.merge h sw bot (Inc 0) b c d3
+              let g, d1 = Dag.append h sw alice (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw bot (Inc 3) g d1 |> Reference.built
+              let c, d3 = Dag.append h sw alice (Inc 4) g d2 |> Reference.built
+              let m, dag = Dag.merge h sw bot (Inc 0) b c d3 |> Reference.built
 
               // the head is a content hash; attest it
               let att = sink.Sign m |> Option.get

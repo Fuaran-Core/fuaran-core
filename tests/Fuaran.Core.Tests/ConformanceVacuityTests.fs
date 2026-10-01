@@ -799,7 +799,7 @@ let vacuityTests =
 
               let refusedOps =
                   { ConformanceTests.streamGen with
-                      Op = fun r -> ConformanceTests.Dec ConformanceTests.overdraw, r }
+                      Op = fun r -> Reference.Counter.Dec ConformanceTests.overdraw, r }
 
               let tree0, _ = ConformanceTests.genTree (ConfRng.ofSeed 1)
 

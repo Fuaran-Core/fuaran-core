@@ -49,33 +49,10 @@ let opGen: OpGen<RNode, string> =
       FreshNode = genFresh
       CanHold = None }
 
-// ---- a counter stream witness (mirrors OpStreamTests) ----
-type CounterOp =
-    | Inc of int
-    | Dec of int
+// ---- the counter stream witness — the one reference copy, `Reference.Counter` (Phase 296) ----
+open Fuaran.Core.Tests.Reference.Counter
 
-let sw: StreamWitness<CounterOp, int, string> =
-    { Apply =
-        fun op st ->
-            match op with
-            | Inc n -> Ok(st + n)
-            | Dec n -> if st - n < 0 then Error "negative" else Ok(st - n)
-      Encode =
-        fun op ->
-            match op with
-            | Inc n -> Json.render (Json.kindObj "inc" [ "n", JInt n ])
-            | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
-      // A real decode (Phase 81 — attributedLaws exercises the fromJsonl path); mirrors OpStreamTests.
-      Decode =
-        fun s ->
-            Decode.parse s
-            |> Result.bind (fun el ->
-                Decode.kindOf el
-                |> Result.bind (fun k -> Decode.intField "n" el |> Result.map (fun n -> k, n)))
-            |> Result.bind (function
-                | "inc", n -> Ok(Inc n)
-                | "dec", n -> Ok(Dec n)
-                | k, _ -> Error("unknown op kind: " + k)) }
+let sw: StreamWitness<CounterOp, int, string> = witness
 
 let private genStreamOp (rng: ConfRng.T) : CounterOp * ConfRng.T =
     let kind, r1 = ConfRng.intBelow 2 rng

@@ -5,29 +5,11 @@ module Fuaran.Core.Tests.DagTests
 open Expecto
 open Fuaran.Core
 
-type private CounterOp =
-    | Inc of int
-    | Dec of int
+// The counter stream domain — the one reference copy, `Reference.Counter` (Phase 296). The copy
+// this suite carried decoded an op kind it did not know as `Inc`; the shared one refuses it.
+open Fuaran.Core.Tests.Reference.Counter
 
-let private sw: StreamWitness<CounterOp, int, string> =
-    { Apply =
-        fun op st ->
-            match op with
-            | Inc n -> Ok(st + n)
-            | Dec n -> if st - n < 0 then Error "negative" else Ok(st - n)
-      Encode =
-        fun op ->
-            match op with
-            | Inc n -> Json.render (Json.kindObj "inc" [ "n", JInt n ])
-            | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
-      Decode =
-        fun s ->
-            Decode.parse s
-            |> Result.bind (fun el ->
-                Decode.kindOf el
-                |> Result.bind (fun k ->
-                    Decode.intField "n" el
-                    |> Result.map (fun n -> if k = "dec" then Dec n else Inc n))) }
+let private sw = witness
 
 let private h = OpStream.defaultHash
 
@@ -37,53 +19,53 @@ let tests =
         "Dag"
         [ testCase "a linear chain verifies and replays like the linear spine"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
               Expect.isTrue (Dag.verifyDag h sw d2) "intact DAG verifies"
-              Expect.equal (Dag.replayTo sw 0 d2 b) (Ok 8) "replay to b = 5 + 3"
+              Expect.equal (Dag.tryReplayTo sw 0 d2 b) (Ok 8) "replay to b = 5 + 3"
               Expect.equal (Dag.heads d2) [ b ] "single head"
 
           testCase "appending onto a non-head node forks a branch"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 // fork off a
-              Expect.equal (Dag.replayTo sw 0 d3 b) (Ok 8) "branch b = 5 + 3"
-              Expect.equal (Dag.replayTo sw 0 d3 c) (Ok 9) "branch c = 5 + 4"
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built // fork off a
+              Expect.equal (Dag.tryReplayTo sw 0 d3 b) (Ok 8) "branch b = 5 + 3"
+              Expect.equal (Dag.tryReplayTo sw 0 d3 c) (Ok 9) "branch c = 5 + 4"
               Expect.equal (Dag.heads d3 |> List.length) 2 "two heads after the fork"
 
           testCase "merge converges both branches; replay is deterministic and order-symmetric"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2
-              let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built
+              let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3 |> Reference.built
               // genesis(5) + branch b(3) + branch c(4) + merge(0) = 12
-              Expect.equal (Dag.replayTo sw 0 d4 m) (Ok 12) "merge replays both branches once"
-              Expect.equal (Dag.replayTo sw 0 d4 m) (Dag.replayTo sw 0 d4 m) "replay is deterministic"
+              Expect.equal (Dag.tryReplayTo sw 0 d4 m) (Ok 12) "merge replays both branches once"
+              Expect.equal (Dag.tryReplayTo sw 0 d4 m) (Dag.tryReplayTo sw 0 d4 m) "replay is deterministic"
               Expect.equal (Dag.heads d4) [ m ] "the merge is the sole head"
 
               // the symmetric merge (c,b) converges to the SAME content id (Phase 64.1 —
               // parents are sorted before hashing, so merge identity is order-independent;
               // two hosts reconciling the same pair mint the same node).
-              let m2, d5 = Dag.merge h sw (Human "x") (Inc 0) c b d4
+              let m2, d5 = Dag.merge h sw (Human "x") (Inc 0) c b d4 |> Reference.built
               Expect.equal m2 m "left/right order ⇒ the SAME content id (order-independent merge)"
-              Expect.equal (Dag.replayTo sw 0 d5 m2) (Dag.replayTo sw 0 d4 m) "and the same converged state"
+              Expect.equal (Dag.tryReplayTo sw 0 d5 m2) (Dag.tryReplayTo sw 0 d4 m) "and the same converged state"
 
           testCase "identical histories converge to identical content ids"
           <| fun _ ->
-              let a1, _ = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let a2, _ = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
+              let a1, _ = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let a2, _ = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               Expect.equal a1 a2 "content addressing is deterministic"
 
               // a different op or actor ⇒ a different id
-              let a3, _ = Dag.append h sw (Human "x") (Inc 6) "" Dag.empty
+              let a3, _ = Dag.append h sw (Human "x") (Inc 6) "" Dag.empty |> Reference.built
               Expect.notEqual a1 a3 "different op ⇒ different id"
 
           testCase "verifyDag detects a tampered node"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
 
               let tampered =
                   { Dag.T.Nodes = d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 99 }) }
@@ -94,16 +76,16 @@ let tests =
 
           testCase "a branch+merge DAG round-trips through JSONL"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2
-              let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built
+              let m, d4 = Dag.merge h sw (Human "x") (Inc 0) b c d3 |> Reference.built
 
               match Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4) with
               | Ok d4' ->
                   Expect.equal d4'.Nodes d4.Nodes "round-trip preserves every node"
                   Expect.isTrue (Dag.verifyDag h sw d4') "the decoded DAG re-verifies"
-                  Expect.equal (Dag.replayTo sw 0 d4' m) (Dag.replayTo sw 0 d4 m) "decoded replays identically"
+                  Expect.equal (Dag.tryReplayTo sw 0 d4' m) (Dag.tryReplayTo sw 0 d4 m) "decoded replays identically"
               | Error e -> failtestf "fromJsonl failed: %s" e
 
           testCase "an empty DAG round-trips"
@@ -113,14 +95,14 @@ let tests =
 
           testCase "toJsonl is stable (id-sorted) for a fixed DAG"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
               Expect.equal (Dag.toJsonl sw.Encode d2) (Dag.toJsonl sw.Encode d2) "stable output"
 
           testCase "a malformed line is a named Error, not an exception"
           <| fun _ ->
               match Dag.fromJsonl sw "{ not json" with
-              | Error e -> Expect.stringContains e "line 0" "the Error names the offending line"
+              | Error e -> Expect.stringContains e "line 1" "the Error names the offending line"
               | Ok _ -> failtest "expected a named Error"
 
           testCase "a dangling parent decodes structurally but fails verifyDag"
@@ -164,7 +146,7 @@ let tests =
 
               match Dag.fromJsonl sw (node "{\"kind\":\"service\",\"id\":\"svc-1\"}") with
               | Error e ->
-                  Expect.stringContains e "line 0" "names the failing line"
+                  Expect.stringContains e "line 1" "names the failing line"
                   Expect.stringContains e "unknown actor kind \"service\"" "names the kind it does not know"
               | Ok dag -> failtestf "an unknown kind must not decode, got %A" dag
 
@@ -179,8 +161,8 @@ let tests =
           // Phase 13 — verified load gates the structural decode on verifyDag.
           testCase "fromJsonlVerified accepts an intact DAG and rejects a dangling parent"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
               Expect.equal (Dag.fromJsonlVerified h sw (Dag.toJsonl sw.Encode d2)) (Ok d2) "intact DAG verifies on load"
 
               // a genuinely dangling parent: serialize only b's line (b's id IS its real content
@@ -194,7 +176,7 @@ let tests =
 
           testCase "fromJsonlVerified rejects a tampered node id"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               // rewrite the stored id so it no longer matches the content hash
               let tampered =
                   { Dag.T.Nodes =
@@ -211,23 +193,23 @@ let tests =
 
           testCase "mergeBase finds the fork point of two branches"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 // fork off a
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw (Human "x") (Inc 4) a d2 |> Reference.built // fork off a
               Expect.equal (Dag.mergeBase d3 b c) (Some a) "the fork point a is the merge base"
               Expect.equal (Dag.ancestorsOf d3 a) (Set.ofList [ a ]) "a genesis closure is itself"
 
           testCase "mergeBase is None for disjoint histories"
           <| fun _ ->
-              let g1, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let g2, d2 = Dag.append h sw (Human "x") (Inc 7) "" d1 // a second, unrelated genesis
+              let g1, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let g2, d2 = Dag.append h sw (Human "x") (Inc 7) "" d1 |> Reference.built // a second, unrelated genesis
               Expect.equal (Dag.mergeBase d2 g1 g2) None "no common ancestor"
 
           testCase "between returns the branch delta in topological order"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2 // linear a -> b -> c
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2 |> Reference.built // linear a -> b -> c
 
               Expect.equal (Dag.between d3 a c |> List.map (fun n -> n.Id)) [ b; c ] "nodes after a, up to c"
               Expect.equal (Dag.between d3 c c) [] "base == head ⇒ empty delta"
@@ -236,9 +218,9 @@ let tests =
           // Phase 26 — branch delta as an applyable op list.
           testCase "betweenOps projects the branch delta's ops in topological order"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
-              let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2 |> Reference.built
 
               Expect.equal (Dag.betweenOps d3 a c) [ Inc 3; Inc 4 ] "ops of the nodes between a and c"
               Expect.equal (Dag.betweenOps d3 c c) [] "base == head ⇒ no ops"
@@ -248,32 +230,32 @@ let tests =
           // Phase 21 — DAG break localisation.
           testCase "firstBreak is None for an intact DAG"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
               Expect.isNone (Dag.firstBreak h sw d2) "intact ⇒ no break"
 
           testCase "firstBreak localises a tampered node and a dangling parent"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
 
               // tamper a node's op without rewriting its id ⇒ content-id mismatch
               let tampered =
                   { Dag.T.Nodes = d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }) }
 
               match Dag.firstBreak h sw tampered with
-              | Some b -> Expect.equal b.Reason ContentIdMismatch "names a content-id mismatch"
+              | Some b -> Expect.equal b.Reason DagBreakReason.ContentIdMismatch "names a content-id mismatch"
               | None -> failtest "expected a break"
 
               // a real node whose parent is dropped from the map: its id still matches its content
               // hash, so the *missing-parent* check (not content-id) is what trips
-              let ra, dra = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let _, drab = Dag.append h sw (Human "x") (Inc 3) ra dra
+              let ra, dra = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let _, drab = Dag.append h sw (Human "x") (Inc 3) ra dra |> Reference.built
               let orphaned = { Dag.T.Nodes = drab.Nodes |> Map.remove ra }
 
               match Dag.firstBreak h sw orphaned with
               | Some b ->
-                  Expect.equal b.Reason MissingParent "names a missing parent"
+                  Expect.equal b.Reason DagBreakReason.MissingParent "names a missing parent"
                   Expect.equal b.Got ra "reports the missing parent id"
               | None -> failtest "expected a break"
 
@@ -285,8 +267,8 @@ let tests =
               // is typed now, but this error text is what a consumer outside this library matches,
               // and `DagBreakReason.toString` is the only thing keeping it what it was. An exact
               // comparison, not a substring: this case exists to go red if the wording ever moves.
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
 
               let bLine =
                   (Dag.toJsonl sw.Encode d2).Split('\n') |> Array.find (fun l -> l.Contains b)
@@ -335,7 +317,12 @@ let tests =
 
               let streamGen: StreamGen<CounterOp, int> = { State0 = 0; Op = genOp }
               let results = Conformance.dagLaws sw streamGen h 99 100
-              Expect.equal (List.length results) 4 "verifyDag + determinism + tamper + JSONL round-trip"
+
+              Expect.equal
+                  (List.length results)
+                  7
+                  "verifyDag + determinism + tamper + JSONL round-trip + the three Phase 296 refusals"
+
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "dag laws pass"
 
           // ---- Phase 42: DAG acyclicity guard ----
@@ -364,15 +351,146 @@ let tests =
               | Ok _ -> failtest "expected a cyclic-history error"
 
               match Dag.tryReplayTo sw 0 cyclic "a" with
-              | Error(Dag.CyclicHistory "a") -> ()
+              | Error(Dag.ReplayFault.CyclicHistory "a") -> ()
               | other -> failtestf "expected CyclicHistory, got %A" other
 
           testCase "tryReplayTo replays an acyclic DAG like replayTo"
           <| fun _ ->
-              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty
-              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1
+              let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
               Expect.isTrue (Dag.isAcyclic d2 b) "a genuine DAG is acyclic"
 
               match Dag.tryReplayTo sw 0 d2 b with
               | Ok 8 -> ()
               | other -> failtestf "expected Ok 8, got %A" other ]
+
+// ---- Phase 296 — the DAG's typed refusals: an unknown head, an unknown parent, a colliding id ----
+
+[<Tests>]
+let refusalTests =
+    let x = Human "x"
+
+    testList
+        "Dag refusals (Phase 296)"
+        [ testCase "tryReplayTo refuses a head the DAG does not hold; the replayTo bridge raises"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+
+              Expect.equal (Dag.tryReplayTo sw 0 d1 a) (Ok 5) "a held head replays"
+
+              Expect.equal
+                  (Dag.tryReplayTo sw 0 d1 (a + "typo"))
+                  (Error(Dag.ReplayFault.UnknownHead(a + "typo")))
+                  "a typo'd head is named, never the initial state"
+
+              Expect.throwsT<System.ArgumentException>
+                  (fun () -> Dag.replayTo sw 0 d1 "absent" |> ignore)
+                  "the obsolete bridge cannot carry the fault, so it raises rather than answering Ok 0"
+
+          testCase "append and merge refuse a parent the DAG does not hold"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+
+              Expect.equal
+                  (Dag.append h sw x (Inc 1) "nope" d1)
+                  (Error(DagAppendFault.UnknownParent "nope"))
+                  "an append onto an absent parent"
+
+              Expect.equal
+                  (Dag.merge h sw x (Inc 0) a "nope" d1)
+                  (Error(DagAppendFault.UnknownParent "nope"))
+                  "a merge naming an absent parent"
+
+              Expect.equal
+                  (Dag.append h sw x (Inc 1) "p,q" d1)
+                  (Error(DagAppendFault.CommaInParentId "p,q"))
+                  "a comma-bearing id is refused for what it is, before it is looked up"
+
+          testCase
+              "an id the DAG holds for a different node is refused; the held node stays (a HashFn that collides on demand)"
+          <| fun _ ->
+              let collide: HashFn = fun _ _ -> "c"
+              let c, d1 = Dag.append collide sw x (Inc 5) "" Dag.empty |> Reference.built
+
+              Expect.equal
+                  (Dag.append collide sw x (Inc 6) "" d1)
+                  (Error(DagAppendFault.ContentIdCollision c))
+                  "a different op under the same id"
+
+              Expect.equal
+                  (Dag.append collide sw (Human "y") (Inc 5) "" d1)
+                  (Error(DagAppendFault.ContentIdCollision c))
+                  "a different actor under the same id"
+
+              Expect.equal (Dag.append collide sw x (Inc 5) "" d1) (Ok(c, d1)) "the SAME node deduplicates, by design"
+
+          testCase "a merge and an append naming the comma-spliced parent are told apart by their parents"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let b, d2 = Dag.append h sw x (Inc 3) a d1 |> Reference.built
+              let c, d3 = Dag.append h sw x (Inc 4) a d2 |> Reference.built
+              let m, d4 = Dag.merge h sw x (Inc 0) b c d3 |> Reference.built
+
+              let lo, hi =
+                  (if System.String.CompareOrdinal(b, c) < 0 then
+                       b, c
+                   else
+                       c, b)
+
+              // A file carrying, beside the merge, a node with the merge's id and the ONE spliced
+              // parent — buildable by nothing here, refused as a collision when read.
+              let spliced =
+                  "{\"node\":true,\"id\":\""
+                  + m
+                  + "\",\"parents\":[\""
+                  + lo
+                  + ","
+                  + hi
+                  + "\"],\"actor\":{\"kind\":\"human\",\"id\":\"x\"},\"op\":"
+                  + sw.Encode(Inc 0)
+                  + "}"
+
+              match Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4 + "\n" + spliced) with
+              | Error e -> Expect.stringContains e "content-id collision" "the spliced node is refused"
+              | Ok _ -> failtest "a node colliding with the merge must be refused"
+
+              Expect.equal
+                  (Dag.fromJsonl sw (Dag.toJsonl sw.Encode d4 + "\n" + Dag.toJsonl sw.Encode d4))
+                  (Ok d4)
+                  "a repeated identical node deduplicates on load"
+
+          testCase "appendChecked applies the op at the caller's state: a rejected op never enters the DAG"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+
+              match Dag.appendChecked h sw x (Dec 9) 5 a d1 with
+              | Error(DagAppendRejection.Domain "would go negative") -> ()
+              | other -> failtestf "expected the domain's rejection, got %A" other
+
+              match Dag.appendChecked h sw x (Dec 2) 5 a d1 with
+              | Ok(3, id, d2) -> Expect.equal (Dag.tryReplayTo sw 0 d2 id) (Ok 3) "the state it returns is the replay"
+              | other -> failtestf "expected the applied node, got %A" other
+
+              match Dag.mergeChecked h sw x (Inc 0) 5 a "nope" d1 with
+              | Error(DagAppendRejection.Fault(DagAppendFault.UnknownParent "nope")) -> ()
+              | other -> failtestf "the graph refusal is judged first, got %A" other
+
+          testCase "the DAG reader refuses what the shared scanner refuses, with a 1-based line"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let good = Dag.toJsonl sw.Encode d1
+
+              let refused (text: string) (expect: string) =
+                  match Dag.fromJsonl sw text with
+                  | Error e ->
+                      Expect.stringContains e "line 3:" "the line counts the blank one"
+                      Expect.stringContains e expect "and names the reason"
+                  | Ok _ -> failtestf "expected a refusal: %s" expect
+
+              refused (good + "\n\n" + good.Replace("\"id\":\"" + a + "\"", "\"id\":12")) "field id is not a string"
+
+              refused
+                  (good + "\n\n" + good.Replace("\"parents\":[]", "\"parents\":[1]"))
+                  "field parents is not an array of strings"
+
+              refused (good + "\n\n" + good.Replace("\"kind\":\"inc\"", "\"kind\":\"bogus\"")) "unknown op kind: bogus" ]

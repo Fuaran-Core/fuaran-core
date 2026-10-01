@@ -561,11 +561,14 @@ let foldConfluenceTests =
 
               let chain (ops: PlanOp list) (parent: string) (d0: Dag.T<PlanOp>) =
                   ops
-                  |> List.fold (fun (h, d) op -> Dag.append hashFn planW (Human "lane") op h d) (parent, d0)
+                  |> List.fold
+                      (fun (h, d) op -> Dag.append hashFn planW (Human "lane") op h d |> Reference.built)
+                      (parent, d0)
 
               let build (a: PlanOp list) (b: PlanOp list) =
                   let baseId, d0 =
                       Dag.append hashFn planW (Human "base") (SetShipped "p3") "" Dag.empty
+                      |> Reference.built
 
                   let headA, d1 = chain a baseId d0
                   let headB, d2 = chain b baseId d1
@@ -593,12 +596,13 @@ let foldConfluenceTests =
               let chain (i: int) (ops: PlanOp list) (parent: string) (d0: Dag.T<PlanOp>) =
                   ops
                   |> List.fold
-                      (fun (h, d) op -> Dag.append hashFn planW (Human("lane-" + string i)) op h d)
+                      (fun (h, d) op -> Dag.append hashFn planW (Human("lane-" + string i)) op h d |> Reference.built)
                       (parent, d0)
 
               let build (lanes: PlanOp list list) =
                   let baseId, d0 =
                       Dag.append hashFn planW (Human "base") (SetShipped "p3") "" Dag.empty
+                      |> Reference.built
 
                   let heads, dag =
                       lanes

@@ -36,6 +36,7 @@ type DagNode<'Op> =
 /// alternative to naming that case is a reader that claims to know which check failed when it does
 /// not. `DagBreakReason.ofString` is total and lands there; `firstBreak` never does
 /// (`Conformance.dagBreakReasonLaws`).
+[<RequireQualifiedAccess>]
 type DagBreakReason =
     /// The node's stored id is not the content hash of its (parents, actor, op) — a tampered node.
     | ContentIdMismatch
@@ -54,18 +55,18 @@ module DagBreakReason =
     /// The canonical string for a reason — the exact spelling `firstBreak` minted before this type.
     let toString (r: DagBreakReason) : string =
         match r with
-        | ContentIdMismatch -> "content-id mismatch (tampered node)"
-        | MissingParent -> "missing parent"
-        | Unrecognised s -> s
+        | DagBreakReason.ContentIdMismatch -> "content-id mismatch (tampered node)"
+        | DagBreakReason.MissingParent -> "missing parent"
+        | DagBreakReason.Unrecognised s -> s
 
     /// Total: both strings the walker ever emitted classify, and anything else is `Unrecognised`
     /// verbatim rather than swept into the nearer-looking case. `toString >> ofString` is the
     /// identity on the named cases.
     let ofString (s: string) : DagBreakReason =
         match s with
-        | "content-id mismatch (tampered node)" -> ContentIdMismatch
-        | "missing parent" -> MissingParent
-        | other -> Unrecognised other
+        | "content-id mismatch (tampered node)" -> DagBreakReason.ContentIdMismatch
+        | "missing parent" -> DagBreakReason.MissingParent
+        | other -> DagBreakReason.Unrecognised other
 
 /// The first integrity fault found in a DAG (Phase 21) — the node it occurs at, why, and the
 /// expected vs got value. `verifyDag` is `firstBreak … |> Option.isNone`; this names *where*.
@@ -91,6 +92,7 @@ type DagBreak =
 ///     pure script cannot name (`Footprint.UnknownParentWrites`) while the other makes any structural
 ///     write: conservatively a collision, keyed by the removed/moved id. THE pinned over-approximation
 ///     inherited from `Ops.independent` — see STABILITY.md "Op-script footprint + independence".
+[<RequireQualifiedAccess>]
 type MergeConflictShape =
     | ConcurrentUpdate
     | InsertPositionClash
@@ -107,20 +109,28 @@ type MergeConflict<'Op> =
       Address: string
       Shape: MergeConflictShape }
 
-/// Why `Dag.tryAppend` / `Dag.tryMerge` refused to build a node (Phase 300) — the typed refusals that
-/// make the parent-splice premise a property of everything this module BUILDS rather than a premise
-/// about its callers. `nodeHash` joins the sorted parent ids with `,`, so a parent id carrying a comma
-/// splices: an `append` whose parent id is the string `"x,y"` minted the id of `merge(x, y)` with no
-/// hash weakness at all, and replaced that node silently. And `""` is `append`'s genesis marker, never
-/// a node id, so `merge("", x)` built a node with a phantom parent. `parent_splice_unambiguous`
-/// (proofs/Chain.fst) proves the comma-join injective exactly for non-empty, comma-free ids; these two
-/// refusals are that premise, stated where the ids enter.
+/// Why `Dag.append` / `Dag.merge` refused to build a node (Phase 300, Phase 296) — the typed refusals
+/// that make the DAG's structural premises properties of everything this module BUILDS rather than
+/// premises about its callers. `nodeHash` joins the sorted parent ids with `,`, so a parent id carrying
+/// a comma splices: an `append` whose parent id is the string `"x,y"` minted the id of `merge(x, y)`
+/// with no hash weakness at all, and replaced that node silently. And `""` is `append`'s genesis
+/// marker, never a node id, so `merge("", x)` built a node with a phantom parent.
+/// `parent_splice_unambiguous` (proofs/Chain.fst) proves the comma-join injective exactly for
+/// non-empty, comma-free ids; those two refusals are that premise, stated where the ids enter. Phase
+/// 296 adds the two the DAG's own content decides: a parent it does not hold, and an id it already
+/// holds for a different node.
 [<RequireQualifiedAccess>]
 type DagAppendFault =
     /// A merge was handed `""` for a parent — `append`'s genesis marker, not a node id.
     | EmptyParentId
     /// A parent id carries a `,` — the separator the content-hash pre-image joins parent ids with.
     | CommaInParentId of parentId: string
+    /// A parent id the DAG does not hold (Phase 296).
+    | UnknownParent of parentId: string
+    /// The DAG already holds this content id for a node whose parents (modulo order), actor or op
+    /// differ (Phase 296) — a hash collision, which under the 32-bit FNV-1a default is a real event,
+    /// or a node loaded from a file that was not built by this module. The node held first stays.
+    | ContentIdCollision of nodeId: string
 
 /// Render a `DagAppendFault` for a log line or an exception message (Phase 300).
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -133,6 +143,19 @@ module DagAppendFault =
             "the parent id \""
             + p
             + "\" carries a comma, the separator of the content-hash pre-image"
+        | DagAppendFault.UnknownParent p -> "the parent id \"" + p + "\" names no node of the DAG"
+        | DagAppendFault.ContentIdCollision id ->
+            "the DAG already holds node \""
+            + id
+            + "\" with different content (a content-id collision)"
+
+/// Why `Dag.appendChecked` / `Dag.mergeChecked` refused (Phase 296) — the shape of
+/// `AppendRejection<'Rej>` on the linear stream: a structural `Fault` the DAG decided, or the domain's
+/// own rejection of the op at the state the caller named.
+[<RequireQualifiedAccess>]
+type DagAppendRejection<'Rej> =
+    | Fault of DagAppendFault
+    | Domain of 'Rej
 
 /// One lane an N-lane reconcile refused because the lane's own delta does not apply (Phase 300): the
 /// lane's head, its delta (the exclusive region `Dag.reconcileMany` would have folded), and the first
@@ -209,6 +232,34 @@ module Dag =
         else
             None
 
+    /// A parent id the DAG must already hold (Phase 296) — after the splice premise, since a
+    /// comma-bearing id is refused for what it IS, not for being absent.
+    let private knownParent (dag: T<'Op>) (p: string) : DagAppendFault option =
+        match parentFault p with
+        | Some f -> Some f
+        | None when not (dag.Nodes.ContainsKey p) -> Some(DagAppendFault.UnknownParent p)
+        | None -> None
+
+    let private ordinalSort (ids: string list) =
+        ids |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+
+    /// Is `n` the node (`parents`, `actor`, `op`) would build? Parents compared modulo order — the
+    /// content id is parent-order-independent (Phase 64.1), so `merge(a,b)` and `merge(b,a)` are
+    /// one node — and the op through its encoding, so no equality is demanded of `'Op` (GP2).
+    let private sameNode
+        (encode: 'Op -> string)
+        (n: DagNode<'Op>)
+        (parents: string list)
+        (actor: Actor)
+        (op: 'Op)
+        : bool =
+        ordinalSort n.Parents = ordinalSort parents
+        && n.Actor = actor
+        && encode n.Op = encode op
+
+    /// Add the node, refusing an id the DAG already holds for DIFFERENT content (Phase 296). The
+    /// same node added twice is one node — content addressing deduplicates by design, and a retry
+    /// that re-sends an append converges on the node it already wrote.
     let private addNode
         (hashFn: HashFn)
         (encode: 'Op -> string)
@@ -216,37 +267,42 @@ module Dag =
         (op: 'Op)
         (parents: string list)
         (dag: T<'Op>)
-        : string * T<'Op> =
+        : Result<string * T<'Op>, DagAppendFault> =
         let id = nodeHash hashFn encode parents actor op
 
-        let node =
-            { Id = id
-              Parents = parents
-              Actor = actor
-              Op = op }
+        match Map.tryFind id dag.Nodes with
+        | Some existing when sameNode encode existing parents actor op -> Ok(id, dag)
+        | Some _ -> Error(DagAppendFault.ContentIdCollision id)
+        | None ->
+            let node =
+                { Id = id
+                  Parents = parents
+                  Actor = actor
+                  Op = op }
 
-        id, { Nodes = Map.add id node dag.Nodes }
+            Ok(id, { Nodes = Map.add id node dag.Nodes })
 
-    /// `append` with its refusal typed (Phase 300): a comma-bearing `parentId` is
-    /// `Error(DagAppendFault.CommaInParentId _)`, because its content id would splice into a merge's.
-    /// `""` is genesis, as for `append`.
-    let tryAppend
-        (hashFn: HashFn)
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (actor: Actor)
-        (op: 'Op)
-        (parentId: string)
-        (dag: T<'Op>)
-        : Result<string * T<'Op>, DagAppendFault> =
-        match parentFault parentId with
-        | Some f -> Error f
-        | None -> Ok(addNode hashFn w.Encode actor op (if parentId = "" then [] else [ parentId ]) dag)
-
-    /// Append `op` as a child of `parentId` (`""` for genesis). Appending onto a node that
-    /// already has a child *forks* a branch. Returns the new node's content id.
+    /// Append `op` as a child of `parentId` (`""` for genesis). Appending onto a node that already has
+    /// a child *forks* a branch. Returns the new node's content id and the extended DAG.
     ///
-    /// Since Phase 300 a comma-bearing `parentId` is refused — an `ArgumentException` carrying
-    /// `DagAppendFault.toString`; `tryAppend` is the same refusal as a typed `Result`.
+    /// **Refusals, typed (Phase 300, Phase 296)** — the DAG is returned only when the node is sound:
+    ///   - `CommaInParentId` — the parent id carries the separator the content-hash pre-image joins
+    ///     parent ids with, so its id would splice into a merge's;
+    ///   - `UnknownParent` — a non-empty `parentId` the DAG does not hold (a typo'd parent used to
+    ///     build a node `verifyDag` then rejected as `MissingParent`);
+    ///   - `ContentIdCollision` — the DAG already holds this id for a node whose parents (modulo
+    ///     order), actor or op differ. Under the 32-bit FNV-1a default a collision is a real event
+    ///     (about 0.3% at 5,000 nodes, even odds near 77,000), and the old `Map.add` replaced the
+    ///     held node silently while `verifyDag` still passed.
+    ///
+    /// **An identical node deduplicates, deliberately.** The same op by the same actor on the same
+    /// parent IS the same node — content addressing converges by design — so it returns `Ok` with the
+    /// DAG unchanged. A caller that must count appends keys them itself (`OpStream.appendIdempotent`'s
+    /// discipline).
+    ///
+    /// The op is NOT applied here: the DAG holds no state, and whether an op applies depends on the
+    /// state its parent's closure replays to. `appendChecked` applies it against a state the caller
+    /// holds; `tryReplayTo` and `reconcileMany` refuse a rejecting node wherever it came from.
     let append
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -254,15 +310,24 @@ module Dag =
         (op: 'Op)
         (parentId: string)
         (dag: T<'Op>)
-        : string * T<'Op> =
-        match tryAppend hashFn w actor op parentId dag with
-        | Ok r -> r
-        | Error f -> invalidArg "parentId" (DagAppendFault.toString f)
+        : Result<string * T<'Op>, DagAppendFault> =
+        if parentId = "" then
+            addNode hashFn w.Encode actor op [] dag
+        else
+            match knownParent dag parentId with
+            | Some f -> Error f
+            | None -> addNode hashFn w.Encode actor op [ parentId ] dag
 
-    /// `merge` with its refusals typed (Phase 300): a parent that is `""` is
-    /// `Error DagAppendFault.EmptyParentId`, a comma-bearing one `Error(DagAppendFault.CommaInParentId _)`
-    /// — the left parent judged first.
-    let tryMerge
+    /// Merge two heads into a convergent node (`Parents = [leftId; rightId]`). `op` is the merge
+    /// commit's own reconciliation op (a domain no-op where the merge adds nothing).
+    ///
+    /// Refusals, typed, the left parent judged first: `EmptyParentId` (`""` is `append`'s genesis
+    /// marker, not a node id), `CommaInParentId`, `UnknownParent`, and `ContentIdCollision` exactly as
+    /// for `append`. With the first two, no merge id can equal an append id built through this module:
+    /// an append's pre-image names ONE comma-free parent, a merge's two joined by a comma — and a node
+    /// loaded from a file that tries it anyway is refused as a collision, because the comparison is
+    /// over the parents themselves, not the id.
+    let merge
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (actor: Actor)
@@ -275,31 +340,51 @@ module Dag =
             if p = "" then
                 Some DagAppendFault.EmptyParentId
             else
-                parentFault p
+                knownParent dag p
 
         match judge leftId |> Option.orElse (judge rightId) with
         | Some f -> Error f
-        | None -> Ok(addNode hashFn w.Encode actor op [ leftId; rightId ] dag)
+        | None -> addNode hashFn w.Encode actor op [ leftId; rightId ] dag
 
-    /// Merge two heads into a convergent node (`Parents = [leftId; rightId]`). `op` is the
-    /// merge commit's own reconciliation op (a domain no-op where the merge adds nothing).
-    ///
-    /// Since Phase 300 a parent that is `""` or carries a comma is refused — an `ArgumentException`
-    /// carrying `DagAppendFault.toString`; `tryMerge` is the same refusal as a typed `Result`. With both
-    /// refusals, no merge id can equal an append id: an append's pre-image names ONE comma-free parent,
-    /// a merge's two joined by a comma.
-    let merge
+    /// `append` that also APPLIES the op (Phase 296): `state` is the state `parentId`'s closure
+    /// replays to — the caller's, exactly as `OpStream.append` takes the stream's current state — and
+    /// an op the domain rejects there is refused before it enters the DAG, instead of surfacing at
+    /// replay. Returns the state after the op beside the node. The graph refusals are judged first.
+    let appendChecked
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (actor: Actor)
         (op: 'Op)
+        (state: 'State)
+        (parentId: string)
+        (dag: T<'Op>)
+        : Result<'State * string * T<'Op>, DagAppendRejection<'Rej>> =
+        match append hashFn w actor op parentId dag with
+        | Error f -> Error(DagAppendRejection.Fault f)
+        | Ok(id, dag') ->
+            match w.Apply op state with
+            | Ok state' -> Ok(state', id, dag')
+            | Error rej -> Error(DagAppendRejection.Domain rej)
+
+    /// `merge` that also APPLIES the merge op (Phase 296): `state` is the state the merged closure
+    /// replays to (`tryReplayTo`, or `reconcileMany`'s result), and a rejected merge op is refused
+    /// before it enters the DAG. The graph refusals are judged first.
+    let mergeChecked
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
         (leftId: string)
         (rightId: string)
         (dag: T<'Op>)
-        : string * T<'Op> =
-        match tryMerge hashFn w actor op leftId rightId dag with
-        | Ok r -> r
-        | Error f -> invalidArg "parentId" (DagAppendFault.toString f)
+        : Result<'State * string * T<'Op>, DagAppendRejection<'Rej>> =
+        match merge hashFn w actor op leftId rightId dag with
+        | Error f -> Error(DagAppendRejection.Fault f)
+        | Ok(id, dag') ->
+            match w.Apply op state with
+            | Ok state' -> Ok(state', id, dag')
+            | Error rej -> Error(DagAppendRejection.Domain rej)
 
     /// The first integrity fault in the DAG, scanned in deterministic id order (Phase 21): a node
     /// whose stored id is not the content hash of its (parents, actor, op) — a tampered node — or a
@@ -314,7 +399,7 @@ module Dag =
             if id <> h then
                 Some
                     { NodeId = id
-                      Reason = ContentIdMismatch
+                      Reason = DagBreakReason.ContentIdMismatch
                       Expected = h
                       Got = id }
             else
@@ -322,7 +407,7 @@ module Dag =
                 | Some missing ->
                     Some
                         { NodeId = id
-                          Reason = MissingParent
+                          Reason = DagBreakReason.MissingParent
                           Expected = ""
                           Got = missing }
                 | None -> None)
@@ -423,66 +508,71 @@ module Dag =
                     (Set.count anc - List.length order)
             )
 
-    /// Replay to `headId`: fold the reducer over the head's ancestor-closure in topological
-    /// order (each op applied once). Deterministic — the topo order is total — so two
-    /// convergent histories over the same node set replay to the same state. On a domain
-    /// rejection, returns the offending node id + the envelope.
-    let replayTo
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (state0: 'State)
-        (dag: T<'Op>)
-        (headId: string)
-        : Result<'State, string * 'Rej> =
-        let rec go st =
-            function
-            | [] -> Ok st
-            | id :: rest ->
-                let n = Map.find id dag.Nodes
-
-                match w.Apply n.Op st with
-                | Ok st' -> go st' rest
-                | Error e -> Error(id, e)
-
-        go state0 (topoOrder dag headId)
-
-    /// A guarded-replay fault (Phase 42): either the head's history is **cyclic** (so a plain
-    /// `replayTo` would silently fold only the acyclic prefix to a wrong `Ok`) or a node's op was
+    /// A guarded-replay fault (Phase 42, Phase 296): the head is not a node of the DAG, the head's
+    /// history is **cyclic** (a plain fold would cover only the acyclic prefix), or a node's op was
     /// **rejected** by the domain witness.
+    [<RequireQualifiedAccess>]
     type ReplayFault<'Rej> =
+        /// The DAG holds no node with this id (Phase 296) — a typo'd head used to replay to the
+        /// initial state as if it named an empty history.
+        | UnknownHead of headId: string
         | CyclicHistory of headId: string
         | Rejected of nodeId: string * reject: 'Rej
 
-    /// `replayTo` that refuses a cyclic history (Phase 42). Returns `Error(CyclicHistory head)` when
-    /// the head's closure is not fully orderable — instead of `replayTo`'s silent partial fold — and
-    /// `Error(Rejected …)` on a domain rejection. Prefer this on any DAG that was not loaded through
-    /// `fromJsonlVerified` (whose content-hash gate already makes a forged cycle impossible).
+    /// Replay to `headId`, refusing what cannot be replayed (Phase 42, Phase 296): fold the reducer
+    /// over the head's ancestor-closure in topological order, each op applied once. Deterministic —
+    /// the topo order is total — so two convergent histories over the same node set replay to the same
+    /// state. `Error(ReplayFault.UnknownHead h)` for a head the DAG does not hold,
+    /// `Error(ReplayFault.CyclicHistory h)` when the closure is not fully orderable (a hand-crafted or
+    /// tampered load — `fromJsonlVerified`'s content-hash gate makes a forged cycle impossible), and
+    /// `Error(ReplayFault.Rejected …)` on a domain rejection.
     let tryReplayTo
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (state0: 'State)
         (dag: T<'Op>)
         (headId: string)
         : Result<'State, ReplayFault<'Rej>> =
-        match tryTopoOrder dag headId with
-        | Error _ -> Error(CyclicHistory headId)
-        | Ok order ->
-            let rec go st =
-                function
-                | [] -> Ok st
-                | id :: rest ->
-                    let n = Map.find id dag.Nodes
+        if not (dag.Nodes.ContainsKey headId) then
+            Error(ReplayFault.UnknownHead headId)
+        else
+            match tryTopoOrder dag headId with
+            | Error _ -> Error(ReplayFault.CyclicHistory headId)
+            | Ok order ->
+                let rec go st =
+                    function
+                    | [] -> Ok st
+                    | id :: rest ->
+                        let n = Map.find id dag.Nodes
 
-                    match w.Apply n.Op st with
-                    | Ok st' -> go st' rest
-                    | Error e -> Error(Rejected(id, e))
+                        match w.Apply n.Op st with
+                        | Ok st' -> go st' rest
+                        | Error e -> Error(ReplayFault.Rejected(id, e))
 
-            go state0 order
+                go state0 order
+
+    /// Replay to `headId` — a bridge for one draft over `tryReplayTo` (Phase 296). A domain rejection
+    /// is `Error(nodeId, reject)` as before; an unknown head or a cyclic history, which this signature
+    /// cannot carry, RAISES (`ArgumentException`) where it used to return a silent partial fold or the
+    /// initial state as `Ok`. Use `tryReplayTo`.
+    [<System.Obsolete("Dag.replayTo cannot report an unknown head or a cyclic history and raises on both; use Dag.tryReplayTo. Removed after the 0.33.0 draft.")>]
+    let replayTo
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (dag: T<'Op>)
+        (headId: string)
+        : Result<'State, string * 'Rej> =
+        match tryReplayTo w state0 dag headId with
+        | Ok st -> Ok st
+        | Error(ReplayFault.Rejected(id, e)) -> Error(id, e)
+        | Error(ReplayFault.UnknownHead h) -> invalidArg "headId" ("Dag.replayTo: the DAG holds no node " + h)
+        | Error(ReplayFault.CyclicHistory h) -> invalidArg "headId" ("Dag.replayTo: cyclic history at " + h)
 
     // ---- JSONL persistence (Phase 01) ----
     // The linear OpStream round-trips to JSONL; the DAG does too, closing the persistence
-    // asymmetry. Self-contained scanner — the Dag module takes no Core.Wire dependency (D2)
-    // and stays Fable-clean (Phase 241). One JSON object per node; the `op` value is the
-    // witness's own Encode output embedded raw (preserved byte-for-byte); nodes are emitted
-    // in id-sorted order so output is stable for a fixed DAG.
+    // asymmetry. Read through the linear package's one scanner (`OpStream.Jsonl`, Phase 296) — the
+    // Dag module takes no Core.Wire dependency (D2) and stays Fable-clean (Phase 241). One JSON
+    // object per node; the `op` value is the witness's own Encode output embedded raw (preserved
+    // byte-for-byte); nodes are emitted in id-sorted order so output is stable for a fixed DAG.
 
     /// JSON string spelling for the node line — the spine's one escaping rule (Phase 287): `"`,
     /// `\`, and every control character `U+0000`–`U+001F` as lower-case `\u00xx`, with NO short
@@ -523,264 +613,62 @@ module Dag =
             + "}")
         |> String.concat "\n"
 
-    /// A self-contained FSharp.Core-only line scanner — ported from OpStream's so the Dag
-    /// module keeps its no-Core.Wire posture (D2). It splits a flat top-level object into its
-    /// fields, capturing the `op` value's raw span byte-for-byte. Structural faults report the
-    /// scanner's own fault index (`start` / `i`) through the surrounding `try/with` → `Result`,
-    /// never an exception — no `Wire.Json` reparse (D2).
-    module private Jsonl =
-
-        /// Unescape a raw JSON string token (surrounding quotes included).
-        let unquote (raw: string) : string =
-            let inner = raw.Substring(1, raw.Length - 2)
-            let sb = System.Text.StringBuilder()
-            let n = inner.Length
-            let mutable i = 0
-
-            let hex (c: char) =
-                if c >= '0' && c <= '9' then int c - int '0'
-                elif c >= 'a' && c <= 'f' then int c - int 'a' + 10
-                else int c - int 'A' + 10
-
-            while i < n do
-                let c = inner.[i]
-
-                if c = '\\' && i + 1 < n then
-                    let e = inner.[i + 1]
-                    i <- i + 2
-
-                    match e with
-                    | '"' -> sb.Append('"') |> ignore
-                    | '\\' -> sb.Append('\\') |> ignore
-                    | '/' -> sb.Append('/') |> ignore
-                    | 'n' -> sb.Append('\n') |> ignore
-                    | 'r' -> sb.Append('\r') |> ignore
-                    | 't' -> sb.Append('\t') |> ignore
-                    | 'b' -> sb.Append('\b') |> ignore
-                    | 'f' -> sb.Append('\f') |> ignore
-                    | 'u' when i + 3 < n ->
-                        let code =
-                            (hex inner.[i] <<< 12)
-                            + (hex inner.[i + 1] <<< 8)
-                            + (hex inner.[i + 2] <<< 4)
-                            + hex inner.[i + 3]
-
-                        i <- i + 4
-                        sb.Append(char code) |> ignore
-                    // A truncated `\u` escape at end of input (Phase 45): emit the `u` literally rather
-                    // than reading past the end and throwing an opaque IndexOutOfRangeException.
-                    | 'u' -> sb.Append('u') |> ignore
-                    | _ -> sb.Append(e) |> ignore
-                else
-                    sb.Append(c) |> ignore
-                    i <- i + 1
-
-            sb.ToString()
-
-        /// Index just past a complete string token starting at the opening quote.
-        let skipString (s: string) (start: int) : int =
-            let n = s.Length
-            let mutable i = start + 1
-            let mutable fin = false
-
-            while not fin do
-                if i >= n then
-                    failwith (sprintf "Dag.fromJsonl: unterminated string (opened at position %d)" start)
-
-                match s.[i] with
-                | '\\' -> i <- i + 2
-                | '"' ->
-                    i <- i + 1
-                    fin <- true
-                | _ -> i <- i + 1
-
-            i
-
-        /// Index just past a complete JSON value starting at `start` (no leading ws).
-        let skipValue (s: string) (start: int) : int =
-            let n = s.Length
-            let mutable i = start
-
-            match s.[i] with
-            | '"' -> skipString s i
-            | '{'
-            | '[' ->
-                i <- i + 1
-                let mutable depth = 1
-
-                while depth > 0 do
-                    if i >= n then
-                        failwith (sprintf "Dag.fromJsonl: unterminated container (opened at position %d)" start)
-
-                    match s.[i] with
-                    | '"' -> i <- skipString s i
-                    | '{'
-                    | '[' ->
-                        depth <- depth + 1
-                        i <- i + 1
-                    | '}'
-                    | ']' ->
-                        depth <- depth - 1
-                        i <- i + 1
-                    | _ -> i <- i + 1
-
-                i
-            | _ ->
-                let isEnd c =
-                    c = ',' || c = '}' || c = ']' || c = ' ' || c = '\t' || c = '\n' || c = '\r'
-
-                while i < n && not (isEnd s.[i]) do
-                    i <- i + 1
-
-                i
-
-        /// `(key, raw-value)` pairs of a flat top-level object; values kept verbatim.
-        let topFields (line: string) : (string * string) list =
-            let s = line.Trim()
-            let n = s.Length
-            let mutable i = 0
-
-            let skipWs () =
-                while i < n && (let c = s.[i] in c = ' ' || c = '\t' || c = '\n' || c = '\r') do
-                    i <- i + 1
-
-            skipWs ()
-
-            if i >= n || s.[i] <> '{' then
-                failwith (sprintf "Dag.fromJsonl: expected a JSON object at position %d" i)
-
-            i <- i + 1
-            let fields = ResizeArray<string * string>()
-            skipWs ()
-
-            if i < n && s.[i] = '}' then
-                ()
-            else
-                let mutable go = true
-
-                while go do
-                    skipWs ()
-                    let ks = skipString s i
-                    let key = unquote (s.Substring(i, ks - i))
-                    i <- ks
-                    skipWs ()
-
-                    if i >= n || s.[i] <> ':' then
-                        failwith (sprintf "Dag.fromJsonl: expected ':' at position %d" i)
-
-                    i <- i + 1
-                    skipWs ()
-                    let vs = skipValue s i
-                    fields.Add((key, s.Substring(i, vs - i).Trim()))
-                    i <- vs
-                    skipWs ()
-
-                    if i < n && s.[i] = ',' then
-                        i <- i + 1
-                    elif i < n && s.[i] = '}' then
-                        go <- false
-                    else
-                        failwith (sprintf "Dag.fromJsonl: expected ',' or '}' at position %d" i)
-
-            // First-wins on a duplicate key (Phase 45) — agree with the first-wins `JVal` decoders
-            // rather than the last-wins `Map.ofList` the consumers apply.
-            let seen = System.Collections.Generic.HashSet<string>()
-
-            [ for (k, v) in fields do
-                  if seen.Add k then
-                      yield (k, v) ]
-
-        /// Parse a raw JSON array-of-strings span (e.g. `["h1","h2"]` / `[]`).
-        let parseStringArray (raw: string) : string list =
-            let s = raw.Trim()
-            let n = s.Length
-            let items = ResizeArray<string>()
-            let mutable i = 0
-
-            if i < n && s.[i] = '[' then
-                i <- i + 1
-
-            let mutable go = true
-
-            while go do
-                while i < n
-                      && (s.[i] = ' ' || s.[i] = ',' || s.[i] = '\t' || s.[i] = '\n' || s.[i] = '\r') do
-                    i <- i + 1
-
-                if i >= n || s.[i] = ']' then
-                    go <- false
-                elif s.[i] = '"' then
-                    let e = skipString s i
-                    items.Add(unquote (s.Substring(i, e - i)))
-                    i <- e
-                else
-                    failwith (sprintf "Dag.fromJsonl: expected a string in the parents array at position %d" i)
-
-            List.ofSeq items
-
-    /// Decode the `actor` field's raw span into a typed `Actor` (Phase 320) — the canonical object
-    /// form (`{"kind":"human"|"agent", ...}`) emitted by `Actor.encode`, parsed via the flat-object
-    /// scanner. An unrecognised or absent `kind` is a named decode `Error`, never `Human` — a store
-    /// written by a newer build may carry a kind this reader does not know, and reading it as a
-    /// person would misattribute the node. The refusal surfaces as the `line N: <reason>` `Error`.
-    let private actorOfRaw (raw: string) : Actor =
-        let fields = Jsonl.topFields raw |> Map.ofList
-
-        let get k =
-            match Map.tryFind k fields with
-            | Some v -> Jsonl.unquote v
-            | None -> ""
-
-        match get "kind" with
-        | "human" -> Human(get "id")
-        | "agent" -> Agent(get "model", get "version", get "id")
-        | "" -> failwith "Dag.fromJsonl: the actor carries no kind"
-        | kind -> failwith (sprintf "Dag.fromJsonl: unknown actor kind \"%s\"" kind)
-
-    /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`). Fully portable —
-    /// runs under .NET and Fable. A decode Error or a structural fault yields a `line N: <reason>`
-    /// Error, never an exception (GP4). The `op` field's raw span is preserved byte-for-byte, so a
-    /// round-trip is identical.
+    /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`) through the ONE
+    /// JSONL scanner, `OpStream.Jsonl` (Phase 296; until then this module carried a verbatim copy).
+    /// Fully portable — runs under .NET and Fable. A malformed line, a member of the wrong kind
+    /// (`"id":12`, a non-string parent), an unknown actor kind, or a witness decode `Error` is an
+    /// `Error` rendering the typed `JsonlFault` — `line N: <reason> (position P)`, `N` 1-based over
+    /// every line of the text — never an exception (GP4). The `op` raw span is preserved
+    /// byte-for-byte, so a round-trip is identical.
+    ///
+    /// **A repeated id (Phase 296).** A line repeating a node already read deduplicates, as `append`
+    /// does; a line naming an id already held for DIFFERENT content — parents modulo order, actor, or
+    /// op — is refused as a content-id collision rather than replacing the node read first.
     ///
     /// **Structural only — this does NOT verify integrity.** Nodes are keyed by their *stored* id;
     /// a tampered id, a dangling parent, or a cycle decodes to a clean `Ok` here. Run `verifyDag`
     /// afterwards (or use `fromJsonlVerified`, Phase 13) to recompute content ids and confirm every
     /// parent exists before trusting the DAG.
     let fromJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (text: string) : Result<T<'Op>, string> =
-        let lines =
-            text.Replace("\r\n", "\n").Split('\n')
-            |> Array.filter (fun l -> l.Trim() <> "")
-            |> Array.toList
+        let bind f r = Result.bind f r
 
-        let rec go i acc =
-            function
-            | [] -> Ok acc
-            | (line: string) :: rest ->
-                let parsed =
-                    try
-                        let fields = Jsonl.topFields line |> Map.ofList
+        let nodeOf (line: JsonlLine) : Result<JsonlLine * DagNode<'Op>, JsonlFault> =
+            OpStream.Jsonl.stringField "id" line
+            |> bind (fun id ->
+                OpStream.Jsonl.stringsField "parents" line
+                |> bind (fun parents ->
+                    OpStream.Jsonl.actorField "actor" line
+                    |> bind (fun actor ->
+                        OpStream.Jsonl.rawField "op" line
+                        |> bind (fun raw -> w.Decode raw |> Result.mapError (OpStream.Jsonl.refuse line))
+                        |> Result.map (fun op ->
+                            line,
+                            { Id = id
+                              Parents = parents
+                              Actor = actor
+                              Op = op }))))
 
-                        let get k =
-                            match Map.tryFind k fields with
-                            | Some v -> v
-                            | None -> failwith ("missing field " + k)
+        text
+        |> OpStream.Jsonl.scanRecords nodeOf
+        |> bind (fun lines ->
+            let rec go (acc: Map<string, DagNode<'Op>>) =
+                function
+                | [] -> Ok { Nodes = acc }
+                | (line, node: DagNode<'Op>) :: rest ->
+                    match Map.tryFind node.Id acc with
+                    | None -> go (Map.add node.Id node acc) rest
+                    | Some held when sameNode w.Encode held node.Parents node.Actor node.Op -> go acc rest
+                    | Some _ ->
+                        Error(
+                            OpStream.Jsonl.refuse
+                                line
+                                ("node "
+                                 + node.Id
+                                 + " is already held with different content (a content-id collision)")
+                        )
 
-                        match w.Decode(get "op") with
-                        | Error e -> Error e
-                        | Ok op ->
-                            Ok
-                                { Id = Jsonl.unquote (get "id")
-                                  Parents = Jsonl.parseStringArray (get "parents")
-                                  Actor = actorOfRaw (get "actor")
-                                  Op = op }
-                    with ex ->
-                        Error ex.Message
-
-                match parsed with
-                | Error e -> Error(sprintf "line %d: %s" i e)
-                | Ok(node: DagNode<'Op>) -> go (i + 1) (Map.add node.Id node acc) rest
-
-        go 0 Map.empty lines |> Result.map (fun nodes -> { Nodes = nodes })
+            go Map.empty lines)
+        |> Result.mapError JsonlFault.toString
 
     /// `fromJsonl` + the integrity gate (Phase 13): parses structurally, then runs `verifyDag` so a
     /// tampered id, a dangling parent, or a (hash-impossible-to-forge, so id-mismatching) cycle is a
@@ -930,21 +818,21 @@ module Dag =
                           { Left = a
                             Right = b
                             Address = addr
-                            Shape = ConcurrentUpdate }
+                            Shape = MergeConflictShape.ConcurrentUpdate }
 
                   for addr in c2 do
                       yield
                           { Left = a
                             Right = b
                             Address = addr
-                            Shape = InsertPositionClash }
+                            Shape = MergeConflictShape.InsertPositionClash }
 
                   for addr in c3 do
                       yield
                           { Left = a
                             Right = b
                             Address = addr
-                            Shape = MoveVsRemove } ]
+                            Shape = MergeConflictShape.MoveVsRemove } ]
 
     // ---- branch reconciliation (Phase 83; the delta rule Phase 300) ----
     // The mechanical FOLD half of a merge. Given the DAG, a base, and the heads: when the lanes'

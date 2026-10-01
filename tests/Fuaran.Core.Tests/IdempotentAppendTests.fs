@@ -9,34 +9,11 @@ module Fuaran.Core.Tests.IdempotentAppendTests
 open Expecto
 open Fuaran.Core
 
-// The counter stream domain (mirrors OpStreamTests) — Dec below zero is a domain rejection.
-type private CounterOp =
-    | Inc of int
-    | Dec of int
+// The counter stream domain — the one reference copy, `Reference.Counter` (Phase 296).
+open Fuaran.Core.Tests.Reference.Counter
 
-let private encodeOp =
-    function
-    | Inc n -> Json.render (Json.kindObj "inc" [ "n", JInt n ])
-    | Dec n -> Json.render (Json.kindObj "dec" [ "n", JInt n ])
-
-let private decodeOp (s: string) : Result<CounterOp, string> =
-    Decode.parse s
-    |> Result.bind (fun el ->
-        Decode.kindOf el
-        |> Result.bind (fun k -> Decode.intField "n" el |> Result.map (fun n -> k, n)))
-    |> Result.bind (function
-        | "inc", n -> Ok(Inc n)
-        | "dec", n -> Ok(Dec n)
-        | k, _ -> Error("unknown op kind: " + k))
-
-let private sw: StreamWitness<CounterOp, int, string> =
-    { Apply =
-        fun op st ->
-            match op with
-            | Inc n -> Ok(st + n)
-            | Dec n -> if st - n < 0 then Error "would go negative" else Ok(st - n)
-      Encode = encodeOp
-      Decode = decodeOp }
+let private encodeOp = encode
+let private sw = witness
 
 // The op → invocation-key projection (the Phase 27 invocationKey shape): here the canonical op
 // JSON — two identical ops are, by contract, retries of one invocation.

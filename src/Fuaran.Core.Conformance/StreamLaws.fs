@@ -184,18 +184,20 @@ module internal StreamLaws =
             if len > 0 then
                 let atSeq = rng.IntBelow(len + 1)
 
-                match OpStream.compact hashFn stateEncode sw gen.State0 recs atSeq with
+                match
+                    OpStream.Snapshots.compact SnapshotMode.Strict cfg hashFn stateEncode sw gen.State0 recs atSeq
+                with
                 | Ok(snap, tail) ->
-                    match OpStream.replayFrom sw snap tail, OpStream.replay sw gen.State0 recs with
+                    match OpStream.Snapshots.replayFrom sw snap tail, OpStream.replay sw gen.State0 recs with
                     | Ok a, Ok b when a = b -> bounded.Saw()
                     | other ->
                         bounded.Check(false, fun () -> at (sprintf "replayFrom ≠ replay-from-origin (%A)" other))
 
                     across.Check(
-                        OpStream.verifyAcrossWith cfg hashFn stateEncode sw snap tail,
+                        OpStream.Snapshots.verify cfg hashFn stateEncode sw snap tail,
                         fun () -> at "verifyAcrossWith rejected an intact (snapshot, tail)"
                     )
-                | Error e -> bounded.Check(false, fun () -> at (sprintf "compact failed: %s" e)))
+                | Error e -> bounded.Check(false, fun () -> at (sprintf "compact failed: %A" e)))
 
         LawKit.results [ bounded; across ]
 
@@ -228,6 +230,17 @@ module internal StreamLaws =
         let determinism = LawKit.LawCell "replayTo is deterministic"
         let tamper = LawKit.LawCell "verifyDag detects a tampered node"
         let roundtrip = LawKit.LawCell "DAG JSONL round-trip preserves the DAG"
+        // Phase 296 — the three refusals, each asserted every iteration: a head the DAG does not
+        // hold, an id it already holds for a different node (a `HashFn` that collides on demand), and
+        // an op the witness rejects at the head's state (`appendChecked` agrees with `Apply` on every
+        // drawn op, so the refusal arm is taken whenever the generator draws a rejected op).
+        let unknownHead = LawKit.LawCell "tryReplayTo refuses a head the DAG does not hold"
+
+        let collision =
+            LawKit.LawCell "append refuses an id the DAG holds for a different node"
+
+        let rejectedOp =
+            LawKit.LawCell "appendChecked refuses exactly the ops the witness rejects"
         // The tamper arm runs only when the fresh draw differs from the op it replaces — a
         // generator that keeps drawing the same op never tampers, and `tamper` then reports "never
         // reached" rather than green (Phase 302). A census-visible guard naming the starved arm is
@@ -255,7 +268,7 @@ module internal StreamLaws =
                 not (
                     dag'.Nodes <> dag.Nodes
                     || m' <> m
-                    || Dag.replayTo sw gen.State0 dag' m' <> Dag.replayTo sw gen.State0 dag m
+                    || Dag.tryReplayTo sw gen.State0 dag' m' <> Dag.tryReplayTo sw gen.State0 dag m
                 ),
                 fun () -> at "a permuted-construction history diverged (nodes/head/replay)"
             )
@@ -273,9 +286,47 @@ module internal StreamLaws =
             // JSONL persistence round-trip (Phase 01 is shipped)
             match Dag.fromJsonl sw (Dag.toJsonl sw.Encode dag) with
             | Ok dag' when dag'.Nodes = dag.Nodes -> roundtrip.Saw()
-            | other -> roundtrip.Check(false, fun () -> at (sprintf "DAG JSONL round-trip ≠ original (%A)" other)))
+            | other -> roundtrip.Check(false, fun () -> at (sprintf "DAG JSONL round-trip ≠ original (%A)" other))
 
-        LawKit.results [ verify; determinism; tamper; roundtrip ]
+            // Phase 296 — an absent head is refused, never replayed as the initial state.
+            let absent = m + "#absent-" + string (rng.IntBelow 1000)
+
+            match Dag.tryReplayTo sw gen.State0 dag absent with
+            | Error(Dag.ReplayFault.UnknownHead h) when h = absent -> unknownHead.Saw()
+            | other -> unknownHead.Check(false, fun () -> at (sprintf "tryReplayTo of an absent head gave %A" other))
+
+            // Phase 296 — a colliding id is refused and the node held first stays: a `HashFn` that
+            // answers the merge node's id for everything makes the next append collide with it.
+            let colliding: HashFn = fun _ _ -> m
+
+            match Dag.append colliding sw (Human "collider") newOp m dag with
+            | Error(DagAppendFault.ContentIdCollision id) when id = m -> collision.Saw()
+            | other ->
+                collision.Check(false, fun () -> at (sprintf "an append whose id collides with %s gave %A" m other))
+
+            // Phase 296 — appendChecked applies the op at the head's state: refused exactly when the
+            // witness rejects it, the DAG untouched either way on a refusal.
+            match Dag.tryReplayTo sw gen.State0 dag m with
+            | Ok headState ->
+                let probe = rng.Draw gen.Op
+
+                match sw.Apply probe headState, Dag.appendChecked hashFn sw (Human "probe") probe headState m dag with
+                | Error _, Error(DagAppendRejection.Domain _)
+                | Ok _, Ok _ -> rejectedOp.Saw()
+                | applied, checkedAppend ->
+                    rejectedOp.Check(
+                        false,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "Apply gave %A but appendChecked gave %A — the check and the witness disagree"
+                                    (Result.isOk applied)
+                                    checkedAppend
+                            )
+                    )
+            | Error _ -> ())
+
+        LawKit.results [ verify; determinism; tamper; roundtrip; unknownHead; collision; rejectedOp ]
 
     /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a
@@ -885,7 +936,10 @@ module internal StreamLaws =
                 | None -> ()
 
             // ---- the string pair, both directions ----
-            for named in [ SequenceMismatch; PrevHashLinkBroken; HashMismatch ] do
+            for named in
+                [ ChainBreakReason.SequenceMismatch
+                  ChainBreakReason.PrevHashLinkBroken
+                  ChainBreakReason.HashMismatch ] do
                 roundTrip.Check(
                     ChainBreakReason.ofString (ChainBreakReason.toString named) = named,
                     fun () ->
@@ -918,9 +972,9 @@ module internal StreamLaws =
         // for the single `HashMismatch` case, so both walks are expected to have observed the same
         // three strings.
         let expected =
-            [ ChainBreakReason.toString SequenceMismatch
-              ChainBreakReason.toString PrevHashLinkBroken
-              ChainBreakReason.toString HashMismatch ]
+            [ ChainBreakReason.toString ChainBreakReason.SequenceMismatch
+              ChainBreakReason.toString ChainBreakReason.PrevHashLinkBroken
+              ChainBreakReason.toString ChainBreakReason.HashMismatch ]
             |> Set.ofList
 
         let missing (seen: Set<string>) =
@@ -1055,7 +1109,7 @@ module internal StreamLaws =
             | None -> ()
 
             // ---- the string pair, both directions ----
-            for named in [ ContentIdMismatch; MissingParent ] do
+            for named in [ DagBreakReason.ContentIdMismatch; DagBreakReason.MissingParent ] do
                 roundTrip.Check(
                     DagBreakReason.ofString (DagBreakReason.toString named) = named,
                     fun () ->
@@ -1085,8 +1139,8 @@ module internal StreamLaws =
                 ))
 
         let expected =
-            [ DagBreakReason.toString ContentIdMismatch
-              DagBreakReason.toString MissingParent ]
+            [ DagBreakReason.toString DagBreakReason.ContentIdMismatch
+              DagBreakReason.toString DagBreakReason.MissingParent ]
             |> Set.ofList
 
         let missing = Set.difference expected seen
