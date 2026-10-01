@@ -2372,19 +2372,20 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 
 ## 0.33.0 — DRAFT
 
-**Release record — the receiving gate (Phase 276): RUN, and BLOCKED before its compile and value legs.**
+**Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
 On 2026-10-01 the candidate was packed from commit `095d6f9` (every one of the 17 packable projects,
 version `0.33.0`, into a folder) and the downstream host's Fable gate was run against it in its
-cut-time mode (`tests/core-fable/core-fable.ps1 -CoreVersion 0.33.0 -CoreFeed <folder>`). It read the
-17 candidate packages, took the compute packages at its pin (`0.34.0`), and FAILED at its membership
-check, exit 1: `exclusions.json names Fuaran.Core.CSharp, which the candidate does not ship — drop the
-entry`. The list that names it is the HOST's exclusion list (`tests/core-fable/exclusions.json`, the
-entry recorded there from Phase 128); this repository's own `fable-exclusions.json` already dropped it
-with the package (Phase 231). The membership check runs first and fails the run, so the **compile leg
-and the value leg did not run**, and no green Fable run of this candidate exists yet. That is this
-slot's open cut blocker, and it is outside this repository: the host drops the entry, and the gate is
-re-run against the candidate, both legs, before the slot is released. Nothing in the run named a
-defect in Core's code.
+cut-time mode (`tests/core-fable/core-fable.ps1 -CoreVersion 0.33.0 -CoreFeed <folder>`). The first
+run FAILED at the host's membership check: its own exclusion list still named `Fuaran.Core.CSharp`,
+which this slot removes (Phase 231); this repository's `fable-exclusions.json` had already dropped it.
+The host then dropped the entry, and changed its gate in two ways a split producer needs: a Core-only
+cut no longer compiles the compute packages (they pin an older Core until this release is published,
+so their own producer's cut gates them, and the run prints that it skipped them), and its smoke
+program compiles against both Core lines (`EffectClass.Determinism` is a set from this slot, Phase
+319). The re-run is the one this slot cites: **compile leg green — 15 Fuaran.Core packages
+transpiled at 0.33.0, compute packages skipped — and value leg green, 307/307 vectors byte-identical
+on both pipelines at 0.33.0.** No run named a defect in Core's code. Only this ledger has changed
+since `095d6f9`, so the packages a release builds are the ones the gate measured.
 
 **It is a MINOR slot because the change that opens it is BREAKING.** `0.32.0` is tagged, so it is a
 consumer's contract and nothing rides it. Phase 258 removes four packages from this repository's
