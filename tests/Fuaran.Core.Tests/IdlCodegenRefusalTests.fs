@@ -248,3 +248,87 @@ let tests =
               for line in [ envelope; construct ] do
                   Expect.isFalse (line.Contains "\n") "a described refusal is ONE line"
                   Expect.isFalse (line = "") "and is never empty") ]
+
+// ---------------------------------------------------------------------------
+// Phase 293 — declared support is held to the vocabulary: a doc path the emission never
+// consults, a case refine on no referenced case, a projection on no selected kind. Each
+// used to be dropped without a word; each is a typed refusal now.
+// ---------------------------------------------------------------------------
+
+let private withSupport (sup: Gen.GenSupport) (idl: Idl) =
+    Gen.fsharpModuleWith sup "Refusal.Probe" idl kinds
+
+let private unionIdl: Idl =
+    { baseIdl with
+        Kinds =
+            [ { Tag = "Note"
+                Category = "leaf"
+                Annotations = Annotations.Empty
+                Fields = [ f "label" TStr Required; f "source" (TUnion("Source", [])) Required ] } ]
+        Unions =
+            [ { Name = "Source"
+                Params = []
+                Cases =
+                  [ { Tag = "Inline"
+                      Fields = [ f "text" TStr Required ]
+                      Annotations = Annotations.Empty } ] } ] }
+
+let private unsupported (what: string) (r: Result<string, CodegenError>) : string =
+    match expectRefusal what r with
+    | CodegenError.UnsupportedConstruct(construct, _, _) -> construct
+    | other -> failtestf "%s: refused through a different case: %s" what (CodegenError.describe other)
+
+[<Tests>]
+let supportTests =
+    testList
+        "Phase 293 — declared support is validated against the vocabulary"
+        [ testCase "a doc path the emitter consults is rendered, and the control emits" (fun _ ->
+              let sup =
+                  { Gen.GenSupport.Empty with
+                      Docs = Map.ofList [ "type:NoteSpec", [ "/// A note." ] ] }
+
+              let src = expectEmits "a well-spelled doc path" (withSupport sup baseIdl)
+              Expect.stringContains src "/// A note." "the doc reached the artefact")
+
+          testCase "a doc path the emission never consults is a refusal naming the path, not a silent drop" (fun _ ->
+              let sup =
+                  { Gen.GenSupport.Empty with
+                      Docs = Map.ofList [ "type:Nte", [ "/// A note." ] ] }
+
+              Expect.equal
+                  (unsupported "a mistyped doc path" (withSupport sup baseIdl))
+                  "a declared support doc at path 'type:Nte'"
+                  "the refusal names the path")
+
+          testCase "a case refine on no referenced union case is a refusal" (fun _ ->
+              let good =
+                  { Gen.GenSupport.Empty with
+                      CaseRefines = Map.ofList [ "Source.Inline", "Ok(Source.Inline(text))" ] }
+
+              expectEmits "a refine on a declared case" (withSupport good unionIdl) |> ignore
+
+              let bad =
+                  { Gen.GenSupport.Empty with
+                      CaseRefines = Map.ofList [ "Source.Inlne", "Ok(Source.Inline(text))" ] }
+
+              Expect.equal
+                  (unsupported "a mistyped refine key" (withSupport bad unionIdl))
+                  "a declared case refine for 'Source.Inlne'"
+                  "the refusal names the key")
+
+          testCase "a kind projection on no selected kind is a refusal" (fun _ ->
+              let projection: Gen.KindProjection =
+                  { SpecDecl = "NoteSpec = { Label: string }"
+                    Encoder = "and private encNoteSpec (s: NoteSpec) : JVal = JObj [ \"label\", JStr s.Label ]"
+                    Decoder =
+                      "and private decNoteSpec (j: JVal) : Result<NoteSpec, string> = jprop \"label\" j |> Result.bind jstr |> Result.map (fun l -> { Label = l })"
+                    Mk = None }
+
+              let bad =
+                  { Gen.GenSupport.Empty with
+                      KindProjections = Map.ofList [ "Notes", projection ] }
+
+              Expect.equal
+                  (unsupported "a projection on an unknown kind" (withSupport bad baseIdl))
+                  "a declared kind projection for 'Notes'"
+                  "the refusal names the kind") ]

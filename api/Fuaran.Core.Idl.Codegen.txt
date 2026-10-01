@@ -156,6 +156,7 @@ property Fuaran.Core.Idl.Diff.allClasses : Microsoft.FSharp.Collections.FSharpLi
 property Fuaran.Core.Idl.Diff.allConsequences : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence> { get }
 property Fuaran.Core.Idl.Diff.consequenceTable : System.String { get }
 property Fuaran.Core.Idl.Diff.declaredRoster : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Host> { get }
+property Fuaran.Core.Idl.Diff.mappingTable : System.String { get }
 property Fuaran.Core.Idl.FStarTarget+ProvenanceModule.supplied : Fuaran.Core.Idl.FStarTarget+Provenance { get }
 property Fuaran.Core.Idl.FStarTarget.presenceSplitAt : System.Int32 { get }
 property Fuaran.Core.Idl.Gen+GenSupport.Empty : Fuaran.Core.Idl.Gen+GenSupport { get }

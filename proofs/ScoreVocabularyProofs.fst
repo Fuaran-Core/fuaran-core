@@ -104,261 +104,276 @@ let rt_e_navigation_kind (#num #flt: eqtype) (x: e_navigation_kind) : Lemma (ens
       conditional member on — everything before that is reached without a branch.
    ====================================================================================== *)
 
-(* The suffixes of C__vkind__Score — each revealed once, here, and cited by name below. *)
-let sk_vkind__Score__composer__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "composer")) (ensures (find_field n (sfx_vkind__Score__composer e rest) == find_field n rest))
-  = reveal_opaque (`%sfx_vkind__Score__composer) (sfx_vkind__Score__composer #num #flt e rest)
-let sk_vkind__Score__composer__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "composer" (sfx_vkind__Score__composer e rest) == Ok (Some?.v e)))
-  = reveal_opaque (`%sfx_vkind__Score__composer) (sfx_vkind__Score__composer #num #flt e rest)
-let sk_vkind__Score__composer__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Score__composer e rest == rest))
-  = reveal_opaque (`%sfx_vkind__Score__composer) (sfx_vkind__Score__composer #num #flt e rest)
-let sk_vkind__Score__title__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "title")) (ensures (find_field n (sfx_vkind__Score__title e rest) == find_field n rest))
-  = reveal_opaque (`%sfx_vkind__Score__title) (sfx_vkind__Score__title #num #flt e rest)
-let sk_vkind__Score__title__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "title" (sfx_vkind__Score__title e rest) == Ok (Some?.v e)))
-  = reveal_opaque (`%sfx_vkind__Score__title) (sfx_vkind__Score__title #num #flt e rest)
-let sk_vkind__Score__title__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Score__title e rest == rest))
-  = reveal_opaque (`%sfx_vkind__Score__title) (sfx_vkind__Score__title #num #flt e rest)
+(* The suffixes of C__node__Score — each revealed once, here, and cited by name below. *)
+let sk_node__Score__title__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "title")) (ensures (find_field n (sfx_node__Score__title e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_node__Score__title) (sfx_node__Score__title #num #flt e rest)
+let sk_node__Score__title__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "title" (sfx_node__Score__title e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_node__Score__title) (sfx_node__Score__title #num #flt e rest)
+let sk_node__Score__title__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_node__Score__title e rest == rest))
+  = reveal_opaque (`%sfx_node__Score__title) (sfx_node__Score__title #num #flt e rest)
+let sk_node__Score__composer__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "composer")) (ensures (find_field n (sfx_node__Score__composer e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_node__Score__composer) (sfx_node__Score__composer #num #flt e rest)
+let sk_node__Score__composer__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "composer" (sfx_node__Score__composer e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_node__Score__composer) (sfx_node__Score__composer #num #flt e rest)
+let sk_node__Score__composer__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_node__Score__composer e rest == rest))
+  = reveal_opaque (`%sfx_node__Score__composer) (sfx_node__Score__composer #num #flt e rest)
 
-(* lk_vkind__Score__composer__present — composer present *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Score__composer__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f1 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "composer" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f1)) | _ -> True)) =
+(* lk_node__Score__title__present — title present *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_node__Score__title__present (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Score i f0 f1 f2 -> Some? f0 | _ -> false)) (ensures (match x with | C__node__Score i f0 f1 f2 -> get_prop "title" (enc_node #num #flt x) == Ok (JStr (Some?.v f0)) | _ -> True)) =
   match x with
-  | C__vkind__Score f0 f1 f2 ->
-    let s1 = sfx_vkind__Score__title #num #flt (enc_opt_str #num #flt f2) ([]) in
-    let s0 = sfx_vkind__Score__composer #num #flt (enc_opt_str #num #flt f1) (s1) in
-    sk_vkind__Score__composer__hit #num #flt (enc_opt_str #num #flt f1) (s1)
+  | C__node__Score i f0 f1 f2 ->
+    let s1 = sfx_node__Score__composer #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: []) in
+    let s0 = sfx_node__Score__title #num #flt (enc_opt_str #num #flt f0) (s1) in
+    sk_node__Score__title__hit #num #flt (enc_opt_str #num #flt f0) (s1)
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Score__composer__absent — composer absent *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Score__composer__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f1 | _ -> false)) (ensures (Error? (get_prop "composer" (enc_vkind #num #flt x)))) =
+(* lk_node__Score__title__absent — title absent *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_node__Score__title__absent (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Score i f0 f1 f2 -> None? f0 | _ -> false)) (ensures (Error? (get_prop "title" (enc_node #num #flt x)))) =
   match x with
-  | C__vkind__Score f0 f1 f2 ->
-    let s1 = sfx_vkind__Score__title #num #flt (enc_opt_str #num #flt f2) ([]) in
-    let s0 = sfx_vkind__Score__composer #num #flt (enc_opt_str #num #flt f1) (s1) in
-    sk_vkind__Score__composer__none #num #flt (enc_opt_str #num #flt f1) (s1);
-    sk_vkind__Score__title__skip #num #flt "composer" (enc_opt_str #num #flt f2) ([])
+  | C__node__Score i f0 f1 f2 ->
+    let s1 = sfx_node__Score__composer #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: []) in
+    let s0 = sfx_node__Score__title #num #flt (enc_opt_str #num #flt f0) (s1) in
+    sk_node__Score__title__none #num #flt (enc_opt_str #num #flt f0) (s1);
+    sk_node__Score__composer__skip #num #flt "title" (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Score__title__present — title present *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Score__title__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> Some? f2 | _ -> false)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> get_prop "title" (enc_vkind #num #flt x) == Ok (JStr (Some?.v f2)) | _ -> True)) =
+(* lk_node__Score__composer__present — composer present *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_node__Score__composer__present (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Score i f0 f1 f2 -> Some? f1 | _ -> false)) (ensures (match x with | C__node__Score i f0 f1 f2 -> get_prop "composer" (enc_node #num #flt x) == Ok (JStr (Some?.v f1)) | _ -> True)) =
   match x with
-  | C__vkind__Score f0 f1 f2 ->
-    let s1 = sfx_vkind__Score__title #num #flt (enc_opt_str #num #flt f2) ([]) in
-    let s0 = sfx_vkind__Score__composer #num #flt (enc_opt_str #num #flt f1) (s1) in
-    sk_vkind__Score__composer__skip #num #flt "title" (enc_opt_str #num #flt f1) (s1);
-    sk_vkind__Score__title__hit #num #flt (enc_opt_str #num #flt f2) ([])
+  | C__node__Score i f0 f1 f2 ->
+    let s1 = sfx_node__Score__composer #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: []) in
+    let s0 = sfx_node__Score__title #num #flt (enc_opt_str #num #flt f0) (s1) in
+    sk_node__Score__title__skip #num #flt "composer" (enc_opt_str #num #flt f0) (s1);
+    sk_node__Score__composer__hit #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Score__title__absent — title absent *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Score__title__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Score f0 f1 f2 -> None? f2 | _ -> false)) (ensures (Error? (get_prop "title" (enc_vkind #num #flt x)))) =
+(* lk_node__Score__composer__absent — composer absent *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_node__Score__composer__absent (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Score i f0 f1 f2 -> None? f1 | _ -> false)) (ensures (Error? (get_prop "composer" (enc_node #num #flt x)))) =
   match x with
-  | C__vkind__Score f0 f1 f2 ->
-    let s1 = sfx_vkind__Score__title #num #flt (enc_opt_str #num #flt f2) ([]) in
-    let s0 = sfx_vkind__Score__composer #num #flt (enc_opt_str #num #flt f1) (s1) in
-    sk_vkind__Score__composer__skip #num #flt "title" (enc_opt_str #num #flt f1) (s1);
-    sk_vkind__Score__title__none #num #flt (enc_opt_str #num #flt f2) ([])
+  | C__node__Score i f0 f1 f2 ->
+    let s1 = sfx_node__Score__composer #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: []) in
+    let s0 = sfx_node__Score__title #num #flt (enc_opt_str #num #flt f0) (s1) in
+    sk_node__Score__title__skip #num #flt "composer" (enc_opt_str #num #flt f0) (s1);
+    sk_node__Score__composer__none #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: [])
   | _ -> ()
 #pop-options
 
-(* rv_vkind__Score__composer — the value of `rd_vkind__Score__composer` off the encoded object *)
-let rv_vkind__Score__composer (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> rd_vkind__Score__composer #num #flt (enc_vkind #num #flt x) == Ok f1 | _ -> True)) =
-  reveal_opaque (`%rd_vkind__Score__composer) (rd_vkind__Score__composer #num #flt (enc_vkind #num #flt x));
+(* lk_node__Score__children — children — always emitted, at a position the conditionals before it move *)
+#push-options "--fuel 10 --ifuel 4"
+let lk_node__Score__children (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Score? x)) (ensures (match x with | C__node__Score i f0 f1 f2 -> get_prop "children" (enc_node #num #flt x) == Ok (JArr (enc_items_l_node f2)) | _ -> True)) =
   match x with
-  | C__vkind__Score f0 f1 f2 -> (match f1 with | None -> lk_vkind__Score__composer__absent #num #flt x | Some _ -> lk_vkind__Score__composer__present #num #flt x)
-  | _ -> ()
-
-(* rv_vkind__Score__title — the value of `rd_vkind__Score__title` off the encoded object *)
-let rv_vkind__Score__title (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures (match x with | C__vkind__Score f0 f1 f2 -> rd_vkind__Score__title #num #flt (enc_vkind #num #flt x) == Ok f2 | _ -> True)) =
-  reveal_opaque (`%rd_vkind__Score__title) (rd_vkind__Score__title #num #flt (enc_vkind #num #flt x));
-  match x with
-  | C__vkind__Score f0 f1 f2 -> (match f2 with | None -> lk_vkind__Score__title__absent #num #flt x | Some _ -> lk_vkind__Score__title__present #num #flt x)
-  | _ -> ()
-
-(* The suffixes of C__vkind__Measure — each revealed once, here, and cited by name below. *)
-let sk_vkind__Measure__is_anacrusis__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "isAnacrusis")) (ensures (find_field n (sfx_vkind__Measure__is_anacrusis e rest) == find_field n rest))
-  = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
-let sk_vkind__Measure__is_anacrusis__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "isAnacrusis" (sfx_vkind__Measure__is_anacrusis e rest) == Ok (Some?.v e)))
-  = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
-let sk_vkind__Measure__is_anacrusis__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__is_anacrusis e rest == rest))
-  = reveal_opaque (`%sfx_vkind__Measure__is_anacrusis) (sfx_vkind__Measure__is_anacrusis #num #flt e rest)
-let sk_vkind__Measure__repeat_end__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "repeatEnd")) (ensures (find_field n (sfx_vkind__Measure__repeat_end e rest) == find_field n rest))
-  = reveal_opaque (`%sfx_vkind__Measure__repeat_end) (sfx_vkind__Measure__repeat_end #num #flt e rest)
-let sk_vkind__Measure__repeat_end__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "repeatEnd" (sfx_vkind__Measure__repeat_end e rest) == Ok (Some?.v e)))
-  = reveal_opaque (`%sfx_vkind__Measure__repeat_end) (sfx_vkind__Measure__repeat_end #num #flt e rest)
-let sk_vkind__Measure__repeat_end__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__repeat_end e rest == rest))
-  = reveal_opaque (`%sfx_vkind__Measure__repeat_end) (sfx_vkind__Measure__repeat_end #num #flt e rest)
-let sk_vkind__Measure__repeat_start__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "repeatStart")) (ensures (find_field n (sfx_vkind__Measure__repeat_start e rest) == find_field n rest))
-  = reveal_opaque (`%sfx_vkind__Measure__repeat_start) (sfx_vkind__Measure__repeat_start #num #flt e rest)
-let sk_vkind__Measure__repeat_start__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "repeatStart" (sfx_vkind__Measure__repeat_start e rest) == Ok (Some?.v e)))
-  = reveal_opaque (`%sfx_vkind__Measure__repeat_start) (sfx_vkind__Measure__repeat_start #num #flt e rest)
-let sk_vkind__Measure__repeat_start__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__repeat_start e rest == rest))
-  = reveal_opaque (`%sfx_vkind__Measure__repeat_start) (sfx_vkind__Measure__repeat_start #num #flt e rest)
-let sk_vkind__Measure__volta__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "volta")) (ensures (find_field n (sfx_vkind__Measure__volta e rest) == find_field n rest))
-  = reveal_opaque (`%sfx_vkind__Measure__volta) (sfx_vkind__Measure__volta #num #flt e rest)
-let sk_vkind__Measure__volta__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "volta" (sfx_vkind__Measure__volta e rest) == Ok (Some?.v e)))
-  = reveal_opaque (`%sfx_vkind__Measure__volta) (sfx_vkind__Measure__volta #num #flt e rest)
-let sk_vkind__Measure__volta__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_vkind__Measure__volta e rest == rest))
-  = reveal_opaque (`%sfx_vkind__Measure__volta) (sfx_vkind__Measure__volta #num #flt e rest)
-
-(* lk_vkind__Measure__is_anacrusis__present — isAnacrusis not at its default *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__is_anacrusis__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f1 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "isAnacrusis" (enc_vkind #num #flt x) == Ok (JBool f1) | _ -> True)) =
-  match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__hit #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1)
+  | C__node__Score i f0 f1 f2 ->
+    let s1 = sfx_node__Score__composer #num #flt (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: []) in
+    let s0 = sfx_node__Score__title #num #flt (enc_opt_str #num #flt f0) (s1) in
+    sk_node__Score__title__skip #num #flt "children" (enc_opt_str #num #flt f0) (s1);
+    sk_node__Score__composer__skip #num #flt "children" (enc_opt_str #num #flt f1) (("children", JArr (enc_items_l_node f2)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__is_anacrusis__absent — isAnacrusis at its default *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__is_anacrusis__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f1 = false | _ -> false)) (ensures (Error? (get_prop "isAnacrusis" (enc_vkind #num #flt x)))) =
+(* rv_node__Score__title — the value of `rd_node__Score__title` off the encoded object *)
+let rv_node__Score__title (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Score? x)) (ensures (match x with | C__node__Score i f0 f1 f2 -> rd_node__Score__title #num #flt (enc_node #num #flt x) == Ok f0 | _ -> True)) =
+  reveal_opaque (`%rd_node__Score__title) (rd_node__Score__title #num #flt (enc_node #num #flt x));
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__none #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__skip #num #flt "isAnacrusis" (enc_dflt_bool #num #flt (false) f3) (s2);
-    sk_vkind__Measure__repeat_start__skip #num #flt "isAnacrusis" (enc_dflt_bool #num #flt (false) f4) (s3);
-    sk_vkind__Measure__volta__skip #num #flt "isAnacrusis" (enc_opt_l_int #num #flt f5) ([])
+  | C__node__Score i f0 f1 f2 -> (match f0 with | None -> lk_node__Score__title__absent #num #flt x | Some _ -> lk_node__Score__title__present #num #flt x)
+  | _ -> ()
+
+(* rv_node__Score__composer — the value of `rd_node__Score__composer` off the encoded object *)
+let rv_node__Score__composer (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Score? x)) (ensures (match x with | C__node__Score i f0 f1 f2 -> rd_node__Score__composer #num #flt (enc_node #num #flt x) == Ok f1 | _ -> True)) =
+  reveal_opaque (`%rd_node__Score__composer) (rd_node__Score__composer #num #flt (enc_node #num #flt x));
+  match x with
+  | C__node__Score i f0 f1 f2 -> (match f1 with | None -> lk_node__Score__composer__absent #num #flt x | Some _ -> lk_node__Score__composer__present #num #flt x)
+  | _ -> ()
+
+(* The suffixes of C__node__Measure — each revealed once, here, and cited by name below. *)
+let sk_node__Measure__repeat_start__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "repeatStart")) (ensures (find_field n (sfx_node__Measure__repeat_start e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_node__Measure__repeat_start) (sfx_node__Measure__repeat_start #num #flt e rest)
+let sk_node__Measure__repeat_start__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "repeatStart" (sfx_node__Measure__repeat_start e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_node__Measure__repeat_start) (sfx_node__Measure__repeat_start #num #flt e rest)
+let sk_node__Measure__repeat_start__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_node__Measure__repeat_start e rest == rest))
+  = reveal_opaque (`%sfx_node__Measure__repeat_start) (sfx_node__Measure__repeat_start #num #flt e rest)
+let sk_node__Measure__repeat_end__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "repeatEnd")) (ensures (find_field n (sfx_node__Measure__repeat_end e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_node__Measure__repeat_end) (sfx_node__Measure__repeat_end #num #flt e rest)
+let sk_node__Measure__repeat_end__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "repeatEnd" (sfx_node__Measure__repeat_end e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_node__Measure__repeat_end) (sfx_node__Measure__repeat_end #num #flt e rest)
+let sk_node__Measure__repeat_end__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_node__Measure__repeat_end e rest == rest))
+  = reveal_opaque (`%sfx_node__Measure__repeat_end) (sfx_node__Measure__repeat_end #num #flt e rest)
+let sk_node__Measure__volta__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "volta")) (ensures (find_field n (sfx_node__Measure__volta e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_node__Measure__volta) (sfx_node__Measure__volta #num #flt e rest)
+let sk_node__Measure__volta__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "volta" (sfx_node__Measure__volta e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_node__Measure__volta) (sfx_node__Measure__volta #num #flt e rest)
+let sk_node__Measure__volta__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_node__Measure__volta e rest == rest))
+  = reveal_opaque (`%sfx_node__Measure__volta) (sfx_node__Measure__volta #num #flt e rest)
+let sk_node__Measure__is_anacrusis__skip (#num #flt: eqtype) (n: string) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (n <> "isAnacrusis")) (ensures (find_field n (sfx_node__Measure__is_anacrusis e rest) == find_field n rest))
+  = reveal_opaque (`%sfx_node__Measure__is_anacrusis) (sfx_node__Measure__is_anacrusis #num #flt e rest)
+let sk_node__Measure__is_anacrusis__hit (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (Some? e)) (ensures (find_field "isAnacrusis" (sfx_node__Measure__is_anacrusis e rest) == Ok (Some?.v e)))
+  = reveal_opaque (`%sfx_node__Measure__is_anacrusis) (sfx_node__Measure__is_anacrusis #num #flt e rest)
+let sk_node__Measure__is_anacrusis__none (#num #flt: eqtype) (e: option (jval num flt)) (rest: list (string & jval num flt)) : Lemma (requires (None? e)) (ensures (sfx_node__Measure__is_anacrusis e rest == rest))
+  = reveal_opaque (`%sfx_node__Measure__is_anacrusis) (sfx_node__Measure__is_anacrusis #num #flt e rest)
+
+(* lk_node__Measure__repeat_start__present — repeatStart not at its default *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__repeat_start__present (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> not (f1 = false) | _ -> false)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> get_prop "repeatStart" (enc_node #num #flt x) == Ok (JBool f1) | _ -> True)) =
+  match x with
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__hit #num #flt (enc_dflt_bool #num #flt (false) f1) (s1)
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__number — number — always emitted, at a position the conditionals before it move *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__number (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "number" (enc_vkind #num #flt x) == Ok (JInt f2) | _ -> True)) =
+(* lk_node__Measure__repeat_start__absent — repeatStart at its default *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__repeat_start__absent (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> f1 = false | _ -> false)) (ensures (Error? (get_prop "repeatStart" (enc_node #num #flt x)))) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "number" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1)
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__none #num #flt (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__skip #num #flt "repeatStart" (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__skip #num #flt "repeatStart" (enc_opt_l_int #num #flt f3) (s3);
+    sk_node__Measure__is_anacrusis__skip #num #flt "repeatStart" (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__repeat_end__present — repeatEnd not at its default *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__repeat_end__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f3 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatEnd" (enc_vkind #num #flt x) == Ok (JBool f3) | _ -> True)) =
+(* lk_node__Measure__repeat_end__present — repeatEnd not at its default *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__repeat_end__present (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> not (f2 = false) | _ -> false)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> get_prop "repeatEnd" (enc_node #num #flt x) == Ok (JBool f2) | _ -> True)) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatEnd" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__hit #num #flt (enc_dflt_bool #num #flt (false) f3) (s2)
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "repeatEnd" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__hit #num #flt (enc_dflt_bool #num #flt (false) f2) (s2)
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__repeat_end__absent — repeatEnd at its default *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__repeat_end__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f3 = false | _ -> false)) (ensures (Error? (get_prop "repeatEnd" (enc_vkind #num #flt x)))) =
+(* lk_node__Measure__repeat_end__absent — repeatEnd at its default *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__repeat_end__absent (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> f2 = false | _ -> false)) (ensures (Error? (get_prop "repeatEnd" (enc_node #num #flt x)))) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatEnd" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__none #num #flt (enc_dflt_bool #num #flt (false) f3) (s2);
-    sk_vkind__Measure__repeat_start__skip #num #flt "repeatEnd" (enc_dflt_bool #num #flt (false) f4) (s3);
-    sk_vkind__Measure__volta__skip #num #flt "repeatEnd" (enc_opt_l_int #num #flt f5) ([])
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "repeatEnd" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__none #num #flt (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__skip #num #flt "repeatEnd" (enc_opt_l_int #num #flt f3) (s3);
+    sk_node__Measure__is_anacrusis__skip #num #flt "repeatEnd" (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__repeat_start__present — repeatStart not at its default *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__repeat_start__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> not (f4 = false) | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "repeatStart" (enc_vkind #num #flt x) == Ok (JBool f4) | _ -> True)) =
+(* lk_node__Measure__volta__present — volta present *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__volta__present (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> Some? f3 | _ -> false)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> get_prop "volta" (enc_node #num #flt x) == Ok (JArr (enc_items_l_int (Some?.v f3))) | _ -> True)) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatStart" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__skip #num #flt "repeatStart" (enc_dflt_bool #num #flt (false) f3) (s2);
-    sk_vkind__Measure__repeat_start__hit #num #flt (enc_dflt_bool #num #flt (false) f4) (s3)
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__hit #num #flt (enc_opt_l_int #num #flt f3) (s3)
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__repeat_start__absent — repeatStart at its default *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__repeat_start__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> f4 = false | _ -> false)) (ensures (Error? (get_prop "repeatStart" (enc_vkind #num #flt x)))) =
+(* lk_node__Measure__volta__absent — volta absent *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__volta__absent (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> None? f3 | _ -> false)) (ensures (Error? (get_prop "volta" (enc_node #num #flt x)))) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "repeatStart" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__skip #num #flt "repeatStart" (enc_dflt_bool #num #flt (false) f3) (s2);
-    sk_vkind__Measure__repeat_start__none #num #flt (enc_dflt_bool #num #flt (false) f4) (s3);
-    sk_vkind__Measure__volta__skip #num #flt "repeatStart" (enc_opt_l_int #num #flt f5) ([])
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__none #num #flt (enc_opt_l_int #num #flt f3) (s3);
+    sk_node__Measure__is_anacrusis__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__volta__present — volta present *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__volta__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> Some? f5 | _ -> false)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> get_prop "volta" (enc_vkind #num #flt x) == Ok (JArr (enc_items_l_int (Some?.v f5))) | _ -> True)) =
+(* lk_node__Measure__is_anacrusis__present — isAnacrusis not at its default *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__is_anacrusis__present (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> not (f4 = false) | _ -> false)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> get_prop "isAnacrusis" (enc_node #num #flt x) == Ok (JBool f4) | _ -> True)) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f3) (s2);
-    sk_vkind__Measure__repeat_start__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f4) (s3);
-    sk_vkind__Measure__volta__hit #num #flt (enc_opt_l_int #num #flt f5) ([])
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "isAnacrusis" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__skip #num #flt "isAnacrusis" (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__skip #num #flt "isAnacrusis" (enc_opt_l_int #num #flt f3) (s3);
+    sk_node__Measure__is_anacrusis__hit #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: [])
   | _ -> ()
 #pop-options
 
-(* lk_vkind__Measure__volta__absent — volta absent *)
-#push-options "--fuel 8 --ifuel 4"
-let lk_vkind__Measure__volta__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> None? f5 | _ -> false)) (ensures (Error? (get_prop "volta" (enc_vkind #num #flt x)))) =
+(* lk_node__Measure__is_anacrusis__absent — isAnacrusis at its default *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__is_anacrusis__absent (#num #flt: eqtype) (x: node num flt) : Lemma (requires (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> f4 = false | _ -> false)) (ensures (Error? (get_prop "isAnacrusis" (enc_node #num #flt x)))) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    let s3 = sfx_vkind__Measure__volta #num #flt (enc_opt_l_int #num #flt f5) ([]) in
-    let s2 = sfx_vkind__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f4) (s3) in
-    let s1 = sfx_vkind__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f3) (s2) in
-    let s0 = sfx_vkind__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1) in
-    sk_vkind__Measure__is_anacrusis__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f1) (("number", JInt f2) :: s1);
-    sk_vkind__Measure__repeat_end__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f3) (s2);
-    sk_vkind__Measure__repeat_start__skip #num #flt "volta" (enc_dflt_bool #num #flt (false) f4) (s3);
-    sk_vkind__Measure__volta__none #num #flt (enc_opt_l_int #num #flt f5) ([])
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "isAnacrusis" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__skip #num #flt "isAnacrusis" (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__skip #num #flt "isAnacrusis" (enc_opt_l_int #num #flt f3) (s3);
+    sk_node__Measure__is_anacrusis__none #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: [])
   | _ -> ()
 #pop-options
 
-(* rv_vkind__Measure__is_anacrusis — the value of `rd_vkind__Measure__is_anacrusis` off the encoded object *)
-let rv_vkind__Measure__is_anacrusis (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rd_vkind__Measure__is_anacrusis #num #flt (enc_vkind #num #flt x) == Ok f1 | _ -> True)) =
-  reveal_opaque (`%rd_vkind__Measure__is_anacrusis) (rd_vkind__Measure__is_anacrusis #num #flt (enc_vkind #num #flt x));
+(* lk_node__Measure__children — children — always emitted, at a position the conditionals before it move *)
+#push-options "--fuel 12 --ifuel 4"
+let lk_node__Measure__children (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Measure? x)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> get_prop "children" (enc_node #num #flt x) == Ok (JArr (enc_items_l_node f5)) | _ -> True)) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> (if f1 = false then lk_vkind__Measure__is_anacrusis__absent #num #flt x else lk_vkind__Measure__is_anacrusis__present #num #flt x)
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    let s3 = sfx_node__Measure__is_anacrusis #num #flt (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: []) in
+    let s2 = sfx_node__Measure__volta #num #flt (enc_opt_l_int #num #flt f3) (s3) in
+    let s1 = sfx_node__Measure__repeat_end #num #flt (enc_dflt_bool #num #flt (false) f2) (s2) in
+    let s0 = sfx_node__Measure__repeat_start #num #flt (enc_dflt_bool #num #flt (false) f1) (s1) in
+    sk_node__Measure__repeat_start__skip #num #flt "children" (enc_dflt_bool #num #flt (false) f1) (s1);
+    sk_node__Measure__repeat_end__skip #num #flt "children" (enc_dflt_bool #num #flt (false) f2) (s2);
+    sk_node__Measure__volta__skip #num #flt "children" (enc_opt_l_int #num #flt f3) (s3);
+    sk_node__Measure__is_anacrusis__skip #num #flt "children" (enc_dflt_bool #num #flt (false) f4) (("children", JArr (enc_items_l_node f5)) :: [])
+  | _ -> ()
+#pop-options
+
+(* rv_node__Measure__repeat_start — the value of `rd_node__Measure__repeat_start` off the encoded object *)
+let rv_node__Measure__repeat_start (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Measure? x)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> rd_node__Measure__repeat_start #num #flt (enc_node #num #flt x) == Ok f1 | _ -> True)) =
+  reveal_opaque (`%rd_node__Measure__repeat_start) (rd_node__Measure__repeat_start #num #flt (enc_node #num #flt x));
+  match x with
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 -> (if f1 = false then lk_node__Measure__repeat_start__absent #num #flt x else lk_node__Measure__repeat_start__present #num #flt x)
   | _ -> ()
 
-(* rv_vkind__Measure__repeat_end — the value of `rd_vkind__Measure__repeat_end` off the encoded object *)
-let rv_vkind__Measure__repeat_end (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rd_vkind__Measure__repeat_end #num #flt (enc_vkind #num #flt x) == Ok f3 | _ -> True)) =
-  reveal_opaque (`%rd_vkind__Measure__repeat_end) (rd_vkind__Measure__repeat_end #num #flt (enc_vkind #num #flt x));
+(* rv_node__Measure__repeat_end — the value of `rd_node__Measure__repeat_end` off the encoded object *)
+let rv_node__Measure__repeat_end (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Measure? x)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> rd_node__Measure__repeat_end #num #flt (enc_node #num #flt x) == Ok f2 | _ -> True)) =
+  reveal_opaque (`%rd_node__Measure__repeat_end) (rd_node__Measure__repeat_end #num #flt (enc_node #num #flt x));
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> (if f3 = false then lk_vkind__Measure__repeat_end__absent #num #flt x else lk_vkind__Measure__repeat_end__present #num #flt x)
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 -> (if f2 = false then lk_node__Measure__repeat_end__absent #num #flt x else lk_node__Measure__repeat_end__present #num #flt x)
   | _ -> ()
 
-(* rv_vkind__Measure__repeat_start — the value of `rd_vkind__Measure__repeat_start` off the encoded object *)
-let rv_vkind__Measure__repeat_start (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures (match x with | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> rd_vkind__Measure__repeat_start #num #flt (enc_vkind #num #flt x) == Ok f4 | _ -> True)) =
-  reveal_opaque (`%rd_vkind__Measure__repeat_start) (rd_vkind__Measure__repeat_start #num #flt (enc_vkind #num #flt x));
+(* rv_node__Measure__is_anacrusis — the value of `rd_node__Measure__is_anacrusis` off the encoded object *)
+let rv_node__Measure__is_anacrusis (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Measure? x)) (ensures (match x with | C__node__Measure i f0 f1 f2 f3 f4 f5 -> rd_node__Measure__is_anacrusis #num #flt (enc_node #num #flt x) == Ok f4 | _ -> True)) =
+  reveal_opaque (`%rd_node__Measure__is_anacrusis) (rd_node__Measure__is_anacrusis #num #flt (enc_node #num #flt x));
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 -> (if f4 = false then lk_vkind__Measure__repeat_start__absent #num #flt x else lk_vkind__Measure__repeat_start__present #num #flt x)
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 -> (if f4 = false then lk_node__Measure__is_anacrusis__absent #num #flt x else lk_node__Measure__is_anacrusis__present #num #flt x)
   | _ -> ()
 
 (* ======================================================================================
@@ -371,122 +386,119 @@ let rv_vkind__Measure__repeat_start (#num #flt: eqtype) (x: vkind num flt) : Lem
 
 let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__node__Node i k -> rt_vkind #num #flt k
+  | C__node__Score _ _ _ _ -> rt_node__Score #num #flt x
+  | C__node__Part _ _ _ _ -> rt_node__Part #num #flt x
+  | C__node__PartGroup _ _ _ _ -> rt_node__PartGroup #num #flt x
+  | C__node__Measure _ _ _ _ _ _ _ -> rt_node__Measure #num #flt x
+  | C__node__Staff _ _ _ -> rt_node__Staff #num #flt x
+  | C__node__GraceNote _ _ _ -> rt_node__GraceNote #num #flt x
+  | C__node__Dynamic _ _ -> rt_node__Dynamic #num #flt x
+  | C__node__Fermata _ -> rt_node__Fermata #num #flt x
+  | C__node__HairpinStart _ _ -> rt_node__HairpinStart #num #flt x
+  | C__node__HairpinEnd _ -> rt_node__HairpinEnd #num #flt x
+  | C__node__SlurStart _ -> rt_node__SlurStart #num #flt x
+  | C__node__SlurEnd _ -> rt_node__SlurEnd #num #flt x
+  | C__node__OctaveShiftStart _ _ -> rt_node__OctaveShiftStart #num #flt x
+  | C__node__OctaveShiftEnd _ -> rt_node__OctaveShiftEnd #num #flt x
+  | C__node__MultiRest _ _ -> rt_node__MultiRest #num #flt x
+  | C__node__Ornament _ _ _ -> rt_node__Ornament #num #flt x
+  | C__node__RehearsalMark _ _ -> rt_node__RehearsalMark #num #flt x
+  | C__node__NavigationMark _ _ -> rt_node__NavigationMark #num #flt x
+  | C__node__Form _ _ _ _ -> rt_node__Form #num #flt x
 
-and rt_vkind (#num #flt: eqtype) (x: vkind num flt) : Lemma (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 2]) =
+and rt_node__Score (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Score? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Score _ _ _ -> rt_vkind__Score #num #flt x
-  | C__vkind__Part _ _ _ -> rt_vkind__Part #num #flt x
-  | C__vkind__PartGroup _ _ _ -> rt_vkind__PartGroup #num #flt x
-  | C__vkind__Measure _ _ _ _ _ _ -> rt_vkind__Measure #num #flt x
-  | C__vkind__Staff _ _ -> rt_vkind__Staff #num #flt x
-  | C__vkind__GraceNote _ _ -> rt_vkind__GraceNote #num #flt x
-  | C__vkind__Dynamic _ -> rt_vkind__Dynamic #num #flt x
-  | C__vkind__Fermata -> rt_vkind__Fermata #num #flt x
-  | C__vkind__HairpinStart _ -> rt_vkind__HairpinStart #num #flt x
-  | C__vkind__HairpinEnd -> rt_vkind__HairpinEnd #num #flt x
-  | C__vkind__SlurStart -> rt_vkind__SlurStart #num #flt x
-  | C__vkind__SlurEnd -> rt_vkind__SlurEnd #num #flt x
-  | C__vkind__OctaveShiftStart _ -> rt_vkind__OctaveShiftStart #num #flt x
-  | C__vkind__OctaveShiftEnd -> rt_vkind__OctaveShiftEnd #num #flt x
-  | C__vkind__MultiRest _ -> rt_vkind__MultiRest #num #flt x
-  | C__vkind__Ornament _ _ -> rt_vkind__Ornament #num #flt x
-  | C__vkind__RehearsalMark _ -> rt_vkind__RehearsalMark #num #flt x
-  | C__vkind__NavigationMark _ -> rt_vkind__NavigationMark #num #flt x
-  | C__vkind__Form _ _ _ -> rt_vkind__Form #num #flt x
+  | C__node__Score i f0 f1 f2 ->
+    rv_node__Score__title #num #flt x;
+    rv_node__Score__composer #num #flt x;
+    lk_node__Score__children #num #flt x;
+    rt_items_l_node #num #flt [] f2
 
-and rt_vkind__Score (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Score? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Part (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Part? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Score f0 f1 f2 ->
-    rv_vkind__Score__composer #num #flt x;
-    rv_vkind__Score__title #num #flt x;
-    rt_items_l_node #num #flt [] f0
+  | C__node__Part i f0 f1 f2 -> rt_items_l_r_staff_definition #num #flt [] f1; rt_items_l_node #num #flt [] f2
 
-and rt_vkind__Part (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Part? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__PartGroup (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__PartGroup? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Part f0 f1 f2 -> rt_items_l_node #num #flt [] f0; rt_items_l_r_staff_definition #num #flt [] f2
+  | C__node__PartGroup i f0 f1 f2 -> rt_e_bracket_kind #num #flt f1; rt_items_l_node #num #flt [] f2
 
-and rt_vkind__PartGroup (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__PartGroup? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Measure (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Measure? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__PartGroup f0 f1 f2 -> rt_e_bracket_kind #num #flt f0; rt_items_l_node #num #flt [] f1
+  | C__node__Measure i f0 f1 f2 f3 f4 f5 ->
+    rv_node__Measure__repeat_start #num #flt x;
+    rv_node__Measure__repeat_end #num #flt x;
+    (match f3 with | None -> lk_node__Measure__volta__absent #num #flt x | Some _ -> lk_node__Measure__volta__present #num #flt x);
+    rv_node__Measure__is_anacrusis #num #flt x;
+    lk_node__Measure__children #num #flt x;
+    (match f3 with | None -> () | Some w -> rt_items_l_int #num #flt [] w); rt_items_l_node #num #flt [] f5
 
-and rt_vkind__Measure (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Measure? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Staff (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Staff? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Measure f0 f1 f2 f3 f4 f5 ->
-    rv_vkind__Measure__is_anacrusis #num #flt x;
-    lk_vkind__Measure__number #num #flt x;
-    rv_vkind__Measure__repeat_end #num #flt x;
-    rv_vkind__Measure__repeat_start #num #flt x;
-    (match f5 with | None -> lk_vkind__Measure__volta__absent #num #flt x | Some _ -> lk_vkind__Measure__volta__present #num #flt x);
-    rt_items_l_node #num #flt [] f0; (match f5 with | None -> () | Some w -> rt_items_l_int #num #flt [] w)
+  | C__node__Staff i f0 f1 -> rt_items_l_node #num #flt [] f1
 
-and rt_vkind__Staff (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Staff? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__GraceNote (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__GraceNote? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Staff f0 f1 -> rt_items_l_node #num #flt [] f0
+  | C__node__GraceNote i f0 f1 -> rt_r_pitch #num #flt f0; rt_e_grace_kind #num #flt f1
 
-and rt_vkind__GraceNote (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__GraceNote? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Dynamic (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Dynamic? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__GraceNote f0 f1 -> rt_e_grace_kind #num #flt f0; rt_r_pitch #num #flt f1
+  | C__node__Dynamic i f0 -> rt_e_dynamic_level #num #flt f0
 
-and rt_vkind__Dynamic (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Dynamic? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Fermata (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Fermata? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Dynamic f0 -> rt_e_dynamic_level #num #flt f0
+  | C__node__Fermata i -> ()
 
-and rt_vkind__Fermata (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Fermata? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__HairpinStart (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__HairpinStart? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Fermata -> ()
+  | C__node__HairpinStart i f0 -> rt_e_hairpin_kind #num #flt f0
 
-and rt_vkind__HairpinStart (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__HairpinStart? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__HairpinEnd (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__HairpinEnd? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__HairpinStart f0 -> rt_e_hairpin_kind #num #flt f0
+  | C__node__HairpinEnd i -> ()
 
-and rt_vkind__HairpinEnd (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__HairpinEnd? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__SlurStart (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__SlurStart? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__HairpinEnd -> ()
+  | C__node__SlurStart i -> ()
 
-and rt_vkind__SlurStart (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__SlurStart? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__SlurEnd (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__SlurEnd? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__SlurStart -> ()
+  | C__node__SlurEnd i -> ()
 
-and rt_vkind__SlurEnd (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__SlurEnd? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__OctaveShiftStart (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__OctaveShiftStart? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__SlurEnd -> ()
+  | C__node__OctaveShiftStart i f0 -> rt_e_octave_shift_kind #num #flt f0
 
-and rt_vkind__OctaveShiftStart (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__OctaveShiftStart? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__OctaveShiftEnd (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__OctaveShiftEnd? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__OctaveShiftStart f0 -> rt_e_octave_shift_kind #num #flt f0
+  | C__node__OctaveShiftEnd i -> ()
 
-and rt_vkind__OctaveShiftEnd (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__OctaveShiftEnd? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__MultiRest (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__MultiRest? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__OctaveShiftEnd -> ()
+  | C__node__MultiRest i f0 -> ()
 
-and rt_vkind__MultiRest (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__MultiRest? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Ornament (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Ornament? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__MultiRest f0 -> ()
+  | C__node__Ornament i f0 f1 -> rt_e_ornament_name #num #flt f0
 
-and rt_vkind__Ornament (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Ornament? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__RehearsalMark (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__RehearsalMark? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__Ornament f0 f1 -> rt_e_ornament_name #num #flt f0
+  | C__node__RehearsalMark i f0 -> ()
 
-and rt_vkind__RehearsalMark (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__RehearsalMark? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__NavigationMark (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__NavigationMark? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__RehearsalMark f0 -> ()
+  | C__node__NavigationMark i f0 -> rt_e_navigation_kind #num #flt f0
 
-and rt_vkind__NavigationMark (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__NavigationMark? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
+and rt_node__Form (#num #flt: eqtype) (x: node num flt) : Lemma (requires (C__node__Form? x)) (ensures dec_node (enc_node #num #flt x) == Ok x) (decreases %[x; 1]) =
   match x with
-  | C__vkind__NavigationMark f0 -> rt_e_navigation_kind #num #flt f0
-
-and rt_vkind__Form (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Form? x)) (ensures dec_vkind (enc_vkind #num #flt x) == Ok x) (decreases %[x; 1]) =
-  match x with
-  | C__vkind__Form f0 f1 f2 -> rt_items_l_str #num #flt [] f0; rt_items_l_r_form_section #num #flt [] f2
+  | C__node__Form i f0 f1 f2 -> rt_items_l_r_form_section #num #flt [] f1; rt_items_l_str #num #flt [] f2
 
 and rt_r_staff_definition (#num #flt: eqtype) (x: r_staff_definition num flt) : Lemma (ensures dec_r_staff_definition (enc_r_staff_definition #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__r_staff_definition__Mk f0 f1 f2 f3 -> rt_e_clef_kind #num #flt f0; rt_r_key_signature #num #flt f1; rt_r_time_signature #num #flt f2
+  | C__r_staff_definition__Mk f0 f1 f2 f3 -> rt_e_clef_kind #num #flt f1; rt_r_key_signature #num #flt f2; rt_r_time_signature #num #flt f3
 
 and rt_r_key_signature (#num #flt: eqtype) (x: r_key_signature num flt) : Lemma (ensures dec_r_key_signature (enc_r_key_signature #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__r_key_signature__Mk f0 f1 f2 -> rt_e_mode #num #flt f0; rt_e_note_letter #num #flt f1; rt_e_accidental #num #flt f2
+  | C__r_key_signature__Mk f0 f1 f2 -> rt_e_note_letter #num #flt f0; rt_e_accidental #num #flt f1; rt_e_mode #num #flt f2
 
 and rt_r_time_signature (#num #flt: eqtype) (x: r_time_signature num flt) : Lemma (ensures dec_r_time_signature (enc_r_time_signature #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
@@ -494,11 +506,11 @@ and rt_r_time_signature (#num #flt: eqtype) (x: r_time_signature num flt) : Lemm
 
 and rt_r_pitch (#num #flt: eqtype) (x: r_pitch num flt) : Lemma (ensures dec_r_pitch (enc_r_pitch #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__r_pitch__Mk f0 f1 f2 f3 -> rt_e_accidental #num #flt f0; rt_e_note_letter #num #flt f1
+  | C__r_pitch__Mk f0 f1 f2 f3 -> rt_e_note_letter #num #flt f0; rt_e_accidental #num #flt f1
 
 and rt_r_form_section (#num #flt: eqtype) (x: r_form_section num flt) : Lemma (ensures dec_r_form_section (enc_r_form_section #num #flt x) == Ok x) (decreases %[x; 2]) =
   match x with
-  | C__r_form_section__Mk f0 f1 -> rt_items_l_node #num #flt [] f0
+  | C__r_form_section__Mk f0 f1 -> rt_items_l_node #num #flt [] f1
 
 and rt_items_l_node (#num #flt: eqtype) (acc: list (node num flt)) (xs: list (node num flt)) : Lemma (ensures dec_items_l_node acc (enc_items_l_node #num #flt xs) == Ok (rev_app acc xs)) (decreases %[xs; 2]) =
   match xs with

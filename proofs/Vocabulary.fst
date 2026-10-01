@@ -40,6 +40,10 @@
        is what keeps every definition and every emitted lemma first-order.
 
    VOCABULARY. Discriminator "$type", nested-kind envelope, ordinal-sorted key order.
+   The node object carries `id`, the kind object under `kind` and the envelope's members;
+   the kind object carries the discriminator and the kind's members.
+   Every object literal is Ordinal-sorted, the fixed keys merged among the members.
+   A shape the literal cannot carry is refused by name, never emitted.
    4 of 5 kinds are modelled; 4 declared types and 2 enums are reached.
    The kinds NOT modelled — named here rather than silently missing, because a reader
    of the theorem needs to know what it does not cover. Two different reasons, and
@@ -173,12 +177,12 @@ let rd_node__Node__label (#num #flt: eqtype) (el: jval num flt) : Tot (outcome (
 let rec enc_node (#num #flt: eqtype) (x: node num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__node__Node i k e0 e1 ->
-    JObj (("id", JStr i) :: ("kind", enc_vkind k) :: (let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt e1) ([]) in let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt e0) (s1) in s0))
+    JObj ((let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt e1) ([]) in let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt e0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in s0))
 
 and enc_vkind (#num #flt: eqtype) (x: vkind num flt) : Tot (jval num flt) (decreases x) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
-    JObj (("$type", JStr "Embed") :: (let s1 = sfx_vkind__Embed__props #num #flt (enc_opt_m_json #num #flt f3) ([]) in let s0 = sfx_vkind__Embed__content_hash #num #flt (enc_opt_r_content_hash #num #flt f1) (("moduleId", JStr f2) :: s1) in ("componentId", JStr f0) :: s0))
+    JObj ((let s1 = sfx_vkind__Embed__props #num #flt (enc_opt_m_json #num #flt f3) ([]) in let s0 = sfx_vkind__Embed__content_hash #num #flt (enc_opt_r_content_hash #num #flt f1) (("moduleId", JStr f2) :: s1) in ("$type", JStr "Embed") :: ("componentId", JStr f0) :: s0))
   | C__vkind__Group f0 f1 f2 ->
     JObj (("$type", JStr "Group") :: ("children", JArr (enc_items_l_node f0)) :: (if f1 = C__e_layout_kind__Stack then ("onSelect", JStr "<closure>") :: [] else ("layout", enc_e_layout_kind f1) :: ("onSelect", JStr "<closure>") :: []))
   | C__vkind__Link f0 f1 f2 ->

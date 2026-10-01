@@ -122,10 +122,32 @@ module CodegenError =
         | UnsupportedConstruct(construct, principle, alternative) ->
             sprintf "the generator cannot emit %s (%s) — %s" construct principle alternative
 
-/// The type-generation leg: emit illustrative F# type source from the IDL — the
-/// "generate Types.fs" half of the inversion. Spike-grade (a source string, not a
-/// compiled artefact); proves the IDL carries enough to project a host's types.
+/// The source generators over an `Idl`: the F# structural layer (`fsharpTypes`,
+/// `fsharpModuleWith`), the JSON schema, the TypeScript encoder and declarations, and the
+/// scaffold values — each a source string a consumer compiles or publishes, refused as a
+/// typed `CodegenError` wherever the vocabulary asks for something the backend cannot emit.
 module Gen =
+
+    /// The package version the generator was built as, for the emitted header — the
+    /// informational version with any build-metadata suffix dropped, so a regenerated artefact
+    /// names the release that produced it rather than a phase label frozen at first emission.
+    let private generatorVersion: string =
+        let asm = typeof<CodegenError>.Assembly
+
+        let informational =
+            asm.GetCustomAttributes(typeof<System.Reflection.AssemblyInformationalVersionAttribute>, false)
+            |> Seq.tryHead
+            |> Option.map (fun a ->
+                (a :?> System.Reflection.AssemblyInformationalVersionAttribute).InformationalVersion)
+
+        let v =
+            match informational with
+            | Some v when v <> "" -> v
+            | _ -> string (asm.GetName().Version)
+
+        match v.IndexOf '+' with
+        | -1 -> v
+        | i -> v.Substring(0, i)
 
     /// Phase 129 — the emitted text's line endings are the GENERATOR's, never its inputs'.
     ///
@@ -1881,10 +1903,8 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
     /// could fill a `TStr` default the encoder's omit test could not spell, and (the direction
     /// that mattered) neither could spell a value-carrying union. One contract, one renderer, so
     /// the smart constructor, the encoder's omit test and the decoder's restore cannot come apart.
-    let private defaultExpr (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> = fsDefaultLit idl t v
-
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
-    /// IDL-declared default has no code emission (`defaultExpr` — GP4/GP5).
+    /// IDL-declared default has no code emission (`fsDefaultLit` — GP4/GP5).
     let private defaultsDecl
         (projections: Map<string, KindProjection>)
         (msg: Set<string>)
@@ -1957,14 +1977,14 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
 
             let fieldExpr (f: IdlField) : Result<string, CodegenError> =
                 match defaultFor k.Tag f.Name, f.Opt with
-                | Some v, Required -> defaultExpr idl f.Type v
-                | Some v, Optional -> defaultExpr idl f.Type v |> Result.map (fun e -> "Some(" + e + ")")
+                | Some v, Required -> fsDefaultLit idl f.Type v
+                | Some v, Optional -> fsDefaultLit idl f.Type v |> Result.map (fun e -> "Some(" + e + ")")
                 | None, Required -> Ok(ident f.Name)
                 | None, Optional -> Ok "None"
                 // HostOnly: not a ctor param either — the field takes its placeholder.
                 | _, HostOnly -> hostOnlyLit f
                 // OmitDefault: not a ctor param — the field takes its identity default.
-                | _, OmitDefault d -> defaultExpr idl f.Type d
+                | _, OmitDefault d -> fsDefaultLit idl f.Type d
 
             k.Fields
             |> List.map (fun f -> fieldExpr f |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
@@ -1985,7 +2005,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
 
         // Phase 124 — a PROJECTED kind emits no generated constructor (the projection supplies
         // its own), which before this phase meant its declared defaults were never rendered and
-        // so never checked: an unrenderable default on a projected kind escaped `defaultExpr`
+        // so never checked: an unrenderable default on a projected kind escaped `fsDefaultLit`
         // entirely and reached the encoder, where it fell back to always-emit. Validating them
         // here keeps "a declaration the generator cannot render refuses" true of a projected kind
         // too, without emitting a constructor for it.
@@ -1993,8 +2013,8 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
             k.Fields
             |> List.map (fun f ->
                 match defaultFor k.Tag f.Name, f.Opt with
-                | Some v, _ -> defaultExpr idl f.Type v |> Result.map ignore
-                | None, OmitDefault d -> defaultExpr idl f.Type d |> Result.map ignore
+                | Some v, _ -> fsDefaultLit idl f.Type v |> Result.map ignore
+                | None, OmitDefault d -> fsDefaultLit idl f.Type d |> Result.map ignore
                 | None, _ -> Ok())
             |> sequenceR
             |> Result.map ignore
@@ -2179,7 +2199,15 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
         // "///" or "//" alike) attached to the named declaration path, indented to the
         // emission site. Absent path ⇒ empty string, so an IDL with no docs emits
         // byte-identically to the pre-945 generator.
+        //
+        // Phase 293 — every path the emission CONSULTS is recorded, and a declared doc whose
+        // path was never consulted is a refusal at the end rather than a silent drop: a typo
+        // in `type:Heading` used to emit a module with no comment and no complaint.
+        let consulted = System.Collections.Generic.HashSet<string>()
+
         let doc (path: string) (indent: string) : string =
+            consulted.Add path |> ignore
+
             match sup.Docs.TryFind path with
             | Some lines -> (lines |> List.map (fun l -> indent + l) |> String.concat "\n") + "\n"
             | None -> ""
@@ -2187,6 +2215,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
         // The same block as a type-group member's comment slot (no trailing newline —
         // the renderer adds it).
         let docOpt (path: string) : string option =
+            consulted.Add path |> ignore
             sup.Docs.TryFind path |> Option.map (fun lines -> lines |> String.concat "\n")
 
         let kinds =
@@ -2475,7 +2504,8 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
                     ""
 
             sprintf
-                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 3). Do not edit by hand.\nmodule %s%s\n\nopen Fuaran.Core"
+                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen %s. Do not edit by hand.\nmodule %s%s\n\nopen Fuaran.Core"
+                generatorVersion
                 moduleName
                 nowarn
 
@@ -2597,7 +2627,63 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
               [ defaults ] ]
             |> List.concat
             |> String.concat "\n\n"
-            |> Ok
+            |> fun text ->
+                // Phase 293 — the declared-support keys are held to the vocabulary. A doc path
+                // the emission never consulted, a case refine on no referenced union case, a
+                // projection on no selected kind: each is a key the generator would otherwise
+                // drop without a word, and a typo there is an authored intent that never reached
+                // the artefact.
+                let unconsulted =
+                    sup.Docs
+                    |> Map.toList
+                    |> List.map fst
+                    |> List.filter (fun p -> not (consulted.Contains p))
+
+                let caseKeys =
+                    unions
+                    |> List.collect (fun u -> u.Cases |> List.map (fun c -> u.Name + "." + c.Tag))
+                    |> Set.ofList
+
+                let unknownRefines =
+                    sup.CaseRefines
+                    |> Map.toList
+                    |> List.map fst
+                    |> List.filter (fun k -> not (caseKeys.Contains k))
+
+                let kindTagSet = kinds |> List.map (fun k -> k.Tag) |> Set.ofList
+
+                let unknownProjections =
+                    sup.KindProjections
+                    |> Map.toList
+                    |> List.map fst
+                    |> List.filter (fun k -> not (kindTagSet.Contains k))
+
+                match unconsulted, unknownRefines, unknownProjections with
+                | [], [], [] -> Ok text
+                | p :: _, _, _ ->
+                    Error(
+                        CodegenError.UnsupportedConstruct(
+                            sprintf "a declared support doc at path '%s'" p,
+                            "a doc path names a declaration this emission renders — `type:Name`, `case:Union.Tag`, `field:Owner.Field`, `enc:Name`, `dec:Name`, `encarm:Union.Tag`, `decarm:Union.Tag` — and a path it never consults is a doc that silently reaches nothing",
+                            "spell the path as the emitter does, or remove the entry"
+                        )
+                    )
+                | _, k :: _, _ ->
+                    Error(
+                        CodegenError.UnsupportedConstruct(
+                            sprintf "a declared case refine for '%s'" k,
+                            "a case refine is keyed `Union.Tag` on a union case this emission's kinds reach, and one on no such case would be dropped without a word",
+                            "name a declared case of a referenced union, or remove the entry"
+                        )
+                    )
+                | _, _, k :: _ ->
+                    Error(
+                        CodegenError.UnsupportedConstruct(
+                            sprintf "a declared kind projection for '%s'" k,
+                            "a kind projection is keyed by a kind tag among the kinds this emission selects, and one on no such kind would be dropped without a word",
+                            "name a selected kind, or remove the entry"
+                        )
+                    )
         | Error e, _, _, _, _
         | _, Error e, _, _, _
         | _, _, Error e, _, _
