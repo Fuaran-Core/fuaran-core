@@ -332,6 +332,14 @@
          the refusal law, and the decode reject family (`conformance/decode/`) with its emit-decode
          renderer. Reads RefusalVectorTests.fs for the host roster; appended (append-only). -->
     <Compile Include="DecodeLayerTests.fs" />
+
+    <!-- Phase 254 — every package carries its XML documentation file (read from the suite's own
+         output, where each referenced project's file is copied), and every README claim of a surface
+         carries the version it arrived in, derived from api/ at each release tag, with the README's
+         Fable line held to the pins. Read PackageRosterTests.fs, SiblingCorpus.fs, ChildProcess.fs and
+         Snapshots.fs; appended (append-only). -->
+    <Compile Include="PackageDocsTests.fs" />
+    <Compile Include="ReadmeClaimsTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

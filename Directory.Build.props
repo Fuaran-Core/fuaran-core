@@ -357,6 +357,17 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+  <!-- Phase 254: every package carries its XML documentation file, so a consumer restoring from the
+       registry reads the doc comments in the editor rather than only in this repository's sources.
+       Without it the comments reached a consumer only through the `fable/` source copy, which an
+       editor does not read for a referenced assembly. Scoped by the project's FOLDER, `src/`, for the
+       reason the symbols group above is unconditional: `IsPackable` is not yet set when this file is
+       read. The two scopes are one set because `PackageRosterTests` refuses a packable project
+       outside `src/`, and `PackageDocsTests` refuses a package whose built assembly has no `.xml`
+       beside it. -->
+  <PropertyGroup Condition="'$([System.IO.Path]::GetFileName($([System.IO.Path]::GetDirectoryName($(MSBuildProjectDirectory)))))' == 'src'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
