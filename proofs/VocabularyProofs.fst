@@ -114,8 +114,8 @@ let lk_node__Node__hidden__present (#num #flt: eqtype) (x: node num flt) : Lemma
   match x with
   | C__node__Node i k f0 f1 ->
     let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt f1) ([]) in
-    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (s1) in
-    sk_node__Node__hidden__hit #num #flt (enc_opt_bool #num #flt f0) (s1)
+    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in
+    sk_node__Node__hidden__hit #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1)
 #pop-options
 
 (* lk_node__Node__hidden__absent — hidden absent *)
@@ -124,9 +124,29 @@ let lk_node__Node__hidden__absent (#num #flt: eqtype) (x: node num flt) : Lemma 
   match x with
   | C__node__Node i k f0 f1 ->
     let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt f1) ([]) in
-    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (s1) in
-    sk_node__Node__hidden__none #num #flt (enc_opt_bool #num #flt f0) (s1);
+    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in
+    sk_node__Node__hidden__none #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1);
     sk_node__Node__label__skip #num #flt "hidden" (enc_opt_str #num #flt f1) ([])
+#pop-options
+
+(* lk_node__Node__id — id — a fixed key, at a position the conditionals before it move *)
+#push-options "--fuel 8 --ifuel 4"
+let lk_node__Node__id (#num #flt: eqtype) (x: node num flt) : Lemma (ensures (match x with | C__node__Node i k f0 f1 -> get_prop "id" (enc_node #num #flt x) == Ok (JStr i))) =
+  match x with
+  | C__node__Node i k f0 f1 ->
+    let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt f1) ([]) in
+    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in
+    sk_node__Node__hidden__skip #num #flt "id" (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1)
+#pop-options
+
+(* lk_node__Node__kind — kind — a fixed key, at a position the conditionals before it move *)
+#push-options "--fuel 8 --ifuel 4"
+let lk_node__Node__kind (#num #flt: eqtype) (x: node num flt) : Lemma (ensures (match x with | C__node__Node i k f0 f1 -> get_prop "kind" (enc_node #num #flt x) == Ok (enc_vkind k))) =
+  match x with
+  | C__node__Node i k f0 f1 ->
+    let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt f1) ([]) in
+    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in
+    sk_node__Node__hidden__skip #num #flt "kind" (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1)
 #pop-options
 
 (* lk_node__Node__label__present — label present *)
@@ -135,8 +155,8 @@ let lk_node__Node__label__present (#num #flt: eqtype) (x: node num flt) : Lemma 
   match x with
   | C__node__Node i k f0 f1 ->
     let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt f1) ([]) in
-    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (s1) in
-    sk_node__Node__hidden__skip #num #flt "label" (enc_opt_bool #num #flt f0) (s1);
+    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in
+    sk_node__Node__hidden__skip #num #flt "label" (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1);
     sk_node__Node__label__hit #num #flt (enc_opt_str #num #flt f1) ([])
 #pop-options
 
@@ -146,8 +166,8 @@ let lk_node__Node__label__absent (#num #flt: eqtype) (x: node num flt) : Lemma (
   match x with
   | C__node__Node i k f0 f1 ->
     let s1 = sfx_node__Node__label #num #flt (enc_opt_str #num #flt f1) ([]) in
-    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (s1) in
-    sk_node__Node__hidden__skip #num #flt "label" (enc_opt_bool #num #flt f0) (s1);
+    let s0 = sfx_node__Node__hidden #num #flt (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1) in
+    sk_node__Node__hidden__skip #num #flt "label" (enc_opt_bool #num #flt f0) (("id", JStr i) :: ("kind", enc_vkind k) :: s1);
     sk_node__Node__label__none #num #flt (enc_opt_str #num #flt f1) ([])
 #pop-options
 
@@ -178,7 +198,7 @@ let sk_vkind__Embed__props__none (#num #flt: eqtype) (e: option (jval num flt)) 
   = reveal_opaque (`%sfx_vkind__Embed__props) (sfx_vkind__Embed__props #num #flt e rest)
 
 (* lk_vkind__Embed__content_hash__present — contentHash present *)
-#push-options "--fuel 8 --ifuel 4"
+#push-options "--fuel 10 --ifuel 4"
 let lk_vkind__Embed__content_hash__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> Some? f1 | _ -> false)) (ensures (match x with | C__vkind__Embed f0 f1 f2 f3 -> get_prop "contentHash" (enc_vkind #num #flt x) == Ok (enc_r_content_hash (Some?.v f1)) | _ -> True)) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
@@ -189,7 +209,7 @@ let lk_vkind__Embed__content_hash__present (#num #flt: eqtype) (x: vkind num flt
 #pop-options
 
 (* lk_vkind__Embed__content_hash__absent — contentHash absent *)
-#push-options "--fuel 8 --ifuel 4"
+#push-options "--fuel 10 --ifuel 4"
 let lk_vkind__Embed__content_hash__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> None? f1 | _ -> false)) (ensures (Error? (get_prop "contentHash" (enc_vkind #num #flt x)))) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
@@ -201,7 +221,7 @@ let lk_vkind__Embed__content_hash__absent (#num #flt: eqtype) (x: vkind num flt)
 #pop-options
 
 (* lk_vkind__Embed__module_id — moduleId — always emitted, at a position the conditionals before it move *)
-#push-options "--fuel 8 --ifuel 4"
+#push-options "--fuel 10 --ifuel 4"
 let lk_vkind__Embed__module_id (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (C__vkind__Embed? x)) (ensures (match x with | C__vkind__Embed f0 f1 f2 f3 -> get_prop "moduleId" (enc_vkind #num #flt x) == Ok (JStr f2) | _ -> True)) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
@@ -212,7 +232,7 @@ let lk_vkind__Embed__module_id (#num #flt: eqtype) (x: vkind num flt) : Lemma (r
 #pop-options
 
 (* lk_vkind__Embed__props__present — props present *)
-#push-options "--fuel 8 --ifuel 4"
+#push-options "--fuel 10 --ifuel 4"
 let lk_vkind__Embed__props__present (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> Some? f3 | _ -> false)) (ensures (match x with | C__vkind__Embed f0 f1 f2 f3 -> get_prop "props" (enc_vkind #num #flt x) == Ok (JObj (enc_entries_m_json (Some?.v f3))) | _ -> True)) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
@@ -224,7 +244,7 @@ let lk_vkind__Embed__props__present (#num #flt: eqtype) (x: vkind num flt) : Lem
 #pop-options
 
 (* lk_vkind__Embed__props__absent — props absent *)
-#push-options "--fuel 8 --ifuel 4"
+#push-options "--fuel 10 --ifuel 4"
 let lk_vkind__Embed__props__absent (#num #flt: eqtype) (x: vkind num flt) : Lemma (requires (match x with | C__vkind__Embed f0 f1 f2 f3 -> None? f3 | _ -> false)) (ensures (Error? (get_prop "props" (enc_vkind #num #flt x)))) =
   match x with
   | C__vkind__Embed f0 f1 f2 f3 ->
@@ -247,6 +267,8 @@ let rec rt_node (#num #flt: eqtype) (x: node num flt) : Lemma (ensures dec_node 
   match x with
   | C__node__Node i k f0 f1 ->
     rv_node__Node__hidden #num #flt x;
+    lk_node__Node__id #num #flt x;
+    lk_node__Node__kind #num #flt x;
     rv_node__Node__label #num #flt x;
     rt_vkind #num #flt k
 
