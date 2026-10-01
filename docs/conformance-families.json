@@ -238,6 +238,19 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.checkpointLaws",
+      "module": "Conformance",
+      "entry": "checkpointLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.codecInjectivityLaws",
       "module": "Conformance",
       "entry": "codecInjectivityLaws",

@@ -361,6 +361,18 @@ module Families =
               (Guarded [ "DAG shape" ])
               (Drawn,
                "the unknown head and the cyclic load are built every iteration, but a replay rejection and a reconcile refusal come from the caller's drawn ops and their agreement laws hold when none is drawn; the refusals are counted beside the DAG-shape guard, not demanded, since a domain whose ops never reject cannot produce one")
+          // Phase 288 — the checkpoint on the lane DAG. The shape is drawn by the kit, but whether it
+          // holds a branch point depends on the caller's ops (the same op on the same parent is one
+          // node), so a covered replay over a lane merge, an uncovered refusal and a compaction that
+          // keeps history above its checkpoint are demanded by the DAG-shape guard.
+          c
+              "checkpointLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "DAG shape" ])
+              (Drawn,
+               "the uncovered refusal comes from the kit's drawn shape and is demanded by the DAG-shape guard, and a refused compaction is counted beside it; a replay rejection comes from the caller's drawn ops, and its agreement law holds when none is drawn, so it is counted beside the guard, not demanded")
           // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
           // found and left for this phase. Each was `Unconditional` on the strength of what every
           // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an

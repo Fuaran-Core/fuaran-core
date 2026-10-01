@@ -578,6 +578,14 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      `Dag.mergeBase` over heads with several maximal common ancestors is decided by the
      (closure size, id) tie-break, which is a policy. Neither is produced by `foldOnce` or by the
      fold-pull-fold rhythm; a consumer that builds either is outside every level here.
+   - **A history that begins at a checkpoint** (Phase 288). `Dag.replayFrom` resumes from a sealed
+     state at a node, and `Dag.compactAt` truncates the history behind it; whether the drain
+     theorems above extend to a closure whose origin is a checkpointed node rather than the empty
+     DAG is OPEN. What stands instead is level 2 — the `dag-checkpoint-replay` and
+     `dag-checkpoint-truncation` rows, sampled by `Conformance.checkpointLaws` — and the one
+     condition the sampling found load-bearing: the replay refuses a node above the checkpoint
+     that does not descend from it, because the drain folds such a branch before part of the
+     checkpoint's own closure.
 
    Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over

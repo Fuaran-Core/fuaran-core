@@ -1,5 +1,71 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D93: the lane DAG's checkpoint is the linear snapshot's counterpart, a DAG may begin at one, and when to take one stays the domain's call
+
+**Recorded by Phase 288. `Fuaran.Core.OpStream.Dag` (`Dag.Checkpoint`, `sealAt` / `checkpointAt` /
+`checkpointFrom`, `verifyCheckpoint`, `replayFrom` / `replayFromWith`, `compactAt` / `compactFrom`,
+`firstBreakFrom` / `verifyDagFrom`, `toJsonlWithCheckpoints` / `fromJsonlWithCheckpoints`) and
+`Conformance.checkpointLaws`; rides the `0.34.0` draft (STABILITY.md, "A checkpoint on the lane DAG").**
+
+*The counterpart, not a second design.* A checkpoint at node N is `{ Node; State; Hash }`, where `State`
+is the fold of N's ancestor closure and `Hash` is the linear `Snapshot`'s strict seal of that state at
+sequence zero, chained from N's content id the way a linear snapshot chains from its boundary record's
+hash — read the other way, the strict snapshot at the start of the history that begins at N. The seal is
+computed by `OpStream.Snapshots`' own verifier, so there is one pre-image, one verifier and one line
+format: a checkpoint's sidecar line IS that snapshot's line, `{"snapshot":true,"seq":0,"state":<state>,
+"prevHash":<node id>,"hash":<seal>}`. A sidecar reader refuses any other sequence, a chain-only line
+(a checkpoint's seal always binds its state), and an empty `prevHash`. No linear-stream file changed.
+
+*A DAG may begin at one — and the checkpoint travels BESIDE the DAG, not inside `Dag.T`.* The shard asked
+for an optional origin field on `Dag.T<'Op>` "with a default". F# records have no field defaults: a
+field added to `T` is a `record-widening` that stops every full record literal compiling, and downstream
+consumers build `{ Nodes = … }` literals in their own suites; the checkpoint's state is also a `'State`,
+which `T<'Op>` has no parameter for. So the origin rides beside the history, as a linear snapshot rides
+beside its tail, and every function that reads a truncated history takes it as an argument:
+`replayFrom w cp dag head` replays from it and `verifyDagFrom` verifies through it. `compactAt` KEEPS the
+checkpoint's own node, which is what makes the compacted history live on with no new machinery: an
+append onto the node is an ordinary `append`, an empty history above the checkpoint has the node as its
+only head, the reachability index builds over the compacted DAG unchanged, and `checkpointFrom` /
+`compactFrom` take the next checkpoint from the last. That answers the second-pass amendment (the
+linear `compact` was terminal) without sharing a `Compacted` abstraction, which the DAG does not need:
+its nodes carry no sequence numbers to continue, only parents, and the parent is still there.
+
+*Verification through a checkpoint.* `firstBreakFrom` is `firstBreak` with the checkpoint's node as the
+root whose content id the checkpoint carries: the seal recomputes, every node's content id recomputes,
+nothing after the checkpoint's node names a parent the DAG does not hold, and every node is at, behind or
+after the checkpoint's node. Behind it a missing parent IS the truncation. To keep "nothing after the
+checkpoint is missing" checkable, `compactAt` keeps the BAND — every node behind the checkpoint on a path
+from a "side parent" (a node behind the checkpoint that a node after it names as a parent, other than the
+checkpoint's own node) to it; on the usual shape the band is empty. A truncated lane read WITHOUT its
+sidecar is a `MissingParent` break under plain `verifyDag`, as it should be.
+
+*The coverage condition — a premise of the shard that was false, and the refusal that replaces it.* The
+shard's law said `replayFrom cp` agrees with the full replay "for every head reachable from the
+checkpoint's node". On a DAG with a branch point BELOW the checkpoint that is not so: the drain folds a
+head's closure smallest id first, so a branch that left before the checkpoint's node and merges after it
+is folded BEFORE part of the checkpoint's own closure. A log witness under node ids it chooses shows it —
+`0g`, `2a`, `3b` on one lane, `1c` off `0g`, merged by `4m`: the full replay is `0g1c2a3b4m`, while
+resuming at `3b` and folding the rest gives `0g2a3b1c4m`. No state at the checkpoint can stand for that
+prefix. So `replayFrom` refuses, by name, the first node above the checkpoint (in replay order) that does
+not descend from the checkpoint's node (`CheckpointFault.Uncovered`), and `compactAt` refuses a DAG
+holding a node neither behind nor after it. The condition is graph-only — a descent, not an id order — so
+the same history is admitted or refused alike under every hash function. The law is restated to match:
+for every head the checkpoint covers the answers agree, and every other head is refused with the reason
+the graph predicts (`Conformance.checkpointLaws`, which a replay with the refusal removed reds).
+
+*When to take a checkpoint stays the domain's call (GP6).* Core says what a checkpoint is, how it
+chains, how a replay resumes from one and how a truncated history verifies through it; the domain
+supplies the state codec and picks the node. `sealAt` is the genesis-import shape: a converted history
+begins at an ordinary genesis node whose state was translated rather than folded, and the domain vouches
+for that state once.
+
+*What it does not claim.* The seal binds the state to the node; it does not re-fold the discarded
+history, so a checkpoint is exactly as trustworthy as the act that sealed it — verify, then compact,
+the linear compaction's rule. The replay is bounded in the ops it APPLIES; on a full history the graph
+walks that find the delta are still linear unless the reachability index answers them
+(`replayFromWith`). And whether `proofs/DagFold.fst` extends to a checkpointed origin is open: the
+`proofs.json` rows are `tested`, and the question sits in the README's "not claimed" list.
+
 ## 2026-10-01 — D92: the lane DAG's reachability index is a drain order plus per-node ancestor bitsets — an additional way to ask, never a change to what the unindexed functions answer
 
 **Recorded by Phase 289. `Fuaran.Core.OpStream.Dag` (`Dag.Reach`, `appendIndexed` / `mergeIndexed`,

@@ -195,6 +195,16 @@ let private runs =
                100
                (Conformance.reachLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 289 100)
            run
+               "Conformance.checkpointLaws"
+               100
+               (Conformance.checkpointLaws
+                   ConformanceTests.sw
+                   ConformanceTests.streamGen
+                   (fun (s: int) -> string s)
+                   OpStream.defaultHash
+                   288
+                   100)
+           run
                "Conformance.casLaws"
                200
                (Conformance.casLaws
