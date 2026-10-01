@@ -167,20 +167,19 @@ module Diff =
     // Reading the artifact.
     // -----------------------------------------------------------------------
 
-    let private field (name: string) (v: JVal) : JVal option =
-        match v with
-        | JObj fs -> fs |> List.tryPick (fun (k, fv) -> if k = name then Some fv else None)
-        | _ -> None
+    // Phase 310 — the snapshot is a TOLERANT classifier by design: an unrecognised shape degrades
+    // to a placeholder rather than refusing, because a revision written before a key existed must
+    // still compare. So it reads every member through the typed decode layer and DISCARDS a
+    // refusal deliberately, at these three adapters and nowhere else; the traversal and the kind
+    // checks are the layer's, not a private copy of them.
+
+    let private field (name: string) (v: JVal) : JVal option = Decoder.tryMember name v
 
     let private str (name: string) (v: JVal) : string option =
-        match field name v with
-        | Some(JStr s) -> Some s
-        | _ -> None
+        Decoder.optField name Decoder.str v |> Result.defaultValue None
 
     let private arr (name: string) (v: JVal) : JVal list =
-        match field name v with
-        | Some(JArr xs) -> xs
-        | _ -> []
+        Decoder.fieldOr name [] Decoder.items v |> Result.defaultValue []
 
     /// The type object with its `hostSurface` key removed — the wire-observable
     /// part. Recursive, because a `list<fn>` hides one a level down.

@@ -973,8 +973,9 @@ module Json =
         parseDetailedWithPolicy RejectNull maxDepth input
 
     /// Render a `JsonError` as the byte-identical legacy string (`"not valid JSON: <msg> at
-    /// position <pos>"`) that `parse` / `parseWith` have always returned.
-    let private formatJsonError (e: JsonError) : string =
+    /// position <pos>"`) that `parse` / `parseWith` have always returned. Internal since Phase 310:
+    /// the typed decode layer's parse refusal carries the same sentence.
+    let internal formatJsonError (e: JsonError) : string =
         "not valid JSON: " + e.Message + " at position " + string e.Position
 
     /// `parseDetailed` at the default nesting cap (Phase 22) — structured `JsonError` on failure.
@@ -1122,6 +1123,599 @@ module Canon =
     /// before every lower-case data key, so it is always the canonical first key after `render`.
     let typed (tag: string) (fields: (string * JVal) list) : JVal = JObj(("$type", JStr tag) :: fields)
 
+// ============================================================================
+//  Phase 310 — the typed decode layer: a refusal is a CODE and a PATH, not a sentence.
+//
+//  Until this phase `Decode` was six strict combinators returning `Result<_, string>`: no optional
+//  or defaulted member, no reader for half the `JVal` kinds, no path, no tag dispatch, no
+//  accumulation. Every codec on the spine and every consumer around it wrote the missing half for
+//  itself, and none of them could tell a caller WHERE in a document a refusal was or WHAT KIND of
+//  refusal it was without scraping the sentence. The layer below is that half, once: a closed code
+//  set, a path of keys and indices, combinators that grow the path as a refusal leaves them, and a
+//  sentence beside both — the SAME sentence the string forms returned, so a codec moved onto the
+//  layer reads identically to every existing caller (DECISIONS.md D99).
+// ============================================================================
+
+/// One step of a decode path (Phase 310): a member of an object by its key, or an item of an array
+/// by its zero-based index. A path is the list of steps from the document's root, root first.
+[<RequireQualifiedAccess>]
+type PathSegment =
+    | Key of string
+    | Index of int
+
+/// The closed code set a decode refusal carries (Phase 310) — the wire-level decode contract every
+/// host mirrors (DECISIONS.md D99). The code says what KIND of fault a refusal is, so a caller, or a
+/// model repairing its own emission, branches on it rather than on the sentence beside it. Closed:
+/// a host adds no code of its own, and a refinement a host draws finer (the UI host tells an
+/// unknown node kind from an unknown case) is an instance of one of these.
+[<RequireQualifiedAccess>]
+type DecodeCode =
+    /// The input is not JSON text the reader can parse (any parser refusal but its nesting cap). Its
+    /// path is the root.
+    | InvalidJson
+    /// A required member is absent. The path NAMES the absent member: every step but the last
+    /// resolves in the document, to an object that does not carry the last.
+    | MissingField
+    /// A value is of the wrong JSON kind — a string where a number belongs, an array where an
+    /// object does. `Expected` names the kind the position takes.
+    | WrongKind
+    /// A discriminator or an enumerated value names no case the decoder knows. `Expected` lists the
+    /// cases it does.
+    | UnknownTag
+    /// A value of the right kind outside the set its position admits: a number past its range, text
+    /// not in its declared form, an index past an array's end, a value that disagrees with another
+    /// the document carries.
+    | OutOfRange
+    /// A member the decoder does not read, refused under a strict policy. The path names the member.
+    | UndeclaredMember
+    /// A resource bound was passed — the parser's nesting cap, an item count.
+    | LimitExceeded
+    /// A value the vocabulary KNOWS that the reader's declared policy does not admit. A different
+    /// fact from `UnknownTag`, with a different remedy: the spelling is right, and this reader
+    /// does not take it.
+    | NotAdmitted
+    /// The DECODER's own declaration cannot interpret the position — a type it does not declare, an
+    /// unsubstituted type variable. A defect of the vocabulary, not of the document.
+    | SchemaFault
+
+/// A decode refusal (Phase 310): its code, the path to the value at fault (see `DecodeCode` for
+/// what a `MissingField` path names), what the position expected, and a sentence. `Message` is the
+/// sentence the string-error forms return, so the typed and the legacy reading of one refusal are
+/// the same refusal.
+type DecodeError =
+    { Code: DecodeCode
+      Path: PathSegment list
+      Expected: string
+      Message: string }
+
+/// A decoder over the typed refusal (Phase 310). `Decode.Decoder` is its string-error twin, kept
+/// for one draft.
+type Decoder<'T> = JVal -> Result<'T, DecodeError>
+
+/// Paths into a document (Phase 310): rendered, resolved, and carried on the wire.
+[<RequireQualifiedAccess>]
+module DecodePath =
+
+    /// `$` for the root, `[i]` for an item, `["key"]` for a member (the key under `Json.escape`) —
+    /// the spelling `Json.firstNonFinite` and `Json.firstIllFormedString` already report in.
+    let render (path: PathSegment list) : string =
+        let sb = System.Text.StringBuilder("$")
+
+        for step in path do
+            match step with
+            | PathSegment.Index i -> sb.Append('[').Append(string i).Append(']') |> ignore
+            | PathSegment.Key k -> sb.Append("[\"").Append(Json.escape k).Append("\"]") |> ignore
+
+        sb.ToString()
+
+    /// One step into a value — the FIRST member of the key where a foreign document repeats one, as
+    /// every combinator reads it.
+    let private step (s: PathSegment) (v: JVal) : JVal option =
+        match s, v with
+        | PathSegment.Key k, JObj fields -> fields |> List.tryFind (fun (n, _) -> n = k) |> Option.map snd
+        | PathSegment.Index i, JArr items when i >= 0 -> List.tryItem i items
+        | _ -> None
+
+    /// The value at `path` in `doc`, or `None` where a step names nothing there.
+    let resolve (path: PathSegment list) (doc: JVal) : JVal option =
+        let rec go (p: PathSegment list) (v: JVal) =
+            match p with
+            | [] -> Some v
+            | s :: rest -> step s v |> Option.bind (go rest)
+
+        go path doc
+
+    /// A path as a JSON array — a key as a string, an index as an integer. The form a conformance
+    /// vector carries, so no host parses a rendered path back.
+    let toJson (path: PathSegment list) : JVal =
+        path
+        |> List.map (function
+            | PathSegment.Key k -> JStr k
+            | PathSegment.Index i -> JInt i)
+        |> JArr
+
+    /// The inverse of `toJson`; `None` for anything but an array of strings and integers.
+    let ofJson (v: JVal) : PathSegment list option =
+        match v with
+        | JArr items ->
+            let steps =
+                items
+                |> List.map (function
+                    | JStr k -> Some(PathSegment.Key k)
+                    | JInt i -> Some(PathSegment.Index i)
+                    | _ -> None)
+
+            if List.forall Option.isSome steps then
+                Some(List.choose id steps)
+            else
+                None
+        | _ -> None
+
+/// Building and reading decode refusals (Phase 310).
+[<RequireQualifiedAccess>]
+module DecodeError =
+
+    /// Every code, in declaration order.
+    let codes: DecodeCode list =
+        [ DecodeCode.InvalidJson
+          DecodeCode.MissingField
+          DecodeCode.WrongKind
+          DecodeCode.UnknownTag
+          DecodeCode.OutOfRange
+          DecodeCode.UndeclaredMember
+          DecodeCode.LimitExceeded
+          DecodeCode.NotAdmitted
+          DecodeCode.SchemaFault ]
+
+    /// A code's wire name — its case name, as every host spells it.
+    let codeName (code: DecodeCode) : string =
+        match code with
+        | DecodeCode.InvalidJson -> "InvalidJson"
+        | DecodeCode.MissingField -> "MissingField"
+        | DecodeCode.WrongKind -> "WrongKind"
+        | DecodeCode.UnknownTag -> "UnknownTag"
+        | DecodeCode.OutOfRange -> "OutOfRange"
+        | DecodeCode.UndeclaredMember -> "UndeclaredMember"
+        | DecodeCode.LimitExceeded -> "LimitExceeded"
+        | DecodeCode.NotAdmitted -> "NotAdmitted"
+        | DecodeCode.SchemaFault -> "SchemaFault"
+
+    /// The code a wire name spells, or `None`.
+    let tryCodeOfName (name: string) : DecodeCode option =
+        codes |> List.tryFind (fun c -> codeName c = name)
+
+    /// A refusal at the value being decoded (an empty path — a combinator that hands the refusal
+    /// out prefixes its own step).
+    let make (code: DecodeCode) (expected: string) (message: string) : DecodeError =
+        { Code = code
+          Path = []
+          Expected = expected
+          Message = message }
+
+    /// The same refusal one step further from the root — what a combinator does to a refusal
+    /// leaving a member or an item.
+    let under (step: PathSegment) (e: DecodeError) : DecodeError = { e with Path = step :: e.Path }
+
+    /// The same refusal under a whole path prefix.
+    let within (prefix: PathSegment list) (e: DecodeError) : DecodeError = { e with Path = prefix @ e.Path }
+
+    /// The same refusal with its sentence rewritten — a codec prefixing its own context.
+    let reword (f: string -> string) (e: DecodeError) : DecodeError = { e with Message = f e.Message }
+
+    /// The sentence alone — what the string-error forms return.
+    let describe (e: DecodeError) : string = e.Message
+
+    /// Code, path and sentence on one line: `MissingField at $["a"]: missing property: a`.
+    let render (e: DecodeError) : string =
+        codeName e.Code + " at " + DecodePath.render e.Path + ": " + e.Message
+
+    /// The refusal as a canonical wire value: `code`, `path` (`DecodePath.toJson`), `expected`,
+    /// `message`.
+    let toJson (e: DecodeError) : JVal =
+        JObj
+            [ "code", JStr(codeName e.Code)
+              "path", DecodePath.toJson e.Path
+              "expected", JStr e.Expected
+              "message", JStr e.Message ]
+
+    /// Whether the refusal's path RESOLVES in the document it was raised over — the law every
+    /// decoder refusal answers (`Corpus.refusalLaws`): an `InvalidJson` names the root; a
+    /// `MissingField` names a member of a resolving object that does not carry it; every other code
+    /// names a value the document holds.
+    let resolvesIn (doc: JVal) (e: DecodeError) : bool =
+        match e.Code with
+        | DecodeCode.InvalidJson -> List.isEmpty e.Path
+        | DecodeCode.MissingField ->
+            match List.rev e.Path with
+            | PathSegment.Key k :: parentRev ->
+                match DecodePath.resolve (List.rev parentRev) doc with
+                | Some(JObj fields) -> not (fields |> List.exists (fun (n, _) -> n = k))
+                | _ -> false
+            | _ -> false
+        | _ -> (DecodePath.resolve e.Path doc).IsSome
+
+    /// A parser refusal as a decode refusal at the root: the nesting cap is `LimitExceeded`, every
+    /// other class `InvalidJson`; the sentence is the one `Json.parse` returns.
+    let ofJsonError (e: JsonError) : DecodeError =
+        match e.Kind with
+        | MaxDepthExceeded -> make DecodeCode.LimitExceeded "nesting within the parser's cap" (Json.formatJsonError e)
+        | _ -> make DecodeCode.InvalidJson "JSON text" (Json.formatJsonError e)
+
+/// The typed decode combinators (Phase 310). Each returns `Result<_, DecodeError>`; a refusal
+/// leaving a member or an item gains that step, so the path a caller reads is the path from the
+/// value the outermost decoder was handed. Fable-clean, like the rest of the package.
+///
+/// Optional members are three-valued and the third value is a refusal: `optField` reads an ABSENT
+/// member as `Ok None` and a PRESENT member its decoder refuses as that refusal — never as absence,
+/// which is how an ill-typed member went silently unread in every hand-rolled optional reader this
+/// layer replaced.
+[<RequireQualifiedAccess>]
+module Decoder =
+
+    /// A decoder that answers `v` whatever it is handed.
+    let succeed (v: 'T) : Decoder<'T> = fun _ -> Ok v
+
+    /// A decoder that refuses whatever it is handed, at the value itself.
+    let fail (code: DecodeCode) (expected: string) (message: string) : Decoder<'T> =
+        fun _ -> Error(DecodeError.make code expected message)
+
+    let map (f: 'T -> 'U) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.map f
+
+    /// Decode, then decode the SAME value with a decoder chosen by the first answer.
+    let bind (f: 'T -> Decoder<'U>) (d: Decoder<'T>) : Decoder<'U> =
+        fun el ->
+            match d el with
+            | Ok v -> f v el
+            | Error e -> Error e
+
+    /// Decode, then check or convert the answer; a refusal from `f` is raised at the value.
+    let andThen (f: 'T -> Result<'U, DecodeError>) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.bind f
+
+    /// The string-error reading of a decoder — its refusal's sentence. The bridge a codec whose
+    /// published error is a `string` returns through.
+    let describing (d: Decoder<'T>) : JVal -> Result<'T, string> =
+        fun el -> d el |> Result.mapError DecodeError.describe
+
+    /// The refusal of a value of the wrong kind: `expected <kind>, got <kind>`.
+    let wrongKind (expected: string) (found: JVal) : DecodeError =
+        DecodeError.make DecodeCode.WrongKind expected ("expected " + expected + ", got " + JVal.kindName found)
+
+    /// The refusal of an absent required member, its path naming the member: `missing property: <name>`.
+    let missing (name: string) : DecodeError =
+        { Code = DecodeCode.MissingField
+          Path = [ PathSegment.Key name ]
+          Expected = "a member '" + name + "'"
+          Message = "missing property: " + name }
+
+    /// The member `name` of an object — the FIRST, where a foreign document repeats a key — or
+    /// `None` where it has none or `el` is not an object.
+    let tryMember (name: string) (el: JVal) : JVal option =
+        match el with
+        | JObj fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+        | _ -> None
+
+    let private quoteAll (xs: string list) : string =
+        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
+
+    // ---- the six kinds ----
+
+    /// Any value, verbatim.
+    let json: Decoder<JVal> = Ok
+
+    let str: Decoder<string> =
+        function
+        | JStr s -> Ok s
+        | other -> Error(wrongKind "string" other)
+
+    let int: Decoder<int> =
+        function
+        | JInt i -> Ok i
+        | other -> Error(wrongKind "int" other)
+
+    /// A number, whichever constructor the parser chose (`JVal.asFloat`'s rule).
+    let float: Decoder<float> =
+        function
+        | JFloat f -> Ok f
+        | JInt i -> Ok(float i)
+        | other -> Error(wrongKind "number" other)
+
+    let bool: Decoder<bool> =
+        function
+        | JBool b -> Ok b
+        | other -> Error(wrongKind "bool" other)
+
+    /// An array's items, undecoded.
+    let items: Decoder<JVal list> =
+        function
+        | JArr xs -> Ok xs
+        | other -> Error(wrongKind "array" other)
+
+    /// An object's members, in authored order, undecoded.
+    let obj: Decoder<(string * JVal) list> =
+        function
+        | JObj fields -> Ok fields
+        | other -> Error(wrongKind "object" other)
+
+    // ---- members ----
+
+    /// The member `name`, decoded with `d`; absent is `MissingField`, a non-object `WrongKind`.
+    let field (name: string) (d: Decoder<'T>) : Decoder<'T> =
+        fun el ->
+            match el with
+            | JObj _ ->
+                match tryMember name el with
+                | Some v -> d v |> Result.mapError (DecodeError.under (PathSegment.Key name))
+                | None -> Error(missing name)
+            | other -> Error(wrongKind "object" other)
+
+    /// The member `name` if present: absent is `Ok None`, present-and-refused is the refusal.
+    let optField (name: string) (d: Decoder<'T>) : Decoder<'T option> =
+        fun el ->
+            match el with
+            | JObj _ ->
+                match tryMember name el with
+                | Some v ->
+                    d v
+                    |> Result.map Some
+                    |> Result.mapError (DecodeError.under (PathSegment.Key name))
+                | None -> Ok None
+            | other -> Error(wrongKind "object" other)
+
+    /// The member `name`, or `fallback` where it is ABSENT; present-and-refused is the refusal.
+    let fieldOr (name: string) (fallback: 'T) (d: Decoder<'T>) : Decoder<'T> =
+        optField name d |> map (Option.defaultValue fallback)
+
+    /// Decode the value at `path` below the one handed in. A step that names nothing is refused
+    /// where it fails: an absent member as `MissingField`, an item past an array's end as
+    /// `OutOfRange` at the array, a step into the wrong kind as `WrongKind` at that value.
+    let at (path: PathSegment list) (d: Decoder<'T>) : Decoder<'T> =
+        fun el ->
+            let rec go (doneRev: PathSegment list) (rest: PathSegment list) (v: JVal) =
+                let here () = List.rev doneRev
+
+                match rest with
+                | [] -> d v |> Result.mapError (DecodeError.within (here ()))
+                | (PathSegment.Key k as s) :: tail ->
+                    match v with
+                    | JObj _ ->
+                        match tryMember k v with
+                        | Some x -> go (s :: doneRev) tail x
+                        | None -> Error(DecodeError.within (here ()) (missing k))
+                    | other -> Error(DecodeError.within (here ()) (wrongKind "object" other))
+                | (PathSegment.Index i as s) :: tail ->
+                    match v with
+                    | JArr xs ->
+                        match (if i >= 0 then List.tryItem i xs else None) with
+                        | Some x -> go (s :: doneRev) tail x
+                        | None ->
+                            let n = List.length xs
+
+                            Error(
+                                DecodeError.within
+                                    (here ())
+                                    (DecodeError.make
+                                        DecodeCode.OutOfRange
+                                        ("an index below " + string n)
+                                        ("no item " + string i + " in an array of " + string n))
+                            )
+                    | other -> Error(DecodeError.within (here ()) (wrongKind "array" other))
+
+            go [] path el
+
+    // ---- arrays ----
+
+    /// Every item of an array, each with the decoder `f` builds from its index; the first refusal,
+    /// under its item's index.
+    let mapListIndexed (f: int -> Decoder<'T>) : Decoder<'T list> =
+        fun el ->
+            match el with
+            | JArr xs ->
+                let rec go i acc =
+                    function
+                    | [] -> Ok(List.rev acc)
+                    | x :: rest ->
+                        match f i x with
+                        | Ok v -> go (i + 1) (v :: acc) rest
+                        | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
+
+                go 0 [] xs
+            | other -> Error(wrongKind "array" other)
+
+    /// Every item of an array decoded with `d`; the first refusal, under its item's index.
+    let list (d: Decoder<'T>) : Decoder<'T list> = mapListIndexed (fun _ -> d)
+
+    /// `list` with an item bound: more than `maxItems` items is `LimitExceeded` at the array,
+    /// before any item is read.
+    let boundedList (maxItems: int) (d: Decoder<'T>) : Decoder<'T list> =
+        fun el ->
+            match el with
+            | JArr xs when List.length xs > maxItems ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.LimitExceeded
+                        ("at most " + string maxItems + " items")
+                        ("an array of "
+                         + string (List.length xs)
+                         + " items passes the bound of "
+                         + string maxItems)
+                )
+            | _ -> list d el
+
+    /// Every item of an array decoded with `d`, answering EVERY refusal rather than the first.
+    let listAll (d: Decoder<'T>) (el: JVal) : Result<'T list, DecodeError list> =
+        match el with
+        | JArr xs ->
+            let results =
+                xs
+                |> List.mapi (fun i x -> d x |> Result.mapError (DecodeError.under (PathSegment.Index i)))
+
+            match
+                results
+                |> List.choose (function
+                    | Error e -> Some e
+                    | Ok _ -> None)
+            with
+            | [] ->
+                Ok(
+                    results
+                    |> List.choose (function
+                        | Ok v -> Some v
+                        | Error _ -> None)
+                )
+            | errors -> Error errors
+        | other -> Error [ wrongKind "array" other ]
+
+    // ---- several decoders over one value ----
+
+    /// Each decoder over the same value, in order; the first refusal.
+    let sequence (ds: Decoder<'T> list) : Decoder<'T list> =
+        fun el ->
+            let rec go acc =
+                function
+                | [] -> Ok(List.rev acc)
+                | (d: Decoder<'T>) :: rest ->
+                    match d el with
+                    | Ok v -> go (v :: acc) rest
+                    | Error e -> Error e
+
+            go [] ds
+
+    /// Each decoder over the same value, answering EVERY refusal — `sequence`'s accumulating twin,
+    /// for a reader that reports all of a document's independent faults at once.
+    let all (ds: Decoder<'T> list) (el: JVal) : Result<'T list, DecodeError list> =
+        let results = ds |> List.map (fun d -> d el)
+
+        match
+            results
+            |> List.choose (function
+                | Error e -> Some e
+                | Ok _ -> None)
+        with
+        | [] ->
+            Ok(
+                results
+                |> List.choose (function
+                    | Ok v -> Some v
+                    | Error _ -> None)
+            )
+        | errors -> Error errors
+
+    // ---- tags and enumerations ----
+
+    /// A string from a closed set: a miss is `UnknownTag`, naming every known spelling.
+    let oneOf (cases: (string * 'T) list) : Decoder<'T> =
+        fun el ->
+            match el with
+            | JStr s ->
+                match cases |> List.tryFind (fun (k, _) -> k = s) with
+                | Some(_, v) -> Ok v
+                | None ->
+                    let known = cases |> List.map fst
+
+                    Error(
+                        DecodeError.make
+                            DecodeCode.UnknownTag
+                            ("one of " + quoteAll known)
+                            ("unknown value '" + s + "'; the known values are " + quoteAll known)
+                    )
+            | other -> Error(wrongKind "string" other)
+
+    /// Dispatch on the string under the discriminator `key`: the case's decoder reads the SAME
+    /// object. An absent or non-string discriminator is refused as such; an unknown tag is
+    /// `UnknownTag` at the discriminator, naming every known tag.
+    let tagDispatch (key: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
+        fun el ->
+            match field key str el with
+            | Error e -> Error e
+            | Ok t ->
+                match cases |> List.tryFind (fun (k, _) -> k = t) with
+                | Some(_, d) -> d el
+                | None ->
+                    let known = cases |> List.map fst
+
+                    Error(
+                        DecodeError.under
+                            (PathSegment.Key key)
+                            (DecodeError.make
+                                DecodeCode.UnknownTag
+                                ("one of " + quoteAll known)
+                                ("unknown " + key + " '" + t + "'; the known tags are " + quoteAll known))
+                    )
+
+    /// `tagDispatch` under the `"kind"` discriminator.
+    let kindDispatch (cases: (string * Decoder<'T>) list) : Decoder<'T> = tagDispatch "kind" cases
+
+    // ---- ranges ----
+
+    /// An integer within `[lo, hi]`; outside it is `OutOfRange`.
+    let intRange (lo: int) (hi: int) : Decoder<int> =
+        fun el ->
+            match int el with
+            | Ok i when i >= lo && i <= hi -> Ok i
+            | Ok i ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.OutOfRange
+                        ("an int in [" + string lo + ", " + string hi + "]")
+                        (string i + " is outside [" + string lo + ", " + string hi + "]")
+                )
+            | Error e -> Error e
+
+    // ---- the strict member policy ----
+
+    let private undeclaredError (known: string list) (k: string) : DecodeError =
+        let sorted = List.sort known
+
+        DecodeError.under
+            (PathSegment.Key k)
+            (DecodeError.make
+                DecodeCode.UndeclaredMember
+                (if List.isEmpty sorted then
+                     "no members"
+                 else
+                     "one of the members " + quoteAll sorted)
+                ("unknown member '"
+                 + k
+                 + "'; "
+                 + (if List.isEmpty sorted then
+                        "it takes no members"
+                    else
+                        "its members are " + quoteAll sorted)))
+
+    /// Every member of an object outside `known`, in authored order — one `UndeclaredMember` each.
+    /// A non-object has no members to refuse.
+    let undeclared (known: string list) (el: JVal) : DecodeError list =
+        match el with
+        | JObj fields ->
+            fields
+            |> List.filter (fun (k, _) -> not (List.contains k known))
+            |> List.map (fun (k, _) -> undeclaredError known k)
+        | _ -> []
+
+    /// The strict policy (Phase 251's `ReadPolicy.Strict`, generalised): the first member outside
+    /// `known` is `UndeclaredMember`, naming the members that WOULD be read. A non-object passes —
+    /// the decoder that reads it refuses its kind.
+    let members (known: string list) : Decoder<unit> =
+        fun el ->
+            match undeclared known el with
+            | [] -> Ok()
+            | e :: _ -> Error e
+
+    /// `d` under the strict policy: the members check first, then the read.
+    let closed (known: string list) (d: Decoder<'T>) : Decoder<'T> = members known |> bind (fun () -> d)
+
+    // ---- text ----
+
+    /// Parse JSON text, a parser refusal as a decode refusal at the root (`DecodeError.ofJsonError`).
+    let parseWith (maxDepth: int) (json: string) : Result<JVal, DecodeError> =
+        Json.parseDetailedWith maxDepth json |> Result.mapError DecodeError.ofJsonError
+
+    /// `parseWith` at the parser's default nesting cap.
+    let parse (json: string) : Result<JVal, DecodeError> = parseWith Json.defaultMaxDepth json
+
+    /// Parse JSON text and decode it with `d`.
+    let ofString (d: Decoder<'T>) (json: string) : Result<'T, DecodeError> = parse json |> Result.bind d
+
 /// Total decode combinators over the portable `Json.parse` → `JVal` model. Decode is now
 /// **fully portable** — the same combinators run under .NET and Fable (the prior
 /// `#if !FABLE_COMPILER` System.Text.Json path is retired, Phase 241). Each combinator
@@ -1152,11 +1746,9 @@ module Decode =
         | WrongKind(expected, got) -> "expected " + expected + ", got " + got
 
     /// The member `name` of an object — the FIRST, where a foreign document repeats a key, as every
-    /// combinator here reads it — or `None` where it has none or `el` is not an object.
-    let tryProp (name: string) (el: JVal) : JVal option =
-        match el with
-        | JObj fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
-        | _ -> None
+    /// combinator here reads it — or `None` where it has none or `el` is not an object. A forward to
+    /// `Decoder.tryMember` since Phase 310.
+    let tryProp (name: string) (el: JVal) : JVal option = Decoder.tryMember name el
 
     /// `getProp` over the caller's error type: `fault` spells a missing member or a non-object.
     let propWith (fault: Fault -> 'E) (name: string) (el: JVal) : Result<JVal, 'E> =
@@ -1190,33 +1782,38 @@ module Decode =
     /// consumer makes to read a spec-conformant foreign document; everything downstream is unchanged.
     let parseTolerantOfNull (json: string) : Result<JVal, string> = Json.parseTolerantOfNull json
 
-    let getProp (name: string) (el: JVal) : Result<JVal, string> = propWith describe name el
+    // The string-error combinators below are FORWARDS onto the typed layer since Phase 310 — each is
+    // `Decoder.describing` over its `Decoder` twin, and answers the sentence it always answered. They
+    // are kept for one draft and removed at the next breaking draft (STABILITY.md, 0.34.0); new code
+    // reads through `Decoder`, whose refusal carries a code and a path.
 
-    let asString (el: JVal) : Result<string, string> = stringWith describe el
+    /// Forward: `Decoder.field name Decoder.json`.
+    let getProp (name: string) (el: JVal) : Result<JVal, string> =
+        Decoder.describing (Decoder.field name Decoder.json) el
 
-    let asInt (el: JVal) : Result<int, string> =
-        match el with
-        | JInt i -> Ok i
-        | other -> Error("expected int, got " + kindName other)
+    /// Forward: `Decoder.str`.
+    let asString (el: JVal) : Result<string, string> = Decoder.describing Decoder.str el
 
-    let asBool (el: JVal) : Result<bool, string> =
-        match el with
-        | JBool b -> Ok b
-        | other -> Error("expected bool, got " + kindName other)
+    /// Forward: `Decoder.int`.
+    let asInt (el: JVal) : Result<int, string> = Decoder.describing Decoder.int el
 
-    let asFloat (el: JVal) : Result<float, string> =
-        match el with
-        | JFloat f -> Ok f
-        | JInt i -> Ok(float i)
-        | other -> Error("expected number, got " + kindName other)
+    /// Forward: `Decoder.bool`.
+    let asBool (el: JVal) : Result<bool, string> = Decoder.describing Decoder.bool el
 
-    /// The discriminating `"kind"` tag of an object.
+    /// Forward: `Decoder.float`.
+    let asFloat (el: JVal) : Result<float, string> = Decoder.describing Decoder.float el
+
+    /// The discriminating `"kind"` tag of an object. Forward: `Decoder.field "kind" Decoder.str`.
     let kindOf (el: JVal) : Result<string, string> =
-        getProp "kind" el |> Result.bind asString
+        Decoder.describing (Decoder.field "kind" Decoder.str) el
 
-    let strField (name: string) (el: JVal) : Result<string, string> = getProp name el |> Result.bind asString
+    /// Forward: `Decoder.field name Decoder.str`.
+    let strField (name: string) (el: JVal) : Result<string, string> =
+        Decoder.describing (Decoder.field name Decoder.str) el
 
-    let intField (name: string) (el: JVal) : Result<int, string> = getProp name el |> Result.bind asInt
+    /// Forward: `Decoder.field name Decoder.int`.
+    let intField (name: string) (el: JVal) : Result<int, string> =
+        Decoder.describing (Decoder.field name Decoder.int) el
 
     /// Decode every element of a JSON array with `d`. Short-circuits on the first error.
     let mapList (d: Decoder<'T>) (el: JVal) : Result<'T list, string> =
@@ -1505,11 +2102,10 @@ module Versioning =
 
     /// Decode an envelope JVal — reads `$profile` (parsed) + the verbatim `$payload`.
     let decode (el: JVal) : Result<Envelope, string> =
-        Decode.getProp profileKey el
-        |> Result.bind Decode.asString
+        Decoder.describing (Decoder.field profileKey Decoder.str) el
         |> Result.bind Profile.tryParse
         |> Result.bind (fun p ->
-            Decode.getProp payloadKey el
+            Decoder.describing (Decoder.field payloadKey Decoder.json) el
             |> Result.map (fun payload -> { Profile = p; Payload = payload }))
 
     /// Parse + decode an envelope from wire bytes.
@@ -1533,8 +2129,8 @@ module Versioning =
     /// Read an optional `requiredProfile` declaration off an artifact object (the
     /// "artifact declares the profile it requires" shape). Malformed / absent ⇒ `None`.
     let private readRequiredProfile (el: JVal) : Profile option =
-        match Decode.getProp requiredProfileKey el with
-        | Ok(JStr s) ->
+        match Decoder.tryMember requiredProfileKey el with
+        | Some(JStr s) ->
             match Profile.tryParse s with
             | Ok p -> Some p
             | Error _ -> None
@@ -1846,5 +2442,138 @@ module Corpus =
                 match roundTrip codec (gen (seed + i)) with
                 | Ok() -> go (i + 1)
                 | Error m -> Error(sprintf "codecLaws seed=%d: %s" (seed + i) m)
+
+        go 0
+
+    // ---- refusals carry a code and a path (Phase 310) ----
+    // `codecLaws` above is the acceptance half of a codec's laws; these are the refusal half. A
+    // reject vector pins the code and the path a refusal must carry, so host twins mirror one error
+    // contract rather than one sentence; and the refusal law holds every refusal a decoder raises
+    // over a mutated document to a path that resolves in that document.
+
+    /// A reject vector: the document, and the code and path the decoder's refusal must carry.
+    type RejectVector =
+        { Label: string
+          Input: string
+          RefusedAs: DecodeCode
+          At: PathSegment list }
+
+    /// Run reject vectors against a typed decoder over text: each must be refused with exactly its
+    /// code and its path.
+    let runRejects (decode: string -> Result<'T, DecodeError>) (vectors: RejectVector list) : Outcome list =
+        vectors
+        |> List.map (fun v ->
+            match decode v.Input with
+            | Ok _ ->
+                { Name = v.Label
+                  Passed = false
+                  Detail = "expected reject but decoded" }
+            | Error e when e.Code = v.RefusedAs && e.Path = v.At ->
+                { Name = v.Label
+                  Passed = true
+                  Detail = "rejected as expected" }
+            | Error e ->
+                { Name = v.Label
+                  Passed = false
+                  Detail =
+                    "expected "
+                    + DecodeError.codeName v.RefusedAs
+                    + " at "
+                    + DecodePath.render v.At
+                    + ", got "
+                    + DecodeError.render e })
+
+    /// Structural mutations of a document — the faults the refusal law provokes: every value
+    /// replaced by a value of another kind (the root included), every member of every object
+    /// removed, and one undeclared member added to every object. Each mutation is the WHOLE document
+    /// with one change, so a refusal's path is read against exactly what the decoder saw.
+    let mutations (doc: JVal) : JVal list =
+        let otherKind (v: JVal) : JVal =
+            match v with
+            | JStr _ -> JInt 0
+            | JInt _
+            | JFloat _
+            | JBool _ -> JStr "?"
+            | JArr _ -> JObj []
+            | JObj _ -> JArr []
+
+        let replaceAt (i: int) (x: 'a) (xs: 'a list) : 'a list =
+            xs |> List.mapi (fun j y -> if j = i then x else y)
+
+        let rec go (v: JVal) : JVal list =
+            let inner =
+                match v with
+                | JObj fields ->
+                    let removed =
+                        fields
+                        |> List.mapi (fun i _ ->
+                            fields
+                            |> List.indexed
+                            |> List.filter (fun (j, _) -> j <> i)
+                            |> List.map snd
+                            |> JObj)
+
+                    let added = [ JObj(fields @ [ "$undeclared", JBool true ]) ]
+
+                    let deeper =
+                        fields
+                        |> List.mapi (fun i (k, x) -> go x |> List.map (fun x2 -> JObj(replaceAt i (k, x2) fields)))
+                        |> List.concat
+
+                    removed @ added @ deeper
+                | JArr xs ->
+                    xs
+                    |> List.mapi (fun i x -> go x |> List.map (fun x2 -> JArr(replaceAt i x2 xs)))
+                    |> List.concat
+                | _ -> []
+
+            otherKind v :: inner
+
+        go doc
+
+    /// The refusal law (Phase 310): over `count` seed-replayable values from `gen`, the decoder
+    /// accepts each value's encoding, and every structural mutation of it (`mutations`) that the
+    /// decoder REFUSES is refused with a path that resolves in the mutated document
+    /// (`DecodeError.resolvesIn`). A refusal whose path names nothing in the document it was raised
+    /// over sends a repairing caller nowhere. Returns the first counterexample as an `Error`.
+    let refusalLaws
+        (encode: 'T -> JVal)
+        (decode: Decoder<'T>)
+        (gen: int -> 'T)
+        (seed: int)
+        (count: int)
+        : Result<unit, string> =
+        let rec go i =
+            if i >= count then
+                Ok()
+            else
+                let doc = encode (gen (seed + i))
+
+                match decode doc with
+                | Error e ->
+                    Error(
+                        sprintf
+                            "refusalLaws seed=%d: the encoding itself was refused: %s"
+                            (seed + i)
+                            (DecodeError.render e)
+                    )
+                | Ok _ ->
+                    let unresolved =
+                        mutations doc
+                        |> List.tryPick (fun m ->
+                            match decode m with
+                            | Error e when not (DecodeError.resolvesIn m e) -> Some(m, e)
+                            | _ -> None)
+
+                    match unresolved with
+                    | Some(m, e) ->
+                        Error(
+                            sprintf
+                                "refusalLaws seed=%d: the refusal %s does not resolve in %s"
+                                (seed + i)
+                                (DecodeError.render e)
+                                (Json.render m)
+                        )
+                    | None -> go (i + 1)
 
         go 0
