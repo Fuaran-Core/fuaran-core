@@ -113,6 +113,7 @@
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
     <Compile Include="KeyedArbitrationTests.fs" />
+    <Compile Include="KeyedSlotFoldTests.fs" />
     <Compile Include="LightSetTests.fs" />
     <!-- Phase 102 - the null-tolerant read: the conformance family plus the
          strict-parser-unchanged pins. Appended at the end of the list; it depends on
