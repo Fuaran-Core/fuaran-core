@@ -11349,16 +11349,16 @@ let proofOracleTests =
                   // Phase 64.1 on the shape only this family supplies: a merge node's id does not
                   // depend on which head the reconciler called left. This is the production side of
                   // the model's `merge_id_parent_order_independent`, and the last assertion is the
-                  // model's own pre-image measured against the id production minted.
+                  // model's own pre-image measured against the id production minted. The merge is
+                  // made INTO the rebuilt DAG, which holds both parents: since Phase 296 a merge whose
+                  // parent names no node is refused, and this used to merge into an empty one.
                   match built with
                   | (_, _, a) :: (_, _, b) :: _ ->
                       let lr, _ =
-                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" a b Dag.empty
-                          |> Reference.built
+                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" a b dag |> Reference.built
 
                       let rl, _ =
-                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" b a Dag.empty
-                          |> Reference.built
+                          Dag.merge OpStream.defaultHash rawW (Human "m") "{}" b a dag |> Reference.built
 
                       Expect.equal lr rl "merge(A,B) and merge(B,A) converge to one content id"
 
