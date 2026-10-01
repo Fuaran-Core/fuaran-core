@@ -2372,6 +2372,20 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 
 ## 0.33.0 — DRAFT
 
+**Release record — the receiving gate (Phase 276): RUN, and BLOCKED before its compile and value legs.**
+On 2026-10-01 the candidate was packed from commit `095d6f9` (every one of the 17 packable projects,
+version `0.33.0`, into a folder) and the downstream host's Fable gate was run against it in its
+cut-time mode (`tests/core-fable/core-fable.ps1 -CoreVersion 0.33.0 -CoreFeed <folder>`). It read the
+17 candidate packages, took the compute packages at its pin (`0.34.0`), and FAILED at its membership
+check, exit 1: `exclusions.json names Fuaran.Core.CSharp, which the candidate does not ship — drop the
+entry`. The list that names it is the HOST's exclusion list (`tests/core-fable/exclusions.json`, the
+entry recorded there from Phase 128); this repository's own `fable-exclusions.json` already dropped it
+with the package (Phase 231). The membership check runs first and fails the run, so the **compile leg
+and the value leg did not run**, and no green Fable run of this candidate exists yet. That is this
+slot's open cut blocker, and it is outside this repository: the host drops the entry, and the gate is
+re-run against the candidate, both legs, before the slot is released. Nothing in the run named a
+defect in Core's code.
+
 **It is a MINOR slot because the change that opens it is BREAKING.** `0.32.0` is tagged, so it is a
 consumer's contract and nothing rides it. Phase 258 removes four packages from this repository's
 roster — `removal`, breaking for a consumer that takes them from here — and a breaking change opens a
@@ -3657,6 +3671,65 @@ moves. Nothing on the wire or in a chain moves, and no public surface moves. FS0
 build errors repository-wide (`Directory.Build.props`), so a pattern of this kind cannot ship again.
 
 **Rollback.** None needed: the corrected rendering is `0.32.0`'s.
+
+### Decimal vectors and the cut gate: the parity table carries `DecimalText`, the law set carries decimal documents, and the cell-ranging families reach the decimal (Phase 276) — ADDITIVE on every surface; BREAKING as a verdict change for two kit families (`aggregateNullSkipLaws` is now `Guarded`, `columnarValidatorLaws` gains a guard); no public surface moves
+
+**What changed.**
+
+- **`ParityVectors.vectors` gains 94 rows**, appended after every earlier row so each keeps its place
+  in the comparison: `decimal/canonical/*` (every refused form K4 names, one row each, and every
+  normalisation K3 performs), `decimal/compare/*` (sign, place, equal spellings, and two pairs one
+  double cannot tell apart), `decimal/add/*` (carries through the point, a widening carry, a
+  narrowing borrow, cancellation to an unsigned zero, mixed signs in both orders, a scale and a
+  magnitude past any host decimal), `decimal/toFloat/*`, `decimalCodec/*` (the canonical encode, the
+  refusal of a non-canonical cell, a canonicalising decode, integer and whole-exponent tokens, the
+  refusals of a fractional token, of a whole token past 2^53 and of text) and `decimalAggregate/*`
+  (`Sum`, `Min`, `Max`, `Mean`, `Median`, `StdDev`, `CountDistinct`, the past-float refusal, text that
+  is not decimal). `additive`: a consumer's runner compares more lines. Their .NET bytes are committed
+  in `ParityVectorTests`, and the in-range sums and orders are held to `System.Decimal`.
+- **`conformance/laws/decimal-laws.json`** — a second family in the emitted law set, `decimal`:
+  authored inputs over every behaviour D72 pins, each `expected` computed by the kit, refusals among
+  them, stamped with `kitVersion`. Declared in `version-derives.json` and `copies.json` beside
+  `capability-laws.json`; its copy in the shared corpus is written by the same `--emit-laws` command.
+  `docs/conformance-corpus.md` names the family and what a host must reproduce. `additive`.
+- **`Conformance.aggregateNullSkipLaws`** draws its column type from int, float AND decimal (it drew
+  int and float), builds decimal cells through `Cell.decimal`, and emits a guard over the present cell
+  type it reached. Its census class moves from `Unconditional` to `Guarded ["int cell"; "float
+  cell"; "decimal cell"]` (`docs/conformance-families.{md,json}` regenerated).
+- **`Conformance.columnarValidatorLaws`** carries its ranged column as a decimal column on odd
+  iterations (each drawn int `n` read as `n.25`, no extra draw, so an even iteration's table is the one
+  it always was), injects `100.01` as the decimal stratum's out-of-range value, counts out-of-range
+  decimals EXACTLY by their digits, and emits a guard over `int cell` and `decimal cell`. Its census
+  class gains those two dimensions.
+
+**Class.** No `api/*.txt` baseline moved and no wire surface moved: the new rows, the new file and the
+new guards are values and law results, not members. The two family changes are **verdict changes for
+a certifying family**, and that is the breaking part. `aggregateNullSkipLaws` emitted one result and
+now emits two; a run that never draws a decimal column — any run of one iteration, and a seed whose
+draws all fall on int or float — is now RED on its guard where it was green, and the census renders a
+`Guarded` row where it rendered an `Unconditional` one. `columnarValidatorLaws` emits five results
+where it emitted four, and a run with no present decimal cell (one iteration, at least) is red on the
+new guard. Both families draw a different sample from the same seed. The slot is untagged and already
+breaking, so this rides it.
+
+**What adopting it costs.** A consumer that runs either family at the kit's reference size (200
+iterations) sees two more passing results and nothing else. A consumer that runs either at a handful
+of iterations, or asserts a result count, re-reads the guard and the count. A consumer running the
+cross-pipeline table compares 94 more lines; a host that mirrors the decimal certifies against
+`laws/decimal-laws.json`.
+
+**Shown failing first.** With the two guards added and the generators not yet widened, the suite went
+red on both at the reference seed: `column type reached int cell=238 float cell=282 decimal cell=0 —
+never reached decimal cell` (`aggregateNullSkipLaws`, seed 4242, 200 iterations) and `column type
+reached int cell=635 decimal cell=0 — never reached decimal cell` (`columnarValidatorLaws`). The suite
+keeps the go-red: a one-iteration run of each is red on its column-type guard alone, naming the cell
+type it missed.
+
+**The cut gate.** The run is in this slot's release record above: packed and run, and blocked at the
+host's membership check before its compile and value legs — the record names the host's list entry
+that blocks it. Nothing in it named a Core defect.
+
+**Rollback.** Pin `0.32.0`. Nothing persisted moves.
 
 ## 0.32.0 — released 2026-09-26 as `v0.32.0`
 
