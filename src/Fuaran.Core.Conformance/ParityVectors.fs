@@ -666,9 +666,127 @@ let hashSweep: (string * string) list =
               OpStream.defaultHash "deadbeef" s
               Schema.fingerprint (schemaOf s) ])
 
-/// Every vector as the line a runner compares: `VEC <label> <value>`, the named table first and the
-/// sweep after it. Order is part of the comparison. The `VEC ` prefix is what lets a runner filter
-/// out anything a runtime writes around the program; a label never contains a space, so the line
-/// splits on its first one.
+// ---- Phase 291 — the IDL's sanitisation floor, under both pipelines ----
+//
+// The floor's defect lived where only the Fable pipeline could show it: a scan took its index from a
+// lowered COPY of the string, and U+0130 lowers to one unit in .NET's `ToLowerInvariant` and to two
+// in JavaScript's `toLowerCase`, so under Fable the index landed in the wrong place (a long run plus a
+// short tail looped or threw). Phase 291 fixed it with a per-unit fold on the string it indexes, and
+// its suite states every expected output as a literal — but that suite runs on .NET alone.
+//
+// Each row here carries its EXPECTED output beside its input and prints `ok` when the floor produced
+// exactly it, else `diverges:` and the UTF-8 hex of what it produced. So the printed line is ASCII
+// whatever the input holds, the .NET half is asserted in this repository (every row reads `ok`), and
+// the transpiled half is byte-compared against it by the downstream runner. The cases are 291's own:
+// U+0130 runs before each scheme (bare and inside an `href`), case folding on the original string,
+// lone surrogates, the handler and element scans after a run, and the URL floor's clause table.
+
+let private dotI = string (char 0x0130)
+
+/// `ok` when `actual` is `expected`, else the bytes actually produced.
+let private exactly (expected: string) (actual: string) : string =
+    if actual = expected then
+        "ok"
+    else
+        "diverges:" + hexOf (Hash.utf8Bytes actual)
+
+let private scrubCases: (string * string * string) list =
+    [ for scheme in [ "javascript"; "vbscript" ] do
+          for n in [ 1; 3; 11; 12 ] do
+              let run = String.replicate n dotI
+
+              for tailName, tail in [ "bare", ""; "tail", "alert(1)" ] do
+                  yield
+                      sprintf "%s-after-%02d-dotI-%s" scheme n tailName,
+                      run + scheme + ":" + tail,
+                      run + "about:blank" + tail
+
+                  yield
+                      sprintf "%s-after-%02d-dotI-%s-href" scheme n tailName,
+                      "<a href=\"" + run + scheme + ":" + tail + "\">x</a>",
+                      "<a href=\"" + run + "about:blank" + tail + "\">x</a>" ]
+    @ [ "fold-upper", "JAVASCRIPT:x", "about:blankx"
+        "fold-mixed", "JaVaScRiPt:x", "about:blankx"
+        "fold-vbscript-mixed", "VbScRiPt:x", "about:blankx"
+        "fold-several", "a javascript:1 b JAVASCRIPT:2 c", "a about:blank1 b about:blank2 c" ]
+    @ [ for code in [ 0xD800; 0xDC00; 0xDBFF ] do
+            let lone = units [ code ]
+
+            for scheme in [ "javascript"; "vbscript" ] do
+                yield sprintf "%s-after-lone-%04X" scheme code, lone + scheme + ":x", lone + "about:blankx"
+
+                yield
+                    sprintf "%s-after-lone-%04X-doubled" scheme code,
+                    lone + lone + dotI + scheme + ":" + lone,
+                    lone + lone + dotI + "about:blank" + lone ]
+    @ [ for n in [ 1; 3; 12 ] do
+            let run = String.replicate n dotI
+
+            yield
+                sprintf "handler-after-%02d-dotI" n,
+                "<a title=\"" + run + "\" onclick=\"alert(1)\">x</a>",
+                "<a title=\"" + run + "\">x</a>"
+
+            yield sprintf "element-after-%02d-dotI" n, run + "<SCRIPT>alert(1)</SCRIPT>after", run + "after"
+
+            yield
+                sprintf "mixed-after-%02d-dotI" n,
+                "<a title=\"" + run + "\" ONCLICK=\"x\" href=\"" + run + "JAVASCRIPT:y\">z</a>",
+                "<a title=\"" + run + "\" href=\"" + run + "about:blanky\">z</a>" ]
+
+/// The URL floor's clauses (Phase 291, held to the UI floor): input and the sanitised URL, or `None`
+/// for a refusal.
+let private urlCases: (string * string * string option) list =
+    [ "pair-slash-slash", "//evil.example/x", None
+      "pair-slash-backslash", "/\\evil.example/x", None
+      "pair-backslash-backslash", "\\\\evil.example/x", None
+      "pair-backslash-slash", "\\/evil.example/x", None
+      "tab-between-slashes", "/\t/evil.example", None
+      "lf-between-slashes", "/\n/evil.example", None
+      "cr-between-slashes", "/\r/evil.example", None
+      "leading-control-before-pair", "\u0001//evil.example", None
+      "leading-nul-before-pair", "\u0000//evil.example", None
+      "leading-space-tab-before-pair", " \t//evil.example", None
+      "mixed-pair-behind-controls", "\u001F\\\t/evil.example", None
+      "trailing-controls-removed", "//evil.example\u0001\u0002", None
+      "single-leading-backslash", "\\evil.example", Some "\\evil.example"
+      "absolute-path", "/about", Some "/about"
+      "relative-path", "about/us", Some "about/us"
+      "interior-vt-kept", "/\u000B/host/x", Some "/\u000B/host/x"
+      "interior-ff-kept", "/\u000C/host/x", Some "/\u000C/host/x"
+      "interior-tab-removed", "/a\tb", Some "/ab"
+      "edge-controls-removed", "\u0001 /about \u0002", Some "/about"
+      "empty", "", Some ""
+      "only-controls", "\u0001\u0002 \t", Some ""
+      "javascript-behind-tab", "java\tscript:alert(1)", None
+      "javascript-behind-control", "\u0001javascript:alert(1)", None
+      "vbscript", "vbscript:x", None
+      "file", "file:///etc/passwd", None
+      "unknown-scheme", "data:text/html,x", None
+      "https", "https://example.com/a?b#c", Some "https://example.com/a?b#c"
+      "mailto", "mailto:a@b.example", Some "mailto:a@b.example"
+      "https-behind-control", "\u0001https://example.com", Some "https://example.com" ]
+
+let private renderUrl (r: string option) : string =
+    match r with
+    | None -> "refused"
+    | Some s -> "kept:" + s
+
+/// The sanitiser sweep: `idlSanitize/scrub/<case>` and `idlSanitize/url/<case>`, each `ok` when the
+/// floor produced exactly the committed output on this pipeline.
+let sanitiseSweep: (string * string) list =
+    (scrubCases
+     |> List.map (fun (label, input, expected) ->
+         "idlSanitize/scrub/" + label, exactly expected (Fuaran.Core.Idl.Sanitize.scrubMarkdown input)))
+    @ (urlCases
+       |> List.map (fun (label, input, expected) ->
+           "idlSanitize/url/" + label,
+           exactly (renderUrl expected) (renderUrl (Fuaran.Core.Idl.Sanitize.sanitizeUrl input))))
+
+/// Every vector as the line a runner compares: `VEC <label> <value>` — the named table first, then
+/// the hash sweep, then the sanitiser sweep. Order is part of the comparison. The `VEC ` prefix is
+/// what lets a runner filter out anything a runtime writes around the program; a label never
+/// contains a space, so the line splits on its first one.
 let lines () : string list =
-    vectors @ hashSweep |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)
+    vectors @ hashSweep @ sanitiseSweep
+    |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)

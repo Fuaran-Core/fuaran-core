@@ -273,6 +273,10 @@ let private sweepRows = 124
 
 // Moved by Phase 299: every row's fourth value is `Schema.fingerprint`, whose pre-image is the
 // canonical field encoding now rather than a bare U+0001 join.
+/// Phase 291 — the sanitiser sweep: 57 scrub cases (32 U+0130-run cases, 4 case-fold cases, 12
+/// lone-surrogate cases, 9 handler/element cases) and 29 URL-floor clauses.
+let private sanitiseRows = 86
+
 let private sweepDigest =
     "4f8ceff06baed41adbfbba2bc5644c5665abf3ea138b1978c5f5e4414388782f"
 
@@ -317,7 +321,7 @@ let tests =
           // Non-ASCII INPUTS are fine and present; what must stay ASCII is what is PRINTED.
           testCase "every emitted label and value is printable ASCII"
           <| fun _ ->
-              for label, value in ParityVectors.vectors @ ParityVectors.hashSweep do
+              for label, value in ParityVectors.vectors @ ParityVectors.hashSweep @ ParityVectors.sanitiseSweep do
                   for ch in label + value do
                       Expect.isTrue
                           (int ch >= 0x20 && int ch <= 0x7E)
@@ -327,7 +331,7 @@ let tests =
           // carrying one would silently truncate the label and corrupt the value.
           testCase "no label contains a space"
           <| fun _ ->
-              for label, _ in ParityVectors.vectors @ ParityVectors.hashSweep do
+              for label, _ in ParityVectors.vectors @ ParityVectors.hashSweep @ ParityVectors.sanitiseSweep do
                   Expect.isFalse (label.Contains " ") (sprintf "label %s is one token" label)
 
           testCase "the hash sweep has its committed row count and digest"
@@ -354,19 +358,30 @@ let tests =
                   Expect.equal parts[0].Length 8 (sprintf "%s: fnv1a is 32-bit hex" label)
                   Expect.equal parts[1].Length 64 (sprintf "%s: sha256 is 256-bit hex" label)
 
-          testCase "lines () is the named table then the sweep, one VEC line each, in order"
+          // Phase 291 — the sanitiser sweep. Each row carries its expected output and prints `ok` when
+          // the floor produced exactly it, so on .NET every row must read `ok`; the downstream runner
+          // then byte-compares the transpiled pipeline against these lines. The count is pinned so a
+          // case cannot fall out of the table silently.
+          testCase "the sanitiser sweep has its committed row count and every row reads ok on .NET"
+          <| fun _ ->
+              Expect.equal (List.length ParityVectors.sanitiseSweep) sanitiseRows "the sanitiser sweep's row count"
+
+              for label, value in ParityVectors.sanitiseSweep do
+                  Expect.equal value "ok" (sprintf "%s: the floor produced its committed output" label)
+
+          testCase "lines () is the named table then the sweeps, one VEC line each, in order"
           <| fun _ ->
               let lines = ParityVectors.lines ()
 
               Expect.equal
                   lines
-                  (ParityVectors.vectors @ ParityVectors.hashSweep
+                  (ParityVectors.vectors @ ParityVectors.hashSweep @ ParityVectors.sanitiseSweep
                    |> List.map (fun (k, v) -> "VEC " + k + " " + v))
-                  "the runner's comparison unit is exactly the two tables, formatted"
+                  "the runner's comparison unit is exactly the three tables, formatted"
 
               Expect.equal
                   (lines |> List.distinct |> List.length)
-                  (List.length (ParityVectors.vectors @ ParityVectors.hashSweep))
+                  (List.length (ParityVectors.vectors @ ParityVectors.hashSweep @ ParityVectors.sanitiseSweep))
                   "no two vectors share a label"
 
           // Phase 276 — the decimal rows' committed answers held to an INDEPENDENT oracle wherever one

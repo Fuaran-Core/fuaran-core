@@ -2657,6 +2657,24 @@ plus additive members; `api/Fuaran.Core.Idl.Codegen.txt` reports two retypes (`f
 document set is derived by reflection and now draws a hosted slot WITH a declared form, so its
 `"wire": "json"` document is gone from the set — no existing vocabulary's artifact bytes move, since an
 undeclared slot renders exactly as before.
+
+### The sanitisation floor joins the cross-pipeline table (Phase 291's Fable half) — ADDITIVE
+
+**What changed.** Phase 291's sanitiser cases (U+0130 runs before each scheme, bare and inside an
+`href`; case folding on the original string; lone surrogates; the handler and element scans after a
+run; the URL floor's clause table) ran on .NET alone, while the defect they guard against only shows
+under Fable. They now ride the one cross-pipeline table (DECISIONS.md D55): `ParityVectors.sanitiseSweep`,
+86 rows, each carrying its expected output and printing `ok` when the floor produced exactly it (else
+`diverges:` and the UTF-8 hex of what it did produce), appended to `ParityVectors.lines ()` after the
+hash sweep. So the printed lines stay ASCII, this repository asserts every row reads `ok` on .NET, and
+the downstream Fable runner byte-compares the transpiled pipeline against them with no change of its
+own. `Fuaran.Core.Conformance` gains a reference to `Fuaran.Core.Idl` for it — `Idl` depends on `Wire`
+alone, already in the kit's closure, so the kit's package graph gains one package.
+
+**What adopting it costs.** Nothing. A consumer of the conformance kit restores one more package; the
+runner's comparison unit grows by 86 lines at the consumer's next Core raise.
+
+**Class: additive.** `api/Fuaran.Core.Conformance.txt` gains one member (`ParityVectors.sanitiseSweep`).
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

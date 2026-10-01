@@ -84,6 +84,11 @@
          transitively (via Column); a family that drives the parser directly should not
          depend on another project's reference list to keep doing so. -->
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <!-- Phase 291 — for ParityVectors.sanitiseSweep alone: the IDL's sanitisation floor is the one
+         Fable-surface package whose VALUES the cross-pipeline table did not reach, and the table is
+         the only place a value divergence under Fable is caught (DECISIONS.md D55). Idl depends on
+         Wire alone, which is already here, so this adds one package to the kit's closure. -->
+    <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
