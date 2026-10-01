@@ -1530,6 +1530,59 @@ let splice_changes = (fun ( cs  :  Prims.list<cstep<'op>> ) ( sp  :  splice<'op>
      end)
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twin_show : pos  ->  Prims.string = (fun ( p  :  pos ) -> (match (p) with
+| PZero -> begin
+     "0"
+     end
+| PSucc (uu___) -> begin
+     "n"
+     end))
+
+
+let twin_h : Prims.string  ->  Prims.string  ->  Prims.string = (fun ( p  :  Prims.string ) ( e  :  Prims.string ) -> (Prims.strcat p (Prims.strcat "/" e)))
+
+
+let twin_enc : Prims.string  ->  Prims.string = (fun ( o  :  Prims.string ) -> o)
+
+
+let twin_chain : Prims.list<record<Prims.string>> = (build_chain twin_h twin_show twin_enc "" PZero (({cactor = "A"; cop = "x"})::({cactor = "B"; cop = "y"})::[]))
+
+
+let twin_tampered : Prims.list<record<Prims.string>> = (match ((record_at twin_chain (PSucc (PZero)))) with
+| Found (r) -> begin
+     (replace_at twin_chain (PSucc (PZero)) {rseq = r.rseq; ractor = r.ractor; rop = "z"; rprev = r.rprev; rhash = r.rhash})
+     end
+| Missing -> begin
+     twin_chain
+     end)
+
+
+let twins : Prims.list<twin> = ({tname = "join-comma-joins"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (join_comma (("a")::("b")::("c")::[])) "a,b,c"))})::({tname = "first-absent-names-the-missing-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_absent (("k")::[]) (("k")::("p")::[])) (Found ("p"))))})::({tname = "verify-chain-accepts-an-appended-chain"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (verify_chain twin_h twin_show twin_enc "" twin_chain) true))})::({tname = "verify-chain-refuses-an-op-tamper"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (verify_chain twin_h twin_show twin_enc "" twin_tampered) false))})::({tname = "first-break-finds-nothing-in-an-intact-dag"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_break twin_h twin_enc (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> true) (({ekey = "/A|x"; enode = {dparents = []; dactor = "A"; dop = "x"}})::[])) Missing))})::({tname = "first-break-names-a-tampered-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_break twin_h twin_enc (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> true) (({ekey = "bad"; enode = {dparents = []; dactor = "A"; dop = "x"}})::[])) (Found ({bnode = "bad"; breason = "content-id mismatch (tampered node)"; bexpected = "/A|x"; bgot = "bad"}))))})::[]
+
 
 
 

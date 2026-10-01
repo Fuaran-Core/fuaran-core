@@ -1632,6 +1632,35 @@ let __proj__Mkspelling__item__in_dom : spelling  ->  ch  ->  Prims.bool = (fun (
      in_dom
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twin_wire : wire<Prims.string, Prims.string> = {int_str = (fun ( s  :  Prims.string ) -> (CPlain (s))::[]); float_str = (fun ( s  :  Prims.string ) -> (CPlain (s))::[]); fclass = (fun ( uu___  :  Prims.string ) -> FFinite); is_zero = (fun ( uu___  :  Prims.string ) -> false); pos_zero = "0"; key_le = (fun ( uu___  :  Prims.list<ch> ) ( uu___1  :  Prims.list<ch> ) -> true); tok_read = (fun ( uu___  :  Prims.list<ch> ) -> Error ("no")); str_ok = (fun ( uu___  :  Prims.list<ch> ) -> true)}
+
+
+let twins : Prims.list<twin> = ({tname = "escape-escapes-a-quote-and-a-control"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (escape ((CQuote)::(CPlain ("a"))::(CCtrl (false, HDa))::[])) ((CBackslash)::(CQuote)::(CPlain ("a"))::(CBackslash)::(CLu)::(CHexCh (HD0))::(CHexCh (HD0))::(CHexCh (HD0))::(CHexCh (HDa))::[])))})::({tname = "quoted-quotes"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (quoted ((CPlain ("hi"))::[])) ((CQuote)::(CPlain ("hi"))::(CQuote)::[])))})::({tname = "render-an-array"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (render twin_wire (JArr ((JBool (true))::(JStr ([]))::[]))) ((CLBrack)::(CPlain ("t"))::(CPlain ("r"))::(CLu)::(CHexCh (HDe))::(CComma)::(CQuote)::(CQuote)::(CRBrack)::[])))})::[]
+
 
 
 

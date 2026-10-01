@@ -3,19 +3,15 @@
 **Status: GO** (Phase 131, 2026-09-12; the header last brought level with the body 2026-09-14).
 Phase 131's three exit criteria were met and remain met — the confluence proof is reproducible on
 the pinned prover, the extracted model agrees with production over every lane set the differential
-host draws, and the model reads beside the F# in one sitting — and seven further theorems have
-shipped beside it since. **Shipped, eight in all: fold confluence (131, with its hypothesis
-corrected by 132, the DAG beneath it proved by 134 and its topological order by 142), decoder
-totality (135), independence soundness for the tree algebra (133, completed over the WHOLE
-operation alphabet by 162), chain integrity (136, its
-content-id premise decomposed by 145),
-`Json.parse` totality, bounded (146), apply-engine preservation (138, which also lifts 133's
-model to the validator 137 fixed), the diff's refusal characterisation and emission order
-(141, with its positional facts about `after` added by 162), and the canonical form's injectivity
-(149, which also brings the §21 resource limits into the models as named premises).** Each carries
-its own claims ladder in its own section below; the "Next" section at the foot is the live list.
-(The count in this paragraph is the header's as it was last levelled; theorems 8 to 15 below have
-shipped since, and each section says what it added.)
+host draws, and the model reads beside the F# in one sitting — and the theorems numbered below have
+shipped beside it since, each with its own claims ladder in its own section; the "Next" section at
+the foot is the live list. The count is NOT kept by hand any more (Phase 309: this paragraph said
+"eight in all" long after the ladder had passed that): the line below is generated from
+`../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
+
+<!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
+**The ladder, counted:** 239 claims — 170 proved across 24 models, 40 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+<!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
@@ -587,11 +583,13 @@ What may be said, and at what strength, per the attested-stack programme's §6:
      that does not descend from it, because the drain folds such a branch before part of the
      checkpoint's own closure.
 
-   Also not claimed: anything about the linear `OpStream`, about `Dag.replayTo`'s order, about the
+   Also not claimed: anything about the linear `OpStream`, about the
    engine's Lamport projection order (the roadmap engine's own certification of its fold over
    the real `RoadmapOp` union is a downstream tooling phase (#343); this theorem is what makes its choice of
    total order canonical-form-only), or about any domain's reconciliation policy — the model,
-   like production, decides nothing and applies nothing on a halt.
+   like production, decides nothing and applies nothing on a halt. (`Dag.replayTo`'s order and fold
+   were on this list until Phase 309, which proved them — `replay-to-fold-over-drain`,
+   `replay-to-unknown-head-refused` and `replay-to-deterministic`, theorem 16 below.)
 
 "Formally verified" is spent on level 1 alone.
 
@@ -640,6 +638,15 @@ and **can never discharge the other two**. A green kit run is evidence about you
 nothing else in this table — which is what makes it worth having, and what a reader must not
 over-read.
 
+**One obligation is checked against your own word, and says so (Phase 309).** A `domain-obligation`
+row may carry `"discharge": "domain-declared"`: its law checks your DECLARATION and cannot check
+past it, so a domain that declares nothing passes it. `witness-surface-scope` is that row —
+`keyedApplyLaws` holds the engine to what `KeyedChildren` reports, and a domain with keyed positions
+that reports none is green by declaration. The table marks it "domain-declared, not discharged",
+and the coverage line counts it apart from the discharged ones. And the rows, the counts above and
+the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and the
+`Proofs.Ladder` family); edit the ladder, never these.
+
 | Row | Class | Discharged by / closes |
 |---|---|---|
 | `independence-diamond` | `domain-obligation` | `Conformance.footprintLawsAt` |
@@ -654,7 +661,7 @@ over-read.
 | `parser-float-readback-opaque` | `model-bridge` | `permanent` |
 | `parser-alphabet-bridge` | `model-bridge` | `permanent` |
 | `lawful-abstract-witness` | `domain-obligation` | `Conformance.witnessLaws` |
-| `witness-surface-scope` | `domain-obligation` | `Conformance.keyedApplyLaws` |
+| `witness-surface-scope` | `domain-obligation` | `Conformance.keyedApplyLaws` (domain-declared, not discharged) |
 | `canon-numeral-layouts` | `model-bridge` | `permanent` |
 | `canon-key-comparator` | `model-bridge` | `permanent` |
 | `canon-character-bridge` | `model-bridge` | `permanent` |
@@ -775,7 +782,7 @@ other three). It reads JSON this directory already keeps and runs no prover, and
 whatever the verdict:
 
 ```
-proofs: exhaustive (12 packages modelled, 8 excluded; 25 assumed: 14 permanent, 6 domain-discharged, 5 unscheduled, 0 scheduled)
+proofs: exhaustive (11 packages modelled, 6 excluded; 27 assumed: 18 permanent, 5 domain-discharged, 1 domain-declared, 3 unscheduled, 0 scheduled)
 ```
 
 Three clauses stand behind it.
@@ -4032,9 +4039,11 @@ directions.
 
 **The hypothesis, and why it is not a strengthening of what the deferrals asked for.**
 `diff_reconstructs` requires `kinds_agree b a` — a node id the two trees share names the same kind
-in both. The unrestricted form is **false**, not merely unproved: no skeleton operation edits a
-node, so a shared id whose kind differs is unreconstructible by ANY script this alphabet can
-express. `kinds_agree_is_necessary` pins a concrete such pair — two well-formed trees sharing a
+in both. The unrestricted form is **false**, not merely unproved: `Diff.toOps` is a SHAPE diff —
+it emits no `UpdateNode` — so a shared id whose kind differs is unreconstructible by any script
+the diff emits. (This sentence said "no skeleton operation edits a node" until Phase 309 corrected
+it: the ALPHABET has rewritten a node in place since Phase 250; the DIFF does not, and becomes
+content-aware with Phase 305.) `kinds_agree_is_necessary` pins a concrete such pair — two well-formed trees sharing a
 root id and differing only in the kind of one shared id — whose diff is the EMPTY script,
 applicable at every step, landing on `before`. That is the counterexample to dropping the
 hypothesis, and it is also the reason `diff_applicable` carries none: applicability survives the
@@ -4065,10 +4074,11 @@ what the draw gave them; nothing derives one from the other.
 
 **One constraint on the pair, and it is a property of the problem rather than of the generator.** A
 node's content is a function of its id, so the two trees agree on the content of every id they
-share. Skeleton operations relocate and delete nodes; they cannot edit one — per-kind property edits
-are out of `Core.Ops`' remit, which `toOps`' own doc comment says — so a pair whose shared id carries
-a different kind in each tree is unreconstructible by ANY skeleton script, and asking for one is
-asking the wrong question. This was measured before it was believed: a first generator that redrew
+share. The diff relocates and deletes nodes; it does not edit one — it emits no `UpdateNode`, so it
+is a diff of SHAPE until Phase 305 makes it content-aware (Phase 309 corrected this sentence, which
+said skeleton operations cannot edit a node: `UpdateNode` has done so since Phase 250) — so a pair
+whose shared id carries a different kind in each tree is unreconstructible by any script the diff
+emits, and asking for one is asking the wrong question. This was measured before it was believed: a first generator that redrew
 each tree's kinds independently reconstructed 1,738 of 4,000 pairs; with content keyed to the id,
 20,000 of 20,000, with no applicability refusal and no survivor removed. **The shard's own sentence
 ("for any two well-formed trees with the same root id") is therefore slightly too strong as written,
@@ -5942,7 +5952,82 @@ author-ordered and keeps a negative zero's sign. That the stack is deep enough f
 renderers' totality against the machine is a property of the code (they are iterative) held by a
 test on a 1 MB thread, and no model here has a stack to prove it over.
 
+## Theorem 16 — the ladder tells the truth about production: `Dag.replayTo`, tamper evidence as an iff, and twin evaluation (Phase 309)
+
+Four corrections of what the ladder said about the code that runs, each a row a consumer can read
+instead of a premise a consumer inherits.
+
+**`Dag.tryReplayTo` is a theorem over the proved drain** (`DagFold.fst` section 16). Every store the
+plane holds is replayed through it, and it had no row. `replay_to` is `replayClosure` at one root,
+clause for clause — refuse an unknown head, drain the head's closure with section 13's id-ordered
+drain over section 14's closure, refuse a drain that did not place the whole closure as
+`CyclicHistory`, apply each drained node's op in order. `replay_to_is_fold_over_drain`: over an
+id-distinct DAG and an acyclic closure it never reports a cycle, its order is a topological
+enumeration of the closure, and its outcome is section 3's `replay` over the drained ops.
+`replay_to_unknown_head_is_refused`: `UnknownHead` exactly for a head the DAG does not hold.
+`replay_to_deterministic`: two clones holding the same node set in any order replay any head to the
+same outcome. The differential (`replay-to-differential`) renders both sides to one string over
+every lane head, the base and the merged union head of two domains, a missing head, and a cyclic
+closure with its acyclic control; its go-red hands the model a store that lost one closure node.
+
+**The write side the content-id premise leans on is a theorem too.** `add_node` is `addNode`:
+`append_refuses_differing_node` (an id held for content `sameNode` rejects is refused, by name) and
+`append_never_replaces` (every held node survives an accepted append; id distinctness is preserved).
+So `node-ids-distinct` NARROWS: id distinctness is a property of every store built through `append`,
+and what is left assumed is that the hash is injective on the nodes a store HOLDS — which
+`verifyDag` re-checks key by key on load. Under the 32-bit FNV-1a default a collision among OFFERED
+nodes now costs a refused append, never a silently replaced node.
+
+**Tamper evidence, stated with the premise the default violates** (`Chain.fst` section 6c).
+`chain_tamper_evident_iff_hash_distinguishes`, with NO premise: an op or actor tamper at record `i`,
+sequence, prev-link and stored hash left alone, in a chain `verifyChain` accepted, is rejected IF AND
+ONLY IF `h(prev_i, env_i) <> h(prev_i, env'_i)`. `chain-tamper-detected` is the injective-hash
+corollary of it. `content-id-determines-content` already says the premise is false for
+`OpStream.defaultHash` at scale (`hashFnAdversarialLaws`); this says exactly what that costs — the
+tamper is hidden at the collision and nowhere else.
+
+**The id-witness equality is a named axiom**, carried on `lawful-abstract-witness` (the
+`domain-obligation` `Conformance.witnessLaws` discharges, whose identities cell samples exactly it). Every model reads an id through one decidable equality,
+on its key; production keys `ToString` in `wellFormed` / `footprint` / `Tree.Index` and calls
+`Equals` in `tryFind` / `updateNode`. `id_key_faithful` in `TreeOps.fst` section 0 names the
+agreement the theorems transfer under. And `witness-surface-scope` is marked `domain-declared`: its
+law checks the domain's declaration and cannot check past it.
+
+**Twin evaluation — the extractor premise, sampled.** The extraction diff makes "the oracle is the
+model" a checked claim about TEXT; nothing checked that the F# COMPUTES what the model means, and a
+mis-extraction that compiles passed every leg. Every extracted model now ends with a `twins` list —
+fixtures applying the model's own functions to concrete inputs, compared with the value the model
+means — asserted by NORMALISATION (`assert_norm (twins_hold twins == true)`), so F*'s normaliser
+evaluated each one. The list is extracted with the model, and the `Proofs.Oracle` family's "twin
+evaluation" cases run the extracted closures against the extracted oracle. Measured: flipping
+`pick_min` in `oracle/DagFold.fs` to return the frontier's maximum turned two DagFold fixtures red
+(the diamond drain and the replay over it) and nothing else; restored, green. The kit gained the
+step (`kit/check-proof-leg.ps1` step 2c, `-Twins`): an extracted model that declares no twins is
+refused before the prover runs, and `Proofs.Ladder` holds the host's twin roster to `check.ps1`'s
+extracted set in both directions. The twins live in the model they sample, not in one module beside
+all of them, so a cone run still checks only what a change reaches. `extractor-and-compiler-trusted`
+stays a premise and says what is now checked of it.
+
+**Findings, and what was NOT built.** The shard asked for a "grammar conformance not claimed" row
+beside `parse_total`; its premise — that `JsonParse.fst` faithfully proves a number grammar WIDER
+than RFC 8259 — no longer holds: Phase 299 held `parseNumber` to the JSON number grammar and Phase
+306 restated the model (`is_json_number`, `number_grammar_is_checked_first`), and the twins sample it
+(a leading zero is refused). So no row was added. `tree-algebra-well-formed-states` keeps its
+discharge for now: the stronger one waits on `Tree.Index.build` refusing duplicates and on
+`arbitrate` checking its base, neither shipped when this phase was cut.
+
 ## Next
+
+**Models that MOVE with phases already filed** (Phase 309 — so the drift is scheduled rather than
+discovered). `Capability.fst` models `compose` skipping the totality guard and `Query.fst` models an
+exact-type `validateParams`; both move with Phase 295, which converges the invocable seams.
+`Arbitrate.fst` dry-runs `canApplyAll` over the unkeyed footprint; it moves with Phase 247's keyed
+arbitration (`arbitrateWith` / `arbitrateContained`, shipped on the production side) and Phase 334's
+keyed fifth footprint set. Each of those phases should re-cut its model in the same change-set; the
+twins in the moved model are where a stale one goes red first. (The F* target's envelope and key
+order — `Fuaran.Core.Idl.Codegen`'s F* emitter and the generated vocabulary models it writes — were
+the fourth item here; Phase 293 moved them, landing beside this phase, and the `Proofs.Vocabulary`
+family holds the regenerated models to it.)
 
 _(**A resolver that resolves only declared reads** was the first item on this list and is DONE:
 Phase 209. The resolver now answers for `deps[id]` and nothing else, a read outside it is the typed

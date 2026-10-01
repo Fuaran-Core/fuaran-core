@@ -87,6 +87,24 @@ let tid_of (t:tree) : Tot string = match t with TNode i _ _ -> i
 let kind_of (t:tree) : Tot string = match t with TNode _ k _ -> k
 let kids_of (t:tree) : Tot (list tree) = match t with TNode _ _ cs -> cs
 
+(* THE ID-WITNESS AXIOM, NAMED (Phase 309). This model — and `Preservation.fst`, which opens it —
+   reads an id as its KEY, the string `IdWitness.ToString` writes every address in, and compares ids
+   with `=` on that key. Production uses two relations where the model has one: it keys `ToString`
+   in `wellFormed`, `footprint` and `Tree.Index`, and calls `Equals` in `tryFind` and `updateNode`.
+   Every id-equality statement in these two modules is therefore a statement about keys, and it
+   transfers to a domain's `'Id` exactly when the two relations agree — `id_key_faithful
+   idw.Equals idw.ToString`. Named rather than left implicit, so the ladder can name it on the row that carries
+   the witness laws (`lawful-abstract-witness`) beside the law that samples it (`Conformance.witnessLaws`' identities cell,
+   over drawn pairs and pairs built to share a key). A domain whose `Equals` and `ToString`
+   disagree runs a different algebra from the one proved here. *)
+let id_key_faithful (#id:Type) (eq:id -> id -> bool) (key:id -> string) : prop =
+  forall (a b:id). eq a b <==> key a = key b
+
+(* What the axiom buys, at one pair: the witness's equality IS the model's key comparison. *)
+let id_key_eq (#id:Type) (eq:id -> id -> bool) (key:id -> string) (a b:id)
+  : Lemma (requires id_key_faithful eq key) (ensures eq a b == (key a = key b))
+  = ()
+
 (* F#: `Tree.preorder |> List.map w.Id` — `Tree.ids`. Node then children, left to right. *)
 let rec ids (t:tree) : Tot (list string) (decreases t) =
   match t with
@@ -2923,3 +2941,45 @@ let placement_lands_at_position ()
   = assert_norm (apply_all (place_script "root" 1 (TNode "n" "para" []) place_tree) place_tree ==
                  Ok (TNode "root" "doc" [ TNode "a" "sec" []; TNode "n" "para" [];
                                           TNode "b" "sec" [] ]))
+
+(* ======================================================================================
+   TWINS (Phase 309) — the extractor premise, sampled at this model.
+
+   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
+   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
+   compiles would pass every other step. Each fixture below applies this model's own functions to
+   a concrete input and compares the result with the value the model means there, and the
+   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
+   to `true` under the model's own semantics. The list is extracted with the rest of the model,
+   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
+   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
+   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
+   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
+   2c) refuses an extracted model that declares no twins.
+   ====================================================================================== *)
+
+noeq type twin = { tname : string; tholds : unit -> bool }
+
+let rec twins_hold (l:list twin) : Tot bool =
+  match l with
+  | [] -> true
+  | t :: r -> t.tholds () && twins_hold r
+let twin_tree : tree = TNode "root" "doc" [ TNode "a" "sec" [] ]
+
+let twins : list twin = [
+  { tname = "apply-inserts-under-a-parent";
+    tholds = (fun () ->
+      apply (InsertChild "a" (TNode "n" "para" [])) twin_tree
+      = Ok (TNode "root" "doc" [ TNode "a" "sec" [ TNode "n" "para" [] ] ])) };
+  { tname = "apply-refuses-to-remove-the-root";
+    tholds = (fun () -> apply (RemoveNode "root") twin_tree = Error CannotRemoveRoot) };
+  { tname = "apply-refuses-a-mismatched-reorder";
+    tholds = (fun () ->
+      apply (ReorderChildren "root" [ "b" ]) twin_tree = Error (ReorderMismatch "root" [ "a" ] [ "b" ])) };
+  { tname = "apply-updates-a-kind-in-place";
+    tholds = (fun () ->
+      apply (UpdateNode (TNode "a" "aside" [])) twin_tree = Ok (TNode "root" "doc" [ TNode "a" "aside" [] ])) };
+  { tname = "wf-sees-a-repeated-id";
+    tholds = (fun () -> wf (TNode "r" "d" [ TNode "a" "s" []; TNode "a" "s" [] ]) = false) } ]
+
+let _ = assert_norm (twins_hold twins == true)

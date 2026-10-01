@@ -4042,3 +4042,427 @@ let reconcile_fold_order_free #op #state #rej apply fp opof s order base_c cs1 c
   fold_confluence_total apply fp s (lanes_by opof (excl_lanes order base_c cs2 cs1))
                                    (lanes_by opof (excl_lanes order base_c cs2 cs2))
                                    (perm_lanes_by opof _ _ pe)
+
+(* ======================================================================================
+   16. `Dag.tryReplayTo` and the refusing `append` (Phase 309).
+
+   Every store the plane holds is replayed through `Dag.tryReplayTo`, and until this section it
+   had no row: the drain beneath it (section 13) and the closure beside it (section 14) were
+   theorems, and the fold over them was prose. This section is the fold, clause for clause, and
+   the write-side refusal the content-id premise leans on.
+
+   THE REPLAY. F#: `replayClosure` at one root, which `tryReplayTo` is. Three clauses, in
+   production's order:
+     1. a head the DAG does not hold is `UnknownHead` — the refusal Phase 296 added where the old
+        `replayTo` returned the initial state as `Ok`;
+     2. otherwise the head's closure is drained (section 14's `topo_drain`: the closure as a node
+        set, section 13's id-ordered drain over it), and a drain that did not place every node
+        of the closure is `CyclicHistory` — production compares the emitted list's LENGTH with
+        the closure's size, which on a duplicate-free drain is the membership test below
+        (`drain_complete_is_acyclic` is why the two are the same test);
+     3. otherwise each drained id's node op is applied in drain order, and the first rejection
+        is `Rejected` naming its node.
+
+   THE THREE THEOREMS.
+     - `replay_to_unknown_head_is_refused` — `UnknownHead` is returned EXACTLY for a head the DAG
+       does not hold: never the initial state, and never for a head it does hold.
+     - `replay_to_is_fold_over_drain` — over an id-distinct DAG and a head whose closure is
+       acyclic (section 13's witness form, `head_drains`), the replay is the section-3 fold over
+       the ops of the nodes the PROVED drain emits, in that order: it never reports a cycle, the
+       order is a topological enumeration of the closure, an `Ok` is `replay`'s state and a
+       `Rejected` carries `replay`'s rejection.
+     - `replay_to_deterministic` — two clones holding the same node set in different orders
+       replay any head to the same outcome. This is `drain_deterministic` carried through the
+       closure and the lookup, and it is the sentence "every clone replays to the same state"
+       production's docstring makes.
+
+   THE APPEND. F#: `addNode` behind `Dag.append` / `Dag.merge`. The DAG is a map from content id
+   to node, and until Phase 296 a second node minting a held id REPLACED the first (`Map.add`)
+   while `verifyDag` still passed — the shape the `node-ids-distinct` row hid. The model takes
+   production's `sameNode` (parents modulo order, actor, encoded op) as a parameter `same`, and:
+     - `append_refuses_differing_node` — an id the DAG holds for a node `same` does not accept is
+       refused as a collision, and nothing is written;
+     - `append_never_replaces` — whatever an accepted append returns, every node the DAG held
+       before is the node it holds after, and an id-distinct DAG stays id-distinct. So id
+       distinctness is a property of every store built through `append`, not a premise about
+       it; what is left of the hash premise is that the hash is injective on the nodes a store
+       actually holds, which `verifyDag` re-checks key by key on load.
+
+   WHAT IS NOT CLAIMED. The diagnostic payload of `CyclicHistory` beyond the head (production
+   names the first cyclic ROOT, which at one root is the head). `replayClosure` over several roots
+   (`checkpointFrom`, `Dag.mergeParentsState`): the union drain is the same drain over a larger
+   node set, and no theorem here identifies it. That `same` is production's `sameNode`: it is a
+   parameter, and the differential is what ties the two.
+
+   NO SMT PATTERNS, for section 11's reason.
+   ====================================================================================== *)
+
+(* ---- 16.1 the replay ---- *)
+
+(* F#: `ReplayFault<'Rej>` — `UnknownHead`, `CyclicHistory`, `Rejected (nodeId, reject)`. *)
+type replay_fault (rej:Type) =
+  | RUnknownHead : string -> replay_fault rej
+  | RCyclicHistory : string -> replay_fault rej
+  | RRejected : string -> rej -> replay_fault rej
+
+(* F#: the `go` loop of `replayClosure` — `Map.find id dag.Nodes`, then `w.Apply n.Op`. A drained
+   id is always held (it came out of the closure, which is made of held nodes), so the `Missing`
+   arm is the model's total match where production's `Map.find` would raise; it is unreachable on
+   every input `replay_to` hands it. *)
+let rec replay_ids (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (ns:list (node op)) (ids:list string) (s:state)
+  : Tot (outcome state (replay_fault rej)) (decreases ids) =
+  match ids with
+  | [] -> Ok s
+  | id :: t ->
+    (match lookup ns id with
+     | Missing -> replay_ids apply ns t s
+     | Found n ->
+       (match apply n.nop s with
+        | Ok s' -> replay_ids apply ns t s'
+        | Error e -> Error (RRejected id e)))
+
+(* F#: `Dag.tryReplayTo w state0 dag headId`. *)
+let replay_to (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (s0:state) (head:string)
+  : Tot (outcome state (replay_fault rej)) =
+  match lookup d.nodes head with
+  | Missing -> Error (RUnknownHead head)
+  | Found _ ->
+    let cn = closure_nodes d.nodes (ancestors_of d fuel head) in
+    let order = drain_order lt kfuel cn in
+    if sub_ids (ids_of cn) order then replay_ids apply d.nodes order s0
+    else Error (RCyclicHistory head)
+
+let is_unknown_head (#state #rej:Type) (r:outcome state (replay_fault rej)) : Tot bool =
+  match r with
+  | Error (RUnknownHead _) -> true
+  | _ -> false
+
+let is_cyclic (#state #rej:Type) (r:outcome state (replay_fault rej)) : Tot bool =
+  match r with
+  | Error (RCyclicHistory _) -> true
+  | _ -> false
+
+(* THEOREM. `UnknownHead` exactly for a head the DAG does not hold, and naming it. *)
+let replay_to_unknown_head_is_refused (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (s0:state) (head:string)
+  : Lemma (ensures
+            (Missing? (lookup d.nodes head) ==>
+               replay_to apply lt kfuel d fuel s0 head == Error (RUnknownHead head)) /\
+            (is_unknown_head (replay_to apply lt kfuel d fuel s0 head) ==
+               Missing? (lookup d.nodes head)))
+  = match lookup d.nodes head with
+    | Missing -> ()
+    | Found _ ->
+      let cn = closure_nodes d.nodes (ancestors_of d fuel head) in
+      let order = drain_order lt kfuel cn in
+      if sub_ids (ids_of cn) order then begin
+        let rec never (ids:list string) (s:state)
+          : Lemma (ensures not (is_unknown_head (replay_ids apply d.nodes ids s))) (decreases ids)
+          = match ids with
+            | [] -> ()
+            | id :: t ->
+              (match lookup d.nodes id with
+               | Missing -> never t s
+               | Found n -> (match apply n.nop s with | Ok s' -> never t s' | Error _ -> ()))
+        in
+        never order s0
+      end
+      else ()
+
+(* The node-level loop is the section-3 fold over the ops of the same nodes: the same state on
+   `Ok`, the same rejection under `Rejected`, and nothing else. *)
+let rec replay_ids_is_replay (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (d:dag op) (ids:list string) (s:state)
+  : Lemma (ensures
+            (match replay_ids apply d.nodes ids s, replay apply (ops_of (nodes_for d ids)) s with
+             | Ok a, Ok b -> a == b
+             | Error (RRejected _ e), Error e' -> e == e'
+             | _, _ -> False))
+          (decreases ids)
+  = match ids with
+    | [] -> ()
+    | id :: t ->
+      (match lookup d.nodes id with
+       | Missing -> replay_ids_is_replay apply d t s
+       | Found n ->
+         (match apply n.nop s with
+          | Ok s' -> replay_ids_is_replay apply d t s'
+          | Error _ -> ()))
+
+(* THEOREM. Over an id-distinct DAG, a head it holds whose closure is acyclic replays as the fold
+   over the proved drain: no cycle is reported, the order is a topological enumeration of the
+   closure, and the outcome is `replay`'s over the ops of the drained nodes. *)
+#push-options "--z3rlimit 100"
+let replay_to_is_fold_over_drain (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (kfuel:list (node op)) (d:dag op) (fuel:list (node op)) (s0:state) (head:string)
+  (w:list string)
+  : Lemma (requires distinct_ids d /\ Found? (lookup d.nodes head) /\
+                    head_drains d fuel kfuel head w)
+          (ensures (let order = topo_drain lt kfuel d fuel head in
+                    let cn = closure_nodes d.nodes (ancestors_of d fuel head) in
+                    is_topo_enum cn order /\
+                    replay_to apply lt kfuel d fuel s0 head == replay_ids apply d.nodes order s0 /\
+                    not (is_cyclic (replay_to apply lt kfuel d fuel s0 head)) /\
+                    (match replay_to apply lt kfuel d fuel s0 head,
+                           replay apply (ops_of (nodes_for d order)) s0 with
+                     | Ok a, Ok b -> a == b
+                     | Error (RRejected _ e), Error e' -> e == e'
+                     | _, _ -> False)))
+  = let closure = ancestors_of d fuel head in
+    let cn = closure_nodes d.nodes closure in
+    distinct_closure_nodes d.nodes closure;
+    drain_total_on_acyclic lt kfuel cn w;
+    let order = drain_order lt kfuel cn in
+    sub_ids_of_mem (ids_of cn) order;
+    replay_ids_is_replay apply d order s0;
+    let rec never (ids:list string) (s:state)
+      : Lemma (ensures not (is_cyclic (replay_ids apply d.nodes ids s))) (decreases ids)
+      = match ids with
+        | [] -> ()
+        | id :: t ->
+          (match lookup d.nodes id with
+           | Missing -> never t s
+           | Found n -> (match apply n.nop s with | Ok s' -> never t s' | Error _ -> ()))
+    in
+    never order s0
+#pop-options
+
+(* ---- 16.2 determinism: the node set, not its order ---- *)
+
+[@@ noextract_to "FSharp"]  (* proof-only, as `perm` itself *)
+let rec perm_refl (#a:Type) (l:list a) : Tot (perm a l l) (decreases l) =
+  match l with
+  | [] -> PNil
+  | x :: t -> PSkip x t t (perm_refl t)
+
+[@@ noextract_to "FSharp"]  (* proof-only, as `perm` itself *)
+let rec closure_nodes_perm (#op:eqtype) (r1 r2:list (node op)) (p:perm (node op) r1 r2)
+  (c:list string)
+  : Tot (perm (node op) (closure_nodes r1 c) (closure_nodes r2 c)) (decreases p)
+  = match p with
+    | PNil -> PNil
+    | PSkip x m1 m2 p' ->
+      let q = closure_nodes_perm m1 m2 p' c in
+      if mem x.nid c then PSkip x (closure_nodes m1 c) (closure_nodes m2 c) q else q
+    | PSwap x y l ->
+      let cl = closure_nodes l c in
+      if mem x.nid c then
+        (if mem y.nid c then PSwap x y cl
+         else PSkip x cl cl (perm_refl cl))
+      else
+        (if mem y.nid c then PSkip y cl cl (perm_refl cl)
+         else perm_refl cl)
+    | PTrans m1 m2 m3 p12 p23 ->
+      PTrans (closure_nodes m1 c) (closure_nodes m2 c) (closure_nodes m3 c)
+             (closure_nodes_perm m1 m2 p12 c) (closure_nodes_perm m2 m3 p23 c)
+
+(* `sub_ids` reads its left argument as a set. *)
+let sub_ids_ext (l1 l2 m:list string)
+  : Lemma (requires forall (y:string). mem y l1 == mem y l2)
+          (ensures sub_ids l1 m == sub_ids l2 m)
+  = if sub_ids l1 m then begin
+      let aux (x:string) : Lemma (mem x l2 ==> mem x m) =
+        if mem x l2 then sub_ids_mem l1 m x else ()
+      in
+      FStar.Classical.forall_intro aux;
+      sub_ids_of_mem l2 m
+    end
+    else if sub_ids l2 m then begin
+      let aux (x:string) : Lemma (mem x l1 ==> mem x m) =
+        if mem x l1 then sub_ids_mem l2 m x else ()
+      in
+      FStar.Classical.forall_intro aux;
+      sub_ids_of_mem l1 m
+    end
+    else ()
+
+(* Two id-distinct node lists holding the same nodes resolve every id alike. *)
+let lookup_same (#op:eqtype) (r1 r2:list (node op)) (x:string)
+  : Lemma (requires distinct (ids_of r1) /\ distinct (ids_of r2) /\
+                    (forall (n:node op). mem n r1 == mem n r2))
+          (ensures lookup r1 x == lookup r2 x)
+  = ids_same_of_nodes_same r1 r2 x;
+    if mem x (ids_of r1) then begin
+      lookup_of_mem_ids r1 x;
+      lookup_mem_distinct r2 (Found?._0 (lookup r1 x))
+    end
+    else begin
+      (match lookup r1 x with | Missing -> () | Found n -> lookup_found r1 x n);
+      (match lookup r2 x with | Missing -> () | Found n -> lookup_found r2 x n)
+    end
+
+let rec anc_same (#op:eqtype) (d1 d2:dag op) (fuel:list (node op)) (id:string)
+  : Lemma (requires forall (x:string). lookup d1.nodes x == lookup d2.nodes x)
+          (ensures ancestors_of d1 fuel id == ancestors_of d2 fuel id)
+          (decreases %[fuel; (0 <: nat); ([] <: list string)])
+  = match fuel with
+    | [] -> ()
+    | _ :: fuel' ->
+      (match lookup d1.nodes id with
+       | Missing -> ()
+       | Found n -> anc_all_same d1 d2 fuel' n.nparents)
+
+and anc_all_same (#op:eqtype) (d1 d2:dag op) (fuel:list (node op)) (ids:list string)
+  : Lemma (requires forall (x:string). lookup d1.nodes x == lookup d2.nodes x)
+          (ensures ancestors_all d1 fuel ids == ancestors_all d2 fuel ids)
+          (decreases %[fuel; (1 <: nat); ids])
+  = match ids with
+    | [] -> ()
+    | p :: t -> anc_same d1 d2 fuel p; anc_all_same d1 d2 fuel t
+
+let rec replay_ids_same (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (r1 r2:list (node op)) (ids:list string) (s:state)
+  : Lemma (requires forall (x:string). lookup r1 x == lookup r2 x)
+          (ensures replay_ids apply r1 ids s == replay_ids apply r2 ids s) (decreases ids)
+  = match ids with
+    | [] -> ()
+    | id :: t ->
+      (match lookup r1 id with
+       | Missing -> replay_ids_same apply r1 r2 t s
+       | Found n -> (match apply n.nop s with | Ok s' -> replay_ids_same apply r1 r2 t s' | Error _ -> ()))
+
+(* THEOREM. Two clones holding the same id-distinct node set — received in any order — replay any
+   head to the same outcome, rejection and refusal included. *)
+#push-options "--z3rlimit 150"
+let replay_to_deterministic (#op:eqtype) (#state #rej:Type)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool)
+  (k1 k2:list (node op)) (d1 d2:dag op) (fuel:list (node op)) (s0:state) (head:string)
+  (p:perm (node op) d1.nodes d2.nodes)
+  : Lemma (requires total_order lt /\ distinct_ids d1 /\ distinct_ids d2 /\
+                    covers k1 (ids_of (closure_nodes d1.nodes (ancestors_of d1 fuel head))) /\
+                    covers k2 (ids_of (closure_nodes d2.nodes (ancestors_of d2 fuel head))))
+          (ensures replay_to apply lt k1 d1 fuel s0 head == replay_to apply lt k2 d2 fuel s0 head)
+  = let auxn (n:node op) : Lemma (mem n d1.nodes == mem n d2.nodes) =
+      perm_mem d1.nodes d2.nodes p n
+    in
+    FStar.Classical.forall_intro auxn;
+    let auxl (x:string) : Lemma (lookup d1.nodes x == lookup d2.nodes x) =
+      lookup_same d1.nodes d2.nodes x
+    in
+    FStar.Classical.forall_intro auxl;
+    anc_same d1 d2 fuel head;
+    let closure = ancestors_of d1 fuel head in
+    let c1 = closure_nodes d1.nodes closure in
+    let c2 = closure_nodes d2.nodes closure in
+    distinct_closure_nodes d1.nodes closure;
+    distinct_closure_nodes d2.nodes closure;
+    let pc = closure_nodes_perm d1.nodes d2.nodes p closure in
+    drain_deterministic IgnoreDangling lt k1 k2 c1 c2 pc;
+    let auxc (n:node op) : Lemma (mem n c1 == mem n c2) = perm_mem c1 c2 pc n in
+    FStar.Classical.forall_intro auxc;
+    let auxi (y:string) : Lemma (mem y (ids_of c1) == mem y (ids_of c2)) =
+      ids_same_of_nodes_same c1 c2 y
+    in
+    FStar.Classical.forall_intro auxi;
+    let order = drain_order lt k1 c1 in
+    assert (order == drain_order lt k2 c2);
+    sub_ids_ext (ids_of c1) (ids_of c2) order;
+    replay_ids_same apply d1.nodes d2.nodes order s0
+#pop-options
+
+(* ---- 16.3 the append ---- *)
+
+(* F#: `addNode`'s three arms. `same` is `sameNode` — the parents modulo order, the actor, the op
+   through its encoding — and is a parameter for the reason `lt` is one in section 13. *)
+type append_result (op:eqtype) =
+  | Appended : string -> dag op -> append_result op
+  | Collision : string -> append_result op
+
+let add_node (#op:eqtype) (same:node op -> node op -> bool) (n:node op) (d:dag op)
+  : Tot (append_result op) =
+  match lookup d.nodes n.nid with
+  | Found m -> if same m n then Appended n.nid d else Collision n.nid
+  | Missing -> Appended n.nid ({ nodes = n :: d.nodes })
+
+(* THEOREM. An id the DAG holds for a node `same` does not accept is refused, by name. *)
+let append_refuses_differing_node (#op:eqtype) (same:node op -> node op -> bool) (n:node op)
+  (d:dag op) (m:node op)
+  : Lemma (requires lookup d.nodes n.nid == Found m /\ not (same m n))
+          (ensures add_node same n d == Collision n.nid)
+  = ()
+
+(* THEOREM. An accepted append never replaces: every node held before is the node held after, and
+   an id-distinct DAG stays id-distinct. *)
+let append_never_replaces (#op:eqtype) (same:node op -> node op -> bool) (n:node op) (d:dag op)
+  : Lemma (ensures
+            (match add_node same n d with
+             | Collision _ -> True
+             | Appended _ d' ->
+               (forall (x:string). Found? (lookup d.nodes x) ==> lookup d'.nodes x == lookup d.nodes x) /\
+               (distinct_ids d ==> distinct_ids d')))
+  = match lookup d.nodes n.nid with
+    | Found _ -> ()
+    | Missing ->
+      let aux (x:string) : Lemma (Found? (lookup d.nodes x) ==> x =!= n.nid) = () in
+      FStar.Classical.forall_intro aux;
+      if mem n.nid (ids_of d.nodes) then lookup_of_mem_ids d.nodes n.nid else ()
+
+(* ======================================================================================
+   TWINS (Phase 309) — the extractor premise, sampled at this model.
+
+   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
+   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
+   compiles would pass every other step. Each fixture below applies this model's own functions to
+   a concrete input and compares the result with the value the model means there, and the
+   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
+   to `true` under the model's own semantics. The list is extracted with the rest of the model,
+   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
+   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
+   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
+   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
+   2c) refuses an extracted model that declares no twins.
+   ====================================================================================== *)
+
+noeq type twin = { tname : string; tholds : unit -> bool }
+
+let rec twins_hold (l:list twin) : Tot bool =
+  match l with
+  | [] -> true
+  | t :: r -> t.tholds () && twins_hold r
+let twin_lt (x y:string) : Tot bool =
+  (x = "a" && not (y = "a")) || (x = "b" && (y = "c" || y = "m")) || (x = "c" && y = "m")
+
+let twin_dag : dag string =
+  { nodes = [ { nid = "m"; nparents = [ "b"; "c" ]; nop = "m" };
+              { nid = "c"; nparents = [ "a" ]; nop = "c" };
+              { nid = "b"; nparents = [ "a" ]; nop = "b" };
+              { nid = "a"; nparents = []; nop = "a" } ] }
+
+let twin_fuel : list (node string) = app twin_dag.nodes twin_dag.nodes
+
+let twin_apply (o:string) (s:string) : Tot (outcome string string) =
+  if o = "x" then Error "refused" else Ok (s ^ o)
+
+let twins : list twin = [
+  { tname = "independent-disjoint-footprints";
+    tholds = (fun () ->
+      independent
+        ({ reads = [ "p" ]; structure_writes = [ "p" ]; content_writes = [ "n" ]; unknown_parent_writes = [] })
+        ({ reads = [ "q" ]; structure_writes = [ "q" ]; content_writes = [ "m" ]; unknown_parent_writes = [] })
+      = true) };
+  { tname = "dependent-shared-structure-write";
+    tholds = (fun () ->
+      independent
+        ({ reads = []; structure_writes = [ "p" ]; content_writes = []; unknown_parent_writes = [] })
+        ({ reads = []; structure_writes = [ "p" ]; content_writes = []; unknown_parent_writes = [] })
+      = false) };
+  { tname = "drain-orders-a-diamond-by-the-tie-break";
+    tholds = (fun () -> drain_order twin_lt twin_fuel twin_dag.nodes = [ "a"; "b"; "c"; "m" ]) };
+  { tname = "drain-refuses-a-dangling-parent";
+    tholds = (fun () ->
+      drain RefuseDangling twin_lt twin_fuel [ { nid = "c"; nparents = [ "z" ]; nop = "c" } ] = Refused "c") };
+  { tname = "replay-to-folds-the-drained-closure";
+    tholds = (fun () -> replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m" = Ok "abcm") };
+  { tname = "replay-to-refuses-an-unknown-head";
+    tholds = (fun () -> replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz" = Error (RUnknownHead "zz")) };
+  { tname = "add-node-refuses-a-differing-node";
+    tholds = (fun () ->
+      add_node (fun (p q:node string) -> p.nop = q.nop) ({ nid = "a"; nparents = []; nop = "z" }) twin_dag
+      = Collision "a") } ]
+
+let _ = assert_norm (twins_hold twins == true)

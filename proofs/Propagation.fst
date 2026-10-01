@@ -1491,3 +1491,37 @@ let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (t
   let s = needed_for deps targets in
   go_invoked_within ev touches deps always [] [] (keep s topo.order) x;
   mem_keep s topo.order x
+
+(* ======================================================================================
+   TWINS (Phase 309) — the extractor premise, sampled at this model.
+
+   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
+   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
+   compiles would pass every other step. Each fixture below applies this model's own functions to
+   a concrete input and compares the result with the value the model means there, and the
+   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
+   to `true` under the model's own semantics. The list is extracted with the rest of the model,
+   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
+   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
+   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
+   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
+   2c) refuses an extracted model that declares no twins.
+   ====================================================================================== *)
+
+noeq type twin = { tname : string; tholds : unit -> bool }
+
+let rec twins_hold (l:list twin) : Tot bool =
+  match l with
+  | [] -> true
+  | t :: r -> t.tholds () && twins_hold r
+let twin_deps : dmap = [ ("b", [ "a" ]); ("c", [ "b" ]) ]
+
+let twins : list twin = [
+  { tname = "dependents-inverts-the-edges";
+    tholds = (fun () -> dependents twin_deps = [ ("a", [ "b" ]); ("b", [ "c" ]) ]) };
+  { tname = "dirty-set-is-the-downstream-closure";
+    tholds = (fun () -> dirty_from_changed_ids twin_deps [ "a" ] = [ "a"; "b"; "c" ]) };
+  { tname = "an-edge-has-a-direction";
+    tholds = (fun () -> edge twin_deps "b" "c" = false) } ]
+
+let _ = assert_norm (twins_hold twins == true)

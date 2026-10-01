@@ -111,14 +111,20 @@ type CoverageInputs =
 
 /// What the predicate says, once computed — the numbers the emitted line renders.
 type CoverageTally =
-    { Modelled: int
-      Excluded: int
-      Assumed: int
-      Premise: int
-      DomainDischarged: int
-      Permanent: int
-      Unscheduled: int
-      Scheduled: int }
+    {
+        Modelled: int
+        Excluded: int
+        Assumed: int
+        Premise: int
+        DomainDischarged: int
+        /// A `domain-obligation` whose law checks the domain's DECLARATION and cannot check past it
+        /// (`"discharge": "domain-declared"`, Phase 309) — counted apart, because a green run of its
+        /// law is not a discharge.
+        DomainDeclared: int
+        Permanent: int
+        Unscheduled: int
+        Scheduled: int
+    }
 
 let private finding (subject: string) (clause: string) (detail: string) =
     sprintf "'%s' [%s]: %s" subject clause detail
@@ -295,6 +301,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
         | Some "premise" -> [], Some "premise"
         | Some "domain-obligation" ->
             match strMember row "dischargedBy" with
+            | Some _ when strMember row "discharge" = Some "domain-declared" -> [], Some "domain-declared"
             | Some _ -> [], Some "domain-discharged"
             | None ->
                 [ finding
@@ -433,6 +440,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
           Assumed = List.length assumedRows
           Premise = countAccount "premise"
           DomainDischarged = countAccount "domain-discharged"
+          DomainDeclared = countAccount "domain-declared"
           Permanent = countAccount "permanent"
           Unscheduled = countAccount "unscheduled"
           Scheduled = countAccount "scheduled" }
@@ -454,13 +462,14 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
 /// length.
 let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
     sprintf
-        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d unscheduled, %d scheduled)"
+        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled, %d scheduled)"
         (if exhaustive then "exhaustive" else "NOT exhaustive")
         t.Modelled
         t.Excluded
         t.Assumed
         (t.Premise + t.Permanent)
         t.DomainDischarged
+        t.DomainDeclared
         t.Unscheduled
         t.Scheduled
 

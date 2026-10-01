@@ -591,6 +591,32 @@ let add : Prims.list<sym>  ->  Prims.list<sym>  ->  FStar_Pervasives_Native.opti
      FStar_Pervasives_Native.None
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "try-canonical-trims-a-negative"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((Minus)::(Digit ((Prims.parse_int "0")))::(Digit ((Prims.parse_int "0")))::(Dot)::(Digit ((Prims.parse_int "5")))::(Digit ((Prims.parse_int "0")))::[])) (FStar_Pervasives_Native.Some ((Minus)::(Digit ((Prims.parse_int "0")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]))))})::({tname = "add-carries-across-the-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add ((Digit ((Prims.parse_int "1")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]) ((Digit ((Prims.parse_int "2")))::(Dot)::(Digit ((Prims.parse_int "5")))::[])) (FStar_Pervasives_Native.Some ((Digit ((Prims.parse_int "4")))::[]))))})::({tname = "compare-orders-numerically"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (compare ((Digit ((Prims.parse_int "1")))::(Dot)::(Digit ((Prims.parse_int "5")))::[]) ((Digit ((Prims.parse_int "2")))::[])) (FStar_Pervasives_Native.Some ((Prims.parse_int "-1")))))})::[]
+
 
 
 

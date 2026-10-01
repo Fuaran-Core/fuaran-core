@@ -1738,6 +1738,68 @@ let payload_splice_breaks_chain
     (rec_injective_derived op h show enc_op reveal comma close actor_ok hinj oinj reading numeral code)
     genesis rs n r r'
 
+(* ---- 6c. Tamper evidence IS the hash distinguishing — with no premise (Phase 309) ----
+
+   `chain_tamper_detected` spends `rec_injective_on` to say a content tamper is FOUND. That premise
+   is the one production's default violates: `OpStream.defaultHash` is a 32-bit FNV-1a, and
+   `Conformance.hashFnAdversarialLaws` exhibits an in-budget collision on exactly this pre-image
+   shape. So the theorem a reader of the default needs is not "under injectivity, found" but WHEN
+   it is found, stated with nothing assumed: an op or actor tamper at record `n`, its sequence,
+   prev-link and stored hash left alone, in a chain that was intact, is reported by the walker IF
+   AND ONLY IF the record hash distinguishes the two pre-images under that record's predecessor —
+   `h(prev_n, env_n) <> h(prev_n, env'_n)`. A hash that collides there hides the tamper, exactly
+   there, and nowhere else. Whether the host's `HashFn` distinguishes the pre-images a store
+   actually holds is what `Conformance.hashFnLaws`' op-tamper arm samples. *)
+
+let rec chain_tamper_evident_iff_from
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (prev: string)
+  (i: pos)
+  (rs: list (record op))
+  (n: pos)
+  (r: record op)
+  (r': record op)
+  : Lemma
+    (requires
+      chain_ok_from h show enc_op prev i rs /\ record_at rs n == Found r /\
+      r'.rseq == r.rseq /\ r'.rprev == r.rprev /\ r'.rhash == r.rhash)
+    (ensures
+      chain_ok_from h show enc_op prev i (replace_at rs n r') ==
+      (rec_hash h show enc_op r.rprev r.rseq r'.ractor r'.rop =
+       rec_hash h show enc_op r.rprev r.rseq r.ractor r.rop))
+    (decreases rs) =
+  match rs, n with
+  | [], _ -> ()
+  | _ :: _, PZero -> ()
+  | x :: t, PSucc m -> chain_tamper_evident_iff_from h show enc_op x.rhash (PSucc i) t m r r'
+
+(* THEOREM (Phase 309). At the entry point: `verifyChain` rejects the op-tamper exactly when the
+   hash distinguishes the tampered envelope from the original under the same predecessor. *)
+let chain_tamper_evident_iff_hash_distinguishes
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (enc_op: op -> string)
+  (genesis: string)
+  (rs: list (record op))
+  (n: pos)
+  (r: record op)
+  (r': record op)
+  : Lemma
+    (requires
+      verify_chain h show enc_op genesis rs /\ record_at rs n == Found r /\
+      r'.rseq == r.rseq /\ r'.rprev == r.rprev /\ r'.rhash == r.rhash)
+    (ensures
+      not (verify_chain h show enc_op genesis (replace_at rs n r')) ==
+      not (h r.rprev (rec_payload show enc_op r.rseq r'.ractor r'.rop) =
+           h r.rprev (rec_payload show enc_op r.rseq r.ractor r.rop))) =
+  chain_break_none_iff h show enc_op genesis PZero rs;
+  chain_tamper_evident_iff_from h show enc_op genesis PZero rs n r r';
+  chain_break_none_iff h show enc_op genesis PZero (replace_at rs n r')
+
 (* ======================================================================================
    7. Snapshot and bounded replay (Phase 191; F#: `OpStream.replay`, `snapshotAtOpt`, `compact`,
       `compactChainOnly`, `replayFrom`, `verifyAcrossWithOpt`).
@@ -3436,3 +3498,61 @@ let signed_head_rejects_splice
   signed_head_rejects_rewrite h show enc_op actor_ok inj verify binds genesis att
     (build_chain h show enc_op genesis PZero cs)
     (build_chain h show enc_op genesis PZero (apply_splice cs sp))
+
+(* ======================================================================================
+   TWINS (Phase 309) — the extractor premise, sampled at this model.
+
+   The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
+   in it says the F# the extractor emits COMPUTES what this model means: a mis-extraction that
+   compiles would pass every other step. Each fixture below applies this model's own functions to
+   a concrete input and compares the result with the value the model means there, and the
+   assertion at the end is discharged by NORMALISATION — F*'s normaliser evaluates every closure
+   to `true` under the model's own semantics. The list is extracted with the rest of the model,
+   and the `Proofs.Oracle` family runs the extracted closures against the extracted oracle
+   ("twin evaluation"): a closure that comes back `false` there is the F# backend disagreeing with
+   the normaliser on that input. Sampled, never proved: the discharge holds on these inputs, which
+   is where the `tested` rows already live. The kit's TWIN step (`kit/check-proof-leg.ps1`, step
+   2c) refuses an extracted model that declares no twins.
+   ====================================================================================== *)
+
+noeq type twin = { tname : string; tholds : unit -> bool }
+
+let rec twins_hold (l:list twin) : Tot bool =
+  match l with
+  | [] -> true
+  | t :: r -> t.tholds () && twins_hold r
+let twin_show (p:pos) : Tot string = match p with | PZero -> "0" | PSucc _ -> "n"
+
+let twin_h (p e:string) : Tot string = p ^ "/" ^ e
+
+let twin_enc (o:string) : Tot string = o
+
+let twin_chain : list (record string) =
+  build_chain twin_h twin_show twin_enc "" PZero [ { cactor = "A"; cop = "x" }; { cactor = "B"; cop = "y" } ]
+
+let twin_tampered : list (record string) =
+  match record_at twin_chain (PSucc PZero) with
+  | Found r -> replace_at twin_chain (PSucc PZero) ({ r with rop = "z" })
+  | Missing -> twin_chain
+
+let twins : list twin = [
+  { tname = "join-comma-joins";
+    tholds = (fun () -> join_comma [ "a"; "b"; "c" ] = "a,b,c") };
+  { tname = "first-absent-names-the-missing-parent";
+    tholds = (fun () -> first_absent [ "k" ] [ "k"; "p" ] = Found "p") };
+  { tname = "verify-chain-accepts-an-appended-chain";
+    tholds = (fun () -> verify_chain twin_h twin_show twin_enc "" twin_chain = true) };
+  { tname = "verify-chain-refuses-an-op-tamper";
+    tholds = (fun () -> verify_chain twin_h twin_show twin_enc "" twin_tampered = false) };
+  { tname = "first-break-finds-nothing-in-an-intact-dag";
+    tholds = (fun () ->
+      first_break twin_h twin_enc (fun _ _ -> true)
+        [ { ekey = "/A|x"; enode = { dparents = []; dactor = "A"; dop = "x" } } ]
+      = Missing) };
+  { tname = "first-break-names-a-tampered-node";
+    tholds = (fun () ->
+      first_break twin_h twin_enc (fun _ _ -> true)
+        [ { ekey = "bad"; enode = { dparents = []; dactor = "A"; dop = "x" } } ]
+      = Found ({ bnode = "bad"; breason = "content-id mismatch (tampered node)"; bexpected = "/A|x"; bgot = "bad" })) } ]
+
+let _ = assert_norm (twins_hold twins == true)

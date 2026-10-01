@@ -3504,6 +3504,37 @@ prior-blind adapter, one walk each); `Validator.runAllTagged`, `enumerate`, `try
 canonical form changes. Baselines regenerated: `api/Fuaran.Core.AiSurface.txt`, `Conformance`,
 `Observer`, `Projection`, `Propagation`, `Tree`, `Validator` (`Ops` is unchanged).
 `docs/conformance-families.md` / `.json` are regenerated for the new family.
+
+### The ladder tells the truth about production (Phase 309, DECISIONS.md D102) — ADDITIVE: no public surface moves
+
+**What changed.** Proof rows, a proof-leg step and a regenerated document; no shipped package changes.
+
+- `Dag.tryReplayTo` is a theorem over the proved drain (`proofs/DagFold.fst` section 16:
+  `replay_to_is_fold_over_drain`, `replay_to_unknown_head_is_refused`, `replay_to_deterministic`), and
+  the refusing append is too (`append_refuses_differing_node`, `append_never_replaces`), each with a
+  differential that can lose. `node-ids-distinct` narrows to "the hash is injective on the nodes a
+  store holds".
+- `chain_tamper_evident_iff_hash_distinguishes` (`proofs/Chain.fst` 6c): an op tamper is rejected by
+  `verifyChain` exactly when the hash distinguishes the two envelopes — no premise.
+- The id-witness equality is named (`id_key_faithful`, carried on `lawful-abstract-witness`);
+  `witness-surface-scope` is marked `"discharge": "domain-declared"` — a new optional member of an
+  assumed `domain-obligation` row in `proofs.json`, and a `domain-declared` count in the
+  `Proofs.Coverage` line, which now reads `… N domain-discharged, N domain-declared, …`.
+- Twin evaluation: every extracted model declares `twins` asserted by `assert_norm`, extracted into
+  the oracle and run by the `Proofs.Oracle` family; the kit gains step 2c, `-Twins`, which refuses an
+  extracted model that declares none. A repository that adopted the kit by copy is unaffected until
+  it passes `-Twins`.
+- The tree differentials' generated pool draws `UpdateNode` and `Batch`; the two hand-written update
+  cases are retired. Stale counts and the diff's `kinds_agree` reason are corrected.
+- `proofs/README.md`'s header count, contract table and contract counts are generated from
+  `proofs.json` (`CORE_APPROVE_LADDER=1`).
+
+**What a consumer does.** Nothing. A reader that parses the `Proofs.Coverage` line adds the
+`domain-declared` field. An adopter of the kit that wants twin evaluation adds a `twins` list to each
+extracted model and passes `-Twins`.
+
+**Class: additive** — no `api/*.txt` baseline moves and no wire byte moves.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

@@ -273,11 +273,11 @@
     {
       "id": "extractor-and-compiler-trusted",
       "level": "assumed",
-      "claim": "The proof leg holds the committed oracle to a fresh extraction byte for byte, which makes 'the oracle is the model' a checked claim; it does not make the F# backend correct. The least-examined link in the chain, and named as such.",
+      "claim": "The proof leg holds the committed oracle to a fresh extraction byte for byte, which makes 'the oracle is the model' a checked claim; it does not make the F# backend correct. The least-examined link in the chain, and named as such. Since Phase 309 the extractor half is DISCHARGED ON SAMPLED INPUTS by twin evaluation: every extracted model ends with a `twins` list whose fixtures F*'s normaliser evaluates to `true` under the model's semantics (`assert_norm`), the list is extracted with the model, and the `Proofs.Oracle` family's 'twin evaluation' cases run the extracted closures against the extracted oracle — measured red on a deliberately perturbed oracle (the drain's minimum flipped to a maximum: two DagFold fixtures fail). The kit's TWIN step refuses an extracted model with no twins. What remains assumed is the backend and the compiler on every input no fixture samples, which is still a premise.",
       "phase": "fuaran-core#131",
       "class": "premise",
       "evidence": {
-        "assumption": "the F* extractor and the F# compiler are correct"
+        "assumption": "the F* extractor and the F# compiler are correct — on the inputs the twin fixtures sample, checked against the normaliser since Phase 309; everywhere else, assumed"
       }
     },
     {
@@ -359,11 +359,11 @@
     {
       "id": "node-ids-distinct",
       "level": "assumed",
-      "claim": "The hash-collision assumption, and since Phase 134 the only thing the delta recovery assumes about content addressing. Node ids are distinct, so the node a chain named is the node the DAG returns for it; two nodes sharing a content id is the only way that fails.",
+      "claim": "The hash-collision assumption, and since Phase 134 the only thing the delta recovery assumes about content addressing. NARROWED BY PHASE 309 to what it is true OF: the hash is injective on the nodes a store HOLDS. Id distinctness itself is no longer assumed of a store built through `Dag.append` / `Dag.merge` — `append_refuses_differing_node` and `append_never_replaces` (`append-refuses-differing-node` below) make it a property of every such store, because a node minting a held id with different content is refused rather than replacing the held one (the pre-296 `Map.add`) — and `verifyDag` re-checks every key against its content on load. Under the 32-bit FNV-1a default a collision among offered nodes is a real event (about 0.3% at 5,000 nodes, even odds near 77,000): what that now costs is a REFUSED append, never a silently replaced node. What is left assumed is only that two nodes a store actually holds do not share an id under a hash collision the store never saw offered.",
       "phase": "fuaran-core#134",
       "class": "premise",
       "evidence": {
-        "assumption": "Dag.nodeHash is injective on (sorted parents, actor, encoded op)"
+        "assumption": "Dag.nodeHash is injective on the nodes a store holds — (sorted parents, actor, encoded op) of two held nodes never mint one id; append refuses a differing node and verifyDag re-checks every key"
       }
     },
     {
@@ -799,7 +799,7 @@
     {
       "id": "content-id-determines-content",
       "level": "assumed",
-      "claim": "The cryptographic premise, and since Phase 145 the only claim about the DAG's content id that is assumed rather than proved or certified: two (key, value) pairs that mint one digest are the same pair. It is an explicit lemma-valued PARAMETER (`hash_injective`) of the theorems that need it rather than an assume, so which results depend on it is visible in their signatures. Phase 136 stated it in a bundled form that also carried the two splices and the op codec; those are now `preimage-splices-unambiguous` and `op-codec-injective-certified` below, and this row is what is left. It is still stated MODULO THE PARENT SORT, which is the strongest true form. Since Phase 197 it is the whole of what the LINEAR side assumes about its record hash too: that side's pre-image is a four-way JSON envelope rather than nodeHash's two splices, and `chain-envelope-parse` below parses it, so `rec_injective_on` is derived from this row, `op-codec-injective-certified` and `seq-numeral-code-certified` exactly as `node_injective_on` is. Nothing about the record hash is bundled any more. It holds for the host's collision-resistant HashFn; it is FALSE for the default FNV-1a at scale (`hashFnAdversarialLaws` exhibits an in-budget collision). Since Phase 302 `Conformance.hashFnLaws` carries it for the host's own HashFn — its op-tamper, re-mint and distinguishing arms are the ones a constant or colliding HashFn fails — sampled, never proved; and a premise is discharged by nothing, so the row names no `dischargedBy`.",
+      "claim": "The cryptographic premise, and since Phase 145 the only claim about the DAG's content id that is assumed rather than proved or certified: two (key, value) pairs that mint one digest are the same pair. It is an explicit lemma-valued PARAMETER (`hash_injective`) of the theorems that need it rather than an assume, so which results depend on it is visible in their signatures. Phase 136 stated it in a bundled form that also carried the two splices and the op codec; those are now `preimage-splices-unambiguous` and `op-codec-injective-certified` below, and this row is what is left. It is still stated MODULO THE PARENT SORT, which is the strongest true form. Since Phase 197 it is the whole of what the LINEAR side assumes about its record hash too: that side's pre-image is a four-way JSON envelope rather than nodeHash's two splices, and `chain-envelope-parse` below parses it, so `rec_injective_on` is derived from this row, `op-codec-injective-certified` and `seq-numeral-code-certified` exactly as `node_injective_on` is. Nothing about the record hash is bundled any more. It holds for the host's collision-resistant HashFn; it is FALSE for the default FNV-1a at scale (`hashFnAdversarialLaws` exhibits an in-budget collision). Since Phase 302 `Conformance.hashFnLaws` carries it for the host's own HashFn — its op-tamper, re-mint and distinguishing arms are the ones a constant or colliding HashFn fails — sampled, never proved; and a premise is discharged by nothing, so the row names no `dischargedBy`. Since Phase 309 what follows when it FAILS is a theorem rather than a shrug: `chain-tamper-evident-iff-hash-distinguishes` proves, with no premise, that an op tamper at record `i` is reported exactly when the hash distinguishes the two envelopes under record `i`'s predecessor — so under a colliding default the tamper is hidden exactly at the collision and nowhere else.",
       "phase": "fuaran-core#145",
       "class": "premise",
       "evidence": {
@@ -1121,7 +1121,7 @@
     {
       "id": "apply-preserves-wf",
       "level": "proved",
-      "claim": "Every accepted operation preserves id uniqueness — unconditionally, for all five skeleton operations including a nested batch. This is the statement Phase 133 REFUTED and could only prove in conditional form, and it is true now because Phase 137 changed the code rather than because the model changed its mind: `validator-decides-the-invariant` is the link between the two. Its remove and move clauses needed machinery Phase 133 never had, principally that a remove takes the whole removed subtree's ids away with it, which is what makes the move's re-insert provably fresh.",
+      "claim": "Every accepted operation preserves id uniqueness — unconditionally, for all six skeleton operations including a nested batch (`UpdateNode` since Phase 250; the count was corrected by Phase 309). This is the statement Phase 133 REFUTED and could only prove in conditional form, and it is true now because Phase 137 changed the code rather than because the model changed its mind: `validator-decides-the-invariant` is the link between the two. Its remove and move clauses needed machinery Phase 133 never had, principally that a remove takes the whole removed subtree's ids away with it, which is what makes the move's re-insert provably fresh.",
       "phase": "fuaran-core#138",
       "evidence": {
         "theorem": "apply_preserves_wf",
@@ -1154,7 +1154,7 @@
     {
       "id": "invert-round-trip",
       "level": "proved",
-      "claim": "The inverse of an accepted operation is itself accepted at the result and restores the input exactly, for the four non-batch operations. Both halves in one statement: nothing about the derived inverse can be refused at the tree the forward step produced, and applying it gives back the tree the forward step was applied to. The defining law `apply (invert op pre) (apply op pre) = pre`, which the engine's own doc comment states and the conformance pack samples, is a theorem here. The batch alphabet is excluded and the exclusion is stated: a batch's inverse is its members' inverses in reverse order, each derived against the state that member saw, so the lift is the one the fold theorem already performs at lane granularity.",
+      "claim": "The inverse of an accepted operation is itself accepted at the result and restores the input exactly, for the five non-batch operations (the four structural ones and, since Phase 250, `UpdateNode` — `leaf_op` is every non-`Batch` op; the count was corrected by Phase 309). Both halves in one statement: nothing about the derived inverse can be refused at the tree the forward step produced, and applying it gives back the tree the forward step was applied to. The defining law `apply (invert op pre) (apply op pre) = pre`, which the engine's own doc comment states and the conformance pack samples, is a theorem here. The batch alphabet is excluded and the exclusion is stated: a batch's inverse is its members' inverses in reverse order, each derived against the state that member saw, so the lift is the one the fold theorem already performs at lane granularity.",
       "phase": "fuaran-core#138",
       "evidence": {
         "theorem": "invert_applicable",
@@ -1180,21 +1180,22 @@
     {
       "id": "lawful-abstract-witness",
       "level": "assumed",
-      "claim": "The witness laws themselves. The model reads a node as an id, a kind tag and an ordered child list, and treats `ReplaceChildren` as an abstract function satisfying `Conformance.witnessLaws` — exactly as the fold theorem takes the independence diamond abstractly. A domain's own `ReplaceChildren` is that domain's promise, sampled by the conformance pack and proved by nothing; where it does not hold, every theorem above is about a different function from the one that runs. Note the pack's own boundary here: `witnessLaws` exempts a leaf from the round trip, so a witness whose `ReplaceChildren` is partial on leaves is lawful.",
+      "claim": "The witness laws themselves. The model reads a node as an id, a kind tag and an ordered child list, and treats `ReplaceChildren` as an abstract function satisfying `Conformance.witnessLaws` — exactly as the fold theorem takes the independence diamond abstractly. A domain's own `ReplaceChildren` is that domain's promise, sampled by the conformance pack and proved by nothing; where it does not hold, every theorem above is about a different function from the one that runs. Note the pack's own boundary here: `witnessLaws` exempts a leaf from the round trip, so a witness whose `ReplaceChildren` is partial on leaves is lawful. SINCE PHASE 309 THE ID-WITNESS AXIOM IS NAMED HERE TOO, because it is the witness law every id-equality theorem consumes: every model reads an id through ONE decidable equality — `TreeOps` and `Preservation` take ids as their key strings, the form `IdWitness.ToString` writes every address in, compared with `=` — while production keys `ToString` in `wellFormed` / `footprint` / `Tree.Index` and calls `Equals` in `tryFind` / `updateNode`. The theorems transfer to a domain's `'Id` exactly when the two agree: `id_key_faithful idw.Equals idw.ToString` (`Equals a b <==> ToString a = ToString b`), defined in `TreeOps.fst` section 0. A domain whose two relations disagree runs a different algebra from the one proved. `witnessLaws`' identities cell samples exactly that relation, over drawn pairs and over pairs built to share a key (Phase 302), so this row's law now covers the axiom the models consume rather than only reflexivity and the round trip.",
       "phase": "fuaran-core#138",
       "class": "domain-obligation",
       "dischargedBy": "Conformance.witnessLaws",
       "evidence": {
-        "assumption": "the domain's ReplaceChildren satisfies Conformance.witnessLaws"
+        "assumption": "the domain's ReplaceChildren satisfies Conformance.witnessLaws, and its IdWitness keeps id_key_faithful — Equals a b <==> ToString a = ToString b, the one id equality every model reads"
       }
     },
     {
       "id": "witness-surface-scope",
       "level": "assumed",
-      "claim": "That the witness surface is the whole of the tree. `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural position is invisible to the uniqueness scan, to every theorem above, and to the differential. Uniqueness over those positions was the domain's own obligation. Stated as an assumption rather than a limitation because it is what the theorems quantify over: they are true of the witness view, and the witness view is what `Ops` can see. A PERMANENT `premise` until Phase 189, on the reasoning that no kit law could discharge it — which was true of the surface the kit could SEE and stopped holding the moment a domain could DECLARE its keyed positions; `Conformance.keyedChildrenLaws` then certified the domain's own full-walk id check against that declaration. Phase 286 moved the uniqueness itself into Core: a domain that hands its `KeyedWitness` to `Ops.applyContainedKeyed` gets the `DuplicateId` refusal over the keyed walk (`keyed-apply-preserves-wf`), so what is left of the obligation is the DECLARATION — that `KeyedChildren` reports every keyed position the domain's own walk sees, and that `ReplaceKeyedChildren` and `ReplaceChildren` leave each other's positions alone. `Conformance.keyedApplyLaws` certifies exactly that: its agreement law holds the engine's refusal to the domain's own check over collisions BUILT through `PlaceKeyedChild`, and its witness laws hold the two rebuilds apart. The unkeyed `Ops` forms still see exactly what `Children` reports, and a domain that does not use the keyed forms keeps the Phase 189 obligation as it was.",
+      "claim": "That the witness surface is the whole of the tree. `Tree.ids` walks `NodeWitness.Children`, so a node a domain holds in a keyed, non-structural position is invisible to the uniqueness scan, to every theorem above, and to the differential. Uniqueness over those positions was the domain's own obligation. Stated as an assumption rather than a limitation because it is what the theorems quantify over: they are true of the witness view, and the witness view is what `Ops` can see. A PERMANENT `premise` until Phase 189, on the reasoning that no kit law could discharge it — which was true of the surface the kit could SEE and stopped holding the moment a domain could DECLARE its keyed positions; `Conformance.keyedChildrenLaws` then certified the domain's own full-walk id check against that declaration. Phase 286 moved the uniqueness itself into Core: a domain that hands its `KeyedWitness` to `Ops.applyContainedKeyed` gets the `DuplicateId` refusal over the keyed walk (`keyed-apply-preserves-wf`), so what is left of the obligation is the DECLARATION — that `KeyedChildren` reports every keyed position the domain's own walk sees, and that `ReplaceKeyedChildren` and `ReplaceChildren` leave each other's positions alone. `Conformance.keyedApplyLaws` certifies exactly that: its agreement law holds the engine's refusal to the domain's own check over collisions BUILT through `PlaceKeyedChild`, and its witness laws hold the two rebuilds apart. The unkeyed `Ops` forms still see exactly what `Children` reports, and a domain that does not use the keyed forms keeps the Phase 189 obligation as it was. MARKED `domain-declared` BY PHASE 309, because the law checks the declaration and cannot check past it: `keyedApplyLaws` holds the engine to what `KeyedChildren` REPORTS, so a domain with keyed positions that declares none passes it by declaration. A green run says the declaration is consistent; only the domain can say it is complete — so this row is not DISCHARGED by the law it names, it is checked against the domain's own word.",
       "phase": "fuaran-core#138",
       "class": "domain-obligation",
       "dischargedBy": "Conformance.keyedApplyLaws",
+      "discharge": "domain-declared",
       "evidence": {
         "assumption": "the domain's KeyedWitness declares every keyed position its own full walk sees, and its two rebuilds leave each other's positions alone: applyContainedKeyed refuses exactly the inserts the domain's own id check would refuse afterwards, over collisions built through PlaceKeyedChild — Conformance.keyedApplyLaws"
       }
@@ -1224,7 +1225,7 @@
     {
       "id": "contained-preserves",
       "level": "proved",
-      "claim": "`applyContained` preserves the invariant the capability exists to keep — every node with children satisfies `canHold` — for all five operations including a nested batch, with `MoveNode` covered as well as `InsertChild`. The move clause is the one with content: the moved subtree inherits the invariant from the tree it came out of, the removal preserves both the invariant and the destination's capability, and the graft is then an insert under an admitted parent — and that derivation, which needs no hypothesis about the operation at all, is also why Phase 161's graft walk sits at `InsertChild` and not at `MoveNode`. Phase 140 carried TWO hypotheses and refuted the statement without either; Phase 161 discharged one of them in code (`graft-containment`), so what remains is `child_blind` alone — refuted without it by `contained-premises`, and certified for an adopting domain by `Conformance.containerLaws` rather than assumed.",
+      "claim": "`applyContained` preserves the invariant the capability exists to keep — every node with children satisfies `canHold` — for all six operations including a nested batch (`UpdateNode` since Phase 250; the count was corrected by Phase 309), with `MoveNode` covered as well as `InsertChild`. The move clause is the one with content: the moved subtree inherits the invariant from the tree it came out of, the removal preserves both the invariant and the destination's capability, and the graft is then an insert under an admitted parent — and that derivation, which needs no hypothesis about the operation at all, is also why Phase 161's graft walk sits at `InsertChild` and not at `MoveNode`. Phase 140 carried TWO hypotheses and refuted the statement without either; Phase 161 discharged one of them in code (`graft-containment`), so what remains is `child_blind` alone — refuted without it by `contained-premises`, and certified for an adopting domain by `Conformance.containerLaws` rather than assumed.",
       "phase": "fuaran-core#140",
       "evidence": {
         "theorem": "contained_preserves",
@@ -1431,7 +1432,7 @@
     {
       "id": "diff-reconstructs",
       "level": "proved",
-      "claim": "`applyAll (Diff.toOps before after) before == Ok after` — the tree, and not merely a tree like it: the last step is `tree_ext`, an induction over the TREE proving that a tree agreeing with `after` at every node on kind and on child ids IS `after`. Deferred by Phase 141 as 141.t1 and re-deferred by Phase 162 as 162.t3, both carrier-less; this row is their discharge. IT CARRIES ONE HYPOTHESIS AND THE HYPOTHESIS IS NECESSARY: `kinds_agree` — a node id the two trees share names the same kind in both. The unrestricted form is FALSE rather than merely unproved, because no skeleton operation edits a node, so a shared id whose kind differs is unreconstructible by ANY script this alphabet can express; `kinds_agree_is_necessary` pins a concrete such pair whose diff is the EMPTY script, applicable at every step, landing on `before`. This is not a strengthening of what the two deferrals asked for: it is the precondition the README's level-3 ladder has recorded as assumed since Phase 141 (`the two trees agree on the content of every shared id`) and that the differential's pool has enforced since then, measured when a first generator that redrew kinds independently reconstructed 1,738 of 4,000 pairs against 20,000 of 20,000 for the corrected one. What Phase 167 changed is that it is a hypothesis of a proved statement rather than a property of a generator. `reconstruction_is_not_vacuous` evaluates a pair whose script carries one insert, one move, one remove and one reorder, so the theorem is not a statement about the empty script.",
+      "claim": "`applyAll (Diff.toOps before after) before == Ok after` — the tree, and not merely a tree like it: the last step is `tree_ext`, an induction over the TREE proving that a tree agreeing with `after` at every node on kind and on child ids IS `after`. Deferred by Phase 141 as 141.t1 and re-deferred by Phase 162 as 162.t3, both carrier-less; this row is their discharge. IT CARRIES ONE HYPOTHESIS AND THE HYPOTHESIS IS NECESSARY: `kinds_agree` — a node id the two trees share names the same kind in both. The unrestricted form is FALSE rather than merely unproved, because `Diff.toOps` is a SHAPE diff: it emits no `UpdateNode`, so a shared id whose kind differs is unreconstructible by any script the diff emits (the ALPHABET can rewrite a node in place since Phase 250 — the diff does not, and becomes content-aware with Phase 305; the reason was stated as 'no skeleton operation edits a node' until Phase 309 corrected it); `kinds_agree_is_necessary` pins a concrete such pair whose diff is the EMPTY script, applicable at every step, landing on `before`. This is not a strengthening of what the two deferrals asked for: it is the precondition the README's level-3 ladder has recorded as assumed since Phase 141 (`the two trees agree on the content of every shared id`) and that the differential's pool has enforced since then, measured when a first generator that redrew kinds independently reconstructed 1,738 of 4,000 pairs against 20,000 of 20,000 for the corrected one. What Phase 167 changed is that it is a hypothesis of a proved statement rather than a property of a generator. `reconstruction_is_not_vacuous` evaluates a pair whose script carries one insert, one move, one remove and one reorder, so the theorem is not a statement about the empty script.",
       "phase": "fuaran-core#167",
       "evidence": {
         "theorem": "diff_reconstructs",
@@ -2763,6 +2764,77 @@
           "the capture oracle agrees with production — record, walk, tamper and strict replay",
           "a capture model handed a DIFFERENT hash disagrees with production — the comparison can lose"
         ]
+      }
+    },
+    {
+      "id": "replay-to-fold-over-drain",
+      "level": "proved",
+      "claim": "`Dag.tryReplayTo` (the replay every store the plane holds goes through, `replayClosure` at one root) is the fold over the PROVED drain: over an id-distinct DAG and a head it holds whose closure is acyclic (section 13's witness form, `head_drains`), the model's `replay_to` — clause for clause: refuse an unknown head, drain the head's closure with the id-ordered drain, refuse a drain that did not place the whole closure as `CyclicHistory`, then apply each drained node's op in order, the first rejection naming its node — never reports a cycle, its order is a topological enumeration of the closure, and its outcome is section 3's `replay` over the ops of the drained nodes (the same state on `Ok`, the same rejection under `Rejected`). Until this phase `Dag.replayTo` had no row at all.",
+      "phase": "fuaran-core#309",
+      "evidence": {
+        "theorem": "replay_to_is_fold_over_drain",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "replay-to-unknown-head-refused",
+      "level": "proved",
+      "claim": "`Dag.tryReplayTo` answers `UnknownHead` EXACTLY for a head the DAG does not hold, naming it — never the initial state as `Ok`, which is what the pre-296 `replayTo` returned for a typo'd head, and never for a head the DAG holds.",
+      "phase": "fuaran-core#309",
+      "evidence": {
+        "theorem": "replay_to_unknown_head_is_refused",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "replay-to-deterministic",
+      "level": "proved",
+      "claim": "Two clones holding the same id-distinct node set, received in any order, replay any head to the same outcome — state, rejection and refusal alike. `drain_deterministic` carried through the closure walk and the node lookup; the sentence 'two convergent histories over the same node set replay to the same state' in `tryReplayTo`'s docstring, proved.",
+      "phase": "fuaran-core#309",
+      "evidence": {
+        "theorem": "replay_to_deterministic",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "append-refuses-differing-node",
+      "level": "proved",
+      "claim": "`Dag.append` / `Dag.merge` (`addNode`) refuse, by name, a node whose content id the DAG already holds for content production's `sameNode` does not accept (`ContentIdCollision`), and an accepted append NEVER REPLACES: every node held before is the node held after, and an id-distinct DAG stays id-distinct (`append_never_replaces`). `sameNode` is a parameter of the model; the differential ties it to production. This is what lets `node-ids-distinct` narrow from 'node ids are distinct' to 'the hash is injective on the nodes a store holds'.",
+      "phase": "fuaran-core#309",
+      "evidence": {
+        "theorem": "append_refuses_differing_node",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "replay-to-differential",
+      "level": "tested",
+      "claim": "The extracted `replay_to` renders exactly what production's `Dag.tryReplayTo` renders — the state through the domain's own hash, a refusal by its case and the id it names — at every lane head, the base and the merged union head (whose closure is every node, so the drain's tie-break decides the order the ops are applied in) over two domains, plus a head the DAG does not hold, plus a hand-built cyclic closure and its acyclic control. The comparison can lose: a model handed a store that lost one node of the union head's closure disagrees with production. And the extracted `add_node` refuses and deduplicates exactly where production's `addNode` does. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#309",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/DagFold.fst",
+        "cases": [
+          "the extracted replay_to is production's tryReplayTo over every union, with a missing-head arm",
+          "a CYCLIC closure is refused as CyclicHistory by both — and the acyclic control replays",
+          "a model handed a store that LOST one closure node disagrees with tryReplayTo — the measurement can fail",
+          "the extracted add_node refuses a differing node and never replaces — beside Dag.append"
+        ]
+      }
+    },
+    {
+      "id": "chain-tamper-evident-iff-hash-distinguishes",
+      "level": "proved",
+      "claim": "The chain's tamper evidence stated with NO premise, which is the form a reader of the default hash needs: in a chain `verifyChain` accepted, change record `i`'s actor or op and leave its sequence, prev-link and stored hash alone, and `verifyChain` rejects the result IF AND ONLY IF `h(prev_i, env_i) <> h(prev_i, env'_i)` — the record hash distinguishes the original envelope from the tampered one under that record's predecessor. `chain-tamper-detected` is the injective-hash corollary; this is the iff it is a corollary of. Under `OpStream.defaultHash` — a 32-bit FNV-1a that `Conformance.hashFnAdversarialLaws` exhibits an in-budget collision for on exactly this pre-image shape — the tamper is hidden exactly at the collision and nowhere else; whether a host's own HashFn distinguishes the pre-images a store holds is what `Conformance.hashFnLaws`' op-tamper arm samples.",
+      "phase": "fuaran-core#309",
+      "evidence": {
+        "theorem": "chain_tamper_evident_iff_hash_distinguishes",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
       }
     }
   ]

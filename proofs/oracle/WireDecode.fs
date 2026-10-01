@@ -917,6 +917,32 @@ let rec fields_pointwise = (fun ( hs  :  Prims.list<(Prims.string * jval<'num, '
      false
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "str-field-reads-a-member"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (str_field "name" (JObj (((("name"), (JStr ("x"))))::[]))) (Ok ("x"))))})::({tname = "decode-node-a-text-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_node (JObj (((("kind"), (JStr ("text"))))::((("value"), (JStr ("hi"))))::[]))) (Ok (RText ("hi")))))})::({tname = "decode-node-an-unknown-kind"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_node (JObj (((("kind"), (JStr ("zzz"))))::[]))) (Error ("unknown kind: zzz"))))})::({tname = "read-erases-a-member-null"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (read EraseMemberNull (NObj (((("a"), (NNull)))::((("b"), (NBool (true))))::[]))) (Ok (JObj (((("b"), (JBool (true))))::[])))))})::[]
+
 
 
 

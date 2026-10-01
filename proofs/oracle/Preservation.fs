@@ -739,6 +739,35 @@ if (Prims.op_Equals h x) then begin
      end
      end))
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twin_tree : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("a", "sec", []))::[])
+
+
+let twins : Prims.list<twin> = ({tname = "can-apply-refuses-an-unknown-target"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (can_apply (TreeOps.RemoveNode ("zz")) twin_tree) (DagFold.Error (TreeOps.UnknownNode ("zz", ("root")::("a")::[])))))})::({tname = "can-apply-accepts-a-permutation"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (can_apply (TreeOps.ReorderChildren ("root", ("a")::[])) twin_tree) (DagFold.Ok (()))))})::({tname = "invert-of-an-insert-is-a-remove"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (invert_leaf (TreeOps.InsertChild ("root", TreeOps.TNode ("n", "p", []))) twin_tree) (DagFold.Ok (TreeOps.RemoveNode ("n")))))})::({tname = "a-batch-can-raise-its-members-rejection"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (raisable (TreeOps.Batch ((TreeOps.RemoveNode ("x"))::[])) TreeOps.CannotRemoveRoot) true))})::[]
+
 
 
 

@@ -267,6 +267,12 @@ $legArgs = @{
     HostProjectFile = 'tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj'
     HostFilters     = $hostFilters
     Runs            = $Runs
+    # Phase 309 — TWIN EVALUATION (the kit's step 2c): every extracted model ends with a `twins`
+    # list its own `assert_norm` evaluates, and the kit refuses one that declares none. The host
+    # half — the extracted closures run against the extracted oracle — is the "twin evaluation"
+    # cases of the Proofs.Oracle family above, and Proofs.Ladder holds that roster to this file's
+    # extracted set.
+    Twins           = $true
 }
 if ($Extract) { $legArgs.Extract = $true }
 if ($SkipOracleHost) { $legArgs.SkipOracleHost = $true }

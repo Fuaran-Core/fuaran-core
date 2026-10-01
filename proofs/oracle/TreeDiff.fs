@@ -623,6 +623,32 @@ let kind_before : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("
 
 let kind_after : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("x", "para", []))::[])
 
+type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
+
+
+let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tname
+     end))
+
+
+let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
+| {tname = tname; tholds = tholds} -> begin
+     tholds
+     end))
+
+
+let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<twin> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (t)::r -> begin
+     ((t.tholds ()) && (twins_hold r))
+     end))
+
+
+let twins : Prims.list<twin> = ({tname = "to-ops-inserts-then-reorders"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::(TreeOps.TNode ("b", "para", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::(TreeOps.ReorderChildren ("r", ("a")::("b")::[]))::[]))))})::({tname = "to-ops-refuses-a-root-id-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", [])) (TreeOps.TNode ("s", "doc", []))) (DagFold.Error (RootIdMismatch ("r", "s")))))})::({tname = "dup-id-names-the-repeat"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dup_id (TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x", []))::(TreeOps.TNode ("a", "y", []))::[]))) (FStar_Pervasives_Native.Some ("a"))))})::[]
+
 
 
 
