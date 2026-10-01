@@ -146,13 +146,14 @@ module internal StreamLaws =
     /// (`replayFrom` a compacted checkpoint equals `replay` from origin) and **verifyAcrossWith
     /// accepts an intact boundary** — the stream is built with `appendWith cfg` and the boundary
     /// verified with `verifyAcrossWith cfg`, so a domain on a legacy chain format certifies its own
-    /// snapshot path. `'State` needs equality.
+    /// snapshot path. `'State` needs equality. The pinned `cfg` sits last before `seed`, under the
+    /// kit's `…With` rule (Phase 330; it was first until then, and no forward keeps that order).
     let snapshotLawsWith
-        (cfg: StreamConfig)
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (stateEncode: 'State -> string)
         (hashFn: HashFn)
+        (cfg: StreamConfig)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -213,7 +214,7 @@ module internal StreamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        snapshotLawsWith OpStream.canonicalConfig sw gen stateEncode hashFn seed iterations
+        snapshotLawsWith sw gen stateEncode hashFn OpStream.canonicalConfig seed iterations
 
     /// Op-DAG laws (Phase 07): **verifyDag accepts an intact DAG**, **replayTo is
     /// deterministic** (the total topo order ⇒ the same head replays to the same state), and

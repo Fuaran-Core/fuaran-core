@@ -361,13 +361,18 @@ host in the same change-set — whatever the caller count in this repository say
 
 ## Witness-record field freeze (the 1.0 contract)
 
-The six public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
-`AiSurfaceWitness`, `ProjectionWitness`) are
+The twelve public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
+`AiSurfaceWitness`, `ProjectionWitness`, and since Phase 330 the six conformance-kit inputs
+`CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
+`KeyedWitness`, `EvaluatorWitness`) are
 **plain records**: adding a field is a compile-break for *every* adopter's construction site, with no
 gradual-migration path. At `1.0` their field sets **freeze**. (The freeze originally named only the
 four base records; `AiSurfaceWitness` and `ProjectionWitness` are equally public, equally
 adopter-constructed, and carry the same blast radius — an unpinned public witness is exactly the gap
-the freeze exists to close, so they are frozen on the same terms.) This is a safe commitment, not a
+the freeze exists to close, so they are frozen on the same terms. The six conformance-kit inputs
+joined at Phase 330 on the same argument: a domain builds each one by name, exactly as it builds a
+core witness, so a field added to one breaks every adopter that runs its family — and `KeyedWitness`
+is read by the apply path besides, since Phase 286.) This is a safe commitment, not a
 gamble: the adoption cycle exercised the surface across eight structurally-distinct domains — a
 prose/section tree, a heterogeneous spreadsheet model, a CAD feature tree, a belief-bearing world
 graph, the UI tree, a derived legal-drafting domain, a slide deck, and a music score — spanning both
@@ -391,17 +396,17 @@ is reserved for the case where a *frozen* witness is found fundamentally insuffi
 "a new layer wants more," which composition already covers. That is a major-version event and must be
 justified against why composition could not express it.
 
-**Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the six frozen records is a
+**Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the twelve frozen records is a
 review-blocking regression (the same class as introducing a concrete node type, per *The load-bearing
 invariant* above). The mechanical backstop is the law family **`Conformance.witnessSurfaceLaws`**
 (Phase 232), which this repository's suite runs on every gate: one law per frozen record, holding
 its field set — read by reflection from the compiled record — equal to the pinned list in
-`Conformance.frozenWitnessFields` **by name and in declaration order**, and a seventh law holding
+`Conformance.frozenWitnessFields` **by name and in declaration order**, and one more law holding
 that every public record named `…Witness` in the Fuaran.Core assemblies the kit references is
 either frozen there or declared outside the freeze, with its reason, in
-`Conformance.unfrozenWitnesses` (at this entry the conformance-kit inputs — `CapabilitySeamWitness`,
-`QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`, `KeyedWitness`,
-`EvaluatorWitness` — each constructed only to run the opt-in family that takes it). A field added,
+`Conformance.unfrozenWitnesses` (empty since Phase 330, which froze the six conformance-kit inputs
+Phase 232 had declared there; the list and the law that reads it stay, so a witness added before
+`1.0` is still classified by the commit that adds it). A field added,
 removed, renamed or reordered on a frozen record turns the gate red **by the record's name**, and
 regenerating the `api/` baseline does not turn it green. A domain can run the same family at its
 own pin bump to certify that the Core it compiled against carries the frozen shape.
@@ -3040,7 +3045,9 @@ kit's own fixtures defaults it to `OpStream.defaultHash`. Brought under it on th
 `snapshotLawsWith` (its `StreamConfig` is first), `concurrencyLawsWith` (its footprint projection is
 first) and `FoldConfluence.laneFoldLawsWith` (its `hashFn` sits mid-signature). An obsolete forward
 cannot carry an old parameter order under the name the rule assigns, so each is a reorder in place,
-breaking without a forward; they move together in one later change rather than one at a time. A
+breaking without a forward; they move together in one later change rather than one at a time (Phase
+330 made that change on this same draft — "The three remaining `…With` entries take the rule's
+order" below). A
 phase that adds a `…With` or `…At` family (Phase 249's `footprintLawsWith` is the next) follows the
 rule from its first commit.
 
@@ -3729,6 +3736,68 @@ type it missed.
 **The cut gate.** The run is in this slot's release record above: packed and run, and blocked at the
 host's membership check before its compile and value legs — the record names the host's list entry
 that blocks it. Nothing in it named a Core defect.
+
+**Rollback.** Pin `0.32.0`. Nothing persisted moves.
+
+### The three remaining `…With` entries take the rule's order, and the six conformance-kit witness records join the freeze (Phase 330, DECISIONS.md "the kit's last three `…With` entries are reordered with no forward, and the six kit witness records are frozen") — BREAKING (`removal` of the old parameter order); the freeze is a promise, no surface moves for it
+
+**What changed.**
+
+- **The pinned parameter sits last before `seed` in the three entries Phase 297 left out of the
+  naming rule.** Each is reordered in place, in its topic module and in its `Conformance` facade
+  forward. No forward keeps the old order — none can, under the same name — so a call in the old
+  order no longer compiles. Each pinned parameter's type differs from every parameter it changed
+  places with, so the compiler names every such call; none can compile in the wrong order.
+
+  | Entry | Was | Now |
+  |---|---|---|
+  | `Conformance.snapshotLawsWith` | `cfg sw gen stateEncode hashFn seed iterations` | `sw gen stateEncode hashFn cfg seed iterations` |
+  | `Conformance.concurrencyLawsWith` | `footprintOf nodew idw gen encode seed iterations` | `nodew idw gen encode footprintOf seed iterations` |
+  | `FoldConfluence.laneFoldLawsWith` | `w footprintOf hashFn hashState gen laneCount seed iterations` | `w footprintOf hashState gen laneCount hashFn seed iterations` |
+
+  The law text, the draw order, the roster ids and the guard labels are unchanged, so every
+  recorded seed reproduces its sample and the census rows of the three families do not move. The
+  bare forms (`snapshotLaws`, `concurrencyLaws`, `laneFoldLaws`) were never out of order and do not
+  move.
+- **`CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
+  `KeyedWitness` and `EvaluatorWitness` are frozen** with their fields as they stand, in declaration
+  order, appended to `Conformance.frozenWitnessFields` after the six core records.
+  `Conformance.unfrozenWitnesses` is now EMPTY; it stays, and the coverage law still reads it, so a
+  witness added before `1.0` is still classified by the commit that adds it. `witnessSurfaceLaws ()`
+  returns thirteen results where it returned seven: twelve field laws and the coverage law. The
+  freeze section above lists the twelve records.
+
+**Class.** The surface gate classes the three moved signatures `retype` (`api/Fuaran.Core.Conformance.txt`
+regenerated): the old parameter order is REMOVED, with nothing in its place, so it is read here as a
+removal. The draft is untagged and already breaking, so it rides it. The freeze moves no member: the
+six records keep every field, and `unfrozenWitnesses` keeps its type. What it changes is a promise —
+a field added to any of the six is now a red gate naming the record, and from `1.0` it is not
+available at all — and one verdict count: a consumer that asserts `witnessSurfaceLaws ()` returns
+seven results, or that reads a record out of `unfrozenWitnesses`, moves.
+`docs/conformance-families.{md,json}` are regenerated for that count.
+
+**Raise checklist — the test call sites a consumer meets at this raise.** Every one is a test or a
+census, not product code: the three entries are conformance families, run by a suite.
+
+- A dataframe consumer's conformance tests: any hand-written call of the three entries moves its
+  pinned argument to the last place before the seed.
+- A consumer's op-stream DAG law tests: `laneFoldLawsWith` with a host hash takes `hashFn` after
+  `laneCount`.
+- A consumer's persistence law tests: `snapshotLawsWith` with a legacy chain format takes its
+  `StreamConfig` after `hashFn`.
+- A consumer's own Core law tests that inject a footprint (the confluence teeth checks):
+  `concurrencyLawsWith` takes `footprintOf` after `encode`.
+- A consumer's conformance census that runs each roster entry by a hand-written call moves the same
+  lines; one that reads `Families` rows only is unaffected. A census that runs `witnessSurfaceLaws`
+  counts thirteen results.
+
+**Shown failing first.** With the six records added to the pin list and two of `KeyedWitness`'s
+fields swapped in its pin (`KeyedChildren` and `ReplaceKeyedChildren`), the suite went red by the
+record's name: `KeyedWitness declares [Surface; KeyedChildren; ReplaceKeyedChildren;
+PlaceKeyedChild; IdsUnique] where the freeze pins [Surface; ReplaceKeyedChildren; KeyedChildren;
+PlaceKeyedChild; IdsUnique] — added: none; removed: none (the same fields, reordered)`. The suite
+keeps the go-red: a decoy `KeyedWitness` with those two fields swapped fails its pin, and the real
+record passes it.
 
 **Rollback.** Pin `0.32.0`. Nothing persisted moves.
 

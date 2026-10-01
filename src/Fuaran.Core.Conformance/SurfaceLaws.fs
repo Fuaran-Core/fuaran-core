@@ -461,21 +461,23 @@ module internal SurfaceLaws =
 
     // ---- Phase 232 — the witness-record field freeze, held by a law --------------------------------
     //
-    // STABILITY.md's "Witness-record field freeze" names six public witness records whose field sets
-    // freeze at 1.0, and until this family nothing mechanical held them: the Phase 183 surface gate
-    // classes a field add as `record-widening` and refuses only an UNCLASSIFIED move, so a field add
-    // landed with its baseline regenerated passed the gate and the freeze rested on a reviewer.
+    // STABILITY.md's "Witness-record field freeze" names the public witness records whose field sets
+    // freeze at 1.0 (six at Phase 232, twelve since Phase 330), and until this family nothing
+    // mechanical held them: the Phase 183 surface gate classes a field add as `record-widening` and
+    // refuses only an UNCLASSIFIED move, so a field add landed with its baseline regenerated passed
+    // the gate and the freeze rested on a reviewer.
     //
     // The family takes NO witness. It reads the records the kit was compiled against by reflection
     // (`FSharpType.GetRecordFields`, in declaration order) and holds each to the pinned list below by
     // name and in order — so a domain that runs it certifies that the Core it compiled against
-    // carries the frozen shape, which is also the check a host wants at a pin bump. A seventh law
+    // carries the frozen shape, which is also the check a host wants at a pin bump. One more law
     // holds the pin list itself complete: every public record named `…Witness` in the Fuaran.Core
     // assemblies the kit references is either frozen here or declared outside the freeze, with the
     // reason, in `unfrozenWitnesses`. A new witness is therefore a CLASSIFICATION someone makes in
     // the commit that adds it, never one nobody noticed.
 
-    /// The six frozen witness records, each with the type the law reads and its pinned field list.
+    /// The twelve frozen witness records, each with the type the law reads and its pinned field list:
+    /// the six core records Phase 232 froze, then the six conformance-kit inputs Phase 330 brought in.
     /// The type arguments are placeholders — a record's field NAMES and ORDER do not depend on them.
     let private frozenWitnesses: (string * System.Type * string list) list =
         [ "IdWitness", typeof<IdWitness<obj>>, [ "ToString"; "OfString"; "Equals" ]
@@ -487,7 +489,19 @@ module internal SurfaceLaws =
           [ "ReadTools"; "OpKinds"; "KindOfOp"; "Patterns"; "Decide"; "Apply"; "Explain" ]
           "ProjectionWitness",
           typeof<ProjectionWitness<obj, obj, obj>>,
-          [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ] ]
+          [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
+          "CapabilitySeamWitness", typeof<CapabilitySeamWitness<obj>>, [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
+          "QuerySeamWitness", typeof<QuerySeamWitness>, [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
+          "CapabilityPipelineWitness", typeof<CapabilityPipelineWitness>, [ "PipelineRegistry"; "GenPipeline" ]
+          "ConstructWitness", typeof<ConstructWitness<obj>>, [ "Surface"; "Construct" ]
+          "KeyedWitness",
+          typeof<KeyedWitness<obj, obj>>,
+          [ "Surface"
+            "KeyedChildren"
+            "ReplaceKeyedChildren"
+            "PlaceKeyedChild"
+            "IdsUnique" ]
+          "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>, [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).
@@ -501,24 +515,18 @@ module internal SurfaceLaws =
         frozenWitnesses |> List.map (fun (name, _, fields) -> name, fields)
 
     /// The public records named `…Witness` that the freeze deliberately does NOT cover, each with
-    /// why (Phase 232). They are the conformance kit's own INPUTS: a domain constructs one only to
-    /// run the opt-in family that takes it, and each evolves with that family. Listing them is what
-    /// lets `witnessSurfaceLaws` hold every public witness to a classification; extending the freeze
-    /// to one of them is a decision recorded in STABILITY.md, made by moving it to
-    /// `frozenWitnessFields`.
-    let unfrozenWitnesses: (string * string) list =
-        [ "CapabilitySeamWitness",
-          "a conformance-kit input (Phase 246): constructed only to run `capabilityLawsWith`, and versioned with that family"
-          "QuerySeamWitness",
-          "a conformance-kit input (Phase 246): constructed only to run `queryLawsWith`, and versioned with that family"
-          "CapabilityPipelineWitness",
-          "a conformance-kit input (Phase 246): constructed only to run `capabilityPipelineLawsWith`, and versioned with that family"
-          "ConstructWitness",
-          "a conformance-kit input (Phase 126): constructed only to run `constructThenEncodeLaws`, and versioned with that family"
-          "KeyedWitness",
-          "a conformance-kit input (Phase 189) that the apply path also reads since Phase 286 (`Tree.traversal`, `Ops.applyContainedKeyed`); it is still being widened inside the 0.33.0 draft, so whether it joins the freeze is decided when that version is released, not by the commit that widens it"
-          "EvaluatorWitness",
-          "a conformance-kit input (Phase 211): constructed only to run the two `propagationEvaluatorLaws` families, and versioned with them" ]
+    /// why (Phase 232). Listing them is what lets `witnessSurfaceLaws` hold every public witness to a
+    /// classification; extending the freeze to one of them is a decision recorded in STABILITY.md,
+    /// made by moving it to `frozenWitnessFields`.
+    ///
+    /// **Empty since Phase 330.** The six conformance-kit inputs Phase 232 declared here
+    /// (`CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`,
+    /// `ConstructWitness`, `KeyedWitness`, `EvaluatorWitness`) were frozen with their fields as they
+    /// stood: a domain constructs each one by name exactly as it constructs a core witness, so a
+    /// field add breaks it the same way. The list stays, and the coverage law still reads it, so a
+    /// witness added before 1.0 can still be declared outside the freeze, with why, by the commit
+    /// that adds it.
+    let unfrozenWitnesses: (string * string) list = []
 
     /// A type's name without its generic arity suffix — the name a reader and STABILITY.md use.
     let private bareTypeName (t: System.Type) : string =
@@ -579,9 +587,9 @@ module internal SurfaceLaws =
 
         law.Result
 
-    /// The seventh law: every record in `records` whose name ends in `Witness` is classified —
-    /// frozen (`frozenWitnessFields`) or declared outside the freeze (`unfrozenWitnesses`) — and
-    /// every classified name is a record `records` actually holds. Both directions, so a new
+    /// The coverage law, the family's last: every record in `records` whose name ends in `Witness` is
+    /// classified — frozen (`frozenWitnessFields`) or declared outside the freeze
+    /// (`unfrozenWitnesses`) — and every classified name is a record `records` actually holds. Both directions, so a new
     /// witness cannot appear unfrozen AND a renamed or deleted one cannot leave a pin standing over
     /// nothing. A name in both lists is refused too: a witness is frozen or it is not.
     let witnessCoverageLaw (records: System.Type list) : LawResult =
@@ -647,15 +655,16 @@ module internal SurfaceLaws =
         found |> Seq.sortBy (fun t -> t.FullName) |> Seq.toList
 #endif
 
-    /// Phase 232 — the witness-record field freeze, as a law family. Seven laws on .NET: one per
-    /// frozen record (`witnessFieldsLaw` over `frozenWitnessFields`), and `witnessCoverageLaw` over
-    /// every public record in the Fuaran.Core assemblies the kit references. No witness and no seed:
+    /// Phase 232 — the witness-record field freeze, as a law family. Thirteen laws on .NET since
+    /// Phase 330: one per frozen record (`witnessFieldsLaw` over `frozenWitnessFields`, twelve), and
+    /// `witnessCoverageLaw` over every public record in the Fuaran.Core assemblies the kit
+    /// references. No witness and no seed:
     /// the family certifies the Core it was COMPILED AGAINST, so a domain runs it deliberately —
     /// typically at a pin bump — rather than through `certify`, which certifies a witness.
     ///
     /// Under Fable the coverage law is absent rather than reported green: a transpiled program has
     /// no assemblies to enumerate, and the completeness of the pin list is a property of this
-    /// repository's tree, which its own .NET gate holds. The six field laws run on both pipelines.
+    /// repository's tree, which its own .NET gate holds. The twelve field laws run on both pipelines.
     let witnessSurfaceLaws () : LawResult list =
         let fields =
             frozenWitnesses

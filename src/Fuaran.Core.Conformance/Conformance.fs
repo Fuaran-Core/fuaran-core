@@ -168,15 +168,15 @@ module Conformance =
 
     /// Forward — see `StreamLaws.snapshotLawsWith`.
     let snapshotLawsWith
-        (cfg: StreamConfig)
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (stateEncode: 'State -> string)
         (hashFn: HashFn)
+        (cfg: StreamConfig)
         (seed: int)
         (iterations: int)
         : LawResult list =
-        StreamLaws.snapshotLawsWith cfg sw gen stateEncode hashFn seed iterations
+        StreamLaws.snapshotLawsWith sw gen stateEncode hashFn cfg seed iterations
 
     /// Forward — see `StreamLaws.snapshotLaws`.
     let snapshotLaws
@@ -363,15 +363,15 @@ module Conformance =
 
     /// Forward — see `ConcurrencyLaws.concurrencyLawsWith`.
     let concurrencyLawsWith
-        (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
+        (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ConcurrencyLaws.concurrencyLawsWith footprintOf nodew idw gen encode seed iterations
+        ConcurrencyLaws.concurrencyLawsWith nodew idw gen encode footprintOf seed iterations
 
     /// Forward — see `ConcurrencyLaws.concurrencyLaws`.
     let concurrencyLaws

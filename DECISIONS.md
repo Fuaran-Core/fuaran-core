@@ -1,5 +1,45 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D89: the kit's last three `…With` entries are reordered with no forward, and the six kit witness records are frozen
+
+**Recorded by Phase 330. `Fuaran.Core.Conformance`; BREAKING, riding the `0.33.0` draft (STABILITY.md,
+"The three remaining `…With` entries take the rule's order").** Two pieces of this draft were left
+half-done by design, each with its decision deferred to a ruling. Both were ruled on 2026-10-01, before
+the release, so the draft carries them rather than a later breaking cut.
+
+*The naming rule, completed.* D78 stated the rule — `…With` is the same laws with a pinned parameter
+injected, last before `seed` — and recorded three entries it could not yet bring under it:
+`snapshotLawsWith` (its `StreamConfig` first), `concurrencyLawsWith` (its footprint projection first)
+and `FoldConfluence.laneFoldLawsWith` (its `hashFn` third). An obsolete forward cannot keep an old
+parameter order under the name the rule assigns, so the choices were to carry three exceptions into
+`0.34.0` and beyond, or to reorder in place with no forward. **Ruled: the old positions are removed
+outright.** The three are reordered in their modules and their facade forwards, and every call site in
+this repository moved with them. A breaking change on a draft that is already breaking costs an adopter
+one raise; three standing exceptions would cost every adopter, at every raise, the knowledge of which
+entries break the rule. Every pinned parameter's type differs from each parameter it changed places
+with, so no call in the old order compiles — the compiler names each one, which is what makes a move
+without a forward safe to take. This closes D78's "reordered together, in one breaking change".
+
+*The witness freeze, completed.* Phase 232 put the `1.0` field freeze behind `witnessSurfaceLaws` and
+declared six public records outside it, as conformance-kit inputs each versioned with the family that
+takes it: `CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
+`KeyedWitness`, `EvaluatorWitness`. **Ruled: they are in.** Each is built by name at an adopter's
+construction site exactly as a core witness is, so a field added to one breaks every adopter that runs
+its family — the blast radius the freeze exists for. They are frozen with their fields as they stand,
+in declaration order. `KeyedWitness` was held back for a second reason, recorded in D81: it was still
+being widened inside this draft. Phase 286, which widened it, has shipped, and the open phase planned
+to read it next (Phase 247, keyed ids in the footprint) adds to `Footprint`, not to the witness, so
+the release that settles its shape is this one. This closes D81's "Not decided here".
+
+`Conformance.unfrozenWitnesses` is left EMPTY rather than removed. The coverage law reads it unchanged,
+so the classification stays two-way before `1.0`: a witness added later is frozen or declared outside
+the freeze, with why, by the commit that adds it. Removing the list would have made "frozen" the only
+classification and turned a future kit input into a forced freeze — a decision this ruling did not
+take.
+
+*Shown failing first.* Frozen with two of `KeyedWitness`'s fields swapped in its pin, the suite went red
+naming the record and the reorder; the suite keeps a decoy with the same swap as a standing go-red.
+
 ## 2026-10-01 — D88: a pattern identifier that is not a case, and a rule that is never matched, are build errors
 
 **`Directory.Build.props`; `Fuaran.Core.Conformance`. A behaviour correction riding the `0.33.0` draft
@@ -687,7 +727,7 @@ what lets the proof transfer, first offender included.
 
 *Not decided here, and why.* Whether `KeyedWitness` joins the witness-record freeze (Phase 232): it is
 still being widened inside this draft, so the freeze decision belongs to the release that settles its
-shape; `SurfaceLaws.unfrozenWitnesses` says so. The footprint (`Ops.footprint`) still reads the
+shape; `SurfaceLaws.unfrozenWitnesses` says so. (Closed on this draft: frozen — see "the six kit witness records are frozen", newest first.) The footprint (`Ops.footprint`) still reads the
 structural surface; carrying keyed ids into it is Phase 247's.
 
 ## 2026-09-30 — D82: determinism is a SET of factors joined by union — the chain is declined, the journal is why, and a breaking change on the open draft is not a reason to keep the wrong answer
@@ -1036,6 +1076,7 @@ kit-policy form its name would now suggest: a name that changes meaning under a 
 one that disappears. Three `…With` entries whose pinned parameter is not last before `seed`
 (`snapshotLawsWith`, `concurrencyLawsWith`, `laneFoldLawsWith`) cannot take a forward under the name
 the rule gives them; they are reordered together, in one breaking change, rather than one at a time.
+(Closed on this draft: reordered with no forward — see "the kit's last three `…With` entries are reordered with no forward".)
 
 **Declined here, and why.** Widening `LawResult` to carry a passing guard's reached counts is a
 recorded open decision and is not taken by this phase: the runner makes it a one-module change

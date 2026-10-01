@@ -80,7 +80,7 @@ let concurrencyLawTests =
               let underApprox (_: SkeletonOp<RNode, string> list) = Ops.footprint nodew idw []
 
               let results =
-                  Conformance.concurrencyLawsWith underApprox nodew idw opGen encNode 8080 300
+                  Conformance.concurrencyLawsWith nodew idw opGen encNode underApprox 8080 300
 
               Expect.isTrue
                   (results |> List.exists (fun r -> not r.Passed))
@@ -109,7 +109,7 @@ let concurrencyLawTests =
                       UnknownParentWrites = Set.empty }
 
               let results =
-                  Conformance.concurrencyLawsWith noUnknownParent nodew idw opGen encNode 8080 300
+                  Conformance.concurrencyLawsWith nodew idw opGen encNode noUnknownParent 8080 300
 
               // The failing law is NAMED, not merely counted. `coverage` is a vacuity guard and
               // erasing an address set can only ever make MORE pairs independent, so a run that
@@ -141,7 +141,7 @@ let concurrencyLawTests =
                   Ops.footprint nodew idw (RemoveNode "phantom-clash" :: ops)
 
               let results =
-                  Conformance.concurrencyLawsWith allConflict nodew idw opGen encNode 8080 60
+                  Conformance.concurrencyLawsWith nodew idw opGen encNode allConflict 8080 60
 
               let byLaw (name: string) =
                   results |> List.find (fun r -> r.Law.Contains name)

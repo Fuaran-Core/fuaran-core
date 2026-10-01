@@ -113,7 +113,7 @@ let private runs =
            run
                "Conformance.concurrencyLawsWith"
                300
-               (Conformance.concurrencyLawsWith honestFootprint nodew idw ConformanceTests.opGen encNode 8080 300)
+               (Conformance.concurrencyLawsWith nodew idw ConformanceTests.opGen encNode honestFootprint 8080 300)
            run
                "Conformance.arbitrationLaws"
                300
@@ -154,11 +154,11 @@ let private runs =
                "Conformance.snapshotLawsWith"
                100
                (Conformance.snapshotLawsWith
-                   OpStream.canonicalConfig
                    ConformanceTests.sw
                    ConformanceTests.streamGen
                    string
                    OpStream.defaultHash
+                   OpStream.canonicalConfig
                    321
                    100)
            run
@@ -423,10 +423,10 @@ let private runs =
                (FoldConfluence.laneFoldLawsWith
                    FoldConfluenceTests.treeW
                    FoldConfluenceTests.treeFootprint
-                   OpStream.defaultHash
                    FoldConfluenceTests.treeHash
                    FoldConfluenceTests.treeLaneGen
                    3
+                   OpStream.defaultHash
                    1000
                    120)
 

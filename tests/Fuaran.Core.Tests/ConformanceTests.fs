@@ -2075,6 +2075,17 @@ type DecoyReorderedWitness =
 /// A public record named `…Witness` that nobody classified.
 type DecoyUnclassifiedWitness = { Anything: int }
 
+/// `KeyedWitness`'s five fields with two of them swapped — the go-red decoy for a record Phase 330
+/// brought into the freeze. Qualified access keeps its labels from capturing record inference for
+/// the real witness records built later in this file.
+[<RequireQualifiedAccess>]
+type DecoySwappedKeyedWitness =
+    { Surface: int
+      ReplaceKeyedChildren: int
+      KeyedChildren: int
+      PlaceKeyedChild: int
+      IdsUnique: int }
+
 /// Every public type in the Fuaran.Core assemblies this test project was built against — wider
 /// than the kit's own reference closure (it also holds the packages the kit does not reference),
 /// and excluding the test assemblies, whose decoys above are not shipped witnesses.
@@ -2114,12 +2125,12 @@ let witnessSurfaceLawTests =
               Expect.equal
                   (List.length results)
                   (List.length Conformance.frozenWitnessFields + 1)
-                  "six field laws and one coverage law"
+                  "one field law per frozen record and one coverage law"
 
               for record, _ in Conformance.frozenWitnessFields do
                   Expect.exists results (fun r -> r.Law.Contains("(" + record + ")")) (sprintf "no law names %s" record)
 
-          testCase "the pinned records are exactly the six STABILITY.md freezes, and STABILITY.md names the family"
+          testCase "the pinned records are exactly the ones STABILITY.md freezes, and STABILITY.md names the family"
           <| fun _ ->
               // `Snapshots` compiles after this file, so the repository root is found the same way
               // it finds it: the nearest ancestor holding the solution.
@@ -2191,6 +2202,40 @@ let witnessSurfaceLawTests =
 
               Expect.isFalse r.Passed "a reordered NodeWitness passed the freeze"
               Expect.stringContains (defaultArg r.Counterexample "") "reordered" "the counterexample says what moved"
+
+          testCase "go-red: a record Phase 330 froze fails with two of its fields swapped"
+          <| fun _ ->
+              let r =
+                  Conformance.witnessFieldsLaw "KeyedWitness" (pinnedOf "KeyedWitness") typeof<DecoySwappedKeyedWitness>
+
+              Expect.isFalse r.Passed "a KeyedWitness with two fields swapped passed the freeze"
+              Expect.stringContains r.Law "(KeyedWitness)" "the law names the record"
+              Expect.stringContains (defaultArg r.Counterexample "") "reordered" "the counterexample says what moved"
+
+              let control =
+                  Conformance.witnessFieldsLaw "KeyedWitness" (pinnedOf "KeyedWitness") typeof<KeyedWitness<obj, obj>>
+
+              Expect.isTrue control.Passed "the real KeyedWitness fails its own pin"
+
+          testCase "Phase 330: twelve records are frozen and none is declared outside the freeze"
+          <| fun _ ->
+              Expect.equal
+                  (Conformance.frozenWitnessFields |> List.map fst)
+                  [ "IdWitness"
+                    "NodeWitness"
+                    "StreamWitness"
+                    "ArtifactWitness"
+                    "AiSurfaceWitness"
+                    "ProjectionWitness"
+                    "CapabilitySeamWitness"
+                    "QuerySeamWitness"
+                    "CapabilityPipelineWitness"
+                    "ConstructWitness"
+                    "KeyedWitness"
+                    "EvaluatorWitness" ]
+                  "the frozen records, in pin order"
+
+              Expect.isEmpty Conformance.unfrozenWitnesses "a witness is declared outside the freeze again"
 
           testCase "go-red: a type that is not a record fails rather than reading as an empty field set"
           <| fun _ ->

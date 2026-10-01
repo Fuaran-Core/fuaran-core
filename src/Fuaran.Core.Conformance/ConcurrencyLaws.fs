@@ -593,12 +593,15 @@ module internal ConcurrencyLaws =
     /// *sufficient* for confluence, never *necessary* — a pair NOT declared independent is
     /// **skipped, not asserted** (a dependent pair may or may not commute; the law makes no claim
     /// about it). See STABILITY.md "Confluence / interleaving law".
+    ///
+    /// The injected `footprintOf` sits last before `seed`, under the kit's `…With` rule (Phase 330;
+    /// it was first until then, and no forward keeps that order).
     let concurrencyLawsWith
-        (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (gen: OpGen<'Node, 'Id>)
         (encode: 'Node -> string)
+        (footprintOf: SkeletonOp<'Node, 'Id> list -> Footprint)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -703,7 +706,7 @@ module internal ConcurrencyLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        concurrencyLawsWith (Ops.footprint nodew idw) nodew idw gen encode seed iterations
+        concurrencyLawsWith nodew idw gen encode (Ops.footprint nodew idw) seed iterations
 
     // ---- proposal arbitration (Phase 85) ----
     // The teeth on `Arbitration.arbitrate`: a deterministic, total partition of N op-script

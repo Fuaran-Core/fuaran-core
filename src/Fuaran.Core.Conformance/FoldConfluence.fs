@@ -334,13 +334,16 @@ module FoldConfluence =
     /// Every divergence is `shrinkLanes`-reduced before it is reported, and the counterexample
     /// carries the seed, the iteration, the shrunk lanes in the domain's own encoding, and each
     /// distinct outcome — a reproducer, not a symptom.
+    ///
+    /// The pinned `hashFn` sits last before `seed`, under the kit's `…With` rule (Phase 330; it sat
+    /// third until then, and no forward keeps that order).
     let laneFoldLawsWith
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (footprintOf: 'Op -> Footprint)
-        (hashFn: HashFn)
         (hashState: 'State -> string)
         (gen: LaneGen<'Op, 'State>)
         (laneCount: int)
+        (hashFn: HashFn)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -498,7 +501,7 @@ outcomes:
         (seed: int)
         (iterations: int)
         : LawResult list =
-        laneFoldLawsWith w footprintOf OpStream.defaultHash hashState gen laneCount seed iterations
+        laneFoldLawsWith w footprintOf hashState gen laneCount OpStream.defaultHash seed iterations
 
     /// The aggregate verdict, matching `Conformance.certify`'s shape: run the laws and report
     /// whether every one passed.

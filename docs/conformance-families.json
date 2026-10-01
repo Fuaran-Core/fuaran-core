@@ -826,7 +826,7 @@
       "optIn": true,
       "reason": "no-witness-to-certify",
       "discharges": [],
-      "cases": "7",
+      "cases": "13",
       "adequacy": "unconditional",
       "refusal": "none"
     },
