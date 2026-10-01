@@ -146,6 +146,14 @@ $ErrorActionPreference = 'Stop'
 #                rejection proved justified (maximal, NOT maximum), and the whole result proved
 #                invariant under arrival order for id-distinct input, with the witness that the
 #                hypothesis is needed. Opens DagFold and TreeOps, so it follows both.
+#   DecimalText — Phase 279, the EXACT DECIMAL's text arithmetic: `DecimalText.parts` / `render` /
+#                `tryCanonical` / `aligned` / `addMagnitudes` / `subMagnitudes` / `compare` / `add`
+#                clause for clause over a text read as its symbols, with one number proved to have
+#                one canonical text (D72 K3), the order proved total and equal to the numeric order,
+#                the sum proved to denote the sum and to be commutative, associative and canonical
+#                with zero its identity, and the accepted set proved to be exactly the grammar (D72
+#                K4). Self-contained: it opens nothing, so its position is free. Its integers extract
+#                to `Prims.int` / `Prims.nat` (`bigint`), which the oracle host bridges at the edge.
 #
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
@@ -156,7 +164,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

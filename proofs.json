@@ -2504,5 +2504,142 @@
         "assumption": "the temporal-text predicates, the reversal of three accumulator loops and the dropped error prose are as the model takes them"
       }
     }
+,
+    {
+      "id": "decimal-text-canonical-idempotent",
+      "level": "proved",
+      "claim": "`DecimalText.tryCanonical` is idempotent: a text it writes, it reads back to that same text. Proved through the two halves of the canonical form: every record `parts` returns is NORMAL (`parts_normal` — no leading zero on the integer digits, no trailing zero on the fraction, no sign on zero) and `parts (render p) == Some p` for every normal `p` (`render_parts` — the rendered text is in the grammar and both trims are the identity on it). `render` is therefore injective on normal records (`render_injective`): two canonical texts that agree are one record.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "canonical_idempotent",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-one-number-one-text",
+      "level": "proved",
+      "claim": "D72 K3, PROVED: two accepted texts denote one number if and only if their canonical forms are one text. The number a text denotes is the rational `numer / 10^scale`, carried as its numerator at a common scale (`denotes p m`, with `denotes_scale` saying the scale chosen reads nothing into it). The arithmetic core is `normal_injective`: a normal record is DETERMINED by its numerator at the common scale — equal numerators force equal signs, then equal scales (a fraction without a trailing zero is not a multiple of ten, `scaled_not_multiple`), then equal digit runs (`mag_eq_normal`, through the bound `mag fp < 10^scale` and the injectivity of a digit run's value at a fixed length). Everything a consumer does by string comparison on a decimal column — grouping, distinctness, the distinct token, the capture key, a join — rests on this sentence, and it now rests on a theorem.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "same_number_iff_canonical",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-zero-unique",
+      "level": "proved",
+      "claim": "Zero has exactly one canonical text, `\"0\"`: an accepted text whose numerator is zero canonicalises to `zero_text`, whatever sign, leading zeros, point or trailing zeros it was written with (`-0.00` included), and `zero_text` reads as the zero record (`zero_text_parts`). It is the no-sign-on-zero clause of D72 K3 stated on its own, because it is the one place the canonical form drops information a reader might think it keeps.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "zero_unique",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-order-is-the-numeric-order",
+      "level": "proved",
+      "claim": "`DecimalText.compare` answers the SIGN OF THE DIFFERENCE of the two numbers denoted, read at the common scale: `compare a b == Some (sign (denotes pa m - denotes pb m))` for every pair of accepted texts. Proved clause for clause: a sign that differs decides (a negative normal record is strictly negative, `numer_sign`); otherwise `aligned` writes each magnitude as the absolute value of its numerator at the common scale (`aligned_spec`) and the ordinal order of two equal-width digit strings is the order of the numbers they write (`lex_sign`, through the least-significant-first comparison `cmp_lsb_sign` and `lex_rev`). Canonical or not: `1.50` and `1.5` compare equal because they denote one number.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "compare_denotes",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-order-total",
+      "level": "proved",
+      "claim": "`compare` is a TOTAL ORDER on accepted texts that answers 0 exactly where the canonical forms are one text. Transitivity (`compare_transitive`) lifts three pairwise answers to a three-way common scale, where `scale_up` preserves strict order; antisymmetry (`compare_antisymmetric`) is the sign of the negated difference; and `compare_zero_iff_canonical` is `compare_denotes` joined to `same_number_iff_canonical`, so the equality `compare` reports is the string equality the column layer uses, and neither can disagree with the other.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "compare_transitive",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-sum-is-the-sum",
+      "level": "proved",
+      "claim": "THE SUM IS THE SUM. For every pair of accepted texts `add a b` is `Some` of the render of a normal record whose scale is at or below the common scale and whose numerator at that scale is the sum of the two numerators (`add_parts_denotes`, lifted to the texts by `add_denotes`). Proved clause for clause over production's arms: equal signs add the aligned magnitudes (`add_magnitudes_mag` — the digit-wise sum with its carry, `add_lsb_value`, writes the sum); differing signs subtract the smaller from the larger as `lex` orders them (`sub_magnitudes_mag` — the digit-wise difference with its borrow, `sub_lsb_value`, writes the difference and the borrow it discards is zero over `a >= b`) or write zero when they are equal; the `PadLeft(scale + 1)` and the split at the point move no digit's value; and the two trims change the numerator only by the scale they remove. Nothing is rounded and nothing overflows, which the model states by computing in unbounded integers.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "add_denotes",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-sum-canonical",
+      "level": "proved",
+      "claim": "`add` always answers canonical text: whatever its two inputs were written as, the sum is a text `isCanonical` accepts, because the record it renders is normal (the trims and the sign-on-zero clause are applied by the arm itself, and `render_parts` reads it back). It is the property that lets a `Sum` over a decimal column be a `Decimal` cell without a second canonicalisation.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "add_canonical",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-sum-commutative",
+      "level": "proved",
+      "claim": "`add a b == add b a` as TEXTS, over every pair (both `None` off the grammar). It follows from the sum theorem and from one number having one canonical text: the two sums are normal records with one numerator at one common scale, so `normal_injective` makes them one record and `render` one text. The algebraic laws are corollaries of the canonical form, which is the point of proving it rather than sampling it.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "add_commutative",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-sum-associative",
+      "level": "proved",
+      "claim": "Over three accepted texts `(a + b) + c` and `a + (b + c)` are one text: each inner sum is accepted (it is canonical), and both outer sums denote one number at the three-way common scale — `denotes_scale` lifts each pairwise sum to it and `scale_up_plus` distributes the lift over the sum — so `normal_injective_at` (the witness scale cancelled down by `scale_up_inj`) makes the two records one. A fold of `add` over a decimal column therefore sums the column whatever order it visits the cells in.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "add_associative",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-sum-zero-identity",
+      "level": "proved",
+      "claim": "`add a \"0\" == tryCanonical a` for every text: adding zero canonicalises and does nothing else. The zero record has numerator zero at every scale, so the sum denotes `a`'s own number at `a`'s own scale and `normal_injective_at` identifies it with `a`'s canonical record. With `zero_unique`, any text that denotes zero is the same identity.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "add_zero_identity",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-refusal-exact",
+      "level": "proved",
+      "claim": "D72 K4, PROVED: the accepted set is EXACTLY the grammar `-?[0-9]+(\\.[0-9]+)?`, stated as a recogniser over the symbols (`grammar`, through `intpart` and `frac`) that shares nothing with `parts`, and `parts` accepts a text if and only if the recogniser does (`parts_iff_grammar`, via `intpart_split`: the first-point split and the two digit-run checks are the regular expression). Each of `tryCanonical`, `compare` and `add` answers `None` exactly off it — `compare` and `add` exactly when either input is off it — so a leading `+`, a bare point, an exponent, a separator, white space, a second point, an empty text and a lone sign are refused by every function alike, and nothing else is.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "theorem": "refusal_exact",
+        "model": "proofs/DecimalText.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "decimal-text-differential",
+      "level": "tested",
+      "claim": "The extracted decimal-text model agrees with the shipped `DecimalText.tryCanonical`, `compare` and `add` over a generated pool: texts shaped to reach every clause (leading and trailing zeros to trim, a sign on zero to drop, bare and fractional forms, scales and widths that differ within a pair, magnitudes of twenty-five digits, and the refused forms D72 K4 names, one each) — the canonical form text for text, the order sign for sign, the sum text for text, and `None` on exactly the pairs the model refuses, with the pool asserted to reach the opposite-sign arm, the alignment and a cancellation to zero. The bridge is a .NET string read as the model's symbol classes and the model's symbols written back, and it is where the two host facts the model does not state enter: that `'0'..'9'` are the ten consecutive code units `int c - int '0'` reads, and that `string` on a digit writes the character `of_digits` stands for; `CompareOrdinal` over equal-width digit strings is the model's `lex`, and the sample is what holds it. Two go-reds, one per theorem family: a canonicaliser that keeps the written scale (K3 with one clause missing) and an ORDINAL comparator over canonical text both lose against the model on the same pools production does not lose on. A last case reads the theorems' statements at the shipped code — idempotence, zero as the identity under any spelling of zero, antisymmetry, 0 exactly where the canonical forms agree, the sum canonical and commutative — so a reader can see what each says without the model open; that case is a sample of the shipped seam, not the differential.",
+      "phase": "fuaran-core#279",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/DecimalText.fst",
+        "cases": [
+          "the decimal-text oracle agrees with DecimalText.tryCanonical, compare and add over a generated pool of texts and pairs",
+          "a decimal-text canonicaliser that keeps the written scale, or an ORDINAL comparator over canonical text, DISAGREES with the model — the measurement can fail",
+          "the theorems hold on the shipped DecimalText over the pool — idempotence, the order, the sum"
+        ]
+      }
+    }
   ]
 }
