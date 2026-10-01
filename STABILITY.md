@@ -2409,7 +2409,7 @@ the topic files share, and the cases that exercise the facade's `certify` rather
 the domains into topic files would have rewritten every file that names them, which is a different change
 from this one. No assertion changed.
 
-### The F\* target encodes the wire shape it declares, and the classifier's rules are one table (Phase 293) — ADDITIVE: one property added to `Diff`; two classifier verdicts and three documented rows change
+### The F\* target encodes the wire shape it declares, the classifier's rules are one table with `support.json` as an input, and `Codegen.fs` splits behind the `Gen` facade with one type emitter (Phase 293) — BREAKING (source) in `Diff`, inside the slot's standing class; `Gen`'s baseline moves by zero lines; `Gen.fsharpTypes`' OUTPUT changes
 
 **`Fuaran.Core.Idl.Codegen`. Class: `additive` on the baseline — `Diff.mappingTable : string` is
 the one public addition (the seventeen surface baselines read, one moved by that line). Three
@@ -2463,8 +2463,57 @@ key where it used to be a silent drop. The emitted header names the package vers
 regeneration moves that one comment line. The bare alias `defaultExpr` and the unused
 `reachesDeclared` / `bindNode` are gone; the F\* suffix-chain fold is linear.
 
-*Consumer edit.* None for a compiling consumer. A gate that pins a classifier verdict re-reads the
-three rows above; a regenerated proof model is a regenerated file.
+*The split (the phase's second task, landed after the first close-out).* `Codegen.fs` (4,761
+lines) is gone; the emitters are `internal` modules under `src/Fuaran.Core.Idl.Codegen/Emit/` —
+`Core` (the error channel's helpers, the one `Result` sequencer, naming and mangling, the
+msg-carrying analysis, the F# type spelling, the emitters' mirror of the support records, and the
+one name-to-declaration index with `findKind` / `findUnion` / `findEnum` / `findRecord`), `Reach`
+(the one reachability walk), `Annotations` (the single landing site for declared annotations, with
+the stated precedence: a declaration's comment is its category, then the SUPPORT doc block, then the
+AUTHORED annotation lines — `memberDocLines`), `FSharpTypes` (THE ONE TYPE EMITTER: `typeGroup`),
+`FSharpDefaults`, `FSharpCodec`, `JsonSchema`, `TypeScript`, `Scaffold` — and `Gen.fs` is a facade:
+the published `KindProjection` / `GenSupport` declared there, every entry point a one-line forward.
+`FStar.fs` consumes `Emit/Core.fs` (its three private finders are the shared ones). **The baseline
+`api/Fuaran.Core.Idl.Codegen.txt` moves by zero lines for the split** — every `Gen.*` line and both
+record types are byte-identical; the lines that do move are the classifier widening below.
+
+*`Gen.fsharpTypes`' OUTPUT changes — class `breaking` for a consumer that pins the emitted text, and
+it is the change one type emitter implies.* The old `fsharpTypes` was a second, older emitter: every
+enum, union and kind as its own `type` declaration, no `RequireQualifiedAccess`, no records, no
+`NodeKind` / `Node`, no wire-equality members. It is now the ONE emitter's projection with no
+declared support: the enums as `[<RequireQualifiedAccess>]` types, then unions, records, kind specs,
+`NodeKind` and `Node` as one `type … and …` recursion group (unions and `NodeKind`
+`RequireQualifiedAccess`, attributes inline after `and`), category comments on specs, and the Phase 252
+wire-equality members where a host-only field earns them — exactly what `fsharpModuleWith` renders
+inside the module, which is the point: there is no longer a declaration the two could render
+differently. A consumer compiling against the text gains declarations (`Node`, `NodeKind`, the
+records) and loses nothing; a golden that pinned the old text re-pins. The generated MODULES are
+byte-identical across the split (`MiniGenerated.fs`, `DocGenerated.fs`, `DocAnnotatedGenerated.fs`
+regenerate unchanged), and the repository's own type-leg pin now reads a member whichever keyword
+joins it.
+
+*`support.json` joins the classifier's inputs — the three widenings the operator accepted, each
+classed honestly.* (1) `Diff.Change` gains `SupportChanged of key * before: string option * after:
+string option` — **breaking for an exhaustive matcher** over the union (`FS0025`, an error under
+`TreatWarningsAsErrors`): the one case the published shape could not express, keyed `doc:<path>` /
+`splice:<slot>` / `refine:<Union.Tag>` / `projection:<Kind>` / `prelude`. (2) `Diff.Snapshot` gains
+`Support: Map<string, string>` — **breaking for a full record literal** (`FS0764`); a consumer that
+reads snapshots through `Diff.snapshot` / `parse` is unaffected and sees an empty map. (3) The
+`classify` command of `fuaran-core-idl` (the CLI package, outside this phase's declared files) takes
+`--support-before <support.json> --support-after <support.json>`, both or neither (one side alone is
+refused: a support document on one side is a diff against nothing) — additive. The new library doors
+are `snapshotWith`, `parseWith`, `classifyArtifactsWith`, `classifyDiffWith`, `runWith` and
+`runVerdictWith` (additive); the old doors delegate with no support and classify exactly as before.
+The verdict: every support move is `host-surface-only` on the wire (host-language source the generator
+splices, never a wire fact); a kind projection or the type splice is `full-literal-construction` on the
+F# axis (generated declarations move), everything else `no-generated-shape-change`. A projection or
+refine edit beside an unchanged vocabulary therefore classifies `host-surface` (exit 0) where it read
+`unchanged`, which is the row the phase was filed for. The slot's class is already `breaking (source)`,
+so the number does not move.
+
+*Consumer edit.* A full `Snapshot` literal names `Support`; an exhaustive `match` over `Change` gains a
+`SupportChanged` arm; a golden over `Gen.fsharpTypes` re-pins. A gate that pins a classifier verdict
+re-reads the three rows above; a regenerated proof model is a regenerated file.
 
 ### The `OpStream` module becomes a forwarding facade over the concern files (Phase 332) — ADDITIVE; no public surface moves
 

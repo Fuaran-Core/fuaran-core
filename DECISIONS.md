@@ -230,7 +230,7 @@ the one adoption cost — and it is taken deliberately: a stream the domain cann
 is a stream it cannot keep, and a base certification that is silent about it is the gap Phase 301
 was filed for.
 
-## 2026-10-01 — D96: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table; `Codegen.fs` splits behind a facade or not at all
+## 2026-10-01 — D96: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table and read `support.json`; `Codegen.fs` splits behind the `Gen` facade with one type emitter
 
 **Recorded by Phase 293. `Fuaran.Core.Idl.Codegen` (`FStarTarget`, `Diff`, `Gen`); rides the `0.34.0`
 draft (STABILITY.md, "The F\* target encodes the wire shape it declares").** Three decisions, each
@@ -267,25 +267,35 @@ fields without defaults. The context-free `consequences` cannot see a field's op
 that costs a rebuild rather than a surprise — and `classifyDiff` / `classifyArtifacts`, which hold
 the snapshots, decide exactly.
 
-*The `Codegen.fs` split is deferred WHOLE, under the facade rule it would ship under.* The split the
-phase names — `Emit/Core.fs`, `Emit/Reach.fs`, `Emit/Annotations.fs`, the F\# defaults / types /
-codec, JSON schema, TypeScript and scaffold files behind a one-line-forward `Gen` facade, with one
-type emitter and one monomorphising walk shared with the JSON schema and the F\* target — is a
-phase-sized refactor of a 4,600-line file whose byte-identical API baseline is the only thing that
-holds it honest, and it was not started here rather than landed half-way: a partial split is the
-debt the posture forbids, and "one type emitter" changes `fsharpTypes`' output, which consumers
-compare goldens against and which wants its own entry. The rule it ships under when it does: every
-public type and entry point stays declared in the facade (`Gen`) as a one-line forward, the `Emit.*`
-modules are `internal`, the baseline moves by zero lines, and `FStar.fs` consumes `Emit/Core.fs`
-rather than keeping a second `substType` / sequencer / mangler. The dead code the split would have
-swept is removed now (`reachesDeclared`, the ignored `bindNode`, the alias `defaultExpr`), the
-emitted header names the package version, and the suffix-chain fold is linear — so the split, when
-it comes, is motion and nothing else.
+*The `Codegen.fs` split ships WHOLE, under the facade rule — and the rule is what made it safe.*
+The phase closed once with the split deferred and the operator re-opened it to finish, with no
+successor: on a side whose posture forbids debt, a phase closes complete. The rule the split ships
+under: every published type and entry point stays declared in the facade (`Gen.fs` — `KindProjection`,
+`GenSupport`, and every function as a one-line forward), the emitters are `internal` modules under
+`Emit/` in dependency order (`Core`, `Reach`, `Annotations`, `FSharpTypes`, `FSharpDefaults`,
+`FSharpCodec`, `JsonSchema`, `TypeScript`, `Scaffold`), the baseline moves by ZERO lines for the split
+(it did — the only lines that moved are the classifier's widening), `FStar.fs` consumes `Emit/Core.fs`,
+and there is ONE type emitter: `FSharpTypes.typeGroup`, which the module renders and `Gen.fsharpTypes`
+projects with no declared support. The one consequence a consumer sees is `fsharpTypes`' text, recorded
+in STABILITY.md with its class. Two mechanics are worth writing down because the obvious alternatives
+fail: the published `GenSupport` / `KindProjection` cannot be declared in a module the emitters compile
+BEFORE (a module is declared once, and `Gen+GenSupport` is an IL name consumers construct), so the
+emitters take mirror records (`Core.Support` / `Core.Projection`) and the facade converts field for
+field; and the emitters' `private` markers were dropped wholesale because an `internal` module leaks
+nothing — except where the marker sat inside GENERATED source (`let private encFloat …` in a
+triple-quoted literal), which the generated-module drift guards caught on the first run and which is
+why those guards exist.
 
-*What was NOT done, and why it is named here.* `support.json` does not yet join the classifier's
-inputs: a projection or case-refine edit still classifies `unchanged`. Carrying it needs a `Change`
-case and a `Snapshot` member — both published shapes with a baseline of their own — and a flag on
-the `classify` command, which is a different package's surface; it is a successor's, not a residue.
+*`support.json` is a classifier INPUT, and the widening is recorded as what it is.* A `Change` case
+and a `Snapshot` member are published shapes; the operator accepted both and the CLI flag outside the
+phase's declared files as recorded widenings, and STABILITY.md classes each honestly (a closed union
+gaining a case is breaking for an exhaustive matcher; a record gaining a field is breaking for a full
+literal). The alternative — folding support into an existing case such as `FieldHostSurfaceChanged` —
+was rejected as a lie about what moved: a projection is not a field. Every support move is
+host-surface on the wire; a projection or the type splice is a construction break on the F# axis
+because they ARE generated declarations; a refine is the final expression of one decoder arm built
+from binders already read, so it moves no declaration.
+
 ## 2026-10-01 — D95: `idl.json` is untrusted input at every loading path, and the generator splices IDL-authored text only through one escaper with a policy per target
 
 **Recorded by Phase 292. `Fuaran.Core.Idl` (`Declare.errors`, `SourceLit`, `TypeParams`,

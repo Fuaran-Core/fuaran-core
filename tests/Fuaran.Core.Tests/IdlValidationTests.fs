@@ -427,7 +427,17 @@ let sourceLitTests =
 
               let offences =
                   [ for rel in
-                        [ "src/Fuaran.Core.Idl.Codegen/Codegen.fs"
+                        // Phase 293 — the emitters live under `Emit/` behind the `Gen.fs` facade.
+                        [ "src/Fuaran.Core.Idl.Codegen/Gen.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/Core.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/Reach.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/Annotations.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/FSharpTypes.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/FSharpDefaults.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/FSharpCodec.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/JsonSchema.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/TypeScript.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/Scaffold.fs"
                           "src/Fuaran.Core.Idl.Codegen/FStar.fs" ] do
                         let lines = File.ReadAllLines(Snapshots.repoFile rel)
 

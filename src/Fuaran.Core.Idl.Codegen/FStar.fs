@@ -1,6 +1,7 @@
 namespace Fuaran.Core.Idl
 
 open Fuaran.Core
+open Fuaran.Core.Idl.Emit.Core
 
 // ---------------------------------------------------------------------------
 // The F* PROOF-MODEL target (Phase 150) — the fourth backend of `Fuaran.Core.Idl.Codegen`,
@@ -327,14 +328,8 @@ module FStarTarget =
         | KeyOrder.Sorted -> ms |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
         | KeyOrder.Declared -> ms
 
-    let private findRecord (idl: Idl) n =
-        idl.Records |> List.tryFind (fun r -> r.Name = n)
-
-    let private findUnion (idl: Idl) n =
-        idl.Unions |> List.tryFind (fun u -> u.Name = n)
-
-    let private findEnum (idl: Idl) n =
-        idl.Enums |> List.tryFind (fun e -> e.Name = n)
+    // Phase 293 — the finders are `Emit.Core`'s (`findRecord` / `findUnion` / `findEnum`): one
+    // spelling of a name lookup across every backend.
 
     /// The declared default of an omit-default member, as an F* literal — the admissible set
     /// is deliberately narrower than the F# backend's, because the model's `num` and `flt` are
