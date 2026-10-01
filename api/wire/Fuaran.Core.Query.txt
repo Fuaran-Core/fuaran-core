@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.32.0: breaking
+# class since v0.33.0: additive
 doc	deferredQueryResult	sha256:d4153f11108020d1acee7de988d8e650af3b1adb12bc2f29588d75a23cde3f45	{"$type":"pending"}
 doc	deferredQueryResult / Cell.Bool	sha256:4e6cf78d0b09adc2c21d445845433d73836bf9f622212bf75c903f5d088c1c3f	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":[true]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}}
 doc	deferredQueryResult / Cell.Date	sha256:e88b4dca77ad37b9ceb74711065ec1f5aaed7bab6a97b0810c50860a7d861e4a	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}}
@@ -49,6 +49,23 @@ doc	query / HostEffect.ReadsHost	sha256:646138ba11db1379cb8f7777291779e11db2363c
 doc	query / HostEffect.WritesHost	sha256:02916c789a228ed74db13b756870bea218e4194be46d38f8d9b605e92478f276	{"$type":"query","effect":{"determinism":"clock","host":"writesHost"},"id":"s","pageSize":1,"params":[{"name":"s","required":true,"type":"int"}],"resultSchema":[{"name":"s","type":"int"}],"source":{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]},"timeoutMs":1}
 doc	query / Set<DeterminismFactor>.empty	sha256:e8673adcd729ca913ee0fb33c22772513e88f5f6e930844218325d5b2a1b1c84	{"$type":"query","effect":{"determinism":"deterministic","host":"pure"},"id":"s","pageSize":1,"params":[{"name":"s","required":true,"type":"int"}],"resultSchema":[{"name":"s","type":"int"}],"source":{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]},"timeoutMs":1}
 doc	query / Set<DeterminismFactor>.two	sha256:5ea280a0b2ec67d3fd72968a60111a4fda86f279e82aa82542773e7d182bc718	{"$type":"query","effect":{"determinism":"clock+random","host":"pure"},"id":"s","pageSize":1,"params":[{"name":"s","required":true,"type":"int"}],"resultSchema":[{"name":"s","type":"int"}],"source":{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]},"timeoutMs":1}
+doc	queryError	sha256:a9f5bd643eaf4ed46a92a4c8f1c5ab0eab2d058b9afa13ab06ad10cac67e6044	{"$type":"noSuchQuery","id":"s","known":["s"]}
+doc	queryError / ColumnType.BoolType	sha256:da9bf9bd959c2b85df65ab63c2b3a6f9ff10b7657e559784fb23fd726f1d3926	{"$type":"paramTypeMismatch","expected":"bool","got":"bool","name":"s"}
+doc	queryError / ColumnType.DateType	sha256:46dc28a4af289c28ad3d56c978b27f6428aa31dc21fefc46a7ce117682e26311	{"$type":"paramTypeMismatch","expected":"date","got":"date","name":"s"}
+doc	queryError / ColumnType.DecimalType	sha256:2eb1a2034d397a5bc86d3b7197038d1c6d14a1b65ac9a5068afe383d63a50840	{"$type":"paramTypeMismatch","expected":"decimal","got":"decimal","name":"s"}
+doc	queryError / ColumnType.FloatType	sha256:1f4d415f97235511d3c2aef5e2c482f6f6f5e6e9bbe38b49102d67dce59cc420	{"$type":"paramTypeMismatch","expected":"float","got":"float","name":"s"}
+doc	queryError / ColumnType.IntType	sha256:40756df6eaad9030851c5f60d6e6432c7f59c59527fc41d65b52242b1de84908	{"$type":"paramTypeMismatch","expected":"int","got":"int","name":"s"}
+doc	queryError / ColumnType.StringType	sha256:26e2203a78a9f0fa58d5b467ab2214758c6e890c7275a7c3ad11aa1018a8ebfd	{"$type":"paramTypeMismatch","expected":"string","got":"string","name":"s"}
+doc	queryError / ColumnType.TimestampType	sha256:ca810cdd9bdb927b4a4b425033ce3c851b504ce0d7d964d4171c1e52cda3fd14	{"$type":"paramTypeMismatch","expected":"timestamp","got":"timestamp","name":"s"}
+doc	queryError / QueryError.DuplicateQuery	sha256:cf8b2ee63e8d110f1c6698095030cf72c45d2196a886d9bf8373d43abc4af0e7	{"$type":"duplicateQuery","id":"s"}
+doc	queryError / QueryError.ExecutionFailed	sha256:281c004c43f5bd70f55bee4fd2b3f2b533ba894ad2455a044a48b1e7c19b8dc7	{"$type":"executionFailed","detail":"s","recoverable":["s"]}
+doc	queryError / QueryError.NoSuchQuery	sha256:a9f5bd643eaf4ed46a92a4c8f1c5ab0eab2d058b9afa13ab06ad10cac67e6044	{"$type":"noSuchQuery","id":"s","known":["s"]}
+doc	queryError / QueryError.ParamTypeMismatch	sha256:40756df6eaad9030851c5f60d6e6432c7f59c59527fc41d65b52242b1de84908	{"$type":"paramTypeMismatch","expected":"int","got":"int","name":"s"}
+doc	queryError / QueryError.RequiredParamsNull	sha256:76ad5f5445e4f43c4d7830b1f625e0804224bdca8da21ed699abdc26c795379e	{"$type":"requiredParamsNull","names":["s"]}
+doc	queryError / QueryError.RequiredParamsUnbound	sha256:9a2fefc533a2dda5897725b59d0e5299e97067ef3da835498dd2aa1d7a0cafc8	{"$type":"requiredParamsUnbound","names":["s"]}
+doc	queryError / QueryError.SourceNotResolved	sha256:5088411cc913767be0d292d368cf38c536db37c279299380d91a111e8c5ad13c	{"$type":"sourceNotResolved","ref":"s"}
+doc	queryError / QueryError.Timeout	sha256:f7384321e83a7d9fab64d2d4eac32a21fc6b604c888ab7ba25fdeaf50427925a	{"$type":"timeout"}
+doc	queryError / QueryError.UnknownParam	sha256:1600c37b0d25e2c576f07f3dac417cd86ea355141c1a24a1fc4c88af63e9e2a6	{"$type":"unknownParam","declared":["s"],"name":"s"}
 doc	queryResult	sha256:56b917c3066d84b137b49911b0064be0aca8f00d2c8ca7674354cb0d36cefee5	{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}
 doc	queryResult / Cell.Bool	sha256:dc47c87de594df0a2415fc28111114fa9612bb62bf2aefcb158a3110579282da	{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":[true]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}
 doc	queryResult / Cell.Date	sha256:de84ab59fb260d9f9e04855126f42812176c049f3dc69f288fe8f2ff35092b2d	{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}

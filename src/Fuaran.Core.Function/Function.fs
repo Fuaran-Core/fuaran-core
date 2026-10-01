@@ -196,6 +196,25 @@ module Space =
         | SlotTree _ -> false
         | _ -> true
 
+    /// Values in single quotes, comma-separated — how a refusal names a closed set.
+    let internal quoteAll (xs: string list) : string =
+        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
+
+    /// A value space in words, for a model to read (Phase 251): what a value must be to lie in the
+    /// space, phrased so the sentence `InvokeError.describe` builds around it says what WOULD be
+    /// accepted. An `Enum` names its members (the name-the-alternatives rule); a float bound is
+    /// written in the canonical float layout, so the sentence is the same on every host.
+    let describe (space: ValueSpace) : string =
+        match space with
+        | IntRange(lo, hi) -> "an integer from " + string lo + " to " + string hi
+        | FloatRange(lo, hi) -> "a number from " + Canon.canonicalFloat lo + " to " + Canon.canonicalFloat hi
+        | StringLen(lo, hi) -> "a string of " + string lo + " to " + string hi + " characters"
+        | Enum [] -> "a member of an empty set, so no value is accepted"
+        | Enum xs -> "one of " + quoteAll xs
+        | AnyString -> "any string"
+        | SlotTree None -> "a tree: a JSON object with a \"kind\""
+        | SlotTree(Some k) -> "a tree of kind '" + k + "': a JSON object whose \"kind\" is '" + k + "'"
+
 /// The hole flavours. The first three are the *data* axis — a typed value, a tree-typed
 /// slot (higher-order), and a bounded repeat (the only iteration the total language permits)
 /// — bound by `apply` / `curry` / `compose` with an `Arg<'Node>`. `ActionHole` is the
@@ -690,6 +709,23 @@ module Function =
         else
             Error(declared, actual)
 
+    // ---- THE TAG CONVENTION (Phase 251) ----
+    // Three JSON spellings leave this package and its `Query` sibling, one per kind of artefact,
+    // and the choice is by artefact, never by taste:
+    //
+    //   * A WIRE DOCUMENT — something a codec encodes and decodes back (`CapabilityCodec`,
+    //     `QueryCodec`, `CapabilityPipeline.encode`: declarations, invocations, the `Deferred`
+    //     envelope, the typed refusals) — is discriminated by `"$type"` (`Canon.typed`), the
+    //     DU-position convention: `"$type"` sorts first under `Canon.render`, and a reader dispatches
+    //     on it.
+    //   * A DESCRIPTOR in the substrate's own vocabulary that is read and never decoded back —
+    //     `toSchema` below — is tagged by `"kind"` (`Json.kindObj`), the convention of every
+    //     domain node and op on the tree wire, which is what such a descriptor is read beside.
+    //   * A STANDARD JSON SCHEMA for a model — `Function.toJsonSchema`, `Query.toJsonSchema` — carries
+    //     no tag at all: it is JSON Schema, so it says `"type": "object"`, and everything the
+    //     standard has no keyword for (the effect class, action holes, a query's result row) rides
+    //     under an `x-` key OUTSIDE `properties`, so it never reads as an argument to fill.
+
     // ---- signature → JSON tool-schema projection (Phase 247) ----
 
     let private spaceToJson (s: ValueSpace) : JVal =
@@ -1012,6 +1048,57 @@ type InvokeError =
     | UninvocableArg of addr: string
     | BodyFailed of reason: string
 
+/// What a model reads when an invocation is refused (Phase 251). The union names the failure and
+/// carries the alternatives in its fields; `describe` turns a case into one plain sentence that
+/// keeps both — every case that refuses against a closed set (`NoSuchCapability`, `UnknownArg`,
+/// `ArgOutOfSpace`, `RequiredArgsUnbound`) names the members of that set, so the next attempt has
+/// something to aim at. The wire form of the same value is `CapabilityCodec.invokeErrorJson`.
+module InvokeError =
+
+    /// One sentence a model can act on, naming the failure and what would be accepted.
+    let describe (e: InvokeError) : string =
+        match e with
+        | NoSuchCapability(id, []) ->
+            "Refused: there is no tool '"
+            + id
+            + "' you may call. There are no tools you may call."
+        | NoSuchCapability(id, known) ->
+            "Refused: there is no tool '"
+            + id
+            + "' you may call. The tools you may call are "
+            + Space.quoteAll known
+            + "."
+        | DuplicateCapability id -> "Refused: the tool '" + id + "' is registered twice."
+        | UnknownArg(addr, []) ->
+            "Refused: '"
+            + addr
+            + "' is not an argument of this tool. It takes no arguments."
+        | UnknownArg(addr, declared) ->
+            "Refused: '"
+            + addr
+            + "' is not an argument of this tool. Its arguments are "
+            + Space.quoteAll declared
+            + "."
+        | ArgOutOfSpace(addr, space, got) ->
+            "Refused: argument '"
+            + addr
+            + "' must be "
+            + Space.describe space
+            + "; you sent '"
+            + got
+            + "'."
+        | RequiredArgsUnbound addrs -> "Refused: required arguments missing: " + Space.quoteAll addrs + "."
+        | UninvocableArg addr ->
+            "Refused: argument '"
+            + addr
+            + "' cannot take the value sent. A tree argument takes a JSON object with a \"kind\"; an action is bound by the host and never by a caller."
+        | BodyFailed reason -> "Refused: the tool ran and failed: " + reason + "."
+
+    /// Every refusal, one sentence per line, in the order given — the reading of
+    /// `Capability.validateArgsAll`'s answer, so a call with two bad arguments is answered once.
+    let describeAll (es: InvokeError list) : string =
+        es |> List.map describe |> String.concat "\n"
+
 /// A domain-general async-result envelope for a capability invocation (Phase 32) — the Compute Layer
 /// spec's `Deferred<'T> = Pending | Ready of 'T | Error of e` (§4), put in the SUBSTRATE so every host
 /// (Mail network-send, Legal LLM-extraction, CAD server mesh-ops — none of which may depend on
@@ -1054,6 +1141,18 @@ module Deferred =
         match d with
         | Ready v -> Some v
         | _ -> None
+
+/// A validated argument, TYPED by the value space it was checked against (Phase 251) — what
+/// `Capability.invokeWithArgs` hands a body, so the body reads the value `validateArgs` already
+/// accepted instead of parsing the string again. `IntRange` arguments arrive as `IntValue`,
+/// `FloatRange` as `FloatValue`, `StringLen` / `Enum` / `AnyString` as `TextValue`, and a
+/// `SlotTree` argument as `TreeValue`, the parsed wire document (decoding it into the domain's node
+/// stays the host's, per the witness pattern).
+type ArgValue =
+    | IntValue of int
+    | FloatValue of float
+    | TextValue of string
+    | TreeValue of JVal
 
 /// The invocable-capability surface: the typed registry (populate + enumerate + dispatch), the
 /// arg-validation contract, the Phase 27 capture keying, and the wire codec. Additive over the
@@ -1161,6 +1260,113 @@ module Capability =
             | Pending -> Ok Pending
             | Failed m -> Error(BodyFailed m))
 
+    // ---- every refusal at once, and the validated arguments handed on (Phase 251) ----
+
+    /// The refusal one argument earns on its own, by the rules `validateArgs` applies to it.
+    let private argFault (c: Capability) (declared: string list) (addr: string, value: string) : InvokeError option =
+        match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = addr) with
+        | None -> Some(UnknownArg(addr, declared))
+        | Some h ->
+            match h.Space with
+            | None -> Some(UninvocableArg addr)
+            | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Some(UninvocableArg addr)
+            | Some space ->
+                if Space.validate space value then
+                    None
+                else
+                    Some(ArgOutOfSpace(addr, space, value))
+
+    /// Validate as `validateArgs` does, but answer with EVERY refusal rather than the first: one
+    /// per refused argument, in argument order, then `RequiredArgsUnbound` naming every required
+    /// hole left out. So a call with two bad arguments is refused naming both, and a model needs one
+    /// round trip, not two. The first-failure form is kept, and the two agree by construction of
+    /// their order: the head of this list is exactly `validateArgs`'s refusal, and `Ok ()` here is
+    /// `Ok ()` there.
+    let validateArgsAll (c: Capability) (args: (string * string) list) : Result<unit, InvokeError list> =
+        let holes = c.Signature.Holes
+        let declared = holes |> List.map (fun h -> h.Addr)
+        let argMap = Map.ofList args
+        let faults = args |> List.choose (argFault c declared)
+
+        let unbound =
+            holes
+            |> List.filter (fun h -> h.Required && not (Map.containsKey h.Addr argMap))
+            |> List.map (fun h -> h.Addr)
+
+        let all =
+            if List.isEmpty unbound then
+                faults
+            else
+                faults @ [ RequiredArgsUnbound unbound ]
+
+        if List.isEmpty all then Ok() else Error all
+
+    /// One argument as the value its space admits, or `None` where the string is not in it.
+    let private typedValue (space: ValueSpace option) (value: string) : ArgValue option =
+        match space with
+        | Some(IntRange _) ->
+            match System.Int32.TryParse value with
+            | true, v -> Some(IntValue v)
+            | _ -> None
+        | Some(FloatRange _) ->
+            match
+                System.Double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+            with
+            | true, v -> Some(FloatValue v)
+            | _ -> None
+        | Some(StringLen _)
+        | Some(Enum _)
+        | Some AnyString -> Some(TextValue value)
+        | Some(SlotTree _) ->
+            match Json.parse value with
+            | Ok el -> Some(TreeValue el)
+            | Error _ -> None
+        | None -> None
+
+    /// Validate `args` (`validateArgs`), then type each one by the space it was checked against —
+    /// the list `invokeWithArgs` hands a body, in argument order. The parses are the ones
+    /// `Space.validate` made, so an argument that validated always types; were one ever not to, it
+    /// is refused as `ArgOutOfSpace` rather than handed on untyped.
+    let typeArgs (c: Capability) (args: (string * string) list) : Result<(string * ArgValue) list, InvokeError> =
+        validateArgs c args
+        |> Result.bind (fun () ->
+            let rec go (acc: (string * ArgValue) list) =
+                function
+                | [] -> Ok(List.rev acc)
+                | (addr, value) :: rest ->
+                    let space =
+                        c.Signature.Holes
+                        |> List.tryPick (fun h -> if h.Addr = addr then h.Space else None)
+
+                    match typedValue space value with
+                    | Some v -> go ((addr, v) :: acc) rest
+                    | None ->
+                        match space with
+                        | Some sp -> Error(ArgOutOfSpace(addr, sp, value))
+                        | None -> Error(UninvocableArg addr)
+
+            go [] args)
+
+    /// `invoke`, with the body handed the validated arguments, typed (`typeArgs`) — so the body
+    /// reads the values validation accepted instead of closing over the caller's list and parsing it
+    /// again, and the list it reads is the list that was checked. Additive beside `invoke`; the same
+    /// three outcomes, and a body's `Failed m` is projected into `BodyFailed m` exactly as there.
+    let invokeWithArgs
+        (c: Capability)
+        (args: (string * string) list)
+        (body: (string * ArgValue) list -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
+        typeArgs c args
+        |> Result.bind (fun typed ->
+            match body typed with
+            | Ready v -> Ok(Ready v)
+            | Pending -> Ok Pending
+            | Failed m -> Error(BodyFailed m))
+
 /// A typed capability registry — the discovery surface an agent enumerates (the compute analogue of
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
 /// dispatch — only a registered id resolves.
@@ -1200,6 +1406,28 @@ module Registry =
         match Map.tryFind id r.Capabilities with
         | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
         | Some c -> Capability.invoke c args (body c)
+
+    /// `dispatch`, with the body handed the resolved capability and the validated arguments, typed
+    /// (`Capability.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny the same.
+    let dispatchWithArgs
+        (r: CapabilityRegistry)
+        (id: string)
+        (args: (string * string) list)
+        (body: Capability -> (string * ArgValue) list -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
+        match Map.tryFind id r.Capabilities with
+        | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
+        | Some c -> Capability.invokeWithArgs c args (body c)
+
+/// How a seam codec treats a member it does not know (Phase 251). `Lenient` — the default, and
+/// what every decoder without a policy argument does — ignores it, so a reader tolerates a writer
+/// one version ahead. `Strict` refuses it, naming the member and the members that WOULD be read:
+/// for input from a model, an ignored member is a claim that silently went unread (an `"actor"`
+/// beside an invocation, say), and the refusal is what tells the model so.
+[<RequireQualifiedAccess>]
+type ReadPolicy =
+    | Lenient
+    | Strict
 
 /// The canonical wire codec for a `Capability` declaration + a typed invocation record. Round-trips
 /// the full `Signature` (so an enumerated capability re-serialises identically), the determinism
@@ -1502,6 +1730,198 @@ module CapabilityCodec =
 
     let decodeDeferred (decodeT: JVal -> Result<'T, string>) (s: string) : Result<Deferred<'T>, string> =
         Decode.parse s |> Result.bind (deferredOf decodeT)
+
+    // ---- typed refusal (Phase 251) ----
+    // The refusal crosses the wire like every other seam type, under the same `$type` envelope
+    // (one case, one tag; the case name in camelCase). A value space travels in its codec form, so
+    // the document decodes back to the same `InvokeError`. The sentence a model reads is
+    // `InvokeError.describe`; this is the structured form beside it.
+
+    let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
+
+    /// Encode an `InvokeError` to a `JVal` (`"$type"` is the case: `noSuchCapability`, `argOutOfSpace`, …).
+    let invokeErrorJson (e: InvokeError) : JVal =
+        match e with
+        | NoSuchCapability(id, known) -> Canon.typed "noSuchCapability" [ "id", JStr id; "known", strs known ]
+        | DuplicateCapability id -> Canon.typed "duplicateCapability" [ "id", JStr id ]
+        | UnknownArg(addr, declared) -> Canon.typed "unknownArg" [ "addr", JStr addr; "declared", strs declared ]
+        | ArgOutOfSpace(addr, space, got) ->
+            Canon.typed "argOutOfSpace" [ "addr", JStr addr; "space", spaceJson space; "got", JStr got ]
+        | RequiredArgsUnbound addrs -> Canon.typed "requiredArgsUnbound" [ "addrs", strs addrs ]
+        | UninvocableArg addr -> Canon.typed "uninvocableArg" [ "addr", JStr addr ]
+        | BodyFailed reason -> Canon.typed "bodyFailed" [ "reason", JStr reason ]
+
+    let encodeInvokeError (e: InvokeError) : string = Canon.render (invokeErrorJson e)
+
+    /// Decode an `InvokeError` from a `JVal` — `Result`-typed with a named error.
+    let invokeErrorOf (el: JVal) : Result<InvokeError, string> =
+        let strList (name: string) =
+            Decode.getProp name el |> Result.bind (Decode.mapList Decode.asString)
+
+        Decode.strField "$type" el
+        |> Result.bind (fun k ->
+            match k with
+            | "noSuchCapability" ->
+                Decode.strField "id" el
+                |> Result.bind (fun id -> strList "known" |> Result.map (fun known -> NoSuchCapability(id, known)))
+            | "duplicateCapability" -> Decode.strField "id" el |> Result.map DuplicateCapability
+            | "unknownArg" ->
+                Decode.strField "addr" el
+                |> Result.bind (fun addr -> strList "declared" |> Result.map (fun d -> UnknownArg(addr, d)))
+            | "argOutOfSpace" ->
+                Decode.strField "addr" el
+                |> Result.bind (fun addr ->
+                    Decode.getProp "space" el
+                    |> Result.bind spaceOf
+                    |> Result.bind (fun sp ->
+                        Decode.strField "got" el |> Result.map (fun got -> ArgOutOfSpace(addr, sp, got))))
+            | "requiredArgsUnbound" -> strList "addrs" |> Result.map RequiredArgsUnbound
+            | "uninvocableArg" -> Decode.strField "addr" el |> Result.map UninvocableArg
+            | "bodyFailed" -> Decode.strField "reason" el |> Result.map BodyFailed
+            | other -> Error("unknown invoke error: " + other))
+
+    let decodeInvokeError (s: string) : Result<InvokeError, string> =
+        Decode.parse s |> Result.bind invokeErrorOf
+
+    // ---- strict read policy (Phase 251) ----
+    // `Strict` is a members check over the document BEFORE the ordinary decoder runs: every object
+    // this codec reads may carry only the members this codec reads from it. The decoders above are
+    // untouched, so `Lenient` is byte-for-byte the old behaviour. A shape fault (a string where an
+    // object belongs) is left to the decoder to name; the check only ever adds the unknown-member
+    // refusal. A `ready` envelope's payload is the caller's `decodeT`'s to read, so its members are
+    // the caller's to police.
+
+    let private tagOf (el: JVal) : string option =
+        match el with
+        | JObj fields ->
+            fields
+            |> List.tryPick (fun (k, v) ->
+                match k, v with
+                | "$type", JStr t -> Some t
+                | _ -> None)
+        | _ -> None
+
+    /// The first member of `el` outside `known`, as a refusal naming it and the members read.
+    let private members (where: string) (known: string list) (el: JVal) : Result<unit, string> =
+        match el with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (k, _) -> not (List.contains k known)) with
+            | Some(k, _) ->
+                Error(
+                    "unknown member '"
+                    + k
+                    + "' in "
+                    + where
+                    + "; its members are "
+                    + Space.quoteAll (List.sort known)
+                )
+            | None -> Ok()
+        | _ -> Ok()
+
+    /// Check the member `name` of `el`, where it is present.
+    let private within (name: string) (check: JVal -> Result<unit, string>) (el: JVal) : Result<unit, string> =
+        match el with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (k, _) -> k = name) with
+            | Some(_, v) -> check v
+            | None -> Ok()
+        | _ -> Ok()
+
+    /// Check every element of an array.
+    let private each (check: JVal -> Result<unit, string>) (el: JVal) : Result<unit, string> =
+        match el with
+        | JArr xs -> xs |> List.fold (fun acc x -> acc |> Result.bind (fun () -> check x)) (Ok())
+        | _ -> Ok()
+
+    let private strictSpace (el: JVal) =
+        let extra =
+            match tagOf el with
+            | Some "intRange"
+            | Some "floatRange"
+            | Some "stringLen" -> [ "min"; "max" ]
+            | Some "enum" -> [ "values" ]
+            | Some "slotTree" -> [ "slotKind" ]
+            | _ -> []
+
+        members "value space" ("$type" :: extra) el
+
+    let private strictEffect (el: JVal) =
+        members "effect" [ "host"; "determinism" ] el
+
+    let private strictEntry (el: JVal) =
+        members "signature hole" [ "addr"; "name"; "kind"; "required"; "space"; "slotKind"; "actionEffect" ] el
+        |> Result.bind (fun () -> within "space" strictSpace el)
+        |> Result.bind (fun () -> within "actionEffect" strictEffect el)
+
+    let private strictSignature (el: JVal) =
+        members "signature" [ "name"; "effect"; "holes" ] el
+        |> Result.bind (fun () -> within "effect" strictEffect el)
+        |> Result.bind (fun () -> within "holes" (each strictEntry) el)
+
+    let private strictPlacement (el: JVal) =
+        let extra =
+            match tagOf el with
+            | Some "clientIsland" -> [ "island" ]
+            | _ -> []
+
+        members "placement" ("$type" :: extra) el
+
+    let private strictCapability (el: JVal) =
+        members "capability" [ "$type"; "id"; "signature"; "determinism"; "placement" ] el
+        |> Result.bind (fun () -> within "signature" strictSignature el)
+        |> Result.bind (fun () -> within "placement" strictPlacement el)
+
+    let private strictInvocation (el: JVal) =
+        members "invocation" [ "$type"; "capabilityId"; "args" ] el
+        |> Result.bind (fun () -> within "args" (each (members "invocation argument" [ "addr"; "value" ])) el)
+
+    let private strictDeferred (el: JVal) =
+        let extra =
+            match tagOf el with
+            | Some "ready" -> [ "value" ]
+            | Some "failed" -> [ "message" ]
+            | _ -> []
+
+        members "deferred" ("$type" :: extra) el
+
+    let private under (policy: ReadPolicy) (check: JVal -> Result<unit, string>) (el: JVal) : Result<unit, string> =
+        match policy with
+        | ReadPolicy.Lenient -> Ok()
+        | ReadPolicy.Strict -> check el
+
+    /// `decodeJson` under a read policy: `Strict` refuses an unknown member anywhere in the
+    /// declaration (its signature, holes, value spaces, effects and placement included).
+    let decodeJsonWith (policy: ReadPolicy) (el: JVal) : Result<Capability, string> =
+        under policy strictCapability el |> Result.bind (fun () -> decodeJson el)
+
+    /// `decode` under a read policy.
+    let decodeWith (policy: ReadPolicy) (s: string) : Result<Capability, string> =
+        Decode.parse s |> Result.bind (decodeJsonWith policy)
+
+    /// `decodeInvocation` under a read policy: `Strict` refuses an unknown member of the
+    /// invocation or of any of its arguments — an `"actor"` beside the `capabilityId`, say, which
+    /// `Lenient` reads past.
+    let decodeInvocationWith (policy: ReadPolicy) (s: string) : Result<string * (string * string) list, string> =
+        Decode.parse s
+        |> Result.bind (under policy strictInvocation)
+        |> Result.bind (fun () -> decodeInvocation s)
+
+    /// `deferredOf` under a read policy: `Strict` refuses an unknown member of the envelope; the
+    /// `ready` payload is `decodeT`'s to read.
+    let deferredOfWith
+        (policy: ReadPolicy)
+        (decodeT: JVal -> Result<'T, string>)
+        (el: JVal)
+        : Result<Deferred<'T>, string> =
+        under policy strictDeferred el |> Result.bind (fun () -> deferredOf decodeT el)
+
+    /// `decodeDeferred` under a read policy.
+    let decodeDeferredWith
+        (policy: ReadPolicy)
+        (decodeT: JVal -> Result<'T, string>)
+        (s: string)
+        : Result<Deferred<'T>, string> =
+        Decode.parse s |> Result.bind (deferredOfWith policy decodeT)
 
 // ============================================================================
 //  Signature-typed function registry (Phase 50) — the artifact-function

@@ -29,6 +29,10 @@ field Fuaran.Core.ApplyError+Tags.UnknownHoleAddr : System.Int32 (literal)
 field Fuaran.Core.ApplyError+Tags.ValueOutOfSpace : System.Int32 (literal)
 field Fuaran.Core.ArgSource+Tags.FromNode : System.Int32 (literal)
 field Fuaran.Core.ArgSource+Tags.Literal : System.Int32 (literal)
+field Fuaran.Core.ArgValue+Tags.FloatValue : System.Int32 (literal)
+field Fuaran.Core.ArgValue+Tags.IntValue : System.Int32 (literal)
+field Fuaran.Core.ArgValue+Tags.TextValue : System.Int32 (literal)
+field Fuaran.Core.ArgValue+Tags.TreeValue : System.Int32 (literal)
 field Fuaran.Core.Arg`1+Tags.SlotArg : System.Int32 (literal)
 field Fuaran.Core.Arg`1+Tags.ValueArg : System.Int32 (literal)
 field Fuaran.Core.BindHandlerError+Tags.HandlerEffectExceedsCeiling : System.Int32 (literal)
@@ -81,6 +85,8 @@ field Fuaran.Core.Placement+Tags.ClientDeclarative : System.Int32 (literal)
 field Fuaran.Core.Placement+Tags.ClientIsland : System.Int32 (literal)
 field Fuaran.Core.Placement+Tags.Precomputed : System.Int32 (literal)
 field Fuaran.Core.Placement+Tags.Server : System.Int32 (literal)
+field Fuaran.Core.ReadPolicy+Tags.Lenient : System.Int32 (literal)
+field Fuaran.Core.ReadPolicy+Tags.Strict : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.AnyString : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.Enum : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.FloatRange : System.Int32 (literal)
@@ -88,21 +94,33 @@ field Fuaran.Core.ValueSpace+Tags.IntRange : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.SlotTree : System.Int32 (literal)
 field Fuaran.Core.ValueSpace+Tags.StringLen : System.Int32 (literal)
 method Fuaran.Core.CapabilityCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
+method Fuaran.Core.CapabilityCodec.decodeDeferredWith`1(Fuaran.Core.ReadPolicy, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.decodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.decodeInvocation(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, System.String>
+method Fuaran.Core.CapabilityCodec.decodeInvocationWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, System.String>
+method Fuaran.Core.CapabilityCodec.decodeInvokeError(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.InvokeError, System.String>
 method Fuaran.Core.CapabilityCodec.decodeJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
+method Fuaran.Core.CapabilityCodec.decodeJsonWith(Fuaran.Core.ReadPolicy, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
+method Fuaran.Core.CapabilityCodec.decodeWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Capability, System.String>
 method Fuaran.Core.CapabilityCodec.deferredJson`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Deferred`1<!!0>) : Fuaran.Core.JVal
+method Fuaran.Core.CapabilityCodec.deferredOfWith`1(Fuaran.Core.ReadPolicy, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.deferredOf`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, System.String>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, System.String>
 method Fuaran.Core.CapabilityCodec.encode(Fuaran.Core.Capability) : System.String
 method Fuaran.Core.CapabilityCodec.encodeDeferred`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Deferred`1<!!0>) : System.String
 method Fuaran.Core.CapabilityCodec.encodeInvocation(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : System.String
+method Fuaran.Core.CapabilityCodec.encodeInvokeError(Fuaran.Core.InvokeError) : System.String
 method Fuaran.Core.CapabilityCodec.encodeJson(Fuaran.Core.Capability) : Fuaran.Core.JVal
+method Fuaran.Core.CapabilityCodec.invokeErrorJson(Fuaran.Core.InvokeError) : Fuaran.Core.JVal
+method Fuaran.Core.CapabilityCodec.invokeErrorOf(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.InvokeError, System.String>
 method Fuaran.Core.CapabilityCodec.signatureOf(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Signature, System.String>
 method Fuaran.Core.CapabilityModule.create(System.String, Fuaran.Core.Signature, Fuaran.Core.Placement) : Fuaran.Core.Capability
 method Fuaran.Core.CapabilityModule.determinismTag(Fuaran.Core.Capability) : System.String
 method Fuaran.Core.CapabilityModule.invocationKey(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : System.String
+method Fuaran.Core.CapabilityModule.invokeWithArgs`1(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ArgValue>>, Fuaran.Core.Deferred`1<!!0>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityModule.invoke`1(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
+method Fuaran.Core.CapabilityModule.typeArgs(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ArgValue>>, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityModule.validateArgs(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.InvokeError>
+method Fuaran.Core.CapabilityModule.validateArgsAll(Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.InvokeError>>
 method Fuaran.Core.CapabilityPipelineModule.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityPipeline, System.String>
 method Fuaran.Core.CapabilityPipelineModule.dirtySet(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.CapabilityPipeline) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 method Fuaran.Core.CapabilityPipelineModule.encode(Fuaran.Core.CapabilityPipeline) : System.String
@@ -146,13 +164,17 @@ method Fuaran.Core.FunctionRegistryModule.findBySignature(Fuaran.Core.MatchMode,
 method Fuaran.Core.FunctionRegistryModule.partiallyApply(System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.FunctionEntry) : Fuaran.Core.FunctionEntry
 method Fuaran.Core.FunctionRegistryModule.register(Fuaran.Core.FunctionEntry, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.FunctionRegistryModule.tryFind(System.String, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.FunctionEntry>
+method Fuaran.Core.InvokeErrorModule.describe(Fuaran.Core.InvokeError) : System.String
+method Fuaran.Core.InvokeErrorModule.describeAll(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.InvokeError>) : System.String
 method Fuaran.Core.Memo.count`1(Fuaran.Core.MemoCache`1<!!0>) : System.Int32
 method Fuaran.Core.Memo.empty`1() : Fuaran.Core.MemoCache`1<!!0>
 method Fuaran.Core.Memo.isMemoisable(Fuaran.Core.EffectClass) : System.Boolean
+method Fuaran.Core.Registry.dispatchWithArgs`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ArgValue>>, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.Registry.dispatch`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.Registry.enumerate(Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Capability>
 method Fuaran.Core.Registry.register(Fuaran.Core.Capability, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.Registry.tryFind(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>
+method Fuaran.Core.Space.describe(Fuaran.Core.ValueSpace) : System.String
 method Fuaran.Core.Space.slotKindOf(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Space.validate(Fuaran.Core.ValueSpace, System.String) : System.Boolean
 property Fuaran.Core.Effect.clock : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor> { get }
@@ -222,6 +244,12 @@ type Fuaran.Core.ArgSource (union)
 type Fuaran.Core.ArgSource+FromNode (type)
 type Fuaran.Core.ArgSource+Literal (type)
 type Fuaran.Core.ArgSource+Tags (type)
+type Fuaran.Core.ArgValue (union)
+type Fuaran.Core.ArgValue+FloatValue (type)
+type Fuaran.Core.ArgValue+IntValue (type)
+type Fuaran.Core.ArgValue+Tags (type)
+type Fuaran.Core.ArgValue+TextValue (type)
+type Fuaran.Core.ArgValue+TreeValue (type)
 type Fuaran.Core.Arg`1 (union)
 type Fuaran.Core.Arg`1+SlotArg (type)
 type Fuaran.Core.Arg`1+Tags (type)
@@ -273,6 +301,7 @@ type Fuaran.Core.InvokeError+RequiredArgsUnbound (type)
 type Fuaran.Core.InvokeError+Tags (type)
 type Fuaran.Core.InvokeError+UninvocableArg (type)
 type Fuaran.Core.InvokeError+UnknownArg (type)
+type Fuaran.Core.InvokeErrorModule (module)
 type Fuaran.Core.IslandKind (union)
 type Fuaran.Core.IslandKind+Tags (type)
 type Fuaran.Core.MatchMode (union)
@@ -310,6 +339,8 @@ type Fuaran.Core.PipelineNode+Tags (type)
 type Fuaran.Core.Placement (union)
 type Fuaran.Core.Placement+ClientIsland (type)
 type Fuaran.Core.Placement+Tags (type)
+type Fuaran.Core.ReadPolicy (union)
+type Fuaran.Core.ReadPolicy+Tags (type)
 type Fuaran.Core.Registry (module)
 type Fuaran.Core.SigEntry (record)
 type Fuaran.Core.Signature (record)
@@ -331,6 +362,10 @@ union-case Fuaran.Core.ApplyError.NewUnknownHoleAddr #0(addr: System.String, dec
 union-case Fuaran.Core.ApplyError.NewValueOutOfSpace #1(addr: System.String, space: Fuaran.Core.ValueSpace, got: System.String)
 union-case Fuaran.Core.ArgSource.NewFromNode #1(nodeId: System.String)
 union-case Fuaran.Core.ArgSource.NewLiteral #0(value: System.String)
+union-case Fuaran.Core.ArgValue.NewFloatValue #1(Item: System.Double)
+union-case Fuaran.Core.ArgValue.NewIntValue #0(Item: System.Int32)
+union-case Fuaran.Core.ArgValue.NewTextValue #2(Item: System.String)
+union-case Fuaran.Core.ArgValue.NewTreeValue #3(Item: Fuaran.Core.JVal)
 union-case Fuaran.Core.Arg`1.NewSlotArg #1(Item: !0)
 union-case Fuaran.Core.Arg`1.NewValueArg #0(Item: System.String)
 union-case Fuaran.Core.BindHandlerError.NewHandlerEffectExceedsCeiling #3(addr: System.String, ceiling: Fuaran.Core.EffectClass, handler: Fuaran.Core.EffectClass)
@@ -383,6 +418,8 @@ union-case Fuaran.Core.Placement.ClientDeclarative #2()
 union-case Fuaran.Core.Placement.NewClientIsland #3(Item: Fuaran.Core.IslandKind)
 union-case Fuaran.Core.Placement.Precomputed #4()
 union-case Fuaran.Core.Placement.Server #1()
+union-case Fuaran.Core.ReadPolicy.Lenient #0()
+union-case Fuaran.Core.ReadPolicy.Strict #1()
 union-case Fuaran.Core.ValueSpace.AnyString #4()
 union-case Fuaran.Core.ValueSpace.NewEnum #3(Item: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.ValueSpace.NewFloatRange #1(lo: System.Double, hi: System.Double)

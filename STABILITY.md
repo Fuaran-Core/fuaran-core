@@ -2675,6 +2675,57 @@ alone, already in the kit's closure, so the kit's package graph gains one packag
 runner's comparison unit grows by 86 lines at the consumer's next Core raise.
 
 **Class: additive.** `api/Fuaran.Core.Conformance.txt` gains one member (`ParityVectors.sanitiseSweep`).
+
+### The capability and query seams speak to a model (Phase 251) — ADDITIVE
+
+**What changed.** The two seams refused in typed unions and stopped there: nothing rendered a
+refusal for a model, neither codec encoded one, a body or resolver was not handed the arguments
+validation had accepted, validation stopped at the first failure, `Query` had no JSON Schema, and an
+unknown member was always read past. Each now has a Core answer, beside the existing forms:
+
+- **Refusals rendered.** `InvokeError.describe` and `QueryError.describe` (with `describeAll`) turn a
+  case into one sentence that names the failure and, wherever a closed set is refused against, its
+  members. `Space.describe` phrases a value space. A `ParamTypeMismatch` whose expected type is
+  `decimal`, `date` or `timestamp` also says how to write one (a decimal as a JSON string of decimal
+  text, such as `"12.50"`, never a JSON number).
+- **Refusals encoded.** `CapabilityCodec.invokeErrorJson` / `encodeInvokeError` / `invokeErrorOf` /
+  `decodeInvokeError`, and the `QueryCodec.queryErrorJson` family: one `"$type"` per case (the case
+  name in camelCase), a value space in its codec form, a column type by its tag. Both are wire roots
+  now (`invokeError`, `queryError`).
+- **Validated arguments handed on.** `Capability.invokeWithArgs` / `Registry.dispatchWithArgs` hand a
+  body the validated arguments TYPED by their spaces, as the new `ArgValue` union (`IntValue`,
+  `FloatValue`, `TextValue`, `TreeValue` — the parsed document of a slot argument);
+  `Capability.typeArgs` is that list on its own. `Query.invokeWithArgs` /
+  `QueryRegistry.dispatchWithArgs` hand a resolver the validated `(string * Cell) list`.
+- **Every violation at once.** `Capability.validateArgsAll` and `Query.validateParamsAll` answer every
+  refusal — per argument in argument order, then the unbound required ones, then (query) the required
+  ones bound only to `Null`. The first-failure forms are unchanged, and the head of each list is
+  exactly their answer; a suite enumerates every combination of a fixture's arguments to hold it.
+- **A query schema.** `Query.toJsonSchema` is `Function.toJsonSchema`'s twin: untagged JSON Schema,
+  parameters keyed by name, `x-effect`, and `x-result` (one result row, keyed by column) outside
+  `properties`. A `decimal` parameter or result column is a STRING with the pattern
+  `^-?[0-9]+(\.[0-9]+)?$` — exactly the text the codec reads into a `Decimal` cell — because a model
+  told "number" emits a fractional token the codec refuses. `QueryCodec.decodeArgs` /
+  `decodeArgsJson` read the argument object that schema describes, through the column codec's one
+  cell decoder, answering every refusal (an undeclared member is always `UnknownParam`).
+- **A strict read policy.** `ReadPolicy` (`Lenient`, the default, or `Strict`) and
+  `CapabilityCodec.decodeWith` / `decodeJsonWith` / `decodeInvocationWith` / `deferredOfWith` /
+  `decodeDeferredWith`, `QueryCodec.decodeWith` / `decodeResultWith` / `decodeDeferredResultWith`.
+  `Strict` refuses an unknown member of any object the codec reads, naming it and the members read; it
+  runs as a check before the unchanged decoder, so `Lenient` is the old behaviour byte for byte. The
+  embedded `source` and `rows` documents are the column codec's and a `ready` payload is the caller's
+  decoder's, so the check stops at them.
+- **The tag convention, written down** beside `Function.toSchema`: a wire document is `"$type"`, a
+  descriptor read beside the tree wire is `"kind"`, a JSON Schema for a model is untagged with `x-`
+  extensions outside `properties`.
+
+**What adopting it costs.** Nothing: every existing function, type and emitted byte is unchanged. A
+consumer that opens `Fuaran.Core` beside a namespace of its own declaring `ArgValue`, `ReadPolicy`, or
+a case named `IntValue` / `FloatValue` / `TextValue` / `TreeValue`, resolves the later-opened one.
+
+**Class: additive.** `api/Fuaran.Core.Function.txt` and `api/Fuaran.Core.Query.txt` gain members and
+types only; `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` gain the two
+refusal roots' documents, every existing document unchanged.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
