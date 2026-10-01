@@ -320,7 +320,14 @@
          `0.33.0`, and this repository's `0.32.0` emissions of them stay on nuget.org. BREAKING —
          four packages leave the roster, a `removal` for a consumer taking them from here — so `0.32.0`,
          which is tagged, is advanced rather than ridden. See STABILITY.md "0.33.0 — DRAFT". -->
-    <Version>0.33.0</Version>
+    <!-- 0.34.0 (2026-10-01): a draft slot opened over the tagged 0.33.0, first as ADDITIVE (Phase
+         331, the conformance tests split along the kit's topic files; Phase 332, the OpStream module
+         behind a forwarding facade; neither moves a public surface). Reclassed BREAKING (source) the
+         same day, before any tag: Phase 252 widens HostedCodec and retypes Gen.fsharpValue /
+         Gen.typescriptValue, and Phase 248 retypes ArbitrationRejection.Conflicts. Pre-1.0 a
+         breaking change is a MINOR bump, and this slot already is one over 0.33.0, so it keeps its
+         number. See STABILITY.md "0.34.0 — DRAFT". -->
+    <Version>0.34.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

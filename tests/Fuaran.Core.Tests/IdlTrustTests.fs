@@ -282,3 +282,62 @@ let tests =
                     match Artifact.parse (Artifact.render refIdl) with
                     | Ok back -> Expect.equal back.Harden refIdl.Harden "the declaration survives the round trip"
                     | Error e -> failtestf "the reference artifact did not parse: %s" e) ] ]
+
+// ---------------------------------------------------------------------------
+// Phase 252 — the gate is conditional on a DECLARED gated kind. A vocabulary with
+// no foreign component has nothing to gate and must reach the checked path; one
+// that carries a foreign-component-shaped kind and declares no gate is refused by
+// name, so the condition cannot become the fail-open Phase 180 closed.
+// ---------------------------------------------------------------------------
+
+let private foreignShaped (k: IdlKind) =
+    let names = k.Fields |> List.map (fun f -> f.Name) |> Set.ofList
+    names.Contains "moduleId" && names.Contains "componentId"
+
+/// `refIdl` with no gated kind declared and its foreign-component kind removed.
+let private gateless: Idl =
+    { refIdl with
+        Harden = HardenPolicy.Undeclared
+        Kinds = refIdl.Kinds |> List.filter (foreignShaped >> not) }
+
+[<Tests>]
+let gateConditionalTests =
+    testList
+        "Phase 252 — the harden gate is conditional on a declared gated kind"
+        [ testCase "a vocabulary with no foreign component hardens and scaffolds with no gate declared" (fun _ ->
+              Expect.isTrue
+                  (refIdl.Kinds |> List.exists foreignShaped)
+                  "the fixture's own foreign kind is what is removed"
+
+              Expect.isOk (Trust.checkHardenPolicy gateless noTrust) "nothing to gate, nothing to declare"
+
+              let node =
+                  match Sample.sampleNodes gateless (gateless.Kinds |> List.map _.Tag) 7 1 with
+                  | [ v ] -> v
+                  | other -> failtestf "expected one sampled node, got %d" other.Length
+
+              Expect.isOk (Trust.harden gateless noTrust node) "the checked path is reachable")
+
+          testCase "a declared markdown field still needs the text-literal members" (fun _ ->
+              let withMarkdown =
+                  { noTrust with
+                      MarkdownFields = Set.ofList [ "Markdown", "text" ] }
+
+              match Trust.checkHardenPolicy gateless withMarkdown with
+              | Error(CodegenError.UndeclaredHardenToken(named, needed)) ->
+                  Expect.equal named "TextLiteralCase" "the first member the scrub needs"
+                  Expect.stringContains needed "markdown" "and what needed it"
+              | other -> failtestf "expected the text-literal refusal, got %A" other)
+
+          testCase "a foreign-component-shaped kind with no gate declared is refused by name" (fun _ ->
+              let ungated =
+                  { refIdl with
+                      Harden = { refIdl.Harden with GatedKind = "" } }
+
+              let foreign = refIdl.Kinds |> List.find foreignShaped
+
+              match Trust.checkHardenPolicy ungated noTrust with
+              | Error(CodegenError.UndeclaredHardenToken(named, needed)) ->
+                  Expect.equal named "GatedKind" "the gate is what is missing"
+                  Expect.stringContains needed foreign.Tag "naming the kind that needed it"
+              | other -> failtestf "expected the gate refusal, got %A" other) ]

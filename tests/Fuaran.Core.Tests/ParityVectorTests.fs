@@ -220,7 +220,7 @@ let private expected: (string * string) list =
       "decimalCodec/decode-whole-exponent-token",
       @"ok:{""columns"":{""c"":{""validity"":[true],""values"":[""3000000000""]}},""schema"":[{""name"":""c"",""type"":""decimal""}]}"
       "decimalCodec/decode-refuses-fractional-token", "refused:TypeMismatch"
-      "decimalCodec/decode-refuses-integer-token-past-2-53", "refused:NotJson"
+      "decimalCodec/decode-refuses-integer-token-past-2-53", "refused:TypeMismatch"
       "decimalCodec/decode-refuses-whole-float-past-2-53", "refused:TypeMismatch"
       "decimalCodec/decode-refuses-exponent-text", "refused:MalformedShape"
       "decimalCodec/decode-refuses-plus-text", "refused:MalformedShape"

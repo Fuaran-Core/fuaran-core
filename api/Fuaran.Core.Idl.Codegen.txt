@@ -136,11 +136,12 @@ method Fuaran.Core.Idl.FStarTarget.vocabularyModuleFrom(Fuaran.Core.Idl.FStarTar
 method Fuaran.Core.Idl.Gen.fsharpModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpModuleWith(Fuaran.Core.Idl.Gen+GenSupport, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpTypes(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
-method Fuaran.Core.Idl.Gen.fsharpValue(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Idl.Gen.fsharpValue(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.jsonSchema(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.provenanceHeader(System.String, System.String, System.String) : System.String
+method Fuaran.Core.Idl.Gen.typescriptDeclarations(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.typescriptModule(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
-method Fuaran.Core.Idl.Gen.typescriptValue(Fuaran.Core.Idl.IdlValue) : System.String
+method Fuaran.Core.Idl.Gen.typescriptValue(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.SupportArtifact.json(Fuaran.Core.Idl.SupportDocument) : Fuaran.Core.JVal
 method Fuaran.Core.Idl.SupportArtifact.ofJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>
 method Fuaran.Core.Idl.SupportArtifact.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.SupportDocument, System.String>

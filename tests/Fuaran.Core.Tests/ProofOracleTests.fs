@@ -1831,7 +1831,7 @@ let private renderProdArbitration (a: Arbitration<RNode, string>) : string list 
           match why with
           | Inapplicable(i, rej) ->
               yield sprintf "rejected %d/%s inapplicable at %d (%s)" p.Id p.Holder i (prodRejClass rej)
-          | Conflicts ids -> yield sprintf "rejected %d/%s conflicts %A" p.Id p.Holder ids ]
+          | Conflicts(ids, _) -> yield sprintf "rejected %d/%s conflicts %A" p.Id p.Holder ids ]
 
 /// The model's result in the same vocabulary.
 let private renderModelArbitration (a: Arbitrate.arbitration) : string list =
@@ -3507,10 +3507,15 @@ module private JsonParseDiff =
             + "}"
 
     /// The model's one opacity parameter, instantiated: `System.Double.TryParse` plus the
-    /// finiteness gate, which is exactly what `parseNumber` asks.
+    /// finiteness gate, which is exactly what `parseNumber` asks — and, since Phase 253, whether
+    /// the token is the canonical float layout of the double it reads as (`FCanonical`), which is
+    /// what `parseNumber` asks of an integer token past 2^53.
     let floatRead (tok: JsonParse.ch list) : JsonParse.freadv =
-        match System.Double.TryParse(tokStr tok, System.Globalization.NumberStyles.Float, inv) with
+        let s = tokStr tok
+
+        match System.Double.TryParse(s, System.Globalization.NumberStyles.Float, inv) with
         | true, v when System.Double.IsNaN v || System.Double.IsInfinity v -> JsonParse.FNonFinite
+        | true, v when FloatLayout.finite v = s -> JsonParse.FCanonical
         | true, _ -> JsonParse.FFinite
         | _ -> JsonParse.FUnparsable
 
@@ -3636,6 +3641,12 @@ module private JsonParseDiff =
           "int32 min", "-2147483648"
           "int32 min minus one", "-2147483649"
           "seventeen nines", "99999999999999999"
+          // Phase 253 — an integer token past 2^53 that IS a canonical float layout is read; one
+          // that spells the same double's exact value instead is not.
+          "canonical layout past int53", "10000000000000000"
+          "canonical layout 2^53 plus two", "9007199254740994"
+          "canonical layout negative", "-9007199254740994"
+          "exact value, not the layout", "18205257897171752"
           "bare minus", "-"
           "float", "1.5"
           "float exponent", "1e3"
@@ -11229,7 +11240,7 @@ let proofOracleTests =
               Expect.equal (List.length r.Accepted + List.length r.Rejected) 2 "nothing dropped"
 
               match r.Rejected with
-              | [ (p, Conflicts [ 1 ]) ] -> Expect.equal p.Holder "b" "the loser cites the winner's id"
+              | [ (p, Conflicts([ 1 ], _)) ] -> Expect.equal p.Holder "b" "the loser cites the winner's id"
               | other -> failtestf "expected one Conflicts [1] rejection, got %A" other
 
               // the check itself: total, ascending, each repeated id once, empty on unique input
@@ -11274,8 +11285,12 @@ let proofOracleTests =
               Expect.equal (ids last) [ 2; 3 ] "numbered last, the same proposal loses to an accepted set of TWO"
 
               Expect.equal
-                  (first.Rejected |> List.map snd)
-                  [ Conflicts [ 1 ]; Conflicts [ 1 ] ]
+                  (first.Rejected
+                   |> List.map (fun (_, r) ->
+                       match r with
+                       | Conflicts(ids, _) -> Some ids
+                       | _ -> None))
+                  [ Some [ 1 ]; Some [ 1 ] ]
                   "and both rejections are justified — each cites the proposal standing in its way"
 
               Expect.equal
@@ -13661,6 +13676,88 @@ let proofOracleTests =
                       "the reversed comparator disagreed on %d of %d documents — it must leave the ones with no sortable object alone"
                       (List.length t.Diffs)
                       t.Docs)
+
+          // Phase 253 — `integral_float_reads_back`, the numeral premise section 7 adds for the
+          // floats OUTSIDE the canonical subset, evaluated at production's own reader: a finite float
+          // whose token carries neither marker reads back as a number rendering as that token. Until
+          // Phase 253 it was false past 2^53, so the instrument also runs a reader carrying the old
+          // guard, which must lose there and only there.
+          testCase "a finite float outside the canonical subset reads back and re-renders as its token (Phase 253)"
+          <| fun _ ->
+              let premiseFails (w: WireCanon.wire<int, float>) (f: float) : string option =
+                  let tok = WireCanon.canonical_float w f
+
+                  if WireCanon.float_canonical w f then
+                      None
+                  else
+                      match w.tok_read tok with
+                      | WireCanon.Ok v when canonFromChs (WireCanon.render w v) = canonFromChs tok -> None
+                      | other -> Some(sprintf "%s -> %A" (canonFromChs tok) other)
+
+              let rnd = System.Random 253
+
+              let pastInt53 =
+                  [ for _ in 1..400 ->
+                        let m = rnd.NextInt64(1L <<< 52, 1L <<< 53)
+                        let f = float m * float (1L <<< (1 + rnd.Next 4))
+                        if rnd.Next 2 = 0 then f else -f ]
+
+              let pool =
+                  [ 0.0
+                    -0.0
+                    2.0
+                    -7.0
+                    2147483647.0
+                    2147483648.0
+                    1e15
+                    9007199254740992.0
+                    9007199254740994.0
+                    -9007199254740994.0
+                    1e16
+                    1.8205257897171752e16
+                    99999999999999984.0 ]
+                  @ pastInt53
+
+              let outside =
+                  pool |> List.filter (fun f -> not (WireCanon.float_canonical canonWire f))
+
+              Expect.isGreaterThan
+                  (outside |> List.filter (fun f -> abs f > 9007199254740992.0) |> List.length)
+                  100
+                  "the pool reached marker-less floats past 2^53 at all — otherwise the premise was asked nothing new"
+
+              Expect.isEmpty
+                  (pool |> List.choose (premiseFails canonWire))
+                  "every finite float outside the canonical subset reads back as a number rendering as its token"
+
+              // The go-red: production's reader with the guard it carried before Phase 253, which
+              // refused every integer token past 2^53.
+              let oldGuard: WireCanon.wire<int, float> =
+                  { canonWire with
+                      tok_read =
+                          fun t ->
+                              let s = canonFromChs t
+                              let digits = s.TrimStart '-'
+
+                              let integerPastInt53 =
+                                  not (s.Contains "." || s.Contains "E")
+                                  && (digits.Length > 16
+                                      || (digits.Length = 16
+                                          && System.String.CompareOrdinal(digits, "9007199254740992") > 0))
+
+                              if integerPastInt53 then
+                                  WireCanon.Error "integer literal outside the int53 safe range"
+                              else
+                                  canonWire.tok_read t }
+
+              let lost = pool |> List.choose (premiseFails oldGuard)
+              Expect.isNonEmpty lost "a reader with the old guard MUST fail the premise"
+
+              Expect.isEmpty
+                  (pool
+                   |> List.filter (fun f -> abs f <= 9007199254740992.0)
+                   |> List.choose (premiseFails oldGuard))
+                  "and only past 2^53 — at or inside it the old reader satisfies the premise too"
 
           testCase "the four renderings that ALIAS — `render_injective` is false, and this is why"
           <| fun _ ->

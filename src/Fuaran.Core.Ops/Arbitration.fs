@@ -30,12 +30,39 @@ type OpScriptProposal<'Node, 'Id> =
 type ArbitrationRejection<'Id> =
     /// The proposal's script does not apply to the base tree: the op-algebra's
     /// own rejection envelope, plus the index of the failing op in the script.
+    /// A stale script's envelope is `UnknownNode`, whose `addressable` is every id
+    /// in the base; `Arbitration.stale` is its bounded form for reporting (Phase 248).
     | Inapplicable of opIndex: int * rejection: Rejection<'Id>
     /// The script applies, but its footprint (Phase 78) interferes with the
     /// accepted set — the interfering accepted proposals' ids (computed against
     /// the FULL accepted set, in pinned order): exactly what to rebase against
     /// once they land. Non-empty by construction.
-    | Conflicts of interfering: int list
+    ///
+    /// `interference` (Phase 248) says HOW each one interferes: every cited id, in
+    /// the same order, paired with the `Ops.interference` clauses its footprint and
+    /// the proposal's fail (the proposal on the left), each list non-empty. It is
+    /// exactly `Arbitration.interference nodew idw accepted proposal`, computed by the
+    /// same function, so `interfering = List.map fst interference` always holds.
+    | Conflicts of interfering: int list * interference: (int * Interference list) list
+
+/// The bounded report of a stale proposal (Phase 248): the id its script named that the tree
+/// does not hold, where in the script, how many ids the tree does hold, and a sample of them
+/// capped at `Arbitration.staleSampleSize`. Its size is fixed by the error, never by the
+/// document — what a scheduler sends each of N refused proposers, where the op-algebra's own
+/// `UnknownNode` would send the whole base's ids N times.
+type StaleProposal<'Id> =
+    {
+        /// The index of the failing op in the proposal's script.
+        OpIndex: int
+        /// The id the failing op named that the tree does not hold at that op — the base, as the
+        /// script's earlier ops left it.
+        Missing: 'Id
+        /// How many ids that tree does hold — the length of `UnknownNode`'s `addressable`.
+        AddressableCount: int
+        /// The first `Arbitration.staleSampleSize` of those ids, in the tree's pre-order (the root
+        /// first): enough to show the id shape the base uses, never the document.
+        Sample: 'Id list
+    }
 
 /// The result of arbitrating N op-script proposals against one base tree
 /// (Phase 85) — a deterministic, TOTAL partition. `Accepted` is mutually
@@ -75,6 +102,53 @@ module Arbitration =
         |> List.map fst
         |> List.sort
 
+    /// The cap on `StaleProposal.Sample` (Phase 248): at most this many addressable ids ride a stale
+    /// proposal's bounded report, whatever the document's size.
+    let staleSampleSize = 8
+
+    /// The bounded report of a stale proposal's rejection (Phase 248): `Some` for an `Inapplicable`
+    /// whose envelope is `UnknownNode` — the script named an id the base does not hold — and `None`
+    /// for every other rejection, which carries no document-sized payload to bound. Total.
+    let stale (rejection: ArbitrationRejection<'Id>) : StaleProposal<'Id> option =
+        match rejection with
+        | Inapplicable(opIndex, UnknownNode(missing, addressable)) ->
+            Some
+                { OpIndex = opIndex
+                  Missing = missing
+                  AddressableCount = List.length addressable
+                  Sample = List.truncate staleSampleSize addressable }
+        | _ -> None
+
+    // The accepted proposals a footprint interferes with, in the given order, each with the clauses
+    // it fails — the one computation behind both `Conflicts`' citation and `interference` below.
+    let private interferingWith
+        (fp: Footprint)
+        (accepted: (OpScriptProposal<'Node, 'Id> * Footprint) list)
+        : (int * Interference list) list =
+        accepted
+        |> List.choose (fun (a, afp) ->
+            match Ops.interference fp afp with
+            | [] -> None
+            | clauses -> Some(a.Id, clauses))
+
+    /// Why `proposal` cannot join `accepted` (Phase 248): each accepted proposal it interferes with,
+    /// in the order given, paired with `Ops.interference` of the two footprints — the proposal on
+    /// the left, the accepted one on the right. Handed an arbitration's `Accepted` and one of its
+    /// `Conflicts`-rejected proposals, it is exactly that `Conflicts`' `interference` member (its ids
+    /// the `interfering` citation, in the same order), because `arbitrate` computes both with this
+    /// function; every clause list is non-empty. It stays the query surface for a party that holds
+    /// a proposal and an accepted set but no rejection. Empty exactly when the proposal is
+    /// independent of every accepted one. Total.
+    let interference
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (accepted: OpScriptProposal<'Node, 'Id> list)
+        (proposal: OpScriptProposal<'Node, 'Id>)
+        : (int * Interference list) list =
+        accepted
+        |> List.map (fun a -> a, Ops.footprint nodew idw a.Ops)
+        |> interferingWith (Ops.footprint nodew idw proposal.Ops)
+
     /// Arbitrate N op-script proposals against one base tree (Phase 85) —
     /// decide which subset can land together. A deterministic, total partition
     /// (GP4: analysis only — the base is never mutated, and no input throws):
@@ -96,7 +170,8 @@ module Arbitration =
     ///      everything already accepted; otherwise it is rejected with
     ///      `Conflicts`, citing the interfering accepted ids (recomputed
     ///      against the FULL accepted set, so the citation is the complete
-    ///      rebase target, not just the first collision).
+    ///      rebase target, not just the first collision) and, since Phase 248,
+    ///      each one's `Ops.interference` clauses.
     ///
     /// The accepted set is pairwise independent, so (footprint soundness,
     /// `Conformance.footprintLaws`) its scripts apply confluently in any
@@ -131,7 +206,7 @@ module Arbitration =
                 if accepted |> List.forall (fun (_, afp) -> Ops.independent fp afp) then
                     (p, fp) :: accepted, rejected
                 else
-                    accepted, (p, Conflicts []) :: rejected
+                    accepted, (p, Conflicts([], [])) :: rejected
 
         let acceptedRev, rejectedRev = pinned |> List.fold step ([], [])
         let accepted = List.rev acceptedRev
@@ -146,13 +221,8 @@ module Arbitration =
                 match reason with
                 | Inapplicable _ -> p, reason
                 | Conflicts _ ->
-                    let fp = Ops.footprint nodew idw p.Ops
-
-                    let interfering =
-                        accepted
-                        |> List.choose (fun (a, afp) -> if Ops.independent fp afp then None else Some a.Id)
-
-                    p, Conflicts interfering)
+                    let explained = interferingWith (Ops.footprint nodew idw p.Ops) accepted
+                    p, Conflicts(List.map fst explained, explained))
 
         let acceptedProposals = accepted |> List.map fst
 

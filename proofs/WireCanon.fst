@@ -61,6 +61,10 @@
        13: the guarded `Canon.tryRender` IS the renderer wherever every float is finite, and
        refuses exactly where one is not — naming a float whose rendering refutation 1 says is a
        string's. The integer-shaped float of refutation 2 is proved NOT refused.
+     - `every_finite_float_reads_back` — Phase 253, section 7: every finite float `render` emits,
+       canonical or not, is read back as a value that renders as the same bytes. Off the canonical
+       subset it rests on a second numeral premise, `integral_float_reads_back`, which production
+       did not satisfy until Phase 253 (its parser refused an integer-shaped float layout past 2^53).
 
    THE FOUR RULE LEMMAS ARE THE PROOF'S OWN PARTS, not decoration:
      - rule 2 — `sort_is_a_canonical_choice`: under the comparator's total-order premises, sorting
@@ -750,7 +754,9 @@ and read_kvs (#num #flt: eqtype) (w: wire num flt) (input: list ch)
       == x)", and the integer layout as plain decimal with no leading zeroes. `tok_read_ok` is
       those two sentences, and nothing else. Rule 5's injectivity lemma below is derived from it
       rather than assumed beside it — which is the point: two premises where one suffices is two
-      chances to assume something false.
+      chances to assume something false. (Phase 253 adds a second, `integral_float_reads_back`,
+      about the floats OUTSIDE the canonical subset; exactly one theorem carries it, and it is
+      stated beside that theorem at the foot of this section.)
    ====================================================================================== *)
 
 let numeric_token (t: list ch) : Tot bool = Cons? t && all_num t
@@ -778,6 +784,34 @@ let canonical_float_injective (#num #flt: eqtype) (w: wire num flt) (f g: flt)
 let int_and_float_layouts_disjoint (#num #flt: eqtype) (w: wire num flt) (i: num) (f: flt)
   : Lemma (requires tok_read_ok w /\ float_canonical w f)
           (ensures ~(w.int_str i == canonical_float w f)) = ()
+
+(* ---- Phase 253: THE FLOATS OUTSIDE THE CANONICAL SUBSET ARE READ BACK TOO. `tok_read_ok` speaks
+        of the canonical subset only, and refutation 2 (section 11) says what the floats outside it
+        alias. Neither said they could be READ: a finite float whose layout carries neither marker
+        renders as an integer-shaped token, and past 2^53 production's parser refused that token,
+        so `Canon.render (JFloat 1e16)` was text `Json.parse` would not take back. The premise below
+        is the read-back production gives those floats since Phase 253 — the token reads as a number
+        that renders as the same token (an Int32 token as `JInt`, any other as `JFloat`). It is a
+        SECOND numeral premise, carried by this theorem alone: nothing in sections 8-16 assumes it,
+        and no theorem there moved. Before Phase 253 it was FALSE of production; the oracle host
+        evaluates it beside a reader with the old guard, which must lose. ---- *)
+
+[@@ noextract_to "FSharp"]
+let integral_float_reads_back (#num #flt: eqtype) (w: wire num flt) : prop =
+  forall (f: flt). (w.fclass f == FFinite /\ not (float_canonical w f)) ==>
+    (Ok? (w.tok_read (canonical_float w f)) /\
+     render w (Ok?.v (w.tok_read (canonical_float w f))) == canonical_float w f)
+
+(* EVERY FINITE FLOAT THE ENCODER RENDERS IS READ BACK, as a value that renders as the same bytes —
+   the canonical subset by `tok_read_ok`, the rest by the premise above. Rendering is therefore a
+   fixed point of read-then-render on every finite float, which is what "every float Core renders,
+   Core reads" means at the model. *)
+[@@ noextract_to "FSharp"]
+let every_finite_float_reads_back (#num #flt: eqtype) (w: wire num flt) (f: flt)
+  : Lemma (requires tok_read_ok w /\ integral_float_reads_back w /\ w.fclass f == FFinite)
+          (ensures Ok? (w.tok_read (render w (JFloat f))) /\
+                   render w (Ok?.v (w.tok_read (render w (JFloat f)))) == render w (JFloat f)) =
+  assert (render w (JFloat f) == canonical_float w f)
 
 (* ---- RULE 2, derived from the comparator's total-order premises: sorting is a CANONICAL
         choice — the result is ordered, and re-sorting it changes nothing, so the author's key

@@ -1546,6 +1546,7 @@ type freadv =
 | FFinite
 | FNonFinite
 | FUnparsable
+| FCanonical
 
 
 let uu___is_FFinite : freadv  ->  Prims.bool = (fun ( projectee  :  freadv ) -> (match (projectee) with
@@ -1568,6 +1569,15 @@ let uu___is_FNonFinite : freadv  ->  Prims.bool = (fun ( projectee  :  freadv ) 
 
 let uu___is_FUnparsable : freadv  ->  Prims.bool = (fun ( projectee  :  freadv ) -> (match (projectee) with
 | FUnparsable -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_FCanonical : freadv  ->  Prims.bool = (fun ( projectee  :  freadv ) -> (match (projectee) with
+| FCanonical -> begin
      true
      end
 | uu___ -> begin
@@ -1720,6 +1730,9 @@ if isf then begin
 | FFinite -> begin
      POk (JFloat (tok), [])
      end
+| FCanonical -> begin
+     POk (JFloat (tok), [])
+     end
 | FNonFinite -> begin
      PErr (MalformedNumber, (msg_nonfinite tok), [])
      end
@@ -1741,7 +1754,13 @@ if (int53_safe digits) then begin
      POk (JFloat (tok), [])
      end)
      end else begin
+     (match ((float_read tok)) with
+| FCanonical -> begin
+     POk (JFloat (tok), [])
+     end
+| uu___1 -> begin
      PErr (MalformedNumber, (msg_int53 tok), [])
+     end)
      end
      end
      end

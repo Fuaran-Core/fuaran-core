@@ -568,7 +568,9 @@ let idlFStarTargetTests =
                             THosted
                                 { FSharp = ""
                                   Encode = "enc"
-                                  Decode = "dec" }
+                                  Decode = "dec"
+                                  Wire = None
+                                  Format = None }
                         )
                     "an unresolved type parameter",
                     "unresolved type parameter",

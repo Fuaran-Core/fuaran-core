@@ -79,7 +79,9 @@ let private series: IdlType =
     THosted
         { FSharp = "float list"
           Encode = "encSeries"
-          Decode = "decSeries" }
+          Decode = "decSeries"
+          Wire = None
+          Format = None }
 
 // ---------------------------------------------------------------------------
 // The vocabulary.

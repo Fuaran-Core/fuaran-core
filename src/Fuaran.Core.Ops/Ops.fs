@@ -21,6 +21,12 @@ type NestRelation =
 /// wire (`RejectionCodec` in `Fuaran.Core.AiSurface`) — so a domain stops writing its own explainer.
 type Rejection<'Id> =
     /// `target` is not in the tree; `addressable` enumerates the ids that are.
+    ///
+    /// `addressable` is the WHOLE tree's ids, and that is deliberate (Phase 248): it is a repair aid
+    /// for the single-op `canApply` path, where a model repairs one op and needs every id it could
+    /// have meant. It therefore grows with the document rather than with the error. A party that
+    /// reports a stale op-script to others — a scheduler telling N proposers why arbitration refused
+    /// them — reports `Arbitration.stale`'s bounded envelope instead.
     | UnknownNode of target: 'Id * addressable: 'Id list
     /// Inserting / moving a node whose id already exists in the tree.
     | DuplicateId of 'Id
@@ -120,6 +126,35 @@ type Footprint =
       StructureWrites: Set<string>
       ContentWrites: Set<string>
       UnknownParentWrites: Set<string> }
+
+/// One clause of `Ops.independent` that two footprints fail, with the addresses it fails on
+/// (Phase 248) — what `Ops.interference` reports, so a refused party learns HOW its script
+/// collides and not only with whom. `left` and `right` are the first and second footprint handed
+/// to `Ops.interference`; a clause that is an overlap carries the one shared set, which is the
+/// address set on each side. The cases are the clauses of `independent`, in its order, and nothing
+/// else: a footprint pair that fails no clause is independent, and one that fails any is not.
+[<RequireQualifiedAccess>]
+type Interference =
+    /// Both scripts content-write the same nodes — author, destroy, relocate or rewrite them:
+    /// `left.ContentWrites ∩ right.ContentWrites`.
+    | SameTarget of targets: Set<string>
+    /// The left script content-writes nodes the right script reads (as a parent, a move target, a
+    /// reorder's child, an inserted id's duplicate check): `left.ContentWrites ∩ right.Reads`.
+    | LeftWritesRightReads of addresses: Set<string>
+    /// The right script content-writes nodes the left script reads: `left.Reads ∩ right.ContentWrites`.
+    | RightWritesLeftReads of addresses: Set<string>
+    /// Both scripts write the child list of the same named parent, so they shift the same siblings
+    /// (the pinned same-parent rule): `left.StructureWrites ∩ right.StructureWrites`.
+    | SameParent of parents: Set<string>
+    /// The left script removes, moves or rewrites in place nodes whose parent it cannot name, and the
+    /// right script writes structure somewhere (the pinned unknown-parent over-approximation):
+    /// `relocated` is the left's `UnknownParentWrites`, `structural` the right's `StructureWrites ∪
+    /// UnknownParentWrites`. No address is shared — that is the clause's point.
+    | LeftUnknownParent of relocated: Set<string> * structural: Set<string>
+    /// The mirror of `LeftUnknownParent`: the right script relocates, the left writes structure.
+    /// `structural` is the left's `StructureWrites ∪ UnknownParentWrites`, `relocated` the right's
+    /// `UnknownParentWrites`.
+    | RightUnknownParent of structural: Set<string> * relocated: Set<string>
 
 // ---- Phase 315: the envelope's operations and the footprint builders ----
 
@@ -1358,6 +1393,37 @@ module Ops =
 
         List.fold (fun acc op -> unionFootprint acc (ofOp op)) emptyFootprint ops
 
+    /// Every clause of `independent` two footprints fail, with the addresses each fails on (Phase
+    /// 248) — the explanation of a `false` verdict, so a refused party can see WHAT it collides on
+    /// (the parent it shares, the id the other script reads, the relocation that serialises it)
+    /// without re-deriving the clauses itself. Empty exactly when `independent a b`. The clauses are
+    /// listed in `Interference`'s declaration order, each at most once; `a` is the left side and `b`
+    /// the right, so `interference b a` reports the same clauses with the directional cases mirrored.
+    /// Total, no throws (GP4).
+    let interference (a: Footprint) (b: Footprint) : Interference list =
+        let structural (f: Footprint) =
+            Set.union f.StructureWrites f.UnknownParentWrites
+
+        let sameTarget = Set.intersect a.ContentWrites b.ContentWrites
+        let leftWrites = Set.intersect a.ContentWrites b.Reads
+        let rightWrites = Set.intersect a.Reads b.ContentWrites
+        let sameParent = Set.intersect a.StructureWrites b.StructureWrites
+        let structuralA = structural a
+        let structuralB = structural b
+
+        [ if not (Set.isEmpty sameTarget) then
+              Interference.SameTarget sameTarget
+          if not (Set.isEmpty leftWrites) then
+              Interference.LeftWritesRightReads leftWrites
+          if not (Set.isEmpty rightWrites) then
+              Interference.RightWritesLeftReads rightWrites
+          if not (Set.isEmpty sameParent) then
+              Interference.SameParent sameParent
+          if not (Set.isEmpty a.UnknownParentWrites) && not (Set.isEmpty structuralB) then
+              Interference.LeftUnknownParent(a.UnknownParentWrites, structuralB)
+          if not (Set.isEmpty b.UnknownParentWrites) && not (Set.isEmpty structuralA) then
+              Interference.RightUnknownParent(structuralA, b.UnknownParentWrites) ]
+
     /// Are two footprints **independent** (Phase 78) — do their scripts provably commute under `apply`?
     /// Pairwise disjointness across the write kinds, with the conservative rules pinned:
     ///   - no content write/write overlap, and no content-write vs read overlap either way (a node one
@@ -1379,18 +1445,10 @@ module Ops =
     /// "the pinned unknown-parent clause is necessary" and by the `Conformance.concurrencyLaws`
     /// teeth-check that erases `UnknownParentWrites`. Tightening it is a change to the `Footprint`
     /// record and to every consumer that reads it, not a change to this function.
-    let independent (a: Footprint) (b: Footprint) : bool =
-        let disjoint x y = Set.isEmpty (Set.intersect x y)
-
-        let hasStructural (f: Footprint) =
-            not (Set.isEmpty f.StructureWrites && Set.isEmpty f.UnknownParentWrites)
-
-        disjoint a.ContentWrites b.ContentWrites
-        && disjoint a.ContentWrites b.Reads
-        && disjoint b.ContentWrites a.Reads
-        && disjoint a.StructureWrites b.StructureWrites
-        && not (not (Set.isEmpty a.UnknownParentWrites) && hasStructural b)
-        && not (not (Set.isEmpty b.UnknownParentWrites) && hasStructural a)
+    ///
+    /// Since Phase 248 it is DEFINED as `interference a b = []`, so the verdict and its explanation
+    /// have one source and cannot drift; the clauses above are `interference`'s cases.
+    let independent (a: Footprint) (b: Footprint) : bool = List.isEmpty (interference a b)
 
 /// Structural tree-diff → op script (Phase 245): the inverse direction of `Ops.apply`.
 /// Given two trees over a shared id space, derive a `SkeletonOp` list that transforms one

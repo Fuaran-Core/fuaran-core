@@ -2375,6 +2375,288 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.34.0 — DRAFT
+
+**Slot class: breaking (source).** Opened as an additive slot over the tagged  .33.0 and reclassed
+breaking before any tag, when Phase 252 widened HostedCodec (two fields) and retyped Gen.fsharpValue
+and Gen.typescriptValue, and Phase 248 retyped ArbitrationRejection.Conflicts. Each entry below names
+its own class and the edit a consumer makes; the wire classes are recorded per entry. Pre-1.0 a breaking
+change is a minor bump, which this slot already is over  .33.0, so the number does not move.
+
+**Phase 331 — `tests/Fuaran.Core.Tests/ConformanceTests.fs` is split along the conformance kit's topic
+files. Class: `additive`, and the whole of it is tests: no package's public surface moves (the seventeen
+surface baselines read, none moved).** Phase 297 split the kit's source into topic files and deferred the
+matching split of its test file, because sibling phases were appending cases to it. That file held
+the cases of every law family in one 2,400-line module, so a change to one family edited the file every
+other family's phase was editing.
+
+Seven test files now mirror the kit's topic files — `TreeLawsTests`, `StreamLawsTests`,
+`IntegrityLawsTests`, `SeamLawsTests`, `FunctionLawsTests`, `PropagationLawsTests` and
+`SurfaceLawsTests` — registered in the test project in the kit's compile order. Each case moved verbatim
+(names, bodies, order within a topic), and the list a case is registered under kept its name, so the
+Expecto test list is identical before and after, by name and by count (1,531 listed lines each).
+Three lists keep their old names over cases that now live in other files — the `casLaws` cases still read
+`Conformance.functionVerify/…` — because the name is the identity a filter or a recorded result keys on.
+
+`ConformanceTests.fs` keeps what several files compile against: the reference domains and generators
+(the counter stream witness, the keyed and formula-sheet domains, the validity oracle), the guard helpers
+the topic files share, and the cases that exercise the facade's `certify` rather than one family. Moving
+the domains into topic files would have rewritten every file that names them, which is a different change
+from this one. No assertion changed.
+
+### The `OpStream` module becomes a forwarding facade over the concern files (Phase 332) — ADDITIVE; no public surface moves
+
+**What changed.** Phase 296 split `OpStream.fs` by concern at the type level and left the `OpStream`
+module's own members in one file, so that file still held every concern's code. Each member's body
+now lives in the file that owns its concern, in an internal module there — `Chain.fs` (the chain
+hashes, the payload configs, append, verification, rehash, replay, the head, compare-and-append and
+idempotent append), `Jsonl.fs` (the one scanner and the record reader and writer), `Snapshot.fs` (the
+snapshot family and its pre-Phase-296 forwards), `Capture.fs` (capture / replay and attestation) and
+`Attributed.fs` — and `OpStream` (`OpStream.fs`, compiled last) keeps every public name, the nested
+`OpStream.Jsonl`, `OpStream.Snapshots` and `OpStream.Attributed` included, as a forward with the same
+signature, attributes and documentation. `Jsonl.fs` now compiles before `Snapshot.fs`, ahead of the
+readers built on its scanner; the `fable/` source distribution ships the project file that says so.
+Two documentation edits ride it: `OpStream.appendIf` now carries the compare-and-append contract,
+which was written above the private core it calls and so never reached a consumer's tooltip, and two
+doc comments that pointed "above" / "below" at code that moved name its file instead.
+
+**What adopting it costs.** Nothing. `api/Fuaran.Core.OpStream.txt` is byte-identical, every error
+string is byte-identical (the bodies moved verbatim, the `OpStream.snapshotAt: …` strings the
+compaction proof model pins among them), and the proof cone over `proofs/Chain.fst` verifies with its extracted oracle
+byte-identical to a fresh extraction. A forward of a hash function keeps the lambda form
+(`fun prev payload -> …`): written as a bare value it would compile to a property rather than a
+two-argument method, which the baseline refuses as a `removal`.
+
+**Class: additive.** No public surface moves; a change to one op-stream concern now edits one file.
+
+### One sanitisation floor, total on hostile input, with the URL floor at parity with the UI tier's (Phase 291) — ADDITIVE; no public surface moves
+
+**What changed.** `Fuaran.Core.Idl.Sanitize` is the floor `Trust.harden` sends every declared URL and
+markdown field through, and it had two defects. Neither changes a signature; `api/Fuaran.Core.Idl.txt` is
+byte-identical.
+
+**1. `scrubMarkdown` took indices from a lowered copy of the string and applied them to the original.** The
+event-handler scan and the `javascript:` / `vbscript:` loop both did (`s.ToLowerInvariant()` then
+`IndexOf`, then `Remove` / `Substring` on `s`). On .NET `ToLowerInvariant` keeps the length. Under Fable a
+string lowercase is `toLowerCase()`, which turns U+0130 into two units, so each `İ` shifts every later
+index by one: the wrong characters are replaced, and with enough of them and a tail the scheme loop
+replaces past the real match forever. Every scan now compares per unit on the string it indexes —
+`foldAscii` (`A`-`Z` to `a`-`z`, nothing else) inside `indexOfFolded`, and the same fold inside the handler
+scan — so no index is ever taken from a string of another length, on either pipeline. The element sweep
+moved onto the same helper: `IndexOf(…, OrdinalIgnoreCase)` is a comparison whose Fable lowering this
+repository cannot see, and the one function whose contract is "total on hostile input" should not lean on
+it. The scheme loop is bounded by a `searchFrom` cursor that advances past every replacement, as the UI
+tier's copy is; resuming at the cursor loses no match, because `about:blank` holds no `j` or `v` and its one
+`:` follows `about`, which is the tail of neither scheme (the Phase 96 splice case is still in the corpus
+and still passes). On .NET the output is byte-identical to before for every input: the fold is the one
+`OrdinalIgnoreCase` already applied to these ASCII needles, and the one character whose invariant
+lowercase is ASCII under .NET (U+212A) occurs in no token this module scans for.
+
+**2. The URL floor was not the UI floor.** Compared clause by clause (`Fuaran.UI.EmissionGrammar`'s
+`normalizeUrlForFloor`, `isProtocolRelative`, `sanitizeUrl`):
+
+| Clause | UI floor | Core before | Core now |
+|---|---|---|---|
+| Edge removal | every unit at or below U+0020, both ends | `String.Trim()`: Unicode white space only | as the UI floor |
+| Interior TAB / LF / CR | removed | kept | as the UI floor |
+| Interior VT / FF | kept (the parser keeps them) | kept | as the UI floor |
+| Protocol-relative pair | any two units drawn from `/` and `\` | `//` and `/\` only | as the UI floor |
+| A single leading `\` | allowed (reads as `/`) | allowed | as the UI floor |
+| Value returned | the normalised string | the trimmed string | as the UI floor |
+| Scheme extraction, allow and reject sets, default-deny, empty string | — | identical | unchanged |
+
+The clauses the UI floor held that Core lacked are therefore four: the C0 half of the edge removal (NUL,
+U+0001-U+0008, U+000E-U+001B), the interior TAB / LF / CR removal, the `\\` and `\/` halves of the pair, and the
+normalised return. So Core accepted `\\evil.example`, `\/evil.example`, `/<TAB>/evil.example` and
+`<U+0001>//evil.example`, each of which a browser normalises to an off-origin `//evil.example`; all four are
+refused now. The clause table is a test (`urlFloorClauses`), so a divergence is a red case naming its
+clause.
+
+**What adopting it costs.** Nothing at the call site. One consequence is worth reading: the edge removal no
+longer takes non-ASCII white space (U+0085, U+00A0, U+2028, …), because the parser keeps it, so
+`<U+00A0>//host` is now returned as an ordinary relative path where Core used to refuse it. That is the
+UI floor's choice and the reason for the exact normalisation; a consumer that trims the value again itself
+before use re-opens the hole the floor exists to close, and should not. Both floors still classify a scheme
+candidate through `Trim()` and `ToLowerInvariant` (the candidate has already lost everything at or below
+U+0020); that residue is shared, default-deny covers it, and it is unchanged here.
+
+**The corpus.** `IdlCertificationTests` gains, with the expected output stated as a literal so both
+pipelines can share the oracle: `İ` runs of 1, 3, 11 and 12 before each scheme with and without a tail,
+bare and inside an `href`; a lone surrogate (high, low, and a doubled form) before a scheme; the handler
+and element scans after an `İ` run; and the URL clause table. Each case runs under a 20 s bound.
+
+**Class: additive.** The floor refuses more (the four pair spellings, and a scheme after any number of
+`İ` under Fable, which the old scan could miss or loop on) and nothing it accepted that was safe is
+refused. The narrow reverse edge above, strings it used to refuse and now passes through unchanged, is the
+parity the phase exists to establish.
+
+### Rejections that explain themselves: `Ops.interference` names the clause, `Conflicts` carries it, and a stale proposal has a bounded report (Phase 248) — BREAKING-SOURCE: `ArbitrationRejection.Conflicts` gains a field (`retype`); the rest `additive`
+
+**What changed.** A `Conflicts` rejection named WHO interfered and not HOW, so a party that wanted
+to know what to rebase against — the parent it shares, the id the other script reads, the
+relocation that serialises it — re-derived `Ops.independent`'s clauses itself, in glue that copied
+private logic and could drift from it. And a stale proposal's rejection reused the op-algebra's
+`UnknownNode` envelope, whose `addressable` is every id in the base: at a 465-node document, 465 ids
+per stale proposal, sent again to every party a scheduler reports to.
+
+- **`Interference`** (new, `Fuaran.Core.Ops`, qualified access) — one case per clause of
+  `independent`, in its order: `SameTarget`, `LeftWritesRightReads`, `RightWritesLeftReads`,
+  `SameParent`, `LeftUnknownParent`, `RightUnknownParent`, each carrying the addresses it fails on
+  (an overlap's one shared set; the unknown-parent clauses the relocated ids on one side and the
+  structural writes on the other).
+- **`Ops.interference : Footprint -> Footprint -> Interference list`** (new) — every clause two
+  footprints fail. **`Ops.independent` is now DEFINED as `interference a b = []`**, so the verdict and
+  its explanation have one source. Its verdict did not move: the suite holds the redefinition to the
+  previous clause-by-clause conjunction on every ordered pair of the 256 footprints over a two-address
+  universe, in which every clause fires.
+- **`ArbitrationRejection.Conflicts` gains a second field, `interference: (int * Interference list) list`**
+  — BREAKING-SOURCE, `retype`. Every cited id, in the same order, paired with the clauses its footprint
+  and the rejected proposal's fail (the proposal on the left), each list non-empty; `interfering` is
+  unchanged and is always `List.map fst interference`. **The consumer edit:** a match on `Conflicts`
+  gains a field — `| Conflicts ids ->` becomes `| Conflicts(ids, _) ->` (or `Conflicts(ids, clauses)` to
+  read the explanation); a match written `| Conflicts _ ->` still compiles; a constructed `Conflicts ids`
+  becomes `Conflicts(ids, clauses)`, and an expected value written as a `Conflicts` literal now has to
+  state the clauses or compare the ids alone. The rejection's wire is unaffected: no Core package
+  encodes `ArbitrationRejection`.
+- **`Arbitration.interference nodew idw accepted proposal`** (new) — the same per-pair list as a query,
+  for a party that holds a proposal and an accepted set but no rejection. `arbitrate` computes both
+  `Conflicts` fields through the one helper this function calls, so handed an arbitration's `Accepted`
+  and a `Conflicts`-rejected proposal it returns exactly that case's `interference` member.
+- **`StaleProposal<'Id>`** (new record: `OpIndex`, `Missing`, `AddressableCount`, `Sample`),
+  **`Arbitration.stale`** (new: `Some` for an `Inapplicable` whose envelope is `UnknownNode`, `None`
+  otherwise) and **`Arbitration.staleSampleSize`** (new, `8`). **The bound:** a stale proposal's
+  report is one id, two integers and at most eight sampled ids (the base's first eight in pre-order),
+  whatever the document's size.
+- **Documentation only:** `Rejection.UnknownNode` now states what `addressable` is for — a repair
+  aid on the single-op `canApply` path, where a model repairs one op and needs every id it could
+  have meant — and that a party reporting a stale script to others reports `Arbitration.stale`
+  instead.
+
+**What did NOT change, deliberately.** `Inapplicable` still carries the op-algebra's own envelope,
+`addressable` in full: the bounded report ships beside it rather than in it, because the full list is
+the right payload for the single-op repair it was built for and a scheduler can choose the bounded one.
+`arbitrate`'s partition, its `interfering` citations and its envelopes are what they were; the formal
+model (`proofs/Arbitrate.fst`) states its theorems over the citation, which did not move, and the oracle
+differential compares that citation.
+
+**Class: breaking-source**, for the one `retype` on `Conflicts`; everything else — one new union, one
+new record, four new module values — is `additive`. Pre-1.0, an untagged draft's minor carries a
+breaking change without a new number. `api/Fuaran.Core.Ops.txt` records the case's new field and the
+new members.
+
+### `Json.parse` reads every float `Canon.render` writes; the canonical-float family samples the whole double range (Phase 253) — ADDITIVE: the read side widens, no emitted byte moves
+
+**What changed.** The canonical float layout (WIRE_FORMAT §2 rule 5, `FloatLayout.finite`) writes a
+finite double whose base-10 exponent is 15 or 16 in fixed point, so `1e16` renders as
+`10000000000000000` and `9007199254740994.0` as `9007199254740994` — integer tokens past 2^53, which the
+parser's int53 guard refused. A document Core wrote could not be read by Core. The parser now reads an
+integer token past 2^53 **exactly when it is the canonical float layout of the double it reads as**, as
+that `JFloat`; it re-renders to the same token. Every other integer token past 2^53 is refused as
+before, with the same message: `9007199254740993` (2^53 + 1), a 19-digit identifier, and the exact
+value of a double whose layout spells it differently (`18205257897171752`, whose double's layout is
+`18205257897171750`). DECISIONS D90 records why the read side moved rather than the layout.
+
+`Conformance.canonicalFloatLaws` builds one float per iteration in each of four strata — the old
+small-magnitude spread, the whole normal range, the subnormals, and the integral range from 2^53 to
+2^57 — and asserts the edges every run (the largest finite and smallest subnormal of each sign, the
+largest subnormal and smallest normal, 2^53 and its neighbour, both ends of the fixed-point window, the
+Int32 edges, both zeroes). Its round trip now runs through the parser over that whole range, and a
+fourth law asserts the fixed point: the parsed value re-renders to the very bytes it was read from. With
+the parser change reverted, the family goes red at its first iteration, in the integral stratum.
+
+**What adopting it costs.** Nothing to compile against: no public signature moves and every
+`api/` baseline, managed and wire, is unchanged — no `Canon.render` byte moves. Three observable
+differences, each a read that used to be refused:
+
+- `Json.parse` (and every reader over it) returns `Ok (JFloat …)` for a canonical integer-shaped float
+  layout past 2^53 where it returned a `MalformedNumber`. A caller that relied on that refusal to keep
+  identifiers past 2^53 out keeps it for every token that is not such a layout; an identifier in that
+  range travels as a string, as before.
+- The columnar decoder's vector `decode-refuses-integer-token-past-2-53` (`conformance/laws/
+  decimal-laws.json`) is still refused, now by the decimal column (`TypeMismatch`, a whole float past
+  2^53) rather than by the parser (`NotJson`). The shared corpus's copy of that file is re-emitted with `--emit-laws <corpus dir>`.
+- `canonicalFloatLaws` reports four laws, not three; a census over it counts 2000 cases at 500
+  iterations where it counted 1500.
+
+**The proofs move with it.** `proofs/JsonParse.fst`'s float reader gains a verdict, `FCanonical`;
+`int53_guard_exact` now reads "int53-safe, or the canonical layout of its double",
+`int53_guard_refuses` excludes that layout, `canonical_layout_past_int53_is_read` is new, and the
+oracle is re-extracted. `proofs/WireCanon.fst` gains a second numeral premise,
+`integral_float_reads_back`, and `every_finite_float_reads_back` on it; the oracle host evaluates that
+premise against production's parser and against a reader with the old guard, which must lose past 2^53
+and only there.
+
+**Class: additive** — a decode widening; nothing a consumer pins as emitted moves.
+
+
+### The IDL serves a vocabulary that is not the UI's (Phase 252) — BREAKING (source): one record widened, two emitters retyped
+
+**What changed.** A second vocabulary taken through every IDL leg found the legs disagreeing with each
+other and assuming the UI vocabulary. Seven corrections, one change each.
+
+- **A hosted slot declares its wire form.** `HostedCodec` gains `Wire: IdlType option` (what the codec
+  writes, as an IDL type) and `Format: string option` (a closed string format on a string wire:
+  `date`, `date-time`, `uuid` — `HostedFormat`). A declared form is what every leg but the F# host
+  reads: the sampler draws from it, `Gen.jsonSchema` states it (with `format`), the TypeScript module
+  encodes through it and its decoder checks it, `Decode` (the interpreter) refuses a value outside it,
+  and the generated F# decoder checks it before the host codec runs. Without one (`Wire = None`)
+  every leg carries the JSON verbatim as before. The artifact writes a declared form as the hosted
+  type's `wire` (a type object) and `format`; an undeclared slot still writes `"wire": "json"`,
+  byte-for-byte as before. `Declare.hostedWireErrors` reports a malformed declaration, and the
+  generators refuse one as `CodegenError.UnsupportedConstruct`.
+- **`Gen.fsharpValue` returns the typed refusal** (`Result<string, CodegenError>`, was
+  `Result<string, string>`), resolves an enum literal through `IdlEnum.CaseOf` to the host case,
+  emits a `TRecord` value as a record expression, writes a union case's `Optional` field as
+  `Some(…)` / `None` as its declaration says, and scaffolds a hosted slot that declares its wire form
+  through its own `Decode` over an escaped `JVal` literal. What remains (an undeclared hosted slot, a
+  closure, JSON, a map, a sentinel, an op slot) is refused as `UnsupportedConstruct`.
+- **`Gen.typescriptValue` fills declared defaults.** It took the value alone and so could not know a
+  default; it now takes the vocabulary and the slot's type (`typescriptValue idl t v :
+  Result<string, CodegenError>`) and emits the generated decoder's shape — every omit-at-default
+  member present — so the generated encoder no longer writes `undefined` or a default the wire
+  omits. **`Gen.typescriptDeclarations idl kindTags`** (new) emits the `.d.ts` beside the module.
+- **The checked scaffold no longer requires a gated kind.** `Trust.checkHardenPolicy` asks for the
+  gate's members only when a gated kind is declared; it still refuses, by name, a vocabulary that
+  declares a kind carrying `moduleId` and `componentId` (the fields the gate reads) and no gate, and a
+  declared markdown field now needs the text-literal members on its own account.
+- **The artifact carries the vocabulary's identity.** `Artifact.renderWith identity idl` writes the
+  vocabulary's own `description` and `name`; `Artifact.identityOf` reads them back, so an authored
+  `idl.json` re-renders to itself. `Artifact.render` is `renderWith Artifact.defaultIdentity`, its
+  bytes unchanged.
+- **The classifier's host roster is the manifest's `hosts` and nothing else.** Without a manifest, or
+  with one declaring no `hosts`, no host is obliged by name and the report says so; the UI tier's own
+  rows follow its reference host `fuaran` when a roster declares it. `Diff.declaredRoster` stays, for
+  a caller that passes it explicitly.
+- **Two classifier rules corrected** (`docs/idl-stability-classes.md`): `int` to `float` (anywhere in
+  a type) is an `additive` widening, exit 0, not `breaking-wire`; a move in a **hosted** slot's
+  `hostSurface` block (its host type, `encode` or `decode`) is `undecided`, exit 4, not
+  `host-surface-only`. On the F# axis a `hostSurface` move is now decided from the block: a
+  construction break when `fsharp` moved, `no-generated-shape-change` otherwise.
+- **Generated wire equality** (DECISIONS D91). A generated record, kind spec or node holding a
+  host-only CLOSURE, not generic in `'Msg`, whose wire fields all compare, takes
+  `[<CustomEquality; NoComparison>]` with `Equals` / `GetHashCode` over its wire fields, so the
+  tree-algebra families accept the generated layer. A vocabulary without such a declaration emits
+  byte-for-byte what it did.
+
+**What adopting it costs — the consumer edits.**
+
+- Every `THosted { FSharp = …; Encode = …; Decode = … }` literal adds `Wire = None; Format = None`
+  (FS0764 until it does), or declares the slot's form: `Wire = Some TStr; Format = Some "date"`.
+- A caller of `Gen.fsharpValue` that wants the sentence adapts with
+  `|> Result.mapError CodegenError.describe`.
+- A caller of `Gen.typescriptValue v` writes `Gen.typescriptValue idl TNode v` and handles the
+  `CodegenError` (a value that does not fit its declaration is refused now, not emitted).
+- A caller of `Diff.run` (or `fuaran-core-idl classify`) that relied on the UI roster without a
+  manifest supplies a manifest declaring `hosts`, or calls `Diff.report` with `Diff.declaredRoster`.
+- A generated module regenerates: a vocabulary that declares a hosted wire form, or holds a qualifying
+  host-only closure, gets new decoder or equality code.
+
+**Class: breaking (source).** `api/Fuaran.Core.Idl.txt` reports `record-widening` (`HostedCodec`)
+plus additive members; `api/Fuaran.Core.Idl.Codegen.txt` reports two retypes (`fsharpValue`,
+`typescriptValue`) and one addition. The wire baseline for `Fuaran.Core.Idl` reads `breaking`: its
+document set is derived by reflection and now draws a hosted slot WITH a declared form, so its
+`"wire": "json"` document is gone from the set — no existing vocabulary's artifact bytes move, since an
+undeclared slot renders exactly as before.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

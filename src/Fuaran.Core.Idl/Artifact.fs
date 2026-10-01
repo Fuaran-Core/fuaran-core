@@ -82,7 +82,9 @@ module Artifact =
 
     /// The structural type of a field. `$type` carries the [[IdlType]] case; the
     /// `wire` key, where present, states the FIXED wire form a third party will see
-    /// for that case, so a sentinel is never mistaken for authored content.
+    /// for that case, so a sentinel is never mistaken for authored content — or, on a
+    /// hosted slot, its DECLARED wire form as a type object (Phase 252), `"json"` when it
+    /// declares none.
     ///
     /// `hostSurface` (on [[TFn]] / [[THosted]]) carries the host-language strings
     /// from [[ClosureSig]] / [[HostedCodec]]. They are included because they are
@@ -117,11 +119,21 @@ module Artifact =
                       [ "fsharp", JStr sg.FSharp
                         "typescript", JStr sg.TypeScript
                         "placeholder", JStr sg.Placeholder ] ]
+        // Phase 252 — wire states the slot's DECLARED wire form as a type object, and
+        // ormat the string format on top of it; a slot that declares none says "json"
+        // (carried verbatim), byte-for-byte what every earlier artifact wrote. Both sit
+        // OUTSIDE hostSurface: they are wire spec a third-party codec reads.
         | THosted h ->
             Canon.typed
                 "hosted"
-                [ "wire", JStr "json"
-                  "hostSurface", JObj [ "fsharp", JStr h.FSharp; "encode", JStr h.Encode; "decode", JStr h.Decode ] ]
+                ([ "wire",
+                   (match h.Wire with
+                    | Some w -> typeJson w
+                    | None -> JStr "json")
+                   "hostSurface", JObj [ "fsharp", JStr h.FSharp; "encode", JStr h.Encode; "decode", JStr h.Decode ] ]
+                 @ (match h.Format with
+                    | Some f -> [ "format", JStr f ]
+                    | None -> []))
 
     /// An authored value — a field default, or a nested part of one.
     let rec private valueJson (v: IdlValue) : JVal =
@@ -387,26 +399,52 @@ module Artifact =
                 // sorted here for the same reason every other named collection is.
                 TransparentUnions = idl.Harden.TransparentUnions |> List.sortWith (fun (a, _) (b, _) -> ordinal a b) } }
 
-    /// The whole IDL as a `JVal`.
+    /// Who a vocabulary IS (Phase 252) — the artifact's `name` and `description`.
+    ///
+    /// **Beside the [[Idl]], not on it.** Identity is a property of the published
+    /// document rather than of the structure the generators read: no leg emits a
+    /// different type, codec or schema for it. And carrying it on the record would
+    /// widen a record every vocabulary builds by literal. So [[renderWith]] takes it,
+    /// and [[identityOf]] reads it back, which is what lets an authored `idl.json`
+    /// re-render to itself.
+    type Identity =
+        {
+            /// The vocabulary's name, written as the artifact's `name` member when
+            /// present. `None` writes no member, which is every artifact [[render]]
+            /// has ever written.
+            Name: string option
+            /// The artifact's `description` member, verbatim.
+            Description: string
+        }
+
+    /// The `description` [[render]] writes — the UI vocabulary's, as it always has.
+    /// Kept as [[render]]'s default because the artifact's bytes are pinned: a
+    /// vocabulary that wants its own description says so through [[renderWith]].
+    let defaultDescription =
+        "Canonical data rendering of the Fuaran UI wire vocabulary — kinds, unions, enums, "
+        + "records, field defaults and the node envelope. This is the STRUCTURAL source: it "
+        + "states what the vocabulary is, including optionality classes and omit-at-default "
+        + "values that a JSON Schema cannot express. schema.json beside it is the VALIDATION "
+        + "surface, derived from the same contract. Keys marked hostSurface are host-language "
+        + "declarations, not wire spec, and carry nothing observable on the wire. See "
+        + "WIRE_FORMAT.md section 13."
+
+    /// The identity [[render]] writes: no name, [[defaultDescription]].
+    let defaultIdentity: Identity =
+        { Name = None
+          Description = defaultDescription }
+
+    /// The whole IDL as a `JVal`, under a declared [[Identity]] (Phase 252).
     ///
     /// [[canonicalise]] runs FIRST and owns every ordering decision; nothing below
     /// sorts. That is what keeps the ordering contract one definition now that
     /// [[parse]] has to reproduce it exactly.
-    let json (idl: Idl) : JVal =
+    let jsonWith (identity: Identity) (idl: Idl) : JVal =
         let idl = canonicalise idl
 
         JObj(
             [ "version", JInt version
-              "description",
-              JStr(
-                  "Canonical data rendering of the Fuaran UI wire vocabulary — kinds, unions, enums, "
-                  + "records, field defaults and the node envelope. This is the STRUCTURAL source: it "
-                  + "states what the vocabulary is, including optionality classes and omit-at-default "
-                  + "values that a JSON Schema cannot express. schema.json beside it is the VALIDATION "
-                  + "surface, derived from the same contract. Keys marked hostSurface are host-language "
-                  + "declarations, not wire spec, and carry nothing observable on the wire. See "
-                  + "WIRE_FORMAT.md section 13."
-              )
+              "description", JStr identity.Description
               "kinds", JArr(idl.Kinds |> List.map kindJson)
               "unions", JArr(idl.Unions |> List.map (unionJson idl.Harden))
               "enums",
@@ -463,6 +501,12 @@ module Artifact =
                    []
                else
                    [ "ops", JArr(idl.Ops |> List.map kindJson) ])
+            // The vocabulary's name (Phase 252). Written only when one is declared, so
+            // every artifact rendered without one is byte-for-byte what it was — the
+            // `ops` posture again.
+            @ (match identity.Name with
+               | Some name -> [ "name", JStr name ]
+               | None -> [])
             // The declared wire shape (Phases 108/109). Emitted only when it
             // differs from the default, so every `$type`-nested vocabulary's
             // artefact is byte-for-byte what it was — the `ops` posture again.
@@ -525,9 +569,18 @@ module Artifact =
                       ) ] ]
         )
 
+    /// The whole IDL as a `JVal`, under [[defaultIdentity]].
+    let json (idl: Idl) : JVal = jsonWith defaultIdentity idl
+
     /// The `idl.json` bytes — indented, canonically ordered, newline-terminated
     /// (matching `schema.json`'s convention in the same corpus).
     let render (idl: Idl) : string = indent 0 (json idl) + "\n"
+
+    /// [[render]] under a declared [[Identity]] (Phase 252) — the vocabulary's own
+    /// name and description rather than [[defaultDescription]]. With the identity
+    /// [[identityOf]] reads off an artifact, an authored `idl.json` re-renders to
+    /// itself.
+    let renderWith (identity: Identity) (idl: Idl) : string = indent 0 (jsonWith identity idl) + "\n"
 
     /// The same indented, canonically-ordered layout [[render]] uses, over an arbitrary
     /// `JVal`. Exposed so a SIBLING document of the vocabulary — the declared-support
@@ -656,12 +709,31 @@ module Artifact =
                 hostSurface [ "fsharp"; "encode"; "decode" ] v
                 |> Result.bind (function
                     | [ fs; enc; dec ] ->
-                        Ok(
-                            THosted
-                                { FSharp = fs
-                                  Encode = enc
-                                  Decode = dec }
-                        )
+                        let wire =
+                            match atKey "wire" v with
+                            | None
+                            | Some(JStr "json") -> Ok None
+                            | Some(JObj _ as w) -> readType w |> Result.map Some
+                            | Some _ -> Error "hosted type's 'wire' is neither \"json\" nor a type"
+
+                        let format =
+                            match atKey "format" v with
+                            | None -> Ok None
+                            | Some(JStr f) -> Ok(Some f)
+                            | Some _ -> Error "hosted type's 'format' is not a string"
+
+                        match wire, format with
+                        | Error e, _
+                        | _, Error e -> Error e
+                        | Ok w, Ok f ->
+                            Ok(
+                                THosted
+                                    { FSharp = fs
+                                      Encode = enc
+                                      Decode = dec
+                                      Wire = w
+                                      Format = f }
+                            )
                     | _ -> Error "hosted type has an incomplete 'hostSurface'")
             | other -> Error("unknown type '" + other + "'")
 
@@ -1093,3 +1165,25 @@ module Artifact =
     /// Read a vocabulary from `idl.json` bytes — the inverse of [[render]], up to the
     /// ordering [[canonicalise]] states.
     let parse (text: string) : Result<Idl, string> = Json.parse text |> Result.bind ofJson
+
+    /// The [[Identity]] an artifact declares (Phase 252): its `description`, and its
+    /// `name` when it carries one. The other half of [[parse]] — what the `Idl` record
+    /// does not hold — so `renderWith (identityOf root) (ofJson root)` reproduces the
+    /// artifact instead of re-stamping it with [[defaultDescription]].
+    let identityOfJson (root: JVal) : Result<Identity, string> =
+        strAt "description" root
+        |> Result.bind (fun description ->
+            match atKey "name" root with
+            | None ->
+                Ok
+                    { Name = None
+                      Description = description }
+            | Some(JStr name) ->
+                Ok
+                    { Name = Some name
+                      Description = description }
+            | Some _ -> Error "idl.json 'name' is not a string")
+
+    /// [[identityOfJson]] over `idl.json` bytes.
+    let identityOf (text: string) : Result<Identity, string> =
+        Json.parse text |> Result.bind identityOfJson
