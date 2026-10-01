@@ -251,13 +251,20 @@ module internal ProposalSpike =
                     match tsModule with
                     | None -> []
                     | Some source ->
-                        [ for ext in externals do
-                              let literal =
-                                  encoded
-                                  |> List.map (fun (i, v, _) -> sprintf "  [%d, %s]," i (Gen.typescriptValue v))
-                                  |> String.concat "\n"
+                        // Phase 252 — the value literals are scaffolded against the POST
+                        // vocabulary, so every omit-at-default member is filled the way the
+                        // generated decoder fills it, under the vocabulary's declared shape.
+                        let literalR =
+                            (Ok [], encoded)
+                            ||> List.fold (fun acc (i, v, _) ->
+                                match acc, Gen.typescriptValue post TNode v with
+                                | Error m, _ -> Error m
+                                | _, Error e -> Error(sprintf "vector %d: %s" i (CodegenError.describe e))
+                                | Ok xs, Ok s -> Ok(sprintf "  [%d, %s]," i s :: xs))
+                            |> Result.map (List.rev >> String.concat "\n")
 
-                              match ext.Run source literal with
+                        [ for ext in externals do
+                              match literalR |> Result.bind (fun literal -> ext.Run source literal) with
                               | Error m -> yield leg ("fuzz:" + ext.Name) false ("the external leg did not run: " + m)
                               | Ok produced ->
                                   let expected = encoded |> List.map (fun (_, _, w) -> w)

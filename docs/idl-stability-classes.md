@@ -56,7 +56,9 @@ point.
 | an **optional** field added | `additive` | `full-literal-construction` |
 | a **host-only** field added | `host-surface-only` | `full-literal-construction` |
 | a field removed, or its type moved | wire-dependent | `full-literal-construction` |
-| a field's `hostSurface` block moved | `host-surface-only` | `full-literal-construction` |
+| a field's type **widened from `int` to `float`** (anywhere in it — a list element, a map value, a union argument) | `additive` | `full-literal-construction` |
+| a `fn` slot's `hostSurface` block moved | `host-surface-only` | `full-literal-construction` when its `fsharp` signature moved, else `no-generated-shape-change` |
+| a **hosted** slot's `hostSurface` block moved — its host type, its `encode` or its `decode` | `undecided` | `full-literal-construction` when its `fsharp` type moved, else `no-generated-shape-change` |
 | a field's optionality moved **into or out of** `optional` | wire-dependent | `full-literal-construction` |
 | a field's optionality moved **between** `required` and `omitDefault` | `breaking-wire` (omit-at-default is wire-visible) | `no-generated-shape-change` |
 | a node kind added or removed | `additive` / `breaking-wire` | `exhaustive-match` (a kind is a case of the generated node-kind DU) |
@@ -70,6 +72,26 @@ point.
 | the declared wire shape, the hardening vocabulary, a transparent case, a kind's category, an authoring default | wire-dependent | `no-generated-shape-change` |
 | any annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape |
 | anything crossing an erased slot | `undecided` | `generated-shape-unreadable` |
+
+**The two corrected rules (Phase 252).**
+
+- **Int to float is a widening, and a widening is `additive`.** A float slot admits every integer
+  literal, and a whole float renders as the same digits, so every document the old vocabulary
+  admitted decodes and re-encodes byte-identically under the new one, and every emitter that
+  conformed (writing integers) still conforms. That is this table's definition of `additive`, not of
+  `breaking-for-emitters`, whose defining case is an old emitter's output becoming invalid. The cost
+  is the one a new enum case has: host lag — a decoder that predates the widening refuses `2.5` —
+  and the report says so. The rule used to read "a value that decoded no longer does", which is
+  false for this one change. The narrowing (`float` to `int`) and every other retype stay
+  `breaking-wire`.
+- **A hosted slot's codec is its wire form, so moving it is `undecided`.** The artifact states what a
+  hosted slot's codec is called, never what it writes, so a different `encode` or `decode` — or a
+  different host type under the same codec names, which is a different function — can move every
+  document's bytes with nothing in the artifact to show it. The rule used to call that
+  `host-surface-only` (exit 0), a false absorbable; it is now `undecided` (exit 4) with the checks a
+  human runs. A `fn` slot's block stays `host-surface-only`: a closure is the fixed sentinel on the
+  wire whatever its signature says. On the F# axis both are decided rather than reported unreadable —
+  the block states the host type outright, so the generated field moves exactly when `fsharp` does.
 
 ## The verdict class, and what a gate does with it
 
@@ -119,6 +141,12 @@ whatever the pull brought and the caller branches on the exit code above. With `
 it asserts a class the author declared, exiting 0 on a match and 1 on a mismatch, printing both
 sides — that is the form that belongs in a `run.ps1`, because it is the form that can go red for
 the right reason.
+
+`--manifest` names the vocabulary's own manifest, read only for its host roster (`hosts`). The roster
+is that and nothing else (Phase 252): without a manifest, or with one that declares no `hosts`, no
+host is obliged by name and the report says so, rather than falling back to one vocabulary's hosts
+for every vocabulary. The UI tier's own §11 rows (its corpus, its veneers, its spec document) follow
+its reference host `fuaran` when a roster declares it.
 
 Everything is written to stdout, refusals included, so a gate that captures the output gets the
 whole record in one stream. A refusal — bad usage, an unreadable file, an artifact that did not

@@ -42,29 +42,6 @@ type ClosureSig =
       TypeScript: string
       Placeholder: string }
 
-/// The host codec of a [[THosted]] slot (Phase 692 gap-closure) — a wire-visible
-/// field whose value is a HOST type with its own canonical codec, spliced into the
-/// generated module verbatim. The motivating case is `Binding.Transform`: its
-/// `source` is a `Fuaran.Core.DataSource` and its `pipeline` a `Fuaran.Core.Transform
-/// list`, rendered by Core's own `ColumnCodec` / `DataFrameCodec` under the same
-/// `Canon` discipline — re-modelling that vocabulary as IDL unions would mint a
-/// second set of types beside the ones the evaluator actually consumes.
-///
-/// `FSharp` is the slot's host type, verbatim. `Encode` is an F# expression of type
-/// `'host -> JVal`; `Decode` an F# expression of type `JVal -> Result<'host, string>`.
-/// Both are emitted into the generated module, so (like a [[ClosureSig]] placeholder)
-/// they may reference generated-internal declarations (`encBinding`, a record codec)
-/// as well as fully-qualified host functions.
-///
-/// Everywhere else — the schema, the TypeScript backend, the interpreter's
-/// `IdlValue` carrier, the sampler — a hosted slot behaves exactly like [[TJson]]:
-/// the JSON is carried verbatim, because its content is the host codec's business,
-/// not the schema's.
-type HostedCodec =
-    { FSharp: string
-      Encode: string
-      Decode: string }
-
 /// The structural type of a field's value on the wire.
 type IdlType =
     | TStr
@@ -103,7 +80,8 @@ type IdlType =
     /// (see [[HostedCodec]]) — `Binding.Transform`'s `source` / `pipeline`, and the
     /// slot-specific transparent-Static convention of a `Range` control's value.
     /// The generated F# declares the real host type and delegates to the named
-    /// codec expressions; every other backend carries the JSON verbatim ([[TJson]]).
+    /// codec expressions; every other backend reads the slot's declared wire form, or
+    /// carries the JSON verbatim ([[TJson]]) when it declares none.
     | THosted of HostedCodec
     /// A *non-discriminated* object (a plain F# record) — an object with named
     /// fields and **no `$type` tag** (`SelectOption`, `FormField`, `FilterSpec`,
@@ -126,6 +104,47 @@ type IdlType =
     /// exactly one wire position: `TreeOp.Batch`'s `ops` list. Resolves against
     /// [[Idl]]'s `Ops`, the way [[TNode]] resolves against `Kinds`.
     | TOp
+
+/// The host codec of a [[THosted]] slot (Phase 692 gap-closure) — a wire-visible
+/// field whose value is a HOST type with its own canonical codec, spliced into the
+/// generated module verbatim. The motivating case is `Binding.Transform`: its
+/// `source` is a `Fuaran.Core.DataSource` and its `pipeline` a `Fuaran.Core.Transform
+/// list`, rendered by Core's own `ColumnCodec` / `DataFrameCodec` under the same
+/// `Canon` discipline — re-modelling that vocabulary as IDL unions would mint a
+/// second set of types beside the ones the evaluator actually consumes.
+///
+/// `FSharp` is the slot's host type, verbatim. `Encode` is an F# expression of type
+/// `'host -> JVal`; `Decode` an F# expression of type `JVal -> Result<'host, string>`.
+/// Both are emitted into the generated module, so (like a [[ClosureSig]] placeholder)
+/// they may reference generated-internal declarations (`encBinding`, a record codec)
+/// as well as fully-qualified host functions.
+///
+/// **The slot's WIRE FORM (Phase 252).** `Wire` declares, as an IDL type, what the
+/// codec writes — `Some TStr` for a date the codec renders as `"2026-10-03"` — and
+/// `Format` names a closed string format on top of it ([[HostedFormat]]: `date`,
+/// `date-time`, `uuid`). A declared wire form is what every leg that is not the F#
+/// host reads: the sampler draws from it, the schema states it, the TypeScript
+/// decoder checks it (and its encoder writes through it), the interpreter refuses a
+/// value outside it, and the generated F# decoder checks it before the host codec
+/// runs. Without one (`Wire = None`) those legs carry the JSON verbatim exactly as
+/// [[TJson]] does, which is what every slot declared before Phase 252 means — and the
+/// reason the two generated hosts could disagree on which documents are valid: the
+/// codec refused what nothing else knew to refuse.
+///
+/// BREAKING (Phase 252, record widening): a full literal adds `Wire = None; Format =
+/// None` to keep its meaning, or declares the slot's wire form.
+and HostedCodec =
+    {
+        FSharp: string
+        Encode: string
+        Decode: string
+        /// The IDL type the codec writes on the wire, when declared. A scalar, enum,
+        /// record, list or map — never another erased slot (see
+        /// [[Declare.hostedWireErrors]]).
+        Wire: IdlType option
+        /// A closed string format on top of a `Some TStr` wire ([[HostedFormat]]).
+        Format: string option
+    }
 
 /// Where a node's KIND BODY sits relative to its `id` on the wire (Phase 109).
 /// Both readiness spikes (`SecondDomainSpike.fs`, `ScoreDomainSpike.fs`) measured
@@ -632,6 +651,59 @@ type Idl =
         Harden: HardenPolicy
     }
 
+/// The closed set of string FORMATS a hosted slot's declared wire form may name
+/// (Phase 252, [[HostedCodec.Format]]) — and the one definition of what each admits,
+/// so the interpreter, the sampler and the generated hosts cannot disagree on it.
+///
+/// **Closed, deliberately.** A format the engine does not know is one no leg can
+/// check or draw from, which is the disagreement the declaration exists to remove;
+/// [[Declare.hostedWireErrors]] reports one, and the generators refuse it. The three
+/// are JSON Schema's spellings, read strictly: `date` is RFC 3339 `full-date` (a real
+/// calendar day, years 0001–9999), `date-time` is RFC 3339 `date-time` (an offset is
+/// required; `T`/`Z` in either case; no leap second), and `uuid` is the 8-4-4-4-12 hex
+/// form in either case.
+[<RequireQualifiedAccess>]
+module HostedFormat =
+
+    /// Every format a hosted slot may declare.
+    let known: string list = [ "date"; "date-time"; "uuid" ]
+
+    let private dateRx =
+        System.Text.RegularExpressions.Regex("^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
+
+    let private dateTimeRx =
+        System.Text.RegularExpressions.Regex(
+            "^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(\\.[0-9]+)?([Zz]|[+-]([0-9]{2}):([0-9]{2}))$"
+        )
+
+    let private uuidRx =
+        System.Text.RegularExpressions.Regex(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        )
+
+    let private validDay (y: int) (m: int) (d: int) =
+        y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
+
+    /// Whether the string `s` is in `format`. An unknown format admits nothing.
+    let admits (format: string) (s: string) : bool =
+        let num (g: System.Text.RegularExpressions.Group) = int g.Value
+
+        match format with
+        | "date" ->
+            let m = dateRx.Match s
+            m.Success && validDay (num m.Groups[1]) (num m.Groups[2]) (num m.Groups[3])
+        | "date-time" ->
+            let m = dateTimeRx.Match s
+
+            m.Success
+            && validDay (num m.Groups[1]) (num m.Groups[2]) (num m.Groups[3])
+            && num m.Groups[4] <= 23
+            && num m.Groups[5] <= 59
+            && num m.Groups[6] <= 59
+            && (not m.Groups[9].Success || (num m.Groups[9] <= 23 && num m.Groups[10] <= 59))
+        | "uuid" -> uuidRx.IsMatch s
+        | _ -> false
+
 /// Declaration helpers for the IDL's hand-authored parts.
 [<RequireQualifiedAccess>]
 module Declare =
@@ -712,6 +784,65 @@ module Declare =
 
               if List.length (List.distinct annotated) <> List.length annotated then
                   sprintf "enum '%s': two annotation entries name the same case" e.Name ]
+
+    /// Well-formedness of every hosted slot's declared wire form (Phase 252). Empty
+    /// list ⇒ well-formed. A wire form is a type the other legs can read without the
+    /// host codec — a scalar, a declared enum, record or union, or a list or map of
+    /// those — so another erased slot (`json`, `hosted`, a closure, a sentinel), a
+    /// node, a tree-op or a type variable is refused; a format needs a string wire and
+    /// must be one [[HostedFormat]] knows.
+    let hostedWireErrors (idl: Idl) : string list =
+        let rec readable (t: IdlType) : string option =
+            match t with
+            | TStr
+            | TInt
+            | TBool
+            | TFloat -> None
+            | TEnum n when idl.Enums |> List.exists (fun e -> e.Name = n) -> None
+            | TRecord n when idl.Records |> List.exists (fun r -> r.Name = n) -> None
+            | TUnion(n, args) when idl.Unions |> List.exists (fun u -> u.Name = n) -> args |> List.tryPick readable
+            | TEnum n
+            | TRecord n
+            | TUnion(n, _) -> Some(sprintf "names '%s', which the vocabulary does not declare" n)
+            | TList inner
+            | TMap inner -> readable inner
+            | other -> Some(sprintf "is %A, which no leg but the host codec can read" other)
+
+        let rec hostedIn (t: IdlType) : HostedCodec list =
+            match t with
+            | THosted h -> [ h ]
+            | TList inner
+            | TMap inner -> hostedIn inner
+            | TUnion(_, args) -> args |> List.collect hostedIn
+            | _ -> []
+
+        let fieldSets =
+            [ for k in idl.Kinds -> "kind " + k.Tag, k.Fields
+              for o in idl.Ops -> "op " + o.Tag, o.Fields
+              for r in idl.Records -> "record " + r.Name, r.Fields
+              for u in idl.Unions do
+                  for c in u.Cases -> sprintf "union %s.%s" u.Name c.Tag, c.Fields
+              yield "the node envelope", idl.NodeFields ]
+
+        [ for owner, fields in fieldSets do
+              for f in fields do
+                  for h in hostedIn f.Type do
+                      let at = sprintf "%s, field '%s' (hosted %s)" owner f.Name h.FSharp
+
+                      match h.Wire |> Option.bind readable with
+                      | Some why -> sprintf "%s: the declared wire form %s" at why
+                      | None -> ()
+
+                      match h.Format, h.Wire with
+                      | Some fmt, _ when not (List.contains fmt HostedFormat.known) ->
+                          sprintf
+                              "%s: format '%s' is not one the engine knows (%s)"
+                              at
+                              fmt
+                              (String.concat ", " HostedFormat.known)
+                      | Some fmt, w when w <> Some TStr ->
+                          sprintf "%s: format '%s' needs a string wire form (Wire = Some TStr)" at fmt
+                      | _ -> () ]
 
     /// Well-formedness of the declared wire shape (Phases 108/109). Empty list ⇒
     /// well-formed. The discriminator shares an object with a tagged body's own
@@ -903,7 +1034,8 @@ module Encode =
         // inherits all three instead of re-implementing them.
         | TJson, VJson j -> Ok j
         // A hosted slot's content is the host codec's business — the interpreter
-        // carries it verbatim, exactly as TJson (see [[HostedCodec]]).
+        // carries it verbatim, exactly as TJson (see [[HostedCodec]]). A declared wire
+        // form (Phase 252) is checked on DECODE, the direction a document arrives from.
         | THosted _, VJson j -> Ok j
         | TRecord name, VRecord fields ->
             match findRecord name idl with
@@ -1043,6 +1175,11 @@ module Encode =
     /// The declared canonical renderer (Phase 111): Ordinal-sorted by default,
     /// authored order under `KeyOrder.Declared` — where the encoder's own
     /// construction order (discriminator, id, declared fields) is normative.
+    /// A value of `t` as its canonical `JVal` — what the sampler draws a hosted slot's
+    /// declared wire form through (Phase 252), so the drawn JSON is exactly what the
+    /// interpreter would write for that type.
+    let internal valueJson (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> = encodeValue idl t v
+
     let private render (idl: Idl) : JVal -> string =
         match idl.Wire.KeyOrder with
         | KeyOrder.Sorted -> Canon.render
@@ -1165,8 +1302,19 @@ module Decode =
         // contract is that its content is not the schema's business.
         | TJson, j -> Ok(VJson j)
         // A hosted slot decodes verbatim in the interpreter — only the generated
-        // F# runs the real host codec (see [[HostedCodec]]).
-        | THosted _, j -> Ok(VJson j)
+        // F# runs the real host codec (see [[HostedCodec]]). Since Phase 252 a slot
+        // that declares its wire form is checked against it first, so the interpreter
+        // refuses what the host codec and the TypeScript host refuse.
+        | THosted h, j ->
+            match h.Wire with
+            | None -> Ok(VJson j)
+            | Some w ->
+                decodeValue idl w j
+                |> Result.bind (fun _ ->
+                    match h.Format, j with
+                    | None, _ -> Ok(VJson j)
+                    | Some fmt, JStr s when HostedFormat.admits fmt s -> Ok(VJson j)
+                    | Some fmt, _ -> Error(sprintf "hosted value is not a '%s' string" fmt))
         | TRecord name, JObj fs ->
             match idl.Records |> List.tryFind (fun r -> r.Name = name) with
             | None -> Error(sprintf "unknown record '%s'" name)
@@ -1269,6 +1417,11 @@ module Decode =
                             | envelope -> VNodeEnv(id, envelope, kindTag, fields)))
             | _ -> Error(sprintf "node must have a string 'id' and a string '%s' discriminator" idl.Wire.Discriminator)
         | _, _ -> Error "node must be an object"
+
+    /// Decode one parsed JSON value at a declared type (Phase 252) — the per-slot face of
+    /// [[decode]], for a caller holding a value rather than a node: a hosted slot's JSON
+    /// read through its declared wire form, for instance.
+    let value (idl: Idl) (t: IdlType) (j: JVal) : Result<IdlValue, string> = decodeValue idl t j
 
     /// Decode canonical wire JSON to an authored `IdlValue`, driven by the IDL.
     let decode (idl: Idl) (json: string) : Result<IdlValue, string> =

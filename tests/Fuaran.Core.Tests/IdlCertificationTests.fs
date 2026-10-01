@@ -484,21 +484,20 @@ let valueCarryingDefaults =
               Gen.fsharpModuleWith support "Phase124.Projected" idl (probeTags idl)
               |> isUnsupportedDefault "F#, projected kind")
 
-          testCase "the scaffold leg answers with the SAME typed case, rendered" (fun _ ->
-              // `Gen.fsharpValue` publishes a plain-string channel, so it cannot carry the case
-              // itself — but it can carry the case's own words rather than a second sentence of
-              // its own invention, which is what "folded into the same case" has to mean here.
+          testCase "the scaffold leg answers with the SAME typed case" (fun _ ->
+              // Since Phase 252 `Gen.fsharpValue` returns the typed refusal itself, so "folded
+              // into the same case" is an equality rather than a sentence match.
               let idl =
                   { probeIdl with
                       Kinds = [ oneKind [ badMapField ] ] }
 
               match Gen.fsharpValue idl TNode (VNode("p", "Probe", [])) with
               | Ok _ -> failtest "the scaffold emitted source for a default it cannot render"
-              | Error m ->
-                  Expect.stringContains
-                      m
-                      (CodegenError.describe (CodegenError.UnsupportedDefault(TMap TStr, unrenderable)))
-                      "the scaffold's refusal is the module emitters' own case, rendered")
+              | Error e ->
+                  Expect.equal
+                      e
+                      (CodegenError.UnsupportedDefault(TMap TStr, unrenderable))
+                      "the scaffold's refusal is the module emitters' own case")
 
           testCase "a nullary spelling of a case that TAKES a payload is refused, not mis-emitted" (fun _ ->
               // `VUnion(tag, [])` matched ANY union before Phase 124, so a default authored

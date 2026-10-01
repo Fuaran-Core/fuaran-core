@@ -1,5 +1,32 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D91: a generated record holding a host-only closure takes WIRE equality; the conformance families keep their equality constraint
+
+**Recorded by Phase 252. `Fuaran.Core.Idl.Codegen` (`Gen.fsharpModule`'s output); rides the `0.34.0`
+draft (STABILITY.md, "The IDL serves a vocabulary that is not the UI's").** A field declared
+`HostOnly` is a closure, so the generated record holding it has no structural equality, and neither
+does anything that holds that record — the generated `Node` included. Every tree-algebra conformance
+family (`witnessLaws`, `opAlgebra`, `diffLaws`) asks `'Node: equality`, so a vocabulary with one
+host-only field could not certify its own generated layer without wrapping it in a type whose
+equality is the equality of its encodings. The shard offered two remedies; this records the choice.
+
+*Chosen: custom equality on the generated declaration, over its wire fields.* A host-only field is
+never on the wire, so the record's wire-observable identity is exactly its other fields, and equality
+over them is what a decode can tell apart — the wrapper a consumer otherwise writes by hand, generated
+once. Giving the families an equality function instead would leave every generated layer without
+`=` for every other use, would add a parameter to four families a domain with ordinary equality never
+needs, and would put the burden on each caller to know which equality the laws mean.
+
+*Its boundary, decided rather than left open.* A declaration qualifies when it holds a host-only field,
+is not generic in `'Msg` (an `Equals` over a `'Msg`-carrying field needs a constraint the generated
+layer cannot state, and the vocabularies that are `'Msg`-generic keep their shape untouched), and every
+wire field is equality-capable — so a wire-visible closure (`TFn`) or a hosted host type, whose equality
+the IDL cannot see, disqualifies it rather than emitting source that does not compile. Records, kind
+specs and the node envelope are covered; a host-only field on a UNION case is not, because no
+vocabulary declares one outside a `'Msg`-generic union, and a union's `Equals` must enumerate its cases
+— built when the first such vocabulary exists, not before. The qualifying set is computed as a
+fixpoint across the recursive type group, since one declaration's equality depends on another's.
+
 ## 2026-10-01 — D90: an integer token past 2^53 is read when it is a canonical float — the read side moves, not the layout
 
 **Recorded by Phase 253. `Fuaran.Core.Wire`; ADDITIVE, riding the `0.34.0` draft (STABILITY.md, "`Json.parse`

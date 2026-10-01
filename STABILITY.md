@@ -2582,6 +2582,75 @@ and only there.
 
 **Class: additive** — a decode widening; nothing a consumer pins as emitted moves.
 
+
+### The IDL serves a vocabulary that is not the UI's (Phase 252) — BREAKING (source): one record widened, two emitters retyped
+
+**What changed.** A second vocabulary taken through every IDL leg found the legs disagreeing with each
+other and assuming the UI vocabulary. Seven corrections, one change each.
+
+- **A hosted slot declares its wire form.** `HostedCodec` gains `Wire: IdlType option` (what the codec
+  writes, as an IDL type) and `Format: string option` (a closed string format on a string wire:
+  `date`, `date-time`, `uuid` — `HostedFormat`). A declared form is what every leg but the F# host
+  reads: the sampler draws from it, `Gen.jsonSchema` states it (with `format`), the TypeScript module
+  encodes through it and its decoder checks it, `Decode` (the interpreter) refuses a value outside it,
+  and the generated F# decoder checks it before the host codec runs. Without one (`Wire = None`)
+  every leg carries the JSON verbatim as before. The artifact writes a declared form as the hosted
+  type's `wire` (a type object) and `format`; an undeclared slot still writes `"wire": "json"`,
+  byte-for-byte as before. `Declare.hostedWireErrors` reports a malformed declaration, and the
+  generators refuse one as `CodegenError.UnsupportedConstruct`.
+- **`Gen.fsharpValue` returns the typed refusal** (`Result<string, CodegenError>`, was
+  `Result<string, string>`), resolves an enum literal through `IdlEnum.CaseOf` to the host case,
+  emits a `TRecord` value as a record expression, writes a union case's `Optional` field as
+  `Some(…)` / `None` as its declaration says, and scaffolds a hosted slot that declares its wire form
+  through its own `Decode` over an escaped `JVal` literal. What remains (an undeclared hosted slot, a
+  closure, JSON, a map, a sentinel, an op slot) is refused as `UnsupportedConstruct`.
+- **`Gen.typescriptValue` fills declared defaults.** It took the value alone and so could not know a
+  default; it now takes the vocabulary and the slot's type (`typescriptValue idl t v :
+  Result<string, CodegenError>`) and emits the generated decoder's shape — every omit-at-default
+  member present — so the generated encoder no longer writes `undefined` or a default the wire
+  omits. **`Gen.typescriptDeclarations idl kindTags`** (new) emits the `.d.ts` beside the module.
+- **The checked scaffold no longer requires a gated kind.** `Trust.checkHardenPolicy` asks for the
+  gate's members only when a gated kind is declared; it still refuses, by name, a vocabulary that
+  declares a kind carrying `moduleId` and `componentId` (the fields the gate reads) and no gate, and a
+  declared markdown field now needs the text-literal members on its own account.
+- **The artifact carries the vocabulary's identity.** `Artifact.renderWith identity idl` writes the
+  vocabulary's own `description` and `name`; `Artifact.identityOf` reads them back, so an authored
+  `idl.json` re-renders to itself. `Artifact.render` is `renderWith Artifact.defaultIdentity`, its
+  bytes unchanged.
+- **The classifier's host roster is the manifest's `hosts` and nothing else.** Without a manifest, or
+  with one declaring no `hosts`, no host is obliged by name and the report says so; the UI tier's own
+  rows follow its reference host `fuaran` when a roster declares it. `Diff.declaredRoster` stays, for
+  a caller that passes it explicitly.
+- **Two classifier rules corrected** (`docs/idl-stability-classes.md`): `int` to `float` (anywhere in
+  a type) is an `additive` widening, exit 0, not `breaking-wire`; a move in a **hosted** slot's
+  `hostSurface` block (its host type, `encode` or `decode`) is `undecided`, exit 4, not
+  `host-surface-only`. On the F# axis a `hostSurface` move is now decided from the block: a
+  construction break when `fsharp` moved, `no-generated-shape-change` otherwise.
+- **Generated wire equality** (DECISIONS D91). A generated record, kind spec or node holding a
+  host-only CLOSURE, not generic in `'Msg`, whose wire fields all compare, takes
+  `[<CustomEquality; NoComparison>]` with `Equals` / `GetHashCode` over its wire fields, so the
+  tree-algebra families accept the generated layer. A vocabulary without such a declaration emits
+  byte-for-byte what it did.
+
+**What adopting it costs — the consumer edits.**
+
+- Every `THosted { FSharp = …; Encode = …; Decode = … }` literal adds `Wire = None; Format = None`
+  (FS0764 until it does), or declares the slot's form: `Wire = Some TStr; Format = Some "date"`.
+- A caller of `Gen.fsharpValue` that wants the sentence adapts with
+  `|> Result.mapError CodegenError.describe`.
+- A caller of `Gen.typescriptValue v` writes `Gen.typescriptValue idl TNode v` and handles the
+  `CodegenError` (a value that does not fit its declaration is refused now, not emitted).
+- A caller of `Diff.run` (or `fuaran-core-idl classify`) that relied on the UI roster without a
+  manifest supplies a manifest declaring `hosts`, or calls `Diff.report` with `Diff.declaredRoster`.
+- A generated module regenerates: a vocabulary that declares a hosted wire form, or holds a qualifying
+  host-only closure, gets new decoder or equality code.
+
+**Class: breaking (source).** `api/Fuaran.Core.Idl.txt` reports `record-widening` (`HostedCodec`)
+plus additive members; `api/Fuaran.Core.Idl.Codegen.txt` reports two retypes (`fsharpValue`,
+`typescriptValue`) and one addition. The wire baseline for `Fuaran.Core.Idl` reads `breaking`: its
+document set is derived by reflection and now draws a hosted slot WITH a declared form, so its
+`"wire": "json"` document is gone from the set — no existing vocabulary's artifact bytes move, since an
+undeclared slot renders exactly as before.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

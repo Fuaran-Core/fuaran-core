@@ -102,6 +102,13 @@ let private emitTsModule (idl: Idl) (tags: string list) : string =
     | Ok src -> src
     | Error e -> failwithf "TypeScript codegen rejected the vocabulary: %A" e
 
+/// A node scaffolded as a TypeScript value literal against the spike vocabulary (Phase 252:
+/// the emitter takes the vocabulary and refuses a value that does not fit it).
+let private tsNodeValue (v: IdlValue) : string =
+    match Gen.typescriptValue miniIdl TNode v with
+    | Ok src -> src
+    | Error e -> failwithf "the TypeScript value emitter refused a node: %s" (CodegenError.describe e)
+
 [<Tests>]
 let tests =
     testList
@@ -489,7 +496,7 @@ let tests =
 
               let fixturesJs =
                   cases
-                  |> List.map (fun (name, v) -> sprintf "  [\"%s\", %s]," name (Gen.typescriptValue v))
+                  |> List.map (fun (name, v) -> sprintf "  [\"%s\", %s]," name (tsNodeValue v))
                   |> String.concat "\n"
 
               let harness =
@@ -643,7 +650,7 @@ let tests =
 
               let vectorsJs =
                   vectors
-                  |> List.mapi (fun i v -> sprintf "  [%d, %s]," i (Gen.typescriptValue v))
+                  |> List.mapi (fun i v -> sprintf "  [%d, %s]," i (tsNodeValue v))
                   |> String.concat "\n"
 
               let harness =
@@ -727,7 +734,7 @@ let tests =
                   let valueSrc =
                       match Gen.fsharpValue miniIdl TNode hostileNode with
                       | Ok s -> s
-                      | Error e -> failtestf "fsharpValue rejected the node: %s" e
+                      | Error e -> failtestf "fsharpValue rejected the node: %s" (CodegenError.describe e)
 
                   let decls =
                       match Gen.fsharpModule "Scaffold" miniIdl generatedKinds with
@@ -791,7 +798,7 @@ let tests =
           testCase
               "scaffold injection-safety (TS): a hostile wire string cannot break out of the generated literal"
               (fun _ ->
-                  let valueSrc = Gen.typescriptValue hostileNode
+                  let valueSrc = tsNodeValue hostileNode
                   let tsModule = emitTsModule miniIdl generatedKinds
 
                   let harness = tsModule + "\n\nconsole.log(encodeNode(" + valueSrc + "));\n"
@@ -846,3 +853,403 @@ let tests =
               Expect.stringContains header "agent:claude@4.8" "carries the typed actor"
               Expect.stringContains header "INERT" "states generated code is inert structure"
               Expect.stringContains header "human-bound" "states behaviour is human-bound (holes)") ]
+
+
+// ---------------------------------------------------------------------------
+// Phase 252 — a vocabulary that is not the UI's, through every leg.
+//
+// A trip holds bags, a bag holds items and nested bags. It carries what the UI
+// vocabulary never exercised together: a hosted slot with a declared wire form and
+// format, a wire-mapped enum whose wire strings are not F# identifiers, a record
+// with an omit-at-default member, an omit-at-default union, an optional field, and
+// a host-only closure. The cases hold the two generated hosts to the same verdict on
+// every sampled document, and the scaffold legs to compiling, default-filled output.
+// ---------------------------------------------------------------------------
+
+module private SecondVocabulary =
+
+    let field name ty opt : IdlField =
+        { Name = name
+          Type = ty
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    let kind tag fields : IdlKind =
+        { Tag = tag
+          Category = "trip"
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    /// A date carried by the host as `System.DateOnly` and on the wire as `yyyy-MM-dd`.
+    let date: HostedCodec =
+        { FSharp = "System.DateOnly"
+          Encode =
+            "(fun (d: System.DateOnly) -> JStr(d.ToString(\"yyyy-MM-dd\", System.Globalization.CultureInfo.InvariantCulture)))"
+          Decode =
+            "(fun (j: JVal) -> match j with JStr s -> (match System.DateOnly.TryParseExact(s, \"yyyy-MM-dd\", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None) with | true, d -> Ok d | _ -> Error \"not a date\") | _ -> Error \"expected a string\")"
+          Wire = Some TStr
+          Format = Some "date" }
+
+    let idl: Idl =
+        { Kinds =
+            [ kind
+                  "Trip"
+                  [ field "title" TStr Required
+                    field "departs" (THosted date) Required
+                    field "nights" TInt Required
+                    field "notes" TStr Optional
+                    field "bags" (TList TNode) Required ]
+              kind
+                  "Bag"
+                  [ field "label" TStr Required
+                    field "capacityLitres" TFloat Required
+                    field "contents" (TList TNode) Required ]
+              kind
+                  "Item"
+                  [ field "name" TStr Required
+                    field "quantity" TInt (OmitDefault(VInt 1))
+                    field "category" (TEnum "Category") Required
+                    field "status" (TUnion("Status", [])) (OmitDefault(VUnion("Unpacked", [])))
+                    field "weight" (TRecord "Weight") Optional
+                    field
+                        "onPacked"
+                        (TFn
+                            { FSharp = "unit -> unit"
+                              TypeScript = "() => void"
+                              Placeholder = "ignore" })
+                        HostOnly ] ]
+          Unions =
+            [ { Name = "Status"
+                Params = []
+                Cases =
+                  [ { Tag = "Unpacked"
+                      Fields = []
+                      Annotations = Annotations.Empty }
+                    { Tag = "Packed"
+                      Fields = []
+                      Annotations = Annotations.Empty }
+                    { Tag = "Borrowed"
+                      Fields = [ field "lender" TStr Required ]
+                      Annotations = Annotations.Empty } ] } ]
+          Enums =
+            [ Declare.enumWith "Category" [ "Clothing", "clothing"; "Documents", "documents"; "FirstAid", "first-aid" ] ]
+          Records =
+            [ { Name = "Weight"
+                Fields =
+                  [ field "grams" TInt Required
+                    field "approximate" TBool (OmitDefault(VBool false)) ] } ]
+          Defaults = []
+          NodeFields = []
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared }
+
+    let tags = [ "Trip"; "Bag"; "Item" ]
+
+    /// The documents both hosts are held to: the sampler's draw, rendered by the interpreter.
+    let documents =
+        Sample.sampleNodes idl tags 20260926 300
+        |> List.map (fun v ->
+            match Encode.encode idl v with
+            | Ok w -> w
+            | Error m -> failwithf "the interpreter refused a sampled node: %s" m)
+
+    /// Wire strings the hosted slot must REFUSE in every leg: not a calendar day, not a
+    /// date at all, and a value the sampler drew for an undeclared slot before Phase 252.
+    let refusedDeparts = [ "2026-02-30"; "tab\there"; "2026-1-3" ]
+
+    let tripWith (departs: string) =
+        sprintf
+            "{\"id\":\"t\",\"kind\":{\"$type\":\"Trip\",\"bags\":[],\"departs\":%s,\"nights\":1,\"title\":\"x\"}}"
+            (Canon.render (JStr departs))
+
+    let authoredItem =
+        VNode(
+            "item-1",
+            "Item",
+            [ "name", VStr "Plasters"
+              "category", VEnum "first-aid"
+              "weight", VRecord [ "grams", VInt 30 ] ]
+        )
+
+    let authoredTrip =
+        VNode(
+            "trip-1",
+            "Trip",
+            [ "title", VStr "Walking \"the\" way"
+              "departs", VJson(JStr "2026-10-03")
+              "nights", VInt 7
+              "bags",
+              VList
+                  [ VNode(
+                        "bag-1",
+                        "Bag",
+                        [ "label", VStr "Rucksack"
+                          "capacityLitres", VFloat 45.5
+                          "contents", VList [ authoredItem ] ]
+                    ) ] ]
+        )
+
+    /// Run a process over a script file; `None` when the tool is not on PATH.
+    let run (tool: string) (args: string) : (int * string * string) option =
+        let psi = ChildProcess.redirected tool args
+
+        match
+            (try
+                Some(Process.Start psi)
+             with _ ->
+                 None)
+        with
+        | None -> None
+        | Some p ->
+            let stdout = p.StandardOutput.ReadToEnd()
+            let stderr = p.StandardError.ReadToEnd()
+            p.WaitForExit()
+            Some(p.ExitCode, stdout.Replace("\r\n", "\n"), stderr)
+
+    let withTemp (ext: string) (text: string) (f: string -> 'a) : 'a =
+        let path =
+            Path.Combine(Path.GetTempPath(), sprintf "fuaran-252-%s%s" (Guid.NewGuid().ToString("N")) ext)
+
+        File.WriteAllText(path, text)
+
+        try
+            f path
+        finally
+            try
+                File.Delete path
+            with _ ->
+                ()
+
+    /// One line per document: `ok\t<re-encoded>` or `err`.
+    let lines (stdout: string) =
+        stdout.Split('\n') |> Array.filter (fun l -> l <> "") |> Array.toList
+
+[<Tests>]
+let secondVocabularyTests =
+    testList
+        "Phase 252 · a vocabulary that is not the UI's"
+        [ testCase "the vocabulary's hosted wire form is well-formed, and a malformed one is reported" (fun _ ->
+              Expect.isEmpty (Declare.hostedWireErrors SecondVocabulary.idl) "the declared form is well-formed"
+
+              let bad (h: HostedCodec) =
+                  { SecondVocabulary.idl with
+                      Kinds =
+                          [ SecondVocabulary.kind "Trip" [ SecondVocabulary.field "departs" (THosted h) Required ] ] }
+                  |> Declare.hostedWireErrors
+
+              Expect.hasLength
+                  (bad
+                      { SecondVocabulary.date with
+                          Format = Some "postcode" })
+                  1
+                  "an unknown format"
+
+              Expect.hasLength
+                  (bad
+                      { SecondVocabulary.date with
+                          Wire = Some TInt })
+                  1
+                  "a format on a non-string wire"
+
+              Expect.hasLength
+                  (bad
+                      { SecondVocabulary.date with
+                          Wire = Some TJson
+                          Format = None })
+                  1
+                  "an erased wire form")
+
+          testCase "every sampled document decodes and re-encodes byte-identically in the interpreter" (fun _ ->
+              for i, w in List.indexed SecondVocabulary.documents do
+                  match Decode.decode SecondVocabulary.idl w with
+                  | Ok v -> Expect.equal (Encode.encode SecondVocabulary.idl v) (Ok w) (sprintf "document %d" i)
+                  | Error m -> failtestf "document %d refused: %s (%s)" i m w
+
+              for d in SecondVocabulary.refusedDeparts do
+                  Expect.isError
+                      (Decode.decode SecondVocabulary.idl (SecondVocabulary.tripWith d))
+                      (sprintf "the interpreter refuses departs %A" d))
+
+          testCase "the schema states the hosted slot's wire form and format" (fun _ ->
+              match Gen.jsonSchema SecondVocabulary.idl with
+              | Error e -> failtestf "schema: %s" (CodegenError.describe e)
+              | Ok s -> Expect.stringContains s "\"format\":\"date\"" "the format is stated")
+
+          testCase "the generated TypeScript host accepts and round-trips exactly what the interpreter does" (fun _ ->
+              let tsModule =
+                  match Gen.typescriptModule SecondVocabulary.idl SecondVocabulary.tags with
+                  | Ok m -> m
+                  | Error e -> failtestf "TS codegen: %s" (CodegenError.describe e)
+
+              let docs =
+                  SecondVocabulary.documents
+                  @ (SecondVocabulary.refusedDeparts |> List.map SecondVocabulary.tripWith)
+
+              let harness =
+                  tsModule
+                  + "\n\nconst __docs = "
+                  + Canon.render (JArr(docs |> List.map JStr))
+                  + ";\nfor (const d of __docs) { const r = decodeNode(d); console.log(r.ok ? 'ok\\t' + encodeNode(r.value) : 'err'); }\n"
+
+              SecondVocabulary.withTemp ".mjs" harness (fun path ->
+                  match SecondVocabulary.run "node" ("\"" + path + "\"") with
+                  | None -> skiptest "node not on PATH"
+                  | Some(code, _, stderr) when code <> 0 -> failtestf "node failed: %s" stderr
+                  | Some(_, stdout, _) ->
+                      let got = SecondVocabulary.lines stdout
+
+                      let expected =
+                          (SecondVocabulary.documents |> List.map (fun w -> "ok\t" + w))
+                          @ [ "err"; "err"; "err" ]
+
+                      Expect.equal got expected "300 documents identical, the three refusals refused"))
+
+          testCase
+              "the generated F# host agrees with it, compiles with wire equality, and scaffolds the authored trip"
+              (fun _ ->
+                  let decls =
+                      match Gen.fsharpModule "SecondVocabulary" SecondVocabulary.idl SecondVocabulary.tags with
+                      | Ok m -> m.Replace("module SecondVocabulary\n", "")
+                      | Error e -> failtestf "F# codegen: %s" (CodegenError.describe e)
+
+                  Expect.stringContains
+                      decls
+                      "[<CustomEquality; NoComparison>] ItemSpec"
+                      "the host-only spec takes wire equality"
+
+                  let tripSrc =
+                      match Gen.fsharpValue SecondVocabulary.idl TNode SecondVocabulary.authoredTrip with
+                      | Ok s -> s
+                      | Error e -> failtestf "fsharpValue: %s" (CodegenError.describe e)
+
+                  Expect.stringContains tripSrc "Category.FirstAid" "an enum literal by its host case"
+
+                  Expect.stringContains
+                      tripSrc
+                      "Weight = Some({ Grams = 30; Approximate = false })"
+                      "a record, defaults filled"
+
+                  let expectedTrip =
+                      match Encode.encode SecondVocabulary.idl SecondVocabulary.authoredTrip with
+                      | Ok w -> w
+                      | Error m -> failtestf "interpreter: %s" m
+
+                  let docs =
+                      SecondVocabulary.documents
+                      @ (SecondVocabulary.refusedDeparts |> List.map SecondVocabulary.tripWith)
+
+                  let dllRef (name: string) =
+                      "#r @\"" + Path.Combine(AppContext.BaseDirectory, name) + "\"\n"
+
+                  let fsx =
+                      dllRef "Fuaran.Core.Wire.dll"
+                      + dllRef "Fuaran.Core.Tree.dll"
+                      + dllRef "Fuaran.Core.Validator.dll"
+                      + decls
+                      + "\n\nlet __docs : string list = "
+                      + "[ "
+                      + (docs
+                         |> List.map (fun d -> "\"" + d.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"")
+                         |> String.concat "; ")
+                      + " ]\n"
+                      + "for d in __docs do\n"
+                      + "    match decodeNode d with\n"
+                      + "    | Ok n -> printfn \"ok\\t%s\" (encodeNode n)\n"
+                      + "    | Error _ -> printfn \"err\"\n"
+                      + "let __trip : Node = "
+                      + tripSrc
+                      + "\nprintfn \"trip\\t%s\" (encodeNode __trip)\n"
+                      // Wire equality: the decoded tree equals itself and its re-decode — the
+                      // comparison the tree-algebra families make, which did not compile before.
+                      + "printfn \"eq\\t%b\" (decodeNode (encodeNode __trip) = Ok __trip)\n"
+
+                  SecondVocabulary.withTemp ".fsx" fsx (fun path ->
+                      match SecondVocabulary.run "dotnet" ("fsi \"" + path + "\"") with
+                      | None -> skiptest "dotnet not on PATH"
+                      | Some(code, _, stderr) when code <> 0 -> failtestf "fsi failed: %s" stderr
+                      | Some(_, stdout, _) ->
+                          let got = SecondVocabulary.lines stdout
+
+                          let expected =
+                              (SecondVocabulary.documents |> List.map (fun w -> "ok\t" + w))
+                              @ [ "err"; "err"; "err"; "trip\t" + expectedTrip; "eq\ttrue" ]
+
+                          Expect.equal got expected "the F# host agrees on every document, the scaffold, and equality"))
+
+          testCase
+              "the TypeScript scaffold fills declared defaults, and the encoder writes the interpreter's bytes"
+              (fun _ ->
+                  let tripSrc =
+                      match Gen.typescriptValue SecondVocabulary.idl TNode SecondVocabulary.authoredTrip with
+                      | Ok s -> s
+                      | Error e -> failtestf "typescriptValue: %s" (CodegenError.describe e)
+
+                  Expect.stringContains tripSrc "quantity: 1" "an omit-at-default member is present"
+                  Expect.stringContains tripSrc "approximate: false" "a record's omit-at-default member is present"
+                  Expect.stringContains tripSrc "status: { $type: \"Unpacked\" }" "an omit-at-default union is present"
+
+                  let tsModule =
+                      match Gen.typescriptModule SecondVocabulary.idl SecondVocabulary.tags with
+                      | Ok m -> m
+                      | Error e -> failtestf "TS codegen: %s" (CodegenError.describe e)
+
+                  let expectedTrip =
+                      match Encode.encode SecondVocabulary.idl SecondVocabulary.authoredTrip with
+                      | Ok w -> w
+                      | Error m -> failtestf "interpreter: %s" m
+
+                  SecondVocabulary.withTemp
+                      ".mjs"
+                      (tsModule + "\n\nconsole.log(encodeNode(" + tripSrc + "));\n")
+                      (fun path ->
+                          match SecondVocabulary.run "node" ("\"" + path + "\"") with
+                          | None -> skiptest "node not on PATH"
+                          | Some(code, _, stderr) when code <> 0 -> failtestf "node failed: %s" stderr
+                          | Some(_, stdout, _) ->
+                              Expect.equal (stdout.Trim()) expectedTrip "byte-identical to the interpreter"))
+
+          testCase "the TypeScript declarations describe the decoder's shape" (fun _ ->
+              match Gen.typescriptDeclarations SecondVocabulary.idl SecondVocabulary.tags with
+              | Error e -> failtestf "declarations: %s" (CodegenError.describe e)
+              | Ok d ->
+                  for expected in
+                      [ "export type Category = \"clothing\" | \"documents\" | \"first-aid\";"
+                        "export type Weight = { grams: number; approximate: boolean };"
+                        "export type Status = { $type: \"Unpacked\" } | { $type: \"Packed\" } | { $type: \"Borrowed\"; lender: string };"
+                        "departs: string"
+                        "notes?: string"
+                        "quantity: number"
+                        "onPacked?: unknown"
+                        "export type NodeKind = TripSpec | BagSpec | ItemSpec;"
+                        "export declare function encodeNode(n: Node): string;" ] do
+                      Expect.stringContains d expected expected)
+
+          testCase
+              "the scaffold refuses a hosted value outside its form, and an undeclared hosted slot, as typed values"
+              (fun _ ->
+                  let trip departs =
+                      VNode("t", "Trip", [ "title", VStr "x"; "departs", departs; "nights", VInt 1; "bags", VList [] ])
+
+                  match Gen.fsharpValue SecondVocabulary.idl TNode (trip (VJson(JStr "2026-02-30"))) with
+                  | Error(CodegenError.UnsupportedConstruct _) -> ()
+                  | other -> failtestf "expected a typed refusal, got %A" other
+
+                  let undeclared =
+                      { SecondVocabulary.idl with
+                          Kinds =
+                              [ SecondVocabulary.kind
+                                    "Trip"
+                                    [ SecondVocabulary.field
+                                          "departs"
+                                          (THosted
+                                              { SecondVocabulary.date with
+                                                  Wire = None
+                                                  Format = None })
+                                          Required ] ] }
+
+                  match
+                      Gen.fsharpValue undeclared TNode (VNode("t", "Trip", [ "departs", VJson(JStr "2026-10-03") ]))
+                  with
+                  | Error(CodegenError.UnsupportedConstruct _) -> ()
+                  | other -> failtestf "expected a typed refusal, got %A" other) ]
