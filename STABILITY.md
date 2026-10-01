@@ -2377,6 +2377,12 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 
 ## 0.34.0 — DRAFT
 
+**Slot class: breaking (source).** Opened as an additive slot over the tagged  .33.0 and reclassed
+breaking before any tag, when Phase 252 widened HostedCodec (two fields) and retyped Gen.fsharpValue
+and Gen.typescriptValue, and Phase 248 retyped ArbitrationRejection.Conflicts. Each entry below names
+its own class and the edit a consumer makes; the wire classes are recorded per entry. Pre-1.0 a breaking
+change is a minor bump, which this slot already is over  .33.0, so the number does not move.
+
 **Phase 331 — `tests/Fuaran.Core.Tests/ConformanceTests.fs` is split along the conformance kit's topic
 files. Class: `additive`, and the whole of it is tests: no package's public surface moves (the seventeen
 surface baselines read, none moved).** Phase 297 split the kit's source into topic files and deferred the
