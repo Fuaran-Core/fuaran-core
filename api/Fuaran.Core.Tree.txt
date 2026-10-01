@@ -11,6 +11,9 @@ ctor Fuaran.Core.NodeWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, !1>,
 ctor Fuaran.Core.Tree+NodeIndex`2..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !1>, !1, System.String)
 field Fuaran.Core.Tree+WellFormed`1+Tags.RepeatedId : System.Int32 (literal)
 field Fuaran.Core.Tree+WellFormed`1+Tags.Structural : System.Int32 (literal)
+method Fuaran.Core.FreshIds.derived`1(Fuaran.Core.IdWitness`1<!!0>, !!0, Microsoft.FSharp.Collections.FSharpSet`1<System.String>) : !!0
+method Fuaran.Core.FreshIds.repairDuplicates`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!0>>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpSet`1<System.String>, !!1>>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, !!0) : System.Tuple`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<!!1, !!1>>>
+method Fuaran.Core.FreshIds.sequential`1(Fuaran.Core.IdWitness`1<!!0>, System.String, !!0, Microsoft.FSharp.Collections.FSharpSet`1<System.String>) : !!0
 method Fuaran.Core.Hash.canonicalField(System.String) : System.String
 method Fuaran.Core.Hash.canonicalFields(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : System.String
 method Fuaran.Core.Hash.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.IllFormedUtf16>
@@ -82,6 +85,7 @@ record-field Fuaran.Core.Tree+NodeIndex`2.ById #0 : Microsoft.FSharp.Collections
 record-field Fuaran.Core.Tree+NodeIndex`2.Fingerprint #3 : System.String
 record-field Fuaran.Core.Tree+NodeIndex`2.ParentOf #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, !1>
 record-field Fuaran.Core.Tree+NodeIndex`2.Root #2 : !1
+type Fuaran.Core.FreshIds (module)
 type Fuaran.Core.Hash (module)
 type Fuaran.Core.IdWitness`1 (record)
 type Fuaran.Core.IllFormedUtf16 (record)

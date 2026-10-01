@@ -607,6 +607,34 @@ module Families =
               (Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ])
               (Built,
                "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms")
+          // Phase 312 — the placement algebra, tree lowering and fresh ids. Each takes the base run's
+          // witness (freshIdLaws also a `setId` and the minting strategy it certifies, neither a
+          // witness record) and promises more than the base contract does, so each is elected.
+          c
+              "placementLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "placement arm (place / move across parents / move within a parent / non-final position)" ])
+              (Built,
+               "the unknown anchor, the out-of-range index and the three engine refusals (absent parent, duplicate id, move of the root) are built every iteration a holder is drawn")
+          c
+              "loweringLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded
+                  [ "lowered tree (well-formed / in the containment invariant / filled shell / built repeated id)" ])
+              (Built,
+               "the repeated-id tree whose script must be refused DuplicateId is built by appending a copy of a drawn node under a holder; its guard counts it")
+          c
+              "freshIdLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "built arm (repeated id built / clone placed)" ])
+              (NoRefusal,
+               "no law reads a refused outcome: a minted id, a repaired tree and an accepted clone are the subjects, and a refused clone fails the clone law outright")
           // Phase 286 — the same declaration, handed to the engine: the collisions the unkeyed
           // engine is blind to are BUILT through `PlaceKeyedChild`, and the engine's refusal is
           // held to the domain's own walk over them.

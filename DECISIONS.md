@@ -1,5 +1,57 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D93: placement lowers to the skeleton ops it always needed, a tree lowers to its shell plus an insert script, and minting stays off the witness
+
+**Recorded by Phase 312. `Fuaran.Core.Ops` (`Anchor`, `PlaceError`, `TreePlacement`, `Ops.lower` /
+`skeletonRoot` / `shellOf`) and `Fuaran.Core.Tree` (`FreshIds`); rides the `0.34.0` draft
+(STABILITY.md, "A placement algebra, tree lowering and fresh ids").** The shard asked for the
+placement, lowering and minting helpers consumers had each re-derived, and for this record: that
+placement lowers to skeleton ops, and that minting stays off the witness.
+
+*Placement is a LOWERING, never an op.* Phase 95 removed the ordinal from `InsertChild` / `MoveNode`
+because an index is a projection over one snapshot of a child list and an id is checkable; nothing
+here reverses that. An `Anchor` is resolved against the tree the placement is computed over and
+lowered to the ops that already exist — an append, plus a `ReorderChildren` naming every sibling id
+when the append alone does not give the anchored order — so the op stream, the apply engine, the
+footprint, inversion and arbitration see nothing new, and a script computed against a stale tree is
+refused by `ReorderChildren`'s permutation check rather than silently landing somewhere else. The
+two legs ride one `Batch` so the placement is atomic. `Anchor.Index` exists because a document
+domain's ops are index-bearing; it means a position among the destination's children OTHER than the
+node placed (`0 .. count`), which is exactly what those ops meant for an insert and for a move after
+its removal, so they re-express as `TreePlacement.place` / `move` at `Anchor.Index` with the same
+trees and the same `(parent, index, count)` refusal (`PlacementTests`).
+
+*Within its own parent, a move is a reorder.* The obvious lowering — `MoveNode` then
+`ReorderChildren`, which one host shipped — reaches the same tree, but `MoveNode` writes the node and
+an UNKNOWN parent in its footprint (the pinned over-approximation), so it collides with every
+concurrent structural write; `ReorderChildren` writes the one parent. A move to where the node already
+is lowers to `[]`. The dry run is the engine's own (`canApplyContained`), first, so a placement the
+engine would refuse carries the engine's envelope unchanged (`PlaceError.Refused`) and the anchor is
+only resolved for an op that would be accepted.
+
+*A tree lowers to its shell plus an insert script.* `Ops.lower` is the UI host's streaming lowering,
+already generic over the witness: each child inserted as its own shell in preorder, so sibling order
+is rebuilt by appends alone and a streamed and a batched emission are one script. No separate
+container-aware lowering ships: every node that holds children is an insert's parent, so the same
+script under `applyAllWith canHold` rebuilds every tree in the containment invariant and refuses one
+outside it at its first offender. A leaf is never shelled (`shellOf` returns a childless node as it
+is), because a witness may leave `ReplaceChildren` partial on nodes that cannot hold children.
+
+*Minting stays off the witness (D5 kept).* `IdWitness` still carries no `fresh`. `FreshIds` mints over
+`ToString` / `OfString` and a caller-supplied taken set of keys, deterministically, with no hidden
+state — `sequential` re-derives its next number from the taken set rather than carrying the counter
+one host's version kept, so a replay mints the same ids. A strategy is any `'Id -> Set<string> -> 'Id`;
+the two shipped ones suit string-shaped ids, and a `Guid` or integer domain supplies its own and
+certifies it with `Conformance.freshIdLaws`. `repairDuplicates` is one function for two uses: with an
+empty taken set it renames a tree's later occurrences, with a target tree's keys it prepares a clone
+or a paste.
+
+*Named `TreePlacement`, not `Placement`.* The shard spelled the module `Placement`, lifted from a
+host's module name. `Fuaran.Core.Placement` is already a public type in `Fuaran.Core.Function` (where a
+capability's body runs); a module of the same name in another assembly would make `Placement.x`
+resolve differently depending on which packages a consumer references and opens — a permanent
+ambiguity on a public surface that a `ModuleSuffix` would only hide at the CLR level. The error type is
+`PlaceError` for the same reason.
 ## 2026-10-01 — D92: the lane DAG's reachability index is a drain order plus per-node ancestor bitsets — an additional way to ask, never a change to what the unindexed functions answer
 
 **Recorded by Phase 289. `Fuaran.Core.OpStream.Dag` (`Dag.Reach`, `appendIndexed` / `mergeIndexed`,

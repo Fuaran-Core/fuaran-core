@@ -2876,6 +2876,50 @@ a case named `IntValue` / `FloatValue` / `TextValue` / `TreeValue`, resolves the
 **Class: additive.** `api/Fuaran.Core.Function.txt` and `api/Fuaran.Core.Query.txt` gain members and
 types only; `api/wire/Fuaran.Core.Function.txt` and `api/wire/Fuaran.Core.Query.txt` gain the two
 refusal roots' documents, every existing document unchanged.
+
+### A placement algebra, tree lowering and fresh ids: `TreePlacement`, `Ops.lower`, `FreshIds` (Phase 312) — ADDITIVE
+
+**What changed.** `InsertChild` and `MoveNode` append and order is stated by `ReorderChildren` naming
+ids (Phase 95), so every consumer that wanted a node anywhere but last derived the sibling
+permutation itself, and every consumer that cloned, pasted or repaired a tree hand-rolled a
+derive-and-probe id loop. Core now ships both, as helpers over the existing ops and witnesses:
+
+- `Fuaran.Core.Ops`: `Anchor<'Id>` (`First | Last | Before of 'Id | After of 'Id | Index of int`,
+  positions counted among the destination's children OTHER than the node placed), `PlaceError<'Id>`
+  (`Refused of Rejection` carrying the engine's own envelope, `UnknownAnchor` enumerating the
+  siblings, `IndexOutOfRange` naming the count), and the `TreePlacement` module — `place` / `move` /
+  `clone` and their `…Contained` forms — each LOWERED to a skeleton script: `[InsertChild]` or
+  `[Batch [InsertChild; ReorderChildren]]`, `[MoveNode]` or `[Batch [MoveNode; ReorderChildren]]`
+  across parents, `[ReorderChildren]` or `[]` within one, and a clone's copy renamed by
+  `FreshIds.repairDuplicates` and then placed. No new op.
+- `Ops.shellOf` / `Ops.skeletonRoot` / `Ops.lower`: a tree as its root's shell plus the preorder
+  `InsertChild` script that rebuilds it, `applyAll (lower t) (skeletonRoot t) = Ok t` for every
+  well-formed tree, and the same script under `applyAllWith canHold` for a tree in the containment
+  invariant.
+- `Fuaran.Core.Tree`: the `FreshIds` module — `derived` (`<id>-copy`, `-copy-2`, …), `sequential`
+  (`<prefix>-1`, `-2`, … with no hidden counter) and `repairDuplicates` (rename every later
+  occurrence and every id a caller-supplied taken set holds, return the mapping), each over
+  `IdWitness` and a taken set of `ToString` keys.
+- `Conformance.placementLaws`, `Conformance.loweringLaws` (both over the base witness) and
+  `Conformance.freshIdLaws` (also a `setId` and the minting strategy it certifies) — all opt-in,
+  `StrongerPromise`, guarded on the arms they draw.
+
+**What did NOT change, deliberately.** `IdWitness` gains no `fresh` (D5): minting is a helper over
+`ToString` / `OfString` and a taken set, so the same inputs mint the same id on every host and every
+replay. No existing function's signature or answer moves, and no wire bytes move. The shard named the
+module `Placement`; `Fuaran.Core.Placement` is already a public type (where a capability's body runs),
+so the module is `TreePlacement` (DECISIONS.md, Phase 312).
+
+**What adopting it costs.** Nothing for a consumer that does not call it. A consumer retiring its own
+placement verbs gets the same script for an anchor-relative insert and a cross-parent move, and a
+`ReorderChildren` (or nothing) where it emitted `Batch [MoveNode; ReorderChildren]` for a move within
+one parent — the same tree, a smaller footprint. A domain whose ids are not strings with a suffix
+(a `Guid`, an integer) passes its own strategy of the shape `'Id -> Set<string> -> 'Id` and certifies
+it with `freshIdLaws`. A consumer that opens `Fuaran.Core` beside a namespace of its own declaring
+`Anchor`, `PlaceError`, `TreePlacement` or `FreshIds` resolves the later-opened one.
+
+**Class: additive.** `api/Fuaran.Core.Ops.txt`, `api/Fuaran.Core.Tree.txt` and
+`api/Fuaran.Core.Conformance.txt` gain members and types only.
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

@@ -37,6 +37,7 @@
     <Compile Include="SchemaTests.fs" />
     <Compile Include="ConformanceTests.fs" />
     <Compile Include="TreeLawsTests.fs" />
+    <Compile Include="PlacementTests.fs" />
     <Compile Include="KeyedApplyTests.fs" />
     <Compile Include="StreamLawsTests.fs" />
     <Compile Include="IntegrityLawsTests.fs" />
