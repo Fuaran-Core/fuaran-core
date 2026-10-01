@@ -119,7 +119,11 @@ module JVal =
 /// the same bytes (WIRE_FORMAT §2 rule 5). Certified rather than asserted since Phase 118:
 /// the Fable consumer's parity leg runs `ParityVectors` under a JS runtime and byte-compares it
 /// against the .NET run (STABILITY.md "Fable cleanliness").
-module internal FloatLayout =
+///
+/// PUBLIC since Phase 315 (it was `internal`): a host that lays a float out anywhere but the wire —
+/// an SVG coordinate, a label — used to keep its own copy of this re-lay and a note to keep it in
+/// sync. `finite` and `roundTrip` are the layout; the `floatLayout/*` parity vectors pin them.
+module FloatLayout =
 
 #if FABLE_COMPILER
     [<Fable.Core.Emit("$0.toString()")>]

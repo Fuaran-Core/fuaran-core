@@ -414,6 +414,90 @@ module Cell =
         | Decimal _ -> Some DecimalType
         | Null -> None
 
+    // ---- Phase 315: THE cell token and THE cell order, public ----
+    // Four spellings of a cell's identity token had grown up (the aggregate's `CountDistinct` key,
+    // `ColumnValidator.unique`'s key, the compute layer's `cellToken`, and the capture key's cell
+    // fields), and the compute copy had already drifted at `Decimal`. `token` is the one spelling a
+    // consumer keys on; `compare` is the one order a consumer sorts by. Phase 299's float normal form
+    // is where both come from: NaN is ONE value and sorts LAST, `-0` and `0` are one value.
+
+    /// The column layer's total order over floats: IEEE order on the non-NaN values, `-0 = 0`, and
+    /// NaN one value above every other — never delegated to a host comparison, which put NaN below
+    /// everything on .NET and above everything under Fable.
+    let internal compareFloat (a: float) (b: float) : int =
+        match System.Double.IsNaN a, System.Double.IsNaN b with
+        | true, true -> 0
+        | true, false -> 1
+        | false, true -> -1
+        | false, false ->
+            if a < b then -1
+            elif a > b then 1
+            else 0
+
+    let private asFloat (c: Cell) : float option =
+        match c with
+        | Int i -> Some(float i)
+        | Float f -> Some f
+        | _ -> None
+
+    /// A cell as exact-decimal text: a `Decimal`'s canonical form, or an `Int`'s digits (the lossless
+    /// promotion `ColumnType.widens` pins). A `Float` is not one.
+    let private asDecimal (c: Cell) : string option =
+        match c with
+        | Decimal s -> DecimalText.tryCanonical s
+        | Int i -> Some(string i)
+        | _ -> None
+
+    /// THE order between two present cells of one family (Phase 315; `Column.aggregate`'s `Min` /
+    /// `Max` order since Phase 299), or `None` where they are incomparable. `Int` and `Float` compare
+    /// as floats through `compareFloat` — NaN last, `-0 = 0`, one answer on every host; `Decimal`
+    /// and `Int` compare EXACTLY (`DecimalText.compare`), so two decimals a float cannot tell apart
+    /// are still ordered; `Bool` false before true; `Str` / `Date` / `Timestamp` by ordinal (ISO text
+    /// sorts chronologically). Anything else — a `Decimal` beside a `Float` (`widens` refuses that
+    /// retype), two families, a `Null`, a `Decimal` whose text is not decimal — is `None`.
+    ///
+    /// An ORDER, not an identity: `Int 1` and `Float 1.0` compare equal and have two `token`s.
+    let compare (a: Cell) (b: Cell) : int option =
+        match a, b with
+        | (Int _ | Float _), (Int _ | Float _) -> Option.map2 compareFloat (asFloat a) (asFloat b)
+        | (Decimal _ | Int _), (Decimal _ | Int _) ->
+            Option.map2 (fun x y -> DecimalText.compare x y) (asDecimal a) (asDecimal b)
+            |> Option.flatten
+        | Bool x, Bool y ->
+            Some(
+                if x = y then 0
+                elif x then 1
+                else -1
+            )
+        | Str x, Str y -> Some(System.String.CompareOrdinal(x, y))
+        | Date x, Date y -> Some(System.String.CompareOrdinal(x, y))
+        | Timestamp x, Timestamp y -> Some(System.String.CompareOrdinal(x, y))
+        | _ -> None
+
+    /// THE canonical, host-deterministic identity token of a cell (Phase 315; the key the compute
+    /// layer's `Distinct` / `GroupBy` partition on since Phase 41). Type-tagged, so `Int 1` and
+    /// `Float 1.0` are two values: `i:<digits>`, `f:<float>`, `b:1` / `b:0`, `s:` / `d:` / `t:` +
+    /// the text, `m:` + the CANONICAL decimal text (so `1.50` and `1.5` are one token), and `n:`.
+    /// A float is `NaN`, `Inf` or `-Inf` when non-finite and `Canon.canonicalFloat` otherwise, so
+    /// NaN is one token and `-0.0` shares `0`'s — two floats share a token exactly when `compare`
+    /// says they are equal. A `Decimal` whose text is not decimal text keeps that text, so it never
+    /// shares a token with a decimal.
+    let token (c: Cell) : string =
+        match c with
+        | Int i -> "i:" + string i
+        | Float f ->
+            "f:"
+            + (if System.Double.IsNaN f then "NaN"
+               elif System.Double.IsPositiveInfinity f then "Inf"
+               elif System.Double.IsNegativeInfinity f then "-Inf"
+               else Canon.canonicalFloat f)
+        | Bool b -> "b:" + (if b then "1" else "0")
+        | Str s -> "s:" + s
+        | Date s -> "d:" + s
+        | Timestamp s -> "t:" + s
+        | Decimal s -> "m:" + (DecimalText.tryCanonical s |> Option.defaultValue s)
+        | Null -> "n:"
+
 /// A group/window aggregate function (Phase 36, lifted from the DataFrame evaluator's `GroupBy` so it
 /// is a public, single-source surface). `Count` is non-null count; `Sum` keeps the source numeric type;
 /// `Mean`/`Median`/`StdDev` are `float`; `Min`/`Max`/`First`/`Last` keep the source type.
@@ -492,52 +576,11 @@ module Column =
         | Int i -> Some(string i)
         | _ -> None
 
-    // ---- THE float order and THE float token (Phase 299) ----
+    // ---- THE float order, the cell order and the cell token (Phase 299; public since Phase 315) ----
     // One normal form of a float, which the aggregate ORDER and the distinct TOKEN both read, so
-    // they agree by construction: `compareFloat a b = 0` exactly when `floatToken a = floatToken b`.
-    //   * NaN is ONE value, and it sorts LAST — above +∞. F# generic comparison put NaN below
-    //     everything on .NET and above everything under Fable, so `Min`/`Max`/`Median` over a
-    //     column holding a NaN answered differently by host; this order is spelled out, never
-    //     delegated to a host comparison.
-    //   * `-0` and `0` are one value (`Canon.canonicalFloat` collapses the sign, and `<` / `>` do
-    //     not separate them), so neither can win a tie by host.
-    //   * the non-finite tokens are `JVal.nonFiniteToken`'s — the one spelling on the spine.
-
-    /// The column layer's total order over floats: IEEE order on the non-NaN values, `-0 = 0`, and
-    /// NaN one value above every other.
-    let private compareFloat (a: float) (b: float) : int =
-        match System.Double.IsNaN a, System.Double.IsNaN b with
-        | true, true -> 0
-        | true, false -> 1
-        | false, true -> -1
-        | false, false ->
-            if a < b then -1
-            elif a > b then 1
-            else 0
-
-    /// The column layer's token for a float — equal exactly where `compareFloat` says equal.
-    let private floatToken (f: float) : string =
-        match JVal.nonFiniteToken f with
-        | Some tok -> tok
-        | None -> Canon.canonicalFloat f
-
-    /// A total comparison between two present, same-family cells (`None` ⇒ incomparable). Kept in the
-    /// Column layer so `aggregate` (Min/Max) is self-contained here (the aggregate family is the single
-    /// source; comparison is shared shape, not a second aggregate implementation). Numbers order
-    /// through `compareFloat`, so the answer is one on every host.
-    let private aggCompare (a: Cell) (b: Cell) : int option =
-        match a, b with
-        | (Int _ | Float _), (Int _ | Float _) -> Option.map2 compareFloat (aggAsNum a) (aggAsNum b)
-        // An exact comparison, never through `float`: two decimals a float cannot tell apart are
-        // still ordered. A `Decimal` beside a `Float` is incomparable, as `widens` has it.
-        | (Decimal _ | Int _), (Decimal _ | Int _) ->
-            Option.map2 (fun x y -> DecimalText.compare x y) (aggAsDecimal a) (aggAsDecimal b)
-            |> Option.flatten
-        | Bool x, Bool y -> Some(compare x y)
-        | Str x, Str y -> Some(System.String.CompareOrdinal(x, y))
-        | Date x, Date y -> Some(System.String.CompareOrdinal(x, y))
-        | Timestamp x, Timestamp y -> Some(System.String.CompareOrdinal(x, y))
-        | _ -> None
+    // they agree by construction. Since Phase 315 both are `Cell`'s public `compare` / `token`
+    // (`Cell.compareFloat` the float order beneath them), read here rather than kept as private
+    // copies — the aggregate keys `CountDistinct` on the token every consumer keys on.
 
     let private aggFnTag =
         function
@@ -551,27 +594,6 @@ module Column =
         | First -> "first"
         | Last -> "last"
         | CountDistinct -> "countDistinct"
-
-    /// The canonical, host-deterministic identity token of a cell (Phase 101) — the per-cell layout
-    /// the compute layer's `Distinct` / `GroupBy` key on, so `CountDistinct` counts exactly the
-    /// values a `Distinct` step would keep. Floats route through `floatToken` — the token the
-    /// aggregate ORDER agrees with (Phase 299): `-0.0` collapses to `0`, NaN is one value, and the
-    /// non-finite spelling is `JVal.nonFiniteToken`'s. Each token is type-tagged so an `Int 1` and a
-    /// `Float 1.0` are two values, never one.
-    let private distinctToken (c: Cell) : string =
-        match c with
-        | Int i -> "i:" + string i
-        | Float f -> "f:" + floatToken f
-        | Bool b -> "b:" + (if b then "1" else "0")
-        | Str s -> "s:" + s
-        | Date s -> "d:" + s
-        | Timestamp s -> "t:" + s
-        // `m`, the tag `Query.invocationKey` gives the same case. Canonical text, so `1.50` and
-        // `1.5` are one token: `aggregate` canonicalises every decimal cell at entry and refuses
-        // text that is not decimal, and the canonicalisation here keeps the token honest for a cell
-        // that reaches it any other way.
-        | Decimal s -> "m:" + (DecimalText.tryCanonical s |> Option.defaultValue s)
-        | Null -> "n:"
 
     /// A present cell as `aggregate` admits it (Phase 299): a cell of a type that widens into
     /// `col.Type` passes, a `Decimal` cell passes CANONICALISED, and anything else — a cell outside
@@ -746,12 +768,12 @@ module Column =
                     count <- count + 1
 
                     if fn = CountDistinct then
-                        distinct.Add(distinctToken cell) |> ignore
+                        distinct.Add(Cell.token cell) |> ignore
                     elif ordered then
                         if count = 1 then
                             best <- cell
                         else
-                            match aggCompare best cell with
+                            match Cell.compare best cell with
                             | Some c ->
                                 if (fn = Min) <> (c <= 0) then
                                     best <- cell
@@ -894,7 +916,7 @@ module Column =
                             finiteOr "stddev" (snd (scaledMoments kept)))
             | Median ->
                 numeric (fun () ->
-                    match List.sortWith compareFloat (List.ofSeq kept) with
+                    match List.sortWith Cell.compareFloat (List.ofSeq kept) with
                     | [] -> Ok Null
                     | sorted ->
                         let n = List.length sorted

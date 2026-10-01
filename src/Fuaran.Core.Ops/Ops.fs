@@ -1,11 +1,24 @@
 namespace Fuaran.Core
 
+/// Where a refused move's new parent sits relative to the node being moved (Phase 315) — the
+/// relation `Rejection.WouldNestUnderSelf` carries.
+[<RequireQualifiedAccess>]
+type NestRelation =
+    /// The new parent IS the moved node: `MoveNode(x, x)`.
+    | Self
+    /// The new parent is a proper descendant of the moved node.
+    | Descendant
+
 /// The recoverable error-envelope contract — the single most valuable thing to
 /// standardise across domains (it is the AI-feedback protocol). Every rejection
 /// *names the failure and enumerates the valid alternatives*, so an orchestrator
 /// reads one rejection shape regardless of tier. Domain defect codes that don't fit
 /// the skeleton plug in through `Rejected (code, message)`. Total — failures are
 /// data, never exceptions.
+///
+/// Phase 315 gave the envelope its operations — `Rejection.code` (a stable code per class),
+/// `Rejection.explain` (the agent-readable `RejectionGuidance`), and the canonical encoder beside the
+/// wire (`RejectionCodec` in `Fuaran.Core.AiSurface`) — so a domain stops writing its own explainer.
 type Rejection<'Id> =
     /// `target` is not in the tree; `addressable` enumerates the ids that are.
     | UnknownNode of target: 'Id * addressable: 'Id list
@@ -13,8 +26,10 @@ type Rejection<'Id> =
     | DuplicateId of 'Id
     /// The root cannot be removed or moved.
     | CannotRemoveRoot
-    /// A move whose new parent is the target itself or one of its descendants.
-    | WouldNestUnderSelf of 'Id
+    /// A move whose new parent is the target itself or one of its descendants. `relation` says which
+    /// (Phase 315): a move under itself and a move into its own subtree are different mistakes, and a
+    /// caller that told them apart used to re-run the check to learn which it had made.
+    | WouldNestUnderSelf of target: 'Id * relation: NestRelation
     /// A node that holds children while `canHold` refuses it (Phase 251). Two sites raise it, and
     /// `target` names a node in a different place at each: the (new) PARENT of an insert/move, which
     /// is a node of the tree; or — since Phase 161 (DECISIONS D38) — an interior node of the SUBTREE
@@ -105,6 +120,156 @@ type Footprint =
       StructureWrites: Set<string>
       ContentWrites: Set<string>
       UnknownParentWrites: Set<string> }
+
+// ---- Phase 315: the envelope's operations and the footprint builders ----
+
+/// Agent-readable rejection guidance (the envelope discipline, GP5): what went wrong plus the
+/// enumerated alternatives, so a refused agent can repair its emission instead of guessing.
+/// Defined here since Phase 315 (it was declared in `Fuaran.Core.AiSurface`), so `Rejection.explain`
+/// can return it; the namespace is unchanged, so every `RejectionGuidance` in source still means it.
+type RejectionGuidance =
+    { Message: string
+      Alternatives: string list }
+
+/// The words `Rejection.explain` speaks in (Phase 315) — what the domain calls a node and its root,
+/// so the same explainer serves a document ("block", "document root") and a sheet ("cell",
+/// "workbook"). `RejectionNouns.generic` is "node" / "root".
+type RejectionNouns = { Node: string; Root: string }
+
+/// The stock nouns.
+[<RequireQualifiedAccess>]
+module RejectionNouns =
+
+    /// "node" / "root".
+    let generic: RejectionNouns = { Node = "node"; Root = "root" }
+
+/// The operations on a `Rejection` (Phase 315): its stable code, and its guidance. Its canonical
+/// wire encoding is `RejectionCodec` in `Fuaran.Core.AiSurface`, the package that carries the wire.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Rejection =
+
+    /// The stable code of a rejection — one per class, camel-case, and for the skeleton classes the
+    /// `$type` the canonical encoder writes: `unknownNode`, `duplicateId`, `cannotRemoveRoot`,
+    /// `wouldNestUnderSelf`, `notAContainer`, `reorderMismatch`, `keyedPosition`. Two answers differ
+    /// from the case tag. `reorderOnLeaf` is a `ReorderMismatch` whose parent holds no children
+    /// (`expected = []`): nothing to reorder, rather than a wrong permutation, so a caller need not
+    /// pre-check the leaf to tell them apart. And a domain's `Rejected` answers its OWN code verbatim
+    /// — that is what the case is for. The skeleton words are this envelope's vocabulary: a domain
+    /// code should not reuse one.
+    let code (r: Rejection<'Id>) : string =
+        match r with
+        | UnknownNode _ -> "unknownNode"
+        | DuplicateId _ -> "duplicateId"
+        | CannotRemoveRoot -> "cannotRemoveRoot"
+        | WouldNestUnderSelf _ -> "wouldNestUnderSelf"
+        | NotAContainer _ -> "notAContainer"
+        | ReorderMismatch(_, [], _) -> "reorderOnLeaf"
+        | ReorderMismatch _ -> "reorderMismatch"
+        | Rejected(code, _) -> code
+        | KeyedPosition _ -> "keyedPosition"
+
+    /// The rejection as guidance an agent can act on: a message naming the failure in the domain's
+    /// `nouns`, and the alternatives the envelope enumerates — the addressable ids of an
+    /// `UnknownNode`, the children a reorder must permute. `idText` renders an id. A domain's
+    /// `Rejected` is its own message, with no alternatives (it carries none). Total.
+    let explain (idText: 'Id -> string) (nouns: RejectionNouns) (r: Rejection<'Id>) : RejectionGuidance =
+        let q (i: 'Id) = "'" + idText i + "'"
+
+        match r with
+        | UnknownNode(target, addressable) ->
+            { Message = "no " + nouns.Node + " " + q target + " exists"
+              Alternatives = addressable |> List.map idText }
+        | DuplicateId d ->
+            { Message = "a " + nouns.Node + " " + q d + " already exists; mint a fresh id"
+              Alternatives = [] }
+        | CannotRemoveRoot ->
+            { Message = "the " + nouns.Root + " cannot be removed or moved"
+              Alternatives = [] }
+        | WouldNestUnderSelf(target, NestRelation.Self) ->
+            { Message = "a " + nouns.Node + " cannot be moved under itself (" + q target + ")"
+              Alternatives = [] }
+        | WouldNestUnderSelf(target, NestRelation.Descendant) ->
+            { Message = "moving " + q target + " there would nest it inside its own subtree"
+              Alternatives = [] }
+        | NotAContainer(target, kindTag) ->
+            { Message = q target + " (" + kindTag + ") cannot hold children"
+              Alternatives = [] }
+        | ReorderMismatch(parent, [], _) ->
+            { Message = q parent + " has no children to reorder"
+              Alternatives = [] }
+        | ReorderMismatch(parent, expected, _) ->
+            { Message = "a reorder of " + q parent + " must be a permutation of its current children"
+              Alternatives = expected |> List.map idText }
+        | Rejected(_, message) -> { Message = message; Alternatives = [] }
+        | KeyedPosition(target, holder) ->
+            { Message =
+                q target
+                + " sits in a keyed position of "
+                + q holder
+                + "; vacating or relocating it is a domain edit"
+              Alternatives = [] }
+
+/// The footprint builders (Phase 315) — the address shapes `Ops.footprint` folds a skeleton op into,
+/// public so a domain whose op vocabulary is NOT `SkeletonOp` lowers its own ops into the same
+/// `Footprint` without rebuilding the record by hand. Every address is an id key (the
+/// `IdWitness.ToString` form). The builders are the skeleton clauses' shapes: `insertUnder`,
+/// `removeNode` and `moveTo` are exactly `Ops.footprint` of a leaf `InsertChild`, a `RemoveNode` and a
+/// `MoveNode` (held to it by the suite), and a subtree insert is the `union` of one `insertUnder` per
+/// id it carries.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Footprint =
+
+    /// No reads, no writes — independent of everything.
+    let empty: Footprint =
+        { Reads = Set.empty
+          StructureWrites = Set.empty
+          ContentWrites = Set.empty
+          UnknownParentWrites = Set.empty }
+
+    /// Both footprints' addresses, kind by kind. `independent (union a b) c` holds exactly when
+    /// `independent a c` and `independent b c` both do, so growing a footprint never frees a pair.
+    let union (a: Footprint) (b: Footprint) : Footprint =
+        { Reads = Set.union a.Reads b.Reads
+          StructureWrites = Set.union a.StructureWrites b.StructureWrites
+          ContentWrites = Set.union a.ContentWrites b.ContentWrites
+          UnknownParentWrites = Set.union a.UnknownParentWrites b.UnknownParentWrites }
+
+    /// An in-place edit of one node's own content: a read and a content-write of `id`. Two edits of
+    /// one node collide; edits of two nodes do not. NOT `Ops.footprint (UpdateNode …)`, which also
+    /// records an unknown-parent write — read that clause before using this for an op that can land
+    /// under a parent a concurrent op removes: a domain op shaped like this one must fold in what its
+    /// removal partners destroy itself (`Footprint`'s pinned over-approximation (2)).
+    let contentEdit (id: string) : Footprint =
+        { empty with
+            Reads = Set.singleton id
+            ContentWrites = Set.singleton id }
+
+    /// A node `id` authored under `parent`: both are read, the parent's child-list is a known
+    /// structure-write, and `id` is content-written. `Ops.footprint [ InsertChild(parent, leaf) ]`.
+    let insertUnder (parent: string) (id: string) : Footprint =
+        { Reads = Set.ofList [ parent; id ]
+          StructureWrites = Set.singleton parent
+          ContentWrites = Set.singleton id
+          UnknownParentWrites = Set.empty }
+
+    /// The node `id` destroyed: read and content-written, and its source parent — which the script
+    /// cannot name — recorded as the pinned unknown-parent write. `Ops.footprint [ RemoveNode id ]`.
+    let removeNode (id: string) : Footprint =
+        { empty with
+            Reads = Set.singleton id
+            ContentWrites = Set.singleton id
+            UnknownParentWrites = Set.singleton id }
+
+    /// The node `id` relocated under `newParent`: both read, the destination's child-list a known
+    /// structure-write, `id` content-written, and its source parent the unknown-parent write.
+    /// `Ops.footprint [ MoveNode(id, newParent) ]`.
+    let moveTo (id: string) (newParent: string) : Footprint =
+        { Reads = Set.ofList [ id; newParent ]
+          StructureWrites = Set.singleton newParent
+          ContentWrites = Set.singleton id
+          UnknownParentWrites = Set.singleton id }
 
 /// The generic apply engine over the skeleton ops. Total: every failure is a typed
 /// `Rejection` envelope. Generic over the `NodeWitness` / `IdWitness` — no domain
@@ -450,7 +615,13 @@ module Ops =
                         let descendantIds = Tree.ids t sub |> Set.ofList |> Set.map idw.ToString
 
                         if descendantIds.Contains(idw.ToString newParent) then
-                            Error(WouldNestUnderSelf target)
+                            let relation =
+                                if idw.ToString newParent = idw.ToString target then
+                                    NestRelation.Self
+                                else
+                                    NestRelation.Descendant
+
+                            Error(WouldNestUnderSelf(target, relation))
                         else
                             // remove then insert: both halves already validated above.
                             match applyWith canHold w t keyed idw (RemoveNode target) root with
@@ -868,17 +1039,9 @@ module Ops =
     // reason: two moves nesting into each other's subtrees reject each other with
     // `WouldNestUnderSelf`, and no record could free that pair at all.
 
-    let private emptyFootprint =
-        { Reads = Set.empty
-          StructureWrites = Set.empty
-          ContentWrites = Set.empty
-          UnknownParentWrites = Set.empty }
+    let private emptyFootprint = Footprint.empty
 
-    let private unionFootprint (a: Footprint) (b: Footprint) : Footprint =
-        { Reads = Set.union a.Reads b.Reads
-          StructureWrites = Set.union a.StructureWrites b.StructureWrites
-          ContentWrites = Set.union a.ContentWrites b.ContentWrites
-          UnknownParentWrites = Set.union a.UnknownParentWrites b.UnknownParentWrites }
+    let private unionFootprint (a: Footprint) (b: Footprint) : Footprint = Footprint.union a b
 
     /// The read/write footprint of an op-script (Phase 78) — a pure, total derivation over the skeleton
     /// five through the node/id witnesses (the `NodeWitness` reads the ids out of an inserted `'Node`

@@ -85,12 +85,47 @@ type PolicyDecision =
     | NeedsApproval
     | Deny of reason: string
 
-/// Agent-readable rejection guidance (the envelope discipline, GP5): what went
-/// wrong plus the enumerated alternatives, so a refused agent can repair its
-/// emission instead of guessing.
-type RejectionGuidance =
-    { Message: string
-      Alternatives: string list }
+// `RejectionGuidance` — the agent-readable guidance `Explain` returns — is declared in
+// `Fuaran.Core.Ops` since Phase 315, beside `Rejection.explain`, which builds it. Same namespace,
+// same fields: a source that names it here still compiles unchanged.
+
+/// The canonical wire encoding of an `Ops` `Rejection` (Phase 315) — the envelope as a `$type`-tagged
+/// canonical JSON object, so a host that forwards a refusal to an agent or a log writes the one
+/// spelling every host reads, rather than its own. Every member of the case is carried (the
+/// `addressable` ids of an `UnknownNode`, both orders of a `ReorderMismatch`), and the `$type` is
+/// the case's: `Rejection.code`'s word, except that a reorder on a leaf stays `reorderMismatch` here
+/// (its empty `expected` says so) and a domain's `Rejected` is `rejected` with its own `code` as a
+/// member. Lives here rather than in `Fuaran.Core.Ops` because this package carries the wire.
+[<RequireQualifiedAccess>]
+module RejectionCodec =
+
+    /// The rejection as a canonical wire value; `idText` renders an id.
+    let encode (idText: 'Id -> string) (r: Rejection<'Id>) : JVal =
+        let one (i: 'Id) = JStr(idText i)
+        let many (xs: 'Id list) = JArr(xs |> List.map one)
+
+        match r with
+        | UnknownNode(target, addressable) ->
+            Canon.typed "unknownNode" [ "target", one target; "addressable", many addressable ]
+        | DuplicateId d -> Canon.typed "duplicateId" [ "id", one d ]
+        | CannotRemoveRoot -> Canon.typed "cannotRemoveRoot" []
+        | WouldNestUnderSelf(target, relation) ->
+            let rel =
+                match relation with
+                | NestRelation.Self -> "self"
+                | NestRelation.Descendant -> "descendant"
+
+            Canon.typed "wouldNestUnderSelf" [ "target", one target; "relation", JStr rel ]
+        | NotAContainer(target, kindTag) ->
+            Canon.typed "notAContainer" [ "target", one target; "kindTag", JStr kindTag ]
+        | ReorderMismatch(parent, expected, got) ->
+            Canon.typed "reorderMismatch" [ "parent", one parent; "expected", many expected; "got", many got ]
+        | Rejected(code, message) -> Canon.typed "rejected" [ "code", JStr code; "message", JStr message ]
+        | KeyedPosition(target, holder) -> Canon.typed "keyedPosition" [ "target", one target; "holder", one holder ]
+
+    /// `encode` rendered canonically (`Canon.render`: sorted keys, the pinned escaping). A caller that
+    /// must refuse an ill-formed id rather than write it through renders with `Canon.tryRender`.
+    let render (idText: 'Id -> string) (r: Rejection<'Id>) : string = Canon.render (encode idText r)
 
 /// The per-domain AI-surface seam — one witness bundling the four parts. The
 /// core sees the artifact (`'State`), the op (`'Op`), and the rejection

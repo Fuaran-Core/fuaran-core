@@ -35,6 +35,231 @@ module OpStream =
     /// computes the same hashes. That was not true before `0.6.0`; see the copy note above.
     let defaultHash: HashFn = fun prev payload -> fnv1a (prev + "|" + payload)
 
+    // ---- Phase 315: the named SHA-256 chain hash ----
+    // A DELIBERATE COPY of `Hash.utf8Bytes` + `Hash.sha256HexOfBytes` (`Fuaran.Core.Tree`), for the
+    // reason the FNV-1a copy above exists: this package takes no `Tree` dependency (DECISIONS D2),
+    // and the chain hash a host swaps in for `defaultHash` has to be callable from it. It is held
+    // VALUE-IDENTICAL rather than trusted — the `sha256Hash/*` rows of `ParityVectors` compare it
+    // with `Hash.sha256Hex` over the whole hash-sweep corpus on both pipelines, so a copy that
+    // drifts is a red row rather than two hosts disagreeing about a chain. The arithmetic notes
+    // (`.+.`'s mask, the `uint32`-only bit length) are `Hash.fs`'s; read them there before
+    // "simplifying" anything here.
+    module private Sha256 =
+
+        let private k: uint32[] =
+            [| 0x428a2f98u
+               0x71374491u
+               0xb5c0fbcfu
+               0xe9b5dba5u
+               0x3956c25bu
+               0x59f111f1u
+               0x923f82a4u
+               0xab1c5ed5u
+               0xd807aa98u
+               0x12835b01u
+               0x243185beu
+               0x550c7dc3u
+               0x72be5d74u
+               0x80deb1feu
+               0x9bdc06a7u
+               0xc19bf174u
+               0xe49b69c1u
+               0xefbe4786u
+               0x0fc19dc6u
+               0x240ca1ccu
+               0x2de92c6fu
+               0x4a7484aau
+               0x5cb0a9dcu
+               0x76f988dau
+               0x983e5152u
+               0xa831c66du
+               0xb00327c8u
+               0xbf597fc7u
+               0xc6e00bf3u
+               0xd5a79147u
+               0x06ca6351u
+               0x14292967u
+               0x27b70a85u
+               0x2e1b2138u
+               0x4d2c6dfcu
+               0x53380d13u
+               0x650a7354u
+               0x766a0abbu
+               0x81c2c92eu
+               0x92722c85u
+               0xa2bfe8a1u
+               0xa81a664bu
+               0xc24b8b70u
+               0xc76c51a3u
+               0xd192e819u
+               0xd6990624u
+               0xf40e3585u
+               0x106aa070u
+               0x19a4c116u
+               0x1e376c08u
+               0x2748774cu
+               0x34b0bcb5u
+               0x391c0cb3u
+               0x4ed8aa4au
+               0x5b9cca4fu
+               0x682e6ff3u
+               0x748f82eeu
+               0x78a5636fu
+               0x84c87814u
+               0x8cc70208u
+               0x90befffau
+               0xa4506cebu
+               0xbef9a3f7u
+               0xc67178f2u |]
+
+        let private rotr (x: uint32) (n: int) : uint32 = (x >>> n) ||| (x <<< (32 - n))
+
+        let inline private (.+.) (x: uint32) (y: uint32) : uint32 = (x + y) &&& 0xFFFFFFFFu
+
+        /// `Hash.utf8Bytes`: UTF-8, a lone or ill-ordered surrogate written as `EF BF BD` — the
+        /// platform's answer, so the digest is the one `SHA256.HashData(Encoding.UTF8.GetBytes s)`
+        /// computes on .NET.
+        let private utf8 (s: string) : ResizeArray<byte> =
+            let out = ResizeArray<byte>()
+            let mutable i = 0
+
+            while i < s.Length do
+                let c = int s[i]
+
+                let pairs =
+                    c >= 0xD800
+                    && c <= 0xDBFF
+                    && i + 1 < s.Length
+                    && (let lo = int s[i + 1] in lo >= 0xDC00 && lo <= 0xDFFF)
+
+                if c < 0x80 then
+                    out.Add(byte c)
+                elif c < 0x800 then
+                    out.Add(byte (0xC0 ||| (c >>> 6)))
+                    out.Add(byte (0x80 ||| (c &&& 0x3F)))
+                elif pairs then
+                    let lo = int s[i + 1]
+                    let cp = 0x10000 + ((c - 0xD800) <<< 10) + (lo - 0xDC00)
+                    out.Add(byte (0xF0 ||| (cp >>> 18)))
+                    out.Add(byte (0x80 ||| ((cp >>> 12) &&& 0x3F)))
+                    out.Add(byte (0x80 ||| ((cp >>> 6) &&& 0x3F)))
+                    out.Add(byte (0x80 ||| (cp &&& 0x3F)))
+                    i <- i + 1
+                elif c >= 0xD800 && c <= 0xDFFF then
+                    out.Add(byte 0xEF)
+                    out.Add(byte 0xBF)
+                    out.Add(byte 0xBD)
+                else
+                    out.Add(byte (0xE0 ||| (c >>> 12)))
+                    out.Add(byte (0x80 ||| ((c >>> 6) &&& 0x3F)))
+                    out.Add(byte (0x80 ||| (c &&& 0x3F)))
+
+                i <- i + 1
+
+            out
+
+        let private hexChars = "0123456789abcdef"
+
+        /// Lower-case hex SHA-256 of the UTF-8 bytes of `s` — `Hash.sha256Hex s`.
+        let hex (s: string) : string =
+            let data = utf8 s
+            let byteLen = data.Count
+            data.Add 0x80uy
+
+            while data.Count % 64 <> 56 do
+                data.Add 0uy
+
+            let lo = uint32 byteLen <<< 3
+            let hi = uint32 byteLen >>> 29
+
+            for shift in [ 24; 16; 8; 0 ] do
+                data.Add(byte ((hi >>> shift) &&& 0xFFu))
+
+            for shift in [ 24; 16; 8; 0 ] do
+                data.Add(byte ((lo >>> shift) &&& 0xFFu))
+
+            let hs =
+                [| 0x6a09e667u
+                   0xbb67ae85u
+                   0x3c6ef372u
+                   0xa54ff53au
+                   0x510e527fu
+                   0x9b05688cu
+                   0x1f83d9abu
+                   0x5be0cd19u |]
+
+            let w = Array.zeroCreate<uint32> 64
+
+            for b in 0 .. data.Count / 64 - 1 do
+                let off = b * 64
+
+                for t in 0..15 do
+                    w[t] <-
+                        (uint32 data[off + t * 4] <<< 24)
+                        ||| (uint32 data[off + t * 4 + 1] <<< 16)
+                        ||| (uint32 data[off + t * 4 + 2] <<< 8)
+                        ||| (uint32 data[off + t * 4 + 3])
+
+                for t in 16..63 do
+                    let s0 = (rotr w[t - 15] 7) ^^^ (rotr w[t - 15] 18) ^^^ (w[t - 15] >>> 3)
+                    let s1 = (rotr w[t - 2] 17) ^^^ (rotr w[t - 2] 19) ^^^ (w[t - 2] >>> 10)
+                    w[t] <- w[t - 16] .+. s0 .+. w[t - 7] .+. s1
+
+                let mutable a = hs[0]
+                let mutable bb = hs[1]
+                let mutable c = hs[2]
+                let mutable d = hs[3]
+                let mutable e = hs[4]
+                let mutable f = hs[5]
+                let mutable g = hs[6]
+                let mutable h = hs[7]
+
+                for t in 0..63 do
+                    let s1 = (rotr e 6) ^^^ (rotr e 11) ^^^ (rotr e 25)
+                    let ch = (e &&& f) ^^^ ((~~~e) &&& g)
+                    let temp1 = h .+. s1 .+. ch .+. k[t] .+. w[t]
+                    let s0 = (rotr a 2) ^^^ (rotr a 13) ^^^ (rotr a 22)
+                    let maj = (a &&& bb) ^^^ (a &&& c) ^^^ (bb &&& c)
+                    let temp2 = s0 .+. maj
+                    h <- g
+                    g <- f
+                    f <- e
+                    e <- d .+. temp1
+                    d <- c
+                    c <- bb
+                    bb <- a
+                    a <- temp1 .+. temp2
+
+                hs[0] <- hs[0] .+. a
+                hs[1] <- hs[1] .+. bb
+                hs[2] <- hs[2] .+. c
+                hs[3] <- hs[3] .+. d
+                hs[4] <- hs[4] .+. e
+                hs[5] <- hs[5] .+. f
+                hs[6] <- hs[6] .+. g
+                hs[7] <- hs[7] .+. h
+
+            let sb = System.Text.StringBuilder()
+
+            for v in hs do
+                for shift in [ 28; 24; 20; 16; 12; 8; 4; 0 ] do
+                    sb.Append(hexChars[int ((v >>> shift) &&& 0xFu)]) |> ignore
+
+            sb.ToString()
+
+    /// The named SHA-256 chain hash (Phase 315): lower-case hex SHA-256 over the UTF-8 bytes of
+    /// `prevHash + "|" + payload` — the same join `defaultHash` folds, under a cryptographic digest.
+    /// The `HashFn` a host passes where a chain must resist a forged second pre-image, which FNV-1a
+    /// cannot. It is byte-for-byte `fun prev payload -> Hash.sha256Hex (prev + "|" + payload)`, the
+    /// function several consumers wrote by hand, so each copy is replaceable by this name without
+    /// moving one persisted hash.
+    ///
+    /// **Over ill-formed text it inherits the platform's replacement**, as `Hash.sha256Hex` does: a
+    /// lone surrogate in an actor or an op's encoding is hashed as U+FFFD, so two records differing
+    /// only there share a digest. A `HashFn` is total and cannot refuse; a writer that must rule
+    /// that out checks its strings before it appends (`Hash.trySha256Hex` names the unit).
+    let sha256Hash: HashFn = fun prev payload -> Sha256.hex (prev + "|" + payload)
+
     /// JSON string spelling for every line, snapshot, capture and envelope this module emits —
     /// the ONE escaper this package carries (`JsonString.quote`, the D2 copy of `Wire.Json.escape`,
     /// every control character as `\u00xx` since Phase 287). Fable-clean.
@@ -127,6 +352,22 @@ module OpStream =
 
         if n = 0 then n, None else n, Some last
 
+    /// THE hash of one chained record (Phase 315): `hashFn prev (cfg.Payload seq actor encodedOp)`,
+    /// the value every `append` stores as `Hash` and every verifier recomputes. Public for an adapter
+    /// that keeps its own record type, or appends without the domain state (`appendChainOnly`), and
+    /// used to rebuild the payload by hand to get it — a copy that silently stops verifying the day
+    /// the payload binding moves. `encodedOp` is the witness's `Encode` of the op; `prev` is the
+    /// predecessor's `Hash`, or `cfg.Genesis` for the first record.
+    let chainHashOf
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (seq: int)
+        (actor: Actor)
+        (encodedOp: string)
+        (prev: string)
+        : string =
+        hashFn prev (cfg.Payload seq actor encodedOp)
+
     /// Chain `ops` onto a stream whose length is `seq0` and whose tip hash is `prev0`, applying each
     /// op in turn: the new records in order and the final state, or the first rejection with its index
     /// in `ops`. Nothing is copied; the caller splices the new records on once.
@@ -148,7 +389,7 @@ module OpStream =
                 | Error e -> Error(i, e)
                 | Ok st' ->
                     let seq = seq0 + i
-                    let h = hashFn prev (cfg.Payload seq actor (w.Encode op))
+                    let h = chainHashOf cfg hashFn seq actor (w.Encode op) prev
 
                     let r =
                         { Seq = seq
@@ -224,6 +465,31 @@ module OpStream =
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, int * 'Rej> =
         appendManyWith canonicalConfig hashFn w actor ops state records
+
+    /// Chain one op onto the stream WITHOUT applying it (Phase 315) — no state in, no state out, no
+    /// domain rejection. For an adapter whose apply runs somewhere else (at `replay`, or in its own
+    /// reducer before it calls here), which used to recompute the canonical payload and hash by hand
+    /// to get the record `append` would have written. The record is exactly that one — `chainHashOf`
+    /// under `canonicalConfig`, so a stream built with it `verifyChain`s under a witness with the same
+    /// `Encode` — and it carries nothing `append` would have checked: an op the domain would refuse is
+    /// chained all the same, and `replay` is where it is refused. `encode` is the witness's `Encode`.
+    /// One walk and one copy, as `append`.
+    let appendChainOnly
+        (hashFn: HashFn)
+        (encode: 'Op -> string)
+        (actor: Actor)
+        (op: 'Op)
+        (records: OpRecord<'Op> list)
+        : OpRecord<'Op> list =
+        let n, last = tip records
+        let prev = defaultArg last canonicalConfig.Genesis
+
+        records
+        @ [ { Seq = n
+              Actor = actor
+              Op = op
+              PrevHash = prev
+              Hash = chainHashOf canonicalConfig hashFn n actor (encode op) prev } ]
 
     /// THE chain walker (Phase 296) — the one loop `firstChainBreakWith`, `rehash`, the snapshot
     /// boundary verifier and `firstCaptureBreak` share, where four copies were written. Walks `items`
@@ -956,12 +1222,18 @@ module OpStream =
 
                             fail f.Position reason
 
+                    // Phase 315 — an actor that names nobody is refused here, as `Actor.validate`
+                    // refuses it at construction, so a store cannot read back an anonymous author.
+                    let named (a: Actor) =
+                        Actor.validate a
+                        |> Result.mapError (fun why -> faultAt line.Number p (JsonlFaultReason.ActorInvalid(key, why)))
+
                     match tryRawField "kind" inner with
                     | None -> Error(refuse line "the actor carries no kind")
                     | Some _ ->
                         match str "kind" with
-                        | "human" -> Ok(Human(str "id"))
-                        | "agent" -> Ok(Agent(str "model", str "version", str "id"))
+                        | "human" -> named (Human(str "id"))
+                        | "agent" -> named (Agent(str "model", str "version", str "id"))
                         | kind -> Error(refuse line (sprintf "unknown actor kind \"%s\"" kind))
                 with JsonlScanFault(pos, r) ->
                     Error(faultAt line.Number pos r)

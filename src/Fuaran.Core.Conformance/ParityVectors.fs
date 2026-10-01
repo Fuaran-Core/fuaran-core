@@ -177,6 +177,31 @@ let private aggregateNanOrder: string =
     |> String.concat "/"
 
 /// The table. Order is part of the comparison, so it is a list and never a map.
+/// Phase 315 — the corpus the named exports are held to what they are copies or renderings of:
+/// SHA-256's padding and block boundaries (55/56/64/119/120 bytes after the join), the non-ASCII
+/// length classes, and two ill-formed units, where the copied UTF-8 encoder must replace exactly as
+/// the canonical one does.
+let private exportCorpus: string list =
+    [ ""
+      "a"
+      "abc"
+      twoBlock
+      unicodeSample
+      units [ 0xD800 ]
+      units [ 0xD801; 0xD800 ]
+      String.replicate 46 "a"
+      String.replicate 47 "a"
+      String.replicate 55 "a"
+      String.replicate 110 "a"
+      String.replicate 111 "a"
+      String.replicate 1000 "xy" ]
+
+/// `agrees:<n>` when `f` and `g` give one value on every corpus input, else `diverges@<index>`.
+let private agreement (f: string -> string) (g: string -> string) : string =
+    match exportCorpus |> List.tryFindIndex (fun s -> f s <> g s) with
+    | None -> "agrees:" + string (List.length exportCorpus)
+    | Some i -> "diverges@" + string i
+
 let vectors: (string * string) list =
     [
       // ---- Hash.fnv1a — the 32-bit content fingerprint (D16's split-half multiply) ----
@@ -321,7 +346,54 @@ let vectors: (string * string) list =
       "profile/plus-sign", profileRoundTrip "core@+1.0"
       "profile/trailing-nul", profileRoundTrip ("core@1.0" + string (char 0))
       "profile/int32-max", profileRoundTrip "core@2147483647.2147483647"
-      "profile/past-int32", profileRoundTrip "core@2147483648.0" ]
+      "profile/past-int32", profileRoundTrip "core@2147483648.0"
+
+      // ---- Phase 315 — the light set's named exports. Appended, so every earlier row keeps its
+      // place in the comparison. ----
+      // `OpStream.sha256Hash` is OpStream's own copy of the digest (D2): held to `Hash.sha256Hex`
+      // over the export corpus, and pinned at two values of its own.
+      "sha256Hash/genesis", OpStream.sha256Hash "" "{\"seq\":0}"
+      "sha256Hash/two-block", OpStream.sha256Hash "deadbeef" twoBlock
+      "sha256Hash/agrees-with-sha256Hex",
+      agreement (OpStream.sha256Hash "deadbeef") (fun s -> Hash.sha256Hex ("deadbeef|" + s))
+      // `Hash.fnv1a32`, the raw value — printed in decimal, the one rendering both runtimes share.
+      "fnv1a32/a", string (Hash.fnv1a32 "a")
+      "fnv1a32/unicode", string (Hash.fnv1a32 unicodeSample)
+      "fnv1a32/agrees-with-fnv1a", agreement (fun s -> (Hash.fnv1a32 s).ToString("x8")) Hash.fnv1a
+      // `FloatLayout`, public: the finite layout keeps the sign of -0 (`canonicalFloat` drops it).
+      "floatLayout/finite-neg-zero", FloatLayout.finite -0.0
+      "floatLayout/finite-tenth", FloatLayout.finite 0.1
+      "floatLayout/finite-e21", FloatLayout.finite 1e21
+      "floatLayout/finite-e-7", FloatLayout.finite 1e-7
+      "floatLayout/finite-neg-third", FloatLayout.finite (-1.0 / 3.0)
+      "floatLayout/round-trip-non-finite",
+      String.concat
+          ","
+          [ FloatLayout.roundTrip nan
+            FloatLayout.roundTrip infinity
+            FloatLayout.roundTrip -infinity ]
+      // `Cell.token` and `Cell.compare` — NaN one token and last in the order, -0 and 0 one value,
+      // a decimal at its canonical text.
+      "cellToken/floats",
+      [ Float nan
+        Float infinity
+        Float -infinity
+        Float -0.0
+        Float 0.0
+        Float 0.1
+        Float 1e21 ]
+      |> List.map Cell.token
+      |> String.concat " "
+      "cellToken/scalars",
+      [ Int -3; Bool true; Str "s"; Date "2026-10-01"; Null ]
+      |> List.map Cell.token
+      |> String.concat " "
+      "cellToken/decimal-canonical", Cell.token (Decimal "1.50")
+      "cellCompare/float-order",
+      [ Float nan; Float infinity; Float 1.0; Float -0.0; Int 0; Float -infinity ]
+      |> List.sortWith (fun a b -> Cell.compare a b |> Option.defaultValue 0)
+      |> List.map Cell.token
+      |> String.concat " " ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

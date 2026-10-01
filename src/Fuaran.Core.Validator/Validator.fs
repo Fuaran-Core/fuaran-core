@@ -89,6 +89,54 @@ module Validator =
     let canonicalCodes (defects: Defect<'Id> list) : string =
         defects |> List.map (fun d -> d.Code) |> List.sort |> Hash.canonicalFields
 
+    // ---- Phase 315: the versioned rule pack ----
+    // The container the `PackRule` convention above was always about, which every domain that
+    // ships packs wrote for itself: a named, VERSIONED set of rules whose findings each carry the
+    // rule that produced them and a `pack@version` citation, so a report can cite the rule and a
+    // consumer can pin the pack version it audits against. Generic over the SUBJECT a rule reads (a
+    // tree root, a document, a model, a voicing sequence) — a tree family is the instance
+    // `fun root -> family.Run w root` — and over the defect's location `'Id`.
+
+    /// One rule of a pack: its id within the pack (the citation key) and its check.
+    type PackCheck<'Subject, 'Id> =
+        { RuleId: string
+          Run: 'Subject -> Defect<'Id> list }
+
+    /// A versioned rule pack. `Version` is the pack's own, cited on every finding.
+    type Pack<'Subject, 'Id> =
+        { Name: string
+          Version: string
+          Rules: PackCheck<'Subject, 'Id> list }
+
+    /// One finding of a pack run: the defect, the `PackRule` that produced it (stamped by `runPack`,
+    /// so a rule cannot mis-cite itself), and the citation `<pack>@<version>/<ruleId>`.
+    type PackFinding<'Id> =
+        { Rule: PackRule
+          Citation: string
+          Defect: Defect<'Id> }
+
+    /// The citation of a pack's rule: `<pack>@<version>/<ruleId>` — the `PackRule` family id
+    /// convention (`pack + "/" + ruleId`) with the version the finding was produced under.
+    let citation (pack: Pack<'Subject, 'Id>) (ruleId: string) : string =
+        pack.Name + "@" + pack.Version + "/" + ruleId
+
+    /// Run every rule of `pack` over `subject`, in rule order then each rule's own defect order,
+    /// stamping each defect with its `PackRule` and citation.
+    let runPack (pack: Pack<'Subject, 'Id>) (subject: 'Subject) : PackFinding<'Id> list =
+        pack.Rules
+        |> List.collect (fun rule ->
+            let stamp: PackRule =
+                { Pack = pack.Name
+                  RuleId = rule.RuleId }
+
+            let cited = citation pack rule.RuleId
+
+            rule.Run subject
+            |> List.map (fun d ->
+                { Rule = stamp
+                  Citation = cited
+                  Defect = d }))
+
 /// A columnar validation rule over a `Table` (Phase 37) — the columnar analogue of `RuleFamily`,
 /// reusing the SAME `Defect` / `Severity` model (one defect vocabulary, GP-consistent). The location
 /// `'Id` is a `string`: a column name, or `column#row` for a cell-level fault. Rules are functions over
@@ -109,32 +157,6 @@ module ColumnValidator =
           Severity = Severity.Error
           Message = "no such column: " + column
           Node = Some column }
-
-    /// A canonical, host-deterministic token for a cell — the uniqueness key element. Type-tagged so
-    /// distinct cell types never collide.
-    let private cellToken (c: Cell) : string =
-        match c with
-        | Int i -> "i:" + string i
-        | Float f ->
-            "f:"
-            + (if System.Double.IsNaN f then
-                   "NaN"
-               elif System.Double.IsPositiveInfinity f then
-                   "Inf"
-               elif System.Double.IsNegativeInfinity f then
-                   "-Inf"
-               // Phase 55/54: the finite token uses the single cross-host canonical float layout
-               // (`Wire.Canon.canonicalFloat` — `ToString("R")` on .NET, JS re-lay under Fable). The
-               // prior `string f` was locale-dependent + lossy; a raw `ToString("R")` is not
-               // Fable-supported (the Phase-54 gate caught it), so route through Canon.
-               else
-                   Canon.canonicalFloat f)
-        | Bool b -> "b:" + (if b then "1" else "0")
-        | Str s -> "s:" + s
-        | Date s -> "d:" + s
-        | Timestamp s -> "t:" + s
-        | Decimal s -> "m:" + s
-        | Null -> "n:"
 
     /// Build a rule from an id + body.
     let rule (id: string) (run: Table -> Defect<string> list) : ColumnRule = { Id = id; Run = run }
@@ -215,6 +237,9 @@ module ColumnValidator =
                     | _ -> None))
 
     /// The composite key formed by `columns` must be unique across rows — each repeat is located.
+    /// A key element is `Cell.token` (Phase 315; a private copy until then), so two cells are one
+    /// key value exactly when every consumer keying on the token says so: NaN is one value, `-0.0`
+    /// is `0`, and two `Decimal` cells holding `1.5` and `1.50` are one value.
     let unique (columns: string list) : ColumnRule =
         rule ("unique:" + String.concat "," columns) (fun t ->
             let missing = columns |> List.filter (fun c -> (Table.tryColumn c t).IsNone)
@@ -226,7 +251,7 @@ module ColumnValidator =
                 let cols = columns |> List.map (fun c -> Table.tryColumn c t |> Option.get)
 
                 let keyAt i =
-                    cols |> List.map (fun c -> cellToken (Column.cell i c))
+                    cols |> List.map (fun c -> Cell.token (Column.cell i c))
 
                 let keyName = String.concat "," columns
 

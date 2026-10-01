@@ -98,8 +98,15 @@ let tests =
           testCase "MoveNode refuses to nest a node under itself"
           <| fun _ ->
               match Ops.apply nodew idw (MoveNode("a", "a1")) (sample ()) with
-              | Error(WouldNestUnderSelf "a") -> ()
+              | Error(WouldNestUnderSelf("a", NestRelation.Descendant)) -> ()
               | other -> failtestf "expected WouldNestUnderSelf, got %A" other
+
+          // Phase 315 — the relation says which of the two mistakes it was.
+          testCase "MoveNode under itself is the Self relation, into its subtree the Descendant one"
+          <| fun _ ->
+              match Ops.apply nodew idw (MoveNode("a", "a")) (sample ()) with
+              | Error(WouldNestUnderSelf("a", NestRelation.Self)) -> ()
+              | other -> failtestf "expected WouldNestUnderSelf(a, Self), got %A" other
 
           testCase "ReorderChildren permutes"
           <| fun _ ->

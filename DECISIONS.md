@@ -1,5 +1,87 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D85: the light set — a dozen copied pieces become names; `appendAll` is `appendMany`, the capture key keeps its own cell encoding, and the nesting relation is a field
+
+**Recorded by Phase 315, riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`, "The light set").**
+Downstream consumers had each re-implemented a handful of one-screen pieces because Core kept them
+private, or exported the type without the operation. Each export below names the copies that evidence
+it; each is held to the copy it replaces on a shared fixture (`LightSetTests`, and the `ParityVectors`
+rows for the ones a browser computes too).
+
+| Export | What it replaces |
+|---|---|
+| `OpStream.sha256Hash : HashFn` | `fun prev payload -> sha256Hex (prev + "\|" + payload)`, hand-written by four consumers (the UI host's stream entries among them) |
+| `Hash.fnv1a32 : string -> uint32` | the raw FNV value, recovered by copying `mul32` in seven consumers (the UI renderer among them) |
+| `OpStream.chainHashOf`, `OpStream.appendChainOnly` | four domain adapters that append without the state and rebuild the canonical payload and hash by hand |
+| `Footprint.empty` / `union` / `contentEdit` / `insertUnder` / `removeNode` / `moveTo` | the private builders (`Ops.fs`), rebuilt by three consumers whose op vocabulary is not `SkeletonOp` |
+| `Rejection.code`, `Rejection.explain`, `RejectionCodec` | the six-case explainer the UI host and two domains each wrote |
+| `FloatLayout` (public) | the UI host's "keep in sync" copy of the layout Core ported from it, kept for SVG |
+| `Cell.token`, `Cell.compare` | four spellings of a cell's token (the `CountDistinct` key, the `unique` key, the compute layer's `cellToken`, the capture key's cell fields), one of which had drifted at `Decimal` |
+| `Validator.Pack` / `runPack` / `PackFinding` | the versioned pack container two domains hand-roll over `PackRule`, a third planned |
+| `Actor.validate` / `human` / `agent`, `ActorInvalid` | a consumer's workaround for an actor with an empty id |
+
+*`sha256Hash` is a copy, by D2.* `OpStream` references nothing, so the digest it names is its own copy
+of `Hash.utf8Bytes` + `Hash.sha256HexOfBytes`, held value-identical by the `sha256Hash/*` parity rows
+(both pipelines) and by the suite against the platform digest. Over an ill-formed string it answers the
+platform's replacement, as `Hash.sha256Hex` does: a `HashFn` is total and cannot refuse, so this is
+D84's unguarded posture — platform parity, not injectivity — stated on the function.
+
+*`appendAll` is not added.* The shard asked for a batch append that stops at the first refusal and
+names its index; Phase 296 shipped exactly that as `appendMany` / `appendManyWith`, with the signature
+the consumer copies have. A second name for one function is the drift this phase exists to remove, so
+the acceptance law — the batch refuses at the index `Ops.applyAll` refuses at — is stated over
+`appendMany`.
+
+*The capture key does not adopt `Cell.token`.* `Query.invocationKey`'s pre-image is INJECTIVE on cells
+(`cell_fields_injective` in `proofs/Query.fst`): a decimal is its text as it stands, a float its
+canonical layout. `Cell.token` is an EQUALITY-CLASS key — NaN one value, `1.50` and `1.5` one value —
+because that is what a `Distinct` or a `unique` key asks. They answer different questions; folding one
+into the other would either break the proved property or move every persisted capture key. So "one
+spelling" holds for the three identity keys (`CountDistinct`, `ColumnValidator.unique`, the compute
+layer's `cellToken`, which matches `Cell.token` on every non-decimal cell and adopts it at its next
+raise) and the capture key keeps its own. `Cell.compare` is the family-wise ORDER the aggregates use
+(NaN last, `-0 = 0`, decimals exact), `None` across families: an order, not an identity.
+
+*The nesting relation is a field, and that is the one breaking item.* `WouldNestUnderSelf` conflated a
+move under itself with a move into its own subtree. The payload cannot say which (it carries the
+target, not the new parent), so telling them apart needs either a field or a second case. A second case
+for the descendant move would change which case existing code receives for a move it already handles,
+and split one class that the apply vectors and the proof model pin as one. The field keeps the class
+and changes the payload: `WouldNestUnderSelf of target * relation: NestRelation`, breaking-source for
+a one-field pattern, in a draft that is already breaking. The reorder on a leaf needs no new case — a
+`ReorderMismatch` whose `expected` is empty already says the parent has no children — so it is a code
+(`reorderOnLeaf`), derived from the payload.
+
+*`RejectionGuidance` moves down without an alias.* `Rejection.explain` returns it, so it is declared in
+`Fuaran.Core.Ops` now. The namespace is unchanged, so every source that names it still compiles; an
+alias of the same full name in `Fuaran.Core.AiSurface` would be a cyclic abbreviation, not a
+forward. The move is binary-breaking for the AiSurface assembly and source-compatible. The canonical
+encoder is `RejectionCodec` in AiSurface, because `Fuaran.Core.Ops` carries no wire; it writes the
+whole envelope, and the apply vectors keep their narrower class-and-address projection.
+
+*An actor names somebody — at the constructors and on read.* A union case cannot refuse its arguments
+and closing the cases would break every construction site, so the refusal is `Actor.validate` and the
+two validating constructors, and the JSONL actor decoder refuses an empty id
+(`JsonlFaultReason.ActorInvalid`). The legacy bare-string reader stays lenient: it is a migration
+path, and refusing there would strand a stream it is the only way to read.
+
+*The pack is generic over its subject.* A tree family is one instance (`fun root -> family.Run w
+root`); a document, a model or a voicing sequence is another. A finding carries the `PackRule` and the
+citation `<pack>@<version>/<ruleId>` beside an unchanged `Defect` — the `Family` field on `Defect`
+itself is Phase 298's, for the next breaking draft. `PackRule` is kept: this is its use.
+
+*The laws are suite tests.* Each is a property of Core's own functions over no domain witness — the
+union law (`independent (a ∪ c) b ⇔ independent a b ∧ independent c b`, so growing a footprint never
+frees a pair), the builders against `Ops.footprint`'s clauses, the stateless chain against `append`'s
+— so they are `LightSetTests` rather than kit families a domain runs.
+
+*What the acceptance could not have.* "Each named consumer copy is byte-equal to the Core export"
+holds for the chain hash, the FNV value, the float layout and the cell token, each tested against a
+reproduction of the copy. It cannot hold for the rejection explainer: the copies disagree with each
+other in wording, each speaking its own nouns. `Rejection.explain` takes the nouns as a parameter and
+is pinned, case by case, on its own fixture; a consumer adopts it by choosing its nouns, not by
+matching its old sentences.
+
 ## 2026-10-01 — D84: the renderers do not recurse, an ill-formed string is refused wherever a digest depends on it, a float aggregate names its overflow, the profile grammar is its canonical strings, and the §21 limits are an open question
 
 **Recorded by Phase 306. BREAKING, riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`,
