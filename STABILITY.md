@@ -3535,6 +3535,47 @@ extracted model and passes `-Twins`.
 
 **Class: additive** — no `api/*.txt` baseline moves and no wire byte moves.
 
+### The stranger's on-ramp: every package carries its XML documentation file, README claims carry the version they arrived in, and the invocable seams have an adoption path (Phase 254) — additive
+
+A downstream consumer built a working domain over the capability and query seams from the published
+packages and documents alone, and logged where the public surfaces did not answer. The answers
+existed; they were somewhere the consumer could not see.
+
+- **Every package carries its XML documentation file.** `Directory.Build.props` sets
+  `GenerateDocumentationFile` for every project under `src/`, so the `.nupkg` carries `lib/<tfm>/<id>.xml`
+  beside the assembly and an editor shows the doc comments. Until now they reached a consumer only
+  inside the `fable/` source copy, which an editor does not read for a referenced assembly — there
+  was never a separate Fable copy of any comment to move. The build raised no new warning.
+  `PackageDocsTests` holds it: every packable project's built assembly has its `.xml` beside it,
+  naming that assembly and documenting members, and no packable project switches the property off.
+- **Every surface the README names carries the version it arrived in, derived rather than typed.**
+  `ReadmeClaimsTests` reads the committed public-surface baselines (`api/*.txt`) at every release tag:
+  the first tag carrying them is the floor (`0.27.0`), and a code span in the README whose name the
+  current baselines resolve is stamped after its first occurrence in each section — `(since 0.31.0)`,
+  or `(since 0.34.0, unreleased)` when no release has it. A surface present at the floor carries no
+  stamp, and a generated sentence under the package table says so. The committed README is held to
+  that rendering (`CORE_APPROVE_README=1` rewrites it), an unreleased stamp is held to the standing
+  `<Version>` and its `## … — DRAFT` heading here, and a released one to an entry header.
+- **The seams' README rows answer what had to be probed**: arguments are keyed by hole ADDRESS
+  (`SigEntry.Addr`), never by name, and there is no name-keyed projection; a capability declares no
+  result type (the body's `'v` is the host's); a query's parameters are keyed by name and its result
+  type is its `ResultSchema`; both invocation keys are the id, `#`, and eight hex digits of 32-bit
+  FNV-1a over an injective pre-image; default deny is the registry's shape, not a flag; and the tag
+  spelling is chosen by artefact — `"$type"` for a wire document a codec decodes back, `"kind"` for a
+  descriptor read and never decoded (`Function.toSchema`), none for a JSON Schema.
+- **`docs/ADOPTION.md` gains step 4, the invocable seams** — an artifact with holes, a capability
+  registry, a query registry, the three `Deferred` outcomes, default deny, and certification at the
+  domain's own seam (`capabilityLawsAt` / `queryLawsAt`) before dispatch — and its worked example is
+  `samples/adoption`, extended with the same steps and run by the gate, instead of a path in another
+  repository.
+- **A "which Fable version" line in the README**: the receiving gate's compiler pin (`5.0.0`) and this
+  repository's `Fable.Core` pin (`5.0`), held by the suite to both — the compiler's whenever that
+  gate's checkout is present, which a clone of this repository alone cannot see.
+
+**What a consumer does.** Nothing; a restore of this version shows the doc comments in the editor.
+
+**Class: additive** — no `api/*.txt` baseline moves and no wire byte moves.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**
