@@ -458,6 +458,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.freshIdLaws",
+      "module": "Conformance",
+      "entry": "freshIdLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "1400",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.functionVerifyLaws",
       "module": "Conformance",
       "entry": "functionVerifyLaws",
@@ -562,6 +575,19 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.loweringLaws",
+      "module": "Conformance",
+      "entry": "loweringLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "800",
+      "adequacy": "guarded-reached",
+      "refusal": "built"
+    },
+    {
       "id": "Conformance.memoLaws",
       "module": "Conformance",
       "entry": "memoLaws",
@@ -649,6 +675,19 @@
       "discharges": [],
       "cases": "800",
       "adequacy": "unconditional",
+      "refusal": "built"
+    },
+    {
+      "id": "Conformance.placementLaws",
+      "module": "Conformance",
+      "entry": "placementLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "800",
+      "adequacy": "guarded-reached",
       "refusal": "built"
     },
     {

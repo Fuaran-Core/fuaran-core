@@ -989,5 +989,63 @@ let rec fields : ((Prims.string * Prims.string)  ->  Prims.string)  ->  (Prims.n
      end))
 
 
+let rec insert_at = (fun ( k  :  Prims.nat ) ( x  :  'a ) ( l  :  Prims.list<'a> ) ->  
+if (Prims.op_Equals k (Prims.parse_int "0")) then begin
+     (x)::l
+     end else begin
+     (match (l) with
+| [] -> begin
+     (x)::[]
+     end
+| (h)::r -> begin
+     (h)::(insert_at (k - (Prims.parse_int "1")) x r)
+     end)
+     end)
+
+
+let placed_kids : Prims.string  ->  tree  ->  Prims.list<tree> = (fun ( p  :  Prims.string ) ( t  :  tree ) -> (match ((find_in p t)) with
+| FStar_Pervasives_Native.None -> begin
+     []
+     end
+| FStar_Pervasives_Native.Some (m) -> begin
+     (kids_of m)
+     end))
+
+
+let place_script : Prims.string  ->  Prims.nat  ->  tree  ->  tree  ->  Prims.list<op> = (fun ( p  :  Prims.string ) ( k  :  Prims.nat ) ( n  :  tree ) ( t  :  tree ) -> (
+
+let cs = (placed_kids p t)
+in  
+if (Prims.op_Equals k (len cs)) then begin
+     (InsertChild (p, n))::[]
+     end else begin
+     (Batch ((InsertChild (p, n))::(ReorderChildren (p, (insert_at k (tid_of n) (kid_ids cs))))::[]))::[]
+     end))
+
+
+let rec ins_at : Prims.string  ->  Prims.nat  ->  tree  ->  tree  ->  tree = (fun ( p  :  Prims.string ) ( k  :  Prims.nat ) ( n  :  tree ) ( t  :  tree ) -> (match (t) with
+| TNode (i, kd, cs) -> begin
+     (
+
+let cs' = (ins_at_all p k n cs)
+in  
+if (Prims.op_Equals i p) then begin
+     TNode (i, kd, (insert_at k n cs'))
+     end else begin
+     TNode (i, kd, cs')
+     end)
+     end))
+and ins_at_all : Prims.string  ->  Prims.nat  ->  tree  ->  Prims.list<tree>  ->  Prims.list<tree> = (fun ( p  :  Prims.string ) ( k  :  Prims.nat ) ( n  :  tree ) ( ts  :  Prims.list<tree> ) -> (match (ts) with
+| [] -> begin
+     []
+     end
+| (t)::r -> begin
+     ((ins_at p k n t))::(ins_at_all p k n r)
+     end))
+
+
+let place_tree : tree = TNode ("root", "doc", (TNode ("a", "sec", []))::(TNode ("b", "sec", []))::[])
+
+
 
 

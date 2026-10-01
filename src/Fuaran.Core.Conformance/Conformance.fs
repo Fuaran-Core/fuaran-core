@@ -135,6 +135,40 @@ module Conformance =
         : LawResult list =
         TreeLaws.keyedChildrenLaws keyw nodew idw gen seed iterations
 
+    /// Forward — see `TreeLaws.placementLaws` (Phase 312).
+    let placementLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.placementLaws nodew idw gen seed iterations
+
+    /// Forward — see `TreeLaws.loweringLaws` (Phase 312).
+    let loweringLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.loweringLaws nodew idw gen seed iterations
+
+    /// Forward — see `TreeLaws.freshIdLaws` (Phase 312). `setId` rebuilds a node with a new id and
+    /// `mint` is the strategy certified — `FreshIds.derived idw`, `FreshIds.sequential idw prefix`, or
+    /// the domain's own.
+    let freshIdLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (setId: 'Id -> 'Node -> 'Node)
+        (mint: 'Id -> Set<string> -> 'Id)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.freshIdLaws nodew idw gen setId mint seed iterations
+
     /// Forward — see `KeyedApplyLaws.keyedApplyLaws` (Phase 286).
     let keyedApplyLaws
         (keyw: KeyedWitness<'Node, 'Id>)

@@ -692,3 +692,141 @@ module Tree =
     /// domain generator. That two distinct pre-images hash apart under FNV-1a is not claimed.
     let encodeHash (w: NodeWitness<'Node, 'Id>) (encode: 'Node -> string) (node: 'Node) : string =
         encodePreimage w encode node |> Hash.fnv1a
+
+/// Deterministic fresh ids for a caller that must mint one (Phase 312): a derived or a sequential
+/// id that a caller-supplied TAKEN set does not hold, and the repair of a tree that carries an id
+/// twice. Every consumer that clones, pastes or repairs re-derived this derive-and-probe loop.
+///
+/// **Minting stays OFF the witness (D5, kept).** `IdWitness` carries no `fresh` and gains none:
+/// these are helpers over `ToString` / `OfString` and a taken set the caller passes, so nothing
+/// here reads ambient state, and the same inputs mint the same id on every host and every replay.
+/// A taken set is a `Set<string>` of `IdWitness.ToString` keys — the form `Footprint`,
+/// `Tree.Index` and `Tree.wellFormed` key ids by — so no `comparison` is demanded of `'Id`.
+///
+/// **A strategy is a function `'Id -> Set<string> -> 'Id`**: given the id being replaced and the
+/// taken keys, an id whose key the set does not hold. `derived` and `sequential` are two such
+/// functions over STRING-SHAPED ids; a domain whose ids are not strings with a suffix (a `Guid`,
+/// an integer) writes its own of the same shape, hands it to `repairDuplicates` /
+/// `TreePlacement.clone`, and certifies it with `Conformance.freshIdLaws`. Both shipped strategies
+/// probe pairwise-distinct candidate strings, so each terminates within `Set.count taken + 1`
+/// probes; each requires the witness's `OfString` to read a candidate back to an id whose
+/// `ToString` is that candidate, which `freshIdLaws` checks rather than assumes.
+[<RequireQualifiedAccess>]
+module FreshIds =
+
+    /// The first of `candidate 1`, `candidate 2`, … that `taken` does not hold. The candidates are
+    /// pairwise distinct, so at most `Set.count taken + 1` probes run.
+    let private firstFree (taken: Set<string>) (candidate: int -> string) : string =
+        let rec probe (n: int) =
+            let c = candidate n
+            if Set.contains c taken then probe (n + 1) else c
+
+        probe 1
+
+    /// A deterministic derivation from the id being replaced: `<id>-copy`, then `<id>-copy-2`,
+    /// `<id>-copy-3`, … — the first whose key `taken` does not hold. The spelling is the one the UI
+    /// host's clone verbs have shipped, so a consumer that adopts this one keeps its ids.
+    let derived (idw: IdWitness<'Id>) (id: 'Id) (taken: Set<string>) : 'Id =
+        let s = idw.ToString id
+
+        firstFree taken (fun n -> if n = 1 then s + "-copy" else s + "-copy-" + string n)
+        |> idw.OfString
+
+    /// Sequential ids under a fixed prefix: the first of `<prefix>-1`, `<prefix>-2`, … whose key
+    /// `taken` does not hold. The id being replaced is not read, so the minted sequence depends only
+    /// on the prefix and the taken set — the deterministic-replay strategy. There is NO hidden
+    /// counter: a caller that adds each minted key to `taken` (as `repairDuplicates` does) gets
+    /// `-1`, `-2`, `-3`, … in request order, and the same requests mint the same ids on replay.
+    let sequential (idw: IdWitness<'Id>) (prefix: string) (_replaced: 'Id) (taken: Set<string>) : 'Id =
+        firstFree taken (fun n -> prefix + "-" + string n) |> idw.OfString
+
+    /// Rename every node of `root` whose id is already TAKEN — held by `taken`, or carried by an
+    /// EARLIER node in preorder — to a fresh id from `mint`, and return the renamed tree with the
+    /// mapping `(original, fresh)`, one entry per renamed node in preorder. The first occurrence of
+    /// an id `taken` does not hold keeps it; every later occurrence is the one renamed.
+    ///
+    /// Two uses, one function. With `taken = Set.empty` it repairs a tree that carries an id twice
+    /// (the later occurrence is renamed). With `taken` the keys of a TARGET tree it prepares a
+    /// subtree for insertion there — every id that would collide is renamed, every other id is
+    /// kept — which is what a clone or a paste needs before `InsertChild`.
+    ///
+    /// Each fresh id is minted against `taken`, every id `root` carries (so it cannot collide with
+    /// an occurrence not yet visited) and every id minted before it. Given a lawful `mint` the
+    /// result is `Tree.wellFormed` and holds no key of `taken` (`Conformance.freshIdLaws`). A tree
+    /// with nothing to rename is returned as it was, with an empty mapping.
+    ///
+    /// `setId` rebuilds a node with a new id — a per-call parameter, as for `Tree.remapIds`, never a
+    /// witness field. The rebuild is bottom-up through `ReplaceChildren`, iterative (a deep tree
+    /// cannot overflow), and walks `w`'s children: a domain with keyed positions passes
+    /// `Tree.traversal nodew keyw` to reach and rename the nodes held there too.
+    let repairDuplicates
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (setId: 'Id -> 'Node -> 'Node)
+        (mint: 'Id -> Set<string> -> 'Id)
+        (taken: Set<string>)
+        (root: 'Node)
+        : 'Node * ('Id * 'Id) list =
+        let nodes = Tree.preorder w root
+        let carried = nodes |> List.map (fun n -> idw.ToString(w.Id n)) |> Set.ofList
+
+        // One preorder pass decides, per preorder position, the fresh id (if any).
+        let rec decide (i: int) (seen: Set<string>) (avoid: Set<string>) (renames: Map<int, 'Id>) mappingRev ns =
+            match ns with
+            | [] -> renames, List.rev mappingRev
+            | n :: rest ->
+                let id = w.Id n
+                let k = idw.ToString id
+
+                if Set.contains k taken || Set.contains k seen then
+                    let fresh = mint id avoid
+
+                    decide
+                        (i + 1)
+                        seen
+                        (Set.add (idw.ToString fresh) avoid)
+                        (Map.add i fresh renames)
+                        ((id, fresh) :: mappingRev)
+                        rest
+                else
+                    decide (i + 1) (Set.add k seen) avoid renames mappingRev rest
+
+        let renames, mapping =
+            decide 0 Set.empty (Set.union taken carried) Map.empty [] nodes
+
+        if Map.isEmpty renames then
+            root, []
+        else
+            // Bottom-up rebuild whose frames carry their node's PREORDER position: a frame is
+            // created when its node is first reached, which is preorder, so `next` numbers the
+            // nodes exactly as `decide` did. `(position, node, children-to-rebuild,
+            // rebuilt-children-reversed)`; `carry` hands a finished child to its parent frame.
+            let rec loop (next: int) (stack: (int * 'Node * 'Node list * 'Node list) list) (carry: 'Node option) =
+                match stack with
+                | [] -> root // unreachable: the root frame returns directly
+                | (ix, node, remaining, doneRev) :: rest ->
+                    match carry with
+                    | Some child -> loop next ((ix, node, remaining, child :: doneRev) :: rest) None
+                    | None ->
+                        match remaining with
+                        | [] ->
+                            // a leaf is not rebuilt: a witness may leave `ReplaceChildren` partial
+                            // on nodes that cannot hold children
+                            let rebuilt =
+                                if List.isEmpty doneRev then
+                                    node
+                                else
+                                    w.ReplaceChildren node (List.rev doneRev)
+
+                            let rebuilt =
+                                match Map.tryFind ix renames with
+                                | Some fresh -> setId fresh rebuilt
+                                | None -> rebuilt
+
+                            match rest with
+                            | [] -> rebuilt
+                            | _ -> loop next rest (Some rebuilt)
+                        | c :: cs ->
+                            loop (next + 1) ((next, c, w.Children c, []) :: (ix, node, cs, doneRev) :: rest) None
+
+            loop 1 [ (0, root, w.Children root, []) ] None, mapping

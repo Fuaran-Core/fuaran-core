@@ -90,6 +90,24 @@ let private runs =
                "Conformance.containerLaws"
                200
                (Conformance.containerLaws nodew idw ContainedOpsTests.containerGen 1610 200)
+           // Phase 312 — the placement algebra, tree lowering and fresh ids, at the contained
+           // reference generator (a leaf kind, so every container clause is live).
+           run
+               "Conformance.placementLaws"
+               200
+               (Conformance.placementLaws nodew idw ConformanceTests.containedGen 312 200)
+           run "Conformance.loweringLaws" 200 (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
+           run
+               "Conformance.freshIdLaws"
+               200
+               (Conformance.freshIdLaws
+                   nodew
+                   idw
+                   ConformanceTests.containedGen
+                   (fun i (n: RNode) -> { n with Id = i })
+                   (FreshIds.derived idw)
+                   312
+                   200)
            run
                "Conformance.mergeConflictLaws"
                300
