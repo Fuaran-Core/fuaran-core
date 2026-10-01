@@ -581,8 +581,10 @@ let vectors: (string * string) list =
       "decimalCodec/decode-integer-token-past-int32", decimalDecode "3000000000,-9007199254740992"
       "decimalCodec/decode-whole-exponent-token", decimalDecode "3e9"
       "decimalCodec/decode-refuses-fractional-token", decimalDecode "3.5"
-      // Past 2^53 a whole-valued number token is refused twice over: an INTEGER token by the
-      // parser's int53 guard, before the codec sees it, and a whole FLOAT token by the codec.
+      // Past 2^53 a whole-valued number token is refused by one of two hands: an integer token that
+      // is not a canonical float layout by the parser's int53 guard, before the codec sees it, and a
+      // token the parser reads as a double by the codec. Since Phase 253 the first row is the second
+      // kind: `9007199254740994` is the canonical layout of a double, so the parser reads it.
       "decimalCodec/decode-refuses-integer-token-past-2-53", decimalDecode "9007199254740994"
       "decimalCodec/decode-refuses-whole-float-past-2-53", decimalDecode "1e300"
       "decimalCodec/decode-refuses-exponent-text", decimalDecode "\"1e3\""

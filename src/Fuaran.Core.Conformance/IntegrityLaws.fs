@@ -8,12 +8,63 @@ module internal IntegrityLaws =
     // float→wire / float→key path routes through, so the bytes match across the .NET / Fable / TS /
     // Python hosts.
 
-    /// The canonical-float laws (Phase 55). Self-contained (it draws floats from the seed); over a
-    /// seed-replayable sample certifies: **determinism** (the same float always renders identically),
-    /// **finite round-trip** (a finite float's canonical string re-parses through the wire parser to the
-    /// same numeric value — the cross-host parity contract; an integer-valued float legitimately
-    /// re-parses as a `JInt` of the same value, per `WIRE_FORMAT`), and **stable non-finite tokens**
-    /// (`NaN` / `±Infinity` render to fixed, distinct tokens, never host-/locale-specific text).
+    /// `2^k` as a double, by repeated doubling or halving — exact over the whole range, the
+    /// subnormals included, because every power of two from `2^-1074` to `2^1023` is a double.
+    /// Fable-clean: no `Math.Pow` (whose last bit is the runtime's to choose) and no
+    /// `BitConverter`.
+    let private pow2 (k: int) : float =
+        let mutable r = 1.0
+
+        if k >= 0 then
+            for _ in 1..k do
+                r <- r * 2.0
+        else
+            for _ in 1 .. -k do
+                r <- r * 0.5
+
+        r
+
+    /// The edges every run asserts once, beside the drawn strata: the largest finite and the
+    /// smallest subnormal of each sign, the largest subnormal and the smallest normal, 2^53 and its
+    /// first neighbour above, the fixed-point window's ends (1e15, 1e16, the largest double below
+    /// 1e17, and 1e17 itself, the first in exponent form), the Int32 edges, and both zeroes.
+    let private canonicalFloatEdges: float list =
+        [ System.Double.MaxValue
+          -System.Double.MaxValue
+          System.Double.Epsilon
+          -System.Double.Epsilon
+          pow2 -1022 - pow2 -1074
+          pow2 -1022
+          pow2 53
+          pow2 53 + 2.0
+          -(pow2 53 + 2.0)
+          1e15
+          1e16
+          -1e16
+          99999999999999984.0
+          1e17
+          2147483647.0
+          2147483648.0
+          -2147483648.0
+          -2147483649.0
+          0.0
+          -0.0 ]
+
+    /// The canonical-float laws (Phase 55; widened by Phase 253). Self-contained (it draws floats from
+    /// the seed); over a seed-replayable sample certifies: **determinism** (the same float always
+    /// renders identically), **finite round-trip** (a finite float's canonical string PARSES through
+    /// the wire parser to the same numeric value — every float Core renders, Core reads; an
+    /// integer-valued float legitimately re-parses as a `JInt` of the same value, per `WIRE_FORMAT`),
+    /// **the fixed point** (the parsed value re-renders to the very bytes it was read from), and
+    /// **stable non-finite tokens** (`NaN` / `±Infinity` render to fixed, distinct tokens, never
+    /// host-/locale-specific text).
+    ///
+    /// Each iteration BUILDS one float in each of four strata, which a counterexample names — a spread
+    /// of small magnitudes (until Phase 253 the family's only draw, under 1e6, so the layout's one
+    /// integer-shaped range the parser refused was never reached), the whole normal range (every binary exponent from -1022 to 1023, a full 52-bit
+    /// mantissa, either sign), the subnormals, and the integral range from 2^53 to 2^57, where the
+    /// layout's integer-shaped tokens past 2^53 live — and every run asserts the edges besides, so
+    /// the largest finite, the smallest subnormal and the neighbours of 2^53 are reached by any seed.
     let canonicalFloatLaws (seed: int) (iterations: int) : LawResult list =
         let determinism =
             LawKit.LawCell "canonicalFloat is deterministic (same float ⇒ same string)"
@@ -21,33 +72,104 @@ module internal IntegrityLaws =
         let roundtrip =
             LawKit.LawCell "a finite float round-trips through the wire parser to the same numeric value"
 
+        let fixedPoint =
+            LawKit.LawCell "a finite float's canonical text re-renders, once parsed, to the same bytes"
+
         let nonFinite =
             LawKit.LawCell "non-finite floats render to stable, distinct tokens (NaN / ±Infinity)"
 
-        let numericOf (s: string) : float option =
-            match Json.parse s with
-            | Ok(JInt i) -> Some(float i)
-            | Ok(JFloat f) -> Some f
-            | _ -> None
+        let assertOne (at: string -> string) (stratum: string) (f: float) =
+            let s1 = Canon.canonicalFloat f
+            let s2 = Canon.canonicalFloat f
+
+            determinism.Check(
+                (s1 = s2),
+                fun () -> at (sprintf "canonicalFloat not deterministic for %s float %g" stratum f)
+            )
+
+            let parsed = Json.parse s1
+
+            let numeric =
+                match parsed with
+                | Ok(JInt i) -> Some(float i)
+                | Ok(JFloat g) -> Some g
+                | _ -> None
+
+            roundtrip.Check(
+                (numeric = Some f),
+                fun () ->
+                    at (
+                        sprintf
+                            "finite round-trip ≠ original for %s float %s (got %A from %s)"
+                            stratum
+                            (FloatLayout.finite f)
+                            parsed
+                            s1
+                    )
+            )
+
+            match parsed with
+            | Ok v ->
+                let again = Canon.render v
+
+                fixedPoint.Check(
+                    (again = s1),
+                    fun () ->
+                        at (
+                            sprintf
+                                "%s float %s: canonical text %s re-renders as %s"
+                                stratum
+                                (FloatLayout.finite f)
+                                s1
+                                again
+                        )
+                )
+            | Error e ->
+                fixedPoint.Check(
+                    false,
+                    fun () ->
+                        at (
+                            sprintf
+                                "%s float %s: canonical text %s does not parse: %s"
+                                stratum
+                                (FloatLayout.finite f)
+                                s1
+                                e
+                        )
+                )
+
+        // A 52-bit mantissa as two 26-bit halves (an `int` draw tops out at 31 bits), exact as a
+        // double. Draw ORDER is the replay contract, so every stratum draws in the order written.
+        let mantissa (rng: LawKit.Draws) : float =
+            let hi = rng.IntBelow 67108864
+            let lo = rng.IntBelow 67108864
+            float hi * 67108864.0 + float lo
+
+        let signed (rng: LawKit.Draws) (f: float) : float = if rng.IntBelow 2 = 0 then f else -f
 
         LawKit.run iterations seed (fun rng _ at ->
             let a = rng.IntBelow 2000000
             let b = rng.IntBelow 1000
             // a spread of finite magnitudes, positive and negative.
-            let f = float (a - 1000000) / float (b + 1)
+            assertOne at "spread" (float (a - 1000000) / float (b + 1))
 
-            let s1 = Canon.canonicalFloat f
-            let s2 = Canon.canonicalFloat f
+            // the normal range: (2^52 + m) * 2^(e - 52) for a binary exponent e in [-1022, 1023].
+            let m = mantissa rng
+            let e = rng.IntBelow 2046 - 1022
+            assertOne at "normal" (signed rng ((pow2 52 + m) * pow2 (e - 52)))
 
-            determinism.Check((s1 = s2), fun () -> at (sprintf "canonicalFloat not deterministic for %g" f))
+            // the subnormals: m * 2^-1074 for m in [1, 2^52).
+            let m = mantissa rng
+            assertOne at "subnormal" (signed rng ((if m = 0.0 then 1.0 else m) * pow2 -1074))
 
-            match numericOf s1 with
-            | Some v when v = f -> roundtrip.Saw()
-            | other ->
-                roundtrip.Check(
-                    false,
-                    fun () -> at (sprintf "finite round-trip ≠ original for %g (got %A from %s)" f other s1)
-                ))
+            // the integral range from 2^53 to 2^57: the fixed-point layouts past 2^53 are integer
+            // tokens (up to the largest double below 1e17), and the exponent-form ones follow.
+            let m = mantissa rng
+            let e = 53 + rng.IntBelow 4
+            assertOne at "integral past 2^53" (signed rng ((pow2 52 + m) * pow2 (e - 52))))
+
+        for f in canonicalFloatEdges do
+            assertOne (fun msg -> "seed=" + string seed + " edge: " + msg) "edge" f
 
         // stable, distinct non-finite tokens (fixed text, not host-/locale-specific).
         let nan = Canon.canonicalFloat System.Double.NaN
@@ -64,7 +186,7 @@ module internal IntegrityLaws =
                 sprintf "seed=%d: non-finite tokens not stable/distinct (nan=%s pinf=%s ninf=%s)" seed nan pinf ninf
         )
 
-        LawKit.results [ determinism; roundtrip; nonFinite ]
+        LawKit.results [ determinism; roundtrip; fixedPoint; nonFinite ]
 
     // ---- memo encoder injectivity (Phase 56) ----
     // The teeth on `applyMemo`'s silent precondition: its content-addressed key is

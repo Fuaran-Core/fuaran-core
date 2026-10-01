@@ -24,9 +24,12 @@
        kind is never invented anywhere else, and `depth_bound_scalars_unaffected` saying an
        exhausted budget still accepts a scalar.
      - `int53_guard_exact` — every integer token the parser ACCEPTS is int53-safe by value, whether
-       it landed on `JInt` or on `JFloat`; the guard as production spells it is SOUND (it never
-       admits an unsafe integer) and CONSERVATIVE (`int53_guard_conservative` exhibits a safe value
-       it refuses). See the finding below: "exact" is not available, and claiming it would be false.
+       it landed on `JInt` or on `JFloat`, OR (since Phase 253) is the canonical float layout of the
+       double it reads as — the one integer-shaped spelling past 2^53 a Core document carries, and
+       `canonical_layout_past_int53_is_read` says such a token is read; the guard as production
+       spells it is SOUND (it never admits an unsafe integer that is not such a layout) and
+       CONSERVATIVE (`int53_guard_conservative` exhibits a safe value it refuses). See the finding
+       below: "exact" is not available, and claiming it would be false.
      - `error_kind_exhaustive` — the twelve `JsonErrorKind` cases are confined to the layers that
        raise them (again in the return types, so the confinement is checked at every call site
        rather than asserted once) and every one of the twelve is REACHABLE, by a witness input.
@@ -47,10 +50,11 @@
        classification is proved, the transliteration is sampled by the differential.
 
      - THE FLOAT READBACK IS OPAQUE. `System.Double.TryParse`'s verdict on a token — parses
-       finitely, parses to a non-finite, does not parse — is a PARAMETER (`float_read`), exactly as
-       Phase 135 made `float i` a parameter and Phase 136 made the hash one. Nothing in this model
-       looks inside a float; what it decides is WHICH of the three outcomes each verdict leads to,
-       and that is the parser's own logic rather than .NET's.
+       finitely, parses to a non-finite, does not parse, and (Phase 253) parses finitely to a double
+       whose canonical layout IS the token — is a PARAMETER (`float_read`), exactly as Phase 135
+       made `float i` a parameter and Phase 136 made the hash one. Nothing in this model looks
+       inside a float; what it decides is WHICH of the outcomes each verdict leads to, and that is
+       the parser's own logic rather than .NET's.
 
      - THE DEPTH CAP IS A LIST, and the rendered cap in the message is a string parameter. F*'s
        `int` does not survive this extraction (README, finding 2), so `depth >= maxDepth` is spelt
@@ -553,12 +557,15 @@ let scan_number (s: list ch)
      | [] -> ([], false, s3)) in
   (app neg (app ints (app frac expo)), isf1 || isf2, s4)
 
-(* The three verdicts `System.Double.TryParse` plus the finiteness gate can reach. A PARAMETER:
-   see the header's note on opacity. *)
+(* The verdicts `System.Double.TryParse` plus the finiteness gate can reach, with the finite one
+   split by Phase 253: `FCanonical` is a finite double whose canonical float layout
+   (`FloatLayout.finite`) IS the token, `FFinite` any other finite read. A PARAMETER: see the
+   header's note on opacity — which layout .NET writes is .NET's to compute, as the read is. *)
 type freadv =
   | FFinite
   | FNonFinite
   | FUnparsable
+  | FCanonical
 
 (* F#: `Json.isJsonNumber` (Phase 299) — the JSON number grammar, exactly (RFC 8259 §6): an
    optional `-`; then `0`, or a non-zero digit and any digits after it; then, optionally, a `.`
@@ -613,6 +620,7 @@ let classify_number (float_read: list ch -> freadv) (tok: list ch) (isf: bool)
   else if isf then
     (match float_read tok with
      | FFinite -> POk (JFloat tok) []
+     | FCanonical -> POk (JFloat tok) []
      | FNonFinite -> PErr MalformedNumber (msg_nonfinite tok) []
      | FUnparsable -> PErr MalformedNumber (msg_malformed tok) [])
   else if int32_fits neg digits then POk (JInt tok) []
@@ -622,7 +630,12 @@ let classify_number (float_read: list ch -> freadv) (tok: list ch) (isf: bool)
     (match float_read tok with
      | FUnparsable -> PErr MalformedNumber (msg_malformed tok) []
      | _ -> POk (JFloat tok) [])
-  else PErr MalformedNumber (msg_int53 tok) []
+  else
+    (* F#: the THIRD `Double.TryParse` (Phase 253) — past 2^53 the token is read exactly when it is
+       the canonical layout of the finite double it reads as, and refused by the guard otherwise. *)
+    (match float_read tok with
+     | FCanonical -> POk (JFloat tok) []
+     | _ -> PErr MalformedNumber (msg_int53 tok) [])
 
 (* F#: `parseNumber` whole. Both failures fire AFTER the token scan, so their position is the end
    of the token — which is where production's `i` stands when `fail` captures it. *)
@@ -916,7 +929,7 @@ let depth_bound_exact
    refusal, the second says it is not vacuous. *)
 let depth_bound_scalars_unaffected
   (float_read: list ch -> freadv) (cap: string) (pol: policy)
-  : Lemma (requires float_read [CD0] == FFinite)
+  : Lemma (requires float_read [CD0] <> FUnparsable)
           (ensures ROk? (parse float_read cap pol [] [CD0]) /\
                    (let r = parse float_read cap pol [] [CLBrack; CRBrack] in
                     RErr? r /\ RErr?.k r == MaxDepthExceeded) /\
@@ -970,28 +983,53 @@ let int32_within_int53 (neg: bool) (d: list ch)
   : Lemma (ensures int32_fits neg d ==> int53_safe_value d)
   = limit_lengths ()
 
-(* THE GUARD, STATED OVER THE PARSER. Every integer token the parser accepts — on either branch,
-   `JInt` by the Int32 range or `JFloat` by the guard — denotes an int53-safe value. This is the
-   claim worth having, and note WHERE it lives: the Int32 branch is not guarded and does not need
-   to be, which is the correction the phase's brief needed. *)
+(* THE GUARD, STATED OVER THE PARSER. Every integer token the parser accepts — `JInt` by the Int32
+   range, `JFloat` by the guard, or `JFloat` past it — denotes an int53-safe value OR is the
+   canonical layout of the double it reads as (`FCanonical`). This is the claim worth having, and
+   note WHERE it lives: the Int32 branch is not guarded and does not need to be, which is the
+   correction the phase's brief needed.
+
+   THE SECOND DISJUNCT IS PHASE 253's. Until then the statement was the first disjunct alone, and
+   it was true: the parser refused every integer token past 2^53. But the canonical float layout
+   writes a finite double whose base-10 exponent is 15 or 16 in fixed point, so 1e16 renders as an
+   integer token past 2^53 that the parser refused — a document Core wrote that Core could not
+   read. The guard now admits exactly those tokens. What it protects is unchanged in kind: a token
+   it admits past 2^53 re-renders to itself, so no reading of it moves a digit of the wire, and a
+   token that would (2^53 + 1, a 19-digit identifier) is still refused by name. What it no longer
+   says is that the VALUE is int53-safe — a canonical layout past 2^53 can spell its double with
+   trailing zeros where the double's exact value has other digits, which is a fact about the
+   double, and why an identifier past 2^53 travels as a string. *)
 let int53_guard_exact (float_read: list ch -> freadv) (tok: list ch)
   : Lemma (ensures (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
-                    POk? (classify_number float_read tok false) ==> int53_safe_value digits))
+                    POk? (classify_number float_read tok false) ==>
+                    (int53_safe_value digits \/ float_read tok == FCanonical)))
   =
   let digits = (match tok with CMinus :: t -> t | _ -> tok) in
   let neg = (match tok with CMinus :: _ -> true | _ -> false) in
   int32_within_int53 neg digits;
   int53_guard_sound digits
 
-(* … and the refusal is classified: an integer token of the grammar that is not int53-safe is
-   refused, by name. (A token OUTSIDE the grammar is refused before the guard reads it, in other
-   words — `number_grammar_is_checked_first` below.) *)
+(* … and the refusal is classified: an integer token of the grammar that is not int53-safe, and is
+   not the canonical layout of its double, is refused, by name. (A token OUTSIDE the grammar is
+   refused before the guard reads it, in other words — `number_grammar_is_checked_first` below.) *)
 let int53_guard_refuses (float_read: list ch -> freadv) (tok: list ch)
   : Lemma (ensures (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
                     let neg = (match tok with CMinus :: _ -> true | _ -> false) in
-                    (is_json_number tok /\ not (int32_fits neg digits) /\ not (int53_safe digits)) ==>
+                    (is_json_number tok /\ not (int32_fits neg digits) /\ not (int53_safe digits) /\
+                     float_read tok <> FCanonical) ==>
                     (let r = classify_number float_read tok false in
                      PErr? r /\ PErr?.k r == MalformedNumber /\ PErr?.msg r == msg_int53 tok)))
+  = ()
+
+(* … and the admission is exact (Phase 253): an integer token of the grammar past both ranges that
+   IS the canonical layout of its double is read, as that double — the case that made a canonical
+   rendering of 1e16 unreadable before it. *)
+let canonical_layout_past_int53_is_read (float_read: list ch -> freadv) (tok: list ch)
+  : Lemma (ensures (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
+                    let neg = (match tok with CMinus :: _ -> true | _ -> false) in
+                    (is_json_number tok /\ not (int32_fits neg digits) /\ not (int53_safe digits) /\
+                     float_read tok == FCanonical) ==>
+                    classify_number float_read tok false == POk (JFloat tok) []))
   = ()
 
 (* ---- THE GRAMMAR CLOSES THE FINDING (Phases 299 and 306) ----
@@ -1032,7 +1070,8 @@ let number_grammar_is_checked_first (float_read: list ch -> freadv) (tok: list c
 
 (* THE GUARD IS EXACT ON THE GRAMMAR. For an integer token the parser's grammar admits: the
    lexical test IS the test on the value, and the token is accepted exactly when its value is in
-   the Int32 range, or is int53-safe and the float reader reads it. *)
+   the Int32 range, or is int53-safe and the float reader reads it, or (Phase 253) is the canonical
+   layout of the double it reads as. *)
 let int53_guard_exact_on_the_grammar (float_read: list ch -> freadv) (tok: list ch)
   : Lemma (requires (let digits = (match tok with CMinus :: t -> t | _ -> tok) in
                      is_json_number tok /\ all_digits digits))
@@ -1041,7 +1080,8 @@ let int53_guard_exact_on_the_grammar (float_read: list ch -> freadv) (tok: list 
                     int53_safe digits == int53_safe_value digits /\
                     (POk? (classify_number float_read tok false) <==>
                        (int32_fits neg digits \/
-                        (int53_safe_value digits /\ float_read tok <> FUnparsable)))))
+                        (int53_safe_value digits /\ float_read tok <> FUnparsable) \/
+                        float_read tok == FCanonical))))
   =
   let digits = (match tok with CMinus :: t -> t | _ -> tok) in
   json_integer_is_unpadded digits

@@ -78,6 +78,39 @@ let tests =
                   | Error m -> Expect.stringContains m "int53" (sprintf "%s names the safe-range rule" tok)
                   | Ok v -> failtestf "expected reject for %s, got %A (silent precision loss)" tok v
 
+          // Phase 253 — the float layout writes 1e16 as `10000000000000000`, an integer token past
+          // 2^53, so refusing every such token left a document Core wrote unreadable by Core.
+          testCase
+              "an integer token past 2^53 is read exactly when it is the canonical layout of its double (Phase 253)"
+          <| fun _ ->
+              for f in
+                  [ 1e16
+                    9007199254740994.0
+                    -9007199254740994.0
+                    1.8205257897171752e16
+                    9.9999999999999984e16 ] do
+                  let tok = Canon.canonicalFloat f
+                  Expect.isFalse (tok.Contains "." || tok.Contains "E") (sprintf "%s is integer-shaped" tok)
+
+                  match Json.parse tok with
+                  | Ok(JFloat g) ->
+                      Expect.equal g f (sprintf "%s reads as the double it was written from" tok)
+                      Expect.equal (Canon.render (JFloat g)) tok (sprintf "%s re-renders byte for byte" tok)
+                  | other -> failtestf "expected JFloat for the canonical token %s, got %A" tok other
+
+              // Past 2^53 the admission is by SPELLING: 18205257897171752 is the exact value of the
+              // double whose canonical layout is 18205257897171750, and it does not survive a
+              // re-render, so it is refused with the guard's message — as are 2^53 + 1 and a token
+              // no double is written as at all.
+              for tok in
+                  [ "18205257897171752"
+                    "9007199254740993"
+                    "-9007199254740993"
+                    "100000000000000000" ] do
+                  match Json.parse tok with
+                  | Error m -> Expect.stringContains m "int53" (sprintf "%s names the safe-range rule" tok)
+                  | Ok v -> failtestf "expected reject for the non-canonical token %s, got %A" tok v
+
           testCase "a float token beyond the double range is rejected, never JFloat Infinity"
           <| fun _ ->
               // "1e400" is syntactically valid JSON but TryParses to +Infinity on

@@ -85,10 +85,14 @@ let integrityLawTests =
                   "one drawn encoding is reported as a search that compared nothing"
 
           // Phase 55 — the canonical-float encoder laws.
-          testCase "canonicalFloatLaws certify determinism + finite round-trip + stable non-finite tokens (Phase 55)"
+          // Phase 253 — the round trip is through the PARSER over the whole double range, and the
+          // parsed value re-renders to the same bytes (the fourth law).
+          testCase
+              "canonicalFloatLaws certify determinism + finite round-trip + fixed point + stable non-finite tokens (Phase 55, 253)"
           <| fun _ ->
               let results = Conformance.canonicalFloatLaws 4242 500
-              Expect.equal (List.length results) 3 "determinism + round-trip + non-finite laws reported"
+
+              Expect.equal (List.length results) 4 "determinism + round-trip + fixed-point + non-finite laws reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

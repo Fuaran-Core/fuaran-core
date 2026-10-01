@@ -2538,6 +2538,50 @@ new record, four new module values — is `additive`. Pre-1.0, an untagged draft
 breaking change without a new number. `api/Fuaran.Core.Ops.txt` records the case's new field and the
 new members.
 
+### `Json.parse` reads every float `Canon.render` writes; the canonical-float family samples the whole double range (Phase 253) — ADDITIVE: the read side widens, no emitted byte moves
+
+**What changed.** The canonical float layout (WIRE_FORMAT §2 rule 5, `FloatLayout.finite`) writes a
+finite double whose base-10 exponent is 15 or 16 in fixed point, so `1e16` renders as
+`10000000000000000` and `9007199254740994.0` as `9007199254740994` — integer tokens past 2^53, which the
+parser's int53 guard refused. A document Core wrote could not be read by Core. The parser now reads an
+integer token past 2^53 **exactly when it is the canonical float layout of the double it reads as**, as
+that `JFloat`; it re-renders to the same token. Every other integer token past 2^53 is refused as
+before, with the same message: `9007199254740993` (2^53 + 1), a 19-digit identifier, and the exact
+value of a double whose layout spells it differently (`18205257897171752`, whose double's layout is
+`18205257897171750`). DECISIONS D90 records why the read side moved rather than the layout.
+
+`Conformance.canonicalFloatLaws` builds one float per iteration in each of four strata — the old
+small-magnitude spread, the whole normal range, the subnormals, and the integral range from 2^53 to
+2^57 — and asserts the edges every run (the largest finite and smallest subnormal of each sign, the
+largest subnormal and smallest normal, 2^53 and its neighbour, both ends of the fixed-point window, the
+Int32 edges, both zeroes). Its round trip now runs through the parser over that whole range, and a
+fourth law asserts the fixed point: the parsed value re-renders to the very bytes it was read from. With
+the parser change reverted, the family goes red at its first iteration, in the integral stratum.
+
+**What adopting it costs.** Nothing to compile against: no public signature moves and every
+`api/` baseline, managed and wire, is unchanged — no `Canon.render` byte moves. Three observable
+differences, each a read that used to be refused:
+
+- `Json.parse` (and every reader over it) returns `Ok (JFloat …)` for a canonical integer-shaped float
+  layout past 2^53 where it returned a `MalformedNumber`. A caller that relied on that refusal to keep
+  identifiers past 2^53 out keeps it for every token that is not such a layout; an identifier in that
+  range travels as a string, as before.
+- The columnar decoder's vector `decode-refuses-integer-token-past-2-53` (`conformance/laws/
+  decimal-laws.json`) is still refused, now by the decimal column (`TypeMismatch`, a whole float past
+  2^53) rather than by the parser (`NotJson`). The shared corpus's copy of that file is re-emitted with `--emit-laws <corpus dir>`.
+- `canonicalFloatLaws` reports four laws, not three; a census over it counts 2000 cases at 500
+  iterations where it counted 1500.
+
+**The proofs move with it.** `proofs/JsonParse.fst`'s float reader gains a verdict, `FCanonical`;
+`int53_guard_exact` now reads "int53-safe, or the canonical layout of its double",
+`int53_guard_refuses` excludes that layout, `canonical_layout_past_int53_is_read` is new, and the
+oracle is re-extracted. `proofs/WireCanon.fst` gains a second numeral premise,
+`integral_float_reads_back`, and `every_finite_float_reads_back` on it; the oracle host evaluates that
+premise against production's parser and against a reader with the old guard, which must lose past 2^53
+and only there.
+
+**Class: additive** — a decode widening; nothing a consumer pins as emitted moves.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

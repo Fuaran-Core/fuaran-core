@@ -991,7 +991,7 @@
     {
       "id": "int53-guard-exact",
       "level": "proved",
-      "claim": "Every integer token the parser ACCEPTS denotes an int53-safe value, whichever branch produced it — JInt by the Int32 range, JFloat by the guard. Note where the guard is NOT: the Int32 branch runs no int53 test and needs none, because the Int32 range is a strict subset (int32_within_int53 proves it).",
+      "claim": "Every integer token the parser ACCEPTS denotes an int53-safe value, whichever branch produced it — JInt by the Int32 range, JFloat by the guard — OR, since Phase 253, is the canonical float layout of the double it reads as (the float reader's `FCanonical` verdict): the one integer-shaped spelling past 2^53 a canonical rendering carries, read as that double and re-rendered to the same token (`canonical_layout_past_int53_is_read`). Every other integer token past 2^53 — 2^53 + 1, a 19-digit identifier, the exact value of a double whose layout spells it differently — is still refused by name (`int53_guard_refuses`). Note where the guard is NOT: the Int32 branch runs no int53 test and needs none, because the Int32 range is a strict subset (int32_within_int53 proves it).",
       "phase": "fuaran-core#146",
       "evidence": {
         "theorem": "int53_guard_exact",
@@ -2401,7 +2401,7 @@
     {
       "id": "int53-guard-exact-on-the-grammar",
       "level": "proved",
-      "claim": "THE INT53 FINDING, CLOSED. `int53-guard-conservative` records that the guard's lexical comparison refuses a zero-padded safe integer. That is still true of the PREDICATE and is no longer true of the PARSER: since Phase 299 a token is held to the JSON number grammar before either guard reads it, the grammar has no leading zero, and an integer token of the grammar is `0` or begins with a non-zero digit (`json_integer_is_unpadded`) — so on the tokens the parser reads the lexical test and the test on the value are ONE test, and the token is accepted exactly when its value is in the Int32 range, or is int53-safe and the float reader reads it (`int53_guard_exact_on_the_grammar`, an iff). `padded_token_is_refused_by_the_grammar` shows the old witness is now refused as a malformed number, not as an unsafe integer. This is the exactness the phase that wrote the guard asked for, and what the comment in Wire.fs justifying the lexical comparison always assumed.",
+      "claim": "THE INT53 FINDING, CLOSED. `int53-guard-conservative` records that the guard's lexical comparison refuses a zero-padded safe integer. That is still true of the PREDICATE and is no longer true of the PARSER: since Phase 299 a token is held to the JSON number grammar before either guard reads it, the grammar has no leading zero, and an integer token of the grammar is `0` or begins with a non-zero digit (`json_integer_is_unpadded`) — so on the tokens the parser reads the lexical test and the test on the value are ONE test, and the token is accepted exactly when its value is in the Int32 range, or is int53-safe and the float reader reads it, or (since Phase 253) is the canonical float layout of the double it reads as (`int53_guard_exact_on_the_grammar`, an iff). `padded_token_is_refused_by_the_grammar` shows the old witness is now refused as a malformed number, not as an unsafe integer. This is the exactness the phase that wrote the guard asked for, and what the comment in Wire.fs justifying the lexical comparison always assumed.",
       "phase": "fuaran-core#306",
       "evidence": {
         "theorem": "int53_guard_exact_on_the_grammar",
