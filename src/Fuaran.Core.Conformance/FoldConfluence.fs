@@ -83,7 +83,8 @@ type LaneGen<'Op, 'State> =
 
 /// The fold-confluence law family (Phase 100). A domain runs `laneFoldLaws` against its own
 /// witness; `foldOnce` and `shrinkLanes` are exposed because a domain investigating a
-/// counterexample wants to drive them directly.
+/// counterexample wants to drive them directly, and `laneDag` (Phase 249) because a domain that
+/// wants a halt's typed conflicts reads them off the DAG `foldOnce` folds.
 [<RequireQualifiedAccess>]
 module FoldConfluence =
 
@@ -198,6 +199,12 @@ module FoldConfluence =
             | Ok st -> LaneFolded(hashState st)
             | Error rej -> LaneRejected(sprintf "%A" rej)
 
+    /// The base node every trial forks from: `baseOp` appended to the empty DAG under the
+    /// `Human "base"` actor. One definition, so `laneDag` and the shaped draws of
+    /// `laneFoldLawsWith` cannot build different bases.
+    let private baseNode (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (baseOp: 'Op) : string * Dag.T<'Op> =
+        Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> LawKit.dagBuilt
+
     /// Chain each lane onto `parentOf i` under its own actor, returning the heads in lane order.
     let private chainLanes
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -221,16 +228,37 @@ module FoldConfluence =
                 hs @ [ head ], d')
             ([], d0)
 
-    /// Fold ONE lane set in the order given, through the real DAG surface rather than a
-    /// re-implementation of it: each lane is chained onto a shared base node **under its own
-    /// actor**, the lane deltas are recovered by `Dag.reconcileMany`'s partition, which checks
-    /// every unordered lane pair and (Phase 300) that every lane applies on its own from `state0`,
-    /// and the composed script is replayed through the domain reducer from `state0`.
+    /// The lane DAG of one trial (Phase 249): `baseOp` appended to the empty DAG under the
+    /// `Human "base"` actor, then each lane chained onto that base node **under its own actor**
+    /// (`Human "lane-<i>"`, `i` the lane's index). Returns the DAG, the base node's id and the
+    /// lane heads in lane order — exactly what `Dag.reconcileMany w footprintOf dag baseId state0
+    /// heads` takes, so a domain that wants the TYPED `MergeConflict` list of a halt (to report it in
+    /// its own words, or to resolve it) reads it off the very DAG `foldOnce` folds, rather than
+    /// rebuilding one beside it that can drift.
     ///
     /// The per-lane actor is load-bearing, not decoration: node ids are content hashes of
     /// (parents, actor, op), so two lanes carrying the SAME op sequence off the same base would
     /// otherwise converge to one chain — correct content-addressing, but it would silently
-    /// collapse the trial to a single lane and certify nothing.
+    /// collapse the trial to a single lane and certify nothing. An empty lane's head is the base
+    /// node itself.
+    let laneDag
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (baseOp: 'Op)
+        (lanes: 'Op list list)
+        : Dag.T<'Op> * string * string list =
+        let baseId, d0 = baseNode hashFn w baseOp
+        let heads, dag = chainLanes w hashFn (fun _ _ -> baseId) d0 lanes
+        dag, baseId, heads
+
+    /// Fold ONE lane set in the order given, through the real DAG surface rather than a
+    /// re-implementation of it: the trial is `laneDag` (each lane chained onto a shared base node
+    /// under its own actor), the lane deltas are recovered by `Dag.reconcileMany`'s partition,
+    /// which checks every unordered lane pair and (Phase 300) that every lane applies on its own
+    /// from `state0`, and the composed script is replayed through the domain reducer from `state0`.
+    ///
+    /// Defined over `laneDag` (Phase 249), so the DAG a domain builds to read a halt's typed
+    /// conflicts and the DAG this folds cannot diverge.
     let foldOnce
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (footprintOf: 'Op -> Footprint)
@@ -240,10 +268,7 @@ module FoldConfluence =
         (baseOp: 'Op)
         (lanes: 'Op list list)
         : LaneFoldOutcome =
-        let baseId, d0 =
-            Dag.append hashFn w (Human "base") baseOp "" Dag.empty |> LawKit.dagBuilt
-
-        let heads, dag = chainLanes w hashFn (fun _ _ -> baseId) d0 lanes
+        let dag, baseId, heads = laneDag hashFn w baseOp lanes
         foldHeads w footprintOf hashState state0 dag baseId heads
 
     /// Greedy delta-debugging over a failing lane set: repeatedly take the first single-element
@@ -378,8 +403,7 @@ module FoldConfluence =
         // identically under every order. The criss-cross needs a merge op, which a lane generator does
         // not supply, so it is drawn by `reconcileLaws`, over the tree algebra's no-op batch.
         let outcomesOf (shape: int) (ls: 'Op list list) =
-            let baseId, d0 =
-                Dag.append hashFn w (Human "base") gen.BaseOp "" Dag.empty |> LawKit.dagBuilt
+            let baseId, d0 = baseNode hashFn w gen.BaseOp
 
             let overHeads (heads: string list) (dag: Dag.T<'Op>) =
                 arrivalOrders (List.length heads)
