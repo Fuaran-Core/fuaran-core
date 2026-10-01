@@ -1,5 +1,62 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D97: a compacted stream is a VALUE that reads its boundary, the writers refuse what the reader cannot read back, and strict replay never answers live
+
+**Recorded by Phase 301. `Fuaran.Core.OpStream` (`Compacted`, `OpStream.Compacted`, the `try…`
+writers, `replayEffectStrict`), `Fuaran.Core.OpStream.Dag` (`Dag.tryToJsonl`); rides the `0.34.0`
+draft (STABILITY.md, "The compacted stream lives on").**
+
+*Decided: the compacted stream is a value, `Compacted<'Op,'State>` — snapshot, tail and the
+discarded history's key index — and the operations on it are new members beside `append`, not a
+change to `append`.* The shard offered two shapes. The other was to make `append` / `head` /
+`KeyIndex.ofStream` read `last.Seq + 1` and the last hash and accept a boundary. Rejected: `append`
+numbering from the list's length is what `proofs/Chain.fst` §6 models (`append_rec` at the record
+count), what every verified stream agrees with, and what an unverified stream's next record is
+measured against; changing it would move a proved function's meaning on exactly the inputs where it
+matters (a stream whose stored sequences are not its positions) to fix inputs where it does not
+apply (a tail). A tail is not a stream that starts at its genesis, and a value that carries its
+boundary says so in its type. `append` stays the form for a stream from its genesis; `Compacted` is
+the form for one that begins at a snapshot, and §7b proves the two mint the same record
+(`append_after_compact`), so nothing is lost by having both.
+
+*Decided: `Keys` is the PREFIX index, fixed at compaction, and no hash binds it.* A key index is a
+value the caller threads (Phase 82); after compaction the prefix cannot be re-folded, so the index of
+what was discarded has to be carried, and `Compacted.keyIndex` continues it over the tail
+(`key_index_rebuild_parity`). Binding it into the snapshot's hash would change the snapshot's
+pre-image and with it every snapshot line's meaning, which Phase 301's "bytes on disk are unchanged"
+excludes; so it is trusted exactly as a `ChainOnly` snapshot's state is — as far as the act that
+compacted. **No on-disk format for it is minted here.** A host that persists a compacted stream
+persists `Keys` beside it (it is a map of key to `{Seq; Hash}`); a line format for it, and whether
+that line belongs in the snapshot line as an extra member old readers would ignore, is a format
+decision left to the first consumer that asks, because it is irreversible once written and nothing
+yet reads it.
+
+*Decided: the writers CHECK; they do not escape.* The shard offered a scanner that keeps the exact
+raw span and writers that escape. Rejected: the span IS the bytes the chain hashed, so re-spelling
+an encoding at the writer would write a line whose op the reader hands the decoder in bytes the hash
+never saw — the failure moved, not removed. The checked writers (`tryToJsonl` and its siblings) take
+the encoding as it is and refuse one that would not come back as itself: a line break, whitespace
+around the value, or anything but one JSON value (`OpStream.Jsonl.checkRaw`). The unchecked writers
+are unchanged, for every caller that already holds well-formed encodings and wants no `Result`; a
+line or paragraph separator inside a string passes, because the canonical escaper emits it raw and
+the reader splits on `\n` alone.
+
+*Decided: strict replay is a second member, and its label check is exact.* `replayEffect`'s live
+fallback is a contract callers rely on (a legacy journal), so `replayEffectStrict` sits beside it
+and refuses instead: exhausted, another identity, another label, a label that is not canonical.
+"Canonical" is `Effect.determinismTag`'s vocabulary, copied here because this package sits below
+`Function` (`isDeterminismLabel`, held equal to `Effect.tryDeterminismOfTag` over a label corpus by a
+test); case-exact, so `Deterministic` is refused rather than journalled as some other label. A
+truncation the session never reaches cannot be seen by replay at all, so the journal's head is the
+anchor (`captureHead`, `verifyCapturesAt`): the chain binds every sequence, so the head fixes the
+length, and a host records it in its op stream or has an `IAttestationSink` sign it.
+
+*Decided: the base run certifies linear persistence.* `streamLaws` gains the JSONL round-trip cell,
+so `certify` / `certifyStream` go red for a domain whose `Encode` is not one single-line JSON value.
+That is a run that can turn red without a line of the domain changing — named in STABILITY.md as
+the one adoption cost — and it is taken deliberately: a stream the domain cannot write and read back
+is a stream it cannot keep, and a base certification that is silent about it is the gap Phase 301
+was filed for.
 ## 2026-10-01 — D96: the F\* model refuses a shape its literal cannot carry; the classifier's rules are one descriptor table; `Codegen.fs` splits behind a facade or not at all
 
 **Recorded by Phase 293. `Fuaran.Core.Idl.Codegen` (`FStarTarget`, `Diff`, `Gen`); rides the `0.34.0`

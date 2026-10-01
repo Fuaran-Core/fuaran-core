@@ -91,6 +91,47 @@ module JsonlFault =
     let toString (f: JsonlFault) : string =
         sprintf "line %d: %s (position %d)" f.Line (reasonText f.Reason) f.Position
 
+/// WHY a JSONL writer refused to embed a raw span (Phase 301). A writer embeds a domain encoding —
+/// an op, a captured value, a snapshot's state — verbatim, and the reader hands the decoder the
+/// value's exact span; so the line round-trips only when the encoding IS one JSON value that sits on
+/// one line with nothing around it. Before this type the writers embedded whatever `Encode` produced,
+/// and an encoding with a line break, or a space either side, read back changed — and failed
+/// `verifyChain` / `verifyCaptures` — with nothing at the write to say so.
+[<RequireQualifiedAccess>]
+type JsonlWriteFaultReason =
+    /// The encoding carries a line break (`\n` or `\r`) at `position`: the line would end inside it.
+    | MultiLine of position: int
+    /// Whitespace before or after the one value: the reader keeps the value's span without it, so
+    /// the decoder would be handed different bytes than the chain hashed.
+    | NotTrimStable
+    /// The scanner does not read the encoding as one JSON value — no value, an invalid literal, an
+    /// unterminated string or container, a bad escape, or a second value after the first. The
+    /// scanner's own reason.
+    | Unreadable of reason: JsonlFaultReason
+
+/// One refused embedding (Phase 301): the 1-based `Line` of the output the writer would have
+/// produced (the record's, capture's or node's position plus one; a snapshot line is line 1), the
+/// `Member` whose span was refused (`op`, `value` or `state`), and the `Reason`.
+type JsonlWriteFault =
+    { Line: int
+      Member: string
+      Reason: JsonlWriteFaultReason }
+
+/// Render a `JsonlWriteFault` for a log line or an `Error` string (Phase 301).
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module JsonlWriteFault =
+
+    /// The reason's text, without the line and member.
+    let reasonText (r: JsonlWriteFaultReason) : string =
+        match r with
+        | JsonlWriteFaultReason.MultiLine p -> sprintf "the encoding carries a line break at position %d" p
+        | JsonlWriteFaultReason.NotTrimStable -> "whitespace before or after the encoded value"
+        | JsonlWriteFaultReason.Unreadable r -> "not one JSON value: " + JsonlFault.reasonText r
+
+    /// `line N: member M: <reason>`.
+    let toString (f: JsonlWriteFault) : string =
+        sprintf "line %d: member %s: %s" f.Line f.Member (reasonText f.Reason)
+
 /// The scanner's internal refusal, raised deep in the scan and caught at the one boundary that turns
 /// it into a `JsonlFault` — never seen by a caller.
 exception internal JsonlScanFault of position: int * reason: JsonlFaultReason
@@ -115,20 +156,23 @@ module internal OpStreamJsonl =
     /// every control character as `\u00xx` since Phase 287). Fable-clean.
     let jstr (s: string) : string = JsonString.quote s
 
+    /// One record line around the op's embedded encoding — the one line format both writers emit.
+    let recordLine (r: OpRecord<'Op>) (opJson: string) : string =
+        "{\"seq\":"
+        + string r.Seq
+        + ",\"actor\":"
+        + Actor.encode r.Actor
+        + ",\"op\":"
+        + opJson
+        + ",\"prevHash\":"
+        + jstr r.PrevHash
+        + ",\"hash\":"
+        + jstr r.Hash
+        + "}"
+
     let toJsonl (w: StreamWitness<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : string =
         records
-        |> List.map (fun r ->
-            "{\"seq\":"
-            + string r.Seq
-            + ",\"actor\":"
-            + Actor.encode r.Actor
-            + ",\"op\":"
-            + w.Encode r.Op
-            + ",\"prevHash\":"
-            + jstr r.PrevHash
-            + ",\"hash\":"
-            + jstr r.Hash
-            + "}")
+        |> List.map (fun r -> recordLine r (w.Encode r.Op))
         |> String.concat "\n"
 
     module Jsonl =
@@ -344,6 +388,46 @@ module internal OpStreamJsonl =
                     fail start (JsonlFaultReason.InvalidLiteral token)
 
                 i
+
+        /// Will `raw`, embedded as a member value, read back as exactly `raw` (Phase 301)? It must
+        /// carry no line break, start with no whitespace, and be one JSON value the scanner reads to
+        /// its last character — the conditions under which the member's span is `raw` byte for byte.
+        /// A line separator (U+2028 / U+2029) is NOT a break here: the canonical escaper emits it raw
+        /// inside a string, and the reader splits on `\n` alone, so it round-trips.
+        let checkRaw (raw: string) : Result<unit, JsonlWriteFaultReason> =
+            let n = raw.Length
+            let mutable brk = -1
+            let mutable k = 0
+
+            while brk < 0 && k < n do
+                if raw.[k] = '\n' || raw.[k] = '\r' then
+                    brk <- k
+
+                k <- k + 1
+
+            if brk >= 0 then
+                Error(JsonlWriteFaultReason.MultiLine brk)
+            elif n > 0 && isWs raw.[0] then
+                Error JsonlWriteFaultReason.NotTrimStable
+            else
+                try
+                    let e = skipValue raw 0
+
+                    if e = n then
+                        Ok()
+                    else
+                        let mutable allWs = true
+
+                        for j in e .. n - 1 do
+                            if not (isWs raw.[j]) then
+                                allWs <- false
+
+                        if allWs then
+                            Error JsonlWriteFaultReason.NotTrimStable
+                        else
+                            Error(JsonlWriteFaultReason.Unreadable JsonlFaultReason.TrailingContent)
+                with JsonlScanFault(_, r) ->
+                    Error(JsonlWriteFaultReason.Unreadable r)
 
         /// The members of the flat object `s` holds — `(key, raw value, value position)`, first-wins
         /// on a repeated key (Phase 45: the first-wins `JVal` decoders and this scanner agree on which
@@ -653,6 +737,42 @@ module internal OpStreamJsonl =
     /// the position, without a line number the caller never had.
     let spanFault (f: JsonlFault) : string =
         sprintf "%s (position %d)" (JsonlFault.reasonText f.Reason) f.Position
+
+    /// Write one line per item, each from its embedded span (Phase 301): every span is checked
+    /// (`Jsonl.checkRaw`) before any line is built, and the first refused one is the result — by its
+    /// 1-based line and the member that would have carried it. On `Ok` the text is the one the
+    /// unchecked writer produces, byte for byte.
+    let checkedLines
+        (memberName: string)
+        (spanOf: 'T -> string)
+        (lineOf: 'T -> string -> string)
+        (items: 'T list)
+        : Result<string, JsonlWriteFault> =
+        let lines = ResizeArray<string>()
+
+        let rec go (i: int) =
+            function
+            | [] -> Ok(String.concat "\n" lines)
+            | (x: 'T) :: rest ->
+                let span = spanOf x
+
+                match Jsonl.checkRaw span with
+                | Error reason ->
+                    Error
+                        { Line = i + 1
+                          Member = memberName
+                          Reason = reason }
+                | Ok() ->
+                    lines.Add(lineOf x span)
+                    go (i + 1) rest
+
+        go 0 items
+
+    let tryToJsonl
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (records: OpRecord<'Op> list)
+        : Result<string, JsonlWriteFault> =
+        checkedLines "op" (fun (r: OpRecord<'Op>) -> w.Encode r.Op) recordLine records
 
     /// One record line, decoded — the members in line order, the `op` span handed to the witness.
     let private recordOf

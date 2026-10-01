@@ -3051,6 +3051,35 @@ was not the seed.
      verifying, as for the chain itself.
    - **`EffectCapture` journals and the DAG's `replayTo`.** A different stream and a different walk.
 
+### The compacted stream lives on, and the capture journal is a chain (Phase 301)
+
+`proofs/Chain.fst` §7b and §7c. Until Phase 301 a compaction was terminal: `append` numbers from the
+length of the list it is handed, which is right for a stream that starts at its genesis and wrong for
+a tail, which starts at the snapshot's boundary. `Compacted` reads the boundary, and three theorems
+say it reads it right. **`append_after_compact`** — the compaction of the appended stream IS the
+appended compaction, snapshot and tail alike, so the record `appendTo` mints is the record `append`
+mints, at the origin's sequence and linked to the origin's head, an empty tail included; with
+`compact_preserves_verify` the appended original verifies exactly when its prefix does and the
+appended compaction verifies across. **`compact_compose`** — compacting `k` past a compaction at `n`
+is compacting the full stream at `n + k`, refusals included (a prefix refusal is reported at its
+ORIGIN index, because the cut records are replayed numbered from the boundary), given the seam the
+production code checks: the tail starts at its boundary. **`key_index_rebuild_parity`** — the
+first-wins key-index fold splits at any boundary, so the discarded prefix's index continued over the
+tail is the whole stream's.
+
+§7c is section 6 at the capture payload: **`intact_captures_verify`**, **`replay_record`** (strict
+replay of a recorded session over its complete journal answers every recorded value and consumes the
+journal — `replay (record s) = s`), **`truncated_journal_exhausted`** (a journal missing its last
+capture stops exhausted, never answered live), and **`capture_value_tamper_detected`**, which spends a
+BUNDLED premise (`cap_value_injective`): §6b's decomposition of the record envelope was not repeated
+for the capture envelope. The label vocabulary and the escaper are parameters, as the hash is.
+
+The bridge is `tests/Fuaran.Core.Tests/ProofOracleCompactedTests.fs` (`compacted-stream-differential`,
+`capture-journal-differential`): every `(n, k)` pair of a seeded stream pool in both snapshot modes,
+a starved snapshot so the prefix refusal is met, append after compaction at every boundary, the key
+index at every boundary, and recorded, tampered, replayed and truncated capture journals. Before it
+was trusted, the extracted oracle was perturbed to number an appended record and a re-compaction
+from the tail rather than the boundary — the defect itself — and both comparisons went red.
 ### The signed head binds the chain it seals — signing composition as a theorem (Phase 193)
 
 Theorem 3 finds a tampered record. It says nothing about a **rewrite** — a tamper that re-mints

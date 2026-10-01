@@ -14,6 +14,7 @@
     <Compile Include="Chain.fs" />
     <Compile Include="Jsonl.fs" />
     <Compile Include="Snapshot.fs" />
+    <Compile Include="Compacted.fs" />
     <Compile Include="Capture.fs" />
     <Compile Include="Attributed.fs" />
     <Compile Include="OpStream.fs" />

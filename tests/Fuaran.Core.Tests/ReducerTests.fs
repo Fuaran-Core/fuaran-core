@@ -31,12 +31,20 @@ let private gen: StreamGen<Op, int> = { State0 = 0; Op = genOp }
 
 // A StreamWitness over the counter Op — wires the same reducer into the op-stream seam so
 // `certifyStream` (the F7 reducer-only / heterogeneous-tree entry point) can be exercised.
+// A JSON string (`"i5"`): the base run certifies linear persistence since Phase 301, and a bare
+// `i5` is not a JSON value the JSONL reader can read back.
 let private encode =
     function
-    | Inc n -> "i" + string n
-    | Dec n -> "d" + string n
+    | Inc n -> "\"i" + string n + "\""
+    | Dec n -> "\"d" + string n + "\""
 
-let private decode (s: string) : Result<Op, string> =
+let private decode (q: string) : Result<Op, string> =
+    let s =
+        if q.Length >= 2 && q.StartsWith "\"" && q.EndsWith "\"" then
+            q.Substring(1, q.Length - 2)
+        else
+            q
+
     if s.Length < 2 then
         Error("short: " + s)
     else
@@ -108,16 +116,16 @@ let tests =
           testCase "certifyStream certifies a reducer-only domain (op-stream laws + reducer laws, no tree)"
           <| fun _ ->
               // F7: a domain with no uniform node tree certifies via the op-stream + reducer
-              // seams alone. The report bundles streamLaws (3) + reducer laws (2) + the reducer's
-              // accepted/refused guards (2, Phase 220) + the stream laws' accepted-op and
-              // tampered-chain guards (2, Phase 245) = 9.
+              // seams alone. The report bundles streamLaws (4 — the JSONL round trip since Phase 301)
+              // + reducer laws (2) + the reducer's accepted/refused guards (2, Phase 220) + the
+              // stream laws' accepted-op and tampered-chain guards (2, Phase 245) = 10.
               let report = Conformance.certifyStream sw gen OpStream.defaultHash 271 200
               Expect.isTrue report.AllPassed "a well-formed reducer-only domain certifies green"
 
               Expect.equal
                   (List.length report.Results)
-                  9
-                  "3 op-stream laws + 2 reducer laws + 2 reducer guards + 2 stream guards"
+                  10
+                  "4 op-stream laws + 2 reducer laws + 2 reducer guards + 2 stream guards"
 
           testCase "certifyStream surfaces a throwing reducer through the bundled report"
           <| fun _ ->

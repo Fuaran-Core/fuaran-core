@@ -29,8 +29,8 @@ let streamLawTests =
 
               Expect.equal
                   (List.length results)
-                  5
-                  "exact-replay + deterministic + tamper + identity-order laws, and the Phase 297 tampered-capture guard, reported"
+                  6
+                  "exact-replay + deterministic + tamper + identity-order + JSONL round-trip (Phase 301) laws, and the Phase 297 tampered-capture guard, reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -139,8 +139,8 @@ let reducerGuardTests =
 
               Expect.equal
                   (List.length report.Results)
-                  9
-                  "a starved guard does not short-circuit the stream laws — reducer (2 + 2 guards) + stream (3 + 2 guards, Phase 245)" ]
+                  10
+                  "a starved guard does not short-circuit the stream laws — reducer (2 + 2 guards) + stream (4 + 2 guards, Phase 245; the JSONL round trip, Phase 301)" ]
 
 /// One op, always the same one: every chain is non-empty, and every tamper the family draws
 /// encodes identically to the op it would replace, so the tamper law never runs. A non-empty

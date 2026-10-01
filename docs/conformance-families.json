@@ -207,7 +207,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800",
+      "cases": "1000",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     },
@@ -892,7 +892,7 @@
       "witness": ["StreamWitness", "StreamGen"],
       "optIn": false,
       "discharges": [],
-      "cases": "600",
+      "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
     },

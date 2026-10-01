@@ -744,20 +744,45 @@ module Dag =
 
     /// One JSON object per node, in deterministic id-sorted order. The `op` is embedded as raw
     /// JSON (the witness's own Encode output), so a round-trip preserves it byte-for-byte.
+    let private nodeLine (n: DagNode<'Op>) (opJson: string) : string =
+        "{\"node\":true,\"id\":"
+        + jstr n.Id
+        + ",\"parents\":["
+        + (n.Parents |> List.map jstr |> String.concat ",")
+        + "],\"actor\":"
+        + Actor.encode n.Actor
+        + ",\"op\":"
+        + opJson
+        + "}"
+
     let toJsonl (encode: 'Op -> string) (dag: T<'Op>) : string =
         dag.Nodes
         |> Map.toList
-        |> List.map (fun (_, n) ->
-            "{\"node\":true,\"id\":"
-            + jstr n.Id
-            + ",\"parents\":["
-            + (n.Parents |> List.map jstr |> String.concat ",")
-            + "],\"actor\":"
-            + Actor.encode n.Actor
-            + ",\"op\":"
-            + encode n.Op
-            + "}")
+        |> List.map (fun (_, n) -> nodeLine n (encode n.Op))
         |> String.concat "\n"
+
+    /// `toJsonl` that refuses an op encoding the reader cannot read back (Phase 301) — the linear
+    /// writers' check (`OpStream.Jsonl.checkRaw`) over every node's `encode n.Op`, in the id order the
+    /// lines are written. A node's content id is hashed over its encoding, so an encoding carrying a
+    /// line break, or whitespace either side of the value, read back changed and failed `verifyDag`.
+    /// The first such node is the `Error`, by its 1-based line and member (`op`); on `Ok` the text is
+    /// `toJsonl`'s, byte for byte.
+    let tryToJsonl (encode: 'Op -> string) (dag: T<'Op>) : Result<string, JsonlWriteFault> =
+        let rec go (i: int) (acc: string list) =
+            function
+            | [] -> Ok(acc |> List.rev |> String.concat "\n")
+            | (n: DagNode<'Op>) :: rest ->
+                let opJson = encode n.Op
+
+                match OpStream.Jsonl.checkRaw opJson with
+                | Error reason ->
+                    Error
+                        { Line = i + 1
+                          Member = "op"
+                          Reason = reason }
+                | Ok() -> go (i + 1) (nodeLine n opJson :: acc) rest
+
+        go 0 [] (dag.Nodes |> Map.toList |> List.map snd)
 
     /// Parse JSONL back into a DAG (the `op` raw span is handed to `w.Decode`) through the ONE
     /// JSONL scanner, `OpStream.Jsonl` (Phase 296; until then this module carried a verbatim copy).
@@ -2036,6 +2061,27 @@ module Dag =
         checkpoints
         |> List.map (fun cp -> OpStream.Snapshots.toJsonl stateEncode (asSnapshot cp))
         |> String.concat "\n"
+
+    /// `toJsonlWithCheckpoints` through the checked writers (Phase 301): the lane by `tryToJsonl`, each
+    /// sidecar line by `OpStream.Snapshots.tryToJsonl` — a refused state is the `Error` by its 1-based
+    /// SIDECAR line, member `state`. On `Ok` both texts are `toJsonlWithCheckpoints`'s, byte for byte.
+    let tryToJsonlWithCheckpoints
+        (encode: 'Op -> string)
+        (stateEncode: 'State -> string)
+        (dag: T<'Op>)
+        (checkpoints: Checkpoint<'State> list)
+        : Result<string * string, JsonlWriteFault> =
+        tryToJsonl encode dag
+        |> Result.bind (fun lane ->
+            let rec go (i: int) (acc: string list) =
+                function
+                | [] -> Ok(lane, acc |> List.rev |> String.concat "\n")
+                | (cp: Checkpoint<'State>) :: rest ->
+                    match OpStream.Snapshots.tryToJsonl stateEncode (asSnapshot cp) with
+                    | Error f -> Error { f with Line = i + 1 }
+                    | Ok line -> go (i + 1) (line :: acc) rest
+
+            go 0 [] checkpoints)
 
     /// Read a DAG and its optional checkpoint sidecar (Phase 288). The lane is read by `fromJsonl`, so a
     /// DAG file with NO sidecar (`None`) reads exactly as `fromJsonl` reads it, with no checkpoints. A
