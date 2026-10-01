@@ -131,13 +131,11 @@ module Propagation =
         |> List.map (fun (k, vs) -> k, vs |> List.map snd |> Set.ofList)
         |> Map.ofList
 
-    /// The **minimal dirty set** for a changed-input set: `changed` ∪ every id transitively downstream of it
-    /// (the reverse-reachability closure over the dependents map). Minimal by construction — an id not
-    /// reverse-reachable from any change is never included. This is the primary entry point: a *value* edit
-    /// (a formula / cell-body change) names the changed ids directly. Pure, total.
-    let dirtyFromChangedIds (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
-        let deps' = dependents deps
-
+    /// The reachability closure of `seed` over an edge map: `seed` ∪ every id reachable from it by
+    /// following `edges` (an id with no entry has no out-edges). The one frontier loop behind both
+    /// directions of propagation (Phase 317): over the DEPENDENTS map it is the dirty set (push), over
+    /// the dependency map itself it is the needed set (pull). `grow` in `proofs/Propagation.fst`.
+    let private closureOver (edges: Map<string, Set<string>>) (seed: Set<string>) : Set<string> =
         let rec grow (frontier: Set<string>) (acc: Set<string>) =
             if Set.isEmpty frontier then
                 acc
@@ -145,20 +143,36 @@ module Propagation =
                 let next =
                     (Set.empty, frontier)
                     ||> Set.fold (fun s node ->
-                        match Map.tryFind node deps' with
+                        match Map.tryFind node edges with
                         | Some ds -> Set.union s ds
                         | None -> s)
 
                 let fresh = Set.difference next acc
                 grow fresh (Set.union acc fresh)
 
-        grow changed changed
+        grow seed seed
+
+    /// The **minimal dirty set** for a changed-input set: `changed` ∪ every id transitively downstream of it
+    /// (the reverse-reachability closure over the dependents map). Minimal by construction — an id not
+    /// reverse-reachable from any change is never included. This is the primary entry point: a *value* edit
+    /// (a formula / cell-body change) names the changed ids directly. Pure, total.
+    let dirtyFromChangedIds (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
+        closureOver (dependents deps) changed
 
     /// Staleness as queryable data (A3): the dirty closure the caller has not yet recomputed, returned as a
     /// derived `Set<string>` — no mutable state, no stored flag on any node (GP2). A semantic alias of
     /// `dirtyFromChangedIds` making the "outputs to mark stale" contract explicit at the call site.
     let staleSet (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
         dirtyFromChangedIds deps changed
+
+    /// The **needed set** for a target set (Phase 317) — the pull dual of `dirtyFromChangedIds`:
+    /// `targets` ∪ every id transitively UPSTREAM of one (the reachability closure over the dependency
+    /// map itself, where the dirty set closes over its inverse). It is the ⊆-least set that holds the
+    /// targets and is closed under "is read by a member" — every read of a member is a member — so it
+    /// is exactly what evaluating the targets requires (`needed_for_least`, `proofs/Propagation.fst`).
+    /// A dangling read, and a target the map does not hold, are members like any other id: the set is
+    /// about ids, and whether an id is evaluable is the map's question, not this one. Pure, total.
+    let neededFor (deps: Map<string, Set<string>>) (targets: Set<string>) : Set<string> = closureOver deps targets
 
     /// The string ids a structural `SkeletonOp` touches — the *container* ids whose structure changed
     /// (over-approximation always safe, the Phase-34 contract). Because bindings are id-addressed, a
@@ -372,14 +386,16 @@ module Propagation =
     /// `Map.tryFind id prior` — its own value from the evaluation that produced `prior`, or `None`
     /// when there is none. `eval` / `evalFrom` hand an evaluator that ignores it; `evalWith` /
     /// `evalFromWith` hand the domain's own.
-    let private walkWith
+    ///
+    /// **The order is handed in (Phase 317)** — `walkWith` hands `sort deps`, and the demand-driven
+    /// `evalForWith` hands that same order restricted to the needed set, so the two walk one order.
+    let private walkTopo
         (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
         (recompute: string -> bool)
         (prior: Map<string, 'v>)
         (deps: Map<string, Set<string>>)
+        (topo: TopoResult)
         : Result<EvalOutcome<'v>, PropagationError> =
-        let topo = sort deps
-
         let rec go (results: Map<string, 'v>) =
             function
             | [] ->
@@ -419,6 +435,15 @@ module Propagation =
                     go (Map.add id (Map.find id prior) results) rest
 
         go Map.empty topo.Order
+
+    /// The walk over `sort deps` — what every entry point but the demand-driven pair runs.
+    let private walkWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (recompute: string -> bool)
+        (prior: Map<string, 'v>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        walkTopo evalNode recompute prior deps (sort deps)
 
     /// The prior-blind walk every existing entry point runs: the evaluator is never handed a prior.
     let private walk
@@ -527,3 +552,48 @@ module Propagation =
         else
             let dirty = dirtyFromChangedIds deps changed
             walkWith evalNode (fun id -> Set.contains id dirty) prior deps
+
+    // ---- demand-driven evaluation: pull (Phase 317) ----
+    // `evalFrom` pushes a change forward over the dirty set; these two pull a TARGET set back over
+    // the needed set (`neededFor`) and evaluate that and nothing else — "compute X, and only what X
+    // reads". The walk is the one every other entry point runs, over `sort deps`'s order restricted
+    // to the needed set: a subsequence of a dependency order is a dependency order, and walking the
+    // SAME order is what makes agreement with `eval` a theorem (`eval_for_agrees`,
+    // `proofs/Propagation.fst`) rather than an argument about two orders. The order is still derived
+    // over the whole map — `sort` is cheap beside evaluation, and it is the evaluator that is pulled.
+
+    /// `sort deps` restricted to the needed set: its order filtered, and the cyclic groups that meet
+    /// it (a group meeting a closed set lies inside it, since every member reads every other).
+    let private restrictTopo (needed: Set<string>) (topo: TopoResult) : TopoResult =
+        { Order = topo.Order |> List.filter (fun id -> Set.contains id needed)
+          Cycles = topo.Cycles |> List.filter (List.exists (fun id -> Set.contains id needed)) }
+
+    /// Demand-driven evaluation over a prior-aware evaluator (Phase 317): `evalWith` restricted to
+    /// `neededFor deps targets` — every needed node is evaluated once, in dependency order, handed
+    /// `None` as its prior, and no node outside the needed set is handed to `evalNode` at all.
+    ///
+    /// **Agreement** (`eval_for_agrees`): when `evalWith evalNode deps` succeeds, this succeeds with
+    /// exactly its values on the needed set and exactly its cyclic groups that meet the needed set.
+    /// The converse is the point of pulling: a node that would fail OUTSIDE the needed set is never
+    /// reached, so this can succeed where the full evaluation does not. A target the map does not
+    /// hold is needed and has no value — as under `eval`, an absent id is never evaluated — so a
+    /// caller that must tell the two apart asks `Map.containsKey`. The undeclared-read refusal is
+    /// `eval`'s (`EvalUndeclaredRead`), at the first needed node that reads outside its declaration.
+    let evalForWith
+        (evalNode: (string -> 'v option) -> 'v option -> string -> Result<'v, string>)
+        (targets: Set<string>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        let needed = neededFor deps targets
+        walkTopo evalNode (fun _ -> true) Map.empty deps (restrictTopo needed (sort deps))
+
+    /// Demand-driven evaluation (Phase 317): `eval` restricted to `neededFor deps targets` — the
+    /// targets and everything upstream of them, evaluated once each in dependency order, and nothing
+    /// else. `evalForWith` over an evaluator that ignores its prior; its agreement with `eval` on the
+    /// needed set, and its silence outside it, are `evalForWith`'s.
+    let evalFor
+        (evalNode: (string -> 'v option) -> string -> Result<'v, string>)
+        (targets: Set<string>)
+        (deps: Map<string, Set<string>>)
+        : Result<EvalOutcome<'v>, PropagationError> =
+        evalForWith (fun resolve _ id -> evalNode resolve id) targets deps

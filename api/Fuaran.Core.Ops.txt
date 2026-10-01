@@ -39,6 +39,7 @@ method Fuaran.Core.FootprintModule.insertUnder(System.String, System.String) : F
 method Fuaran.Core.FootprintModule.moveTo(System.String, System.String) : Fuaran.Core.Footprint
 method Fuaran.Core.FootprintModule.removeNode(System.String) : Fuaran.Core.Footprint
 method Fuaran.Core.FootprintModule.union(Fuaran.Core.Footprint, Fuaran.Core.Footprint) : Fuaran.Core.Footprint
+method Fuaran.Core.Ops+Index.afterOp`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>) : Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>
 method Fuaran.Core.Ops.applyAllWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
 method Fuaran.Core.Ops.applyAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, System.Tuple`3<System.Int32, Fuaran.Core.Rejection`1<!!1>, !!0>>
 method Fuaran.Core.Ops.applyContainedKeyed`2(Fuaran.Core.KeyedWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Rejection`1<!!1>>
@@ -93,6 +94,7 @@ type Fuaran.Core.RejectionGuidance (record)
 type Fuaran.Core.RejectionModule (module)
 type Fuaran.Core.RejectionNouns (record)
 type Fuaran.Core.RejectionNounsModule (module)
+type Fuaran.Core.Ops+Index (module)
 type Fuaran.Core.Rejection`1 (union)
 type Fuaran.Core.Rejection`1+DuplicateId (type)
 type Fuaran.Core.Rejection`1+KeyedPosition (type)

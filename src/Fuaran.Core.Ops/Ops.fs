@@ -859,6 +859,250 @@ module Ops =
         : Result<unit, int * Rejection<'Id>> =
         canApplyAllWith (fun _ -> true) w idw ops root
 
+    // ---- the index, maintained through an edit (Phase 317) ----
+    // `Tree.Index.build` is O(n) and `isFreshFor` reports staleness after every op, so a consumer
+    // holding an index across an edit session either rebuilt it per op or read it stale. `afterOp`
+    // carries it through the op instead, touching what the op touched. It lives here, not beside
+    // `build`, because `SkeletonOp` is declared here and `Tree` precedes this module.
+
+    /// Index maintenance across the skeleton ops (Phase 317).
+    [<RequireQualifiedAccess>]
+    module Index =
+
+        // What an op (or a batch of them) did to the tree, tracked by id without the intermediate
+        // trees: the child-id lists it rewrote, the nodes it grafted, the parent links it moved, the
+        // indexed nodes it removed, and every id whose own record or presence may differ.
+        type private Track<'Node, 'Id> =
+            { Kids: Map<string, 'Id list>
+              Grafted: Map<string, 'Node>
+              Parent: Map<string, 'Id>
+              Gone: Set<string>
+              Touched: Set<string> }
+
+        /// The index of `post` — the tree `apply w idw op` returned for the tree `ix` indexes —
+        /// carried through `op` rather than rebuilt (Phase 317). Every op kind is handled, a
+        /// `Batch` folded through its steps without the intermediate trees: the op names the
+        /// containers it rewrote and the subtrees it grafted or removed, and only those, their
+        /// ancestors (whose node values every edit rebuilds) and the grafted and removed subtrees
+        /// are re-indexed, through `Tree.Index.rebind`.
+        ///
+        /// **The law:** `afterOp w idw op post (Tree.Index.build w idw pre) ≡ Tree.Index.build w
+        /// idw post` — the same `Root`, `ParentOf` and `Fingerprint`, the same `ById` keys, and at
+        /// each key a node equal to `post`'s (a node outside the edit keeps the value the index
+        /// held, which `apply` rebuilt from the same content). So `isFreshFor post` holds of it.
+        ///
+        /// **The cost** is the op's, not the tree's: per step, the depth times the fanout along each
+        /// rewritten container's path, plus the size of each grafted, removed or rewritten subtree's
+        /// root record — and never a walk of the tree. **The guard:** what the tracking predicts is
+        /// checked against `post` on the nodes it re-indexes (the root's id, every re-indexed node
+        /// found where the tracking puts it, with the children the tracking says it has); a `post`
+        /// that disagrees — an op `apply` refused, a tree from elsewhere, an index built under
+        /// another witness — falls back to `Tree.Index.build w idw post`, so the law holds whatever
+        /// the caller hands it, and only the cost depends on the contract.
+        let afterOp
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (op: SkeletonOp<'Node, 'Id>)
+            (post: 'Node)
+            (ix: Tree.NodeIndex<'Node, 'Id>)
+            : Tree.NodeIndex<'Node, 'Id> =
+            let key (i: 'Id) = idw.ToString i
+            let keyOf (n: 'Node) = key (w.Id n)
+
+            let exists (st: Track<'Node, 'Id>) (k: string) =
+                st.Grafted.ContainsKey k || (ix.ById.ContainsKey k && not (st.Gone.Contains k))
+
+            let kidsOf (st: Track<'Node, 'Id>) (k: string) : 'Id list option =
+                match Map.tryFind k st.Kids with
+                | Some ks -> Some ks
+                | None ->
+                    match Map.tryFind k st.Grafted with
+                    | Some n -> Some(w.Children n |> List.map w.Id)
+                    | None ->
+                        if st.Gone.Contains k then
+                            None
+                        else
+                            Map.tryFind k ix.ById |> Option.map (fun n -> w.Children n |> List.map w.Id)
+
+            let without (target: 'Id) (ks: 'Id list) =
+                ks |> List.filter (fun c -> not (idw.Equals c target))
+
+            let rec step (st: Track<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) : Track<'Node, 'Id> option =
+                match op with
+                | InsertChild(parent, node) ->
+                    let pk = key parent
+
+                    match (if exists st pk then kidsOf st pk else None) with
+                    | None -> None
+                    | Some ks ->
+                        let graft = Tree.preorder w node
+
+                        Some
+                            { st with
+                                Kids = Map.add pk (ks @ [ w.Id node ]) st.Kids
+                                Grafted = (st.Grafted, graft) ||> List.fold (fun m n -> Map.add (keyOf n) n m)
+                                Parent =
+                                    (Map.add (keyOf node) parent st.Parent, graft)
+                                    ||> List.fold (fun m n ->
+                                        (m, w.Children n) ||> List.fold (fun m c -> Map.add (keyOf c) (w.Id n) m))
+                                Touched = (Set.add pk st.Touched, graft) ||> List.fold (fun s n -> Set.add (keyOf n) s) }
+
+                | RemoveNode target ->
+                    let tk = key target
+
+                    match Map.tryFind tk st.Parent with
+                    | Some parent when exists st tk ->
+                        let pk = key parent
+
+                        match kidsOf st pk with
+                        | None -> None
+                        | Some ks ->
+                            // the subtree as the tracking holds it NOW (earlier steps included)
+                            let rec collect (acc: string list) (stack: string list) =
+                                match stack with
+                                | [] -> Some acc
+                                | k :: rest ->
+                                    match kidsOf st k with
+                                    | None -> None
+                                    | Some cs -> collect (k :: acc) ((cs |> List.map key) @ rest)
+
+                            match collect [] [ tk ] with
+                            | None -> None
+                            | Some sub ->
+                                Some
+                                    { Kids =
+                                        (Map.add pk (without target ks) st.Kids, sub)
+                                        ||> List.fold (fun m k -> Map.remove k m)
+                                      Grafted = (st.Grafted, sub) ||> List.fold (fun m k -> Map.remove k m)
+                                      Parent = (st.Parent, sub) ||> List.fold (fun m k -> Map.remove k m)
+                                      Gone =
+                                        (st.Gone, sub)
+                                        ||> List.fold (fun s k -> if ix.ById.ContainsKey k then Set.add k s else s)
+                                      Touched = (Set.add pk st.Touched, sub) ||> List.fold (fun s k -> Set.add k s) }
+                    | _ -> None
+
+                | MoveNode(target, newParent) ->
+                    let tk = key target
+                    let nk = key newParent
+
+                    match Map.tryFind tk st.Parent with
+                    | Some parent when exists st tk && exists st nk ->
+                        let pk = key parent
+
+                        match kidsOf st pk with
+                        | None -> None
+                        | Some ks ->
+                            // remove, then append — `apply`'s order, which matters when the two parents are one
+                            let kids1 = Map.add pk (without target ks) st.Kids
+
+                            match kidsOf { st with Kids = kids1 } nk with
+                            | None -> None
+                            | Some nks ->
+                                Some
+                                    { st with
+                                        Kids = Map.add nk (nks @ [ target ]) kids1
+                                        Parent = Map.add tk newParent st.Parent
+                                        Touched = st.Touched |> Set.add pk |> Set.add nk }
+                    | _ -> None
+
+                | ReorderChildren(parent, order) ->
+                    let pk = key parent
+
+                    if exists st pk then
+                        Some
+                            { st with
+                                Kids = Map.add pk order st.Kids
+                                Touched = Set.add pk st.Touched }
+                    else
+                        None
+
+                | UpdateNode node ->
+                    let tk = keyOf node
+
+                    if exists st tk then
+                        Some
+                            { st with
+                                Touched = Set.add tk st.Touched }
+                    else
+                        None
+
+                | Batch ops ->
+                    let rec go (s: Track<'Node, 'Id>) =
+                        function
+                        | [] -> Some s
+                        | o :: rest ->
+                            match step s o with
+                            | Some s' -> go s' rest
+                            | None -> None
+
+                    go st ops
+
+            let start =
+                { Kids = Map.empty
+                  Grafted = Map.empty
+                  Parent = ix.ParentOf
+                  Gone = Set.empty
+                  Touched = Set.empty }
+
+            let incremental (st: Track<'Node, 'Id>) : Tree.NodeIndex<'Node, 'Id> option =
+                // every touched id still present, and its ancestors, are re-indexed from `post`
+                let affected =
+                    (Set.empty, st.Touched)
+                    ||> Set.fold (fun acc k ->
+                        if not (exists st k) then
+                            acc
+                        else
+                            let rec up (a: Set<string>) (cur: string) =
+                                if a.Contains cur then
+                                    a
+                                else
+                                    let a' = Set.add cur a
+
+                                    match Map.tryFind cur st.Parent with
+                                    | Some p -> up a' (key p)
+                                    | None -> a'
+
+                            up acc k)
+
+                let rootKey = key ix.Root
+
+                if not (idw.Equals (w.Id post) ix.Root) then
+                    None
+                elif Set.isEmpty affected then
+                    Some(Tree.Index.rebind w idw [] [] ix)
+                elif not (affected.Contains rootKey) then
+                    None
+                else
+                    // find each affected node in `post` by descending from the root through the
+                    // affected set — every affected node's ancestors are affected
+                    let rec locate (found: 'Node list) (queue: 'Node list) =
+                        match queue with
+                        | [] -> found
+                        | n :: rest ->
+                            let next = w.Children n |> List.filter (fun c -> affected.Contains(keyOf c))
+                            locate (n :: found) (next @ rest)
+
+                    let arriving = locate [] [ post ]
+
+                    let agrees (n: 'Node) =
+                        match kidsOf st (keyOf n) with
+                        | Some ks -> (ks |> List.map key) = (w.Children n |> List.map keyOf)
+                        | None -> false
+
+                    if List.length arriving <> Set.count affected || not (List.forall agrees arriving) then
+                        None
+                    else
+                        let leaving =
+                            Set.union affected st.Touched
+                            |> Set.toList
+                            |> List.choose (fun k -> Map.tryFind k ix.ById)
+
+                        Some(Tree.Index.rebind w idw leaving arriving ix)
+
+            match step start op |> Option.bind incremental with
+            | Some ix' -> ix'
+            | None -> Tree.Index.build w idw post
+
     /// Derive the inverse of an op from the **pre-state** tree (the tree the op applied to)
     /// — Phase 242. Every skeleton op's inverse is recoverable from the pre-state:
     /// insert↔remove, remove↔insert (capturing the removed subtree + its parent + index),

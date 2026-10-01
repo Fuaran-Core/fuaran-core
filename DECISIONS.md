@@ -1,5 +1,92 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-01 — D86: the algebra's remaining symmetries are built (`Schema.patch`, the pull, an index carried through an edit), and five omissions are recorded as deliberate so they are not filed again
+
+**Recorded by Phase 317. Riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`, "The remaining
+algebra symmetries").** A closure pass over Core's public surface found the spine complete under its
+advertised laws apart from three asymmetries, and five places where an operation is ABSENT on
+purpose but nothing said so — which is how an omission gets re-proposed by the next pass that walks
+the same surface. The three are built; the five are ruled here.
+
+*`Schema.diff` gets its transform, and the delta records where the columns go.* A `SchemaDelta` was a
+report: `Reordered : bool` said THAT the common columns moved and not where, and nothing recorded an
+added column's position, so a host that keeps deltas beside `Schema.fingerprint` as provenance could
+not replay one, and `patch old (diff old target) = target` could not be stated. The delta gains
+`Order` — the target's column order, EMPTY exactly when the target's order is the one `patch` derives
+without it (the survivors in old order, then the additions in listed order) — so `diff a a` is the
+identity delta and an append-only change records nothing extra. `Reordered` is kept with its meaning
+(it is now implied by `Order`) rather than replaced, because it is the one bit a compatibility check
+reads. `Schema.patch` refuses, by name, a delta computed against another schema (`SchemaError`); it
+never repairs one. The order is a sibling FIELD rather than a second delta type because the delta is
+what `diff` returns: a consumer that wanted the transform would otherwise have to call two functions
+that can disagree. The cost is honest and recorded: a record gaining a field breaks every full-literal
+construction, so the class is `record-widening`, not the `additive` the shard proposed. `merge`,
+`project` and `rename` over schemas stay the compute repository's (D66); only the inverse of `diff`
+is the spine's.
+
+*Propagation pulls as well as pushes.* `dirtyFromChangedIds` is the forward closure over the
+dependents map; its dual, the backward closure over the dependency map itself, was expressible only
+as the unnamed trick `dirtyFromChangedIds (dependents deps) targets`. `neededFor` names it, and both
+now run ONE frontier loop handed the map in the direction wanted — the loop the model always had
+(`grow`). `evalFor` / `evalForWith` evaluate the needed set and nothing else. GP6 ("owns no
+evaluator") is not crossed: `evalFrom` is already a driver, and this is the same driver over a
+smaller order. **The order is `sort` over the WHOLE map, restricted to the needed set** — not `sort`
+over the restricted map — because walking one order is what makes agreement with `eval` a theorem
+(`eval_for_agrees`, `proofs/Propagation.fst`) over a model that takes the order as a parameter and
+assumes nothing about `sort`; deriving the order is cheap beside evaluation, and evaluation is what is
+pulled. A target the map does not hold is needed and has no value, exactly as an absent id has none
+under `eval`; it is not a new refusal, so `PropagationError` does not widen.
+
+*An index is carried through an edit, and its stamp becomes a sum so it can be.* `Tree.Index.build` is
+O(n), and so was the staleness stamp beside it: one FNV-1a digest over the whole preorder, which no
+edit can update without re-walking the tree. So a carried index could never be cheaper than a rebuilt
+one while the stamp was a sequence digest, whatever the rest of the index did. **The stamp is now the
+sum, modulo 2^32, of one FNV-1a term per node** over the node's id, kind, child count and ordered
+child ids. Given unique ids those records determine the tree (each node names its children), so the
+sum still sees every skeleton edit, a kind change and an id-remap, and an edit re-stamps by
+subtracting the terms of the nodes it changed and adding their successors'. Every stamp value moves;
+a stamp persisted before this draft reads stale once and the index is rebuilt, which is the safe
+direction. `Tree.Index.rebind` is the primitive (withdraw these nodes' entries, install those), and
+`Ops.Index.afterOp` derives both lists from the op — every kind, a `Batch` folded through its steps
+WITHOUT the intermediate trees, by tracking ids, parent links and child lists. It lives in `Ops`
+because `SkeletonOp` does. **It verifies what it predicts** (the root's id, every re-indexed node found
+in `post` where the tracking puts it, with the children the tracking says it has) and falls back to a
+rebuild on any disagreement — an op `apply` refused, a tree from elsewhere, an index built under a
+keyed traversal whose `UpdateNode` brings keyed children with it — so the law
+`afterOp op post (build pre) ≡ build post` holds whatever it is handed and only the cost depends on
+the contract. The cost, measured by the witness's child reads rather than a clock: the same edit
+session costs the same over a tree forty times larger, and twice the session costs twice as much. A
+law family in the kit for a domain's own witness was considered and not built: the guard already
+falls back on any record the witness reports differently, and the one thing it trusts unchecked — that
+a node the op did not touch comes back from `apply` with the content it had — is `ReplaceChildren`
+round-tripping, which the witness laws `certify` runs already hold a domain to.
+
+**The five omissions, ruled.**
+
+1. **No `uncurry` / `decompose` on `Function`.** A bound function IS its closure: `Bind` substitutes an
+   argument into the artifact and the result is an artifact, with no record of the binding kept
+   apart from it, so there is nothing to take apart. `Function.signatureExcluding` is the projection
+   a caller actually wants (the signature less the bound addresses); an inverse of `curry` would have
+   to invent the binding history `Bind` deliberately does not keep.
+2. **No seventh skeleton op.** `ReplaceSubtree`, `SetChildren` and `Swap` are each `Diff.toOps` over
+   the subtree concerned — a computed, minimal script of the six ops — and an op that bundled one would
+   add a case to every exhaustive match in every domain, a footprint rule, an inverse and a proof
+   section, for a script a function already computes. Membership, order and content are separate ops
+   on purpose (`SkeletonOp`'s own comment); a seventh would recombine them.
+3. **`Ops.normalize` is not a canonical form.** It is a peephole that preserves the result of an
+   applyable script and is idempotent — the two laws it is certified for — and nothing more: two
+   scripts with the same effect need not normalise to the same script, because deciding that needs
+   the tree, and `normalize` reads none. A canonical form, if one is ever wanted, is `Diff.toOps` over
+   the before and after trees, which does read them.
+4. **No ordinal on `InsertChild` / `MoveNode`.** Removed deliberately on 2026-07-26 and recorded only
+   on the type: an index is a projection of a child list against one snapshot of it, silently wrong
+   after any preceding or concurrent edit, where an id is checkable. Placement is
+   `Batch [InsertChild …; ReorderChildren …]`.
+5. **No `fresh` on the id witness.** The generic functions mint no ids — hygiene derives addresses
+   deterministically, and replay and caching depend on that — so id minting stays the domain's
+   (STABILITY.md "Stability-critical surfaces"; the identity axis is a parameter). The conformance
+   generator takes `FreshNode` FROM the domain for the same reason.
+
 ## 2026-10-01 — D85: the light set — a dozen copied pieces become names; `appendAll` is `appendMany`, the capture key keeps its own cell encoding, and the nesting relation is a field
 
 **Recorded by Phase 315, riding the `0.33.0` draft (STABILITY.md `0.33.0 — DRAFT`, "The light set").**

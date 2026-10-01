@@ -5,7 +5,7 @@
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 ctor Fuaran.Core.Column..ctor(System.String, Fuaran.Core.ColumnType, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>)
-ctor Fuaran.Core.SchemaDelta..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>, System.Boolean)
+ctor Fuaran.Core.SchemaDelta..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Table..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Column>)
 field Fuaran.Core.AggFn+Tags.Count : System.Int32 (literal)
 field Fuaran.Core.AggFn+Tags.CountDistinct : System.Int32 (literal)
@@ -50,6 +50,11 @@ field Fuaran.Core.SchemaCompat+Tags.Breaking : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Compatible : System.Int32 (literal)
 field Fuaran.Core.SchemaCompat+Tags.Unknown : System.Int32 (literal)
 method Fuaran.Core.CellModule.compare(Fuaran.Core.Cell, Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
+field Fuaran.Core.SchemaError+Tags.AbsentColumn : System.Int32 (literal)
+field Fuaran.Core.SchemaError+Tags.AlreadyPresent : System.Int32 (literal)
+field Fuaran.Core.SchemaError+Tags.DuplicateColumn : System.Int32 (literal)
+field Fuaran.Core.SchemaError+Tags.OrderMismatch : System.Int32 (literal)
+field Fuaran.Core.SchemaError+Tags.TypeDisagrees : System.Int32 (literal)
 method Fuaran.Core.CellModule.decimal(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Cell>
 method Fuaran.Core.CellModule.isNull(Fuaran.Core.Cell) : System.Boolean
 method Fuaran.Core.CellModule.token(Fuaran.Core.Cell) : System.String
@@ -73,9 +78,14 @@ method Fuaran.Core.DecimalText.compare(System.String, System.String) : Microsoft
 method Fuaran.Core.DecimalText.isCanonical(System.String) : System.Boolean
 method Fuaran.Core.DecimalText.tryCanonical(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.DecimalText.tryToFloat(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
+method Fuaran.Core.SchemaDeltaCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SchemaDelta, Fuaran.Core.ColumnError>
+method Fuaran.Core.SchemaDeltaCodec.decodeJson(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SchemaDelta, Fuaran.Core.ColumnError>
+method Fuaran.Core.SchemaDeltaCodec.encode(Fuaran.Core.SchemaDelta) : System.String
+method Fuaran.Core.SchemaDeltaCodec.encodeJson(Fuaran.Core.SchemaDelta) : Fuaran.Core.JVal
 method Fuaran.Core.SchemaModule.classify(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.SchemaDelta) : Fuaran.Core.SchemaCompat
 method Fuaran.Core.SchemaModule.diff(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>) : Fuaran.Core.SchemaDelta
 method Fuaran.Core.SchemaModule.fingerprint(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>) : System.String
+method Fuaran.Core.SchemaModule.patch(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Fuaran.Core.SchemaDelta) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Fuaran.Core.SchemaError>
 method Fuaran.Core.TableModule.columnNames(Fuaran.Core.Table) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.TableModule.rowCount(Fuaran.Core.Table) : System.Int32
 method Fuaran.Core.TableModule.tryColumn(System.String, Fuaran.Core.Table) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Column>
@@ -86,11 +96,14 @@ property Fuaran.Core.ColumnCodec.codec : Fuaran.Core.Corpus+Codec`1<Fuaran.Core.
 property Fuaran.Core.ColumnTypeModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnType> { get }
 property Fuaran.Core.ColumnTypeModule.allTags : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.DecimalText.zero : System.String { get }
+property Fuaran.Core.SchemaDeltaCodec.codec : Fuaran.Core.Corpus+Codec`1<Fuaran.Core.SchemaDelta> { get }
+property Fuaran.Core.SchemaModule.identityDelta : Fuaran.Core.SchemaDelta { get }
 property Fuaran.Core.TableModule.empty : Fuaran.Core.Table { get }
 record-field Fuaran.Core.Column.Cells #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>
 record-field Fuaran.Core.Column.Name #0 : System.String
 record-field Fuaran.Core.Column.Type #1 : Fuaran.Core.ColumnType
 record-field Fuaran.Core.SchemaDelta.Added #0 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
+record-field Fuaran.Core.SchemaDelta.Order #4 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.SchemaDelta.Removed #1 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
 record-field Fuaran.Core.SchemaDelta.Reordered #3 : System.Boolean
 record-field Fuaran.Core.SchemaDelta.Retyped #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>
@@ -140,6 +153,14 @@ type Fuaran.Core.SchemaCompat+Breaking (type)
 type Fuaran.Core.SchemaCompat+Tags (type)
 type Fuaran.Core.SchemaCompat+Unknown (type)
 type Fuaran.Core.SchemaDelta (record)
+type Fuaran.Core.SchemaDeltaCodec (module)
+type Fuaran.Core.SchemaError (union)
+type Fuaran.Core.SchemaError+AbsentColumn (type)
+type Fuaran.Core.SchemaError+AlreadyPresent (type)
+type Fuaran.Core.SchemaError+DuplicateColumn (type)
+type Fuaran.Core.SchemaError+OrderMismatch (type)
+type Fuaran.Core.SchemaError+Tags (type)
+type Fuaran.Core.SchemaError+TypeDisagrees (type)
 type Fuaran.Core.SchemaModule (module)
 type Fuaran.Core.Table (record)
 type Fuaran.Core.TableModule (module)
@@ -186,3 +207,8 @@ union-case Fuaran.Core.DataSource.NewRef #1(Item: System.String)
 union-case Fuaran.Core.SchemaCompat.Compatible #0()
 union-case Fuaran.Core.SchemaCompat.NewBreaking #1(reasons: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.SchemaCompat.NewUnknown #2(reasons: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.SchemaError.NewAbsentColumn #1(column: System.String)
+union-case Fuaran.Core.SchemaError.NewAlreadyPresent #3(column: System.String)
+union-case Fuaran.Core.SchemaError.NewDuplicateColumn #0(column: System.String)
+union-case Fuaran.Core.SchemaError.NewOrderMismatch #4(expected: Microsoft.FSharp.Collections.FSharpList`1<System.String>, got: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.SchemaError.NewTypeDisagrees #2(column: System.String, expected: Fuaran.Core.ColumnType, got: Fuaran.Core.ColumnType)

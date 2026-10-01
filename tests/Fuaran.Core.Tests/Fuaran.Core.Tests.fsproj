@@ -88,6 +88,8 @@
     <Compile Include="PropagationTests.fs" />
     <Compile Include="PropagationContractTests.fs" />
     <Compile Include="PropagationCompositionTests.fs" />
+    <!-- Phase 317 — the remaining algebra symmetries: Schema.patch, propagation pull, the index carried through an edit. -->
+    <Compile Include="AlgebraSymmetryTests.fs" />
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
     <Compile Include="LightSetTests.fs" />

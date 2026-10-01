@@ -585,5 +585,71 @@ let eval_from_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witn
      end))
 
 
+let needed_for : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( targets  :  Prims.list<Prims.string> ) -> (grow deps targets targets))
+
+
+let rec keep : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( s  :  Prims.list<Prims.string> ) ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (h)::t -> begin
+      
+if (mem h s) then begin
+     (h)::(keep s t)
+     end else begin
+     (keep s t)
+     end
+     end))
+
+
+let rec meets : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( s  :  Prims.list<Prims.string> ) ( g  :  Prims.list<Prims.string> ) -> (match (g) with
+| [] -> begin
+     false
+     end
+| (h)::t -> begin
+     ((mem h s) || (meets s t))
+     end))
+
+
+let rec keep_groups : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.list<Prims.string>> = (fun ( s  :  Prims.list<Prims.string> ) ( gs  :  Prims.list<Prims.list<Prims.string>> ) -> (match (gs) with
+| [] -> begin
+     []
+     end
+| (g)::t -> begin
+      
+if (meets s g) then begin
+     (g)::(keep_groups s t)
+     end else begin
+     (keep_groups s t)
+     end
+     end))
+
+
+let restrict_topo : Prims.list<Prims.string>  ->  topo_result  ->  topo_result = (fun ( s  :  Prims.list<Prims.string> ) ( topo  :  topo_result ) -> {order = (keep s topo.order); cycles = (keep_groups s topo.cycles)})
+
+
+let rec keep_values = (fun ( s  :  Prims.list<Prims.string> ) ( l  :  Prims.list<(Prims.string * 'v)> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((k, x))::t -> begin
+      
+if (mem k s) then begin
+     (((k), (x)))::(keep_values s t)
+     end else begin
+     (keep_values s t)
+     end
+     end))
+
+
+let eval_for_with = (fun ( evw  :  evaluator_with<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (walk_with evw touches deps always [] (restrict_topo (needed_for deps targets) topo)))
+
+
+let eval_for = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (eval_for_with (lift ev) touches targets deps topo))
+
+
+let walk_for_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (go_invoked ev touches deps always [] [] (keep (needed_for deps targets) topo.order)))
+
+
 
 
