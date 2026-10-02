@@ -51,11 +51,15 @@ Beside that spine, and all four read by `Conformance` so they precede it: `Obser
 
 **The compute strand is produced elsewhere (Phase 258, D66).** `Fuaran.Core.DataFrame`,
 `Fuaran.Core.Column.Ops`, `Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp`
-continue, under the same ids and namespaces, from
+continued, under the same ids and namespaces, from
 [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) at `0.33.0`;
-this repository published them up to `0.32.0`, and those versions stay on nuget.org. They are built
-over the packages above and read by none of them, and a test here refuses any project, package
-reference or built assembly that brings one of the four ids back into this tree.
+this repository published them up to `0.32.0`, and those versions stay on nuget.org. **From that
+repository's `0.36.0` they carry their own ids and the `Fuaran.Compute` namespace:
+`Fuaran.Compute.DataFrame`, `Fuaran.Compute.ColumnOps`, `Fuaran.Compute.Conformance` and
+`Fuaran.Compute.PipelineQuery`** (the C# facade was deleted rather than renamed); the `Fuaran.Core.*`
+ids stop at `0.34.0`, their last published version (D66's note). They are built over the packages
+above and read by none of them, and a test here refuses any project, package reference or built
+assembly that brings one of them back into this tree, under either set of ids.
 
 **The C# facade is removed (Phase 231, DECISIONS.md D28).** `Fuaran.Core.CSharp`, the C#-shaped
 facade over the column layer, the hole-declaration family and the wire JSON model, was published
