@@ -96,6 +96,8 @@ type CodegenError =
     /// backend emits; a [[Optionality.HostOnly]] field whose type is not a [[TFn]], so it
     /// declares neither a host type nor a placeholder to restore; and a declared transparent
     /// union case that does not carry exactly one field, so its bare wire form is ambiguous.
+    /// Since Phase 303 a fourth: a caller's harden entry naming a field the sanitisation floor
+    /// cannot reach (`Trust.checkHardenPolicy`), which would otherwise pass unsanitised.
     /// Each was a THROW before this phase — a build-time crash carrying prose, from a
     /// generator whose every other refusal was already a value.
     | UnsupportedConstruct of construct: string * principle: string * alternative: string
@@ -271,6 +273,17 @@ module internal Core =
             "GP5: the refusal names the construct and thereby the set that IS supported",
             "give the transparent case exactly one field, or declare no transparent case for this union"
         )
+
+    /// Phase 303 — a RECORD value literal for the type `typeName` (a record, or a kind's
+    /// `<Tag>Spec`), from its `Field = expr` assignments. A declaration with no fields is the
+    /// single-case MARKER type the type emitter declares for it (`R = | R`, F# having no empty
+    /// record — `{ }` is FS3863), and its one value is spelled qualified, `R.R`, which reads the
+    /// same whatever the module opens. Every F# site that writes a record value goes through
+    /// here, so the declaration and its values cannot disagree about the shape.
+    let recordLit (typeName: string) (assigns: string list) : string =
+        match assigns with
+        | [] -> typeName + "." + typeName
+        | xs -> "{ " + String.concat "; " xs + " }"
 
     let pascal (s: string) =
         if s.Length = 0 then

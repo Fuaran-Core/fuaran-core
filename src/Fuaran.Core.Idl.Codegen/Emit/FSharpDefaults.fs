@@ -124,8 +124,8 @@ module internal FSharpDefaults =
                 |> List.map (fun rf ->
                     fsDefaultField idl Map.empty rf authored
                     |> Result.map (fun e -> pascal rf.Name + " = " + e))
-                |> concatR "; "
-                |> Result.map (fun body -> "{ " + body + " }")
+                |> sequenceR
+                |> Result.map (recordLit r.Name)
         | TUnion(n, args), VUnion(tag, authored) ->
             match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
             | None -> refuse ()
@@ -285,14 +285,15 @@ module internal FSharpDefaults =
 
             k.Fields
             |> List.map (fun f -> fieldExpr f |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
-            |> concatR "; "
+            |> sequenceR
+            |> Result.map (recordLit (k.Tag + "Spec"))
             |> Result.bind (fun record ->
                 parmsR
                 |> Result.bind (fun parms ->
                     envelopeAssigns
                     |> Result.map (fun envelope ->
                         sprintf
-                            "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s { %s }%s }"
+                            "let mk%s %s : Node%s =\n    { Id = id; Kind = NodeKind.%s %s%s }"
                             k.Tag
                             parms
                             nodeArgs

@@ -3,3 +3,5 @@
 tests/Fuaran.Core.Tests/MiniGenerated.fs
 tests/Fuaran.Core.Tests/DocGenerated.fs
 tests/Fuaran.Core.Tests/DocAnnotatedGenerated.fs
+tests/Fuaran.Core.Tests/ScoreGenerated.fs
+tests/Fuaran.Core.Tests/ReferenceGenerated.fs
