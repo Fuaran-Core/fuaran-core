@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 246 claims — 176 proved across 25 models, 41 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 248 claims — 177 proved across 25 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -4125,6 +4125,28 @@ measured rather than assumed: 100 of 200 iterations mint a violating probe, all 
 the offender named by id and kind, and all 100 are ACCEPTED by the plain `toOps` — so the refusal is
 the container check's contribution and nothing else's.
 
+**What Phase 305 added here — the content-aware run theorem (section 13).** Section 12 pinned why
+the structural contained script can be refused: it runs against `before`'s kinds. Production's
+repair (D103.1) emits an `UpdateNode` for every survivor whose content changed, in two blocks around
+the four passes — a rewrite whose new node `canHold` accepts FIRST, every other one LAST — and
+`diff_applicable_contained_run` is that form's guarantee, with no `kinds_agree`:
+
+> `wf b /\ wf a /\ tid_of b == tid_of a /\ child_blind ch /\ to_ops_contained_with ch b a == Ok s
+> ==> apply_contained_all ch s b == Ok a`
+
+The proof REUSES section 10's induction rather than restating it over six blocks. The first block
+takes `before` to `recolour`, the same tree with those survivors' kinds taken from `after`
+(`updates_first_run`, through a per-node view of a rewrite, `Preservation.upd_view`); the four passes
+emit the SAME script for `recolour` as for `before`, because they read ids, parents and child lists
+and never a kind (`diff_blocks_recolour`), so `diff_run` at `recolour` is the plain run; the
+contained engine agrees with the plain one at every structural step (`contained_run`), because every
+parent an insert or a move addresses already carries `after`'s kind — a kind invariant each
+structural step keeps (`structural_step_kinds`) and `first_non_container`'s `None` turns into
+`canHold`'s acceptance; and the last block rewrites the leaves `canHold` refuses, each holding no
+children by then (`updates_last_run`), after which the tree is `after` node for node (`tree_ext`).
+Section 12's pair is evaluated repaired: `[UpdateNode p; InsertChild p q]` applies and lands on
+`after` where `[InsertChild p q]` was refused.
+
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The thirteen lemmas above, over any two trees and any
@@ -4140,7 +4162,10 @@ the container check's contribution and nothing else's.
    under `kinds_agree`, whose necessity is itself proved (`kinds_agree_is_necessary`). Both stand on
    section 10's four-invariant induction (`inserts_run`, `moves_run`, `removes_run`, `reorders_run`,
    chained by `diff_run`) and on `tree_ext`, over `Preservation.fst` section 11's intermediate-tree
-   lemmas. F\* 2026.09.06,
+   lemmas. **And, since Phase 305, the content-aware run theorem** `diff_applicable_contained_run`
+   (section 13), with `updates_first_run`, `diff_blocks_recolour`, `contained_run`,
+   `structural_step_kinds` and `updates_last_run` under it, and the evaluated repair of section 12's
+   pair. F\* 2026.09.06,
    Z3 4.13.3,
    every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`.
 2. **Differentially tested.** The extracted `to_ops` / `to_ops_contained` agree with
@@ -4150,7 +4175,11 @@ the container check's contribution and nothing else's.
    through `canApplyAll` / `canApplyAllWith`. Those two are proved at level 1 since Phase 167 and
    stay measured here for the reason every differential in this directory keeps a comparison a
    theorem covers: the theorem is about the MODEL, and this is the shipped engine. Agreement is
-   over the pool drawn, never over all inputs. Three go-reds, each required to lose.
+   over the pool drawn, never over all inputs. Three go-reds, each required to lose. Since Phase
+   305 the content-aware form is measured the same way (`content-diff-differential`): the extracted
+   `to_ops_contained_with` against `Diff.toOpsContainedWith` with the kind tag as the encoder, the
+   run theorem instantiated on both sides per pair, and a blind bridge that erases every kind
+   required to lose wherever production emitted a rewrite.
 3. **Assumed, and stated as such.**
    - **The witness laws**, **the witness surface is the whole tree**, and **the extractor and the F#
      compiler are trusted** — the same three, in the same words, as theorem 5's.
@@ -4160,7 +4189,8 @@ the container check's contribution and nothing else's.
      stays at this level because it is a precondition a CALLER owes and no theorem here discharges
      — it is the condition under which asking for a skeleton script is a well-formed question at
      all — and it constrains only `diff_reconstructs`; every other theorem in this section,
-     `diff_applicable` included, holds without it.
+     `diff_applicable` included, holds without it, and since Phase 305 the content-aware form's
+     `diff_applicable_contained_run` holds without it too: the rewrites carry the kinds across.
 4. **Not claimed.**
    - **`Diff.toOpsMoved`** (fuaran-core#63, the move-aware diff) — not shipped, so not modelled and
      not claimed. When it lands it is a second emission strategy over the same two trees, and every

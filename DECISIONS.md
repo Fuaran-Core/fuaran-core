@@ -88,11 +88,14 @@ and the reason the law is conditional pinned as `cancellation_can_admit_a_refuse
 `merged_applies_and_order_free` is PROVED too (`Arbitrate.fst` section 11): at a well-formed base the
 merged script applies and every order of the accepted set reaches the same tree, read off
 `DagFold.replay_perm` at `Skeleton`'s instantiation with the accepted scripts as lanes — and the `wf
-base` hypothesis is exactly what D103.4's refusal makes true of every base production arbitrates. The
-one theorem still open is the content-aware run theorem, which needs section 10's reconstruction
-induction restated over `to_ops_contained_with`; its bridge ships now (`ContentDiffTests`), the
-pre-fix counterexample is proved, and the claim stays on the README's not-claimed list rather than
-becoming an assumed row (a not-claimed item is the absence of a row) until the re-open reaches it.
+base` hypothesis is exactly what D103.4's refusal makes true of every base production arbitrates. And
+the content-aware run theorem is PROVED (`TreeDiff.fst` section 13, `diff_applicable_contained_run`):
+section 10's induction was not restated over six blocks but REUSED — the first update block takes
+`before` to the same tree recoloured from `after`, the four passes emit the same script for it (they
+read no kind), the contained engine agrees with the plain one at every structural step because each
+addressed parent already carries `after`'s kind, and the last block rewrites the leaves `canHold`
+refuses once their children have left. So of (b)'s four theorems none is open; the bridges that
+shipped first (`ContentDiffTests`) stay as the shipped engine's sample of each.
 
 ## 2026-10-01 — D102: a ladder row states what it is true OF, and a premise production violates is either a refusal or a row that says so
 

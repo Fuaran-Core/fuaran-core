@@ -10704,6 +10704,187 @@ let proofOracleTests =
                   Expect.isTrue (DagFold.is_topo_enum ns' ord) "and the complete drain IS a topological enumeration"
               | m, p -> failtestf "the acyclic control disagreed: model=%A production=%A" m p
 
+          // ---- Phase 305: the content-aware diff oracle — `Diff.toOpsContainedWith` beside the model ----
+          //
+          // `TreeDiff.diff_applicable_contained_run` is about the extracted `to_ops_contained_with`; this
+          // holds that function to the shipped one. Pairs are the Phase 141 generator's independent
+          // draws under a drawn predicate, as the structural diff differential above; the encoder is
+          // the kind tag, which is the content the witness shows and the model's `changed_kind` reads.
+          // Compared per pair: the verdict and the script, operation for operation, through the same
+          // renderers as the structural differential; then the theorem instantiated on both sides —
+          // the extracted `apply_contained_all` lands the extracted script on the model of `after`,
+          // and `Ops.applyAllWith canHold` lands production's on `after`'s shape. Agreement is over the
+          // pool drawn, never over all inputs.
+
+          testCase
+              "the content-aware diff oracle agrees with Diff.toOpsContainedWith under a drawn predicate, and both scripts apply under it"
+          <| fun _ ->
+              // The Phase 141 generator keys every node's kind off its id, so a survivor never changes
+              // kind and the two update blocks would be empty on every pair; re-kind a third of
+              // `after`'s non-root nodes, seeded and replayable, so the blocks are reached.
+              let rec rekind (r0: ConfRng.T) (t: RNode) : RNode * ConfRng.T =
+                  let flip, r1 = ConfRng.intBelow 3 r0
+
+                  let kind, r2 =
+                      if t.Id <> "root" && flip = 0 then
+                          let i, r' = ConfRng.intBelow (List.length containerKinds) r1
+                          containerKinds.[i], r'
+                      else
+                          t.Kind, r1
+
+                  let children, r3 =
+                      t.Children
+                      |> List.fold
+                          (fun (acc, r) c ->
+                              let c', r' = rekind r c
+                              acc @ [ c' ], r')
+                          ([], r2)
+
+                  { t with
+                      Kind = kind
+                      Children = children },
+                  r3
+
+              let mutable r = ConfRng.ofSeed 30507
+              let mutable accepted = 0
+              let mutable withUpdate = 0
+              let mutable disagreements = []
+
+              for i in 1..800 do
+                  let before, r1 = genPairTree r
+                  let after, r2 = genPairTree r1
+                  let after, r2 = rekind r2 after
+                  let kinds, r3 = drawCanHold r2
+                  r <- r3
+                  let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
+                  let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
+                  let encode (n: RNode) = nodew.KindTag n
+                  let mb = toModelTree before
+                  let ma = toModelTree after
+                  let prod = Diff.toOpsContainedWith canHold encode nodew idw before after
+                  let model = TreeDiff.to_ops_contained_with mCanHold mb ma
+
+                  if prodDiffRender prod <> modelDiffRender model then
+                      disagreements <-
+                          sprintf
+                              "#%d under canHold={%s}\n  production: %s\n  oracle:     %s"
+                              i
+                              (showKinds kinds)
+                              (prodDiffRender prod)
+                              (modelDiffRender model)
+                          :: disagreements
+
+                  match prod, model with
+                  | Ok pops, DagFold.Ok mops ->
+                      accepted <- accepted + 1
+
+                      if
+                          pops
+                          |> List.exists (fun o ->
+                              match o with
+                              | UpdateNode _ -> true
+                              | _ -> false)
+                      then
+                          withUpdate <- withUpdate + 1
+
+                      Expect.equal
+                          (Preservation.apply_contained_all mCanHold mops mb)
+                          (DagFold.Ok ma)
+                          (sprintf
+                              "#%d: the extracted script applies under the predicate on the model and lands on after"
+                              i)
+
+                      match Ops.applyAllWith canHold nodew idw pops before with
+                      | Ok t ->
+                          Expect.equal
+                              (prodShape t)
+                              (prodShape after)
+                              (sprintf "#%d: production's script lands on after" i)
+                      | Error(j, e, _) -> failtestf "#%d: production's content-aware script was REFUSED at %d: %A" i j e
+                  | _ -> ()
+
+              match disagreements with
+              | [] -> ()
+              | ds ->
+                  failtestf
+                      "Diff.toOpsContainedWith and the extracted model DISAGREE on %d pair(s):\n%s"
+                      (List.length ds)
+                      (String.concat "\n" (List.rev ds))
+
+              Expect.isGreaterThan accepted 100 "the pool produced scripts, not only refusals"
+
+              Expect.isGreaterThan
+                  withUpdate
+                  50
+                  "the pool reached content changes (a differential over pairs with no rewrite measures nothing of the two blocks)"
+
+          testCase "a bridge that erases every kind loses against Diff.toOpsContainedWith — the measurement can fail"
+          <| fun _ ->
+              // The teeth. Handed trees whose kinds are all erased, the model sees no content change
+              // and emits no rewrite; on every pair where production emitted one the comparison must
+              // lose. (The predicate reads the kind too, so the blind model may also refuse where
+              // production accepts — either way a disagreement, which is what is asserted.)
+              // The Phase 141 generator keys every node's kind off its id, so a survivor never changes
+              // kind and the two update blocks would be empty on every pair; re-kind a third of
+              // `after`'s non-root nodes, seeded and replayable, so the blocks are reached.
+              let rec rekind (r0: ConfRng.T) (t: RNode) : RNode * ConfRng.T =
+                  let flip, r1 = ConfRng.intBelow 3 r0
+
+                  let kind, r2 =
+                      if t.Id <> "root" && flip = 0 then
+                          let i, r' = ConfRng.intBelow (List.length containerKinds) r1
+                          containerKinds.[i], r'
+                      else
+                          t.Kind, r1
+
+                  let children, r3 =
+                      t.Children
+                      |> List.fold
+                          (fun (acc, r) c ->
+                              let c', r' = rekind r c
+                              acc @ [ c' ], r')
+                          ([], r2)
+
+                  { t with
+                      Kind = kind
+                      Children = children },
+                  r3
+
+              let mutable r = ConfRng.ofSeed 30508
+              let mutable withUpdate = 0
+              let mutable lost = 0
+
+              for _ in 1..1000 do
+                  let before, r1 = genPairTree r
+                  let after, r2 = genPairTree r1
+                  let after, r2 = rekind r2 after
+                  let kinds, r3 = drawCanHold r2
+                  r <- r3
+                  let canHold (n: RNode) = kinds.Contains(nodew.KindTag n)
+                  let mCanHold (t: TreeOps.tree) = kinds.Contains(mKind t)
+                  let encode (n: RNode) = nodew.KindTag n
+                  let prod = Diff.toOpsContainedWith canHold encode nodew idw before after
+
+                  let model =
+                      TreeDiff.to_ops_contained_with mCanHold (toModelTreeBlind before) (toModelTreeBlind after)
+
+                  match prod with
+                  | Ok pops when
+                      pops
+                      |> List.exists (fun o ->
+                          match o with
+                          | UpdateNode _ -> true
+                          | _ -> false)
+                      ->
+                      withUpdate <- withUpdate + 1
+
+                      if prodDiffRender prod <> modelDiffRender model then
+                          lost <- lost + 1
+                  | _ -> ()
+
+              Expect.isGreaterThan withUpdate 50 "the sample reached pairs whose script carries a rewrite"
+              Expect.equal lost withUpdate "every such pair lost under the blind bridge"
+
           // ---- Phase 305: the normalize oracle — `Ops.normalize` beside the extracted peephole ----
           //
           // The model's theorems (`Normalize.fst`: `normalize_preserves`, `normalize_idempotent`,

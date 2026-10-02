@@ -114,10 +114,6 @@ let rec drop_id_idem (x:string) (l:list string)
 
 let drop_id_self (x:string) : Lemma (ensures drop_id x [x] == []) = ()
 
-let tid_upd (x k:string) (t:tree)
-  : Lemma (ensures tid_of (upd x k t) == tid_of t) [SMTPat (tid_of (upd x k t))]
-  = match t with TNode _ _ _ -> ()
-
 let rec upd_all_app (x k:string) (l m:list tree)
   : Lemma (ensures upd_all x k (app l m) == app (upd_all x k l) (upd_all x k m)) (decreases l)
   = match l with
@@ -147,66 +143,6 @@ let upd_root (x k:string) (n:tree)
   : Lemma (requires tid_of n == x /\ not (mem x (ids_all (kids_of n))))
           (ensures upd x k n == TNode x k (kids_of n))
   = match n with TNode _ _ cs -> upd_absent_all x k cs
-
-(* A lookup through a rewrite. *)
-let rec find_upd (q x k:string) (t:tree)
-  : Lemma (ensures find_in q (upd x k t) == (match find_in q t with
-                                             | None -> None
-                                             | Some m -> Some (upd x k m))) (decreases t)
-  = match t with
-    | TNode i _ cs -> if i = q then () else find_all_upd q x k cs
-and find_all_upd (q x k:string) (ts:list tree)
-  : Lemma (ensures find_all q (upd_all x k ts) == (match find_all q ts with
-                                                   | None -> None
-                                                   | Some m -> Some (upd x k m))) (decreases ts)
-  = match ts with
-    | [] -> ()
-    | t :: r ->
-      find_upd q x k t;
-      (match find_in q t with
-       | Some _ -> ()
-       | None -> find_all_upd q x k r)
-
-let rec kid_ids_upd_all (x k:string) (ts:list tree)
-  : Lemma (ensures kid_ids (upd_all x k ts) == kid_ids ts) (decreases ts)
-  = match ts with
-    | [] -> ()
-    | _ :: r -> kid_ids_upd_all x k r
-
-let rec has_kid_upd_all (y x k:string) (ts:list tree)
-  : Lemma (ensures has_kid y (upd_all x k ts) == has_kid y ts) (decreases ts)
-  = match ts with
-    | [] -> ()
-    | _ :: r -> has_kid_upd_all y x k r
-
-(* A rewrite moves no node: every parent is where it was. *)
-let rec parent_upd (y x k:string) (t:tree)
-  : Lemma (ensures parent_of y (upd x k t) == parent_of y t) (decreases t)
-  = match t with
-    | TNode _ _ cs -> has_kid_upd_all y x k cs; parent_all_upd y x k cs
-and parent_all_upd (y x k:string) (ts:list tree)
-  : Lemma (ensures parent_all y (upd_all x k ts) == parent_all y ts) (decreases ts)
-  = match ts with
-    | [] -> ()
-    | t :: r -> parent_upd y x k t; parent_all_upd y x k r
-
-(* The per-node view of a rewrite: the children of every node are unchanged, and the kind of
-   exactly the rewritten id moves. The companion of `Preservation`'s `ins_view` / `rem_view` /
-   `move_view` / `reorder_view`. *)
-let upd_view (x k:string) (t:tree) (q:string)
-  : Lemma (ensures kids_at q (upd x k t) == kids_at q t /\
-                   kind_at q (upd x k t) == (match kind_at q t with
-                                             | None -> None
-                                             | Some k0 -> Some (if q = x then k else k0)))
-  = find_upd q x k t;
-    match find_in q t with
-    | None -> ()
-    | Some m ->
-      find_in_id q t m;
-      (match m with
-       | TNode mi mk mcs ->
-         assert (upd x k m == TNode mi (if mi = x then k else mk) (upd_all x k mcs));
-         kid_ids_upd_all x k mcs)
 
 (* ======================================================================================
    3. THE SIX COLLAPSES — each row of the table, sound on an applyable pair at a

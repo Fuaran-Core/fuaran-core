@@ -1479,12 +1479,37 @@
     {
       "id": "diff-applicable-contained",
       "level": "proved",
-      "claim": "Every parent address an operation of a contained script carries resolves, in `after`, to a node that HOLDS the addressed child and that `canHold` accepts. REWORDED by Phase 305: until then this row went on to say that such a script `cannot be refused for containment at any step`, which is FALSE — the script runs against `before`'s kinds and the structural diff carries no content, so a survivor that is a leaf in `before` and a container in `after` refuses the inserts under it with `NotAContainer` (`TreeDiff.contained_script_refused_at_before_kinds` pins the pair; the second-pass review measured it on 41% of drawn pairs). What the theorem proves is the ADDRESS half, in `after`; the content-aware `Diff.toOpsContainedWith` is the form that applies under the predicate it checked (D103's placement rule; `ContentDiffTests`' bridge samples it, 0 refused of 1,540), and its run theorem is not yet claimed. Note what this row does not say and could not: `canHold` may read a node's CHILD LIST (Phase 140's `child_blind` counterexample), so the node the engine resolves at apply time is the same node only up to the children the script has already moved; the statement is about the parents the diff ADDRESSES, which is the half the diff can be responsible for. The same boundary is why a `toOps`-emitted insert is safe under an INTERIOR containment check too: the graft is childless, so a validator that walks it for non-containers finds nothing to walk.",
+      "claim": "Every parent address an operation of a contained script carries resolves, in `after`, to a node that HOLDS the addressed child and that `canHold` accepts. REWORDED by Phase 305: until then this row went on to say that such a script `cannot be refused for containment at any step`, which is FALSE — the script runs against `before`'s kinds and the structural diff carries no content, so a survivor that is a leaf in `before` and a container in `after` refuses the inserts under it with `NotAContainer` (`TreeDiff.contained_script_refused_at_before_kinds` pins the pair; the second-pass review measured it on 41% of drawn pairs). What the theorem proves is the ADDRESS half, in `after`; the content-aware `Diff.toOpsContainedWith` is the form that applies under the predicate it checked (D103's placement rule; `ContentDiffTests`' bridge samples it, 0 refused of 1,540), and its run theorem is `diff-applicable-contained-run` (Phase 305). Note what this row does not say and could not: `canHold` may read a node's CHILD LIST (Phase 140's `child_blind` counterexample), so the node the engine resolves at apply time is the same node only up to the children the script has already moved; the statement is about the parents the diff ADDRESSES, which is the half the diff can be responsible for. The same boundary is why a `toOps`-emitted insert is safe under an INTERIOR containment check too: the graft is childless, so a validator that walks it for non-containers finds nothing to walk.",
       "phase": "fuaran-core#141",
       "evidence": {
         "theorem": "diff_applicable_contained",
         "model": "proofs/TreeDiff.fst",
         "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "diff-applicable-contained-run",
+      "level": "proved",
+      "claim": "`Diff.toOpsContainedWith` (Phase 305) applies under the predicate it checked and lands on `after`, content included: for well-formed `before` and `after` sharing a root id and a child-blind `canHold`, every script it returns is accepted at every step by `Ops.applyAllWith canHold` and reaches `after` — the tree, not a tree like it — with NO `kinds_agree` hypothesis, because the rewrites carry the kinds across. The model (`to_ops_contained_with`) is clause for clause: `changed_kind` is the injective encoder over the two shells (the kind tag is the content the witness shows), `pass_updates_first` the rewrites whose new node `canHold` accepts, placed before the four structural passes, `pass_updates_last` the rest, placed after them (DECISIONS D103.1). The proof reuses section 10's induction rather than restating it: the first block takes `before` to `recolour` — the same tree with those survivors' kinds taken from `after` (`updates_first_run`); the four passes emit the SAME script for `recolour` as for `before`, since they read ids, parents and child lists and never a kind (`diff_blocks_recolour`), so `diff_run` at `recolour` gives the plain run; the contained engine agrees with the plain one at every structural step because every parent an insert or a move addresses already carries `after`'s kind, which `canHold` accepts (`contained_run`, over a kind invariant each structural step keeps); and the last block rewrites the leaves `canHold` refuses, each holding no children by then (`updates_last_run`), after which the tree is `after` node for node (`tree_ext`). Section 12's pair — the one the structural contained script is refused on — is evaluated repaired (`content_aware_script_applies_where_the_structural_one_is_refused`).",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "diff_applicable_contained_run",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "content-diff-differential",
+      "level": "tested",
+      "claim": "The extracted `to_ops_contained_with` agrees with the shipped `Diff.toOpsContainedWith`, verdict and script operation for operation, over the Phase 141 generator's independent pairs under a drawn predicate, with the kind tag as the encoder — the content the witness shows and the content the model reads. On every accepted pair the theorem is instantiated on both sides: the extracted `apply_contained_all` lands the extracted script on the model of `after`, and `Ops.applyAllWith canHold` lands production's on `after`'s shape; the Phase 141 generator keys a kind off its id, so a third of `after`'s nodes are re-kinded (seeded) and the case fails if fewer than fifty pairs carried a rewrite. The go-red hands the model trees whose kinds are all erased, so it sees no content change and emits no rewrite; on every pair where production emitted one the comparison must lose. Agreement is over the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/TreeDiff.fst",
+        "cases": [
+          "the content-aware diff oracle agrees with Diff.toOpsContainedWith under a drawn predicate, and both scripts apply under it",
+          "a bridge that erases every kind loses against Diff.toOpsContainedWith — the measurement can fail"
+        ]
       }
     },
     {

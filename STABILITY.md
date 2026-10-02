@@ -2398,7 +2398,9 @@ regenerated). Rides the draft.** The ruling behind each change is DECISIONS D103
   The content-aware forms emit an `UpdateNode` for every survivor whose own content the caller's
   encoder reads differently over the two nodes' shells, placed by D103's rule (a rewrite whose new node
   `canHold` accepts first, every other one last), so the script applies under `Ops.applyAllWith canHold`
-  and lands on `after` content included. **The structural `toOps` / `toOpsContained` / `toOpsGrammar`
+  and lands on `after` content included — PROVED, when the phase was re-opened to finish, as
+  `TreeDiff.diff_applicable_contained_run` (section 13; `diff-applicable-contained-run` in `proofs.json`),
+  with no `kinds_agree` hypothesis. **The structural `toOps` / `toOpsContained` / `toOpsGrammar`
   emit exactly the script they emitted before** (the `ContentDiffTests` structural-part bridge holds the
   two families to the same four blocks), and now read `Tree.Index` for their maps.
 - **The footprint of a content-changing diff script gains writes.** Each `UpdateNode` carries a content

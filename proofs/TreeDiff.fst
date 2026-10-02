@@ -39,7 +39,10 @@
        survivor that is a leaf in `before` and a container in `after` refuses the inserts under it
        (section 12, `contained_script_refused_at_before_kinds`, the exact pair the second-pass
        review measured at 41% of drawn pairs). The content-aware `Diff.toOpsContainedWith` is the
-       form that applies under the predicate it checked; its run theorem is a successor's.
+       form that applies under the predicate it checked; its run theorem is section 13's
+       `diff_applicable_contained_run` (Phase 305, when the phase was re-opened to finish): the two
+       update blocks modelled, section 10's induction REUSED at the recoloured tree rather than
+       restated, the contained engine shown to agree with the plain one at every structural step.
 
      - the POSITIONAL facts (section 9, Phase 162), over `TreeOps.preorder_parent_first`: an
        insert's parent precedes its own node in `after`'s preorder — the source comment's
@@ -2163,9 +2166,13 @@ let kinds_agree_is_necessary ()
       (DECISIONS D103) so the insert meets a section; its run theorem —
       `wf b /\ wf a /\ child_blind ch ==> to_ops_contained_with ch b a = Ok s ==>
       apply_contained_all ch s b == Ok a` — needs the content-aware model and the section-10
-      induction restated over six blocks, and is the successor's; until it lands the claim stays
-      on the README's not-claimed list and the content-aware bridge in `ContentDiffTests.fs`
-      samples it over drawn kinds and a drawn predicate.
+      induction over six blocks, and it is section 13, below — not restated but REUSED: the
+      first block takes `before` to the same tree with those survivors' kinds taken from `after`,
+      the four passes emit the same script for that tree (they read no kind), `diff_run` gives
+      the plain run there, and the contained engine agrees with it at every step because every
+      parent an insert or a move addresses already carries `after`'s kind. The content-aware
+      bridge in `ContentDiffTests.fs` and the oracle differential still sample it on the shipped
+      code, as every theorem here is.
    ====================================================================================== *)
 
 let pre_fix_before : tree = TNode "root" "doc" [ TNode "p" "para" [] ]
@@ -2186,6 +2193,826 @@ let contained_script_refused_at_before_kinds ()
                    == Ok [ InsertChild "p" (TNode "q" "para" []) ]);
     assert_norm (apply_contained_all pre_fix_ch [ InsertChild "p" (TNode "q" "para" []) ] pre_fix_before
                    == Error (NotAContainer "p" "para"))
+
+(* ======================================================================================
+   13. THE CONTENT-AWARE RUN THEOREM (Phase 305) — `Diff.toOpsContainedWith` applies, at every
+       step, under the predicate it checked, and lands on `after`, content included.
+
+       Section 12 pinned why the structural contained script can be refused: it runs against
+       `before`'s kinds. Production's repair (DECISIONS D103.1) emits an `UpdateNode` for every
+       survivor whose content changed, in two blocks around the four structural passes — a
+       rewrite whose new node `canHold` accepts FIRST, so the inserts and moves under it meet a
+       container; every other rewrite LAST, once the children such a node is losing have left.
+       The content the witness shows is the kind tag, so `changed_kind` is the injective encoder
+       over the two shells, and the theorem is
+
+         wf b /\ wf a /\ tid_of b == tid_of a /\ child_blind ch /\ to_ops_contained_with ch b a == Ok s
+           ==>  apply_contained_all ch s b == Ok a
+
+       with NO `kinds_agree`: the rewrites carry the kinds across. The proof is three runs and
+       section 10's induction reused rather than restated: (13.4) the first block takes `before`
+       to `recolour`, the same tree with those survivors' kinds taken from `after`; (13.6–13.7)
+       the structural script is the SAME script for `recolour` as for `before` — the four passes
+       read ids, parents and child lists and never a kind — so `diff_run` at `recolour` gives the
+       plain run, and the contained engine agrees with the plain one at every step because every
+       parent an insert or a move addresses already carries `after`'s kind, which `canHold`
+       accepts (`first_non_container` answered `None`); (13.8) the last block rewrites the leaves
+       that `canHold` refuses, each of which holds no children by then, and the tree is `after`
+       node for node (`tree_ext`).
+   ====================================================================================== *)
+
+(* ---- 13.1 the two update blocks and the entry point, clause for clause ---- *)
+
+(* F#: `differs b n` — the caller's encoder over the two shells, which at the witness level reads
+   the kind tag. `Map.tryFind (key (w.Id n)) bix.ById` is `find_in` against `before`. *)
+let changed_kind (b:tree) (n:tree) : Tot bool =
+  match find_in (tid_of n) b with
+  | Some bn -> kind_of bn <> kind_of n
+  | None -> false
+
+(* F#: block 0 — `UpdateNode n` for every survivor whose content changed and whose new node
+   `canHold` accepts, in `after`'s preorder. The payload is the `after` node itself. *)
+let rec pass_updates_first (ch:tree -> bool) (b:tree) (ns:list tree) : Tot (list op) (decreases ns) =
+  match ns with
+  | [] -> []
+  | n :: r ->
+    if changed_kind b n && ch n then UpdateNode n :: pass_updates_first ch b r
+    else pass_updates_first ch b r
+
+(* F#: block 5 — the rewrites `canHold` refuses, last of all. *)
+let rec pass_updates_last (ch:tree -> bool) (b:tree) (ns:list tree) : Tot (list op) (decreases ns) =
+  match ns with
+  | [] -> []
+  | n :: r ->
+    if changed_kind b n && not (ch n) then UpdateNode n :: pass_updates_last ch b r
+    else pass_updates_last ch b r
+
+(* F#: `Diff.toOpsContainedWith canHold encode` — `toOpsContained`'s refusals, in its order, and
+   the script with the two blocks around the four passes. *)
+let to_ops_contained_with (ch:tree -> bool) (before after:tree) : Tot (outcome (list op) diff_error) =
+  match first_non_container ch (pre after) with
+  | Some p -> Error (TargetNotAContainer (tid_of p) (kind_of p))
+  | None ->
+    (match to_ops before after with
+     | Error e -> Error e
+     | Ok s -> Ok (app (pass_updates_first ch before (pre after))
+                      (app s (pass_updates_last ch before (pre after)))))
+
+let rec apply_contained_all_app (ch:tree -> bool) (l m:list op) (t:tree)
+  : Lemma (ensures apply_contained_all ch (app l m) t ==
+                   (match apply_contained_all ch l t with
+                    | Ok t' -> apply_contained_all ch m t'
+                    | Error e -> Error e)) (decreases l)
+  = match l with
+    | [] -> ()
+    | o :: r -> (match apply_contained ch o t with
+                 | Ok t' -> apply_contained_all_app ch r m t'
+                 | Error _ -> ())
+
+(* ---- 13.2 what the first block builds: `before`, recoloured from `after` ---- *)
+
+(* The kind a node of `before` carries once the listed survivors have been rewritten: `after`'s
+   where the id is listed, the kinds differ and `ch` accepts the after node; its own otherwise. *)
+let recolour_kind (s:list string) (ch:tree -> bool) (a:tree) (i k0:string) : Tot string =
+  if mem i s then
+    (match find_in i a with
+     | Some an -> if kind_of an <> k0 && ch an then kind_of an else k0
+     | None -> k0)
+  else k0
+
+let rec recolour (s:list string) (ch:tree -> bool) (a:tree) (t:tree) : Tot tree (decreases t) =
+  match t with
+  | TNode i k0 cs -> TNode i (recolour_kind s ch a i k0) (recolour_all s ch a cs)
+and recolour_all (s:list string) (ch:tree -> bool) (a:tree) (ts:list tree) : Tot (list tree) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> recolour s ch a t :: recolour_all s ch a r
+
+let tid_recolour (s:list string) (ch:tree -> bool) (a:tree) (t:tree)
+  : Lemma (ensures tid_of (recolour s ch a t) == tid_of t) [SMTPat (tid_of (recolour s ch a t))]
+  = match t with TNode _ _ _ -> ()
+
+let rec ids_recolour (s:list string) (ch:tree -> bool) (a:tree) (t:tree)
+  : Lemma (ensures ids (recolour s ch a t) == ids t) (decreases t)
+  = match t with TNode _ _ cs -> ids_all_recolour s ch a cs
+and ids_all_recolour (s:list string) (ch:tree -> bool) (a:tree) (ts:list tree)
+  : Lemma (ensures ids_all (recolour_all s ch a ts) == ids_all ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> ids_recolour s ch a t; ids_all_recolour s ch a r
+
+let rec wf_recolour (s:list string) (ch:tree -> bool) (a:tree) (t:tree)
+  : Lemma (ensures wf (recolour s ch a t) == wf t) (decreases t)
+  = match t with TNode _ _ cs -> ids_all_recolour s ch a cs; wf_all_recolour s ch a cs
+and wf_all_recolour (s:list string) (ch:tree -> bool) (a:tree) (ts:list tree)
+  : Lemma (ensures wf_all (recolour_all s ch a ts) == wf_all ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> wf_recolour s ch a t; wf_all_recolour s ch a r; ids_recolour s ch a t; ids_all_recolour s ch a r
+
+let rec find_recolour (q:string) (s:list string) (ch:tree -> bool) (a:tree) (t:tree)
+  : Lemma (ensures find_in q (recolour s ch a t) == (match find_in q t with
+                                                     | None -> None
+                                                     | Some m -> Some (recolour s ch a m))) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = q then () else find_all_recolour q s ch a cs
+and find_all_recolour (q:string) (s:list string) (ch:tree -> bool) (a:tree) (ts:list tree)
+  : Lemma (ensures find_all q (recolour_all s ch a ts) == (match find_all q ts with
+                                                           | None -> None
+                                                           | Some m -> Some (recolour s ch a m))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      find_recolour q s ch a t;
+      (match find_in q t with
+       | Some _ -> ()
+       | None -> find_all_recolour q s ch a r)
+
+let rec kid_ids_recolour_all (s:list string) (ch:tree -> bool) (a:tree) (ts:list tree)
+  : Lemma (ensures kid_ids (recolour_all s ch a ts) == kid_ids ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> kid_ids_recolour_all s ch a r
+
+(* The per-node view: children unchanged, the kind as `recolour_kind` says. *)
+let recolour_view (s:list string) (ch:tree -> bool) (a:tree) (t:tree) (q:string)
+  : Lemma (ensures kids_at q (recolour s ch a t) == kids_at q t /\
+                   kind_at q (recolour s ch a t) == (match kind_at q t with
+                                                     | None -> None
+                                                     | Some k0 -> Some (recolour_kind s ch a q k0)))
+  = find_recolour q s ch a t;
+    match find_in q t with
+    | None -> ()
+    | Some m ->
+      find_in_id q t m;
+      (match m with TNode _ _ mcs -> kid_ids_recolour_all s ch a mcs)
+
+(* Nothing listed, nothing recoloured. *)
+let rec recolour_nil (ch:tree -> bool) (a:tree) (t:tree)
+  : Lemma (ensures recolour [] ch a t == t) (decreases t)
+  = match t with TNode _ _ cs -> recolour_all_nil ch a cs
+and recolour_all_nil (ch:tree -> bool) (a:tree) (ts:list tree)
+  : Lemma (ensures recolour_all [] ch a ts == ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> recolour_nil ch a t; recolour_all_nil ch a r
+
+(* ---- 13.3 the four passes do not see a kind: the structural script is the same ---- *)
+
+let rec recolour_all_app (s:list string) (ch:tree -> bool) (a:tree) (l m:list tree)
+  : Lemma (ensures recolour_all s ch a (app l m) == app (recolour_all s ch a l) (recolour_all s ch a m))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> recolour_all_app s ch a r m
+
+let rec pre_recolour (s:list string) (ch:tree -> bool) (a:tree) (t:tree)
+  : Lemma (ensures pre (recolour s ch a t) == recolour_all s ch a (pre t)) (decreases t)
+  = match t with TNode _ _ cs -> pre_all_recolour s ch a cs
+and pre_all_recolour (s:list string) (ch:tree -> bool) (a:tree) (ts:list tree)
+  : Lemma (ensures pre_all (recolour_all s ch a ts) == recolour_all s ch a (pre_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      pre_recolour s ch a t;
+      pre_all_recolour s ch a r;
+      recolour_all_app s ch a (pre t) (pre_all r)
+
+let rec tids_recolour_all (s:list string) (ch:tree -> bool) (a:tree) (l:list tree)
+  : Lemma (ensures tids (recolour_all s ch a l) == tids l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> tids_recolour_all s ch a r
+
+let rec kid_pairs_recolour_all (p:string) (s:list string) (ch:tree -> bool) (a:tree) (cs:list tree)
+  : Lemma (ensures kid_pairs p (recolour_all s ch a cs) == kid_pairs p cs) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | _ :: r -> kid_pairs_recolour_all p s ch a r
+
+let rec parent_map_recolour_all (s:list string) (ch:tree -> bool) (a:tree) (l:list tree)
+  : Lemma (ensures parent_map (recolour_all s ch a l) == parent_map l) (decreases l)
+  = match l with
+    | [] -> ()
+    | p :: r ->
+      (match p with TNode _ _ cs -> kid_pairs_recolour_all (tid_of p) s ch a cs);
+      parent_map_recolour_all s ch a r
+
+let rec kid_map_recolour_all (s:list string) (ch:tree -> bool) (a:tree) (l:list tree)
+  : Lemma (ensures kid_map (recolour_all s ch a l) == kid_map l) (decreases l)
+  = match l with
+    | [] -> ()
+    | n :: r ->
+      (match n with TNode _ _ cs -> kid_ids_recolour_all s ch a cs);
+      kid_map_recolour_all s ch a r
+
+(* Pass 3 reads a node list through its ids alone. *)
+let rec pass_removes_tids (a_ids:list string) (b_par:list (string & string)) (ns ns':list tree)
+  : Lemma (requires tids ns == tids ns')
+          (ensures pass_removes a_ids b_par ns == pass_removes a_ids b_par ns') (decreases ns)
+  = match ns, ns' with
+    | [], [] -> ()
+    | _ :: r, _ :: r' -> pass_removes_tids a_ids b_par r r'
+    | _, _ -> ()
+
+let diff_blocks_recolour (s:list string) (ch:tree -> bool) (a b:tree)
+  : Lemma (ensures diff_blocks (recolour s ch a b) a == diff_blocks b a)
+  = pre_recolour s ch a b;
+    ids_recolour s ch a b;
+    parent_map_recolour_all s ch a (pre b);
+    kid_map_recolour_all s ch a (pre b);
+    tids_recolour_all s ch a (pre b);
+    pass_removes_tids (ids a) (parent_map (pre b)) (recolour_all s ch a (pre b)) (pre b)
+
+let to_ops_recolour (s:list string) (ch:tree -> bool) (a b:tree)
+  : Lemma (ensures to_ops (recolour s ch a b) a == to_ops b a)
+  = ids_recolour s ch a b;
+    diff_blocks_recolour s ch a b
+
+(* ---- 13.4 the first block, step by step ---- *)
+
+(* A rewrite of a listed survivor whose after node `ch` accepts extends the recolouring by its id. *)
+let rec upd_recolour_step (s:list string) (ch:tree -> bool) (a:tree) (k:string) (an:tree) (t:tree)
+  : Lemma (requires find_in k a == Some an /\ ch an)
+          (ensures upd k (kind_of an) (recolour s ch a t) == recolour (app s [k]) ch a t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      mem_app i s [k];
+      upd_recolour_step_all s ch a k an cs
+and upd_recolour_step_all (s:list string) (ch:tree -> bool) (a:tree) (k:string) (an:tree) (ts:list tree)
+  : Lemma (requires find_in k a == Some an /\ ch an)
+          (ensures upd_all k (kind_of an) (recolour_all s ch a ts) == recolour_all (app s [k]) ch a ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> upd_recolour_step s ch a k an t; upd_recolour_step_all s ch a k an r
+
+(* Listing an id that is not in the tree changes nothing ... *)
+let rec recolour_absent_ext (s:list string) (ch:tree -> bool) (a:tree) (k:string) (t:tree)
+  : Lemma (requires not (mem k (ids t)))
+          (ensures recolour (app s [k]) ch a t == recolour s ch a t) (decreases t)
+  = match t with
+    | TNode i _ cs -> mem_app i s [k]; recolour_absent_ext_all s ch a k cs
+and recolour_absent_ext_all (s:list string) (ch:tree -> bool) (a:tree) (k:string) (ts:list tree)
+  : Lemma (requires not (mem k (ids_all ts)))
+          (ensures recolour_all (app s [k]) ch a ts == recolour_all s ch a ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      mem_app k (ids t) (ids_all r);
+      recolour_absent_ext s ch a k t;
+      recolour_absent_ext_all s ch a k r
+
+(* ... nor one whose after node `ch` refuses ... *)
+let rec recolour_skip_refused (s:list string) (ch:tree -> bool) (a:tree) (k:string) (an:tree) (t:tree)
+  : Lemma (requires find_in k a == Some an /\ not (ch an))
+          (ensures recolour (app s [k]) ch a t == recolour s ch a t) (decreases t)
+  = match t with
+    | TNode i _ cs -> mem_app i s [k]; recolour_skip_refused_all s ch a k an cs
+and recolour_skip_refused_all (s:list string) (ch:tree -> bool) (a:tree) (k:string) (an:tree) (ts:list tree)
+  : Lemma (requires find_in k a == Some an /\ not (ch an))
+          (ensures recolour_all (app s [k]) ch a ts == recolour_all s ch a ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> recolour_skip_refused s ch a k an t; recolour_skip_refused_all s ch a k an r
+
+(* ... nor one whose kind did not change. *)
+let rec recolour_skip_same (s:list string) (ch:tree -> bool) (a:tree) (k:string) (an bn:tree) (t:tree)
+  : Lemma (requires wf t /\ find_in k a == Some an /\ find_in k t == Some bn /\ kind_of bn == kind_of an)
+          (ensures recolour (app s [k]) ch a t == recolour s ch a t) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      mem_app i s [k];
+      if i = k then recolour_absent_ext_all s ch a k cs
+      else recolour_skip_same_all s ch a k an bn cs
+and recolour_skip_same_all (s:list string) (ch:tree -> bool) (a:tree) (k:string) (an bn:tree) (ts:list tree)
+  : Lemma (requires wf_all ts /\ find_in k a == Some an /\ find_all k ts == Some bn /\ kind_of bn == kind_of an)
+          (ensures recolour_all (app s [k]) ch a ts == recolour_all s ch a ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      find_in_some_iff k t;
+      inter_nil_iff (ids t) (ids_all r);
+      (match find_in k t with
+       | Some _ ->
+         recolour_skip_same s ch a k an bn t;
+         recolour_absent_ext_all s ch a k r
+       | None ->
+         recolour_absent_ext s ch a k t;
+         recolour_skip_same_all s ch a k an bn r)
+
+(* One accepted rewrite of the first block extends the recolouring by its id. *)
+#push-options "--fuel 1 --ifuel 1"
+let update_first_step (ch:tree -> bool) (b a:tree) (s:list string) (n:tree)
+  : Lemma (requires child_blind ch /\ wf b /\ wf a /\ mem n (pre a) /\ changed_kind b n /\ ch n)
+          (ensures apply_contained ch (UpdateNode n) (recolour s ch a b)
+                   == Ok (recolour (app s [tid_of n]) ch a b))
+  = let k = tid_of n in
+    pre_find a n;
+    let t = recolour s ch a b in
+    ids_recolour s ch a b;
+    find_in_some_iff k b;
+    find_in_some_iff k t;
+    find_recolour k s ch a b;
+    match find_in k t, n with
+    | Some ex, TNode _ kn ncs ->
+      assert (ch (TNode k kn (kids_of ex)) == ch (TNode k kn ncs));
+      upd_recolour_step s ch a k n b
+    | _, _ -> ()
+
+(* A node the first block skips leaves the recolouring where it was. *)
+let update_first_skip (ch:tree -> bool) (b a:tree) (s:list string) (n:tree)
+  : Lemma (requires wf b /\ wf a /\ mem n (pre a) /\ not (changed_kind b n && ch n))
+          (ensures recolour (app s [tid_of n]) ch a b == recolour s ch a b)
+  = let k = tid_of n in
+    pre_find a n;
+    find_in_some_iff k b;
+    if ch n then
+      (match find_in k b with
+       | None -> recolour_absent_ext s ch a k b
+       | Some bn -> recolour_skip_same s ch a k n bn b)
+    else recolour_skip_refused s ch a k n b
+#pop-options
+
+let rec updates_first_run (ch:tree -> bool) (b a:tree) (done ns:list tree)
+  : Lemma (requires child_blind ch /\ wf b /\ wf a /\ pre a == app done ns)
+          (ensures apply_contained_all ch (pass_updates_first ch b ns) (recolour (tids done) ch a b)
+                   == Ok (recolour (tids (app done ns)) ch a b))
+          (decreases ns)
+  = match ns with
+    | [] -> app_nil_r done
+    | n :: r ->
+      app_assoc done [n] r;
+      mem_app_r_tree done (n :: r) n;
+      tids_app done [n];
+      if changed_kind b n && ch n then update_first_step ch b a (tids done) n
+      else update_first_skip ch b a (tids done) n;
+      updates_first_run ch b a (app done [n]) r
+
+(* ---- 13.5 the recoloured tree carries `after`'s kind at every after-parent ---- *)
+
+let rec first_non_container_none_mem (ch:tree -> bool) (ns:list tree) (n:tree)
+  : Lemma (requires first_non_container ch ns == None /\ mem n ns /\ Cons? (kids_of n))
+          (ensures ch n) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | x :: r -> if x = n then () else first_non_container_none_mem ch r n
+
+(* `parent_accepts` names a node of `after`; under `wf` it is the one `find_in` answers with. *)
+let rec parent_accepts_find (ch:tree -> bool) (a:tree) (ns:list tree) (x np:string)
+  : Lemma (requires wf a /\ parent_accepts ch ns x np /\ (forall (n:tree). mem n ns ==> mem n (pre a)))
+          (ensures (match find_in np a with
+                    | Some m -> ch m /\ mem x (kid_ids (kids_of m))
+                    | None -> False)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: r ->
+      if tid_of n = np && mem x (kid_ids (kids_of n)) && ch n then pre_find a n
+      else parent_accepts_find ch a r x np
+
+(* The kind `kind_src` reads for an after-parent is `after`'s, whichever tree it reads it from. *)
+let recolour_parent_kind (ch:tree -> bool) (b a:tree) (p:string)
+  : Lemma (requires wf a /\ first_non_container ch (pre a) == None /\
+                    mem p (ids a) /\ Cons? (kids_at p a))
+          (ensures kind_src (recolour (ids a) ch a b) a p == kind_at p a)
+  = let b1 = recolour (ids a) ch a b in
+    ids_recolour (ids a) ch a b;
+    recolour_view (ids a) ch a b p;
+    find_in_some_iff p a;
+    find_in_some_iff p b;
+    match find_in p a with
+    | Some an ->
+      find_in_mem_pre p a an;
+      find_in_id p a an;
+      (match an with TNode _ _ acs -> first_non_container_none_mem ch (pre a) an)
+    | None -> ()
+
+(* ---- 13.6 the structural script keeps every surviving node's kind ---- *)
+
+(* The kind invariant section 10 carries, stated on its own: every node of `t` reads its kind
+   from `kind_src`. *)
+let kinds_like (b1 a:tree) (t:tree) : prop =
+  wf t /\ (forall (q:string). mem q (ids t) ==> kind_at q t == kind_src b1 a q)
+
+(* An emitted insert's shell carries `after`'s kind for its id. *)
+let after_kind (a:tree) (o:op) : Tot bool =
+  match o with
+  | InsertChild _ n -> kind_at (tid_of n) a = Some (kind_of n)
+  | _ -> true
+
+let rec pass_inserts_after_kind (a:tree) (a_par:list (string & string)) (b_ids:list string) (ns:list tree)
+  : Lemma (requires wf a /\ (forall (n:tree). mem n ns ==> mem n (pre a)))
+          (ensures all_ops (after_kind a) (pass_inserts a_par b_ids ns)) (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: r ->
+      kids_at_pre a n;
+      pass_inserts_after_kind a a_par b_ids r
+
+(* The four passes emit the four structural operations and nothing else. *)
+let structural_op (o:op) : Tot bool =
+  match o with
+  | Batch _ | UpdateNode _ -> false
+  | _ -> true
+
+let rec all_ops_app_both (p:op -> bool) (l m:list op)
+  : Lemma (requires all_ops p l /\ all_ops p m) (ensures all_ops p (app l m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: r -> all_ops_app_both p r m
+
+let diff_script_after_kind (b a:tree)
+  : Lemma (requires wf a /\ Ok? (to_ops b a))
+          (ensures all_ops (after_kind a) (Ok?._0 (to_ops b a)))
+  = let b_nodes = pre b in
+    let a_nodes = pre a in
+    let a_par = parent_map a_nodes in
+    let b_par = parent_map b_nodes in
+    let b_kids = kid_map b_nodes in
+    let p1 = pass_inserts a_par (ids b) a_nodes in
+    let pm = pass_moves (ids b) b_par b_kids a_nodes in
+    let p2 = fst pm in
+    let p3 = pass_removes (ids a) b_par b_nodes in
+    let p4 = pass_reorders a (snd pm) in
+    pass_inserts_after_kind a a_par (ids b) a_nodes;
+    pass_moves_all (ids b) b_par b_kids a_nodes;
+    pass_removes_all (ids a) b_par b_nodes;
+    pass_reorders_all a (snd pm);
+    all_ops_weaken is_move (after_kind a) p2;
+    all_ops_weaken is_remove (after_kind a) p3;
+    all_ops_weaken is_reorder (after_kind a) p4;
+    all_ops_app_both (after_kind a) p3 p4;
+    all_ops_app_both (after_kind a) p2 (app p3 p4);
+    all_ops_app_both (after_kind a) p1 (app p2 (app p3 p4))
+
+let diff_script_structural (b a:tree)
+  : Lemma (requires Ok? (to_ops b a))
+          (ensures all_ops structural_op (Ok?._0 (to_ops b a)))
+  = let b_nodes = pre b in
+    let a_nodes = pre a in
+    let a_par = parent_map a_nodes in
+    let b_par = parent_map b_nodes in
+    let b_kids = kid_map b_nodes in
+    let p1 = pass_inserts a_par (ids b) a_nodes in
+    let pm = pass_moves (ids b) b_par b_kids a_nodes in
+    let p2 = fst pm in
+    let p3 = pass_removes (ids a) b_par b_nodes in
+    let p4 = pass_reorders a (snd pm) in
+    pass_inserts_all a_par (ids b) a_nodes;
+    pass_moves_all (ids b) b_par b_kids a_nodes;
+    pass_removes_all (ids a) b_par b_nodes;
+    pass_reorders_all a (snd pm);
+    all_ops_weaken is_insert structural_op p1;
+    all_ops_weaken is_move structural_op p2;
+    all_ops_weaken is_remove structural_op p3;
+    all_ops_weaken is_reorder structural_op p4;
+    all_ops_app_both structural_op p3 p4;
+    all_ops_app_both structural_op p2 (app p3 p4);
+    all_ops_app_both structural_op p1 (app p2 (app p3 p4))
+
+(* A leaf's ids are its own id alone, and it answers for itself. *)
+let ids_leaf (n:tree)
+  : Lemma (requires Nil? (kids_of n))
+          (ensures ids n == [tid_of n] /\ kind_at (tid_of n) n == Some (kind_of n))
+  = match n with TNode _ _ _ -> ()
+
+#push-options "--fuel 1 --ifuel 1 --z3rlimit 100"
+(* One structural step keeps the invariant: a surviving node keeps its kind (the per-node views),
+   and an inserted shell arrives with `after`'s. *)
+let structural_step_kinds (b1 a:tree) (o:op) (t t':tree)
+  : Lemma (requires wf a /\ kinds_like b1 a t /\ structural_op o /\ script_shape b1 a o /\
+                    after_kind a o /\ apply o t == Ok t')
+          (ensures kinds_like b1 a t')
+  = apply_preserves_wf o t;
+    match o with
+    | InsertChild p n ->
+      let k = tid_of n in
+      ids_leaf n;
+      first_dup_none_iff n t;
+      inter_nil_iff (ids n) (ids t);
+      find_in_some_iff p t;
+      let aux (q:string) : Lemma (mem q (ids t') ==> kind_at q t' == kind_src b1 a q) =
+        if mem q (ids t') then begin
+          ids_ins_mem q p n t;
+          if mem q (ids t) then ins_view p n t q
+          else begin
+            ins_view_inside p n t q;
+            (match n with TNode _ _ _ -> ())
+          end
+        end
+        else ()
+      in
+      FStar.Classical.forall_intro aux
+    | RemoveNode x ->
+      find_in_some_iff x t;
+      parent_exists x t;
+      (match parent_of x t, find_in x t with
+       | Some pid, Some sub ->
+         let aux (q:string) : Lemma (mem q (ids t') ==> kind_at q t' == kind_src b1 a q) =
+           if mem q (ids t') then begin
+             ids_rem_sub q pid x t;
+             rem_kills pid x t sub;
+             rem_view pid x t sub q
+           end
+           else ()
+         in
+         FStar.Classical.forall_intro aux
+       | _, _ -> ())
+    | MoveNode x np ->
+      find_in_some_iff x t;
+      parent_exists x t;
+      (match find_in x t, parent_of x t with
+       | Some sub, Some pid ->
+         move_accepted x np t;
+         let aux (q:string) : Lemma (mem q (ids t') ==> kind_at q t' == kind_src b1 a q) =
+           if mem q (ids t') then begin
+             move_ids x np t pid sub q;
+             move_view x np t pid sub q
+           end
+           else ()
+         in
+         FStar.Classical.forall_intro aux
+       | _, _ -> ())
+    | ReorderChildren p ord ->
+      find_in_some_iff p t;
+      let aux (q:string) : Lemma (mem q (ids t') ==> kind_at q t' == kind_src b1 a q) =
+        if mem q (ids t') then reorder_view p ord t q else ()
+      in
+      FStar.Classical.forall_intro aux
+    | _ -> ()
+#pop-options
+
+(* ---- 13.7 the contained engine agrees with the plain one on the structural script ---- *)
+
+(* Every parent an insert or a move of the diff addresses is an after-parent `ch` accepts. *)
+let shape_to_contained (ch:tree -> bool) (b1 a:tree) (o:op)
+  : Lemma (requires first_non_container ch (pre a) == None /\ script_shape b1 a o)
+          (ensures contained_shape ch (pre a) o)
+  = match o with
+    | InsertChild p n -> lookup_parent_map (pre a) (tid_of n) p;
+                        after_child_accepts ch (pre a) (tid_of n) p
+    | MoveNode x np -> after_child_accepts ch (pre a) x np
+    | _ -> ()
+
+(* A childless graft has no interior to walk. *)
+let first_uncontained_leaf (ch:tree -> bool) (n:tree)
+  : Lemma (requires Nil? (kids_of n)) (ensures first_uncontained ch n == None)
+  = match n with TNode _ _ _ -> ()
+
+(* A list holding an element is not empty. *)
+let mem_cons (x:string) (l:list string)
+  : Lemma (requires mem x l) (ensures Cons? l)
+  = ()
+
+#push-options "--fuel 1 --ifuel 1 --z3rlimit 100"
+(* One structural step: the contained engine takes it exactly as the plain one does, because the
+   parent it addresses already carries `after`'s kind, which `ch` accepts. *)
+let contained_step (ch:tree -> bool) (b1 a:tree) (o:op) (t:tree)
+  : Lemma (requires child_blind ch /\ wf a /\ first_non_container ch (pre a) == None /\
+                    kinds_like b1 a t /\ structural_op o /\ script_shape b1 a o /\
+                    (forall (p:string). mem p (ids a) /\ Cons? (kids_at p a) ==> kind_src b1 a p == kind_at p a) /\
+                    Ok? (apply o t))
+          (ensures apply_contained ch o t == apply o t)
+  = shape_to_contained ch b1 a o;
+    match o with
+    | InsertChild p n ->
+      let k = tid_of n in
+      find_in_some_iff p t;
+      find_in_some_iff p a;
+      first_uncontained_leaf ch n;
+      parent_accepts_find ch a (pre a) k p;
+      (match find_in p t, find_in p a with
+       | Some pn, Some am ->
+         find_in_id p t pn;
+         find_in_id p a am;
+         (match pn, am with
+          | TNode _ pk pcs, TNode _ ak acs ->
+            mem_cons k (kid_ids acs);
+            assert (ch (TNode p ak acs) == ch (TNode p ak pcs)))
+       | _, _ -> ())
+    | MoveNode x np ->
+      find_in_some_iff np t;
+      find_in_some_iff np a;
+      parent_accepts_find ch a (pre a) x np;
+      (match find_in np t, find_in np a with
+       | Some pn, Some am ->
+         find_in_id np t pn;
+         find_in_id np a am;
+         (match pn, am with
+          | TNode _ pk pcs, TNode _ ak acs ->
+            mem_cons x (kid_ids acs);
+            assert (ch (TNode np ak acs) == ch (TNode np ak pcs)))
+       | _, _ -> ())
+    | _ -> ()
+#pop-options
+
+let rec contained_run (ch:tree -> bool) (b1 a:tree) (s:list op) (t:tree)
+  : Lemma (requires child_blind ch /\ wf a /\ first_non_container ch (pre a) == None /\
+                    kinds_like b1 a t /\
+                    all_ops structural_op s /\ all_ops (script_shape b1 a) s /\ all_ops (after_kind a) s /\
+                    (forall (p:string). mem p (ids a) /\ Cons? (kids_at p a) ==> kind_src b1 a p == kind_at p a) /\
+                    Ok? (apply_all s t))
+          (ensures apply_contained_all ch s t == apply_all s t) (decreases s)
+  = match s with
+    | [] -> ()
+    | o :: r ->
+      contained_step ch b1 a o t;
+      (match apply o t with
+       | Ok t' ->
+         structural_step_kinds b1 a o t t';
+         contained_run ch b1 a r t'
+       | Error _ -> ())
+
+(* ---- 13.8 the last block: the leaves `ch` refuses, rewritten once their children have left ---- *)
+
+(* The state after the structural script, as section 10 leaves it, read for this block: the
+   children of every after node are `after`'s and the kinds are `kind_src`'s. *)
+let settled (b1 a f:tree) (done:list string) (t:tree) : prop =
+  wf t /\ tid_of t == tid_of a /\
+  (forall (q:string). mem q (ids a) ==> mem q (ids t)) /\
+  (forall (q:string). mem q (ids a) ==> kids_at q t == kids_at q a) /\
+  (forall (q:string). mem q (ids a) ==>
+     kind_at q t == (if mem q done then kind_at q a else kind_at q f))
+
+(* A skipped after node already carries its kind: not a survivor, unchanged, or rewritten by the
+   first block. *)
+let skipped_kind_is_after (ch:tree -> bool) (b a f:tree) (n:tree)
+  : Lemma (requires wf b /\ wf a /\ mem n (pre a) /\ not (changed_kind b n && not (ch n)) /\
+                    kind_at (tid_of n) f == kind_src (recolour (ids a) ch a b) a (tid_of n))
+          (ensures kind_at (tid_of n) f == kind_at (tid_of n) a)
+  = let k = tid_of n in
+    pre_find a n;
+    find_in_some_iff k a;
+    ids_is_pre a;
+    ids_recolour (ids a) ch a b;
+    recolour_view (ids a) ch a b k;
+    find_in_some_iff k b;
+    match find_in k b with
+    | Some bn ->
+      find_in_id k b bn;
+      (match bn, n with
+       | TNode _ k0 _, TNode _ kn _ ->
+         assert (kind_at k b == Some k0);
+         assert (kind_at k a == Some kn))
+    | None -> ()
+
+let mem_single (q k:string) : Lemma (ensures mem q [k] == (q = k)) = ()
+
+#push-options "--fuel 1 --ifuel 1 --z3rlimit 100"
+(* One rewrite of the last block: the node holds no children by now (it is a leaf of `after`
+   that `ch` refuses), so the rewrite is accepted, and only its kind moves. *)
+let update_last_step (ch:tree -> bool) (b a f:tree) (done:list string) (n:tree) (t:tree)
+  : Lemma (requires wf a /\ first_non_container ch (pre a) == None /\ mem n (pre a) /\
+                    changed_kind b n /\ not (ch n) /\
+                    settled (recolour (ids a) ch a b) a f done t)
+          (ensures (let k = tid_of n in
+                    apply_contained ch (UpdateNode n) t == Ok (upd k (kind_of n) t) /\
+                    settled (recolour (ids a) ch a b) a f (app done [k]) (upd k (kind_of n) t)))
+  = let k = tid_of n in
+    pre_find a n;
+    find_in_some_iff k a;
+    ids_is_pre a;
+    kids_at_pre a n;
+    (if Cons? (kids_of n) then first_non_container_none_mem ch (pre a) n else ());
+    assert (kids_at k a == []);
+    find_in_some_iff k t;
+    match find_in k t with
+    | Some ex ->
+      find_in_id k t ex;
+      assert (kids_at k t == kid_ids (kids_of ex));
+      (match ex with
+       | TNode _ _ [] -> ()
+       | TNode _ _ (c :: _) -> ());
+      upd_wf k (kind_of n) t;
+      ids_upd k (kind_of n) t;
+      let t' = upd k (kind_of n) t in
+      let aux (q:string)
+        : Lemma (kids_at q t' == kids_at q t /\
+                 (mem q (ids a) ==>
+                  kind_at q t' == (if mem q (app done [k]) then kind_at q a else kind_at q f)))
+        = upd_view k (kind_of n) t q;
+          find_in_some_iff q t;
+          mem_app q done [k];
+          mem_single q k
+      in
+      FStar.Classical.forall_intro aux
+    | None -> ()
+
+(* A node the last block skips already carries `after`'s kind. *)
+let update_last_skip (ch:tree -> bool) (b a f:tree) (done:list string) (n:tree) (t:tree)
+  : Lemma (requires wf b /\ wf a /\ mem n (pre a) /\ not (changed_kind b n && not (ch n)) /\
+                    (forall (q:string). mem q (ids a) ==> kind_at q f == kind_src (recolour (ids a) ch a b) a q) /\
+                    settled (recolour (ids a) ch a b) a f done t)
+          (ensures settled (recolour (ids a) ch a b) a f (app done [tid_of n]) t)
+  = let k = tid_of n in
+    pre_find a n;
+    find_in_some_iff k a;
+    ids_is_pre a;
+    skipped_kind_is_after ch b a f n;
+    let aux (q:string)
+      : Lemma (mem q (ids a) ==> kind_at q t == (if mem q (app done [k]) then kind_at q a else kind_at q f))
+      = mem_app q done [k];
+        mem_single q k
+    in
+    FStar.Classical.forall_intro aux
+#pop-options
+
+let rec updates_last_run (ch:tree -> bool) (b a f:tree) (done ns:list tree) (t:tree)
+  : Lemma (requires child_blind ch /\ wf b /\ wf a /\ first_non_container ch (pre a) == None /\
+                    pre a == app done ns /\
+                    (forall (q:string). mem q (ids a) ==> kind_at q f == kind_src (recolour (ids a) ch a b) a q) /\
+                    settled (recolour (ids a) ch a b) a f (tids done) t)
+          (ensures (match apply_contained_all ch (pass_updates_last ch b ns) t with
+                    | Ok g -> settled (recolour (ids a) ch a b) a f (tids (app done ns)) g
+                    | Error _ -> False))
+          (decreases ns)
+  = match ns with
+    | [] -> app_nil_r done
+    | n :: r ->
+      app_assoc done [n] r;
+      mem_app_r_tree done (n :: r) n;
+      tids_app done [n];
+      if changed_kind b n && not (ch n) then begin
+        update_last_step ch b a f (tids done) n t;
+        updates_last_run ch b a f (app done [n]) r (upd (tid_of n) (kind_of n) t)
+      end
+      else begin
+        update_last_skip ch b a f (tids done) n t;
+        updates_last_run ch b a f (app done [n]) r t
+      end
+
+(* ---- 13.9 THE THEOREM ---- *)
+
+#push-options "--fuel 1 --ifuel 1 --z3rlimit 100"
+let diff_applicable_contained_run (ch:tree -> bool) (b a:tree)
+  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ child_blind ch /\
+                    Ok? (to_ops_contained_with ch b a))
+          (ensures apply_contained_all ch (Ok?._0 (to_ops_contained_with ch b a)) b == Ok a)
+  = diff_ok_on_any_wf_pair b a;
+    assert (first_non_container ch (pre a) == None);
+    let s = Ok?._0 (to_ops b a) in
+    let u1 = pass_updates_first ch b (pre a) in
+    let u2 = pass_updates_last ch b (pre a) in
+    assert (to_ops_contained_with ch b a == Ok (app u1 (app s u2)));
+    assert (s == script_of (diff_blocks b a));
+    let b1 = recolour (ids a) ch a b in
+    ids_is_pre a;
+    (* block 0: `before` to the recoloured tree *)
+    recolour_nil ch a b;
+    updates_first_run ch b a [] (pre a);
+    assert (apply_contained_all ch u1 b == Ok b1);
+    apply_contained_all_app ch u1 (app s u2) b;
+    (* the structural script, at the recoloured tree: the same script, the plain run, and the
+       contained engine agreeing with it *)
+    wf_recolour (ids a) ch a b;
+    ids_recolour (ids a) ch a b;
+    to_ops_recolour (ids a) ch a b;
+    diff_blocks_recolour (ids a) ch a b;
+    diff_run b1 a;
+    assert (kinds_like b1 a b1);
+    diff_script_shape b1 a;
+    diff_script_after_kind b1 a;
+    diff_script_structural b1 a;
+    let parents (p:string) : Lemma (mem p (ids a) /\ Cons? (kids_at p a) ==> kind_src b1 a p == kind_at p a) =
+      FStar.Classical.move_requires (recolour_parent_kind ch b a) p
+    in
+    FStar.Classical.forall_intro parents;
+    apply_contained_all_app ch s u2 b1;
+    match apply_all s b1 with
+    | Ok f ->
+      contained_run ch b1 a s b1;
+      assert (apply_contained_all ch s b1 == Ok f);
+      (* block 5: the leaves `ch` refuses, and the tree is `after` *)
+      assert (settled b1 a f [] f);
+      updates_last_run ch b a f [] (pre a) f;
+      (match apply_contained_all ch u2 f with
+       | Ok g ->
+         find_in_self (tid_of a) a;
+         find_in_self (tid_of a) g;
+         tree_ext a g a g;
+         assert (g == a)
+       | Error _ -> ())
+    | Error _ -> ()
+#pop-options
+
+(* ---- 13.10 and the theorem is NOT VACUOUS: section 12's pair, repaired ---- *)
+
+(* The exact pair the structural contained diff is refused on (section 12): the content-aware form
+   rewrites `p` FIRST, so the insert under it meets a section, and the script lands on `after`. *)
+let content_aware_script_applies_where_the_structural_one_is_refused ()
+  : Lemma (ensures to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after
+                     == Ok [ UpdateNode (TNode "p" "section" [ TNode "q" "para" [] ]);
+                             InsertChild "p" (TNode "q" "para" []) ] /\
+                   apply_contained_all pre_fix_ch
+                     [ UpdateNode (TNode "p" "section" [ TNode "q" "para" [] ]);
+                       InsertChild "p" (TNode "q" "para" []) ] pre_fix_before
+                     == Ok pre_fix_after)
+  = assert_norm (to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after
+                   == Ok [ UpdateNode (TNode "p" "section" [ TNode "q" "para" [] ]);
+                           InsertChild "p" (TNode "q" "para" []) ]);
+    assert_norm (apply_contained_all pre_fix_ch
+                   [ UpdateNode (TNode "p" "section" [ TNode "q" "para" [] ]);
+                     InsertChild "p" (TNode "q" "para" []) ] pre_fix_before
+                   == Ok pre_fix_after)
 
 (* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
@@ -2214,6 +3041,11 @@ let twins : list twin = [
     tholds = (fun () ->
       to_ops (TNode "r" "doc" [ TNode "a" "sec" [] ]) (TNode "r" "doc" [ TNode "a" "sec" []; TNode "b" "para" [] ])
       = Ok [ InsertChild "r" (TNode "b" "para" []); ReorderChildren "r" [ "a"; "b" ] ]) };
+  { tname = "to-ops-contained-with-rewrites-the-container-first";
+    tholds = (fun () ->
+      to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after
+      = Ok [ UpdateNode (TNode "p" "section" [ TNode "q" "para" [] ]);
+             InsertChild "p" (TNode "q" "para" []) ]) };
   { tname = "to-ops-refuses-a-root-id-mismatch";
     tholds = (fun () -> to_ops (TNode "r" "doc" []) (TNode "s" "doc" []) = Error (RootIdMismatch "r" "s")) };
   { tname = "dup-id-names-the-repeat";

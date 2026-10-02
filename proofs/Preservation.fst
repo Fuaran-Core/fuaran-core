@@ -2944,6 +2944,71 @@ let kids_at_no_dups (q:string) (t:tree)
       find_in_wf q t m;
       (match m with TNode _ _ mcs -> wf_all_kid_ids_no_dups mcs)
 
+(* ---- the per-node view of a rewrite (Phase 305) — the companion of `ins_view` / `rem_view` /
+   `move_view` / `reorder_view` below: a lookup through a rewrite, the children of every node
+   unchanged, and the kind of exactly the rewritten id moved. `Normalize.fst` and `TreeDiff.fst`
+   both stand on it. ---- *)
+
+let tid_upd (x k:string) (t:tree)
+  : Lemma (ensures tid_of (upd x k t) == tid_of t) [SMTPat (tid_of (upd x k t))]
+  = match t with TNode _ _ _ -> ()
+
+let rec find_upd (q x k:string) (t:tree)
+  : Lemma (ensures find_in q (upd x k t) == (match find_in q t with
+                                             | None -> None
+                                             | Some m -> Some (upd x k m))) (decreases t)
+  = match t with
+    | TNode i _ cs -> if i = q then () else find_all_upd q x k cs
+and find_all_upd (q x k:string) (ts:list tree)
+  : Lemma (ensures find_all q (upd_all x k ts) == (match find_all q ts with
+                                                   | None -> None
+                                                   | Some m -> Some (upd x k m))) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r ->
+      find_upd q x k t;
+      (match find_in q t with
+       | Some _ -> ()
+       | None -> find_all_upd q x k r)
+
+let rec kid_ids_upd_all (x k:string) (ts:list tree)
+  : Lemma (ensures kid_ids (upd_all x k ts) == kid_ids ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> kid_ids_upd_all x k r
+
+let rec has_kid_upd_all (y x k:string) (ts:list tree)
+  : Lemma (ensures has_kid y (upd_all x k ts) == has_kid y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | _ :: r -> has_kid_upd_all y x k r
+
+(* A rewrite moves no node: every parent is where it was. *)
+let rec parent_upd (y x k:string) (t:tree)
+  : Lemma (ensures parent_of y (upd x k t) == parent_of y t) (decreases t)
+  = match t with
+    | TNode _ _ cs -> has_kid_upd_all y x k cs; parent_all_upd y x k cs
+and parent_all_upd (y x k:string) (ts:list tree)
+  : Lemma (ensures parent_all y (upd_all x k ts) == parent_all y ts) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | t :: r -> parent_upd y x k t; parent_all_upd y x k r
+
+let upd_view (x k:string) (t:tree) (q:string)
+  : Lemma (ensures kids_at q (upd x k t) == kids_at q t /\
+                   kind_at q (upd x k t) == (match kind_at q t with
+                                             | None -> None
+                                             | Some k0 -> Some (if q = x then k else k0)))
+  = find_upd q x k t;
+    match find_in q t with
+    | None -> ()
+    | Some m ->
+      find_in_id q t m;
+      (match m with
+       | TNode mi mk mcs ->
+         assert (upd x k m == TNode mi (if mi = x then k else mk) (upd_all x k mcs));
+         kid_ids_upd_all x k mcs)
+
 (* ======================================================================================
    12. THE KEYED WALK — `Ops.applyContainedKeyed`'s insert, and the preservation theorem over
        every id-bearing position a domain declares (Phase 286).
