@@ -283,9 +283,12 @@ let private noteProjection: Gen.KindProjection =
       // nothing noticed that this projection wrote `{"body":…}` where the wire says
       // `{"$type":"Note","body":…}`, so every compiled Note was undecodable by the other hosts.
       Encoder = """and private encNoteSpec (s: NoteSpec) : JVal = Canon.typed "Note" [ "body", encText s.Body ]"""
+      // Phase 337 — a projection's decoder composes with the generated decoders, so it answers
+      // their typed refusal, and reads its member through the generated helpers: a refusal of
+      // the body is then at `["kind", "body", …]`, the path the interpreter reports.
       Decoder =
-        """and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
-        jprop "body" j |> Result.bind decText |> Result.map (fun t -> { Body = t })"""
+        """and private decNoteSpec (j: JVal) : Result<NoteSpec, DecodeError> =
+        dObj j |> Result.bind (fun fs -> dReq "body" fs decText) |> Result.map (fun t -> { Body = t })"""
       Mk = Some """let mkNote (body: Text) : NoteSpec = { Body = body }""" }
 
 let support: SupportDocument =

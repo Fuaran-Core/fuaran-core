@@ -1,5 +1,66 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D109: the generated decoders refuse with Core's `DecodeError`, held to the interpreter's code and path; a verbatim decode expression keeps answering a sentence
+
+**Recorded by Phase 337. `src/Fuaran.Core.Idl.Codegen/Emit/FSharpCodec.fs` (the decode helpers, the
+union, enum, node and parse legs), `Emit/TypeScript.fs` (the decode prelude, `dParse`, `decodeNode`),
+`Emit/Core.fs` (`oneOf`, `declaresHosted`), `Gen.fs` (the support channel's contract), every committed
+generated module under `tests/`, and `tests/Fuaran.Core.Tests/IdlRefusalHostTests.fs`; rides the
+`0.34.0` draft (STABILITY.md, "Phase 337").**
+
+**D109.1 — Core's type, not a generated mirror.** The generated F# module already opens `Fuaran.Core`
+(it encodes through `Canon`, registers a `NodeWitness`, runs `Validator.runAll`), so it may name
+`DecodeError`, `DecodeCode` and `PathSegment` directly. A mirror would be a second closed code set to
+keep in step with the one D99 made the wire contract, and a consumer would convert between two types
+that mean one thing. The TypeScript host has no Core, so its refusal is `DecodeError.toJson`'s members
+— `code`, `path` (keys and indices), `expected`, `message` — which is the shape a conformance vector
+already carries.
+
+**D109.2 — the code and the path are the interpreter's; the sentence is the layer's own, and unchanged.**
+`Idl.Decode.decodeDetailed` is the oracle: the helpers raise the code and grow the path exactly where
+its walk does (a member, an item, a map key, the discriminator; a transparent union's bare payload at
+the same position). Where the generated layer and the interpreter drew a refusal differently, the
+generated one moved: an object without the discriminator at a union slot is `MissingField` at the
+discriminator, never the transparent case's payload refusal, and an unknown enum string is
+`UnknownTag`. The SENTENCE is kept word for word, so `Result.mapError DecodeError.describe` over the
+new `decodeNode` is the old function — a consumer whose own policy layer pins those sentences (a reject
+corpus, a diagnostic) migrates by a type change, not by a corpus regeneration. The law asserts code and
+path; `expected` matches too except where a module covers a subset of the vocabulary's kinds (it lists
+the kinds it decodes).
+
+**D109.3 — a verbatim decode EXPRESSION keeps its contract; a verbatim decode MEMBER takes the new one.**
+The support channel splices three kinds of decode source. A hosted slot's `Decode` and a case refine
+are expressions whose natural refusal is a sentence — a foreign codec (`DataFrameCodec`, a date parser)
+or a policy over decoded members — and neither composes with the generated helpers, so both keep
+answering `Result<_, string>`: the helper the generator wraps them in (`dHosted`, `dRefine`) lifts the
+sentence to `OutOfRange` at the slot or at the case's object. That code is the honest one: a hosted
+slot's declared wire form has already been checked, and a refine runs after every member decoded, so
+in both the value is of the right kind and outside what the position admits. A kind projection's
+decoder and a decode splice are MEMBERS of the decoder group that call the generated decoders, so they
+cannot keep a string error without discarding every path below them; they answer `DecodeError`.
+Rejected: an overloaded lift admitting either error type from any verbatim piece — it compiles only
+when the piece's error type is already fixed, and a codec answering `Ok` alone leaves it ambiguous, so
+it would trade one explicit edit for an inference failure at a distance.
+
+**D109.4 — the TypeScript host refuses what the F# reader refuses at parse.** `JSON.parse` reads `null`
+and any depth; the F# reader (`Json.parse`, the spine's only reader) refuses `null` and caps nesting at
+512, so a document the other two refused was read by this one, and the refusal surfaced later (a
+`null` at a string slot) or never (a `null` in a `json` slot). `dParse` restores the reader's answer
+and its ORDER: the text is scanned for the first container opened past the cap, and the prefix before
+it — closed with a value that cannot join an open token — is what decides between `InvalidJson` (a
+malformed or `null`-carrying prefix, which the reader meets first) and `LimitExceeded`.
+
+**D109.5 — the law, and its two stated boundaries.** The `conformance/decode/` vectors are a shape
+grammar, not a vocabulary, and every generated host decodes from a node root; so each vector the IDL
+can declare becomes one kind of a vocabulary over them (`DecodeVectorsIdl`), its input the member `v` of
+a flat node, its pinned refusal expected under `["v"]`. Eight cannot be declared — an item bound, an int
+range, an admit list, a closed object a refusal depends on, unresolved references, a member name that
+is not an identifier — and are named with their reasons rather than dropped. Sampled mutations of the
+certification vocabularies' documents complete the law. Two positions are not mutated, each a known
+disagreement this phase does not move: a closure / opaque sentinel (the generated hosts read only a
+sentinel slot's presence; the interpreter reads the sentinel), and a hosted slot declaring no wire
+form (only the compiled host runs its codec, Phase 252).
+
 ## 2026-10-02 — D108: a structural edit's change set is the diff of the two trees; the order is certified by a checker the walk does not run; the evaluator contract is about evaluators that return
 
 **Recorded by Phase 308. `src/Fuaran.Core.Propagation/Propagation.fs` (`touchedBy`, `changedForOp`,

@@ -591,30 +591,52 @@ let encodeNodeJson (n: Node) : JVal = encNode n
 
 let encodeNodeKindJson (k: NodeKind) : JVal = encNodeKind k
 
-let private dObj (j: JVal) : Result<(string * JVal) list, string> =
+// Phase 337 — a refusal is Core's `DecodeError`: a code from the closed `DecodeCode` set, the
+// path from the value the outermost decoder was handed, what the position expected, and a
+// sentence. The code and the path are the ones the IDL interpreter reports for the same
+// document; the sentence is this layer's own.
+let private dFail (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
+    Error(DecodeError.make code expected message)
+
+// One step further from the root — what a refusal gains as it leaves a member or an item.
+let private dUnder (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error e -> Error(DecodeError.under step e)
+
+let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
     match j with
     | JObj fs -> Ok fs
-    | _ -> Error "expected an object"
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
-let private dTag (fs: (string * JVal) list) : Result<string, string> =
+// The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
+let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = "kind") with
     | Some(_, JStr t) -> Ok t
-    | _ -> Error "missing or non-string kind"
+    | Some _ -> dFail DecodeCode.WrongKind "string" "missing or non-string kind" |> dUnder (PathSegment.Key "kind")
+    | None ->
+        Error
+            { Decoder.missing "kind" with
+                Message = "missing or non-string kind" }
 
-let private dStr (j: JVal) : Result<string, string> =
+// A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
+let private dUnknown (expected: string) (message: string) : Result<'T, DecodeError> =
+    dFail DecodeCode.UnknownTag expected message |> dUnder (PathSegment.Key "kind")
+
+let private dStr (j: JVal) : Result<string, DecodeError> =
     match j with
     | JStr s -> Ok s
-    | _ -> Error "expected a string"
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"
 
-let private dInt (j: JVal) : Result<int, string> =
+let private dInt (j: JVal) : Result<int, DecodeError> =
     match j with
     | JInt i -> Ok i
-    | _ -> Error "expected an int"
+    | _ -> dFail DecodeCode.WrongKind "int" "expected an int"
 
-let private dBool (j: JVal) : Result<bool, string> =
+let private dBool (j: JVal) : Result<bool, DecodeError> =
     match j with
     | JBool b -> Ok b
-    | _ -> Error "expected a bool"
+    | _ -> dFail DecodeCode.WrongKind "bool" "expected a bool"
 
 // A whole-valued float renders without a decimal point, so it parses back as JInt.
 // WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
@@ -622,64 +644,70 @@ let private dBool (j: JVal) : Result<bool, string> =
 // to the string: a host that answered the string would hand a consumer a different tree on
 // the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
 // the float slot.
-let private dFloat (j: JVal) : Result<float, string> =
+let private dFloat (j: JVal) : Result<float, DecodeError> =
     match j with
     | JFloat f -> Ok f
     | JInt i -> Ok(float i)
     | JStr "NaN" -> Ok System.Double.NaN
     | JStr "Infinity" -> Ok System.Double.PositiveInfinity
     | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
-    | _ -> Error "expected a number"
+    | _ -> dFail DecodeCode.WrongKind "number" "expected a number"
 
-let private dUnit (_: JVal) : Result<unit, string> = Ok()
+let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()
 
 // Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
-let private dJson (j: JVal) : Result<JVal, string> = Ok j
+let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j
 
-let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =
+let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T list, DecodeError> =
     match j with
     | JArr xs ->
-        (Ok [], xs)
-        ||> List.fold (fun acc x ->
-            match acc with
-            | Error e -> Error e
-            | Ok items -> dec x |> Result.map (fun v -> v :: items))
-        |> Result.map List.rev
-    | _ -> Error "expected an array"
+        let rec go (i: int) (acc: 'T list) (rest: JVal list) =
+            match rest with
+            | [] -> Ok(List.rev acc)
+            | x :: tail ->
+                match dec x with
+                | Ok v -> go (i + 1) (v :: acc) tail
+                | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
 
-let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =
+        go 0 [] xs
+    | _ -> dFail DecodeCode.WrongKind "array" "expected an array"
+
+let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
     match j with
     | JObj fs ->
         (Ok [], fs)
         ||> List.fold (fun acc (k, v) ->
             match acc with
             | Error e -> Error e
-            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))
+            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
         |> Result.map (List.rev >> Map.ofList)
-    | _ -> Error "expected an object"
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
-let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =
+let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v
-    | None -> Error("missing required field '" + name + "'")
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
+    | None ->
+        Error
+            { Decoder.missing name with
+                Message = "missing required field '" + name + "'" }
 
-let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =
+let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T option, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> Result.map Some
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name) |> Result.map Some
     | None -> Ok None
 
-let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =
+let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) (dflt: 'T) : Result<'T, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt
 
 // An optional closure / opaque field: the value is a sentinel carrying nothing,
 // but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
-let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =
+let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
     Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
 
-let private decNoteLetter (j: JVal) : Result<NoteLetter, string> =
+let private decNoteLetter (j: JVal) : Result<NoteLetter, DecodeError> =
     match j with
     | JStr "C" -> Ok NoteLetter.C
     | JStr "D" -> Ok NoteLetter.D
@@ -688,18 +716,20 @@ let private decNoteLetter (j: JVal) : Result<NoteLetter, string> =
     | JStr "G" -> Ok NoteLetter.G
     | JStr "A" -> Ok NoteLetter.A
     | JStr "B" -> Ok NoteLetter.B
-    | _ -> Error "not a NoteLetter"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'C', 'D', 'E', 'F', 'G', 'A', 'B'" "not a NoteLetter"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a NoteLetter"
 
-let private decAccidental (j: JVal) : Result<Accidental, string> =
+let private decAccidental (j: JVal) : Result<Accidental, DecodeError> =
     match j with
     | JStr "DoubleFlat" -> Ok Accidental.DoubleFlat
     | JStr "Flat" -> Ok Accidental.Flat
     | JStr "Natural" -> Ok Accidental.Natural
     | JStr "Sharp" -> Ok Accidental.Sharp
     | JStr "DoubleSharp" -> Ok Accidental.DoubleSharp
-    | _ -> Error "not a Accidental"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'DoubleFlat', 'Flat', 'Natural', 'Sharp', 'DoubleSharp'" "not a Accidental"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a Accidental"
 
-let private decBaseDuration (j: JVal) : Result<BaseDuration, string> =
+let private decBaseDuration (j: JVal) : Result<BaseDuration, DecodeError> =
     match j with
     | JStr "Whole" -> Ok BaseDuration.Whole
     | JStr "Half" -> Ok BaseDuration.Half
@@ -708,9 +738,10 @@ let private decBaseDuration (j: JVal) : Result<BaseDuration, string> =
     | JStr "Sixteenth" -> Ok BaseDuration.Sixteenth
     | JStr "ThirtySecond" -> Ok BaseDuration.ThirtySecond
     | JStr "SixtyFourth" -> Ok BaseDuration.SixtyFourth
-    | _ -> Error "not a BaseDuration"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Whole', 'Half', 'Quarter', 'Eighth', 'Sixteenth', 'ThirtySecond', 'SixtyFourth'" "not a BaseDuration"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a BaseDuration"
 
-let private decMode (j: JVal) : Result<Mode, string> =
+let private decMode (j: JVal) : Result<Mode, DecodeError> =
     match j with
     | JStr "Ionian" -> Ok Mode.Ionian
     | JStr "Dorian" -> Ok Mode.Dorian
@@ -733,46 +764,52 @@ let private decMode (j: JVal) : Result<Mode, string> =
     | JStr "PhrygianDominant" -> Ok Mode.PhrygianDominant
     | JStr "LydianSharp2" -> Ok Mode.LydianSharp2
     | JStr "UltraLocrian" -> Ok Mode.UltraLocrian
-    | _ -> Error "not a Mode"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Ionian', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian', 'Locrian', 'MelodicMinor', 'Dorianb2', 'LydianAugmented', 'LydianDominant', 'Mixolydianb6', 'LocrianNatural2', 'SuperLocrian', 'HarmonicMinor', 'LocrianNatural6', 'IonianAugmented', 'DorianSharp4', 'PhrygianDominant', 'LydianSharp2', 'UltraLocrian'" "not a Mode"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a Mode"
 
-let private decClefKind (j: JVal) : Result<ClefKind, string> =
+let private decClefKind (j: JVal) : Result<ClefKind, DecodeError> =
     match j with
     | JStr "Treble" -> Ok ClefKind.Treble
     | JStr "Bass" -> Ok ClefKind.Bass
     | JStr "Alto" -> Ok ClefKind.Alto
     | JStr "Tenor" -> Ok ClefKind.Tenor
     | JStr "Percussion" -> Ok ClefKind.Percussion
-    | _ -> Error "not a ClefKind"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Treble', 'Bass', 'Alto', 'Tenor', 'Percussion'" "not a ClefKind"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a ClefKind"
 
-let private decBracketKind (j: JVal) : Result<BracketKind, string> =
+let private decBracketKind (j: JVal) : Result<BracketKind, DecodeError> =
     match j with
     | JStr "Brace" -> Ok BracketKind.Brace
     | JStr "Square" -> Ok BracketKind.Square
     | JStr "Line" -> Ok BracketKind.Line
     | JStr "None" -> Ok BracketKind.None
-    | _ -> Error "not a BracketKind"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Brace', 'Square', 'Line', 'None'" "not a BracketKind"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a BracketKind"
 
-let private decHairpinKind (j: JVal) : Result<HairpinKind, string> =
+let private decHairpinKind (j: JVal) : Result<HairpinKind, DecodeError> =
     match j with
     | JStr "Crescendo" -> Ok HairpinKind.Crescendo
     | JStr "Decrescendo" -> Ok HairpinKind.Decrescendo
-    | _ -> Error "not a HairpinKind"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Crescendo', 'Decrescendo'" "not a HairpinKind"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a HairpinKind"
 
-let private decOctaveShiftKind (j: JVal) : Result<OctaveShiftKind, string> =
+let private decOctaveShiftKind (j: JVal) : Result<OctaveShiftKind, DecodeError> =
     match j with
     | JStr "Ottava" -> Ok OctaveShiftKind.Ottava
     | JStr "OttavaBassa" -> Ok OctaveShiftKind.OttavaBassa
     | JStr "Quindicesima" -> Ok OctaveShiftKind.Quindicesima
     | JStr "QuindicesimaBassa" -> Ok OctaveShiftKind.QuindicesimaBassa
-    | _ -> Error "not a OctaveShiftKind"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Ottava', 'OttavaBassa', 'Quindicesima', 'QuindicesimaBassa'" "not a OctaveShiftKind"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a OctaveShiftKind"
 
-let private decGraceKind (j: JVal) : Result<GraceKind, string> =
+let private decGraceKind (j: JVal) : Result<GraceKind, DecodeError> =
     match j with
     | JStr "Acciaccatura" -> Ok GraceKind.Acciaccatura
     | JStr "Appoggiatura" -> Ok GraceKind.Appoggiatura
-    | _ -> Error "not a GraceKind"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Acciaccatura', 'Appoggiatura'" "not a GraceKind"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a GraceKind"
 
-let private decOrnamentName (j: JVal) : Result<OrnamentName, string> =
+let private decOrnamentName (j: JVal) : Result<OrnamentName, DecodeError> =
     match j with
     | JStr "Trill" -> Ok OrnamentName.Trill
     | JStr "Turn" -> Ok OrnamentName.Turn
@@ -780,9 +817,10 @@ let private decOrnamentName (j: JVal) : Result<OrnamentName, string> =
     | JStr "Mordent" -> Ok OrnamentName.Mordent
     | JStr "InvertedMordent" -> Ok OrnamentName.InvertedMordent
     | JStr "Tremolo" -> Ok OrnamentName.Tremolo
-    | _ -> Error "not a OrnamentName"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Trill', 'Turn', 'InvertedTurn', 'Mordent', 'InvertedMordent', 'Tremolo'" "not a OrnamentName"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a OrnamentName"
 
-let private decNavigationKind (j: JVal) : Result<NavigationKind, string> =
+let private decNavigationKind (j: JVal) : Result<NavigationKind, DecodeError> =
     match j with
     | JStr "Segno" -> Ok NavigationKind.Segno
     | JStr "Coda" -> Ok NavigationKind.Coda
@@ -794,9 +832,10 @@ let private decNavigationKind (j: JVal) : Result<NavigationKind, string> =
     | JStr "DalSegnoAlCoda" -> Ok NavigationKind.DalSegnoAlCoda
     | JStr "Fine" -> Ok NavigationKind.Fine
     | JStr "ToCoda" -> Ok NavigationKind.ToCoda
-    | _ -> Error "not a NavigationKind"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Segno', 'Coda', 'DaCapo', 'DaCapoAlFine', 'DaCapoAlCoda', 'DalSegno', 'DalSegnoAlFine', 'DalSegnoAlCoda', 'Fine', 'ToCoda'" "not a NavigationKind"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a NavigationKind"
 
-let private decDynamicLevel (j: JVal) : Result<DynamicLevel, string> =
+let private decDynamicLevel (j: JVal) : Result<DynamicLevel, DecodeError> =
     match j with
     | JStr "Pianississimo" -> Ok DynamicLevel.Pianississimo
     | JStr "Pianissimo" -> Ok DynamicLevel.Pianissimo
@@ -811,9 +850,10 @@ let private decDynamicLevel (j: JVal) : Result<DynamicLevel, string> =
     | JStr "Rinforzando" -> Ok DynamicLevel.Rinforzando
     | JStr "FortePiano" -> Ok DynamicLevel.FortePiano
     | JStr "SforzandoPiano" -> Ok DynamicLevel.SforzandoPiano
-    | _ -> Error "not a DynamicLevel"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Pianississimo', 'Pianissimo', 'Piano', 'MezzoPiano', 'MezzoForte', 'Forte', 'Fortissimo', 'Fortississimo', 'Sforzando', 'Forzato', 'Rinforzando', 'FortePiano', 'SforzandoPiano'" "not a DynamicLevel"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a DynamicLevel"
 
-let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
+let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dTag __fs |> Result.bind (fun __t ->
     match __t with
@@ -838,15 +878,15 @@ let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
     | "RehearsalMark" -> decRehearsalMarkSpec j |> Result.map NodeKind.RehearsalMark
     | "NavigationMark" -> decNavigationMarkSpec j |> Result.map NodeKind.NavigationMark
     | "Form" -> decFormSpec j |> Result.map NodeKind.Form
-    | __other -> Error ("unknown node kind: " + __other)))
+    | __other -> dUnknown "one of 'Score', 'Part', 'PartGroup', 'Measure', 'Staff', 'Note', 'Chord', 'GraceNote', 'Dynamic', 'Fermata', 'HairpinStart', 'HairpinEnd', 'SlurStart', 'SlurEnd', 'OctaveShiftStart', 'OctaveShiftEnd', 'MultiRest', 'Ornament', 'RehearsalMark', 'NavigationMark', 'Form'" ("unknown node kind: " + __other)))
 
-and private decNode (j: JVal) : Result<Node, string> =
+and private decNode (j: JVal) : Result<Node, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "id" __fs dStr |> Result.bind (fun id ->
     decNodeKind j |> Result.bind (fun kind ->
     Ok { Id = id; Kind = kind })))
 
-and private decPitch (j: JVal) : Result<Pitch, string> =
+and private decPitch (j: JVal) : Result<Pitch, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "letter" __fs decNoteLetter |> Result.bind (fun letter ->
     dReq "accidental" __fs decAccidental |> Result.bind (fun accidental ->
@@ -854,26 +894,26 @@ and private decPitch (j: JVal) : Result<Pitch, string> =
     dReq "midi" __fs dInt |> Result.bind (fun midi ->
     Ok { Letter = letter; Accidental = accidental; Octave = octave; Midi = midi })))))
 
-and private decDuration (j: JVal) : Result<Duration, string> =
+and private decDuration (j: JVal) : Result<Duration, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "base" __fs decBaseDuration |> Result.bind (fun ``base`` ->
     dDef "dots" __fs dInt (0) |> Result.bind (fun dots ->
     Ok { Base = ``base``; Dots = dots })))
 
-and private decKeySignature (j: JVal) : Result<KeySignature, string> =
+and private decKeySignature (j: JVal) : Result<KeySignature, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "tonic" __fs decNoteLetter |> Result.bind (fun tonic ->
     dReq "tonicAccidental" __fs decAccidental |> Result.bind (fun tonicAccidental ->
     dReq "mode" __fs decMode |> Result.bind (fun mode ->
     Ok { Tonic = tonic; TonicAccidental = tonicAccidental; Mode = mode }))))
 
-and private decTimeSignature (j: JVal) : Result<TimeSignature, string> =
+and private decTimeSignature (j: JVal) : Result<TimeSignature, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "numerator" __fs dInt |> Result.bind (fun numerator ->
     dReq "denominator" __fs dInt |> Result.bind (fun denominator ->
     Ok { Numerator = numerator; Denominator = denominator })))
 
-and private decStaffDefinition (j: JVal) : Result<StaffDefinition, string> =
+and private decStaffDefinition (j: JVal) : Result<StaffDefinition, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "number" __fs dInt |> Result.bind (fun number ->
     dReq "clef" __fs decClefKind |> Result.bind (fun clef ->
@@ -881,34 +921,34 @@ and private decStaffDefinition (j: JVal) : Result<StaffDefinition, string> =
     dReq "initialTime" __fs decTimeSignature |> Result.bind (fun initialTime ->
     Ok { Number = number; Clef = clef; InitialKey = initialKey; InitialTime = initialTime })))))
 
-and private decFormSection (j: JVal) : Result<FormSection, string> =
+and private decFormSection (j: JVal) : Result<FormSection, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "label" __fs dStr |> Result.bind (fun label ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Label = label; Children = children })))
 
-and private decScoreSpec (j: JVal) : Result<ScoreSpec, string> =
+and private decScoreSpec (j: JVal) : Result<ScoreSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dOpt "title" __fs dStr |> Result.bind (fun title ->
     dOpt "composer" __fs dStr |> Result.bind (fun composer ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Title = title; Composer = composer; Children = children }))))
 
-and private decPartSpec (j: JVal) : Result<PartSpec, string> =
+and private decPartSpec (j: JVal) : Result<PartSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "name" __fs dStr |> Result.bind (fun name ->
     dReq "staves" __fs (dList decStaffDefinition) |> Result.bind (fun staves ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Name = name; Staves = staves; Children = children }))))
 
-and private decPartGroupSpec (j: JVal) : Result<PartGroupSpec, string> =
+and private decPartGroupSpec (j: JVal) : Result<PartGroupSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dOpt "name" __fs dStr |> Result.bind (fun name ->
     dReq "bracket" __fs decBracketKind |> Result.bind (fun bracket ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Name = name; Bracket = bracket; Children = children }))))
 
-and private decMeasureSpec (j: JVal) : Result<MeasureSpec, string> =
+and private decMeasureSpec (j: JVal) : Result<MeasureSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "number" __fs dInt |> Result.bind (fun number ->
     dDef "repeatStart" __fs dBool (false) |> Result.bind (fun repeatStart ->
@@ -918,13 +958,13 @@ and private decMeasureSpec (j: JVal) : Result<MeasureSpec, string> =
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Number = number; RepeatStart = repeatStart; RepeatEnd = repeatEnd; Volta = volta; IsAnacrusis = isAnacrusis; Children = children })))))))
 
-and private decStaffSpec (j: JVal) : Result<StaffSpec, string> =
+and private decStaffSpec (j: JVal) : Result<StaffSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "staffNumber" __fs dInt |> Result.bind (fun staffNumber ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { StaffNumber = staffNumber; Children = children })))
 
-and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
+and private decNoteSpec (j: JVal) : Result<NoteSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "pitch" __fs decPitch |> Result.bind (fun pitch ->
     dReq "duration" __fs decDuration |> Result.bind (fun duration ->
@@ -932,7 +972,7 @@ and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
     dDef "tiedToNext" __fs dBool (false) |> Result.bind (fun tiedToNext ->
     Ok { Pitch = pitch; Duration = duration; Voice = voice; TiedToNext = tiedToNext })))))
 
-and private decChordSpec (j: JVal) : Result<ChordSpec, string> =
+and private decChordSpec (j: JVal) : Result<ChordSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "pitches" __fs (dList decPitch) |> Result.bind (fun pitches ->
     dReq "duration" __fs decDuration |> Result.bind (fun duration ->
@@ -940,69 +980,69 @@ and private decChordSpec (j: JVal) : Result<ChordSpec, string> =
     dDef "tiedToNext" __fs dBool (false) |> Result.bind (fun tiedToNext ->
     Ok { Pitches = pitches; Duration = duration; Voice = voice; TiedToNext = tiedToNext })))))
 
-and private decGraceNoteSpec (j: JVal) : Result<GraceNoteSpec, string> =
+and private decGraceNoteSpec (j: JVal) : Result<GraceNoteSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "pitch" __fs decPitch |> Result.bind (fun pitch ->
     dReq "grace" __fs decGraceKind |> Result.bind (fun grace ->
     Ok { Pitch = pitch; Grace = grace })))
 
-and private decDynamicSpec (j: JVal) : Result<DynamicSpec, string> =
+and private decDynamicSpec (j: JVal) : Result<DynamicSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "level" __fs decDynamicLevel |> Result.bind (fun level ->
     Ok { Level = level }))
 
-and private decFermataSpec (j: JVal) : Result<FermataSpec, string> =
+and private decFermataSpec (j: JVal) : Result<FermataSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     Ok FermataSpec.FermataSpec)
 
-and private decHairpinStartSpec (j: JVal) : Result<HairpinStartSpec, string> =
+and private decHairpinStartSpec (j: JVal) : Result<HairpinStartSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "hairpin" __fs decHairpinKind |> Result.bind (fun hairpin ->
     Ok { Hairpin = hairpin }))
 
-and private decHairpinEndSpec (j: JVal) : Result<HairpinEndSpec, string> =
+and private decHairpinEndSpec (j: JVal) : Result<HairpinEndSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     Ok HairpinEndSpec.HairpinEndSpec)
 
-and private decSlurStartSpec (j: JVal) : Result<SlurStartSpec, string> =
+and private decSlurStartSpec (j: JVal) : Result<SlurStartSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     Ok SlurStartSpec.SlurStartSpec)
 
-and private decSlurEndSpec (j: JVal) : Result<SlurEndSpec, string> =
+and private decSlurEndSpec (j: JVal) : Result<SlurEndSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     Ok SlurEndSpec.SlurEndSpec)
 
-and private decOctaveShiftStartSpec (j: JVal) : Result<OctaveShiftStartSpec, string> =
+and private decOctaveShiftStartSpec (j: JVal) : Result<OctaveShiftStartSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "octaveShift" __fs decOctaveShiftKind |> Result.bind (fun octaveShift ->
     Ok { OctaveShift = octaveShift }))
 
-and private decOctaveShiftEndSpec (j: JVal) : Result<OctaveShiftEndSpec, string> =
+and private decOctaveShiftEndSpec (j: JVal) : Result<OctaveShiftEndSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     Ok OctaveShiftEndSpec.OctaveShiftEndSpec)
 
-and private decMultiRestSpec (j: JVal) : Result<MultiRestSpec, string> =
+and private decMultiRestSpec (j: JVal) : Result<MultiRestSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "measureCount" __fs dInt |> Result.bind (fun measureCount ->
     Ok { MeasureCount = measureCount }))
 
-and private decOrnamentSpec (j: JVal) : Result<OrnamentSpec, string> =
+and private decOrnamentSpec (j: JVal) : Result<OrnamentSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "ornament" __fs decOrnamentName |> Result.bind (fun ornament ->
     dOpt "slashCount" __fs dInt |> Result.bind (fun slashCount ->
     Ok { Ornament = ornament; SlashCount = slashCount })))
 
-and private decRehearsalMarkSpec (j: JVal) : Result<RehearsalMarkSpec, string> =
+and private decRehearsalMarkSpec (j: JVal) : Result<RehearsalMarkSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "label" __fs dStr |> Result.bind (fun label ->
     Ok { Label = label }))
 
-and private decNavigationMarkSpec (j: JVal) : Result<NavigationMarkSpec, string> =
+and private decNavigationMarkSpec (j: JVal) : Result<NavigationMarkSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "navigation" __fs decNavigationKind |> Result.bind (fun navigation ->
     Ok { Navigation = navigation }))
 
-and private decFormSpec (j: JVal) : Result<FormSpec, string> =
+and private decFormSpec (j: JVal) : Result<FormSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dOpt "name" __fs dStr |> Result.bind (fun name ->
     dReq "sections" __fs (dList decFormSection) |> Result.bind (fun sections ->
@@ -1011,8 +1051,10 @@ and private decFormSpec (j: JVal) : Result<FormSpec, string> =
 
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
-let decodeNode (s: string) : Result<Node, string> =
-    Json.parse s |> Result.bind decNode
+/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter
+/// reports for the same document, and this layer's sentence (`DecodeError.describe`).
+let decodeNode (s: string) : Result<Node, DecodeError> =
+    Decoder.parse s |> Result.bind decNode
 
 let private witnessKindTag (n: Node) : string =
     match n.Kind with

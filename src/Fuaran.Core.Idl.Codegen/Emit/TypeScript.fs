@@ -666,11 +666,14 @@ module internal TypeScript =
             |> List.map arm
             |> concatR "\n"
             |> Result.map (fun arms ->
-                "  if (isTagged(j)) {\n    const fs = j;\n    switch ("
-                + tsDiscProp disc "j"
-                + ") {\n"
+                // Phase 337 — every object is a tagged one, as the interpreter reads it: an
+                // absent or non-string discriminator is refused AT it (`dTag`), and an unknown
+                // case is `UnknownTag` there.
+                "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
                 + arms
-                + "\n      default: return dFail("
+                + "\n      default: return dUnknown("
+                + SourceLit.tsString (oneOf (u.Cases |> List.map (fun c -> c.Tag)))
+                + ", "
                 + SourceLit.tsString ("unknown " + u.Name + " case: ")
                 + " + "
                 + tsDiscProp disc "j"
@@ -697,7 +700,7 @@ module internal TypeScript =
                 | _ -> Error(transparentArity u.Name ttag)
             | None ->
                 Ok(
-                    "  return dFail("
+                    "  return dFail('WrongKind', 'object', "
                     + SourceLit.tsString ("expected a " + u.Name + " object")
                     + ");"
                 )
@@ -740,19 +743,57 @@ module internal TypeScript =
             + ";\n}")
 
     /// The decode runtime prelude — the JS mirror of the F# `dObj`/`dReq`/… helpers.
-    /// `isTagged` tests the DECLARED discriminator (Phase 108); the default key
-    /// interpolates to exactly the pre-declarable bytes.
+    /// `dTag` reads the DECLARED discriminator (Phase 108).
+    ///
+    /// Phase 337 — a refusal is thrown as a `DecodeFault` carrying the interpreter's CODE and
+    /// EXPECTED, and its PATH grows as it leaves a member or an item (`dAt`); `decodeNode`
+    /// answers it as `{ code, path, expected, message }`, `DecodeError.toJson`'s members. A
+    /// member is read only when it is the object's OWN: `in` also finds a prototype's
+    /// (`toString`, `constructor`), which reads an absent member as present.
     let tsDecodePrelude (disc: string) =
-        "const dFail = (m) => { throw new Error(m); };\n"
-        + "const isTagged = (j) => j !== null && typeof j === 'object' && !Array.isArray(j) && "
-        + SourceLit.tsStringSingle disc
-        + " in j;"
-        + """
-const dObj = (j) => (j !== null && typeof j === 'object' && !Array.isArray(j)) ? j : dFail('expected an object');
-const dStr = (j) => (typeof j === 'string') ? j : dFail('expected a string');
+        let discLit = SourceLit.tsStringSingle disc
+
+        """// Phase 337 — a refusal: the code (the closed DecodeCode set), the path from the document root
+// (member keys and item indices), what the position expected, and a sentence.
+class DecodeFault extends Error {
+  constructor(code, expected, message) {
+    super(message);
+    this.code = code;
+    this.path = [];
+    this.expected = expected;
+  }
+}
+const dFail = (code, expected, m) => { throw new DecodeFault(code, expected, m); };
+// One step further from the root — what a refusal gains as it leaves a member or an item.
+const dAt = (step, f) => {
+  try {
+    return f();
+  } catch (e) {
+    if (e instanceof DecodeFault) e.path.unshift(step);
+    throw e;
+  }
+};
+const dMissing = (name, m) => {
+  const f = new DecodeFault('MissingField', "a member '" + name + "'", m);
+  f.path.push(name);
+  throw f;
+};
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const isObj = (j) => j !== null && typeof j === 'object' && !Array.isArray(j);
+const dDisc = __DISC__;
+// The discriminator: absent is MissingField naming it, a non-string WrongKind at it.
+const dTag = (j) => {
+  if (!hasOwn(j, dDisc)) return dMissing(dDisc, 'missing or non-string ' + dDisc);
+  const t = j[dDisc];
+  return (typeof t === 'string') ? t : dAt(dDisc, () => dFail('WrongKind', 'string', 'missing or non-string ' + dDisc));
+};
+// A tag naming no case this decoder knows: UnknownTag at the discriminator.
+const dUnknown = (expected, m) => dAt(dDisc, () => dFail('UnknownTag', expected, m));
+const dObj = (j) => isObj(j) ? j : dFail('WrongKind', 'object', 'expected an object');
+const dStr = (j) => (typeof j === 'string') ? j : dFail('WrongKind', 'string', 'expected a string');
 // An int slot is the interpreter's 32-bit int: an integral number outside it is refused here as
 // the interpreter and the compiled F# host refuse it (Phase 304), never read as a wider value.
-const dInt = (j) => (typeof j === 'number' && Number.isInteger(j) && j >= -2147483648 && j <= 2147483647) ? j : dFail('expected an int');
+const dInt = (j) => (typeof j === 'number' && Number.isInteger(j) && j >= -2147483648 && j <= 2147483647) ? j : dFail('WrongKind', 'int', 'expected an int');
 // §7 — a float slot also accepts the three quoted non-finite sentinels `encFloat` emits
 // (§5), and decodes them to the NUMBER, never the string. `dInt` above is not widened:
 // §7 stops at the float slot.
@@ -761,24 +802,84 @@ const dFloat = (j) => {
   if (j === 'NaN') return NaN;
   if (j === 'Infinity') return Infinity;
   if (j === '-Infinity') return -Infinity;
-  return dFail('expected a number');
+  return dFail('WrongKind', 'number', 'expected a number');
 };
-const dBool = (j) => (typeof j === 'boolean') ? j : dFail('expected a bool');
-const dList = (dec) => (j) => Array.isArray(j) ? j.map(dec) : dFail('expected an array');
+const dBool = (j) => (typeof j === 'boolean') ? j : dFail('WrongKind', 'bool', 'expected a bool');
+const dList = (dec) => (j) => Array.isArray(j) ? j.map((x, i) => dAt(i, () => dec(x))) : dFail('WrongKind', 'array', 'expected an array');
 const dMap = (dec) => (j) => {
   const o = dObj(j);
   const out = {};
-  for (const k of Object.keys(o)) out[k] = dec(o[k]);
+  for (const k of Object.keys(o)) out[k] = dAt(k, () => dec(o[k]));
   return out;
 };
-const dEnum = (name, cases) => (j) =>
-  (typeof j === 'string' && cases.indexOf(j) >= 0) ? j : dFail('not a ' + name);
-const dReq = (name, fs, dec) => (name in fs) ? dec(fs[name]) : dFail("missing required field '" + name + "'");
-const dOpt = (name, fs, dec) => (name in fs) ? dec(fs[name]) : undefined;
-const dDef = (name, fs, dec, dflt) => (name in fs) ? dec(fs[name]) : dflt;
+const dEnum = (name, cases) => (j) => {
+  if (typeof j !== 'string') return dFail('WrongKind', 'string', 'not a ' + name);
+  return (cases.indexOf(j) >= 0) ? j : dFail('UnknownTag', 'one of ' + cases.map((c) => "'" + c + "'").join(', '), 'not a ' + name);
+};
+const dReq = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(fs[name])) : dMissing(name, "missing required field '" + name + "'");
+const dOpt = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(fs[name])) : undefined;
+const dDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? dAt(name, () => dec(fs[name])) : dflt;
 // An optional closure/opaque field: the value is a sentinel carrying nothing, but
 // its PRESENCE distinguishes present-from-absent and must survive the round trip.
-const dPresent = (name, fs) => (name in fs) ? null : undefined;"""
+const dPresent = (name, fs) => hasOwn(fs, name) ? null : undefined;"""
+            .Replace("__DISC__", discLit)
+
+    /// Phase 337 — the parse leg of the TypeScript `decodeNode`, held to the F# reader's
+    /// answers (`Decoder.parse`): text the reader cannot parse is `InvalidJson` at the root, and
+    /// a container opened past its nesting cap is `LimitExceeded` there. `JSON.parse` has no cap
+    /// and reads `null`, which the wire model has no value for, so the text is first scanned for
+    /// the first container opened past the cap. When there is one, what the F# reader meets
+    /// FIRST decides: the prefix before it is closed with a value and parsed, and a prefix that
+    /// does not parse, or carries a `null`, is `InvalidJson` (the reader stops there), while a
+    /// clean one is `LimitExceeded`. Without one, a `JSON.parse` refusal or a `null` anywhere is
+    /// `InvalidJson`.
+    let tsParseLeg =
+        """const dMaxDepth = __CAP__;
+const dHasNull = (v) => v === null || (typeof v === 'object' && Object.keys(v).some((k) => dHasNull(v[k])));
+// The first container opened past the cap, and the containers open there; null when none is.
+const dDepthBreach = (s) => {
+  const open = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === '[' || c === '{') {
+      if (open.length >= dMaxDepth) return { at: i, open };
+      open.push(c);
+    } else if (c === ']' || c === '}') open.pop();
+  }
+  return null;
+};
+const dParse = (s) => {
+  const refuse = (code, expected, message) => { throw new DecodeFault(code, expected, message); };
+  const breach = dDepthBreach(s);
+  if (breach !== null) {
+    const closers = breach.open.map((c) => (c === '[' ? ']' : '}')).reverse().join('');
+    let prefix;
+    try {
+      // ' 0' cannot join a token the prefix leaves open, so a malformed prefix stays malformed.
+      prefix = JSON.parse(s.slice(0, breach.at) + ' 0' + closers);
+    } catch (e) {
+      return refuse('InvalidJson', 'JSON text', 'not valid JSON: ' + String(e && e.message ? e.message : e));
+    }
+    if (dHasNull(prefix)) return refuse('InvalidJson', 'JSON text', 'not valid JSON: null is not representable in the Fuaran wire JVal model');
+    return refuse('LimitExceeded', "nesting within the parser's cap", 'not valid JSON: max nesting depth ' + dMaxDepth + ' exceeded');
+  }
+  let j;
+  try {
+    j = JSON.parse(s);
+  } catch (e) {
+    return refuse('InvalidJson', 'JSON text', 'not valid JSON: ' + String(e && e.message ? e.message : e));
+  }
+  if (dHasNull(j)) return refuse('InvalidJson', 'JSON text', 'not valid JSON: null is not representable in the Fuaran wire JVal model');
+  return j;
+};"""
+            .Replace("__CAP__", string Json.defaultMaxDepth)
 
     /// Phase 252 — the TypeScript check of a hosted slot's declared FORMAT, emitted only when
     /// the vocabulary declares one ([[declaresHostedFormat]]); the JS face of
@@ -806,7 +907,7 @@ const dFormat = (format, v) => {
       ok = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
     }
   }
-  return ok ? v : dFail("expected a '" + format + "' string");
+  return ok ? v : dFail('OutOfRange', "a '" + format + "' string", "expected a '" + format + "' string");
 };"""
 
     /// Emit a self-contained TypeScript (ESM) structural encoder for the named
@@ -1066,11 +1167,11 @@ const plain = (pairs) =>
                 |> String.concat "\n"
 
             let decKind =
-                "function decKind(j) {\n  if (!isTagged(j)) return dFail('expected a kind object');\n  switch ("
-                + tsDiscProp disc "j"
-                + ") {\n"
+                "function decKind(j) {\n  if (!isObj(j)) return dFail('WrongKind', 'object', 'expected a kind object');\n  switch (dTag(j)) {\n"
                 + arms
-                + "\n    default: return dFail('unknown node kind: ' + "
+                + "\n    default: return dUnknown("
+                + SourceLit.tsString (oneOf (kinds |> List.map (fun k -> k.Tag)))
+                + ", 'unknown node kind: ' + "
                 + tsDiscProp disc "j"
                 + ");\n  }\n}\n\n"
 
@@ -1091,7 +1192,10 @@ const plain = (pairs) =>
                     else
                         // Phase 109 — flat: the node object is the kind body; the id
                         // (and envelope) merge beside the decoded spec's own keys.
-                        "function decNode(j) {\n  const fs = dObj(j);\n  return Object.assign({}, decKind(j), { id: dReq('id', fs, dStr)"
+                        // Phase 337 — the id is read BEFORE the kind, the order the
+                        // interpreter and the compiled F# host read them in, so a node
+                        // missing both is refused at the id by all three.
+                        "function decNode(j) {\n  const fs = dObj(j);\n  const id = dReq('id', fs, dStr);\n  return Object.assign({}, decKind(j), { id: id"
                         + envelope
                         + " });\n}\n\n")
 
@@ -1099,9 +1203,12 @@ const plain = (pairs) =>
             |> Result.map (fun decNode ->
                 decKind
                 + decNode
-                + "// Structural decode. The policy layer (diagnostics, §16 lenient-accept, the\n"
+                + tsParseLeg
+                + "\n\n// Structural decode. The policy layer (diagnostics, §16 lenient-accept, the\n"
                 + "// reject set) composes ABOVE this — see the Phase 672 note in the generator.\n"
-                + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(JSON.parse(s)) };\n  } catch (e) {\n    return { ok: false, error: String(e && e.message ? e.message : e) };\n  }\n}")
+                + "// Phase 337 — a refusal is `{ code, path, expected, message }`: the code and path the IDL\n"
+                + "// interpreter reports for the same document, and this layer's sentence.\n"
+                + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(dParse(s)) };\n  } catch (e) {\n    if (!(e instanceof DecodeFault)) throw e;\n    return { ok: false, error: { code: e.code, path: e.path, expected: e.expected, message: e.message } };\n  }\n}")
 
         [ [ Ok prelude ]
           records |> List.map (tsRecordEncoder idl disc)

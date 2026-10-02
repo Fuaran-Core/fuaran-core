@@ -352,7 +352,7 @@ let private vectorsFor (idl: Idl) (hosted: Map<string, Random -> JVal>) (seed: i
 
 /// A compiled generated module, behind the two entry points every one of them exports.
 type private Compiled =
-    { Decode: string -> Result<obj, string>
+    { Decode: string -> Result<obj, DecodeError>
       Encode: obj -> string
       Hosted: Map<string, obj -> JVal> }
 
@@ -485,7 +485,7 @@ let private tsLeg (idl: Idl) (rows: (IdlValue * IdlValue * string) list) : Map<i
         + "  const out = { i };\n"
         + "  try { out.enc = encodeNode(a); } catch (e) { out.enc = 'THREW: ' + __msg(e); }\n"
         + "  const r = decodeNode(b);\n"
-        + "  if (!r.ok) { out.refused = r.error; } else {\n"
+        + "  if (!r.ok) { out.refused = JSON.stringify(r.error); } else {\n"
         + "    try { out.re = encodeNode(r.value); } catch (e) { out.re = 'THREW: ' + __msg(e); }\n"
         + "    out.eq = __eq(r.value, d);\n"
         + "    if (!out.eq) { out.got = __show(r.value); out.want = __show(d); }\n"
@@ -562,7 +562,7 @@ let private differential (c: Certified) (vectors: IdlValue list) : string list *
         ok
         |> List.collect (fun (i, _, bytes, d) ->
             match c.Compiled.Decode bytes with
-            | Error m -> [ sprintf "#%d compiled F# refused %s: %s" i bytes m ]
+            | Error e -> [ sprintf "#%d compiled F# refused %s: %s" i bytes (DecodeError.render e) ]
             | Ok typed ->
                 [ let again = c.Compiled.Encode typed
 
@@ -661,7 +661,7 @@ let compiledFixtures =
 
               match ScoreGenerated.decodeNode bytes with
               | Ok back -> Expect.equal (ScoreGenerated.encodeNode back) bytes "and it reads back as itself"
-              | Error m -> failtestf "the compiled host refused its own marker node: %s" m)
+              | Error e -> failtestf "the compiled host refused its own marker node: %s" (DecodeError.render e))
 
           testCase "a field-less RECORD is a marker type too, in the one type emitter" (fun _ ->
               let idl =
@@ -798,8 +798,22 @@ let threeWay =
                       | Ok b -> b
                       | Error m -> failtestf "the older vocabulary did not encode: %s" m
 
-                  Expect.isError (Decode.decode current bytes) "the interpreter refuses it"
-                  Expect.isError (ReferenceGenerated.decodeNode bytes) "the compiled F# host refuses it"
+                  // Phase 337 — refused with ONE code and ONE path: the absent member, named.
+                  let missingBody =
+                      Error(DecodeCode.MissingField, [ PathSegment.Key "kind"; PathSegment.Key "body" ])
+
+                  let codeAndPath (r: Result<'T, DecodeError>) =
+                      r |> Result.map ignore |> Result.mapError (fun e -> e.Code, e.Path)
+
+                  Expect.equal
+                      (codeAndPath (Decode.decodeDetailed current bytes))
+                      missingBody
+                      "the interpreter refuses it"
+
+                  Expect.equal
+                      (codeAndPath (ReferenceGenerated.decodeNode bytes))
+                      missingBody
+                      "the compiled F# host refuses it, at the same member"
 
                   let tsModule =
                       match Gen.typescriptModule current (current.Kinds |> List.map _.Tag) with
@@ -809,13 +823,17 @@ let threeWay =
                   match
                       runNode (
                           tsModule
-                          + "\nconsole.log(JSON.stringify(decodeNode("
+                          + "\nconst __r = decodeNode("
                           + Canon.render (JStr bytes)
-                          + ").ok));\n"
+                          + ");\nconsole.log(JSON.stringify(__r.ok ? 'accepted' : [__r.error.code, __r.error.path]));\n"
                       )
                   with
                   | None -> skiptest "node not on PATH"
-                  | Some out -> Expect.equal (out.Trim()) "false" "the TypeScript host refuses it"
+                  | Some out ->
+                      Expect.equal
+                          (out.Trim())
+                          """["MissingField",["kind","body"]]"""
+                          "the TypeScript host refuses it, at the same member"
 
                   // And the other direction: a member the current vocabulary does not know is
                   // tolerated, and the value read is the one the current vocabulary declares.

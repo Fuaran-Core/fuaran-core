@@ -756,7 +756,7 @@ let tests =
                       let expected = Canon.renderOrdered root
 
                       match DocGenerated.decodeNode expected with
-                      | Error e -> failtestf "%s: generated decode: %s" name e
+                      | Error e -> failtestf "%s: generated decode: %s" name (DecodeError.render e)
                       | Ok node ->
                           let actual = DocGenerated.encodeNode node
 
@@ -789,7 +789,7 @@ let tests =
                       + "\n];\n"
                       + "for (const [name, s] of __wire) {\n"
                       + "  const r = decodeNode(s);\n"
-                      + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + r.error));\n"
+                      + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + JSON.stringify(r.error)));\n"
                       + "}\n"
 
                   let tmp =

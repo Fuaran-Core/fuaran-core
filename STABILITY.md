@@ -3938,6 +3938,67 @@ for a removal or a move sees the parent in it now.
 and `PropagationError` gains no case. The behaviour change is a superset: every id the old functions
 named is still named.
 
+### The generated decoders refuse with the typed decode error (Phase 337, DECISIONS.md D109) — BREAKING (source): every generated F# decoder is retyped to `Result<_, DecodeError>` and the generated TypeScript refusal becomes an object; no `api/` baseline moves
+
+The IDL interpreter has refused through Core's typed `DecodeError` since Phase 310; the two generated
+hosts did not, so one malformed document read as a code and a path in one host and a bare sentence in
+the other two. Now all three answer the same `Code` and `Path`.
+
+- **The generated F# module** (`Gen.fsharpModule` / `fsharpModuleWith`): `decodeNode : string ->
+  Result<Node, DecodeError>` (was `Result<Node, string>`), and every emitted decoder and helper
+  (`dObj`, `dTag`, `dReq`, `dOpt`, `dDef`, `dList`, `dMap`, `dStr`, `dInt`, `dFloat`, `dBool`, `dFormat`,
+  each `dec<Name>`) answers `Result<_, DecodeError>`; a generic union's per-parameter codec is `JVal ->
+  Result<'T, DecodeError>`. New helpers: `dFail`, `dUnder`, `dUnknown`; `dHosted` where the vocabulary
+  declares a hosted slot; `dRefine` where the support declares a case refine. The parse is
+  `Decoder.parse` (was `Json.parse`).
+- **The code, path and expectation are the interpreter's** for the same document; the sentence
+  (`DecodeError.describe`) is the one the generated layer returned before, word for word, except where
+  the refusal itself moved (below).
+- **Two refusals MOVED to the interpreter's**: an object with no discriminator at a union slot is
+  `MissingField` at the discriminator (`"missing or non-string $type"`; it was the transparent case's
+  payload refusal, or `"expected a <Union> object"`); and an enum given a string no case names is
+  `UnknownTag` (its sentence, `"not a <Enum>"`, unchanged; a non-string stays `WrongKind`). On the F#
+  host no document that decoded before is refused now, and none refused before decodes.
+- **The generated TypeScript module** (`Gen.typescriptModule`): `decodeNode(s)` answers `{ ok: false,
+  error: { code, path, expected, message } }` (was `error: <string>`) — `DecodeError.toJson`'s members, the
+  path an array of keys and indices. Text the F# reader cannot parse, a `null` anywhere, or a container
+  nested past the reader's cap (512) is refused as the F# reader refuses it (`InvalidJson`,
+  `LimitExceeded`); before, `JSON.parse` read `null` and any depth, and the refusal came later or not at
+  all — so a `null` or an over-deep value in a `json` or verbatim hosted slot, which this host alone
+  read, is refused here too. A member is read only when it is the object's own: `in` also found
+  `toString` and kin, so an absent optional member named like one was refused and is now absent, as on
+  the other hosts. A flat-envelope node reads its `id` before its kind, as the other hosts do. An
+  exception that is not a refusal is no longer swallowed into `error`: it propagates.
+- **The support channel** (`Gen.GenSupport`): a kind projection's `Decoder`, and any `DecodeSplice`
+  member that composes with a generated decoder, answers `DecodeError`. A hosted slot's `Decode`
+  expression and a `CaseRefines` expression are unchanged — both still answer a sentence, which reaches
+  the caller as `OutOfRange` at the slot / at the case's object.
+- **Certification**: `IdlRefusalHostTests.fs` — the `conformance/decode/` vectors through a vocabulary
+  translated from them (16 of 24 covered; the eight the IDL cannot declare are named with their reasons)
+  and its committed generated module `DecodeVectorsGenerated.fs`, and 400 sampled mutations per
+  certification vocabulary, each through the interpreter, the compiled F# host and the TypeScript host,
+  which must answer alike. The Phase 252 second-vocabulary test and the Phase 304 migration pair now
+  assert the code and path, not only the refusal.
+
+**What a consumer of generated code does.** Regenerate the module. Then:
+
+1. A caller of the F# `decodeNode` that read the error as a string reads `DecodeError.describe e` for the
+   same sentence — `decodeNode s |> Result.mapError DecodeError.describe` is the pre-337 function — or
+   branches on `e.Code` and reports `DecodePath.render e.Path`.
+2. A kind projection's `Decoder` changes its annotation from `Result<<Tag>Spec, string>` to
+   `Result<<Tag>Spec, DecodeError>`; a refusal it builds by hand becomes `DecodeError.make
+   DecodeCode.<code> "<expected>" "<sentence>"` (or `dFail …`, which is in scope), and a prelude reader
+   that answers a string lifts with `Result.mapError (fun m -> DecodeError.make DecodeCode.OutOfRange
+   "<expected>" m)`. A `DecodeSplice` member that calls a generated decoder does the same.
+3. A hosted `Decode` expression that calls a generated decoder maps its refusal back to a sentence:
+   `|> Result.mapError DecodeError.describe`.
+4. A TypeScript caller that read `r.error` as a string reads `r.error.message`.
+
+**Class: breaking (source)** — for consumers of generated code; on the TypeScript host also behavioural,
+in the one direction of agreeing with the other two hosts (`null`, over-deep nesting). The `api/`
+baselines do not move (the generator's own signatures are unchanged; it is the EMITTED source that is
+retyped), and `CodegenError` gains no case.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

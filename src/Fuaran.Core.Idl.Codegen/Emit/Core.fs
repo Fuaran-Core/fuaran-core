@@ -245,13 +245,16 @@ module internal Core =
         | w, Some f when w <> Some TStr -> refuse (sprintf "declaring the format '%s' on a non-string wire" f)
         | _ -> None
 
-    /// Whether any hosted slot in the vocabulary declares a FORMAT — the condition the
-    /// F# and TypeScript decoder preludes emit their `dFormat` helper on, so a vocabulary
-    /// that declares none emits byte-for-byte what it did.
-    let declaresHostedFormat (idl: Idl) : bool =
+    /// `one of 'a', 'b'` — what an `UnknownTag` refusal says the position expected, spelled as
+    /// the interpreter spells it (Phase 337), for both generated decoders.
+    let oneOf (names: string list) : string =
+        "one of " + (names |> List.map (fun n -> "'" + n + "'") |> String.concat ", ")
+
+    /// Whether any hosted slot in the vocabulary satisfies `pick`.
+    let private declaresHostedWhere (pick: HostedCodec -> bool) (idl: Idl) : bool =
         let rec has (t: IdlType) =
             match t with
-            | THosted { Format = Some _ } -> true
+            | THosted h -> pick h
             | TList inner
             | TMap inner -> has inner
             | TUnion(_, args) -> args |> List.exists has
@@ -263,6 +266,16 @@ module internal Core =
           yield! idl.Records |> List.map _.Fields
           yield! idl.Unions |> List.collect (fun u -> u.Cases |> List.map _.Fields) ]
         |> List.exists (List.exists (fun f -> has f.Type))
+
+    /// Whether any hosted slot in the vocabulary declares a FORMAT — the condition the
+    /// F# and TypeScript decoder preludes emit their `dFormat` helper on, so a vocabulary
+    /// that declares none emits byte-for-byte what it did.
+    let declaresHostedFormat (idl: Idl) : bool =
+        declaresHostedWhere (fun h -> h.Format.IsSome) idl
+
+    /// Whether the vocabulary declares any hosted slot — the condition the F# decoder prelude
+    /// emits `dHosted` on (Phase 337), the lift of a host codec's sentence-refusal.
+    let declaresHosted (idl: Idl) : bool = declaresHostedWhere (fun _ -> true) idl
 
     /// Phase 195 — the typed refusal for a DECLARED transparent union case that does not
     /// carry exactly one field. A transparent case is on the wire BARE, so its single field

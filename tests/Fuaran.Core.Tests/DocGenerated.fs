@@ -249,30 +249,52 @@ let encodeNodeJson (n: Node) : JVal = encNode n
 
 let encodeNodeKindJson (k: NodeKind) : JVal = encNodeKind k
 
-let private dObj (j: JVal) : Result<(string * JVal) list, string> =
+// Phase 337 — a refusal is Core's `DecodeError`: a code from the closed `DecodeCode` set, the
+// path from the value the outermost decoder was handed, what the position expected, and a
+// sentence. The code and the path are the ones the IDL interpreter reports for the same
+// document; the sentence is this layer's own.
+let private dFail (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
+    Error(DecodeError.make code expected message)
+
+// One step further from the root — what a refusal gains as it leaves a member or an item.
+let private dUnder (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error e -> Error(DecodeError.under step e)
+
+let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
     match j with
     | JObj fs -> Ok fs
-    | _ -> Error "expected an object"
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
-let private dTag (fs: (string * JVal) list) : Result<string, string> =
+// The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
+let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = "kind") with
     | Some(_, JStr t) -> Ok t
-    | _ -> Error "missing or non-string kind"
+    | Some _ -> dFail DecodeCode.WrongKind "string" "missing or non-string kind" |> dUnder (PathSegment.Key "kind")
+    | None ->
+        Error
+            { Decoder.missing "kind" with
+                Message = "missing or non-string kind" }
 
-let private dStr (j: JVal) : Result<string, string> =
+// A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
+let private dUnknown (expected: string) (message: string) : Result<'T, DecodeError> =
+    dFail DecodeCode.UnknownTag expected message |> dUnder (PathSegment.Key "kind")
+
+let private dStr (j: JVal) : Result<string, DecodeError> =
     match j with
     | JStr s -> Ok s
-    | _ -> Error "expected a string"
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"
 
-let private dInt (j: JVal) : Result<int, string> =
+let private dInt (j: JVal) : Result<int, DecodeError> =
     match j with
     | JInt i -> Ok i
-    | _ -> Error "expected an int"
+    | _ -> dFail DecodeCode.WrongKind "int" "expected an int"
 
-let private dBool (j: JVal) : Result<bool, string> =
+let private dBool (j: JVal) : Result<bool, DecodeError> =
     match j with
     | JBool b -> Ok b
-    | _ -> Error "expected a bool"
+    | _ -> dFail DecodeCode.WrongKind "bool" "expected a bool"
 
 // A whole-valued float renders without a decimal point, so it parses back as JInt.
 // WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
@@ -280,77 +302,85 @@ let private dBool (j: JVal) : Result<bool, string> =
 // to the string: a host that answered the string would hand a consumer a different tree on
 // the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
 // the float slot.
-let private dFloat (j: JVal) : Result<float, string> =
+let private dFloat (j: JVal) : Result<float, DecodeError> =
     match j with
     | JFloat f -> Ok f
     | JInt i -> Ok(float i)
     | JStr "NaN" -> Ok System.Double.NaN
     | JStr "Infinity" -> Ok System.Double.PositiveInfinity
     | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
-    | _ -> Error "expected a number"
+    | _ -> dFail DecodeCode.WrongKind "number" "expected a number"
 
-let private dUnit (_: JVal) : Result<unit, string> = Ok()
+let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()
 
 // Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
-let private dJson (j: JVal) : Result<JVal, string> = Ok j
+let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j
 
-let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =
+let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T list, DecodeError> =
     match j with
     | JArr xs ->
-        (Ok [], xs)
-        ||> List.fold (fun acc x ->
-            match acc with
-            | Error e -> Error e
-            | Ok items -> dec x |> Result.map (fun v -> v :: items))
-        |> Result.map List.rev
-    | _ -> Error "expected an array"
+        let rec go (i: int) (acc: 'T list) (rest: JVal list) =
+            match rest with
+            | [] -> Ok(List.rev acc)
+            | x :: tail ->
+                match dec x with
+                | Ok v -> go (i + 1) (v :: acc) tail
+                | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
 
-let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =
+        go 0 [] xs
+    | _ -> dFail DecodeCode.WrongKind "array" "expected an array"
+
+let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
     match j with
     | JObj fs ->
         (Ok [], fs)
         ||> List.fold (fun acc (k, v) ->
             match acc with
             | Error e -> Error e
-            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))
+            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
         |> Result.map (List.rev >> Map.ofList)
-    | _ -> Error "expected an object"
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
-let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =
+let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v
-    | None -> Error("missing required field '" + name + "'")
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
+    | None ->
+        Error
+            { Decoder.missing name with
+                Message = "missing required field '" + name + "'" }
 
-let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =
+let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T option, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> Result.map Some
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name) |> Result.map Some
     | None -> Ok None
 
-let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =
+let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) (dflt: 'T) : Result<'T, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt
 
 // An optional closure / opaque field: the value is a sentinel carrying nothing,
 // but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
-let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =
+let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
     Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
 
-let private decLocale (j: JVal) : Result<Locale, string> =
+let private decLocale (j: JVal) : Result<Locale, DecodeError> =
     match j with
     | JStr "EnGB" -> Ok Locale.EnGB
     | JStr "EnUS" -> Ok Locale.EnUS
-    | _ -> Error "not a Locale"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'EnGB', 'EnUS'" "not a Locale"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a Locale"
 
-let private decNumbering (j: JVal) : Result<Numbering, string> =
+let private decNumbering (j: JVal) : Result<Numbering, DecodeError> =
     match j with
     | JStr "NoNumbering" -> Ok Numbering.NoNumbering
     | JStr "DecimalNumbering" -> Ok Numbering.DecimalNumbering
     | JStr "LegalNumbering" -> Ok Numbering.LegalNumbering
-    | _ -> Error "not a Numbering"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'NoNumbering', 'DecimalNumbering', 'LegalNumbering'" "not a Numbering"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a Numbering"
 
-let private decHeadingDepth (j: JVal) : Result<HeadingDepth, string> =
+let private decHeadingDepth (j: JVal) : Result<HeadingDepth, DecodeError> =
     match j with
     | JStr "H1" -> Ok HeadingDepth.H1
     | JStr "H2" -> Ok HeadingDepth.H2
@@ -358,17 +388,19 @@ let private decHeadingDepth (j: JVal) : Result<HeadingDepth, string> =
     | JStr "H4" -> Ok HeadingDepth.H4
     | JStr "H5" -> Ok HeadingDepth.H5
     | JStr "H6" -> Ok HeadingDepth.H6
-    | _ -> Error "not a HeadingDepth"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'" "not a HeadingDepth"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a HeadingDepth"
 
-let private decListStyle (j: JVal) : Result<ListStyle, string> =
+let private decListStyle (j: JVal) : Result<ListStyle, DecodeError> =
     match j with
     | JStr "Bulleted" -> Ok ListStyle.Bulleted
     | JStr "Numbered" -> Ok ListStyle.Numbered
     | JStr "Lettered" -> Ok ListStyle.Lettered
     | JStr "Roman" -> Ok ListStyle.Roman
-    | _ -> Error "not a ListStyle"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Bulleted', 'Numbered', 'Lettered', 'Roman'" "not a ListStyle"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a ListStyle"
 
-let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
+let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dTag __fs |> Result.bind (fun __t ->
     match __t with
@@ -383,17 +415,17 @@ let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
     | "Figure" -> decFigureSpec j |> Result.map NodeKind.Figure
     | "Caption" -> decCaptionSpec j |> Result.map NodeKind.Caption
     | "Footnote" -> decFootnoteSpec j |> Result.map NodeKind.Footnote
-    | __other -> Error ("unknown node kind: " + __other)))
+    | __other -> dUnknown "one of 'Document', 'Section', 'Paragraph', 'ListBlock', 'ListItem', 'Table', 'Row', 'Cell', 'Figure', 'Caption', 'Footnote'" ("unknown node kind: " + __other)))
 
-and private decNode (j: JVal) : Result<Node, string> =
+and private decNode (j: JVal) : Result<Node, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "id" __fs dStr |> Result.bind (fun id ->
     decNodeKind j |> Result.bind (fun kind ->
     Ok { Id = id; Kind = kind })))
 
-and private decRun (j: JVal) : Result<Run, string> =
+and private decRun (j: JVal) : Result<Run, DecodeError> =
     match j with
-    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "kind")) ->
+    | JObj __fs ->
         dTag __fs |> Result.bind (fun __t ->
         match __t with
         | "Text" ->
@@ -418,10 +450,10 @@ and private decRun (j: JVal) : Result<Run, string> =
         | "Code" ->
             dReq "value" __fs dStr |> Result.bind (fun value ->
             Ok(Run.Code(value)))
-        | __other -> Error ("unknown Run case: " + __other))
-    | _ -> Error "expected a Run object"
+        | __other -> dUnknown "one of 'Text', 'Emphasis', 'Strong', 'InlineRef', 'InlineVariable', 'Link', 'Code'" ("unknown Run case: " + __other))
+    | _ -> dFail DecodeCode.WrongKind "object" "expected a Run object"
 
-and private decDocumentSpec (j: JVal) : Result<DocumentSpec, string> =
+and private decDocumentSpec (j: JVal) : Result<DocumentSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dOpt "title" __fs dStr |> Result.bind (fun title ->
     dReq "locale" __fs decLocale |> Result.bind (fun locale ->
@@ -429,66 +461,68 @@ and private decDocumentSpec (j: JVal) : Result<DocumentSpec, string> =
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Title = title; Locale = locale; Numbering = numbering; Children = children })))))
 
-and private decSectionSpec (j: JVal) : Result<SectionSpec, string> =
+and private decSectionSpec (j: JVal) : Result<SectionSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "heading" __fs (dList decRun) |> Result.bind (fun heading ->
     dReq "depth" __fs decHeadingDepth |> Result.bind (fun depth ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Heading = heading; Depth = depth; Children = children }))))
 
-and private decParagraphSpec (j: JVal) : Result<ParagraphSpec, string> =
+and private decParagraphSpec (j: JVal) : Result<ParagraphSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "runs" __fs (dList decRun) |> Result.bind (fun runs ->
     Ok { Runs = runs }))
 
-and private decListBlockSpec (j: JVal) : Result<ListBlockSpec, string> =
+and private decListBlockSpec (j: JVal) : Result<ListBlockSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "style" __fs decListStyle |> Result.bind (fun style ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Style = style; Children = children })))
 
-and private decListItemSpec (j: JVal) : Result<ListItemSpec, string> =
+and private decListItemSpec (j: JVal) : Result<ListItemSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Children = children }))
 
-and private decTableSpec (j: JVal) : Result<TableSpec, string> =
+and private decTableSpec (j: JVal) : Result<TableSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dOpt "caption" __fs (dList decRun) |> Result.bind (fun caption ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Caption = caption; Children = children })))
 
-and private decRowSpec (j: JVal) : Result<RowSpec, string> =
+and private decRowSpec (j: JVal) : Result<RowSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "isHeader" __fs dBool |> Result.bind (fun isHeader ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { IsHeader = isHeader; Children = children })))
 
-and private decCellSpec (j: JVal) : Result<CellSpec, string> =
+and private decCellSpec (j: JVal) : Result<CellSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "runs" __fs (dList decRun) |> Result.bind (fun runs ->
     Ok { Runs = runs }))
 
-and private decFigureSpec (j: JVal) : Result<FigureSpec, string> =
+and private decFigureSpec (j: JVal) : Result<FigureSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "source" __fs dStr |> Result.bind (fun source ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Source = source; Children = children })))
 
-and private decCaptionSpec (j: JVal) : Result<CaptionSpec, string> =
+and private decCaptionSpec (j: JVal) : Result<CaptionSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "runs" __fs (dList decRun) |> Result.bind (fun runs ->
     Ok { Runs = runs }))
 
-and private decFootnoteSpec (j: JVal) : Result<FootnoteSpec, string> =
+and private decFootnoteSpec (j: JVal) : Result<FootnoteSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     Ok { Children = children }))
 
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
-let decodeNode (s: string) : Result<Node, string> =
-    Json.parse s |> Result.bind decNode
+/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter
+/// reports for the same document, and this layer's sentence (`DecodeError.describe`).
+let decodeNode (s: string) : Result<Node, DecodeError> =
+    Decoder.parse s |> Result.bind decNode
 
 let private witnessKindTag (n: Node) : string =
     match n.Kind with
