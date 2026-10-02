@@ -192,18 +192,24 @@ let planFootprint (op: PlanOp) : Footprint =
         { Reads = noAddr
           StructureWrites = noAddr
           ContentWrites = Set.singleton id
-          UnknownParentWrites = noAddr }
+          UnknownParentWrites = noAddr
+          SlotReads = Set.empty
+          SlotWrites = Set.empty }
     | Retitle(id, _)
     | SetShipped id ->
         { Reads = Set.singleton id
           StructureWrites = noAddr
           ContentWrites = Set.singleton id
-          UnknownParentWrites = noAddr }
+          UnknownParentWrites = noAddr
+          SlotReads = Set.empty
+          SlotWrites = Set.empty }
     | AddDep(id, dep) ->
         { Reads = Set.ofList [ id; dep ]
           StructureWrites = Set.singleton id
           ContentWrites = noAddr
-          UnknownParentWrites = noAddr }
+          UnknownParentWrites = noAddr
+          SlotReads = Set.empty
+          SlotWrites = Set.empty }
 
 let encPlanOp (op: PlanOp) : string =
     match op with
@@ -328,7 +334,9 @@ let blindFootprint (_: string) : Footprint =
     { Reads = noAddr
       StructureWrites = noAddr
       ContentWrites = noAddr
-      UnknownParentWrites = noAddr }
+      UnknownParentWrites = noAddr
+      SlotReads = Set.empty
+      SlotWrites = Set.empty }
 
 /// Three lanes of three distinct ops each — deliberately larger than the defect, so the shrinker
 /// has something to reduce and the assertion below can prove it did.
@@ -571,7 +579,10 @@ let foldConfluenceTests =
               let shapes =
                   [ MergeConflictShape.ConcurrentUpdate
                     MergeConflictShape.InsertPositionClash
-                    MergeConflictShape.MoveVsRemove ]
+                    MergeConflictShape.MoveVsRemove
+                    // Phase 340 — the slot is part of the shape's identity.
+                    MergeConflictShape.SlotClash "tier"
+                    MergeConflictShape.SlotClash "thinking" ]
 
               let report =
                   FoldConfluence.canonicalConflictReport id (shapes |> List.map conflictOf)
@@ -580,8 +591,10 @@ let foldConfluenceTests =
                   (report.Split '\n' |> List.ofArray)
                   [ "concurrent-update|n1|op-left|op-right"
                     "insert-position-clash|n1|op-left|op-right"
-                    "move-vs-remove|n1|op-left|op-right" ]
-                  "each shape renders as its own line"
+                    "move-vs-remove|n1|op-left|op-right"
+                    "slot-clash:thinking|n1|op-left|op-right"
+                    "slot-clash:tier|n1|op-left|op-right" ]
+                  "each shape renders as its own line — a slot clash per slot"
 
               for s in shapes do
                   for t in shapes do

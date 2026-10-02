@@ -606,10 +606,8 @@ module internal StreamLaws =
         // Each op content-writes its own encoding, so two lanes holding the same op interfere and the
         // reconcile laws reach the refusal as well as the fold.
         let footprintOf (op: 'Op) : Footprint =
-            { Reads = Set.empty
-              StructureWrites = Set.empty
-              ContentWrites = Set.singleton (sw.Encode op)
-              UnknownParentWrites = Set.empty }
+            { Footprint.empty with
+                ContentWrites = Set.singleton (sw.Encode op) }
 
         let renderReconcile (r: Result<'Op list, ReconcileFault<'Op, 'Rej>>) =
             match r with

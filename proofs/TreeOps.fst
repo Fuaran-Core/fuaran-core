@@ -409,34 +409,36 @@ and apply_all (os:list op) (t:tree) : Tot (outcome tree rejection) (decreases os
    ====================================================================================== *)
 
 let empty_fp : footprint =
-  { reads = []; structure_writes = []; content_writes = []; unknown_parent_writes = [] }
+  { reads = []; structure_writes = []; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
 
 let union_fp (a b:footprint) : Tot footprint =
   { reads                 = union a.reads b.reads;
     structure_writes      = union a.structure_writes b.structure_writes;
     content_writes        = union a.content_writes b.content_writes;
-    unknown_parent_writes = union a.unknown_parent_writes b.unknown_parent_writes }
+    unknown_parent_writes = union a.unknown_parent_writes b.unknown_parent_writes;
+    slot_reads            = union a.slot_reads b.slot_reads;
+    slot_writes           = union a.slot_writes b.slot_writes }
 
 let rec op_fp (o:op) : Tot footprint (decreases o) =
   match o with
   | InsertChild p n ->
     let inserted = ids n in
     { reads = p :: inserted; structure_writes = [p];
-      content_writes = inserted; unknown_parent_writes = [] }
+      content_writes = inserted; unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
   | RemoveNode x ->
     { reads = [x]; structure_writes = [];
-      content_writes = [x]; unknown_parent_writes = [x] }
+      content_writes = [x]; unknown_parent_writes = [x]; slot_reads = []; slot_writes = [] }
   | MoveNode x np ->
     { reads = [x; np]; structure_writes = [np];
-      content_writes = [x]; unknown_parent_writes = [x] }
+      content_writes = [x]; unknown_parent_writes = [x]; slot_reads = []; slot_writes = [] }
   | ReorderChildren p order ->
     { reads = p :: order; structure_writes = [p];
-      content_writes = []; unknown_parent_writes = [] }
+      content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
   | Batch inner -> fp_all inner
   | UpdateNode n ->
     let x = tid_of n in
     { reads = [x]; structure_writes = [];
-      content_writes = [x]; unknown_parent_writes = [x] }
+      content_writes = [x]; unknown_parent_writes = [x]; slot_reads = []; slot_writes = [] }
 and fp_all (os:list op) : Tot footprint (decreases os) =
   match os with
   | [] -> empty_fp
@@ -1326,7 +1328,10 @@ let disjoint_sym (#a:eqtype) (x y:list a)
 let independent_sym (fa fb:footprint)
   : Lemma (requires independent fa fb) (ensures independent fb fa)
   = disjoint_sym fa.content_writes fb.content_writes;
-    disjoint_sym fa.structure_writes fb.structure_writes
+    disjoint_sym fa.structure_writes fb.structure_writes;
+    (* Phase 340 — the slot clash is symmetric by membership; the two slots-against-node clauses
+       are each other's mirror and swap places. *)
+    slot_clash_nil_sym fa fb
 
 let is_leaf (o:op) : Tot bool = match o with Batch _ -> false | _ -> true
 
@@ -1879,10 +1884,11 @@ let leaf_independence_diamond ()
 
          3. `relocation_footprints_coincide` — and the two ops carry THE SAME FOOTPRINT. A move
             and a batch that removes and then reorders produce byte-identical records across all
-            four address sets, because `union_fp` is a union and neither the op's shape nor the
-            direction of its structural write survives the fold.
+            the address sets (the four node sets, and the two slot sets Phase 340 added, which are
+            empty for every skeleton op), because `union_fp` is a union and neither the op's shape
+            nor the direction of its structural write survives the fold.
 
-       Together (`relocation_clause_is_necessary`) they say: no predicate over the four address
+       Together (`relocation_clause_is_necessary`) they say: no predicate over these address
        sets can free the safe pair without also freeing the fatal one. A single witness refutes a
        universal, and this is that witness — so the tightening needs a footprint that can NAME
        the difference (a fifth address kind carrying the relocation's kind, or a destroyed-subtree
@@ -1910,7 +1916,10 @@ let but_for_relocation (a b:footprint) : Tot bool =
   disjoint a.content_writes b.content_writes &&
   disjoint a.content_writes b.reads &&
   disjoint b.content_writes a.reads &&
-  disjoint a.structure_writes b.structure_writes
+  disjoint a.structure_writes b.structure_writes &&
+  is_empty (slot_clash a b) &&
+  is_empty (slots_against_node a b) &&
+  is_empty (slots_against_node b a)
 
 (* ---- the witness: one tree, a move, a remove-shaped batch with the SAME footprint, and a
    structural write under a parent inside the relocated subtree ---- *)
@@ -2328,7 +2337,15 @@ let independent_union_left (fo fr fb:footprint)
     inter_nil_iff fb.content_writes fr.reads;
     inter_nil_iff fu.structure_writes fb.structure_writes;
     inter_nil_iff fo.structure_writes fb.structure_writes;
-    inter_nil_iff fr.structure_writes fb.structure_writes
+    inter_nil_iff fr.structure_writes fb.structure_writes;
+    (* Phase 340 — the slot clauses descend by membership: every member of a side's slot clash or
+       slots-against-node set is a member of the union's, which is empty. *)
+    nil_of_sub (slot_clash fo fb) (slot_clash fu fb);
+    nil_of_sub (slot_clash fr fb) (slot_clash fu fb);
+    nil_of_sub (slots_against_node fo fb) (slots_against_node fu fb);
+    nil_of_sub (slots_against_node fr fb) (slots_against_node fu fb);
+    nil_of_sub (slots_against_node fb fo) (slots_against_node fb fu);
+    nil_of_sub (slots_against_node fb fr) (slots_against_node fb fu)
 
 let independent_union_right (fa fo fr:footprint)
   : Lemma (requires independent fa (union_fp fo fr))

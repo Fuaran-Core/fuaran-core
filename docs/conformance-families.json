@@ -479,7 +479,7 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": ["independence-diamond"],
-      "cases": "600",
+      "cases": "900",
       "adequacy": "guarded-reached",
       "refusal": "none"
     },

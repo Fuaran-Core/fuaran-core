@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-02 — D106: a stability class is a fact about what an OLD document does under the NEW vocabulary, never about the emitter alone
+## 2026-10-02 — D107: a stability class is a fact about what an OLD document does under the NEW vocabulary, never about the emitter alone
 
 **Recorded by Phase 304. `src/Fuaran.Core.Idl.Codegen/Diff.fs` (`classifyFieldAdd`, the
 `FieldOptionalityChanged` rule and its descriptor rows), `Emit/TypeScript.fs` (`dInt`),
@@ -9,7 +9,7 @@
 `tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs`, `IdlThreeHostTests.fs`; rides the `0.34.0` draft
 (STABILITY.md, "Phase 304").**
 
-**D106.1 — the grading rule.** The table defines its classes by what happens to documents: `additive`
+**D107.1 — the grading rule.** The table defines its classes by what happens to documents: `additive`
 keeps every previously-valid document valid; `breaking-wire` is a document that was valid and is not,
 or whose bytes moved. The classifier nevertheless graded two rows by what an EMITTER does, and got
 both backwards: a required field added, and a field tightened to `required`, were `breaking-for-emitters`
@@ -22,7 +22,7 @@ does under the new vocabulary — refused, decoded to a different value, re-enco
 or unchanged.** What emitters must do is reported beside it (`BreaksEmitters`), and what consumers'
 source must do on the F# axis; neither decides the class.
 
-**D106.2 — the rows it moves.** A required field added, `optional` → `required` and `omitDefault` →
+**D107.2 — the rows it moves.** A required field added, `optional` → `required` and `omitDefault` →
 `required` are `breaking-wire`: the major moves and an old consumer is `Foreign`, where the minor let a
 `Behind` consumer tolerate a profile under which every stored document of the kind is refused.
 `required` → `optional` is `additive`: every old document carries the member, decodes to the same
@@ -32,7 +32,7 @@ document a NEW emitter writes, and a decoder that predates the change refuses th
 lag, exactly as for a new enum case, which is what the minor's `Behind` already means; on the F# axis
 the member becomes an `option`, which `full-literal-construction` carries.
 
-**D106.3 — `required` → `omitDefault` stays `breaking-wire`, and the precedent is the moved identity
+**D107.3 — `required` → `omitDefault` stays `breaking-wire`, and the precedent is the moved identity
 default.** The decoder reads a member sitting on the default and the encoder then omits it, so every
 stored document carrying the default value re-encodes to different bytes. That is the argument the
 `omitDefault` → `omitDefault` (default moved) row already rests on — omit-at-default is wire-visible —
@@ -40,11 +40,11 @@ and a hash-chained store re-encoding such a document would not reproduce it. The
 expected every loosening to be "not a major"; for this one the table's own definition says otherwise,
 and the table wins.
 
-**D106.4 — int → float is `additive` by the same test**, which Phase 252 ruled and 293 carried into
+**D107.4 — int → float is `additive` by the same test**, which Phase 252 ruled and 293 carried into
 the descriptor table: old documents decode and re-encode byte-identically under the widened
 vocabulary. Phase 304 moves nothing there; the evolution differential holds it.
 
-**D106.5 — held three ways.** (i) `field_additive_monotone` (`proofs/WireVersioning.fst` §8): every
+**D107.5 — held three ways.** (i) `field_additive_monotone` (`proofs/WireVersioning.fst` §8): every
 field-add row kept off the major leaves every document that does not carry the added member decoding
 identically through the tolerant seam. Its hypothesis is "not retired" rather than "`Additive`"
 because `breaking-for-emitters` and `host-surface-only` also promise old documents untouched — a
@@ -55,13 +55,87 @@ differential decodes a corpus of old documents under seven perturbed vocabularie
 interpreter and the generated TypeScript decoder and asserts the class predicts both. (iii) The
 section-7 row is restated over the corrected class (`required_field_addition_is_foreign_not_behind`).
 
-**D106.6 — the int range is the interpreter's on every host.** The narrowing case found the generated
+**D107.6 — the int range is the interpreter's on every host.** The narrowing case found the generated
 TypeScript `dInt` reading any integral number, where the interpreter's and the compiled F# host's int
 is 32-bit: an old document carrying 2^31 at a slot narrowed to `int` decoded on one host only. The
 three-way differential never reached it, because an authored `VInt` cannot exceed the range. `dInt` now
 refuses outside [-2^31, 2^31 - 1], and a block of the three-way differential plants 2^31, -2^31 - 1 and
 2^53 at the first int slot of drawn nodes in every certification vocabulary and requires all three
 hosts to refuse, beside an in-range control all three accept.
+
+## 2026-10-02 — D106: a footprint names the slot it writes; a whole-node write stays the conservative default; the keyed witness is not widened for a key no skeleton op can use
+
+**Context.** Phase 340. A `Footprint` had four sets, all node-granular, so any write to part of a node
+was a write to the node: two ops touching different fields of one node interfered, and the fold halted
+on a pair that commutes. The imprecision had a measured cost in a consumer that maps every op of a
+roadmap onto this record — two lanes writing different fields of one phase halted a whole side as an
+operator-owned conflict no verb could resolve, twice, and each new field-versus-field pair would have
+needed another hand-written safe class — and in keyed domains, where two lanes editing different keys
+under one holder halted at the holder and the report named only the holder. Phase 334 had set out to
+add a keyed-slot set and was retired on a refuted premise (two lanes placing different nodes into one
+keyed slot do NOT fold clean; they halt at the holder), leaving the label as the residue.
+
+**Decision.**
+
+1. **A footprint carries two slot sets, not one.** `SlotWrites` and `SlotReads`, each a set of
+   `(node id, slot name)` pairs. The shard asked for a fifth set and for `Footprint.readingSlot` — a
+   reader of one field that does not depend on a write to another — and a slot read cannot be
+   expressed in a write set or in the whole-node `Reads` (a whole-node read collides with every slot
+   write of the node, which is exactly the dependence the reader is declining). Two sets mirror
+   `Reads` / `ContentWrites` at slot granularity; a read set that was not there would have been added
+   by the first consumer that needed it, as a second breaking widening.
+2. **A slot access is compared at the slot against another slot access, and as an access of the node
+   against everything else.** Two writes to different slots of one node commute; a write and an access
+   of ONE slot are `Interference.SlotClash`, carrying the slots. A slot write of `n` collides with a
+   content write, a read or a structure write of `n`, and a slot read of `n` with a content write of
+   `n` (`LeftSlotsRightNode` / `RightSlotsLeftNode`). **A whole-node write stays the conservative
+   default**: it is a write of every slot, so it serialises against each. The rule is what keeps every
+   existing footprint sound without edit — a domain that declares no slot access gets the four-set
+   verdict it always got, byte for byte — and it is where the precision comes from: a consumer narrows
+   a write to a slot ONLY where it knows the op writes that slot and nothing else, and every write it
+   has not narrowed keeps refusing every slot. Proved sound at a slot store (`proofs/DagFold.fst`
+   section 17): different slots commute at every slot, one slot does not, a whole-node write is
+   refused against each slot.
+3. **One helper behind both readers.** `Footprint.slotClash` and `Footprint.slotsAgainstNode` compute
+   the slot clauses' sets, and `Ops.interference` and `Dag.conflicts` both read them, so arbitration
+   and the fold name the same slot by construction (the Phase 248 shape). `Dag.conflicts` reports
+   `MergeConflictShape.SlotClash slot` at the node — the slot rides the shape because the conflict's
+   address is the node — and the node-level slot collisions as `ConcurrentUpdate` at the node. A slot
+   clash is its own address space and is not deduplicated against the node-keyed shapes: a pair that
+   both touches a node whole and clashes on one of its slots reports both, because the slot is the
+   thing a repair has to look at.
+4. **Two writes of the same payload to one slot are still a `SlotClash`.** The footprint sees no
+   payload. The consumer's own classifier decides whether two identical writes are one intent
+   recorded twice, as it does today for identical whole-node writes; Core reports the clash and
+   decides nothing (GP6).
+5. **`KeyedWitness` is NOT widened with the key a keyed child sits under, and `Ops.footprintKeyed`
+   declares no slot write.** The shard asked for both so a keyed placement could be declared a write to
+   `(holder, key)` "where the op only places the keyed child". Measured against the tree, no skeleton
+   op does that: the only ways to write a keyed slot are `UpdateNode` of the holder and `InsertChild`
+   of a subtree carrying it, both of which rewrite the holder whole, and a pure script cannot say which
+   keyed position — or which field — a payload changed (`KeyedSlotFoldTests`, Phase 334's pin, now
+   with the slot cases beside it). A key in the witness would have had no op to serve, and a
+   `footprintKeyed` that narrowed an `UpdateNode` to its keyed slots would have declared two rewrites
+   of one holder independent — which they are not. A domain that places by key lowers its OWN op with
+   `Footprint.slotEdit holder key`, which needs no witness; the engine's keyed walk is unchanged. This
+   is the phase's premise finding, reported rather than built around.
+6. **The skeleton law families do not draw slot pairs; the domain-op family counts them.** No skeleton
+   op writes a slot, so `concurrencyLaws` and `keyedArbitrationLaws` have no slot pair to draw and
+   are not pretended to. `Conformance.footprintLawsAt` — the family at a domain's own ops, where slot
+   footprints live — gains a cell (a slot clash is named at the slot by the fold and by arbitration
+   alike) and two demands (the pairs independent ONLY because slots are compared at the slot, and the
+   pairs that clash on a slot), both vacuous BY DECLARATION for a footprint that declares no slot
+   access, so the family's verdict on such a domain is unchanged.
+
+**Consequences.** Breaking (source) on the open `0.34.0` draft, which already is: every full
+`Footprint` literal gains two fields, every exhaustive match on `Interference` three arms and on
+`MergeConflictShape` one. The record is on no wire. The consumer that motivated the phase can retire
+its hand-written field classes once it lowers its field edits to `slotEdit` and raises its pin; until
+it does, it sees exactly what it saw. Keyed domains stop halting on edits to different keys only for
+ops they lower by key themselves — the skeleton `UpdateNode` of a holder keeps halting at the holder,
+by construction, and the label on that halt is unchanged.
+
+
 ## 2026-10-02 — D105: a transparent case never carries what can be an object; at a float slot the §7 tokens are read back, not refused; a map's value is its key set; a field-less declaration is a marker type
 
 **Recorded by Phase 303. `src/Fuaran.Core.Idl/Idl.fs` (`Decode`, `FloatToken`), `Artifact.fs`,

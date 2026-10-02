@@ -312,7 +312,9 @@ let private everyFootprint =
                       { Reads = r
                         StructureWrites = s
                         ContentWrites = c
-                        UnknownParentWrites = u } ]
+                        UnknownParentWrites = u
+                        SlotReads = Set.empty
+                        SlotWrites = Set.empty } ]
 
 /// The clause as the other side reads it: overlaps are their own mirror, directional clauses swap.
 let private mirror (i: Interference) =
@@ -323,6 +325,9 @@ let private mirror (i: Interference) =
     | Interference.SameParent ps -> Interference.SameParent ps
     | Interference.LeftUnknownParent(relocated, structural) -> Interference.RightUnknownParent(structural, relocated)
     | Interference.RightUnknownParent(structural, relocated) -> Interference.LeftUnknownParent(relocated, structural)
+    | Interference.SlotClash slots -> Interference.SlotClash slots
+    | Interference.LeftSlotsRightNode nodes -> Interference.RightSlotsLeftNode nodes
+    | Interference.RightSlotsLeftNode nodes -> Interference.LeftSlotsRightNode nodes
 
 let private clauseName (i: Interference) =
     match i with
@@ -332,6 +337,9 @@ let private clauseName (i: Interference) =
     | Interference.SameParent _ -> "SameParent"
     | Interference.LeftUnknownParent _ -> "LeftUnknownParent"
     | Interference.RightUnknownParent _ -> "RightUnknownParent"
+    | Interference.SlotClash _ -> "SlotClash"
+    | Interference.LeftSlotsRightNode _ -> "LeftSlotsRightNode"
+    | Interference.RightSlotsLeftNode _ -> "RightSlotsLeftNode"
 
 [<Tests>]
 let interferenceTests =
