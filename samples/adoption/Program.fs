@@ -148,7 +148,184 @@ let genDomainOp (rng: ConfRng.T) : DomainOp * ConfRng.T =
     let t, r2 = ConfRng.intBelow 3 r1
     SetText(id, sprintf "t%d" t), r2
 
-// ---- 4. certify + demonstrate the op-stream ----
+// ---- 5. the invocable seams: an artifact with holes, a capability registry, a query registry ----
+//
+// Phase 254. The same domain, offered to a caller (a model, a UI) as something to INVOKE rather
+// than to edit: a template outline whose `?name` notes are holes, a capability that fills them, and
+// a query that reads notes back. Same shape as above — certify the seam at your own registry and
+// body, then use exactly the dispatch path you certified.
+
+/// A Note whose text is `?name` is a hole: an integer reading from 0 to 100. Its ADDRESS is the
+/// id-path from the root (`report/temp`), which this witness mints; arguments are keyed by it.
+let private holesOf (tree: Item) : HoleDecl list =
+    let rec walk (prefix: string) (i: Item) : HoleDecl list =
+        let addr = if prefix = "" then i.Id else prefix + "/" + i.Id
+
+        let own: HoleDecl list =
+            if i.Kind = Note && i.Text.StartsWith "?" then
+                [ { Addr = addr
+                    Name = i.Text.Substring 1
+                    Kind = ValueHole(IntRange(0, 100)) } ]
+            else
+                []
+
+        own @ List.collect (walk addr) i.Children
+
+    walk "" tree
+
+let artifactW: ArtifactWitness<Item, string> =
+    { Tree = nodew
+      IdW = idw
+      Holes = holesOf
+      Effect = fun _ -> Effect.pureDeterministic
+      Bind =
+        fun addr arg tree ->
+            let id = addr.Substring(addr.LastIndexOf '/' + 1)
+
+            match arg with
+            | ValueArg v ->
+                match Tree.updateNode nodew idw id (fun n -> { n with Text = v }) tree with
+                | Some t -> Ok t
+                | None -> Error("no item at " + addr)
+            | SlotArg _ -> Error "this domain declares no slot holes" }
+
+let template =
+    { Id = "report"
+      Kind = Section
+      Text = "Reading"
+      Children =
+        [ { Id = "temp"
+            Kind = Note
+            Text = "?celsius"
+            Children = [] } ] }
+
+let celsiusAddr = "report/temp"
+let fillId = "outline.fill"
+
+/// The capability: the template's signature (its holes, their spaces, its effect), placed on a server.
+let fillCapability =
+    Capability.create fillId (Function.signature artifactW "fill-reading" template) Server
+
+/// Default deny is this registry's shape: only what is registered here can be dispatched.
+let capabilities =
+    Registry.register fillCapability Registry.empty
+    |> Result.defaultWith (fun e -> failwith (InvokeError.describe e))
+
+/// The host's body. It runs only for a call the registry accepted. A reading above 90 goes to a
+/// slower checker that has not answered yet — the PENDING outcome; anything else settles with the
+/// filled note.
+let fillBody (args: (string * string) list) : Deferred<string> =
+    match args |> List.tryFind (fun (a, _) -> a = celsiusAddr) with
+    | Some(_, v) when
+        (match System.Int32.TryParse v with
+         | true, n -> n > 90
+         | _ -> false)
+        ->
+        Pending
+    | _ ->
+        let bound = args |> List.map (fun (a, v) -> a, ValueArg v) |> Map.ofList
+
+        match Function.apply artifactW bound template with
+        | Ok filled -> Ready(filled.Children |> List.map _.Text |> String.concat " ")
+        | Error e -> Failed(sprintf "%A" e)
+
+/// The calls a model could make — settled, pending and every refusal, including a hole's NAME
+/// where its address belongs.
+let genCall (rng: ConfRng.T) : (string * (string * string) list) * ConfRng.T =
+    let pick, r1 = ConfRng.intBelow 6 rng
+    let v, r2 = ConfRng.intBelow 91 r1
+
+    let call =
+        match pick with
+        | 0 -> fillId, [ celsiusAddr, string v ] // settles
+        | 1 -> fillId, [ celsiusAddr, string (91 + v % 10) ] // pending
+        | 2 -> fillId, [ celsiusAddr, "500" ] // refused: out of the hole's space
+        | 3 -> fillId, [ "celsius", "20" ] // refused: a hole's NAME is not its address
+        | 4 -> fillId, [] // refused: the required hole is unbound
+        | _ -> "outline.delete", [ celsiusAddr, "20" ] // refused: not registered
+
+    call, r2
+
+let capabilitySeam: CapabilitySeamWitness<string> =
+    { Registry = capabilities
+      Body = fun args _ () -> fillBody args
+      Dispatch = Registry.dispatch capabilities // the host path: delegate to Core's dispatch
+      GenCall = genCall }
+
+/// The query: the notes under a section, by the section's id. Parameters are keyed by NAME.
+let notesQuery: Query =
+    { Id = "outline.notes"
+      Params =
+        [ ({ Name = "section"
+             Type = StringType
+             Required = true }
+          : QueryParam) ]
+      ResultSchema = [ "text", StringType ]
+      Effect = Effect.pureDeterministic
+      Source = Ref "outline"
+      TimeoutMs = None
+      PageSize = None }
+
+let queries =
+    QueryRegistry.register notesQuery QueryRegistry.empty
+    |> Result.defaultWith (fun e -> failwith (QueryError.describe e))
+
+/// The resolver: a table of the declared schema, or PENDING for the archive, which is fetched
+/// elsewhere and has not arrived.
+let notesResolver (args: (string * Cell) list) (_: Query) : Deferred<QueryResult> =
+    match args |> List.tryPick (fun (n, c) -> if n = "section" then Some c else None) with
+    | Some(Str "archive") -> Pending
+    | Some(Str section) ->
+        let texts =
+            match Tree.tryFind nodew idw section sampleTree with
+            | Some s ->
+                s.Children
+                |> List.filter (fun c -> c.Kind = Note)
+                |> List.map (fun c -> Str c.Text)
+            | None -> []
+
+        Ready
+            { Rows =
+                { Schema = [ "text", StringType ]
+                  Columns =
+                    [ ({ Name = "text"
+                         Type = StringType
+                         Cells = texts }
+                      : Column) ] }
+              PageNum = 0
+              TotalRowCount = Some texts.Length
+              NextPageToken = None }
+    | _ -> Failed "no section was named"
+
+let genQuery (rng: ConfRng.T) : (string * (string * Cell) list) * ConfRng.T =
+    let pick, r1 = ConfRng.intBelow 6 rng
+    let section, r2 = ConfRng.choose [ "root"; "a"; "ghost" ] r1
+
+    let call =
+        match pick with
+        | 0 -> "outline.notes", [ "section", Str section ] // settles
+        | 1 -> "outline.notes", [ "section", Str "archive" ] // pending
+        | 2 -> "outline.notes", [ "section", Int 3 ] // refused: the wrong type
+        | 3 -> "outline.notes", [] // refused: the required parameter is unbound
+        | 4 -> "outline.notes", [ "section", Null ] // refused: bound to no value
+        | _ -> "outline.drop", [ "section", Str section ] // refused: not registered
+
+    call, r2
+
+let querySeam: QuerySeamWitness =
+    { Queries = queries
+      Resolver = notesResolver
+      Dispatch = QueryRegistry.dispatch queries
+      GenQuery = genQuery }
+
+let private outcome (r: Result<Deferred<'v>, string>) : string =
+    match r with
+    | Ok(Ready v) -> sprintf "settled: %A" v
+    | Ok Pending -> "pending"
+    | Ok(Failed m) -> "unreachable: " + m
+    | Error why -> why // the refusal reads as one sentence: "Refused: ..."
+
+// ---- 4. certify + demonstrate the op-stream (and, 5, the seams) ----
 
 [<EntryPoint>]
 let main _ =
@@ -193,6 +370,44 @@ let main _ =
         "  [%s] op-stream re-expression (append / replay / verifyChain + portable JSONL)"
         (if streamOk then "PASS" else "FAIL")
 
-    let green = (laws |> List.forall (fun r -> r.Passed)) && streamOk
+    // the seams: certify at YOUR registry, body and host path, then dispatch through that same path
+    let seamLaws =
+        Conformance.capabilityLawsAt capabilitySeam 4 200
+        @ Conformance.queryLawsAt querySeam 5 200
+
+    for r in seamLaws do
+        printfn "  [%s] %s" (if r.Passed then "PASS" else "FAIL") r.Law
+
+    printfn
+        "\n  the capability's arguments are keyed by hole address: %s"
+        (Json.render (Function.toJsonSchema fillCapability.Signature))
+
+    printfn "  its invocation key for 20 degrees: %s" (Capability.invocationKey fillCapability [ celsiusAddr, "20" ])
+
+    let call id args =
+        Registry.dispatch capabilities id args (fun _ () -> fillBody args)
+        |> Result.mapError InvokeError.describe
+        |> outcome
+
+    printfn "  fill 20      -> %s" (call fillId [ celsiusAddr, "20" ])
+    printfn "  fill 95      -> %s" (call fillId [ celsiusAddr, "95" ])
+    printfn "  fill by name -> %s" (call fillId [ "celsius", "20" ])
+
+    let notes section =
+        let args = [ "section", Str section ]
+
+        QueryRegistry.dispatch queries "outline.notes" args (notesResolver args)
+        |> Result.map (Deferred.map (fun r -> r.Rows.Columns |> List.collect _.Cells))
+        |> Result.mapError QueryError.describe
+        |> outcome
+
+    printfn "  notes(root)  -> %s" (notes "root")
+    printfn "  notes(archive) -> %s" (notes "archive")
+
+    let green =
+        (laws |> List.forall (fun r -> r.Passed))
+        && streamOk
+        && (seamLaws |> List.forall (fun r -> r.Passed))
+
     printfn "\nconformance: %s" (if green then "GREEN" else "FAILED")
     if green then 0 else 1

@@ -1,17 +1,22 @@
 # Adopting a domain over `Fuaran.Core.*`
 
 The 30-minute on-ramp for re-expressing a domain spine (UI / Calc / Documents / CAD / Office) over
-the shared substrate. The runnable template lives at
-[`samples/adoption`](../samples/adoption/Program.fs) — read it alongside this guide; the worked
-real-world example is the [Documents adoption pilot](../../Fuaran-Documents/docs/CORE-ADOPTION-PILOT.md).
+the shared substrate. The runnable template — and the worked example every section below refers
+to — lives in this repository at [`samples/adoption`](../samples/adoption/Program.fs): a tiny
+outline domain taken through every step, the invocable seams of [step 4](#4-offer-the-domain-as-something-to-invoke)
+included. Read it alongside this guide; `dotnet run --project samples/adoption` prints its
+conformance report.
 
 The shape is always the same: **map your types to the four witnesses → certify → re-express the
 op-stream.** Each step is a few lines.
 
 ## 0. Reference the packages
 
-Add `Fuaran.Core.{Tree,Ops,OpStream,Conformance}` (and `.Wire` if you encode ops as JSON) from the
-local feed / GitHub Packages. All are Apache-2.0, FSharp.Core-only.
+Add `Fuaran.Core.{Tree,Ops,OpStream,Conformance}` (and `.Wire` if you encode ops as JSON;
+`.Function` and `.Query` for step 4) from nuget.org. All are Apache-2.0 and depend on FSharp.Core
+only at run time. Each package carries its XML documentation file, so the editor shows the doc
+comments; [`README.md`](../README.md) stamps each surface it names with the version it arrived in, so
+check a stamp against the version you restored.
 
 ## 1. Map your types to the witnesses
 
@@ -87,7 +92,67 @@ OpStream.verifyChain OpStream.defaultHash streamW records          // tamper-evi
 OpStream.fromJsonl streamW jsonl  : Result<_, string>              // portable — runs in-browser
 ```
 
-## The caveats the pilot surfaced (read these before you start)
+## 4. Offer the domain as something to invoke
+
+Steps 1 to 3 make your tree editable through Core. The invocable seams make it *callable*: a model
+or a UI invokes a typed capability or runs a typed query, and your host supplies the body. The
+shape is the same — **declare → certify at your own seam → dispatch through the path you
+certified** — and [`samples/adoption`](../samples/adoption/Program.fs) section 5 is the worked
+example, end to end.
+
+**An artifact with holes.** An `ArtifactWitness<'Node,'Id>` adds three things to your node witness:
+`Holes` (each hole your tree declares, with its value space and its ADDRESS — the absolute id-path,
+which your witness mints), `Effect` (the two-axis effect class) and `Bind` (lower one argument to
+your own edit). `Function.signature w name tree` derives the signature a caller sees.
+
+```fsharp
+let artifactW : ArtifactWitness<Item,string> =
+    { Tree = nodew; IdW = idw; Holes = holesOf; Effect = fun _ -> Effect.pureDeterministic; Bind = bind }
+
+let fill = Capability.create "outline.fill" (Function.signature artifactW "fill-reading" template) Server
+let capabilities = Registry.register fill Registry.empty       // Result: a duplicate id is refused
+```
+
+Arguments are keyed by the hole's ADDRESS (`"report/temp"`), never its name (`"celsius"`): that is
+the hygiene law, and `Function.toJsonSchema`'s properties use the same keys, so a model sees the
+address. A capability declares no result type — the body's `'v` is yours.
+
+**A query registry.** A `Query` declares typed parameters (keyed by NAME — a query has no holes), a
+result `Schema`, an effect class and a `DataSource`; `QueryRegistry.register` adds it. Your resolver
+answers with a `QueryResult` whose `Rows` table has that schema.
+
+**The three outcomes.** A body (or resolver) answers in `Deferred<'T>`: `Ready v`, `Pending` (not
+answered yet — the host correlates the later answer, for instance by `invocationKey`) or
+`Failed m`. Dispatch returns `Result<Deferred<'v>, InvokeError>` (`QueryError` for a query), so a
+call has exactly three outcomes: **settled** `Ok(Ready v)`, **pending** `Ok Pending`, **refused**
+`Error e`, typed. A body's `Failed m` arrives as the refusal `BodyFailed m` (`ExecutionFailed` for a
+query); `Ok(Failed _)` never escapes. `InvokeError.describe` / `QueryError.describe` turn a refusal
+into one sentence a model can act on.
+
+**Refused by default.** There is no deny flag: default deny is the registry's shape. A call reaches
+your body only when its id is registered AND its arguments validate against the signature (in
+space, no stray key, every required hole bound); every other call is refused before the body runs,
+and an unregistered id is `NoSuchCapability` naming the registered ids.
+
+**Certify, then re-express.** `capabilityLaws` / `queryLaws` certify Core's own fixtures and cannot
+see yours. Hand the kit your registry, your body, your HOST path and a generator of the calls a
+model could make:
+
+```fsharp
+let capabilitySeam : CapabilitySeamWitness<string> =
+    { Registry = capabilities
+      Body = fun args _ () -> fillBody args
+      Dispatch = Registry.dispatch capabilities   // the path your surface really calls
+      GenCall = genCall }                         // settled, pending and refused calls
+
+Conformance.capabilityLawsAt capabilitySeam seed iters   // and queryLawsAt for a QuerySeamWitness
+```
+
+The family certifies the three outcomes, that a refusal runs no body, and that your host refuses
+exactly what the registry refuses — and it reports itself starved, not green, if your generator never
+reaches one of settled, pending or refused. Then dispatch through the very path you certified.
+
+## The caveats the first adoption surfaced (read these before you start)
 
 - **F1 — `ReplaceChildren` is partial on leaves.** Your leaf kinds (`Paragraph`, `Cell`, …) can't
   hold children, so `withChildren` is a no-op on them. Supply `CanHold = Some isContainer` and
@@ -100,9 +165,11 @@ OpStream.fromJsonl streamW jsonl  : Result<_, string>              // portable �
 - **F3 — `Decode` returns `Result`.** `StreamWitness.Decode : string -> Result<'Op,string>` — most
   domains already have a `Result`-returning decoder, so just plug it in (no exception adapter).
 - **F4 — hash format.** Core's chain payload differs from a hand-rolled one, so re-expressing changes
-  the hashes; a domain with persisted streams needs a migration (Phase 255, when it lands).
-- **F5 — typed actors.** Core's op-stream actor is a `string`; keep your typed `Actor` and tag at the
-  seam (`"human:" + u`).
+  the hashes; a domain with persisted streams migrates by sealing its converted state and continuing from
+  it — a linear stream through `OpStream.Snapshots`, a lane DAG through `Dag.sealAt` (Phase 288), which
+  seals an imported state without replaying the history that produced it.
+- **F5 — typed actors.** Core's op-stream actor is the typed `Actor` (`Human` / `Agent`) since Phase
+  320, folded into the hash as step 3 shows; map your own actor type onto it at the seam.
 - **F6 — the win.** Core's `fromJsonl` is portable (FSharp.Core only), so your Fable host can
   rehydrate and `verifyChain` a stream in-browser — which a `System.Text.Json` decoder can't.
 
@@ -132,8 +199,8 @@ adoption prints `conformance: GREEN`.
 
 ## See also
 
-- [`samples/adoption/Program.fs`](../samples/adoption/Program.fs) — the runnable template.
-- [`CORE-ADOPTION-PILOT.md`](../../Fuaran-Documents/docs/CORE-ADOPTION-PILOT.md) — the Documents pilot (the worked example + the findings).
+- [`samples/adoption/Program.fs`](../samples/adoption/Program.fs) — the runnable template and the
+  worked example, the invocable seams included.
 - [`STABILITY.md`](../STABILITY.md) — which witness surfaces are stability-critical.
 - [The dataframe path](#the-dataframe-path) — where `DataFrame`, `Column.Ops`, their law families,
   the dataframe facade and the incremental-evaluation guide live since Phase 258.
