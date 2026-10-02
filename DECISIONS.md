@@ -2868,6 +2868,18 @@ algebra is the trigger to revisit). The repository's name. Whether the proof leg
 the first commit. Each is an open question on the plan that sequences this work, and each is
 answered at the stage that needs it.
 
+**Note (2026-10-02, the compute repository's Phase 322 and its DECISIONS.md D4).** The SAME-ids
+ruling above held for the cut and no longer holds for what the compute repository produces: from
+its `0.36.0` the packages carry their own ids and the `Fuaran.Compute` namespace —
+`Fuaran.Core.DataFrame` → `Fuaran.Compute.DataFrame`, `Fuaran.Core.Column.Ops` →
+`Fuaran.Compute.ColumnOps`, `Fuaran.Core.DataFrame.Conformance` → `Fuaran.Compute.Conformance`, and
+its later `Fuaran.Core.DataFrame.PipelineQuery` → `Fuaran.Compute.PipelineQuery` (`Fuaran.Core.DataFrame.CSharp`
+was deleted, not renamed). The `Fuaran.Core.*` ids stop at `0.34.0`, their last published version.
+The reason is this entry's own line, drawn by D51: a name that says the dataframe is a Core property
+says what D51 rules it is not. Nothing in this repository moves but the boundary: the compute
+boundary test refuses BOTH id sets inside the spine — the new ones because they are what crosses the
+line now, the old ones because they stay restorable and a stale pin could bring one back.
+
 ## 2026-09-26 — D65: `UpdateNode of node: 'Node` — one field, content not structure, and an unknown-parent write in its footprint; classed `union-widening`, so it opens the `0.32.0` slot
 
 **Decided (operator, 2026-09-26; executed by Phase 250).** `SkeletonOp` gains an in-place update,

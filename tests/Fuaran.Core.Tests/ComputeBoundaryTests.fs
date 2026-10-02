@@ -3,7 +3,9 @@
 /// DECISIONS.md D66 rules that `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` are produced by
 /// a repository of their own (https://github.com/Fuaran-Core/fuaran-core-compute), together with
 /// `Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp`, the two assemblies Phase
-/// 257 cut beside them (D68). Phase 258 removed all four from this tree. The line runs one way — the
+/// 257 cut beside them (D68). Phase 258 removed all four from this tree. That repository has since
+/// renamed what it produces to its own `Fuaran.Compute.*` ids (D66's note), and this test refuses
+/// both sets. The line runs one way — the
 /// compute layer is built over this spine, never the reverse — and the easiest change in the world
 /// to make is a helper that brings one of the ids back: a project restored under `src/`, a
 /// `ProjectReference` to it, or a `PackageReference` to the compute repository's release, which
@@ -54,10 +56,20 @@ let spine: string list =
       "Fuaran.Core.Idl.Cli"
       "Fuaran.Core.Conformance" ]
 
-/// The compute side of the line: the four ids the compute repository produces.
+/// The compute side of the line, under BOTH sets of ids. The compute repository's Phase 322 renamed
+/// its packages to their own ids from its `0.36.0` (D66's note): `Fuaran.Compute.DataFrame`,
+/// `Fuaran.Compute.ColumnOps`, `Fuaran.Compute.Conformance` and `Fuaran.Compute.PipelineQuery` are
+/// what it produces now, so they are the boundary. The ids those packages last shipped under
+/// (through `0.34.0`, and the facade deleted beside the `0.33.0` raise) are refused too: they stay
+/// restorable from the registry, so a stale pin naming one could creep back into this tree and
+/// would cross the same line under a name the new set does not catch.
 let compute: Set<string> =
     set
-        [ "Fuaran.Core.DataFrame"
+        [ "Fuaran.Compute.DataFrame"
+          "Fuaran.Compute.ColumnOps"
+          "Fuaran.Compute.Conformance"
+          "Fuaran.Compute.PipelineQuery"
+          "Fuaran.Core.DataFrame"
           "Fuaran.Core.Column.Ops"
           "Fuaran.Core.DataFrame.Conformance"
           "Fuaran.Core.DataFrame.CSharp" ]
@@ -247,6 +259,25 @@ let tests =
                         "Fuaran.Core.DataFrame.CSharp" ])
                   [ "Fuaran.Core.DataFrame.CSharp"; "fuaran.core.dataframe" ]
                   "a compute id is named whatever its case"
+
+              // Both id sets, each on its own: the renamed ids are what the compute repository
+              // produces now, and the old ones are what a stale pin would name.
+              Expect.equal
+                  (computeNamed [ "Fuaran.Compute.ColumnOps"; "Fuaran.Compute.Column"; "Fuaran.Compute" ])
+                  [ "Fuaran.Compute.ColumnOps" ]
+                  "a renamed compute id is named, and a near-miss of one is not"
+
+              Expect.equal
+                  (crossings
+                      (clean |> Map.add "Fuaran.Core.Query" [ "Fuaran.Compute.PipelineQuery" ])
+                      [ "Fuaran.Core.Query" ])
+                  [ "Fuaran.Core.Query", "Fuaran.Compute.PipelineQuery" ]
+                  "a reference to a renamed compute id is a crossing"
+
+              Expect.equal
+                  (computeNamed [ "Fuaran.Core.Column.Ops" ])
+                  [ "Fuaran.Core.Column.Ops" ]
+                  "an id the compute packages shipped under before the rename is still refused"
 
           testCase "no project in the solution, and no directory under src/ or tests/, is a compute id"
           <| fun _ ->
