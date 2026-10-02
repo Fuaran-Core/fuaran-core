@@ -99,6 +99,18 @@ type QueryError =
     /// Distinct from `RequiredParamsUnbound` (left out), so a caller can tell the two apart.
     | RequiredParamsNull of names: string list
 
+/// A resolver's typed failure (Phase 295) — what `Query.invokeWithArgs`'s resolver answers when the
+/// fetch cannot complete, so the refusals the resolver alone can know of reach the caller as the
+/// `QueryError` that names them: a `Ref` the host could not resolve is `SourceNotResolved`, a fetch
+/// that ran out of time is `Timeout`, and any other failure is `ExecutionFailed` with the arguments a
+/// retry may change (`recoverable`). Before Phase 295 the resolver could answer only a string
+/// (`Deferred.Failed`), so the first two cases were unreachable and `recoverable` was always empty.
+[<RequireQualifiedAccess>]
+type ResolveFault =
+    | SourceMissing of ref: string
+    | TimedOut
+    | Failed of detail: string * recoverable: string list
+
 /// What a model reads when a dispatch is refused (Phase 251) — the `InvokeError.describe` twin. Every
 /// case that refuses against a closed set names its members, and a `ParamTypeMismatch` over a type
 /// a JSON value cannot spell directly (`decimal`, `date`, `timestamp`) also says how to write one.
@@ -172,18 +184,25 @@ module QueryError =
 /// FSharp.Core-only, Fable-clean.
 module Query =
 
-    /// The `ColumnType` a present (non-`Null`) cell realizes — the type-compatibility surface the
-    /// param validator (and the fuaran#323 binding thread) checks against.
-    let internal cellType (c: Cell) : ColumnType option =
-        match c with
-        | Int _ -> Some IntType
-        | Float _ -> Some FloatType
-        | Bool _ -> Some BoolType
-        | Str _ -> Some StringType
-        | Date _ -> Some DateType
-        | Timestamp _ -> Some TimestampType
-        | Decimal _ -> Some DecimalType
-        | Null -> None
+    /// The `ColumnType` a present (non-`Null`) cell realizes — `Cell.typeOf`, the column strand's own
+    /// (Phase 295; this module re-implemented it before).
+    let private cellType (c: Cell) : ColumnType option = Cell.typeOf c
+
+    /// Does a cell of type `got` fill a parameter of type `declared`? THE widening lattice,
+    /// `ColumnType.widens` (Phase 295): the identity, or a lossless promotion — an `int` fills a
+    /// `float` or a `decimal` parameter. It was type equality before, so an `int` argument to a
+    /// `float` parameter was refused while the column codec read the same value into a `float`
+    /// column. For the types that have a value space the answer is `Space.subsumes`'s (the
+    /// `spaceRelationLaws` family pins the two together).
+    let private fills (declared: ColumnType) (got: ColumnType) : bool = ColumnType.widens got declared
+
+    /// A validated cell at its parameter's declared type: an `int` that fills a `float` or `decimal`
+    /// parameter is handed on as that type, so a resolver reads the type it declared.
+    let private promote (declared: ColumnType) (c: Cell) : Cell =
+        match declared, c with
+        | FloatType, Int v -> Float(float v)
+        | DecimalType, Int v -> Cell.decimal (string v) |> Option.defaultValue c
+        | _ -> c
 
     /// The Phase 27 determinism label this query keys its captures on (`"deterministic"` /
     /// `"clock"` / `"random"` / `"network"`).
@@ -225,7 +244,8 @@ module Query =
         q.Id + "#" + Hash.fnv1a canonical
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
-    /// fetch: every arg must address a declared param and its cell type must match (or be `Null`);
+    /// fetch: every arg must address a declared param and its cell type must fill the param's type —
+    /// `ColumnType.widens`, Phase 295 — or be `Null`;
     /// every required param must be bound (`RequiredParamsUnbound` otherwise); and every required
     /// param must be bound to a VALUE — one whose bindings are all `Null` is refused as
     /// `RequiredParamsNull` (Phase 226, `required_is_non_null` in `proofs/Query.fst`). The steps run
@@ -244,7 +264,7 @@ module Query =
                 | Some p ->
                     match cellType cell with
                     | None -> checkArgs rest // a Null binding — absence, type-agnostic
-                    | Some t when t = p.Type -> checkArgs rest
+                    | Some t when fills p.Type t -> checkArgs rest
                     | Some t -> Error(ParamTypeMismatch(name, p.Type, t))
 
         checkArgs args
@@ -320,7 +340,7 @@ module Query =
             | Some p ->
                 match cellType cell with
                 | None -> None
-                | Some t when t = p.Type -> None
+                | Some t when fills p.Type t -> None
                 | Some t -> Some(ParamTypeMismatch(name, p.Type, t))
 
         let faults = args |> List.choose argFault
@@ -351,21 +371,37 @@ module Query =
 
         if List.isEmpty all then Ok() else Error all
 
-    /// `invoke`, with the resolver handed the validated argument list — typed, as `Cell`s, and the
-    /// very list `validateParams` checked — so a resolver reads its arguments instead of closing over
-    /// the caller's list. Additive beside `invoke`; the same three outcomes, and a resolver's
-    /// `Failed m` is projected into `ExecutionFailed` exactly as there.
+    /// `invoke`, with the resolver handed the validated argument list — typed, as `Cell`s, the list
+    /// `validateParams` checked, each cell at its parameter's declared type (an `int` filling a
+    /// `float` parameter arrives as a `float`) — so a resolver reads its arguments instead of closing
+    /// over the caller's list. The same three outcomes as `invoke`, and a resolver's `Failed m` is
+    /// projected into `ExecutionFailed` exactly as there.
+    ///
+    /// Since Phase 295 the resolver answers a TYPED failure beside the envelope (`ResolveFault`), so
+    /// the refusals only it can know of reach the caller by name: `SourceMissing` is
+    /// `SourceNotResolved`, `TimedOut` is `Timeout`, and `Failed(detail, recoverable)` is
+    /// `ExecutionFailed(detail, recoverable)` with the arguments a retry may change.
     let invokeWithArgs
         (q: Query)
         (args: (string * Cell) list)
-        (resolve: Query -> (string * Cell) list -> Deferred<QueryResult>)
+        (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
         validateParams q args
         |> Result.bind (fun () ->
-            match resolve q args with
-            | Ready r -> Ok(Ready r)
-            | Pending -> Ok Pending
-            | Failed m -> Error(ExecutionFailed(m, [])))
+            let typed =
+                args
+                |> List.map (fun (name, cell) ->
+                    match q.Params |> List.tryFind (fun p -> p.Name = name) with
+                    | Some p -> name, promote p.Type cell
+                    | None -> name, cell)
+
+            match resolve q typed with
+            | Ok(Ready r) -> Ok(Ready r)
+            | Ok Pending -> Ok Pending
+            | Ok(Failed m) -> Error(ExecutionFailed(m, []))
+            | Error(ResolveFault.SourceMissing r) -> Error(SourceNotResolved r)
+            | Error ResolveFault.TimedOut -> Error Timeout
+            | Error(ResolveFault.Failed(detail, recoverable)) -> Error(ExecutionFailed(detail, recoverable)))
 
     /// The text an exact decimal is written as: the grammar `DecimalText` READS, which is exactly
     /// the set of strings the codec decodes into a `Decimal` cell (and canonicalises: `12.50` is
@@ -396,12 +432,6 @@ module Query =
         | TimestampType -> JObj [ "type", JStr "string"; "pattern", JStr timestampPattern ]
         | DecimalType -> JObj [ "type", JStr "string"; "pattern", JStr decimalPattern ]
 
-    let private hostTag =
-        function
-        | Pure -> "pure"
-        | ReadsHost -> "readsHost"
-        | WritesHost -> "writesHost"
-
     /// Project a query into a STANDARD JSON Schema `object` — `Function.toJsonSchema`'s twin, over
     /// the same convention (Phase 251; the convention is written down beside `Function.toSchema`):
     /// no tag, `"title"` the query id, each parameter a property keyed by its NAME with the schema
@@ -415,10 +445,7 @@ module Query =
         JObj
             [ "type", JStr "object"
               "title", JStr q.Id
-              "x-effect",
-              JObj
-                  [ "host", JStr(hostTag q.Effect.Host)
-                    "determinism", JStr(Effect.determinismTag q.Effect.Determinism) ]
+              "x-effect", EffectCodec.toJson q.Effect
               "properties", JObj(q.Params |> List.map (fun p -> p.Name, columnSchema p.Type))
               "required", JArr(q.Params |> List.filter (fun p -> p.Required) |> List.map (fun p -> JStr p.Name))
               "x-result",
@@ -470,7 +497,7 @@ module QueryRegistry =
         (r: QueryRegistry)
         (id: string)
         (args: (string * Cell) list)
-        (resolve: Query -> (string * Cell) list -> Deferred<QueryResult>)
+        (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
@@ -483,15 +510,9 @@ module QueryCodec =
 
     // ---- column type ----
 
-    let private colTypeStr =
-        function
-        | IntType -> "int"
-        | FloatType -> "float"
-        | BoolType -> "bool"
-        | StringType -> "string"
-        | DateType -> "date"
-        | TimestampType -> "timestamp"
-        | DecimalType -> "decimal"
+    // A column type is spelled by `ColumnType.tag` and read back by `ColumnType.ofTag` (Phase 295;
+    // this codec carried its own copy of both before).
+    let private colTypeStr = ColumnType.tag
 
     // Phase 310 — every member is read through the typed decode layer (`Decoder`); a refusal is
     // spelled into this codec's `QueryError` envelope at the entry points, with the sentence it
@@ -513,47 +534,9 @@ module QueryCodec =
                 ))
 
     let private colTypeOf: Decoder<ColumnType> =
-        tagged
-            "unknown column type: "
-            [ "int", IntType
-              "float", FloatType
-              "bool", BoolType
-              "string", StringType
-              "date", DateType
-              "timestamp", TimestampType
-              "decimal", DecimalType ]
+        tagged "unknown column type: " (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
 
-    // ---- effect class ----
-
-    let private hostStr =
-        function
-        | Pure -> "pure"
-        | ReadsHost -> "readsHost"
-        | WritesHost -> "writesHost"
-
-    let private hostOf: Decoder<HostEffect> =
-        tagged "unknown host effect: " [ "pure", Pure; "readsHost", ReadsHost; "writesHost", WritesHost ]
-
-    let private detStr = Effect.determinismTag
-
-    let private detOf: Decoder<DeterminismSource> =
-        Decoder.str
-        |> Decoder.andThen (fun tag ->
-            match Effect.tryDeterminismOfTag tag with
-            | Some set -> Ok set
-            | None ->
-                Error(
-                    DecodeError.make DecodeCode.UnknownTag "a determinism tag" ("unknown determinism source: " + tag)
-                ))
-
-    let private effectJson (e: EffectClass) : JVal =
-        JObj [ "host", JStr(hostStr e.Host); "determinism", JStr(detStr e.Determinism) ]
-
-    let private effectOf (el: JVal) : Result<EffectClass, DecodeError> =
-        Decoder.field "host" hostOf el
-        |> Result.bind (fun h ->
-            Decoder.field "determinism" detOf el
-            |> Result.map (fun d -> { Host = h; Determinism = d }))
+    // The effect class is `EffectCodec`'s (Phase 295), the capability codec's reader and writer.
 
     // ---- param ----
 
@@ -608,7 +591,7 @@ module QueryCodec =
               "id", JStr q.Id
               "params", JArr(q.Params |> List.map paramJson)
               "resultSchema", schemaJson q.ResultSchema
-              "effect", effectJson q.Effect
+              "effect", EffectCodec.toJson q.Effect
               "source", ColumnCodec.encodeJson q.Source ]
             @ optIntJson "timeoutMs" q.TimeoutMs
             @ optIntJson "pageSize" q.PageSize
@@ -616,47 +599,43 @@ module QueryCodec =
 
     let encode (q: Query) : string = Canon.render (queryJson q)
 
-    /// A decode refusal in this codec's envelope: `ExecutionFailed("decode: " + sentence)`.
-    let private dataErr (e: DecodeError) : QueryError =
-        ExecutionFailed("decode: " + DecodeError.describe e, [])
+    // Phase 295 — a decode failure is a decode failure: the readers answer a typed `DecodeError` (the
+    // `…Detailed` entry points, Phase 310's convention) and the string forms its sentence, as
+    // `CapabilityCodec` does. They answered `ExecutionFailed("decode: …")` before, a refusal of a
+    // fetch that never ran.
 
-    let internal queryOf (el: JVal) : Result<Query, QueryError> =
-        let r =
-            Decoder.field "id" Decoder.str el
-            |> Result.bind (fun id ->
-                Decoder.field "params" (Decoder.list paramOf) el
-                |> Result.bind (fun ps ->
-                    Decoder.field "resultSchema" schemaOf el
-                    |> Result.bind (fun sch ->
-                        Decoder.field "effect" effectOf el
-                        |> Result.bind (fun eff ->
-                            Decoder.optField "timeoutMs" Decoder.int el
-                            |> Result.bind (fun tmo ->
-                                Decoder.optField "pageSize" Decoder.int el
-                                |> Result.map (fun pg -> id, ps, sch, eff, tmo, pg))))))
+    /// A refusal from the column codec, carried as a decode refusal at the member it was reading.
+    let private columnRefused (memberName: string) (what: string) : DecodeError =
+        DecodeError.under
+            (PathSegment.Key memberName)
+            (DecodeError.make DecodeCode.OutOfRange what (memberName + ": not " + what + " the column codec reads"))
 
-        match r with
-        | Error e -> Error(dataErr e)
-        | Ok(id, ps, sch, eff, tmo, pg) ->
-            match Decoder.field "source" Decoder.json el with
-            | Error e -> Error(dataErr e)
-            | Ok srcEl ->
-                match ColumnCodec.decodeJson srcEl with
-                | Error _ -> Error(ExecutionFailed("decode: source", []))
-                | Ok src ->
-                    Ok
-                        { Id = id
-                          Params = ps
-                          ResultSchema = sch
-                          Effect = eff
-                          Source = src
-                          TimeoutMs = tmo
-                          PageSize = pg }
-
-    let decode (s: string) : Result<Query, QueryError> =
-        match Decode.parse s with
-        | Error m -> Error(ExecutionFailed("parse: " + m, []))
-        | Ok el -> queryOf el
+    let internal queryOf (el: JVal) : Result<Query, DecodeError> =
+        Decoder.field "id" Decoder.str el
+        |> Result.bind (fun id ->
+            Decoder.field "params" (Decoder.list paramOf) el
+            |> Result.bind (fun ps ->
+                Decoder.field "resultSchema" schemaOf el
+                |> Result.bind (fun sch ->
+                    Decoder.field "effect" EffectCodec.decoder el
+                    |> Result.bind (fun eff ->
+                        Decoder.optField "timeoutMs" Decoder.int el
+                        |> Result.bind (fun tmo ->
+                            Decoder.optField "pageSize" Decoder.int el
+                            |> Result.bind (fun pg ->
+                                Decoder.field "source" Decoder.json el
+                                |> Result.bind (fun srcEl ->
+                                    match ColumnCodec.decodeJson srcEl with
+                                    | Error _ -> Error(columnRefused "source" "a data source")
+                                    | Ok src ->
+                                        Ok
+                                            { Id = id
+                                              Params = ps
+                                              ResultSchema = sch
+                                              Effect = eff
+                                              Source = src
+                                              TimeoutMs = tmo
+                                              PageSize = pg })))))))
 
     // ---- query result ----
 
@@ -676,37 +655,25 @@ module QueryCodec =
 
     let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
 
-    let internal resultOf (el: JVal) : Result<QueryResult, QueryError> =
-        match Decoder.field "rows" Decoder.json el with
-        | Error e -> Error(dataErr e)
-        | Ok rowsEl ->
+    let internal resultOf (el: JVal) : Result<QueryResult, DecodeError> =
+        Decoder.field "rows" Decoder.json el
+        |> Result.bind (fun rowsEl ->
             match ColumnCodec.decodeJson rowsEl with
-            | Error _ -> Error(ExecutionFailed("decode: rows", []))
+            | Error _ -> Error(columnRefused "rows" "a table")
+            | Ok(Ref _) -> Error(columnRefused "rows" "an embedded table (a ref is not a result)")
             | Ok(Embedded t) ->
-                let parts =
-                    Decoder.field "pageNum" Decoder.int el
-                    |> Result.bind (fun pn ->
-                        Decoder.optField "totalRowCount" Decoder.int el
-                        |> Result.bind (fun trc ->
-                            // Phase 310: a present `nextPageToken` that is not a string is refused,
-                            // where it was read as absent.
-                            Decoder.optField "nextPageToken" Decoder.str el
-                            |> Result.map (fun tok -> pn, trc, tok)))
-
-                match parts with
-                | Error e -> Error(dataErr e)
-                | Ok(pn, trc, tok) ->
-                    Ok
-                        { Rows = t
-                          PageNum = pn
-                          TotalRowCount = trc
-                          NextPageToken = tok }
-            | Ok(Ref _) -> Error(ExecutionFailed("decode: rows must be embedded, not a ref", []))
-
-    let decodeResult (s: string) : Result<QueryResult, QueryError> =
-        match Decode.parse s with
-        | Error m -> Error(ExecutionFailed("parse: " + m, []))
-        | Ok el -> resultOf el
+                Decoder.field "pageNum" Decoder.int el
+                |> Result.bind (fun pn ->
+                    Decoder.optField "totalRowCount" Decoder.int el
+                    |> Result.bind (fun trc ->
+                        // Phase 310: a present `nextPageToken` that is not a string is refused,
+                        // where it was read as absent.
+                        Decoder.optField "nextPageToken" Decoder.str el
+                        |> Result.map (fun tok ->
+                            { Rows = t
+                              PageNum = pn
+                              TotalRowCount = trc
+                              NextPageToken = tok }))))
 
     // ---- deferred query result (Phase 198) ----
     // The seam's result type is now `Deferred<QueryResult>`, so it has to cross the wire like every
@@ -720,14 +687,9 @@ module QueryCodec =
 
     let encodeDeferredResult (d: Deferred<QueryResult>) : string = Canon.render (deferredResultJson d)
 
-    let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, QueryError> =
-        CapabilityCodec.deferredOf (fun e -> resultOf e |> Result.mapError (fun _ -> "queryResult")) el
-        |> Result.mapError (fun m -> ExecutionFailed("decode: " + m, []))
-
-    let decodeDeferredResult (s: string) : Result<Deferred<QueryResult>, QueryError> =
-        match Decode.parse s with
-        | Error m -> Error(ExecutionFailed("parse: " + m, []))
-        | Ok el -> deferredResultOf el
+    let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, DecodeError> =
+        CapabilityCodec.deferredOf (fun e -> resultOf e |> Result.mapError DecodeError.describe) el
+        |> Result.mapError (fun m -> DecodeError.make DecodeCode.OutOfRange "a deferred query result" m)
 
     // ---- typed refusal (Phase 251) ----
     // `CapabilityCodec.invokeErrorJson`'s twin: one `$type` per case, in camelCase, and a column
@@ -949,7 +911,7 @@ module QueryCodec =
             el
         |> Result.bind (fun () -> within "params" (each (members "query parameter" [ "name"; "type"; "required" ])) el)
         |> Result.bind (fun () -> within "resultSchema" (each (members "result column" [ "name"; "type" ])) el)
-        |> Result.bind (fun () -> within "effect" (members "effect" [ "host"; "determinism" ]) el)
+        |> Result.bind (fun () -> within "effect" (members "effect" EffectCodec.members) el)
 
     let private strictResult (el: JVal) =
         members "query result" [ "$type"; "rows"; "pageNum"; "totalRowCount"; "nextPageToken" ] el
@@ -970,28 +932,56 @@ module QueryCodec =
     let private readWith
         (policy: ReadPolicy)
         (check: Decoder<unit>)
-        (read: JVal -> Result<'T, QueryError>)
+        (read: JVal -> Result<'T, DecodeError>)
         (s: string)
-        : Result<'T, QueryError> =
-        match Decode.parse s with
-        | Error m -> Error(ExecutionFailed("parse: " + m, []))
-        | Ok el ->
+        : Result<'T, DecodeError> =
+        Decoder.parse s
+        |> Result.bind (fun el ->
             match policy with
             | ReadPolicy.Lenient -> read el
-            | ReadPolicy.Strict ->
-                match check el with
-                | Error e -> Error(dataErr e)
-                | Ok() -> read el
+            | ReadPolicy.Strict -> check el |> Result.bind (fun () -> read el))
+
+    /// Decode a query declaration under a read policy, answering a typed refusal (Phase 295; Phase
+    /// 310's convention): its code, the path to the value at fault, and `decodeWith`'s sentence.
+    /// `Strict` refuses an unknown member of the declaration, its parameters, its result columns or
+    /// its effect. A parse failure is refused at the root.
+    let decodeDetailedWith (policy: ReadPolicy) (s: string) : Result<Query, DecodeError> =
+        readWith policy strictQuery queryOf s
+
+    /// `decodeResult` under a read policy, answering a typed refusal (Phase 295).
+    let decodeResultDetailedWith (policy: ReadPolicy) (s: string) : Result<QueryResult, DecodeError> =
+        readWith policy strictResult resultOf s
+
+    /// `decodeDeferredResult` under a read policy, answering a typed refusal (Phase 295).
+    let decodeDeferredResultDetailedWith (policy: ReadPolicy) (s: string) : Result<Deferred<QueryResult>, DecodeError> =
+        readWith policy strictDeferredResult deferredResultOf s
+
+    /// Decode a query declaration — `Result`-typed with a named error, as `CapabilityCodec.decode`
+    /// (Phase 295: the sentence of `decodeDetailedWith`'s refusal; it was an `ExecutionFailed` before).
+    let decode (s: string) : Result<Query, string> =
+        decodeDetailedWith ReadPolicy.Lenient s |> Result.mapError DecodeError.describe
+
+    /// Decode a `QueryResult`, `Result`-typed with a named error (Phase 295).
+    let decodeResult (s: string) : Result<QueryResult, string> =
+        decodeResultDetailedWith ReadPolicy.Lenient s
+        |> Result.mapError DecodeError.describe
+
+    /// Decode a `Deferred<QueryResult>`, `Result`-typed with a named error (Phase 295).
+    let decodeDeferredResult (s: string) : Result<Deferred<QueryResult>, string> =
+        decodeDeferredResultDetailedWith ReadPolicy.Lenient s
+        |> Result.mapError DecodeError.describe
 
     /// `decode` under a read policy: `Strict` refuses an unknown member of the declaration, its
     /// parameters, its result columns or its effect.
-    let decodeWith (policy: ReadPolicy) (s: string) : Result<Query, QueryError> = readWith policy strictQuery queryOf s
+    let decodeWith (policy: ReadPolicy) (s: string) : Result<Query, string> =
+        decodeDetailedWith policy s |> Result.mapError DecodeError.describe
 
     /// `decodeResult` under a read policy.
-    let decodeResultWith (policy: ReadPolicy) (s: string) : Result<QueryResult, QueryError> =
-        readWith policy strictResult resultOf s
+    let decodeResultWith (policy: ReadPolicy) (s: string) : Result<QueryResult, string> =
+        decodeResultDetailedWith policy s |> Result.mapError DecodeError.describe
 
     /// `decodeDeferredResult` under a read policy: `Strict` refuses an unknown member of the
     /// envelope or of the result it carries.
-    let decodeDeferredResultWith (policy: ReadPolicy) (s: string) : Result<Deferred<QueryResult>, QueryError> =
-        readWith policy strictDeferredResult deferredResultOf s
+    let decodeDeferredResultWith (policy: ReadPolicy) (s: string) : Result<Deferred<QueryResult>, string> =
+        decodeDeferredResultDetailedWith policy s
+        |> Result.mapError DecodeError.describe

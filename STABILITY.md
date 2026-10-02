@@ -3632,6 +3632,125 @@ existed; they were somewhere the consumer could not see.
 
 **Class: additive** — no `api/*.txt` baseline moves and no wire byte moves.
 
+### The invocable seams converge: one space relation, one effect and value-space codec, one registry shape, a pipeline that type-checks its edges, and totality that agrees with `Required` (Phase 295, DECISIONS.md D104) — BREAKING (source) and BREAKING (wire, the `toSchema` / `toJsonSchema` bytes of a signature with a repeat hole); the rest `additive`
+
+- **One space relation.** `Space.subsumes required available` asks whether `required` admits every
+  value `available` admits. Three call sites now ask it: `CapabilityPipeline.typeCheck` (does an
+  upstream output feed an argument), `FunctionRegistry.findBySignature` (can the context fill a hole)
+  and, through `ColumnType.widens`, `Query.validateParams`. Ranges compare by bounds, so an
+  `IntRange(0, 1000)` output no longer feeds an `IntRange(0, 10)` argument. The one widening is int
+  into float, so an int context now fills a number hole. `AnyString` is the top of the scalar spaces,
+  and the tree spaces form their own family. The lattice is DECISIONS D104. `capabilityPipelineLaws`
+  pins the pipeline site to the relation and certifies it sound against `Space.validate`;
+  `registryLaws` pins the registry site; `queryLaws` pins the query site, where it agrees with the
+  relation on the numeric types.
+- **A query parameter takes a cell whose type widens to it.** `ColumnType.widens` replaces type
+  equality: an `int` cell fills a `float` or `decimal` parameter, and `Query.invokeWithArgs` hands
+  the resolver the cell promoted to the declared type. `Query` reads `Cell.typeOf` and
+  `ColumnType.tag` / `ofTag` instead of its own copies.
+- **One codec each for the effect and the value space.** `EffectCodec` (`toJson`, `decoder`,
+  `hostTag`, `hostDecoder`, `determinismDecoder`, `members`) is now the only effect reader and
+  writer, used by `toSchema`, `toJsonSchema`, `CapabilityCodec`, `QueryCodec` and
+  `Query.toJsonSchema`. Before, there were three writers and two readers. No byte moves. One refusal
+  sentence does: the query codec's `unknown determinism source:` is now the capability codec's
+  `unknown determinism:`.
+
+  `SpaceCodec` (`toJson`, `decoder`, `descriptorJson`) is now the only value-space reader and wire
+  writer. The wire convention is `"$type"` with `min` / `max`. `toSchema` keeps its `"kind"` /
+  `minLength` spelling through `descriptorJson`, and that spelling is frozen: a content pack pins a
+  hash of those bytes. The reader also accepts the descriptor spelling, leniently, for this draft.
+- **`SigEntry.HoleKind` is the typed reading of `Kind`.** It is a member projecting the entry to a
+  `HoleKind`, built by `HoleKind.tryOf`, and `HoleKind.tag` / `tags` hold the tag spellings in one
+  place. The literal comparisons are retired. The capability codec refuses an entry whose `kind` is
+  not one of `tags`; until now it decoded any string.
+- **`CapabilityRegistry` is the module's name.** `Registry` is kept, `[<Obsolete>]`, as a forwarding
+  alias for this draft only.
+- **Totality and `Required` agree.** `Function.signature` enters a BOUNDED repeat hole
+  `Required = true`, because strict `apply` demands it. `CapabilityRegistry.register` and
+  `FunctionRegistry.register` refuse a non-total capability with the new
+  `InvokeError.NonTotalCapability(id, addrs)`. Non-total means an unbounded repeat, or an entry that
+  projects to no hole kind. `compose` checks totality on both parts, as `composeAcross` does.
+- **A pipeline type-checks its edges, and evaluation type-checks first.**
+  - `typeCheck`, `eval` and `evalFrom` take a `CapabilityLookup`, a lookup plus the ids it holds.
+    Both registries project one (`CapabilityLookup.ofRegistry`, `ofFunctionRegistry`), so a host
+    with content packs keeps one registry.
+  - `typeCheck` refuses a self-edge or a cycle as `PipelineCycle(node, cycle)` and a forward edge as
+    `PipelineForwardEdge(node, arg, upstream)`.
+  - An argument refusal wraps the `InvokeError` the capability gives the same argument:
+    `PipelineArgRefused(node, reason)`. It replaces `PipelineUnknownArg`, `PipelineArgOutOfSpace` and
+    `PipelineRequiredUnbound`, which carried the address alone.
+  - `eval` / `evalFrom` take `spell: 'v -> string`. They refuse an ill-typed pipeline as
+    `EvalIllTyped` before any body runs. An upstream value outside the space of the hole it feeds is
+    refused as `EvalArgRefused`. `EvalUnknownNode` is removed, because a forward reference is now a
+    type-check refusal.
+- **A content pack refuses an address that is not a bindable hole.** `FunctionRegistry.partiallyApply`
+  answers `Result<FunctionEntry, InvokeError>`, refusing `UnknownArg(addr, bindable)`.
+  `ContentPack.load` reports this as the new `PackLoadError.UnknownBoundAddr(packId, newId, addr,
+  declared)`. Until now a typo'd `BoundAddrs` entry registered an un-narrowed signature.
+- **`Capability.Determinism` is derived.** It is a member that projects `Signature.Effect.Determinism`,
+  no longer a record field, so a hand-built capability cannot disagree with its signature.
+- **One value, one capture key.** `Space.validate` reads a number under the invariant culture with no
+  white space and no `+`. `" 5"` and `"+5"` are refused. `".5"`, `"1."`, `Infinity` and `NaN` are
+  refused for a number hole.
+  - `Space.canonical` gives a value's one spelling: `05` is `5`, and `1.50` is `1.5`.
+  - `Capability.invocationKey` keys each argument by that spelling, so two spellings of one value
+    replay one capture.
+  - `Capability.typeArgs` reads through the same readers.
+- **`QueryCodec` decode failures are decode failures.**
+  - `decode`, `decodeResult`, `decodeDeferredResult` and their `…With` forms answer
+    `Result<_, string>`, as `CapabilityCodec` does.
+  - New `decodeDetailedWith`, `decodeResultDetailedWith` and `decodeDeferredResultDetailedWith`
+    answer the typed `DecodeError` (Phase 310's convention).
+  - They answered `ExecutionFailed("decode: …", [])` before, which named a fetch that never ran.
+- **A resolver can name its failure.** `Query.invokeWithArgs` and `QueryRegistry.dispatchWithArgs`
+  (new in this draft, Phase 251) take a resolver that answers
+  `Result<Deferred<QueryResult>, ResolveFault>`.
+  - `ResolveFault.SourceMissing` becomes `SourceNotResolved`, `TimedOut` becomes `Timeout`, and
+    `Failed(detail, recoverable)` becomes `ExecutionFailed(detail, recoverable)`.
+  - So the two unreachable `QueryError` cases are reachable, and `recoverable` is filled.
+- **`Deferred.settled`** keeps `Pending` apart from a `Failed "pending"`, which `toResult` conflates.
+- **`Function.fs` is split, in compile order**, into `Effect.fs`, `Space.fs`, `Function.fs`,
+  `Deferred.fs`, `Capability.fs`, `FunctionRegistry.fs`, `ContentPack.fs` and `CapabilityPipeline.fs`.
+  The split moved no public name, and the API baselines were byte-identical after it.
+- **The models restate it.**
+  - `proofs/Capability.fst`: a bounded repeat is required (`entry_of`), `entry_total` reads the hole
+    kind, `register_refuses_non_total` / `register_admits_total`, `compose` guards totality,
+    `compose_rename` still holds, and the capture key runs over the keyed list.
+  - `proofs/Query.fst`: `widens` in `validate_params`, `validate_params_exact`,
+    `refusal_is_truthful`.
+  - Both oracles are re-extracted. The ladder carries `capability-register-total` and
+    `query-validate-widens`.
+
+**What a consumer does.**
+
+- **Code changes:**
+  - Rename `Registry.*` to `CapabilityRegistry.*`. The old name warns for one draft.
+  - Drop `Determinism = …` from a `Capability` record literal; `Capability.create` is the
+    constructor.
+  - Pass `CapabilityLookup.ofRegistry reg` (or `ofFunctionRegistry`) to `CapabilityPipeline.typeCheck`.
+  - Pass it and a `spell` (the identity for a `string` pipeline) to `eval` / `evalFrom`.
+  - Match `PipelineArgRefused(node, UnknownArg …)` where you matched `PipelineUnknownArg`. The same
+    applies to `PipelineArgOutOfSpace` and `PipelineRequiredUnbound`.
+  - Handle `PipelineCycle`, `PipelineForwardEdge`, `EvalIllTyped`, `EvalArgRefused`,
+    `InvokeError.NonTotalCapability` and `PackLoadError.UnknownBoundAddr` in an exhaustive match.
+  - Bind `FunctionRegistry.partiallyApply`'s `Result`.
+  - Read `QueryCodec.decode*`'s error as a string, or use the `…DetailedWith` forms.
+  - Return `Ok d` from a `Query.invokeWithArgs` / `dispatchWithArgs` resolver, or `Error fault`.
+- **Wire changes:**
+  - A signature with a BOUNDED repeat hole lists it as required in `toSchema` and `toJsonSchema`. Its
+    `ContentPack.signatureFingerprint` therefore moves: a pack pinned against such a base re-pins
+    (`ContentPack.pack` over the live entry).
+  - A capability document whose hole `kind` is not `value` / `slot` / `repeat` / `action` is now
+    refused at decode.
+  - `invokeError` gains the `nonTotalCapability` document. The wire baseline is regenerated.
+- **Behaviour changes:**
+  - An int now fills a number hole, a number parameter and a decimal parameter.
+  - A numeric argument spelled with white space or `+` is refused.
+
+**Class: breaking (source)** for the union widenings and retypes above, which ride the slot's operator
+ruling. **Breaking (wire)** for the repeat hole's `required`, the descriptor bytes and the
+fingerprints that follow it. The rest is **additive**.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

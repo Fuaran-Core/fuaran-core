@@ -71,45 +71,33 @@ module FunctionRegistry =
           ResultType = resultType }
 
     /// Register an entry — additive, no silent overwrite (a duplicate id is a named
-    /// `DuplicateCapability`, reusing the Capability registry's error vocabulary). Maintains both the
-    /// id map and the result-type index.
+    /// `DuplicateCapability`, reusing the Capability registry's error vocabulary), and only a total
+    /// one (`NonTotalCapability`, as `CapabilityRegistry.register` refuses it — Phase 295). Maintains
+    /// both the id map and the result-type index.
     let register (e: FunctionEntry) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
         let id = e.Capability.Id
 
         if Map.containsKey id r.Entries then
             Error(DuplicateCapability id)
         else
-            let ids =
-                r.ByResult
-                |> Map.tryFind e.ResultType
-                |> Option.defaultValue Set.empty
-                |> Set.add id
+            match Capability.totalityFault e.Capability with
+            | Some fault -> Error fault
+            | None ->
+                let ids =
+                    r.ByResult
+                    |> Map.tryFind e.ResultType
+                    |> Option.defaultValue Set.empty
+                    |> Set.add id
 
-            Ok
-                { Entries = Map.add id e r.Entries
-                  ByResult = Map.add e.ResultType ids r.ByResult }
+                Ok
+                    { Entries = Map.add id e r.Entries
+                      ByResult = Map.add e.ResultType ids r.ByResult }
 
     let tryFind (id: string) (r: FunctionRegistry) : FunctionEntry option = Map.tryFind id r.Entries
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part of
     /// the contract (`registryLaws` certifies it).
     let enumerate (r: FunctionRegistry) : FunctionEntry list = r.Entries |> Map.toList |> List.map snd
-
-    /// Does `required` value-space subsume `available` — is every value the context can supply (a value
-    /// in `available`) acceptable to the function (a value in `required`)? I.e. `available ⊆ required`,
-    /// the direction that makes the function runnable from the context. Same-constructor numeric/length
-    /// ranges compare by bounds; an `Enum` subsumes a subset `Enum`; an `AnyString` required space
-    /// subsumes any string-valued space (it accepts all strings). Cross-type never subsumes.
-    let private spaceSubsumes (required: ValueSpace) (available: ValueSpace) : bool =
-        match required, available with
-        | IntRange(rl, rh), IntRange(al, ah) -> rl <= al && ah <= rh
-        | FloatRange(rl, rh), FloatRange(al, ah) -> rl <= al && ah <= rh
-        | StringLen(rl, rh), StringLen(al, ah) -> rl <= al && ah <= rh
-        | Enum rs, Enum als -> als |> List.forall (fun v -> List.contains v rs)
-        | AnyString, (StringLen _ | Enum _ | AnyString) -> true
-        | SlotTree None, SlotTree _ -> true
-        | SlotTree(Some rk), SlotTree(Some ak) -> rk = ak
-        | _ -> false
 
     /// Is a required slot constraint satisfied by an available slot? An unconstrained required slot
     /// (`None`) accepts any available slot; a constrained one needs the same kind.
@@ -120,15 +108,17 @@ module FunctionRegistry =
         | Some _, None -> false
 
     /// Is a single required hole satisfied by the matching available-context entry (same address)?
-    /// value/repeat: kinds agree and the available value-space ⊆ the required space; slot: kinds agree
+    /// value/repeat: kinds agree and the available value-space ⊆ the required space, by THE space
+    /// relation (`Space.subsumes`, Phase 295 — the relation `CapabilityPipeline.typeCheck` asks too,
+    /// so an int context now fills a number hole, as validation always accepted); slot: kinds agree
     /// and the available slot constraint satisfies the required one.
     let private holeSatisfied (req: SigEntry) (av: SigEntry) : bool =
         req.Kind = av.Kind
-        && (match req.Kind with
-            | "slot" -> slotSubsumes req.Slot av.Slot
+        && (match req.HoleKind with
+            | Some(SlotHole _) -> slotSubsumes req.Slot av.Slot
             | _ ->
                 match req.Space, av.Space with
-                | Some rs, Some avs -> spaceSubsumes rs avs
+                | Some rs, Some avs -> Space.subsumes rs avs
                 | _ -> false)
 
     /// The core signature-search predicate (Phase 50) — does `entry` match `query` under `mode`? Only
@@ -186,7 +176,7 @@ module FunctionRegistry =
 
     /// Dispatch an invocation through the registry (Phase 50): resolve the id (default-deny — an
     /// unregistered id is `NoSuchCapability`), then invoke via `Capability.invoke` (arg-validated — the
-    /// SAME trust posture as `Registry.dispatch`, no parallel path). The host supplies the body per the
+    /// SAME trust posture as `CapabilityRegistry.dispatch`, no parallel path). The host supplies the body per the
     /// resolved entry's placement, and answers in the `Deferred` envelope.
     ///
     /// It moved with `Capability.invoke` in Phase 210 because it IS `Capability.invoke` — there is no
@@ -210,8 +200,35 @@ module FunctionRegistry =
     /// its narrowed hole shape (a smaller available context now subsumes it, while the un-narrowed
     /// original still demands the dropped holes). Hygiene: holes drop by absolute address. Does NOT
     /// mutate the source entry.
-    let partiallyApply (newId: string) (boundAddrs: Set<string>) (source: FunctionEntry) : FunctionEntry =
-        let narrowed = Function.signatureExcluding boundAddrs source.Capability.Signature
+    ///
+    /// Every bound address must be a BINDABLE hole of the source — a data hole (value, slot or
+    /// repeat), not an action hole and not an address the signature does not declare (Phase 295).
+    /// The first that is not is refused `UnknownArg(addr, bindable)`, naming the bindable holes, so a
+    /// typo cannot register an un-narrowed signature under the pack's name; `ContentPack.load`
+    /// reports it as `UnknownBoundAddr`.
+    let partiallyApply
+        (newId: string)
+        (boundAddrs: Set<string>)
+        (source: FunctionEntry)
+        : Result<FunctionEntry, InvokeError> =
+        let bindable =
+            source.Capability.Signature.Holes
+            |> List.filter (fun h ->
+                match h.HoleKind with
+                | Some(ActionHole _)
+                | None -> false
+                | Some _ -> true)
+            |> List.map (fun h -> h.Addr)
 
-        { Capability = Capability.create newId narrowed source.Capability.Placement
-          ResultType = source.ResultType }
+        match
+            boundAddrs
+            |> Set.toList
+            |> List.tryFind (fun a -> not (List.contains a bindable))
+        with
+        | Some stray -> Error(UnknownArg(stray, bindable))
+        | None ->
+            let narrowed = Function.signatureExcluding boundAddrs source.Capability.Signature
+
+            Ok
+                { Capability = Capability.create newId narrowed source.Capability.Placement
+                  ResultType = source.ResultType }

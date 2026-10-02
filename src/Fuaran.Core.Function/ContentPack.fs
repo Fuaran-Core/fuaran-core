@@ -57,6 +57,12 @@ type PackLoadError =
     | UnknownBaseFunction of packId: string * baseId: string * known: string list
     | SignatureVersionMismatch of packId: string * baseId: string * declared: string * actual: string
     | PackRegisterFailed of packId: string * newId: string * reason: InvokeError
+    /// A `BoundAddrs` entry that is not a bindable hole of the base (Phase 295) — an address the
+    /// base does not declare, or an action hole — naming the pack, the curried id, the address and
+    /// the base's bindable holes. Until Phase 295 such an address was ignored and the pack
+    /// registered an UN-narrowed signature under its new id: the silent stale binding this contract
+    /// exists to refuse.
+    | UnknownBoundAddr of packId: string * newId: string * addr: string * declared: string list
 
 /// Build / fingerprint / load content packs over the Phase-50 signature-typed registry. Additive over
 /// `FunctionRegistry`; FSharp.Core-only, Fable-clean.
@@ -85,13 +91,15 @@ module ContentPack =
     /// Load a content pack into a signature-typed registry (Phase 57). Each `PackedFunction` curries its
     /// base function (`FunctionRegistry.partiallyApply` — the content-pack formalism) and registers the
     /// narrowed entry under its `NewId`, through the registry's existing default-deny posture (no new
-    /// dispatch path). Three guards, default-deny by shape:
+    /// dispatch path). Four guards, default-deny by shape:
     ///   1. the base function must be registered (an unknown base is `UnknownBaseFunction`, enumerating
     ///      the known ids) — a pack cannot conjure a function the host did not register;
     ///   2. the pack's declared base signature version must equal the registry's LIVE fingerprint for
     ///      that base (a mismatch is `SignatureVersionMismatch`, naming both declared + actual) — a pack
     ///      authored against a since-changed signature fails loudly, never binds stale;
-    ///   3. the narrowed entry must register without collision (a duplicate `NewId` surfaces the
+    ///   3. every bound address must be a bindable hole of the base (`UnknownBoundAddr`, naming the
+    ///      bindable holes — Phase 295);
+    ///   4. the narrowed entry must register without collision (a duplicate `NewId` surfaces the
     ///      registry's own `DuplicateCapability` wrapped as `PackRegisterFailed`).
     /// Total — returns the extended registry or the FIRST `PackLoadError`; the registry threads by value
     /// (no global state, GP2). All-or-nothing: a failing entry returns the error WITHOUT handing back a
@@ -110,10 +118,13 @@ module ContentPack =
                     if actual <> pf.BaseSignatureVersion then
                         Error(SignatureVersionMismatch(manifest.PackId, pf.BaseId, pf.BaseSignatureVersion, actual))
                     else
-                        let curried = FunctionRegistry.partiallyApply pf.NewId pf.BoundAddrs baseEntry
-
-                        match FunctionRegistry.register curried acc with
-                        | Ok acc' -> go acc' rest
+                        match FunctionRegistry.partiallyApply pf.NewId pf.BoundAddrs baseEntry with
+                        | Error(UnknownArg(addr, declared)) ->
+                            Error(UnknownBoundAddr(manifest.PackId, pf.NewId, addr, declared))
                         | Error e -> Error(PackRegisterFailed(manifest.PackId, pf.NewId, e))
+                        | Ok curried ->
+                            match FunctionRegistry.register curried acc with
+                            | Ok acc' -> go acc' rest
+                            | Error e -> Error(PackRegisterFailed(manifest.PackId, pf.NewId, e))
 
         go reg manifest.Functions

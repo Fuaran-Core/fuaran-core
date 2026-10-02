@@ -1,5 +1,91 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D104: one space relation answers every "does this value fit" question; a wire document's value space is `$type`-tagged and the descriptor's spelling is frozen; a signature and strict application agree on what a repeat requires; a registry holds only total capabilities
+
+**Context (Phase 295).** The invocable seams had drifted around the parts that were designed
+together. There were three incompatible answers to "does this space admit every value of that one":
+
+- The pipeline's edge check ignored bounds, so an `IntRange(0, 1000)` output fed an `IntRange(0, 10)`
+  argument.
+- The function registry's hole match respected bounds but refused int into float, which validation
+  accepted.
+- The query seam asked type equality, while `ColumnType.widens` called itself the single source of
+  truth.
+
+The other drift:
+
+- The effect was written three times and read twice, with two sentences for one refusal. The value
+  space was written in two spellings.
+- `Function.signature` marked a bounded repeat optional while strict `apply` refused it unbound.
+- A capability over an unbounded repeat registered and dispatched.
+- A pipeline with a cycle, a self-edge or a forward edge type-checked and failed only at evaluation.
+- Evaluation ran bodies without type-checking.
+
+**Decision.**
+
+1. **THE space relation is `Space.subsumes required available`**, and every call site asks it.
+   - The lattice: ranges compare by BOUNDS, and the one widening is int into float (a `FloatRange`
+     admits an `IntRange` its bounds contain).
+   - `StringLen` admits a `StringLen` it bounds and an `Enum` whose members it bounds. An `Enum`
+     admits a subset `Enum`.
+   - `AnyString` is the top of the SCALAR spaces, because every argument at the seam is a string.
+   - The tree spaces are their own family: an unconstrained `SlotTree` admits every `SlotTree`, and a
+     constrained one only its own kind. No scalar space admits a tree, and no tree space a scalar.
+   - The relation is sound (true only where every value of `available` validates in `required`),
+     and incomplete where the answer would need enumerating values (an `IntRange` against an `Enum`
+     of digits, say). Incomplete is the safe direction for a type check.
+   - The query seam asks `ColumnType.widens`, the same lattice over typed cells. It agrees with
+     `subsumes` on the numeric types. It does not agree on strings, where it should not: a typed
+     `string` parameter takes no `int` cell, while an `AnyString` hole admits the text `5`.
+2. **A value space in a wire DOCUMENT is `"$type"`-tagged, with `min` / `max` bounds** (`SpaceCodec`),
+   which is Phase 251's convention for anything a codec decodes back.
+   - `toSchema` is a DESCRIPTOR and keeps its `"kind"` / `minLength` spelling, through
+     `SpaceCodec.descriptorJson`.
+   - That spelling is FROZEN, not merely kept: `ContentPack.signatureFingerprint` hashes `toSchema`'s
+     bytes, so moving the descriptor onto the document spelling would re-pin every published pack for
+     no change in meaning.
+   - The reader takes the descriptor spelling too, leniently, for the 0.34.0 draft. Nothing writes it
+     into a document.
+   - The effect is untagged in both, because it is never a document of its own; `EffectCodec` is its
+     one reader and writer.
+3. **A bounded repeat is `Required`**, because strict `apply` demands it.
+   - This is the direction that changes the signature, not the law: full application binds every
+     data hole (Phase 181), and the signature is the projection of that law that had disagreed.
+   - The cost, accepted by operator ruling: a signature with a repeat hole lists it as required, so
+     its descriptor bytes and its pack fingerprint move.
+4. **A registry holds only total capabilities.**
+   - `register` refuses a non-total one, naming its entries (`NonTotalCapability`). Non-total means
+     a repeat over an unbounded count, or an entry that projects to no hole kind.
+   - `compose` checks totality on both parts, as `composeAcross` does.
+5. **A pipeline is checked before it runs.**
+   - `typeCheck` refuses a self-edge or a cycle as `PipelineCycle`, naming the cycle, and an acyclic
+     forward edge as `PipelineForwardEdge`.
+   - An argument refusal wraps the capability's own `InvokeError`.
+   - `eval` / `evalFrom` take the lookup and type-check first, so they are no longer a second
+     dispatch path beside the registry's.
+   - Both registries project the lookup, so a host with content packs keeps one registry.
+
+**Rejected.**
+
+- Retyping `SigEntry.Kind` to `HoleKind`, as the phase first proposed. `HoleKind` carries the space
+  and the effect ceiling the entry already carries in `Space` and `Action`, so the retype would make
+  a second copy of each that could disagree: the defect class this phase removes from `Capability`.
+  The typed reading is a member (`SigEntry.HoleKind`). The tag is spelled once (`HoleKind.tag`), and
+  the codec refuses any other.
+- Keeping the old `CapabilityPipeline.eval` / `evalFrom` beside type-checked twins. The old forms
+  were the unchecked path, and keeping them keeps the path.
+- Canonicalising inside `Space.validate`'s answer instead of the capture key. `validate` answers a
+  `bool`. The value is handed on typed by `typeArgs` / `invokeWithArgs`, and `invocationKey` keys
+  each argument by `Space.canonical`, so one value has one key wherever the key is built.
+
+**Consequences.**
+
+- The class is breaking (source) and, for the repeat's `required`, breaking (wire); both ride
+  0.34.0's operator ruling.
+- `proofs/Capability.fst` and `proofs/Query.fst` restate required-ness, totality, registration, the
+  widening and the keyed list, and both oracles are re-extracted.
+- `capabilityPipelineLaws`, `registryLaws` and `queryLaws` each pin their call site to the relation.
+
 ## 2026-10-02 — D103: a content-changing survivor is rewritten before the children it gains and after the children it loses; a contained undo is closed only from a contained pre-state; arbitration refuses a malformed base instead of arbitrating it
 
 **Recorded by Phase 305. `src/Fuaran.Core.Ops/Ops.fs` (`Diff`, `normalize`, `invert`, `invertAll`),

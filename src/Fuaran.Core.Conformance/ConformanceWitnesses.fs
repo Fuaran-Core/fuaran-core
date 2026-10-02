@@ -30,10 +30,10 @@ type StreamGen<'Op, 'State> =
 ///   call whose id is registered and whose arguments `Capability.validateArgs` accepts must reach
 ///   the body, and every other call must be refused with the registry's own error.
 /// - `Body` — the domain's body, handed the call's arguments first, in the shape
-///   `Registry.dispatch` wants after them. The kit wraps it to count how often it runs.
+///   `CapabilityRegistry.dispatch` wants after them. The kit wraps it to count how often it runs.
 /// - `Dispatch` — the domain's HOST path: the function its surface actually calls to invoke a
 ///   capability, handed the id, the arguments and the body to run. A host that delegates to Core
-///   passes `Registry.dispatch registry`; a host with its own wiring passes that wiring, which is the
+///   passes `CapabilityRegistry.dispatch registry`; a host with its own wiring passes that wiring, which is the
 ///   point — a defect in it (a body run before the registry refuses) is what the family can see.
 /// - `GenCall` — the calls a model could make: registered and invented ids, arguments in space, out
 ///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a

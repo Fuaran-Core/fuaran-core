@@ -445,6 +445,7 @@ type invoke_error =
   | RequiredArgsUnbound: addrs:list string -> invoke_error
   | UninvocableArg     : addr:string -> invoke_error
   | BodyFailed         : reason:string -> invoke_error
+  | NonTotalCapability : id:string -> addrs:list string -> invoke_error
 
 (* F#: `holes |> List.tryFind (fun h -> h.Addr = addr)` on declared holes. *)
 let rec find_hole (k:string) (holes:list hole_decl) : Tot (option hole_decl) =
@@ -506,8 +507,9 @@ let entry_of (h:hole_decl) : Tot sig_entry =
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot";
       s_space = Some (SlotTree c); s_slot = c; s_action = None; s_required = true }
   | RepeatHole s ->
+    (* Phase 295: a BOUNDED repeat is required, as strict `bind_args` demands it. *)
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat";
-      s_space = Some s; s_slot = None; s_action = None; s_required = false }
+      s_space = Some s; s_slot = None; s_action = None; s_required = is_bounded s }
   | ActionHole e ->
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "action";
       s_space = None; s_slot = None; s_action = Some e; s_required = false }
@@ -520,12 +522,16 @@ let signature_of (#node:Type) (w:witness node) (name:string) (n:node) : Tot sign
 let signature_excluding (bound:list string) (sg:signature) : Tot signature =
   { sg with sg_holes = excluding bound sg.sg_holes }
 
-(* F#: `Function.isTotal`'s per-entry predicate. *)
+(* F#: `Function.isTotal`'s per-entry predicate, over `SigEntry.HoleKind` (Phase 295): a repeat over a
+   bounded count is total, every other hole kind is, and an entry that projects to no hole kind (an
+   unknown tag, or a tag without the payload it needs) is not. *)
 let entry_total (e:sig_entry) : Tot bool =
-  e.s_kind <> "repeat" ||
-  (match e.s_space with
-   | Some s -> is_bounded s
-   | None -> false)
+  match e.s_kind, e.s_space, e.s_action with
+  | "value", Some _, _ -> true
+  | "slot", _, _ -> true
+  | "repeat", Some s, _ -> is_bounded s
+  | "action", _, Some _ -> true
+  | _ -> false
 
 (* F#: `Function.isTotal`. *)
 let is_total (sg:signature) : Tot bool = for_all entry_total sg.sg_holes
@@ -620,9 +626,16 @@ let wire (#node:Type) (w:witness node) (slot_addr:string) (inner outer:node) : T
   | Ok n -> Ok n
   | Error m -> Error (BindFailed slot_addr m)
 
-(* F#: `Function.compose`. *)
+(* F#: `Function.compose` — since Phase 295 it checks totality first, on both parts, as
+   `composeAcross` does: the outer's holes, then the inner's. *)
 let compose (#node:Type) (w:witness node) (slot_addr:string) (inner outer:node) : Tot (outcome node apply_error) =
   let holes = w.holes outer in
+  match guard_total holes with
+  | Some e -> Error e
+  | None ->
+  match guard_total (w.holes inner) with
+  | Some e -> Error e
+  | None ->
   match find_hole slot_addr holes with
   | None -> Error (UnknownHoleAddr slot_addr (map addr_of holes))
   | Some h ->
@@ -773,11 +786,20 @@ let rec ids (cs:list capability) : Tot (list string) =
   | [] -> []
   | c :: t -> c.c_id :: ids t
 
-(* F#: `Registry.register` — additive, no silent overwrite. *)
+(* F#: `Capability.nonTotalAddrs` — the entries `entry_total` refuses, by address. *)
+let rec non_total_addrs (holes:list sig_entry) : Tot (list string) =
+  match holes with
+  | [] -> []
+  | e :: t -> if entry_total e then non_total_addrs t else e.s_addr :: non_total_addrs t
+
+(* F#: `CapabilityRegistry.register` — additive, no silent overwrite, and (Phase 295) only a total
+   capability: a non-total one is refused `NonTotalCapability`, naming its non-total entries. *)
 let register (c:capability) (r:registry) : Tot (outcome registry invoke_error) =
   match find_cap c.c_id r.capabilities with
   | Some _ -> Error (DuplicateCapability c.c_id)
-  | None -> Ok { capabilities = c :: r.capabilities }
+  | None ->
+    if is_total c.c_signature then Ok { capabilities = c :: r.capabilities }
+    else Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes))
 
 (* F#: `Registry.tryFind`. *)
 let try_find_cap (id:string) (r:registry) : Tot (option capability) = find_cap id r.capabilities
@@ -1117,7 +1139,7 @@ let register_refuses_duplicate (c:capability) (r:registry)
   = find_cap_mem c.c_id r.capabilities
 
 let register_extends (c:capability) (r:registry)
-  : Lemma (requires not (mem c.c_id (ids (enumerate r))))
+  : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature)
           (ensures register c r == Ok { capabilities = c :: r.capabilities } /\
                    (forall (id:string). mem id (ids (c :: r.capabilities)) <==> (id = c.c_id \/ mem id (ids (enumerate r)))))
   = find_cap_mem c.c_id r.capabilities
@@ -1131,6 +1153,28 @@ let register_keeps_distinct (c:capability) (r r':registry)
   = find_cap_mem c.c_id r.capabilities
 
 let empty_distinct () : Lemma (distinct (ids (enumerate empty))) = ()
+
+(* `non_total_addrs` is empty exactly when the signature is total. *)
+let rec non_total_addrs_empty (holes:list sig_entry)
+  : Lemma (non_total_addrs holes == [] <==> for_all entry_total holes)
+  = match holes with
+    | [] -> ()
+    | _ :: t -> non_total_addrs_empty t
+
+(* Phase 295 — a registry admits only total capabilities. `register` refuses a fresh id whose
+   signature is not total as `NonTotalCapability`, naming a non-empty list of its entries; so every
+   capability a registry built by `register` holds is total, and `dispatch` never reaches a body over
+   an unbounded repeat. *)
+let register_refuses_non_total (c:capability) (r:registry)
+  : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ not (is_total c.c_signature))
+          (ensures register c r == Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes)) /\
+                   Cons? (non_total_addrs c.c_signature.sg_holes))
+  = find_cap_mem c.c_id r.capabilities; non_total_addrs_empty c.c_signature.sg_holes
+
+let register_admits_total (c:capability) (r r':registry)
+  : Lemma (requires register c r == Ok r')
+          (ensures is_total c.c_signature)
+  = ()
 
 (* ======================================================================================
    9. THE FOURTH THEOREM — law 1, totality: an unbounded repeat is rejected, never run.
@@ -1253,7 +1297,8 @@ let rec find_rename (f:string -> string) (slot_addr:string) (holes:list hole_dec
 
 let compose_rename (#node:Type) (w:witness node) (f:string -> string) (slot_addr:string) (inner n:node)
   : Lemma (compose (renamed f w) slot_addr inner n == compose w slot_addr inner n)
-  = find_rename f slot_addr (w.holes n); addrs_rename f (w.holes n)
+  = guard_rename f (w.holes n); guard_rename f (w.holes inner);
+    find_rename f slot_addr (w.holes n); addrs_rename f (w.holes n)
 
 (* THE FIFTH THEOREM, part one. F#: hole names are inert to `apply`, `curry` and `compose` —
    every clause keys on `Addr`, and a bare `Name` selects nothing. *)
@@ -1513,9 +1558,11 @@ let audit_effect_join (#node:Type) (w:witness node) (n:node)
    pre-image, escaped and terminated — the same canonicaliser `Query.invocationKey` uses, which
    is the point of Phase 225: one encoding, so the two seams cannot drift apart again. *)
 noeq type key_renderers = {
-  k_hash:    string -> string;
-  k_addr_le: string -> string -> bool;
-  k_field:   string -> string
+  k_hash:      string -> string;
+  k_addr_le:   string -> string -> bool;
+  k_field:     string -> string;
+  (* F#: `Space.canonical` (Phase 295) — the one spelling of a value in a space, `None` outside it. *)
+  k_canonical: value_space -> string -> option string
 }
 
 (* F#: `List.sortBy fst`'s insertion step — a STABLE sort. *)
@@ -1550,9 +1597,25 @@ let rec key_fields (kr:key_renderers) (l:list string) : Tot string =
 let key_canonical (kr:key_renderers) (l:invocation) : Tot string =
   key_fields kr (binding_fields l)
 
-(* F#: `Capability.invocationKey`. *)
+(* F#: `Capability.invocationKey`'s `spelled` (Phase 295) — an argument as it is keyed: its
+   canonical spelling in its hole's space where it has one, its own spelling otherwise. *)
+let spell (kr:key_renderers) (c:capability) (b:(string & string)) : Tot (string & string) =
+  let (a, v) = b in
+  match find_entry a c.c_signature.sg_holes with
+  | Some e ->
+    (match e.s_space with
+     | Some sp -> (match kr.k_canonical sp v with Some v' -> (a, v') | None -> (a, v))
+     | None -> (a, v))
+  | None -> (a, v)
+
+(* The argument list as it is keyed. *)
+let keyed (kr:key_renderers) (c:capability) (a:invocation) : Tot invocation = map (spell kr c) a
+
+(* F#: `Capability.invocationKey` — over the KEYED list (Phase 295), so one value has one key; the
+   seventh theorem below is injectivity of the pre-image over the list it is given, which is the
+   keyed list here. *)
 let invocation_key (kr:key_renderers) (c:capability) (a:invocation) : Tot string =
-  c.c_id ^ "#" ^ kr.k_hash (key_canonical kr (sort_bindings kr a))
+  c.c_id ^ "#" ^ kr.k_hash (key_canonical kr (sort_bindings kr (keyed kr c a)))
 
 (* HOW A STRING IS READ — the reading `Chain.fst` and `Query.fst` take, restated because this
    module opens nothing: concatenation is symbol-list append, and equal symbols are one string.
@@ -1735,6 +1798,15 @@ let twins : list twin = [
     tholds = (fun () ->
       det_of_tag "random+network" = Some ({ has_clock = false; has_random = true; has_network = true })) };
   { tname = "det-of-tag-refuses-another-order";
-    tholds = (fun () -> det_of_tag "network+random" = None) } ]
+    tholds = (fun () -> det_of_tag "network+random" = None) };
+  { tname = "a-bounded-repeat-is-required";
+    tholds = (fun () ->
+      (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange 0 3) })).s_required = true) };
+  { tname = "an-unbounded-repeat-is-not-required";
+    tholds = (fun () -> (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole AnyString })).s_required = false) };
+  { tname = "an-entry-of-no-hole-kind-is-not-total";
+    tholds = (fun () ->
+      entry_total ({ s_addr = "x"; s_name = "x"; s_kind = "int"; s_space = Some AnyString; s_slot = None;
+                     s_action = None; s_required = true }) = false) } ]
 
 let _ = assert_norm (twins_hold twins == true)

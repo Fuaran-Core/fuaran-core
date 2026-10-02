@@ -34,6 +34,39 @@ type HoleKind =
     | RepeatHole of countSpace: ValueSpace
     | ActionHole of effect: EffectClass
 
+/// The hole kinds' wire tags (Phase 295) — the ONE place a kind is spelled. `SigEntry.Kind` carries
+/// the tag; every reader of it goes through `HoleKind.tryOf` / `SigEntry.HoleKind` rather than
+/// comparing against a literal, and the capability codec refuses a tag outside `tags`.
+module HoleKind =
+
+    /// The tag a hole kind is written as: `value`, `slot`, `repeat`, `action`.
+    let tag (k: HoleKind) : string =
+        match k with
+        | ValueHole _ -> "value"
+        | SlotHole _ -> "slot"
+        | RepeatHole _ -> "repeat"
+        | ActionHole _ -> "action"
+
+    /// Every tag, in declaration order — the closed set a decoder admits.
+    let tags: string list = [ "value"; "slot"; "repeat"; "action" ]
+
+    /// The hole kind a signature entry's fields project to: its tag and the payload that tag
+    /// needs — a value or repeat hole's space, a slot's constraint, an action's effect ceiling.
+    /// `None` for a tag outside `tags` or a tag whose payload is absent (a `value` entry with no
+    /// space, say), which only a hand-built entry can be.
+    let tryOf
+        (kind: string)
+        (space: ValueSpace option)
+        (slot: string option)
+        (action: EffectClass option)
+        : HoleKind option =
+        match kind, space, action with
+        | "value", Some s, _ -> Some(ValueHole s)
+        | "slot", _, _ -> Some(SlotHole slot)
+        | "repeat", Some s, _ -> Some(RepeatHole s)
+        | "action", _, Some e -> Some(ActionHole e)
+        | _ -> None
+
 /// A declared hole. `Addr` is the absolute lexical address (id-path) — the hygiene
 /// surface: binding is by `Addr`, never by `Name`, so two same-named holes at
 /// different addresses cannot capture one another.
@@ -61,6 +94,10 @@ type SigEntry =
       Slot: string option
       Action: EffectClass option
       Required: bool }
+
+    /// The entry as the hole kind it projects (Phase 295; `HoleKind.tryOf`) — the typed reading of
+    /// `Kind`, so no reader compares the tag against a literal.
+    member e.HoleKind: HoleKind option = HoleKind.tryOf e.Kind e.Space e.Slot e.Action
 
 /// The artifact's derived signature: which holes, what spaces, and its effect class.
 type Signature =
@@ -176,20 +213,24 @@ module Function =
     /// Derive the introspectable signature from a tree.
     let signature (w: ArtifactWitness<'Node, 'Id>) (name: string) (node: 'Node) : Signature =
         let entry (h: HoleDecl) =
-            let kindStr, space, slot, action, required =
+            let space, slot, action, required =
                 match h.Kind with
-                | ValueHole s -> "value", Some s, None, None, true
+                | ValueHole s -> Some s, None, None, true
                 // Phase 229: a slot is entered WITH its value space — a wire tree of the constrained
                 // kind — so a capability over a slotted artifact is invocable at the scalar seam.
-                | SlotHole c -> "slot", Some(SlotTree c), c, None, true
-                | RepeatHole s -> "repeat", Some s, None, None, false
+                | SlotHole c -> Some(SlotTree c), c, None, true
+                // Phase 295: a BOUNDED repeat is required, because strict `apply` demands it — the
+                // signature and the artifact protocol answer one question the same way. An unbounded
+                // repeat is non-total: `apply` refuses it `NonTotal` whatever is bound, and
+                // `CapabilityRegistry.register` refuses a capability over one.
+                | RepeatHole s -> Some s, None, None, Space.isBounded s
                 // An action hole is non-required on the *data* binding axis (no value/slot arg fills it);
                 // it is bound on the *behaviour* axis by `bindHandlers`, which enforces its own coverage.
-                | ActionHole e -> "action", None, None, Some e, false
+                | ActionHole e -> None, None, Some e, false
 
             { Addr = h.Addr
               Name = h.Name
-              Kind = kindStr
+              Kind = HoleKind.tag h.Kind
               Space = space
               Slot = slot
               Action = action
@@ -209,14 +250,17 @@ module Function =
         { sg with
             Holes = sg.Holes |> List.filter (fun e -> not (boundAddrs.Contains e.Addr)) }
 
-    /// Totality law: no repeat hole may range over an unbounded count space.
+    /// Totality law: no repeat hole may range over an unbounded count space, and every entry is a
+    /// hole kind (`SigEntry.HoleKind`).
     let isTotal (sg: Signature) : bool =
         sg.Holes
         |> List.forall (fun e ->
-            e.Kind <> "repeat"
-            || (match e.Space with
-                | Some s -> Space.isBounded s
-                | None -> false))
+            match e.HoleKind with
+            | Some(RepeatHole s) -> Space.isBounded s
+            | Some _ -> true
+            // An entry that projects to no hole kind — an unknown tag, or a tag without the payload
+            // it needs, which only a hand-built entry can be — is not certified total (Phase 295).
+            | None -> false)
 
     /// First totality violation among a hole set, if any.
     let private guardTotal (holes: HoleDecl list) : ApplyError option =
@@ -331,7 +375,10 @@ module Function =
         Effect.join (w.Effect outer) (w.Effect inner)
 
     /// Compose: wire `inner`'s tree into `outer`'s tree-typed slot at `slotAddr`. The
-    /// slot's kind constraint (if any) is checked; the result's effect is the join.
+    /// slot's kind constraint (if any) is checked; the result's effect is the join. Totality is
+    /// checked first, on both parts, exactly as `composeAcross` checks it (Phase 295): a part
+    /// carrying an unbounded repeat makes the composed function non-total, so the composition is
+    /// refused `NonTotal`, never built.
     let compose
         (w: ArtifactWitness<'Node, 'Id>)
         (slotAddr: string)
@@ -340,18 +387,22 @@ module Function =
         : Result<'Node, ApplyError> =
         let holes = w.Holes outer
 
-        match holes |> List.tryFind (fun h -> h.Addr = slotAddr) with
-        | None -> Error(UnknownHoleAddr(slotAddr, holes |> List.map (fun h -> h.Addr)))
-        | Some h ->
-            match h.Kind with
-            | SlotHole constraintOpt ->
-                match constraintOpt with
-                | Some k when w.Tree.KindTag inner <> k -> Error(SlotKindMismatch(slotAddr, k, w.Tree.KindTag inner))
-                | _ ->
-                    match w.Bind slotAddr (SlotArg inner) outer with
-                    | Ok n -> Ok n
-                    | Error m -> Error(BindFailed(slotAddr, m))
-            | _ -> Error(NotASlot slotAddr)
+        match guardTotal holes |> Option.orElse (guardTotal (w.Holes inner)) with
+        | Some e -> Error e
+        | None ->
+            match holes |> List.tryFind (fun h -> h.Addr = slotAddr) with
+            | None -> Error(UnknownHoleAddr(slotAddr, holes |> List.map (fun h -> h.Addr)))
+            | Some h ->
+                match h.Kind with
+                | SlotHole constraintOpt ->
+                    match constraintOpt with
+                    | Some k when w.Tree.KindTag inner <> k ->
+                        Error(SlotKindMismatch(slotAddr, k, w.Tree.KindTag inner))
+                    | _ ->
+                        match w.Bind slotAddr (SlotArg inner) outer with
+                        | Ok n -> Ok n
+                        | Error m -> Error(BindFailed(slotAddr, m))
+                | _ -> Error(NotASlot slotAddr)
 
     /// The effect class of composing a `'B`-witness `inner` ACROSS the boundary into a
     /// `'A`-witness `outer` (Phase 47) — the join law carried across heterogeneous witnesses:
@@ -369,7 +420,7 @@ module Function =
     /// Compose ACROSS witnesses (Phase 47) — the higher-order, heterogeneous step: wire a
     /// `'B`-witness artifact-function's output into the typed slot of an `'A`-witness
     /// artifact-function, yielding ONE composed `'A` artifact-function of the combined signature.
-    /// `compose` (Phase 04) wires within a single witness; this is the "trees into holes ACROSS
+    /// `compose` wires within a single witness; this is the "trees into holes ACROSS
     /// domains" move — an app-function whose slot binds a UI-function whose slot binds a
     /// data-function, as one typed, replayable, verifiable artifact.
     ///
@@ -497,7 +548,7 @@ module Function =
         |> List.map w.Effect
         |> List.fold Effect.join Effect.pureDeterministic
 
-    /// Effect-soundness audit (Phase 248) — the teeth on the mandatory effect signature.
+    /// Effect-soundness audit (fuaran#248) — the teeth on the mandatory effect signature.
     /// Walk the artifact subtree (`observedEffect`), join every node's declared `EffectClass`
     /// componentwise into the *actual* effect, and verify the artifact's top-level declared class
     /// `covers` it. `Ok` when the declaration is at least as wide as the truth on both
@@ -529,46 +580,25 @@ module Function =
     //     standard has no keyword for (the effect class, action holes, a query's result row) rides
     //     under an `x-` key OUTSIDE `properties`, so it never reads as an argument to fill.
 
-    // ---- signature → JSON tool-schema projection (Phase 247) ----
-
-    let private spaceToJson (s: ValueSpace) : JVal =
-        match s with
-        | IntRange(lo, hi) -> Json.kindObj "intRange" [ "min", JInt lo; "max", JInt hi ]
-        | FloatRange(lo, hi) -> Json.kindObj "floatRange" [ "min", JFloat lo; "max", JFloat hi ]
-        | StringLen(lo, hi) -> Json.kindObj "stringLen" [ "minLength", JInt lo; "maxLength", JInt hi ]
-        | Enum xs -> Json.kindObj "enum" [ "values", JArr(xs |> List.map JStr) ]
-        | AnyString -> Json.kindObj "anyString" []
-        | SlotTree c ->
-            Json.kindObj
-                "slotTree"
-                (match c with
-                 | Some k -> [ "slotKind", JStr k ]
-                 | None -> [])
+    // ---- signature → JSON tool-schema projection (fuaran#247) ----
+    // The value space is written in its frozen descriptor spelling (`SpaceCodec.descriptorJson`)
+    // and the effect by `EffectCodec` (Phase 295): one writer each, shared with the codecs.
 
     /// A slot entry's space is DERIVED from its `Slot` constraint (Phase 229) — `signature` enters
     /// every `SlotHole` as `Some(SlotTree c)` beside `Slot = c` — so the wire projections omit it,
     /// and a pre-229 slot entry and a post-229 one project to the same bytes (and the same
     /// `signatureFingerprint`). Only a space that says something the entry does not is written.
     let internal derivedSlotSpace (e: SigEntry) : bool =
-        e.Kind = "slot" && e.Space = Some(SlotTree e.Slot)
+        match e.HoleKind with
+        | Some(SlotHole c) -> e.Space = Some(SlotTree c)
+        | _ -> false
 
     /// An entry's space with a slot's derived space filled in — so an entry built by hand before
     /// Phase 229 (a spaceless slot) and one `signature` derives compare equal where shape matters.
     let internal slotSpaceOf (e: SigEntry) : ValueSpace option =
-        match e.Kind, e.Space with
-        | "slot", None -> Some(SlotTree e.Slot)
+        match e.HoleKind, e.Space with
+        | Some(SlotHole c), None -> Some(SlotTree c)
         | _, sp -> sp
-
-    let private hostStr =
-        function
-        | Pure -> "pure"
-        | ReadsHost -> "readsHost"
-        | WritesHost -> "writesHost"
-
-    let private detStr = Effect.determinismTag
-
-    let private effectJson (e: EffectClass) : JVal =
-        JObj [ "host", JStr(hostStr e.Host); "determinism", JStr(detStr e.Determinism) ]
 
     let private entryJson (e: SigEntry) : JVal =
         // base fields always present; the constraint fields appear only when they apply
@@ -579,18 +609,18 @@ module Function =
           "required", JBool e.Required ]
         @ (match e.Space with
            | Some _ when derivedSlotSpace e -> []
-           | Some s -> [ "space", spaceToJson s ]
+           | Some s -> [ "space", SpaceCodec.descriptorJson s ]
            | None -> [])
         @ (match e.Slot with
            | Some k -> [ "slotKind", JStr k ]
            | None -> [])
         @ (match e.Action with
-           | Some eff -> [ "actionEffect", effectJson eff ]
+           | Some eff -> [ "actionEffect", EffectCodec.toJson eff ]
            | None -> [])
         |> JObj
 
     /// Project a derived signature into a canonical `"kind":"signature"` JSON object
-    /// (Phase 247) — the generic artifact-function-as-tool schema. Each hole becomes a
+    /// (fuaran#247) — the generic artifact-function-as-tool schema. Each hole becomes a
     /// typed property (value-space → min/max/enum/length constraints, slot → its
     /// kind-constraint), the two-axis effect class travels alongside, and the required
     /// addresses are listed — so the orchestrator-facing tool descriptor is produced once
@@ -600,11 +630,11 @@ module Function =
         Json.kindObj
             "signature"
             [ "name", JStr sg.Name
-              "effect", effectJson sg.Effect
+              "effect", EffectCodec.toJson sg.Effect
               "holes", JArr(sg.Holes |> List.map entryJson)
               "required", JArr(sg.Holes |> List.filter (fun h -> h.Required) |> List.map (fun h -> JStr h.Addr)) ]
 
-    // ---- signature → standard JSON Schema projection (Phase 04) ----
+    // ---- signature → standard JSON Schema projection ----
 
     /// The standard JSON-Schema keywords for a value space.
     let private spaceSchema (s: ValueSpace) : (string * JVal) list =
@@ -624,9 +654,9 @@ module Function =
     /// carrying its kind-constraint in `description` (a tree-typed argument has no scalar JSON
     /// type); a value / repeat hole projects its value-space keywords.
     let private propSchema (e: SigEntry) : JVal =
-        match e.Kind with
-        | "slot" ->
-            match e.Slot with
+        match e.HoleKind with
+        | Some(SlotHole c) ->
+            match c with
             | Some k -> JObj [ "type", JStr "object"; "description", JStr("slot of kind: " + k) ]
             | None -> JObj [ "type", JStr "object" ]
         | _ ->
@@ -638,15 +668,15 @@ module Function =
     let private actionEntryJson (e: SigEntry) : JVal =
         [ "addr", JStr e.Addr; "name", JStr e.Name ]
         @ (match e.Action with
-           | Some eff -> [ "effect", effectJson eff ]
+           | Some eff -> [ "effect", EffectCodec.toJson eff ]
            | None -> [])
         |> JObj
 
-    /// Project a derived signature into a STANDARD JSON Schema `object` (Phase 04) — the shape
+    /// Project a derived signature into a STANDARD JSON Schema `object` — the shape
     /// LLM tool-use APIs consume, so a saved artifact-function is a directly-registerable tool
     /// without per-orchestrator translation of `toSchema`'s bespoke shape. Each *data* hole
     /// (value / slot / repeat) becomes a property keyed by its absolute address (hygiene —
-    /// addresses, never bare names); the required ones (value + slot; repeats optional) are
+    /// addresses, never bare names); the required ones (value + slot + bounded repeat — Phase 295) are
     /// listed; the two-axis effect class travels alongside as `x-effect`, OUTSIDE the parameter
     /// schema so it never pollutes the argument properties. Action holes (Phase 318) are NOT
     /// arguments the LLM fills — they are the *host's* hole-binding surface (a human binds a
@@ -656,13 +686,18 @@ module Function =
     /// the artifact declares no action holes, so a data-only signature is byte-identical to
     /// before. `Json.render` of the result is canonical + stable for a fixed signature.
     let toJsonSchema (sg: Signature) : JVal =
-        let dataHoles = sg.Holes |> List.filter (fun e -> e.Kind <> "action")
-        let actionHoles = sg.Holes |> List.filter (fun e -> e.Kind = "action")
+        let isAction (e: SigEntry) =
+            match e.HoleKind with
+            | Some(ActionHole _) -> true
+            | _ -> false
+
+        let dataHoles = sg.Holes |> List.filter (isAction >> not)
+        let actionHoles = sg.Holes |> List.filter isAction
 
         JObj(
             [ "type", JStr "object"
               "title", JStr sg.Name
-              "x-effect", effectJson sg.Effect
+              "x-effect", EffectCodec.toJson sg.Effect
               "properties", JObj(dataHoles |> List.map (fun e -> e.Addr, propSchema e))
               "required",
               JArr(
@@ -781,7 +816,7 @@ module Function =
     /// `compose`d into the outer; then the outer's own holes are bound, also through `applyMemo`. An edit
     /// to an outer hole leaves every inner's key unchanged — the inner subtrees come straight from the
     /// cache (hits) and only the outer re-derives; an edit to one inner misses only that inner's key (and
-    /// the outer, whose composed content then changed). Single-witness `compose` (Phase 04); the
+    /// the outer, whose composed content then changed). Single-witness `compose`; the
     /// cross-witness `composeAcross` (Phase 47) analogue threads the same memo identically — the memo is
     /// witness-agnostic, keyed on content hashes, not on which witness produced the node.
     let applyMemoComposed

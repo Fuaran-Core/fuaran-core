@@ -26,14 +26,18 @@ type Placement =
     | Precomputed
 
 /// A registrable, invocable runtime capability. `Signature` (incl. its `Effect`) is reused
-/// verbatim from the artifact-function surface; `Determinism` is the capture-keying axis (always
-/// `= Signature.Effect.Determinism`, the smart constructor enforces it); `Placement` routes the
-/// host body. The wire carries this declaration + a typed invocation, never the body.
+/// verbatim from the artifact-function surface; `Placement` routes the host body. The wire carries
+/// this declaration + a typed invocation, never the body.
 type Capability =
     { Id: string
       Signature: Signature
-      Determinism: DeterminismSource
       Placement: Placement }
+
+    /// The capture-keying axis: the signature's effect determinism, DERIVED (Phase 295). It was a
+    /// field the smart constructor filled, so a hand-built record could disagree with its own
+    /// signature — journalled under one label, re-decoded under another, and refused by its own
+    /// codec. A member cannot disagree.
+    member c.Determinism: DeterminismSource = c.Signature.Effect.Determinism
 
 /// Why a typed invocation (or a registration) was refused — total, names the failure and, where a
 /// closed set is expected, enumerates the alternatives (GP5). Default-deny by shape: only a
@@ -46,6 +50,10 @@ type InvokeError =
     | RequiredArgsUnbound of addrs: string list
     | UninvocableArg of addr: string
     | BodyFailed of reason: string
+    /// A registration refused because the capability's signature is not total (Phase 295): the
+    /// repeat holes it names range over an unbounded count space, or an entry projects to no hole
+    /// kind. Declared last, so every earlier case keeps its tag.
+    | NonTotalCapability of id: string * addrs: string list
 
 /// What a model reads when an invocation is refused (Phase 251). The union names the failure and
 /// carries the alternatives in its fields; `describe` turns a case into one plain sentence that
@@ -92,6 +100,12 @@ module InvokeError =
             + addr
             + "' cannot take the value sent. A tree argument takes a JSON object with a \"kind\"; an action is bound by the host and never by a caller."
         | BodyFailed reason -> "Refused: the tool ran and failed: " + reason + "."
+        | NonTotalCapability(id, addrs) ->
+            "Refused: the tool '"
+            + id
+            + "' cannot be registered, because it is not total: "
+            + Space.quoteAll addrs
+            + " must each be a repeat over a bounded count, or a declared hole."
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Capability.validateArgsAll`'s answer, so a call with two bad arguments is answered once.
@@ -115,13 +129,25 @@ type ArgValue =
 /// `Function` surface; FSharp.Core-only, Fable-clean.
 module Capability =
 
-    /// Build a capability, deriving `Determinism` from the signature's effect class (the two are
-    /// never allowed to disagree).
+    /// Build a capability. Its `Determinism` is the signature's effect determinism, by derivation
+    /// (Phase 295), so the two cannot disagree.
     let create (id: string) (sg: Signature) (placement: Placement) : Capability =
         { Id = id
           Signature = sg
-          Determinism = sg.Effect.Determinism
           Placement = placement }
+
+    /// The entries that make the signature non-total (Phase 295): a repeat over an unbounded count
+    /// space, or an entry that projects to no hole kind. Empty exactly when `Function.isTotal`.
+    let internal nonTotalAddrs (c: Capability) : string list =
+        c.Signature.Holes
+        |> List.filter (fun e -> not (Function.isTotal { c.Signature with Holes = [ e ] }))
+        |> List.map (fun e -> e.Addr)
+
+    /// The registration refusal a non-total capability earns, or `None` (Phase 295).
+    let internal totalityFault (c: Capability) : InvokeError option =
+        match nonTotalAddrs c with
+        | [] -> None
+        | addrs -> Some(NonTotalCapability(c.Id, addrs))
 
     /// The Phase 27 determinism label this capability keys its captures on (`"deterministic"` /
     /// `"clock"` / `"random"` / `"network"`).
@@ -135,9 +161,24 @@ module Capability =
     /// one, whatever their values contain. That two distinct pre-images hash apart is a property
     /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `OpStream.captureEffect`'s
     /// `eff` argument.
+    ///
+    /// Since Phase 295 each argument is keyed by its CANONICAL spelling in its hole's space
+    /// (`Space.canonical`) where it has one — `05` and `5` for an integer hole, `1.50` and `1.5`
+    /// for a number hole, are one value and one key — and by its own spelling otherwise, so
+    /// injectivity holds over the canonical argument lists.
     let invocationKey (c: Capability) (args: (string * string) list) : string =
+        let spelled (a: string, v: string) =
+            match
+                c.Signature.Holes
+                |> List.tryFind (fun h -> h.Addr = a)
+                |> Option.bind (fun h -> h.Space)
+            with
+            | Some space -> a, (Space.canonical space v |> Option.defaultValue v)
+            | None -> a, v
+
         let canonical =
             args
+            |> List.map spelled
             |> List.sortBy fst
             |> List.collect (fun (a, v) -> [ a; v ])
             |> Hash.canonicalFields
@@ -219,7 +260,7 @@ module Capability =
     // ---- every refusal at once, and the validated arguments handed on (Phase 251) ----
 
     /// The refusal one argument earns on its own, by the rules `validateArgs` applies to it.
-    let private argFault (c: Capability) (declared: string list) (addr: string, value: string) : InvokeError option =
+    let internal argFault (c: Capability) (declared: string list) (addr: string, value: string) : InvokeError option =
         match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = addr) with
         | None -> Some(UnknownArg(addr, declared))
         | Some h ->
@@ -260,20 +301,8 @@ module Capability =
     /// One argument as the value its space admits, or `None` where the string is not in it.
     let private typedValue (space: ValueSpace option) (value: string) : ArgValue option =
         match space with
-        | Some(IntRange _) ->
-            match System.Int32.TryParse value with
-            | true, v -> Some(IntValue v)
-            | _ -> None
-        | Some(FloatRange _) ->
-            match
-                System.Double.TryParse(
-                    value,
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture
-                )
-            with
-            | true, v -> Some(FloatValue v)
-            | _ -> None
+        | Some(IntRange _) -> Space.readInt value |> Option.map IntValue
+        | Some(FloatRange _) -> Space.readFloat value |> Option.map FloatValue
         | Some(StringLen _)
         | Some(Enum _)
         | Some AnyString -> Some(TextValue value)
@@ -329,18 +358,27 @@ module Capability =
 type CapabilityRegistry =
     { Capabilities: Map<string, Capability> }
 
-module Registry =
+/// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295,
+/// which kept that name as an obsolete alias for the 0.34.0 draft). `ModuleSuffix`, so the module
+/// and the type share a name, as `FunctionRegistry` does.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module CapabilityRegistry =
 
     let empty: CapabilityRegistry = { Capabilities = Map.empty }
 
-    /// Register a capability — additive, no silent overwrite (a duplicate id is a named error).
+    /// Register a capability — additive, no silent overwrite (a duplicate id is a named error), and
+    /// only a TOTAL one (Phase 295): a capability whose signature carries a repeat over an unbounded
+    /// count is refused `NonTotalCapability`, naming the holes, rather than dispatched.
     let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
         if Map.containsKey c.Id r.Capabilities then
             Error(DuplicateCapability c.Id)
         else
-            Ok
-                { r with
-                    Capabilities = Map.add c.Id c r.Capabilities }
+            match Capability.totalityFault c with
+            | Some e -> Error e
+            | None ->
+                Ok
+                    { r with
+                        Capabilities = Map.add c.Id c r.Capabilities }
 
     let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Map.tryFind id r.Capabilities
 
@@ -375,6 +413,36 @@ module Registry =
         | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
         | Some c -> Capability.invokeWithArgs c args (body c)
 
+/// The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295): each
+/// member forwards to `CapabilityRegistry`.
+[<System.Obsolete("Registry is CapabilityRegistry since Phase 295; this alias is removed at the next draft.")>]
+module Registry =
+
+    let empty: CapabilityRegistry = CapabilityRegistry.empty
+
+    let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+        CapabilityRegistry.register c r
+
+    let tryFind (id: string) (r: CapabilityRegistry) : Capability option = CapabilityRegistry.tryFind id r
+
+    let enumerate (r: CapabilityRegistry) : Capability list = CapabilityRegistry.enumerate r
+
+    let dispatch
+        (r: CapabilityRegistry)
+        (id: string)
+        (args: (string * string) list)
+        (body: Capability -> unit -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
+        CapabilityRegistry.dispatch r id args body
+
+    let dispatchWithArgs
+        (r: CapabilityRegistry)
+        (id: string)
+        (args: (string * string) list)
+        (body: Capability -> (string * ArgValue) list -> Deferred<'v>)
+        : Result<Deferred<'v>, InvokeError> =
+        CapabilityRegistry.dispatchWithArgs r id args body
+
 /// How a seam codec treats a member it does not know (Phase 251). `Lenient` — the default, and
 /// what every decoder without a policy argument does — ignores it, so a reader tolerates a writer
 /// one version ahead. `Strict` refuses it, naming the member and the members that WOULD be read:
@@ -392,19 +460,8 @@ module CapabilityCodec =
 
     // ---- value-space ----
 
-    let internal spaceJson (s: ValueSpace) : JVal =
-        match s with
-        | IntRange(lo, hi) -> Canon.typed "intRange" [ "min", JInt lo; "max", JInt hi ]
-        | FloatRange(lo, hi) -> Canon.typed "floatRange" [ "min", JFloat lo; "max", JFloat hi ]
-        | StringLen(lo, hi) -> Canon.typed "stringLen" [ "min", JInt lo; "max", JInt hi ]
-        | Enum xs -> Canon.typed "enum" [ "values", JArr(xs |> List.map JStr) ]
-        | AnyString -> Canon.typed "anyString" []
-        | SlotTree c ->
-            Canon.typed
-                "slotTree"
-                (match c with
-                 | Some k -> [ "slotKind", JStr k ]
-                 | None -> [])
+    // The value space is `SpaceCodec`'s and the effect `EffectCodec`'s (Phase 295): one writer and
+    // one reader each, shared with every other codec that carries one.
 
     // Phase 310 — every member is read through the typed decode layer (`Decoder`), so a refusal
     // carries a code and the path to the value at fault (`decodeJsonDetailedWith` and its
@@ -441,46 +498,6 @@ module CapabilityCodec =
                         (what + s)
                 ))
 
-    let internal spaceOfDetailed: Decoder<ValueSpace> =
-        let int name = Decoder.field name Decoder.int
-        let num name = Decoder.field name Decoder.float
-
-        dispatch
-            "unknown value-space kind: "
-            [ "intRange", both (int "min") (int "max") (fun lo hi -> IntRange(lo, hi))
-              "floatRange", both (num "min") (num "max") (fun lo hi -> FloatRange(lo, hi))
-              "stringLen", both (int "min") (int "max") (fun lo hi -> StringLen(lo, hi))
-              "enum", Decoder.field "values" (Decoder.list Decoder.str) |> Decoder.map Enum
-              "anyString", Decoder.succeed AnyString
-              "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree ]
-
-    // ---- effect class ----
-
-    let private hostStr =
-        function
-        | Pure -> "pure"
-        | ReadsHost -> "readsHost"
-        | WritesHost -> "writesHost"
-
-    let private hostOf: Decoder<HostEffect> =
-        tagged "unknown host effect: " [ "pure", Pure; "readsHost", ReadsHost; "writesHost", WritesHost ]
-
-    let private detOf: Decoder<DeterminismSource> =
-        Decoder.str
-        |> Decoder.andThen (fun tag ->
-            match Effect.tryDeterminismOfTag tag with
-            | Some set -> Ok set
-            | None -> Error(DecodeError.make DecodeCode.UnknownTag "a determinism tag" ("unknown determinism: " + tag)))
-
-    let private effectJson (e: EffectClass) : JVal =
-        JObj
-            [ "host", JStr(hostStr e.Host)
-              "determinism", JStr(Effect.determinismTag e.Determinism) ]
-
-    let private effectOf: Decoder<EffectClass> =
-        both (Decoder.field "host" hostOf) (Decoder.field "determinism" detOf) (fun host det ->
-            { Host = host; Determinism = det })
-
     // ---- signature entry + signature ----
 
     let private entryJson (e: SigEntry) : JVal =
@@ -490,13 +507,13 @@ module CapabilityCodec =
           "required", JBool e.Required ]
         @ (match e.Space with
            | Some _ when Function.derivedSlotSpace e -> []
-           | Some s -> [ "space", spaceJson s ]
+           | Some s -> [ "space", SpaceCodec.toJson s ]
            | None -> [])
         @ (match e.Slot with
            | Some k -> [ "slotKind", JStr k ]
            | None -> [])
         @ (match e.Action with
-           | Some eff -> [ "actionEffect", effectJson eff ]
+           | Some eff -> [ "actionEffect", EffectCodec.toJson eff ]
            | None -> [])
         |> JObj
 
@@ -507,13 +524,14 @@ module CapabilityCodec =
         |> Result.bind (fun addr ->
             str "name"
             |> Result.bind (fun name ->
-                str "kind"
+                // Phase 295: the tag is one of `HoleKind.tags`; any other is refused.
+                Decoder.field "kind" (tagged "unknown hole kind: " (HoleKind.tags |> List.map (fun t -> t, t))) el
                 |> Result.bind (fun kind ->
                     Decoder.field "required" Decoder.bool el
                     |> Result.bind (fun required ->
-                        Decoder.optField "space" spaceOfDetailed el
+                        Decoder.optField "space" SpaceCodec.decoder el
                         |> Result.bind (fun sp ->
-                            Decoder.optField "actionEffect" effectOf el
+                            Decoder.optField "actionEffect" EffectCodec.decoder el
                             |> Result.bind (fun ac ->
                                 Decoder.optField "slotKind" Decoder.str el
                                 |> Result.map (fun slot ->
@@ -521,7 +539,7 @@ module CapabilityCodec =
                                     // decoding restores it from the constraint.
                                     let sp =
                                         match sp with
-                                        | None when kind = "slot" -> Some(SlotTree slot)
+                                        | None when kind = HoleKind.tag (SlotHole slot) -> Some(SlotTree slot)
                                         | other -> other
 
                                     { Addr = addr
@@ -535,13 +553,13 @@ module CapabilityCodec =
     let internal signatureJson (sg: Signature) : JVal =
         JObj
             [ "name", JStr sg.Name
-              "effect", effectJson sg.Effect
+              "effect", EffectCodec.toJson sg.Effect
               "holes", JArr(sg.Holes |> List.map entryJson) ]
 
     let private signatureOfDetailed (el: JVal) : Result<Signature, DecodeError> =
         Decoder.field "name" Decoder.str el
         |> Result.bind (fun name ->
-            Decoder.field "effect" effectOf el
+            Decoder.field "effect" EffectCodec.decoder el
             |> Result.bind (fun eff ->
                 Decoder.field "holes" (Decoder.list entryOf) el
                 |> Result.map (fun holes ->
@@ -627,7 +645,6 @@ module CapabilityCodec =
                     |> Result.map (fun placement ->
                         { Id = id
                           Signature = sg
-                          Determinism = sg.Effect.Determinism
                           Placement = placement }))))
 
     let decodeJson (el: JVal) : Result<Capability, string> =
@@ -706,10 +723,11 @@ module CapabilityCodec =
         | DuplicateCapability id -> Canon.typed "duplicateCapability" [ "id", JStr id ]
         | UnknownArg(addr, declared) -> Canon.typed "unknownArg" [ "addr", JStr addr; "declared", strs declared ]
         | ArgOutOfSpace(addr, space, got) ->
-            Canon.typed "argOutOfSpace" [ "addr", JStr addr; "space", spaceJson space; "got", JStr got ]
+            Canon.typed "argOutOfSpace" [ "addr", JStr addr; "space", SpaceCodec.toJson space; "got", JStr got ]
         | RequiredArgsUnbound addrs -> Canon.typed "requiredArgsUnbound" [ "addrs", strs addrs ]
         | UninvocableArg addr -> Canon.typed "uninvocableArg" [ "addr", JStr addr ]
         | BodyFailed reason -> Canon.typed "bodyFailed" [ "reason", JStr reason ]
+        | NonTotalCapability(id, addrs) -> Canon.typed "nonTotalCapability" [ "id", JStr id; "addrs", strs addrs ]
 
     let encodeInvokeError (e: InvokeError) : string = Canon.render (invokeErrorJson e)
 
@@ -729,11 +747,13 @@ module CapabilityCodec =
                   "argOutOfSpace",
                   str "addr"
                   |> Decoder.bind (fun addr ->
-                      both (Decoder.field "space" spaceOfDetailed) (str "got") (fun sp got ->
+                      both (Decoder.field "space" SpaceCodec.decoder) (str "got") (fun sp got ->
                           ArgOutOfSpace(addr, sp, got)))
                   "requiredArgsUnbound", strList "addrs" |> Decoder.map RequiredArgsUnbound
                   "uninvocableArg", str "addr" |> Decoder.map UninvocableArg
-                  "bodyFailed", str "reason" |> Decoder.map BodyFailed ]
+                  "bodyFailed", str "reason" |> Decoder.map BodyFailed
+                  "nonTotalCapability",
+                  both (str "id") (strList "addrs") (fun id addrs -> NonTotalCapability(id, addrs)) ]
 
         Decoder.describing invokeError el
 
@@ -800,8 +820,7 @@ module CapabilityCodec =
 
         members "value space" ("$type" :: extra) el
 
-    let private strictEffect (el: JVal) =
-        members "effect" [ "host"; "determinism" ] el
+    let private strictEffect (el: JVal) = members "effect" EffectCodec.members el
 
     let private strictEntry (el: JVal) =
         members "signature hole" [ "addr"; "name"; "kind"; "required"; "space"; "slotKind"; "actionEffect" ] el

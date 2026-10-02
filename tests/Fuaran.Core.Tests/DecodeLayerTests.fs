@@ -390,7 +390,7 @@ module DecodeRejectCorpus =
 let private intHole (addr: string) : SigEntry =
     { Addr = addr
       Name = addr
-      Kind = "int"
+      Kind = "value"
       Space = Some(IntRange(0, 9))
       Slot = None
       Action = None
@@ -406,17 +406,14 @@ let private capabilities: Capability list =
           { Name = "sum"
             Holes = [ intHole "a"; intHole "b" ]
             Effect = effect }
-        Determinism = effect.Determinism
         Placement = Server }
       { Id = "label"
         Signature =
           { Name = "label"
             Holes =
               [ { intHole "text" with
-                    Kind = "string"
                     Space = Some(Enum [ "x"; "y" ]) } ]
             Effect = effect }
-        Determinism = effect.Determinism
         Placement = ClientIsland Fable } ]
 
 [<Tests>]

@@ -110,7 +110,7 @@ let artifactW : ArtifactWitness<Item,string> =
     { Tree = nodew; IdW = idw; Holes = holesOf; Effect = fun _ -> Effect.pureDeterministic; Bind = bind }
 
 let fill = Capability.create "outline.fill" (Function.signature artifactW "fill-reading" template) Server
-let capabilities = Registry.register fill Registry.empty       // Result: a duplicate id is refused
+let capabilities = CapabilityRegistry.register fill CapabilityRegistry.empty       // Result: a duplicate id is refused
 ```
 
 Arguments are keyed by the hole's ADDRESS (`"report/temp"`), never its name (`"celsius"`): that is
@@ -142,7 +142,7 @@ model could make:
 let capabilitySeam : CapabilitySeamWitness<string> =
     { Registry = capabilities
       Body = fun args _ () -> fillBody args
-      Dispatch = Registry.dispatch capabilities   // the path your surface really calls
+      Dispatch = CapabilityRegistry.dispatch capabilities   // the path your surface really calls
       GenCall = genCall }                         // settled, pending and refused calls
 
 Conformance.capabilityLawsAt capabilitySeam seed iters   // and queryLawsAt for a QuerySeamWitness

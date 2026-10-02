@@ -8,10 +8,11 @@ namespace Fuaran.Core
 //  is a named error at composition time, never a runtime throw.
 //
 //  Nodes are `Source` (a named data ref) + `Invoke` (a registered capability).
-//  A DataFrame `Transform` step participates as a `Capability` whose body runs the
-//  evaluator — so the pipeline needs NO dedicated transform node and `Function`
-//  takes no `DataFrame` dependency (GP1/GP2: additive over the Capability surface;
-//  the data strand stays downstream). FSharp.Core only, Fable-clean.
+//  A compute step — a data-frame transform, say, from the compute layer that is
+//  produced outside this repository since 0.33.0 — participates as a `Capability`
+//  whose body runs its evaluator, so the pipeline needs NO dedicated transform node
+//  and `Function` takes no dependency on any compute package (GP1/GP2: additive over
+//  the Capability surface). FSharp.Core only, Fable-clean.
 // ============================================================================
 
 /// Where an `Invoke` node's argument comes from: a literal scalar, or the output of an upstream node
@@ -32,15 +33,30 @@ type PipelineNode =
 type CapabilityPipeline = { Nodes: PipelineNode list }
 
 /// Why a pipeline was rejected — recoverable + enumerated (GP5), never a throw (GP4). Default-deny by
-/// shape: only a registered capability + a type-compatible, fully-bound edge set composes.
+/// shape: only a registered capability + a type-compatible, fully-bound, ACYCLIC edge set in
+/// declaration order composes. The cases keep their tags where they survived (`EdgeTypeMismatch` is
+/// still the sixth).
+///
+/// Since Phase 295 an argument refusal wraps the `InvokeError` the node's capability gives the same
+/// argument — `UnknownArg` naming the declared holes, `ArgOutOfSpace` carrying the space and the
+/// value, `UninvocableArg`, `RequiredArgsUnbound` — as `PackLoadError.PackRegisterFailed` wraps a
+/// registration's, so a pipeline refusal says what the equivalent invocation refusal says. It
+/// replaced `PipelineUnknownArg`, `PipelineArgOutOfSpace` and `PipelineRequiredUnbound`, which
+/// carried the address alone.
 type PipelineError =
     | DuplicateNode of id: string
     | UnknownNode of id: string
     | PipelineNoSuchCapability of id: string * known: string list
-    | PipelineUnknownArg of node: string * arg: string
-    | PipelineArgOutOfSpace of node: string * arg: string
+    /// The node's capability refuses this argument (Phase 295): the wrapped `InvokeError` is the
+    /// refusal `Capability.validateArgs` gives it.
+    | PipelineArgRefused of node: string * reason: InvokeError
+    /// An edge closes a cycle (Phase 295): `cycle` is the node ids around it, starting at `node`
+    /// and following each `FromNode` edge to its upstream; a self-edge is `[node]`.
+    | PipelineCycle of node: string * cycle: string list
     | EdgeTypeMismatch of node: string * arg: string * producer: string * consumer: string
-    | PipelineRequiredUnbound of node: string * addrs: string list
+    /// An acyclic edge that points FORWARD in declaration order (Phase 295) — the pipeline is not in
+    /// topological order, so the upstream would not have run.
+    | PipelineForwardEdge of node: string * arg: string * upstream: string
 
 /// A pipeline node's argument, resolved for evaluation (Phase 62): an upstream node's realised output, or
 /// a declared literal. The engine resolves each `ArgSource` edge into one of these before handing the arg
@@ -49,12 +65,36 @@ type PipelineArg<'v> =
     | FromUpstream of 'v
     | LiteralArg of string
 
-/// Why pipeline evaluation failed — recoverable + named (GP5), never a throw (GP4). A `FromNode` edge that
-/// references a node not yet evaluated (a forward reference — the pipeline is out of topological order) is
-/// `EvalUnknownNode`; a host `body` failure is `EvalNodeFailed`.
+/// Why pipeline evaluation failed — recoverable + named (GP5), never a throw (GP4). Since Phase 295
+/// evaluation type-checks first: a pipeline `typeCheck` refuses is `EvalIllTyped`, and no body runs —
+/// which is also what retired `EvalUnknownNode`, since a forward reference is now a typeCheck refusal.
+/// An upstream value outside the space of the hole it feeds is `EvalArgRefused`, wrapping the
+/// `ArgOutOfSpace` the capability gives it; a host `body` failure is `EvalNodeFailed`.
 type PipelineEvalError =
-    | EvalUnknownNode of node: string * missing: string
+    | EvalIllTyped of reason: PipelineError
     | EvalNodeFailed of node: string * message: string
+    | EvalArgRefused of node: string * reason: InvokeError
+
+/// Where a pipeline resolves its `Invoke` nodes' capabilities (Phase 295): a lookup and the ids it
+/// holds (for the refusal that names them). Both registries project one — `ofRegistry`,
+/// `ofFunctionRegistry` — so a host that loads content packs into a `FunctionRegistry` type-checks
+/// and evaluates against it, and keeps no second registry.
+type CapabilityLookup =
+    { TryFind: string -> Capability option
+      Known: string list }
+
+/// The two projections onto `CapabilityLookup`.
+module CapabilityLookup =
+
+    /// A capability registry as a lookup.
+    let ofRegistry (r: CapabilityRegistry) : CapabilityLookup =
+        { TryFind = fun id -> CapabilityRegistry.tryFind id r
+          Known = r.Capabilities |> Map.toList |> List.map fst }
+
+    /// A function registry as a lookup: each entry's capability, by its id.
+    let ofFunctionRegistry (r: FunctionRegistry) : CapabilityLookup =
+        { TryFind = fun id -> FunctionRegistry.tryFind id r |> Option.map (fun e -> e.Capability)
+          Known = r.Entries |> Map.toList |> List.map fst }
 
 /// Build / type-check / key / serialise / **evaluate** a `CapabilityPipeline`. Additive over the
 /// `Capability` surface; FSharp.Core-only, Fable-clean.
@@ -79,26 +119,61 @@ module CapabilityPipeline =
         | AnyString -> "anyString"
         | SlotTree _ -> "slotTree"
 
-    /// Does a producer output value-space `feed` a consumer arg value-space — every value the producer
-    /// can emit is acceptable to the consumer (int feeds int or widens to float; a string space feeds
-    /// `AnyString`; otherwise same family).
-    let private spaceFeeds (producer: ValueSpace) (consumer: ValueSpace) : bool =
-        match producer, consumer with
-        | IntRange _, (IntRange _ | FloatRange _) -> true
-        | FloatRange _, FloatRange _ -> true
-        | StringLen _, (StringLen _ | AnyString) -> true
-        | Enum _, (Enum _ | AnyString) -> true
-        | AnyString, AnyString -> true
-        | SlotTree _, SlotTree None -> true
-        | a, b -> a = b
+    /// Does a producer output value-space feed a consumer arg value-space — every value the producer
+    /// can emit is acceptable to the consumer? THE space relation, `Space.subsumes` (Phase 295), which
+    /// compares bounds: an `IntRange(0, 1000)` output no longer feeds an `IntRange(0, 10)` argument.
+    let private spaceFeeds (producer: ValueSpace) (consumer: ValueSpace) : bool = Space.subsumes consumer producer
 
-    /// Type-check the pipeline against the registry (Phase 35): node ids are unique; every `Invoke`'s
-    /// capability resolves (default-deny); every arg addresses a declared scalar hole; a `Literal` is
-    /// in-space; a `FromNode` edge's producer output-type `feeds` the arg's value-space (an ill-typed
-    /// edge is a named `EdgeTypeMismatch`); every required hole is bound. Total.
-    let typeCheck (reg: CapabilityRegistry) (p: CapabilityPipeline) : Result<unit, PipelineError> =
+    /// The upstream ids an `Invoke` node's `FromNode` edges name, in argument order.
+    let private upstreams (n: PipelineNode) : string list =
+        match n with
+        | Source _ -> []
+        | Invoke(_, _, _, args) ->
+            args
+            |> List.choose (fun (_, src) ->
+                match src with
+                | FromNode up -> Some up
+                | Literal _ -> None)
+
+    /// Type-check the pipeline against a capability lookup (Phase 35; the lookup since Phase 295):
+    /// node ids are unique; every `Invoke`'s capability resolves (default-deny); every arg is one the
+    /// capability takes, refused as `Capability.validateArgs` refuses it and wrapped
+    /// `PipelineArgRefused`; a `Literal` is in its hole's space; a `FromNode` edge names a declared
+    /// node that comes EARLIER in declaration order — a self-edge or an edge that closes a cycle is
+    /// `PipelineCycle` naming the cycle, any other later node `PipelineForwardEdge` — and its
+    /// producer's output space feeds the arg's space (`Space.subsumes`; an ill-typed edge is a named
+    /// `EdgeTypeMismatch`); every required hole is bound. Total; the first refusal in declaration
+    /// order is the answer.
+    let typeCheck (lookup: CapabilityLookup) (p: CapabilityPipeline) : Result<unit, PipelineError> =
         let ids = p.Nodes |> List.map nodeId
         let nodeById = p.Nodes |> List.map (fun n -> nodeId n, n) |> Map.ofList
+        let position = ids |> List.mapi (fun i id -> id, i) |> Map.ofList
+
+        // The path from `start` along `FromNode` edges to a node whose edge reaches `target`, if
+        // any: [start; …; x] with x -> target. Each node is visited once.
+        let pathTo (target: string) (start: string) : string list option =
+            let rec walk (seen: Set<string>) (cur: string) : (Set<string> * string list option) =
+                if seen.Contains cur then
+                    seen, None
+                else
+                    let seen = seen.Add cur
+
+                    let ups = Map.tryFind cur nodeById |> Option.map upstreams |> Option.defaultValue []
+
+                    if List.contains target ups then
+                        seen, Some [ cur ]
+                    else
+                        let rec tryUps (seen: Set<string>) =
+                            function
+                            | [] -> seen, None
+                            | u :: rest ->
+                                match walk seen u with
+                                | seen', Some path -> seen', Some(cur :: path)
+                                | seen', None -> tryUps seen' rest
+
+                        tryUps seen ups
+
+            snd (walk Set.empty start)
 
         let dup =
             ids
@@ -113,39 +188,40 @@ module CapabilityPipeline =
                 | [] -> Ok()
                 | Source _ :: rest -> go rest
                 | Invoke(nid, capId, _, args) :: rest ->
-                    match Registry.tryFind capId reg with
-                    | None -> Error(PipelineNoSuchCapability(capId, reg.Capabilities |> Map.toList |> List.map fst))
+                    match lookup.TryFind capId with
+                    | None -> Error(PipelineNoSuchCapability(capId, lookup.Known))
                     | Some cap ->
                         let holes = cap.Signature.Holes
+                        let declared = holes |> List.map (fun h -> h.Addr)
 
-                        let argFault (addr, src) =
-                            match holes |> List.tryFind (fun h -> h.Addr = addr) with
-                            | None -> Some(PipelineUnknownArg(nid, addr))
-                            | Some h ->
-                                match h.Space with
-                                | None -> Some(PipelineUnknownArg(nid, addr)) // a spaceless (action) hole — not feedable
-                                | Some argSpace ->
-                                    match src with
-                                    | Literal v ->
-                                        if Space.validate argSpace v then
-                                            None
-                                        else
-                                            Some(PipelineArgOutOfSpace(nid, addr))
-                                    | FromNode up ->
-                                        match Map.tryFind up nodeById with
-                                        | None -> Some(UnknownNode up)
-                                        | Some upNode ->
-                                            if spaceFeeds (nodeOutputType upNode) argSpace then
-                                                None
-                                            else
-                                                Some(
-                                                    EdgeTypeMismatch(
-                                                        nid,
-                                                        addr,
-                                                        spaceTag (nodeOutputType upNode),
-                                                        spaceTag argSpace
-                                                    )
-                                                )
+                        let edgeFault (addr: string) (up: string) (argSpace: ValueSpace) =
+                            match Map.tryFind up nodeById with
+                            | None -> Some(UnknownNode up)
+                            | Some _ when up = nid -> Some(PipelineCycle(nid, [ nid ]))
+                            | Some upNode ->
+                                if position.[up] > position.[nid] then
+                                    match pathTo nid up with
+                                    | Some path -> Some(PipelineCycle(nid, nid :: path))
+                                    | None -> Some(PipelineForwardEdge(nid, addr, up))
+                                elif spaceFeeds (nodeOutputType upNode) argSpace then
+                                    None
+                                else
+                                    Some(
+                                        EdgeTypeMismatch(nid, addr, spaceTag (nodeOutputType upNode), spaceTag argSpace)
+                                    )
+
+                        let argFault (addr: string, src: ArgSource) =
+                            match src with
+                            | Literal v ->
+                                Capability.argFault cap declared (addr, v)
+                                |> Option.map (fun e -> PipelineArgRefused(nid, e))
+                            | FromNode up ->
+                                match holes |> List.tryFind (fun h -> h.Addr = addr) with
+                                | None -> Some(PipelineArgRefused(nid, UnknownArg(addr, declared)))
+                                | Some h ->
+                                    match h.Space with
+                                    | None -> Some(PipelineArgRefused(nid, UninvocableArg addr))
+                                    | Some argSpace -> edgeFault addr up argSpace
 
                         match args |> List.tryPick argFault with
                         | Some e -> Error e
@@ -160,7 +236,7 @@ module CapabilityPipeline =
                             if List.isEmpty unbound then
                                 go rest
                             else
-                                Error(PipelineRequiredUnbound(nid, unbound))
+                                Error(PipelineArgRefused(nid, RequiredArgsUnbound unbound))
 
             go p.Nodes
 
@@ -197,14 +273,14 @@ module CapabilityPipeline =
 
     // ---- wire codec ----
 
-    // Phase 310 — the value-space codec is the capability codec's, not a second copy of it; the one
-    // difference, the sentence for an unknown space, is this codec's and is kept.
+    // Phase 310 — the value-space codec is `SpaceCodec` (Phase 295), not a second copy of it; the
+    // one difference, the sentence for an unknown space, is this codec's and is kept.
 
-    let private spaceToJ (s: ValueSpace) : JVal = CapabilityCodec.spaceJson s
+    let private spaceToJ (s: ValueSpace) : JVal = SpaceCodec.toJson s
 
     let private spaceFromJ: Decoder<ValueSpace> =
         fun el ->
-            CapabilityCodec.spaceOfDetailed el
+            SpaceCodec.decoder el
             |> Result.mapError (fun e ->
                 match e.Code, e.Path, Decoder.tryMember "$type" el with
                 | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
@@ -296,13 +372,17 @@ module CapabilityPipeline =
     // body (GP6 — render/recompute stays domain-side); it topologically walks the DAG (nodes are in
     // declaration = topological order), resolves each `FromNode` edge into the upstream node's realised
     // value, and hands the resolved arg list to the caller-supplied host `body`. This is the capability-DAG
-    // analogue of `DataFrame.evalPipelineWith resolve` (Phase 34) — the pipeline plumbing is Core's, the
-    // compute is the host's.
+    // analogue of the compute layer's data-frame pipeline evaluator (Phase 34, which left this repository
+    // with the compute layer in 0.33.0) — the pipeline plumbing is Core's, the compute is the host's.
 
     /// Resolve one node's args against the results-so-far, then run the host `body`. Shared by `eval` and
-    /// `evalFrom` so the two agree by construction. A `Literal` passes through as a `LiteralArg`; a
-    /// `FromNode up` resolves to `up`'s realised value (a forward reference is `EvalUnknownNode`).
+    /// `evalFrom` so the two agree by construction. A `Literal` passes through as a `LiteralArg` (the
+    /// type-check put it in its hole's space); a `FromNode up` resolves to `up`'s realised value, which
+    /// must lie in the space of the hole it feeds, read through `spell` (Phase 295) — a value outside
+    /// it is `EvalArgRefused`, wrapping the `ArgOutOfSpace` the capability gives the same string.
     let private runNode
+        (lookup: CapabilityLookup)
+        (spell: 'v -> string)
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (results: Map<string, 'v>)
         (n: PipelineNode)
@@ -312,7 +392,13 @@ module CapabilityPipeline =
         let resolved =
             match n with
             | Source _ -> Ok []
-            | Invoke(_, _, _, args) ->
+            | Invoke(_, capId, _, args) ->
+                let spaceOf (addr: string) =
+                    lookup.TryFind capId
+                    |> Option.bind (fun c ->
+                        c.Signature.Holes
+                        |> List.tryPick (fun h -> if h.Addr = addr then h.Space else None))
+
                 (Ok [], args)
                 ||> List.fold (fun acc (addr, src) ->
                     acc
@@ -320,9 +406,18 @@ module CapabilityPipeline =
                         match src with
                         | Literal s -> Ok((addr, LiteralArg s) :: xs)
                         | FromNode up ->
-                            match Map.tryFind up results with
-                            | Some v -> Ok((addr, FromUpstream v) :: xs)
-                            | None -> Error(EvalUnknownNode(nid, up))))
+                            match Map.tryFind up results, spaceOf addr with
+                            | Some v, Some space ->
+                                let spelled = spell v
+
+                                if Space.validate space spelled then
+                                    Ok((addr, FromUpstream v) :: xs)
+                                else
+                                    Error(EvalArgRefused(nid, ArgOutOfSpace(addr, space, spelled)))
+                            // Unreachable after `typeCheck`: an edge names an earlier node into a
+                            // spaced hole of a resolved capability. Refused as the type-check would.
+                            | None, _ -> Error(EvalIllTyped(PipelineForwardEdge(nid, addr, up)))
+                            | Some _, None -> Error(EvalIllTyped(PipelineArgRefused(nid, UninvocableArg addr)))))
                 |> Result.map List.rev
 
         resolved
@@ -333,9 +428,17 @@ module CapabilityPipeline =
 
     /// The reference evaluator (Phase 62): fold the host `body` over the pipeline in declaration
     /// (topological) order, threading an `id → value` result map. `body` receives each node and its args
-    /// with every `FromNode` edge already resolved to the upstream value. Total — a forward `FromNode`
-    /// reference or a body failure is a named `PipelineEvalError`, never a throw. The cross-host compute
-    /// contract the incremental `evalFrom` is certified byte-identical to.
+    /// with every `FromNode` edge already resolved to the upstream value. Total — an ill-typed pipeline,
+    /// an upstream value outside its hole's space, or a body failure is a named `PipelineEvalError`,
+    /// never a throw. The cross-host compute contract the incremental `evalFrom` is certified
+    /// byte-identical to.
+    ///
+    /// **It type-checks first (Phase 295).** `eval` takes the capability lookup and refuses a pipeline
+    /// `typeCheck` refuses as `EvalIllTyped`, before any body runs, so it is not a second dispatch path
+    /// beside `CapabilityRegistry.dispatch`: a node runs only where its capability resolves and its
+    /// arguments are ones that capability takes. `spell` writes an upstream value as the argument
+    /// string the seam reads (the identity for a `string` pipeline), and a value outside the space of
+    /// the hole it feeds is `EvalArgRefused`.
     ///
     /// **It stays SYNCHRONOUS, by decision (Phase 210's routed-out question, operator decision
     /// 2026-09-19).** `Capability.invoke` and both dispatchers carry the `Deferred` envelope; `body`
@@ -345,17 +448,22 @@ module CapabilityPipeline =
     /// and no demand for one has been measured. Asynchrony belongs at the leaves: a host that must
     /// wait resolves its `Deferred` invocations before it folds the pipeline.
     let eval
+        (lookup: CapabilityLookup)
+        (spell: 'v -> string)
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (p: CapabilityPipeline)
         : Result<Map<string, 'v>, PipelineEvalError> =
-        let rec go (results: Map<string, 'v>) =
-            function
-            | [] -> Ok results
-            | n :: rest ->
-                runNode body results n
-                |> Result.bind (fun v -> go (Map.add (nodeId n) v results) rest)
+        match typeCheck lookup p with
+        | Error e -> Error(EvalIllTyped e)
+        | Ok() ->
+            let rec go (results: Map<string, 'v>) =
+                function
+                | [] -> Ok results
+                | n :: rest ->
+                    runNode lookup spell body results n
+                    |> Result.bind (fun v -> go (Map.add (nodeId n) v results) rest)
 
-        go Map.empty p.Nodes
+            go Map.empty p.Nodes
 
     /// The dirty set for a changed-input set: `changed` ∪ every node transitively downstream of it via
     /// `FromNode` edges (the reverse-reachability closure). Minimal — a node not reachable from any change
@@ -399,23 +507,30 @@ module CapabilityPipeline =
     /// upstream values. Effect-honesty on the dirty path: a clean node reuses its recorded value (the
     /// Phase-53 gate), an uncaptured live node on the dirty path re-invokes, so incrementality never serves
     /// a stale effect result. A node absent from `prior` (never evaluated) is always (re-)evaluated.
+    /// It type-checks first, exactly as `eval` does (Phase 295), so the two refuse the same pipelines.
     let evalFrom
+        (lookup: CapabilityLookup)
+        (spell: 'v -> string)
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (prior: Map<string, 'v>)
         (changed: Set<string>)
         (p: CapabilityPipeline)
         : Result<Map<string, 'v>, PipelineEvalError> =
-        let dirty = dirtySet changed p
+        match typeCheck lookup p with
+        | Error e -> Error(EvalIllTyped e)
+        | Ok() ->
+            let dirty = dirtySet changed p
 
-        let rec go (results: Map<string, 'v>) =
-            function
-            | [] -> Ok results
-            | n :: rest ->
-                let nid = nodeId n
+            let rec go (results: Map<string, 'v>) =
+                function
+                | [] -> Ok results
+                | n :: rest ->
+                    let nid = nodeId n
 
-                if not (Set.contains nid dirty) && Map.containsKey nid prior then
-                    go (Map.add nid (Map.find nid prior) results) rest
-                else
-                    runNode body results n |> Result.bind (fun v -> go (Map.add nid v results) rest)
+                    if not (Set.contains nid dirty) && Map.containsKey nid prior then
+                        go (Map.add nid (Map.find nid prior) results) rest
+                    else
+                        runNode lookup spell body results n
+                        |> Result.bind (fun v -> go (Map.add nid v results) rest)
 
-        go Map.empty p.Nodes
+            go Map.empty p.Nodes

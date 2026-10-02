@@ -29,7 +29,8 @@ module Deferred =
         | Pending -> Pending
         | Failed m -> Failed m
 
-    /// `Ready v` → `Ok v`; `Failed m` → `Error m`; `Pending` → `Error "pending"`.
+    /// `Ready v` → `Ok v`; `Failed m` → `Error m`; `Pending` → `Error "pending"` — which a
+    /// `Failed "pending"` also projects to; `settled` keeps the two apart.
     let toResult (d: Deferred<'T>) : Result<'T, string> =
         match d with
         | Ready v -> Ok v
@@ -42,3 +43,12 @@ module Deferred =
         match d with
         | Ready v -> Some v
         | _ -> None
+
+    /// The settled outcome, or `None` while `Pending` (Phase 295): `Ready v` → `Some(Ok v)`,
+    /// `Failed m` → `Some(Error m)`. `toResult` folds `Pending` into `Error "pending"`, which a body
+    /// failing with the message `"pending"` also produces; this keeps the two apart.
+    let settled (d: Deferred<'T>) : Result<'T, string> option =
+        match d with
+        | Ready v -> Some(Ok v)
+        | Failed m -> Some(Error m)
+        | Pending -> None
