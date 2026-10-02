@@ -1952,7 +1952,7 @@
     {
       "id": "capability-enumerate-is-registry",
       "level": "proved",
-      "claim": "An id is in `Registry.enumerate`'s output exactly when `Registry.tryFind` resolves it, and `dispatch` raises `NoSuchCapability` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS capability's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise (`register_extends`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`). Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `capabilityLaws`'s to certify and is outside the theorem.",
+      "claim": "An id is in `Registry.enumerate`'s output exactly when `Registry.tryFind` resolves it, and `dispatch` raises `NoSuchCapability` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS capability's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends a TOTAL capability by exactly one entry otherwise (`register_extends`; a non-total one is refused, `capability-register-total`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`). Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `capabilityLaws`'s to certify and is outside the theorem.",
       "phase": "fuaran-core#177",
       "evidence": {
         "theorem": "enumerate_is_registry",
@@ -1974,7 +1974,7 @@
     {
       "id": "capability-invocation-key-injective",
       "level": "proved",
-      "claim": "`Capability.invocationKey`'s pre-image is INJECTIVE (Phase 225; the key entered the model with it): two argument lists whose address-sorted canonical strings agree ARE the same sorted list and hold exactly the same bindings (`invocation_key_injective`), so distinct argument sets have distinct pre-images whatever their values contain, with no premise about the address comparator. The pre-image is `Hash.canonicalFields` over two fields per binding (address, value) — the canonicaliser `Query.invocationKey` also builds through, so the two seams cannot drift apart again. The pre-225 join spliced `addr=value` pairs on `U+0001` (not on the empty string, as Phase 187's finding said of both seams: it was true of `Query` only), so `[a = \"1\\u0001b=2\"]` and `[a = \"1\"; b = \"2\"]` shared a pre-image; they key apart on production now. What it spends is named in `key_premises` — the symbol reading of a string and the escaper premise (`capability-key-renderers-abstract`); no numeral layout is among them, because a capability argument is already a string. Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made.",
+      "claim": "`Capability.invocationKey`'s pre-image is INJECTIVE (Phase 225; the key entered the model with it): two argument lists whose address-sorted canonical strings agree ARE the same sorted list and hold exactly the same bindings (`invocation_key_injective`) — since Phase 295 over the KEYED list (`keyed`), each argument in its canonical spelling in its hole's space (`Space.canonical`, the `k_canonical` renderer), so `05` and `5` for an integer hole are one key, so distinct argument sets have distinct pre-images whatever their values contain, with no premise about the address comparator. The pre-image is `Hash.canonicalFields` over two fields per binding (address, value) — the canonicaliser `Query.invocationKey` also builds through, so the two seams cannot drift apart again. The pre-225 join spliced `addr=value` pairs on `U+0001` (not on the empty string, as Phase 187's finding said of both seams: it was true of `Query` only), so `[a = \"1\\u0001b=2\"]` and `[a = \"1\"; b = \"2\"]` shared a pre-image; they key apart on production now. What it spends is named in `key_premises` — the symbol reading of a string and the escaper premise (`capability-key-renderers-abstract`); no numeral layout is among them, because a capability argument is already a string. Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made.",
       "phase": "fuaran-core#225",
       "evidence": {
         "theorem": "invocation_key_injective",
@@ -2961,6 +2961,39 @@
       "evidence": {
         "theorem": "chain_tamper_evident_iff_hash_distinguishes",
         "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-register-total",
+      "level": "proved",
+      "claim": "Phase 295: a registry admits only TOTAL capabilities, and the signature and the artifact protocol agree on what a repeat requires. `CapabilityRegistry.register` refuses a fresh id whose signature is not total as `NonTotalCapability`, naming a non-empty list of its non-total entries (`register_refuses_non_total`), and every registration it accepts is of a total signature (`register_admits_total`), so `dispatch` never reaches a body over an unbounded repeat. `isTotal` reads each entry through its hole kind: a repeat over a bounded count is total, every other hole kind is, and an entry that projects to no hole kind is not (`entry_total`; `non_total_addrs_empty` ties the named list to the verdict). `Function.signature` enters a bounded repeat `Required` (`entry_of`), exactly as strict `apply` demands it; `compose` checks totality on both parts first, as `composeAcross` does, and its hygiene theorem survives the guard (`compose_rename`). Sampled by the model's twins and by `capability-differential` over generated registries.",
+      "phase": "fuaran-core#295",
+      "evidence": {
+        "theorem": "register_refuses_non_total",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "query-validate-widens",
+      "level": "proved",
+      "claim": "Phase 295: a parameter takes a cell exactly when the cell's type WIDENS to the parameter's (`ColumnType.widens`: the identity, `int` into `float`, `int` into `decimal`), the one lattice the column codec reads by. `validateParams` is characterised exactly over it (`validate_params_exact`, through `well_typed`), and a `ParamTypeMismatch` names a cell type that does NOT widen to the declared one (`refusal_is_truthful`). Until Phase 295 the seam asked type equality, so an `int` argument to a `float` parameter was refused while the same value decoded into a `float` column. On the numeric types the widening is `Space.subsumes`, which `queryLaws` certifies; the cell a resolver reads through `invokeWithArgs` is promoted to the declared type, which is outside this model.",
+      "phase": "fuaran-core#295",
+      "evidence": {
+        "theorem": "validate_params_exact",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "vocabulary-vectors-agree",
+      "level": "proved",
+      "claim": "The GENERATED vocabulary models and the REFERENCE INTERPRETER write the same object for every vector the three-way differential carries into F*: `proofs/VocabularyVectors.fst`, emitted by `FStarTarget.vectorsModule` from the test project, holds `d_vectors_agree`, `s_vectors_agree` and `r_vectors_agree` — one per certification model (`DocVocabulary`, `ScoreVocabulary`, `Vocabulary`) — each a sequence of `assert_norm (enc_node v == e)` facts, where `v` is the model value of what the interpreter DECODES a vector's canonical bytes to and `e` is the `jval` those bytes PARSE to, member for member and key for key, at the instantiation `num = int`, `flt = string` (a float carried as its canonical layout). The vectors are the differential's own seeded draws, drawn and adversarial, twelve per model, hostile map keys sorted first; a vector the model cannot express (a kind the model refuses, a non-finite float, a string F* cannot spell, a transparent union) is REFUSED by the target naming it, never dropped, and the test project selects among the admitted ones. The facts are discharged by the NORMALISER, not by Z3: a model encoder that put a member under another key, in another order, or a presence rule the interpreter does not follow fails the module (measured: one renamed key in one expected value fails it with `Assertion failed`). Proved with no assume and no admit under --report_assumes error. Held to a fresh generation by `IdlThreeHostTests`. WHAT IS NOT CLAIMED: the float LAYOUT (the model's `flt` is opaque, so the facts carry the canonical layout as a string on both sides) and the WIRE_FORMAT section-7 sentinels (a non-finite float is spelled on the wire as a string the model's float slot does not carry); both are covered by the three-way differential over the interpreter, the compiled generated F# and the generated TypeScript, which is a TEST, not this row. A fact is about its vector: these are instances of the round trip `rt_node` proves universally, pinned to the bytes the interpreter actually writes.",
+      "phase": "fuaran-core#303",
+      "evidence": {
+        "theorem": "r_vectors_agree",
+        "model": "proofs/VocabularyVectors.fst",
         "prover": "proofs/fstar-pin.json"
       }
     }

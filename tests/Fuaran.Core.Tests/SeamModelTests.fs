@@ -181,7 +181,8 @@ let private invokeErrors: InvokeError list =
       ArgOutOfSpace("tree", SlotTree None, "3")
       RequiredArgsUnbound [ "n"; "x" ]
       UninvocableArg "onDone"
-      BodyFailed "station offline: no reading in the last 24 hours" ]
+      BodyFailed "station offline: no reading in the last 24 hours"
+      NonTotalCapability("expand", [ "expand/rows" ]) ]
 
 let private queryErrors: QueryError list =
     [ NoSuchQuery("raw-dump", [ "readings"; "stations" ])
@@ -330,7 +331,8 @@ let tests =
                         | NoSuchCapability(_, xs)
                         | UnknownArg(_, xs)
                         | ArgOutOfSpace(_, Enum xs, _)
-                        | RequiredArgsUnbound xs -> xs
+                        | RequiredArgsUnbound xs
+                        | NonTotalCapability(_, xs) -> xs
                         | _ -> []
 
                     for e in invokeErrors do
@@ -518,9 +520,11 @@ let tests =
                         calls <- calls + 1
                         seen <- a
 
-                        Ready
-                            { emptyResult with
-                                PageNum = q.Params.Length }
+                        Ok(
+                            Ready
+                                { emptyResult with
+                                    PageNum = q.Params.Length }
+                        )
 
                     Expect.equal
                         (QueryRegistry.dispatchWithArgs queries "readings" args resolve)
@@ -539,7 +543,7 @@ let tests =
                         "refused before the resolver"
 
                     Expect.equal
-                        (Query.invokeWithArgs readings args (fun _ _ -> Failed "down"))
+                        (Query.invokeWithArgs readings args (fun _ _ -> Ok(Failed "down")))
                         (Error(ExecutionFailed("down", [])))
                         "Failed is ExecutionFailed"
 
@@ -745,8 +749,7 @@ let tests =
                             (sprintf "Lenient at %A" path)
 
                         match QueryCodec.decodeWith ReadPolicy.Strict tampered with
-                        | Error(ExecutionFailed(m, [])) ->
-                            Expect.stringContains m "'actor'" (sprintf "names the member at %A" path)
+                        | Error m -> Expect.stringContains m "'actor'" (sprintf "names the member at %A" path)
                         | other -> failtestf "Strict at %A: %A" path other
 
                     let result =
@@ -840,7 +843,7 @@ let tests =
                     let r =
                         Query.invokeWithArgs invoices (Result.defaultValue [] args) (fun _ a ->
                             seen <- a
-                            Ready emptyResult)
+                            Ok(Ready emptyResult))
 
                     Expect.equal r (Ok(Ready emptyResult)) "dispatched"
                     Expect.equal seen [ "amount", Decimal "12.5"; "limit", Int 5 ] "the resolver reads a Decimal cell"

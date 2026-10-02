@@ -577,9 +577,7 @@ let private encFloat (f: float) : JVal =
 
     let specDecoder (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
         let assigns =
-            k.Fields
-            |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
-            |> String.concat "; "
+            k.Fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
 
         fieldBinders idl k.Fields
         |> Result.map (fun binders ->
@@ -588,13 +586,11 @@ let private encFloat (f: float) : JVal =
                 k.Tag
                 k.Tag
                 (objParams msg (k.Tag + "Spec") [])
-                (bindChain "    " binders (sprintf "Ok { %s }" assigns) 1))
+                (bindChain "    " binders ("Ok " + recordLit (k.Tag + "Spec") assigns) 1))
 
     let recordDecoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
         let assigns =
-            r.Fields
-            |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
-            |> String.concat "; "
+            r.Fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
 
         fieldBinders idl r.Fields
         |> Result.map (fun binders ->
@@ -603,7 +599,7 @@ let private encFloat (f: float) : JVal =
                 r.Name
                 r.Name
                 (objParams msg r.Name [])
-                (bindChain "    " binders (sprintf "Ok { %s }" assigns) 1))
+                (bindChain "    " binders ("Ok " + recordLit r.Name assigns) 1))
 
     /// The decode-side helper prelude, emitted once per module. `dTag` reads the
     /// DECLARED discriminator (Phase 108) — `"$type"` interpolates to exactly the

@@ -334,6 +334,13 @@ let rec param_names (ps:list query_param) : Tot (list string) =
   | [] -> []
   | p :: t -> p.p_name :: param_names t
 
+(* F#: `ColumnType.widens` — THE widening lattice (Phase 295): the identity, or one of the two
+   lossless promotions, `int` into `float` and `int` into `decimal`. A cell of type `from` fills a
+   parameter of type `target` exactly when it widens; until Phase 295 the seam asked type
+   equality, refusing an `int` for a `float` parameter the column codec reads it into. *)
+let widens (from target:column_type) : Tot bool =
+  from = target || (from = IntType && target = FloatType) || (from = IntType && target = DecimalType)
+
 (* F#: `validateParams`'s local `checkArgs` — step 1, in the caller's arg order. *)
 let rec check_args (ps:list query_param) (declared:list string) (a:arguments)
   : Tot (outcome unit query_error) (decreases a) =
@@ -346,7 +353,7 @@ let rec check_args (ps:list query_param) (declared:list string) (a:arguments)
       match cell_type c with
       | None -> check_args ps declared rest
       | Some t ->
-        if t = p.p_type then check_args ps declared rest
+        if widens t p.p_type then check_args ps declared rest
         else Error (ParamTypeMismatch name p.p_type t)
 
 (* F#: `validateParams`'s step 2 — the required params the args leave unbound. *)
@@ -482,7 +489,7 @@ let rec check_args_shape (ps:list query_param) (declared:list string) (a:argumen
        | Some p ->
          (match cell_type c with
           | None -> check_args_shape ps declared rest
-          | Some t -> if t = p.p_type then check_args_shape ps declared rest else ()))
+          | Some t -> if widens t p.p_type then check_args_shape ps declared rest else ()))
 
 let validate_params_shape (q:query) (a:arguments)
   : Lemma (ensures (match validate_params q a with
@@ -558,7 +565,7 @@ let dispatch_never_ok_failed (#v:Type) (r:registry) (id:string) (a:arguments)
     | Some q -> invoke_never_ok_failed q a resolve
 
 (* What an accepted binding looks like: it addresses a declared param, and its cell is `Null`
-   or of that param's type. *)
+   or of a type that widens to that param's type (Phase 295). *)
 let well_typed (ps:list query_param) (b:(string & cell)) : Tot bool =
   let (name, c) = b in
   match find_param name ps with
@@ -566,7 +573,7 @@ let well_typed (ps:list query_param) (b:(string & cell)) : Tot bool =
   | Some p ->
     (match cell_type c with
      | None -> true
-     | Some t -> t = p.p_type)
+     | Some t -> widens t p.p_type)
 
 let rec all_well_typed (ps:list query_param) (a:arguments) : Tot bool =
   match a with
@@ -590,13 +597,13 @@ let validate_params_exact (q:query) (a:arguments)
 
 (* What a REFUSAL guarantees: an `UnknownParam` names a bound name no param declares, and lists
    the declared names; a `ParamTypeMismatch` names a declared param, its declared type, and a
-   different type the bound cell really has. *)
+   type the bound cell really has that does NOT widen to it (Phase 295). *)
 let rec refusal_is_truthful (ps:list query_param) (declared:list string) (a:arguments)
   : Lemma (ensures (match check_args ps declared a with
                     | Error (UnknownParam name d) ->
                       None? (find_param name ps) /\ d == declared /\ has_key name a
                     | Error (ParamTypeMismatch name expected got) ->
-                      has_key name a /\ expected <> got /\
+                      has_key name a /\ expected <> got /\ not (widens got expected) /\
                       (match find_param name ps with
                        | Some p -> p.p_type == expected
                        | None -> False)
@@ -610,7 +617,7 @@ let rec refusal_is_truthful (ps:list query_param) (declared:list string) (a:argu
        | Some p ->
          (match cell_type c with
           | None -> refusal_is_truthful ps declared rest
-          | Some t -> if t = p.p_type then refusal_is_truthful ps declared rest else ()))
+          | Some t -> if widens t p.p_type then refusal_is_truthful ps declared rest else ()))
 
 (* And a `RequiredParamsUnbound` names only declared names the args really leave unbound. *)
 let rec unbound_required_truthful (ps:list query_param) (a:arguments) (n:string)
@@ -1204,6 +1211,13 @@ let twins : list twin = [
   { tname = "validate-params-refuses-a-type-mismatch";
     tholds = (fun () ->
       validate_params twin_query [ ("region", Bool true) ] = Error (ParamTypeMismatch "region" StringType BoolType)) };
+  { tname = "validate-params-widens-an-int-into-a-float-param";
+    tholds = (fun () ->
+      validate_params
+        ({ twin_query with q_params = [ { p_name = "region"; p_type = FloatType; p_required = true } ] })
+        [ ("region", Int 3) ] = Ok ()) };
+  { tname = "validate-params-refuses-a-float-for-an-int-param";
+    tholds = (fun () -> widens FloatType IntType = false) };
   { tname = "register-refuses-a-duplicate";
     tholds = (fun () -> register twin_query ({ queries = [ twin_query ] }) = Error (DuplicateQuery "q")) } ]
 

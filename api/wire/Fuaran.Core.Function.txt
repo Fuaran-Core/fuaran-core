@@ -48,6 +48,7 @@ doc	invokeError / InvokeError.ArgOutOfSpace	sha256:8bea1f5e58b347b588e4f20e83c30
 doc	invokeError / InvokeError.BodyFailed	sha256:9fd996b6d6be1b53565a72caf0cbb42d47410ed07215c5ddcd4e67aa5adfccb2	{"$type":"bodyFailed","reason":"s"}
 doc	invokeError / InvokeError.DuplicateCapability	sha256:1f6cd76956fe0ab9454d8539ba53c16f7430bc96d1d3ab202c3dbe645d826dd3	{"$type":"duplicateCapability","id":"s"}
 doc	invokeError / InvokeError.NoSuchCapability	sha256:a00f5ff0b8f9179dcbad9ac66834fb669bbbabb207d72e12eb344583a1eb63d4	{"$type":"noSuchCapability","id":"s","known":["s"]}
+doc	invokeError / InvokeError.NonTotalCapability	sha256:362f5b8c7a69c64bc4775fca1b4f6b3995e79ec7febb7eb0db767cf01ba1bf89	{"$type":"nonTotalCapability","addrs":["s"],"id":"s"}
 doc	invokeError / InvokeError.RequiredArgsUnbound	sha256:682ad35bd95fe0cc2ec554dd8dafc6f9daeb206c5176632e3802ece348eadf1e	{"$type":"requiredArgsUnbound","addrs":["s"]}
 doc	invokeError / InvokeError.UninvocableArg	sha256:e6fd858bb4a0af3c708ccae78dd17518e545c618afe53408abef06fde80ac672	{"$type":"uninvocableArg","addr":"s"}
 doc	invokeError / InvokeError.UnknownArg	sha256:c4f593d98b0bbe22c0c112830bec84ca4be7134ce9a6eecb05dbf00f27f7bc95	{"$type":"unknownArg","addr":"s","declared":["s"]}

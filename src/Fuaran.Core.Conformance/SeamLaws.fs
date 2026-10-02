@@ -20,7 +20,7 @@ module internal SeamLaws =
     ///    random source is journaled as both, never as its least deterministic member). Its
     ///    companion law is the converse: a body that reads a factor OUTSIDE the recorded class is
     ///    not covered, and the difference names that factor;
-    ///  - **stable enumeration** — `Registry.enumerate` is order-stable (by id) regardless of
+    ///  - **stable enumeration** — `CapabilityRegistry.enumerate` is order-stable (by id) regardless of
     ///    insertion order;
     ///  - **declaration round-trip** — `CapabilityCodec.decode (encode c) = Ok c`;
     ///  - **a slotted artifact is invocable** (Phase 229) — a capability whose signature
@@ -219,11 +219,13 @@ module internal SeamLaws =
             let capB = Capability.create ("cap-a" + string i) sg BuildTime
 
             let reg =
-                Registry.empty |> Registry.register cap |> Result.bind (Registry.register capB)
+                CapabilityRegistry.empty
+                |> CapabilityRegistry.register cap
+                |> Result.bind (CapabilityRegistry.register capB)
 
             (match reg with
              | Ok r ->
-                 let ids = Registry.enumerate r |> List.map (fun c -> c.Id)
+                 let ids = CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
                  enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
              | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
@@ -236,14 +238,14 @@ module internal SeamLaws =
 
             // A declaration the registry refuses is a failure of the first law the registration
             // serves, and the iteration's remaining checks are skipped — never a throw.
-            match Registry.register cap Registry.empty with
+            match CapabilityRegistry.register cap CapabilityRegistry.empty with
             | Error e -> envelope.Fail(at (sprintf "the built declaration was refused by the registry: %A" e))
             | Ok creg ->
                 // SETTLED and PENDING: the body's envelope rides out of the seam unchanged, through the
                 // capability-level `invoke` and the registry-level `dispatch` alike.
                 for answer in [ Ready realized; Pending ] do
                     let direct = Capability.invoke cap args (fun () -> answer)
-                    let dispatched = Registry.dispatch creg cap.Id args (fun _ () -> answer)
+                    let dispatched = CapabilityRegistry.dispatch creg cap.Id args (fun _ () -> answer)
 
                     envelope.Check(
                         (direct = Ok answer && dispatched = Ok answer),
@@ -262,7 +264,7 @@ module internal SeamLaws =
                 let ran = ref false
 
                 (match
-                    Registry.dispatch creg cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
+                    CapabilityRegistry.dispatch creg cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
                         ran.Value <- true
                         Ready realized)
                  with
@@ -274,7 +276,7 @@ module internal SeamLaws =
                      ))
 
                 (match
-                    Registry.dispatch creg "no-such-capability" args (fun _ () ->
+                    CapabilityRegistry.dispatch creg "no-such-capability" args (fun _ () ->
                         ran.Value <- true
                         Ready realized)
                  with
@@ -295,7 +297,7 @@ module internal SeamLaws =
                 // `BodyFailed`, so `Ok(Failed _)` is unreachable. Exhausts the body's three answers
                 // rather than asserting the fourth away.
                 for answer in [ Ready realized; Pending; Failed("boom-" + string i) ] do
-                    match Registry.dispatch creg cap.Id args (fun _ () -> answer), answer with
+                    match CapabilityRegistry.dispatch creg cap.Id args (fun _ () -> answer), answer with
                     | Error(BodyFailed m), Failed fm when m = fm -> typedFailure.Saw()
                     | Ok d, (Ready _ | Pending) when d = answer -> typedFailure.Saw()
                     | other, _ ->
@@ -351,11 +353,11 @@ module internal SeamLaws =
 
                 let failSlotted msg = slotted.Check(false, fun () -> at msg)
 
-                match Registry.register slottedCap Registry.empty with
+                match CapabilityRegistry.register slottedCap CapabilityRegistry.empty with
                 | Error e -> failSlotted (sprintf "a slotted capability did not register: %A" e)
                 | Ok sreg ->
                     slotted.Check(
-                        Registry.enumerate sreg |> List.map (fun c -> c.Id) = [ slottedCap.Id ],
+                        CapabilityRegistry.enumerate sreg |> List.map (fun c -> c.Id) = [ slottedCap.Id ],
                         fun () -> at "a registered slotted capability is not enumerated"
                     )
 
@@ -364,7 +366,7 @@ module internal SeamLaws =
                     let run a =
                         ran.Value <- false
 
-                        Registry.dispatch sreg slottedCap.Id a (fun _ () ->
+                        CapabilityRegistry.dispatch sreg slottedCap.Id a (fun _ () ->
                             ran.Value <- true
                             Ready realized)
 
@@ -398,7 +400,7 @@ module internal SeamLaws =
               underDeclared ]
 
     /// The capability-seam laws at a DOMAIN'S seam (Phase 246). `capabilityLaws` beside it builds
-    /// its own capabilities from the seed and certifies Core's `Registry.dispatch`; it cannot see a
+    /// its own capabilities from the seed and certifies Core's `CapabilityRegistry.dispatch`; it cannot see a
     /// domain's registry, body or host path, so a host that runs the body before the registry
     /// refuses leaves it green. This form runs the domain's own `CapabilitySeamWitness` — every call
     /// the witness's generator draws goes through the witness's `Dispatch` with its `Body`, counted —
@@ -427,12 +429,12 @@ module internal SeamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let known = Registry.enumerate w.Registry |> List.map (fun c -> c.Id)
+        let known = CapabilityRegistry.enumerate w.Registry |> List.map (fun c -> c.Id)
 
         LawKit.seamLaws
             { Lookup =
                 fun id ->
-                    match Registry.tryFind id w.Registry with
+                    match CapabilityRegistry.tryFind id w.Registry with
                     | None -> Error(NoSuchCapability(id, known))
                     | Some c -> Ok c
               Validate = Capability.validateArgs
@@ -491,11 +493,18 @@ module internal SeamLaws =
         let typedFailure =
             LawKit.LawCell "a resolver failure is a typed ExecutionFailed, never Ok(Failed _)"
 
+        let relation =
+            LawKit.LawCell
+                "a parameter accepts a cell exactly when ColumnType.widens says it fills, which is Space.subsumes on the numeric types"
+
+        let typedFault =
+            LawKit.LawCell
+                "a resolver's typed fault reaches the caller by name (SourceNotResolved, Timeout, ExecutionFailed with its recoverable)"
+
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
 
-        let decodeV (s: string) : Result<QueryResult, string> =
-            QueryCodec.decodeResult s |> Result.mapError (fun e -> sprintf "%A" e)
+        let decodeV (s: string) : Result<QueryResult, string> = QueryCodec.decodeResult s
 
         let hashFn = OpStream.defaultHash
 
@@ -597,6 +606,56 @@ module internal SeamLaws =
                  enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
              | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
+            // ---- THE widening lattice at the parameter (Phase 295) ----
+            let declared = rng.Choose ColumnType.all
+            let sent = rng.Choose ColumnType.all
+
+            let cellOf (t: ColumnType) : Cell =
+                match t with
+                | IntType -> Int 1
+                | FloatType -> Float 1.5
+                | BoolType -> Bool true
+                | StringType -> Str "s"
+                | DateType -> Date "2026-10-02"
+                | TimestampType -> Timestamp "2026-10-02T00:00:00Z"
+                | DecimalType -> Decimal "1.5"
+
+            // The numeric types are where both seams carry a number: there the widening IS the space
+            // relation. A query cell is typed, so a `string` parameter takes no `int` cell, where a
+            // capability's `AnyString` hole admits the string "5" — the two seams agree on numbers.
+            let spaceOf (t: ColumnType) : ValueSpace option =
+                match t with
+                | IntType -> Some(IntRange(System.Int32.MinValue, System.Int32.MaxValue))
+                | FloatType -> Some(FloatRange(System.Double.MinValue, System.Double.MaxValue))
+                | _ -> None
+
+            let qT =
+                { q with
+                    Params =
+                        [ { Name = "p"
+                            Type = declared
+                            Required = true } ] }
+
+            let accepted = Query.validateParams qT [ "p", cellOf sent ] = Ok()
+            let widens = ColumnType.widens sent declared
+
+            relation.Check(
+                (accepted = widens
+                 && (match spaceOf declared, spaceOf sent with
+                     | Some d, Some g -> Space.subsumes d g = widens
+                     | _ -> true)),
+                fun () ->
+                    at (
+                        sprintf
+                            "%s into %s: accepted=%b widens=%b subsumes=%A"
+                            (ColumnType.tag sent)
+                            (ColumnType.tag declared)
+                            accepted
+                            widens
+                            (Option.map2 Space.subsumes (spaceOf declared) (spaceOf sent))
+                    )
+            )
+
             // declaration + result round-trip.
             (match QueryCodec.decode (QueryCodec.encode q) with
              | Ok q2 -> roundtrip.Check((q2 = q), fun () -> at "query ≠ round-trip")
@@ -652,6 +711,20 @@ module internal SeamLaws =
                  | other ->
                      asyncAxis.Check(false, fun () -> at (sprintf "an unregistered id was not refused: %A" other)))
 
+                // a resolver's typed fault names its refusal (Phase 295).
+                (match
+                    QueryRegistry.dispatchWithArgs reg q.Id goodArgs (fun _ _ ->
+                        Error(ResolveFault.SourceMissing("src-" + string i))),
+                    QueryRegistry.dispatchWithArgs reg q.Id goodArgs (fun _ _ -> Error ResolveFault.TimedOut),
+                    QueryRegistry.dispatchWithArgs reg q.Id goodArgs (fun _ _ ->
+                        Error(ResolveFault.Failed("busy", [ "p0" ])))
+                 with
+                 | Error(SourceNotResolved r), Error Timeout, Error(ExecutionFailed("busy", [ "p0" ])) when
+                     r = "src-" + string i
+                     ->
+                     typedFault.Saw()
+                 | a, b, c -> typedFault.Check(false, fun () -> at (sprintf "typed faults: %A / %A / %A" a b c)))
+
                 // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
                 match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
                 | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> typedFailure.Saw()
@@ -668,7 +741,9 @@ module internal SeamLaws =
               roundtrip
               envelope
               asyncAxis
-              typedFailure ]
+              typedFailure
+              relation
+              typedFault ]
 
     /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`
@@ -770,6 +845,47 @@ module internal SeamLaws =
     // catalogue queried BY SIGNATURE (result type + required-hole shape), extending the Phase-30
     // `Capability` registry pattern (default-deny dispatch + arg-validated invocation carried over).
 
+    // ---- THE space relation (Phase 295) ----
+    // One relation, `Space.subsumes`, answers "does this space admit every value of that one" at three
+    // call sites — the pipeline's edge check, the function registry's hole match, and (through
+    // `ColumnType.widens`) the query seam's parameter check. Each site's family carries a cell that pins
+    // the site to the relation over drawn spaces; `capabilityPipelineLaws` also certifies the relation
+    // SOUND against `Space.validate`.
+
+    /// A small value space, drawn so that related and unrelated pairs both occur: tight bounds, a
+    /// shared enum alphabet, both tree constraints.
+    let internal drawSpace (rng: LawKit.Draws) : ValueSpace =
+        let lo = rng.IntBelow 6
+        let hi = lo + rng.IntBelow 6
+
+        match rng.IntBelow 7 with
+        | 0 -> IntRange(lo, hi)
+        | 1 -> FloatRange(float lo, float hi + 0.5)
+        | 2 -> StringLen(lo, hi)
+        | 3 ->
+            Enum(
+                List.init (1 + rng.IntBelow 3) (fun _ -> rng.Choose [ "a"; "bb"; "ccc" ])
+                |> List.distinct
+            )
+        | 4 -> AnyString
+        | 5 -> SlotTree None
+        | _ -> SlotTree(Some(rng.Choose [ "para"; "table" ]))
+
+    /// Candidate values for a space: some inside it, some at and past its edges, so the soundness
+    /// check meets both answers.
+    let internal candidates (sp: ValueSpace) : string list =
+        match sp with
+        | IntRange(lo, hi) -> [ string lo; string hi; string (hi + 1); "0"; "11" ]
+        | FloatRange(lo, hi) -> [ Canon.canonicalFloat lo; Canon.canonicalFloat hi; "0"; "2.5"; "12" ]
+        | StringLen(lo, hi) ->
+            [ String.replicate lo "x"
+              String.replicate hi "y"
+              String.replicate (hi + 1) "z" ]
+        | Enum xs -> xs @ [ "a"; "zz" ]
+        | AnyString -> [ ""; "5"; "a" ]
+        | SlotTree _ -> [ "{\"kind\":\"para\"}"; "{\"kind\":\"table\"}"; "5" ]
+
+
     /// The signature-typed registry laws (Phase 50) — the teeth on `FunctionEntry` / `FunctionRegistry`
     /// + `findBySignature`. Self-contained (it builds its own functions from the seed); over a
     /// seed-replayable sample it certifies:
@@ -800,7 +916,60 @@ module internal SeamLaws =
             LawKit.LawCell
                 "dispatch stays default-deny + arg-validated (unregistered id refused, out-of-space arg rejected)"
 
+        let relation =
+            LawKit.LawCell
+                "findBySignature fills a hole exactly when the space relation says the context's space fits (Space.subsumes)"
+
         LawKit.run iterations seed (fun rng i at ->
+            // ---- 0. the hole match IS the space relation (Phase 295) ----
+            let required = drawSpace rng
+            let available = drawSpace rng
+
+            let holeOf (sp: ValueSpace) : SigEntry =
+                { Addr = "h"
+                  Name = "h"
+                  Kind = "value"
+                  Space = Some sp
+                  Slot = None
+                  Action = None
+                  Required = true }
+
+            (match
+                FunctionRegistry.empty
+                |> FunctionRegistry.register (
+                    FunctionRegistry.entry
+                        "doc"
+                        (Capability.create
+                            "rel"
+                            { Name = "rel"
+                              Holes = [ holeOf required ]
+                              Effect = Effect.pureDeterministic }
+                            BuildTime)
+                )
+             with
+             | Error e -> relation.Check(false, fun () -> at (sprintf "register failed: %A" e))
+             | Ok r ->
+                 let found =
+                     FunctionRegistry.findBySignature
+                         Subsumes
+                         { ResultType = Some "doc"
+                           Available = [ holeOf available ] }
+                         r
+                     |> List.isEmpty
+                     |> not
+
+                 relation.Check(
+                     (found = Space.subsumes required available),
+                     fun () ->
+                         at (
+                             sprintf
+                                 "the registry's hole match (%b) is not Space.subsumes (%A ⊇ %A)"
+                                 found
+                                 required
+                                 available
+                         )
+                 ))
+
             let lo = rng.IntBelow 50
             let span = rng.IntBelow 50
             let hi = lo + span + 1
@@ -871,13 +1040,13 @@ module internal SeamLaws =
                 )
 
                 // ---- 3. a partial application narrows its signature in the index ----
-                let pack =
+                (match
                     FunctionRegistry.partiallyApply ("pack-" + string i) (Set.ofList [ "h0" ]) ent
-
-                (match FunctionRegistry.register pack r with
+                    |> Result.bind (fun pack -> FunctionRegistry.register pack r |> Result.map (fun r2 -> pack, r2))
+                 with
                  | Error e ->
                      narrowing.Check(false, fun () -> at (sprintf "registering the content pack failed: %A" e))
-                 | Ok r2 ->
+                 | Ok(pack, r2) ->
                      // the smaller context {h1} subsumes the pack (one required hole) but NOT the
                      // original (needs h0 + h1) — the narrowed signature is what is now in the index.
                      let smallQuery =
@@ -936,7 +1105,7 @@ module internal SeamLaws =
                         )
                 ))
 
-        LawKit.results [ findable; nonMatch; narrowing; defaultDeny ]
+        LawKit.results [ findable; nonMatch; narrowing; defaultDeny; relation ]
 
     // ---- content-pack loading contract (Phase 57) ----
     // The teeth on `PackManifest` / `ContentPack.load` + the signature-version compatibility check: a
@@ -1418,6 +1587,20 @@ module internal SeamLaws =
         let replay =
             LawKit.LawCell "a pipeline node replays byte-identically via the Phase 27 capture seam"
 
+        let relation =
+            LawKit.LawCell
+                "an edge type-checks exactly when the space relation says the producer's output fits the argument (Space.subsumes)"
+
+        let sound =
+            LawKit.LawCell "the space relation is sound: a value of the sub-space validates in the super-space"
+
+        let ordered =
+            LawKit.LawCell
+                "a self-edge and a cycle are refused PipelineCycle and a forward edge PipelineForwardEdge, by name"
+
+        let checkedFirst =
+            LawKit.LawCell "an ill-typed pipeline is refused EvalIllTyped before any body runs"
+
         let encV (n: int) : string = string n
 
         let decV (s: string) : Result<int, string> =
@@ -1449,16 +1632,18 @@ module internal SeamLaws =
               Effect = Effect.pureDeterministic }
 
         let regResult =
-            Registry.empty
-            |> Registry.register (Capability.create "prod" prodSig (ClientIsland Pyodide))
-            |> Result.bind (Registry.register (Capability.create "cons" consSig Server))
+            CapabilityRegistry.empty
+            |> CapabilityRegistry.register (Capability.create "prod" prodSig (ClientIsland Pyodide))
+            |> Result.bind (CapabilityRegistry.register (Capability.create "cons" consSig Server))
 
         match regResult with
         | Error e ->
             let built = LawKit.LawCell "capability pipeline registry built"
             built.Check(false, fun () -> sprintf "%A" e)
             LawKit.results [ built ]
-        | Ok reg ->
+        | Ok registry ->
+            let reg = CapabilityLookup.ofRegistry registry
+
             let good =
                 { Nodes =
                     [ Invoke("n1", "prod", IntRange(0, 100), [])
@@ -1481,6 +1666,106 @@ module internal SeamLaws =
                  | Ok p2 -> roundtrip.Check((p2 = good), fun () -> at "pipeline ≠ round-trip")
                  | Error m -> roundtrip.Check(false, fun () -> at (sprintf "pipeline decode failed: %s" m)))
 
+                // ---- THE space relation at the edge, and its soundness (Phase 295) ----
+                let output = drawSpace rng
+                let argSpace = drawSpace rng
+
+                let argCap =
+                    Capability.create
+                        "arg"
+                        { Name = "arg"
+                          Holes =
+                            [ { consHole with
+                                  Space = Some argSpace
+                                  Kind =
+                                      (match argSpace with
+                                       | SlotTree _ -> "slot"
+                                       | _ -> "value")
+                                  Slot =
+                                      (match argSpace with
+                                       | SlotTree c -> c
+                                       | _ -> None) } ]
+                          Effect = Effect.pureDeterministic }
+                        Server
+
+                let edge =
+                    { Nodes =
+                        [ Source("s", "ref", output)
+                          Invoke("n", "arg", AnyString, [ "x", FromNode "s" ]) ] }
+
+                let lookup =
+                    { reg with
+                        TryFind = fun id -> if id = "arg" then Some argCap else reg.TryFind id }
+
+                (match CapabilityPipeline.typeCheck lookup edge with
+                 | Ok() when Space.subsumes argSpace output -> relation.Saw()
+                 | Error(EdgeTypeMismatch _) when not (Space.subsumes argSpace output) -> relation.Saw()
+                 | other ->
+                     relation.Check(
+                         false,
+                         fun () ->
+                             at (
+                                 sprintf
+                                     "the edge check (%A) is not Space.subsumes (%A ⊇ %A = %b)"
+                                     other
+                                     argSpace
+                                     output
+                                     (Space.subsumes argSpace output)
+                             )
+                     ))
+
+                if Space.subsumes argSpace output then
+                    for v in candidates output do
+                        if Space.validate output v then
+                            sound.Check(
+                                Space.validate argSpace v,
+                                fun () ->
+                                    at (sprintf "'%s' is in %A but not in %A, which subsumes it" v output argSpace)
+                            )
+
+                // ---- declaration order, built (Phase 295) ----
+                let selfEdge =
+                    { Nodes = [ Invoke("n1", "cons", IntRange(0, 100), [ "x", FromNode "n1" ]) ] }
+
+                let cycle =
+                    { Nodes =
+                        [ Invoke("n1", "cons", IntRange(0, 100), [ "x", FromNode "n2" ])
+                          Invoke("n2", "cons", IntRange(0, 100), [ "x", FromNode "n1" ]) ] }
+
+                let forward =
+                    { Nodes =
+                        [ Invoke("n2", "cons", IntRange(0, 100), [ "x", FromNode "n1" ])
+                          Invoke("n1", "prod", IntRange(0, 100), []) ] }
+
+                (match
+                    CapabilityPipeline.typeCheck reg selfEdge,
+                    CapabilityPipeline.typeCheck reg cycle,
+                    CapabilityPipeline.typeCheck reg forward
+                 with
+                 | Error(PipelineCycle("n1", [ "n1" ])),
+                   Error(PipelineCycle("n1", [ "n1"; "n2" ])),
+                   Error(PipelineForwardEdge("n2", "x", "n1")) -> ordered.Saw()
+                 | a, b, c ->
+                     ordered.Check(false, fun () -> at (sprintf "order refusals: self=%A cycle=%A forward=%A" a b c)))
+
+                let ran = ref false
+
+                (match
+                    CapabilityPipeline.eval
+                        reg
+                        string
+                        (fun _ _ ->
+                            ran.Value <- true
+                            Ok v)
+                        bad
+                 with
+                 | Error(EvalIllTyped(EdgeTypeMismatch _)) when not ran.Value -> checkedFirst.Saw()
+                 | other ->
+                     checkedFirst.Check(
+                         false,
+                         fun () -> at (sprintf "an ill-typed pipeline evaluated (%A; a body ran: %b)" other ran.Value)
+                     ))
+
                 // per-node replay byte-identity through the Phase 27 seam
                 let key = CapabilityPipeline.nodeInvocationKey (List.head good.Nodes)
                 let _, caps = OpStream.captureEffect hashFn encV "random" key (fun () -> v) []
@@ -1493,7 +1778,7 @@ module internal SeamLaws =
                     )
                 | Error m -> replay.Check(false, fun () -> at (sprintf "node replay errored: %s" m)))
 
-            LawKit.results [ typecheck; roundtrip; replay ]
+            LawKit.results [ typecheck; roundtrip; replay; relation; sound; ordered; checkedFirst ]
 
     /// The capability-pipeline laws at a DOMAIN'S pipelines and registry (Phase 246).
     /// `capabilityPipelineLaws` beside it builds a fixed two-node pipeline over a fixed registry and
@@ -1508,7 +1793,8 @@ module internal SeamLaws =
     ///  - **default deny, built** — for every `Invoke` node, the pipeline with that node naming a
     ///    capability the registry does not hold is refused `PipelineNoSuchCapability`, and the
     ///    pipeline with that node binding an argument no hole declares is refused
-    ///    `PipelineUnknownArg`. Both are BUILT from the drawn pipeline, never drawn.
+    ///    `PipelineArgRefused` wrapping `UnknownArg` (Phase 295). Both are BUILT from the drawn
+    ///    pipeline, never drawn.
     ///
     /// `deferredLaws` has no witness-taking form and needs none: it is over the `Deferred` envelope
     /// alone, which no domain supplies.
@@ -1542,7 +1828,7 @@ module internal SeamLaws =
 
         let absentCapability =
             let rec fresh (s: string) =
-                if Option.isSome (Registry.tryFind s w.PipelineRegistry) then
+                if Option.isSome (CapabilityRegistry.tryFind s w.PipelineRegistry) then
                     fresh (s + "_")
                 else
                     s
@@ -1566,7 +1852,9 @@ module internal SeamLaws =
                 fun () -> at (sprintf "two nodes share an invocation key: %A" nodeKeys)
             )
 
-            match CapabilityPipeline.typeCheck w.PipelineRegistry p with
+            let lookup = CapabilityLookup.ofRegistry w.PipelineRegistry
+
+            match CapabilityPipeline.typeCheck lookup p with
             | Error e ->
                 composes.Check(false, fun () -> at (sprintf "the pipeline does not compose at its registry: %A" e))
             | Ok() ->
@@ -1584,7 +1872,7 @@ module internal SeamLaws =
 
                         match
                             CapabilityPipeline.typeCheck
-                                w.PipelineRegistry
+                                lookup
                                 (replaceAt k (Invoke(nid, absentCapability, outT, args)))
                         with
                         | Error(PipelineNoSuchCapability(c, _)) when c = absentCapability -> deny.Saw()
@@ -1602,10 +1890,10 @@ module internal SeamLaws =
 
                         match
                             CapabilityPipeline.typeCheck
-                                w.PipelineRegistry
+                                lookup
                                 (replaceAt k (Invoke(nid, capId, outT, args @ [ strayArg, Literal "0" ])))
                         with
-                        | Error(PipelineUnknownArg(m, a)) when m = nid && a = strayArg -> deny.Saw()
+                        | Error(PipelineArgRefused(m, UnknownArg(a, _))) when m = nid && a = strayArg -> deny.Saw()
                         | other ->
                             deny.Check(
                                 false,
@@ -1654,6 +1942,26 @@ module internal SeamLaws =
         let mutable dirtyNodes = 0
         let mutable cleanNodes = 0
 
+        // `inc` takes one integer and is total; evaluation type-checks against it (Phase 295).
+        let lookup: CapabilityLookup =
+            let inc =
+                Capability.create
+                    "inc"
+                    { Name = "inc"
+                      Holes =
+                        [ { Addr = "x"
+                            Name = "x"
+                            Kind = "value"
+                            Space = Some(IntRange(0, 1000))
+                            Slot = None
+                            Action = None
+                            Required = true } ]
+                      Effect = Effect.pureDeterministic }
+                    Server
+
+            { TryFind = fun id -> if id = "inc" then Some inc else None
+              Known = [ "inc" ] }
+
         // s1 → a, s2 → b : two independent branches.
         let pipeline: CapabilityPipeline =
             { Nodes =
@@ -1695,15 +2003,17 @@ module internal SeamLaws =
                 | 1 -> Map.ofList [ "s1", s1v0; "s2", s2v1 ], Set.ofList [ "s2" ]
                 | _ -> Map.ofList [ "s1", s1v1; "s2", s2v1 ], Set.ofList [ "s1"; "s2" ]
 
-            match CapabilityPipeline.eval (bodyWith sv0 (ResizeArray())) pipeline with
+            match CapabilityPipeline.eval lookup string (bodyWith sv0 (ResizeArray())) pipeline with
             | Error e -> byteIdentical.Check(false, fun () -> at (sprintf "prior eval errored: %A" e))
             | Ok prior ->
                 let fullInvoked = ResizeArray()
                 let incrInvoked = ResizeArray()
-                let viaFull = CapabilityPipeline.eval (bodyWith sv1 fullInvoked) pipeline
+
+                let viaFull =
+                    CapabilityPipeline.eval lookup string (bodyWith sv1 fullInvoked) pipeline
 
                 let viaIncr =
-                    CapabilityPipeline.evalFrom (bodyWith sv1 incrInvoked) prior changed pipeline
+                    CapabilityPipeline.evalFrom lookup string (bodyWith sv1 incrInvoked) prior changed pipeline
 
                 // byte-identical to a full eval over the changed inputs
                 byteIdentical.Check(

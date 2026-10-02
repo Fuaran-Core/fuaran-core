@@ -305,6 +305,19 @@
       "floorPhase": "fuaran-core#305",
       "phase": "fuaran-core#305",
       "note": "The script peephole — `Ops.normalize` clause for clause (the six-row collapse table, the push loop, the left fold with its output stack and the `Batch` arm) — with the defining law proved for an applyable script at a well-formed tree (`normalize_preserves`), idempotence proved through a stability invariant on the output (`normalize_idempotent`) and the output proved never longer than the input (`normalize_never_longer`), plus the pinned counterexample that says why the law is conditional (`cancellation_can_admit_a_refused_script`). Opens DagFold, TreeOps and Preservation, cites TreeDiff's `tree_ext` and `apply_all_app`, and carries `--ext context_pruning` for the reason TreeOps's entry gives. Three scoped `--z3rlimit 100 --fuel 1 --ifuel 1` blocks, one per extensional row (move/move, reorder/reorder, rewrite/remove): each assembles a `tree_ext` from a per-node view lemma proved just above it at the leg's default, and the low fuel is load-bearing — the first draft of the move/move row, one lemma at default fuel, did not terminate in ten minutes with Z3 past 4 GB, and split into `move_lands` / `move_move_node` / the assembly it is 37 + 27 + 32 goals in a few seconds each. SEEDED BY PHASE 305 from four cold runs of the pinned prover invoked directly on the file with the leg's own flags (`--z3rlimit 40 --quake 3 --report_assumes error`) against a cache holding only DagFold, TreeOps, Preservation and TreeDiff, each run after deleting the module's own `.checked`: 26s (the first verification of the final text), then 20s, 20s, 22s — on a machine with NO other prover running (counted before each run) and no extraction in the run, though with other sessions' .NET builds present. By `seeding`'s rule the budget is 2x26 = 52, rounded up to 60; by `floorSeeding`'s the floor is half the fastest genuine cold run, 10s from 20s. These are direct-invocation figures, as Arbitrate's are: under `check.ps1 -Modules Normalize` the four modules it opens are verified inside its clock and the line will read several minutes, which the selector's own banner says is not a cold measurement of this module alone; the full leg checks them first in their own clocks."
+    },
+    {
+      "module": "VocabularyVectors",
+      "packages": [
+        "Fuaran.Core.Idl.Codegen"
+      ],
+      "budgetSeconds": 20,
+      "measuredSeconds": 3,
+      "floorSeconds": 0,
+      "fastestSeconds": 3,
+      "floorPhase": "fuaran-core#303",
+      "phase": "fuaran-core#303",
+      "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the test project (`--emit-fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3."
     }
   ]
 }

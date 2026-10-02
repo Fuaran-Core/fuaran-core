@@ -7471,6 +7471,7 @@ let private prodInvokeErrRender (e: InvokeError) : string =
     | RequiredArgsUnbound xs -> sprintf "RequiredArgsUnbound(%s)" (String.concat "," xs)
     | UninvocableArg a -> sprintf "UninvocableArg(%s)" a
     | BodyFailed m -> sprintf "BodyFailed(%s)" m
+    | NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
 
 let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     match e with
@@ -7480,6 +7481,7 @@ let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     | ModelCap.ArgOutOfSpace(a, s, g) -> sprintf "ArgOutOfSpace(%s;%s;%s)" a (modelSpaceRender s) g
     | ModelCap.RequiredArgsUnbound xs -> sprintf "RequiredArgsUnbound(%s)" (String.concat "," xs)
     | ModelCap.UninvocableArg a -> sprintf "UninvocableArg(%s)" a
+    | ModelCap.NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
     | ModelCap.BodyFailed m -> sprintf "BodyFailed(%s)" m
 
 let private invokeErrClass (e: InvokeError) : string =
@@ -8787,7 +8789,12 @@ let private genAdversarialFields (r: ConfRng.T) : string list * ConfRng.T =
 let private capKeyRenderers: ModelCap.key_renderers =
     { ModelCap.key_renderers.k_hash = Hash.fnv1a
       ModelCap.key_renderers.k_addr_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
-      ModelCap.key_renderers.k_field = Hash.canonicalField }
+      ModelCap.key_renderers.k_field = Hash.canonicalField
+      ModelCap.key_renderers.k_canonical =
+        fun (sp: ModelCap.value_space) (v: string) ->
+            match Space.canonical (spaceOfModel sp) v with
+            | Some c -> FStar_Pervasives_Native.Some c
+            | None -> FStar_Pervasives_Native.None }
 
 let private prodQueryErrRender (e: QueryError) : string =
     match e with

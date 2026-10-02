@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 250 claims — 179 proved across 25 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 253 claims — 182 proved across 26 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -343,7 +343,6 @@ history whose branches do not commute has no order-free replay for a script to e
 `ReconcileShapeTests.fs` pins a witness. The `reconcile-differential` row runs the extracted
 partition beside production over the four shapes, and the extracted checked fold beside `foldOnce`
 over a rejecting-lane pool.
-
 ### A footprint names the slot it writes (Phase 340)
 
 The four address sets are node-granular, so a write to PART of a node was a write to the node and two

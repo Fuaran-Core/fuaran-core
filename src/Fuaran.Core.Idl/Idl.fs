@@ -1271,6 +1271,22 @@ module Encode =
     let encodeOp (idl: Idl) (v: IdlValue) : Result<string, string> =
         encodeValue idl TOp v |> Result.bind (render idl)
 
+/// WIRE_FORMAT §7's non-finite float spelling, read back (Phase 303) — the inverse of
+/// `JVal.nonFiniteToken`, which is the one place the spine writes it. Internal: the
+/// interpreter's float slot and the artifact's float value read through it, and nothing
+/// else in the tier may widen a slot to the quoted token.
+module internal FloatToken =
+    /// The non-finite float a §7 token names, or `None` for any other string.
+    let tryNonFinite (s: string) : float option =
+        match s with
+        | "NaN" -> Some System.Double.NaN
+        | "Infinity" -> Some System.Double.PositiveInfinity
+        | "-Infinity" -> Some System.Double.NegativeInfinity
+        | _ -> None
+
+    /// [[tryNonFinite]] as a pattern, for a decoder's float arm.
+    let (|NonFinite|_|) (s: string) : float option = tryNonFinite s
+
 /// The symmetric decode leg — the IDL also drives JSON → `IdlValue`, so the codec
 /// round-trips (`encode (decode wire) = wire`). Parsing is the shared portable
 /// `Fuaran.Core.Json.parse`; the IDL drives the walk. Decoders are key-order and
@@ -1359,6 +1375,14 @@ module Decode =
         | TBool, JBool b -> Ok(VBool b)
         | TFloat, JFloat f -> Ok(VFloat f)
         | TFloat, JInt i -> Ok(VFloat(float i))
+        // Phase 303 — WIRE_FORMAT §7: at a FLOAT slot the quoted tokens `"NaN"`, `"Infinity"` and
+        // `"-Infinity"` are the spelling of a non-finite value, and the encoder writes exactly them
+        // (`Canon` renders a non-finite `JFloat` as the quoted token). The generated F# `dFloat`, the
+        // generated TypeScript decoder and the emitted JSON schema already read them back; the
+        // reference interpreter was the one host refusing its own output. Only these three strings,
+        // and only at a float slot — §7 stops there, so an `int` slot and a verbatim `json` slot are
+        // untouched (the encoder refuses a non-finite float inside a verbatim value, Phase 292).
+        | TFloat, JStr(FloatToken.NonFinite f) -> Ok(VFloat f)
         | TEnum name, JStr s ->
             match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
             | Some e when List.contains s e.WireCases -> Ok(VEnum s)

@@ -17,15 +17,21 @@ field Fuaran.Core.QueryError+Tags.RequiredParamsUnbound : System.Int32 (literal)
 field Fuaran.Core.QueryError+Tags.SourceNotResolved : System.Int32 (literal)
 field Fuaran.Core.QueryError+Tags.Timeout : System.Int32 (literal)
 field Fuaran.Core.QueryError+Tags.UnknownParam : System.Int32 (literal)
-method Fuaran.Core.QueryCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Query, Fuaran.Core.QueryError>
+field Fuaran.Core.ResolveFault+Tags.Failed : System.Int32 (literal)
+field Fuaran.Core.ResolveFault+Tags.SourceMissing : System.Int32 (literal)
+field Fuaran.Core.ResolveFault+Tags.TimedOut : System.Int32 (literal)
+method Fuaran.Core.QueryCodec.decode(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Query, System.String>
 method Fuaran.Core.QueryCodec.decodeArgs(Fuaran.Core.Query, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.QueryError>>
 method Fuaran.Core.QueryCodec.decodeArgsJson(Fuaran.Core.Query, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.QueryError>>
-method Fuaran.Core.QueryCodec.decodeDeferredResult(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
-method Fuaran.Core.QueryCodec.decodeDeferredResultWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
+method Fuaran.Core.QueryCodec.decodeDeferredResult(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, System.String>
+method Fuaran.Core.QueryCodec.decodeDeferredResultDetailedWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.DecodeError>
+method Fuaran.Core.QueryCodec.decodeDeferredResultWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, System.String>
+method Fuaran.Core.QueryCodec.decodeDetailedWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Query, Fuaran.Core.DecodeError>
 method Fuaran.Core.QueryCodec.decodeQueryError(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryError, System.String>
-method Fuaran.Core.QueryCodec.decodeResult(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryResult, Fuaran.Core.QueryError>
-method Fuaran.Core.QueryCodec.decodeResultWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryResult, Fuaran.Core.QueryError>
-method Fuaran.Core.QueryCodec.decodeWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Query, Fuaran.Core.QueryError>
+method Fuaran.Core.QueryCodec.decodeResult(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryResult, System.String>
+method Fuaran.Core.QueryCodec.decodeResultDetailedWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryResult, Fuaran.Core.DecodeError>
+method Fuaran.Core.QueryCodec.decodeResultWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryResult, System.String>
+method Fuaran.Core.QueryCodec.decodeWith(Fuaran.Core.ReadPolicy, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Query, System.String>
 method Fuaran.Core.QueryCodec.encode(Fuaran.Core.Query) : System.String
 method Fuaran.Core.QueryCodec.encodeDeferredResult(Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>) : System.String
 method Fuaran.Core.QueryCodec.encodeQueryError(Fuaran.Core.QueryError) : System.String
@@ -37,12 +43,12 @@ method Fuaran.Core.QueryErrorModule.describeAll(Microsoft.FSharp.Collections.FSh
 method Fuaran.Core.QueryModule.determinismTag(Fuaran.Core.Query) : System.String
 method Fuaran.Core.QueryModule.invocationKey(Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>) : System.String
 method Fuaran.Core.QueryModule.invoke(Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Query, Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
-method Fuaran.Core.QueryModule.invokeWithArgs(Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Query, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
+method Fuaran.Core.QueryModule.invokeWithArgs(Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Query, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.ResolveFault>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
 method Fuaran.Core.QueryModule.toJsonSchema(Fuaran.Core.Query) : Fuaran.Core.JVal
 method Fuaran.Core.QueryModule.validateParams(Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.QueryError>
 method Fuaran.Core.QueryModule.validateParamsAll(Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.QueryError>>
 method Fuaran.Core.QueryRegistryModule.dispatch(Fuaran.Core.QueryRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Query, Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
-method Fuaran.Core.QueryRegistryModule.dispatchWithArgs(Fuaran.Core.QueryRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Query, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
+method Fuaran.Core.QueryRegistryModule.dispatchWithArgs(Fuaran.Core.QueryRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Query, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.ResolveFault>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<Fuaran.Core.QueryResult>, Fuaran.Core.QueryError>
 method Fuaran.Core.QueryRegistryModule.enumerate(Fuaran.Core.QueryRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Query>
 method Fuaran.Core.QueryRegistryModule.register(Fuaran.Core.Query, Fuaran.Core.QueryRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryRegistry, Fuaran.Core.QueryError>
 method Fuaran.Core.QueryRegistryModule.tryFind(System.String, Fuaran.Core.QueryRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Query>
@@ -80,6 +86,10 @@ type Fuaran.Core.QueryParam (record)
 type Fuaran.Core.QueryRegistry (record)
 type Fuaran.Core.QueryRegistryModule (module)
 type Fuaran.Core.QueryResult (record)
+type Fuaran.Core.ResolveFault (union)
+type Fuaran.Core.ResolveFault+Failed (type)
+type Fuaran.Core.ResolveFault+SourceMissing (type)
+type Fuaran.Core.ResolveFault+Tags (type)
 union-case Fuaran.Core.QueryError.NewDuplicateQuery #1(id: System.String)
 union-case Fuaran.Core.QueryError.NewExecutionFailed #6(detail: System.String, recoverable: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.QueryError.NewNoSuchQuery #0(id: System.String, known: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
@@ -89,3 +99,6 @@ union-case Fuaran.Core.QueryError.NewRequiredParamsUnbound #4(names: Microsoft.F
 union-case Fuaran.Core.QueryError.NewSourceNotResolved #5(ref: System.String)
 union-case Fuaran.Core.QueryError.NewUnknownParam #2(name: System.String, declared: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.QueryError.Timeout #7()
+union-case Fuaran.Core.ResolveFault.NewFailed #2(detail: System.String, recoverable: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.ResolveFault.NewSourceMissing #0(ref: System.String)
+union-case Fuaran.Core.ResolveFault.TimedOut #1()
