@@ -155,6 +155,13 @@ $ErrorActionPreference = 'Stop'
 #                K4). Self-contained: it opens nothing, so its position is free. Its integers extract
 #                to `Prims.int` / `Prims.nat` (`bigint`), which the oracle host bridges at the edge.
 #
+#   Normalize  — Phase 305, `Ops.normalize` clause for clause — the six-row collapse table, the
+#                push loop and the left fold with its output stack — with the defining law proved
+#                (an applyable script at a well-formed tree reaches the same tree normalised),
+#                idempotence proved through a stability invariant on the output, and the script
+#                proved never to lengthen. Opens DagFold, TreeOps and Preservation and cites
+#                TreeDiff's `tree_ext`, so it follows all four.
+#
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
 #                (DECISIONS.md D66); they are checked by the compute repository's own proof leg.
@@ -164,7 +171,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.

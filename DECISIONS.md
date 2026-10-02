@@ -80,12 +80,16 @@ moved-in survivors, each in `after` order) inside section 10's induction; droppi
 alone would break the extraction differential against the model that proves reconstruction. (b) The
 `Batch` and script lifts of `invert_applicable` are PROVED (`Preservation.fst` section 15,
 `invert_batch_round_trip` / `invert_all_round_trip`, added when the phase was re-opened to finish).
-The other three theorems — the content-aware run theorem, `Normalize.fst`,
-`merged_applies_and_order_free` — each need a model this repository does not yet have or an
-induction restated over it; their bridges ship now (`ContentDiffTests`), the pre-fix counterexample
-is proved, and the claims stay on the README's not-claimed list rather than becoming assumed rows (a
-not-claimed item is the absence of a row). Each is a `deferred` entry on the phase with the reason
-above, for the successor to carry.
+`Normalize.fst` is PROVED too (the continuation of the same re-open): `normalize_preserves` for an
+applyable script at a well-formed tree, `normalize_idempotent` and `normalize_never_longer`
+unconditionally, with the three uniqueness-dependent rows (move/move, reorder/reorder,
+rewrite/remove) proved extensionally through `Preservation`'s per-node views and `TreeDiff.tree_ext`,
+and the reason the law is conditional pinned as `cancellation_can_admit_a_refused_script`. The other
+two theorems — the content-aware run theorem and `merged_applies_and_order_free` — each need an
+induction restated over a model this repository does not yet have; their bridges ship now
+(`ContentDiffTests`), the pre-fix counterexample is proved, and the claims stay on the README's
+not-claimed list rather than becoming assumed rows (a not-claimed item is the absence of a row) until
+the re-open reaches them.
 
 ## 2026-10-01 — D102: a ladder row states what it is true OF, and a premise production violates is either a refusal or a row that says so
 

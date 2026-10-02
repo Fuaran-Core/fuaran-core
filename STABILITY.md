@@ -2414,7 +2414,12 @@ regenerated). Rides the draft.** The ruling behind each change is DECISIONS D103
   two collapsible ops is now caught in the one pass; both are inside the defining law
   (`applyAll (normalize s) = applyAll s` for an applyable `s`), which `Conformance.normalizeLaws` and the
   biased differential certify. The pre-fix form overflowed the stack at about 2,000 flat ops; the new one
-  normalises 100,000 in a scale test.
+  normalises 100,000 in a scale test. **The law is now PROVED** (`proofs/Normalize.fst`, added when the
+  phase was re-opened to finish): `normalize_preserves` for an applyable script at a well-formed tree,
+  `normalize_idempotent` and `normalize_never_longer` unconditionally, the model clause for clause over
+  the fold, with the extracted model held to `Ops.normalize` by a differential in the `Proofs.Oracle`
+  family (`normalize-preserves` / `normalize-idempotent` / `normalize-never-longer` /
+  `normalize-differential` in `proofs.json`).
 - **New: `Ops.invertAll w idw ops pre`** — the script-level inverse, `Result<SkeletonOp list, int *
   Rejection>`, with the law `applyAll (invertAll s pre) (applyAll s pre) = pre` and `applyAll`'s indexed
   refusal. **`Ops.invert (UpdateNode old)` now carries the pre-state content as a SHELL**

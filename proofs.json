@@ -1185,6 +1185,53 @@
       }
     },
     {
+      "id": "normalize-preserves",
+      "level": "proved",
+      "claim": "`Ops.normalize` (Phase 305's single left fold with an output stack) never changes what a script does: for a script that APPLIES to a well-formed tree, `applyAll (normalize s) t = applyAll s t` — the defining law `Conformance.normalizeLaws` samples, as a theorem over the whole skeleton alphabet with `Batch` nested to any depth. The model is clause for clause — the six-row collapse table (insert/remove cancel, move/move, reorder/reorder, rewrite/rewrite, insert/rewrite, rewrite/remove), the push loop that re-examines the new top after every collapse, the fold, and the `Batch` arm that normalises inside and drops an empty one — and the proof is one stack invariant carried through `push` by one lemma per row: three syntactic (`ins_rem_inverse`, `upd_upd`, a rewrite pushed through an insert) and three extensional (the two routes reach a tree whose every node has the same children and kind, so `tree_ext` makes them one tree). Both hypotheses are the function's own: the law is about an applyable script because a cancelled pair can turn a REFUSED script into an accepted one (`cancellation_can_admit_a_refused_script` pins it — normalise after validating), and the move, reorder and rewrite-remove rows are sound only because the node they address occurs once, which is `wf`.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "normalize_preserves",
+        "model": "proofs/Normalize.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "normalize-idempotent",
+      "level": "proved",
+      "claim": "`Ops.normalize` is idempotent, unconditionally: `normalize (normalize s) = normalize s` for every script. The output is STABLE — no adjacent pair collapses, no `Batch` is empty or un-normalised (`normalize_stable`, a stack invariant `push` keeps because every replacement the table emits is a leaf operation) — and the fold is the identity on a stable script (`normalize_fixed`), which is what the doc comment's `normalize ∘ normalize = normalize` claims and `ContentDiffTests`' differential samples.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "normalize_idempotent",
+        "model": "proofs/Normalize.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "normalize-never-longer",
+      "level": "proved",
+      "claim": "`Ops.normalize` never lengthens a script: `len (normalize s) <= len s`, unconditionally — a push adds at most one operation to the stack whatever it collapses on the way down, and a `Batch` contributes at most itself. The third of the doc comment's three promises, stated so that the fold's output can be bounded by its input without reading the table.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "normalize_never_longer",
+        "model": "proofs/Normalize.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "normalize-differential",
+      "level": "tested",
+      "claim": "The extracted peephole agrees with the shipped `Ops.normalize`, op for op, over scripts drawn by `ContentDiffTests`' generator with ADJACENT-COLLAPSE BIAS — an accepted op is often followed by the op that collapses with it, so every row of the table is reached, and the case fails if fewer than a quarter of the scripts collapsed — through the bridge under which production's `ReplaceChildren n' (Children n)` and the model's `TNode (tid n') (kind n') (kids n)` are one value. On the model side the three theorems are instantiated per sample: the normalised script reaches the tree the script reached, is a fixed point, and is no longer. The go-red is a bridge that renames the remove of a cancelling pair and nothing else: it must lose on every script carrying such a pair and still agree on every script without one, so the comparison is shown to see exactly the two cancelling rows. Agreement is over the pool drawn, never over all inputs.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Normalize.fst",
+        "cases": [
+          "the normalize oracle agrees with Ops.normalize over scripts with adjacent-collapse bias",
+          "a bridge that renames the remove of a cancelling pair loses against Ops.normalize — the measurement can fail"
+        ]
+      }
+    },
+    {
       "id": "preservation-differential",
       "level": "tested",
       "claim": "The extracted preservation model agrees with the shipped `Ops.apply`, `Ops.canApply` and `Ops.invert` over the generated pool AND over grafts minted per state from the state's own ids: a subtree whose descendant id the tree already holds, a subtree that repeats an id within itself, and one that does both. Compared at once: the verdict, an accepted result through production's own `Tree.encodeHash`, a rejection by class, the dry run against the mutating call on each side separately, the derived inverse as an operation, and the round trip run on production. The go-red hands the differential the model of the PRE-137 validator and requires it to lose — which is the same comparison that was silently green throughout Phase 137, because the generator's contract is a fresh id and it cannot mint a colliding graft. Agreement is over the pool drawn, never over all inputs.",

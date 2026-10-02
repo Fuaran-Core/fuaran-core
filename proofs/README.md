@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 241 claims — 172 proved across 24 models, 40 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 245 claims — 175 proved across 25 models, 41 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -3929,9 +3929,10 @@ already proves — must make the run lose, and it does.
      parenting rules are its own, and no theorem here says a contained tree is a legal document.
      _(The container capability itself was named here as Phase 140's and is DONE — section 8 of
      `Preservation.fst`, above.)_
-   - **`Ops.normalize`**, which no theorem in this directory reaches. _(`Diff` was named here as
-     Phase 141's and is DONE — theorem 6, below. What that theorem does NOT reach is stated in its
-     own ladder rather than here.)_
+   - _(**`Ops.normalize`** was named here, as the one script operation no theorem in this directory
+     reached, and is DONE — theorem 17, `Normalize.fst`, Phase 305: the defining law, idempotence
+     and never-longer. `Diff` was named here as Phase 141's and is DONE — theorem 6, below. What
+     each of those theorems does NOT reach is stated in its own ladder rather than here.)_
    - **Vocabulary and schema validity.** Whether a tree is a legal DOCUMENT is the wire boundary's
      question (`decode_node_wf`, theorem 1) and the domain rule families'; nothing here says a
      preserved tree is a meaningful one.
@@ -4167,7 +4168,7 @@ the container check's contribution and nothing else's.
      Phase 167 considered lifting section 10's invariant to it and did not: the four `_run` lemmas
      are stated over `toOps`' four passes by name, so a different emission needs its own, and what
      it would inherit is `tree_ext` and the intermediate-tree lemmas rather than the induction.
-   - **`Ops.normalize`**, which no theorem in this directory reaches.
+   - _(**`Ops.normalize`** was named here and is DONE — theorem 17, `Normalize.fst`, Phase 305.)_
    - **Containment LEGALITY** — which kind may parent which. As for theorem 5: `canHold` answers
      only "can this node hold children at all", and no theorem here says a contained tree is a legal
      document.
@@ -6015,6 +6016,96 @@ than RFC 8259 — no longer holds: Phase 299 held `parseNumber` to the JSON numb
 (a leading zero is refused). So no row was added. `tree-algebra-well-formed-states` keeps its
 discharge for now: the stronger one waits on `Tree.Index.build` refusing duplicates and on
 `arbitrate` checking its base, neither shipped when this phase was cut.
+
+## Theorem 17 — `Ops.normalize`: the defining law, idempotence, never longer (Phase 305)
+
+_(This directory's seventeenth, and the last script operation that had no theorem: theorems 5 and 6
+each listed `Ops.normalize` under "not claimed" since Phases 138 and 141. Phase 305 rewrote the
+function as one left fold with an output stack and gave it three `UpdateNode` rows, and a function
+that had just changed shape under a law that was only sampled is exactly the one to prove.)_
+
+The doc comment of `Ops.normalize` makes three promises, and the theorems are their names:
+
+> **"for any script applyable to a tree, `applyAll (normalize ops) = applyAll ops` — normalisation
+> never changes the result." "It is idempotent (`normalize ∘ normalize = normalize`) and never
+> lengthens a script." "Caveat: preservation is guaranteed only for a script that is applyable to
+> the tree … normalise after validating, not before."**
+
+`Normalize.fst` models the function clause for clause over theorem 2's alphabet: `collapse` is the
+six-row table (`InsertChild; RemoveNode` of the inserted node → nothing; `MoveNode; MoveNode` of one
+target → the second; `ReorderChildren; ReorderChildren` on one parent → the second; `UpdateNode;
+UpdateNode` of one id → the second; `InsertChild; UpdateNode` of the inserted node → one insert
+carrying the rewrite's content over the graft's children; `UpdateNode; RemoveNode` of the rewritten
+node → the remove), `push` is the loop that collapses against the top for as long as it collapses,
+`norm_go` is the fold, `norm_step` normalises a `Batch` inside first and drops an empty one, and
+`normalize` is the fold from an empty stack, reversed. Nothing is simplified: the F# reads the
+witness's `Id`, `Children` and `ReplaceChildren` and the model reads `tid_of`, `kids_of` and a
+`TNode` with the rewrite's kind over the graft's children, which is the same value under the bridge
+the differential uses.
+
+**`normalize_preserves`** — `wf t /\ Ok? (apply_all s t) ==> apply_all (normalize s) t == apply_all
+s t`, over the whole alphabet with `Batch` nested to any depth. The proof is one invariant on the
+stack — read bottom-up, it takes the tree to the state the processed prefix reached
+(`apply_stack`) — carried through `push` by one lemma per row. Three rows are syntactic equalities
+on the tree: insert-then-remove is `Preservation.ins_rem_inverse` with `parent_of_ins` locating the
+remove; rewrite-then-rewrite is `upd_upd`; insert-then-rewrite is a rewrite pushed through an
+insert (`upd_over_ins`, new) and then confined to the graft's root (`upd_root`). The three that need
+UNIQUENESS — move-move, reorder-reorder, rewrite-remove — are proved extensionally: both routes
+reach a tree whose every node has the same children and the same kind (`Preservation.move_view`,
+`reorder_view` and `rem_view`, and a new `upd_view` for the rewrite), so `TreeDiff.tree_ext` makes
+the two trees one tree. Each extensional row is three lemmas rather than one — where the first
+operation lands the target, what one node sees after each route, the assembly — under `--fuel 1
+--ifuel 1`, and that split is load-bearing: the move-move row as a single lemma at default fuel did
+not terminate (Z3 past 4 GB after ten minutes), and split it is a few seconds a lemma.
+
+**Why both hypotheses are the function's own, and a counterexample for one of them.** The law is
+about an APPLYABLE script because a cancelled pair can turn a refused script into an accepted one:
+`cancellation_can_admit_a_refused_script` pins `[InsertChild "a" (TNode "a" …); RemoveNode "a"]` on
+a tree holding `a` — refused at the insert, normalised to the empty script, accepted — which is the
+doc comment's caveat as a theorem rather than a sentence. The law is at a WELL-FORMED tree because
+the move, reorder and rewrite-remove rows are sound only when the node they address occurs once:
+on a tree holding `x` twice, moving "x" then moving "x" relocates whichever `Tree.updateNode`
+reaches, and the model is faithful to that. `wf` is the standing shape of every theorem in this
+directory about those three operations (`tree-algebra-well-formed-states`).
+
+**`normalize_idempotent`** — `normalize (normalize s) == normalize s`, unconditionally. The output
+is STABLE: no adjacent pair collapses, no `Batch` is empty, and every `Batch` is itself stable
+(`stable`; `normalize_stable` carries the mirror predicate `sstable` through `push`, which holds
+because every replacement the table emits is a leaf operation, `collapse_leaf`). The fold is the
+identity on a stable script (`normalize_fixed`): every push is a plain cons, and reversing twice is
+the identity.
+
+**`normalize_never_longer`** — `len (normalize s) <= len s`, unconditionally: a push adds at most
+one whatever it collapses on the way down (`push_len`), and a `Batch` contributes at most itself.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** The three theorems above, the six row lemmas
+   (`ins_rem_cancels`, `move_move_sound`, `reorder_reorder_sound`, `upd_upd_sound`,
+   `ins_upd_sound`, `upd_rem_sound`) and their per-node views, the stack invariant (`push_sound`,
+   `norm_go_sound`), the stability invariant (`push_sstable`, `norm_go_sstable`, `stable_rev`),
+   the fixed-point lemmas (`norm_go_fixed`, `normalize_fixed`) and the pinned counterexample
+   (`cancellation_can_admit_a_refused_script`). F\* 2026.09.06, Z3 4.13.3, every query 3/3 under
+   `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Opens `DagFold`, `TreeOps`
+   and `Preservation`; cites `TreeDiff.tree_ext` and `TreeDiff.apply_all_app`.
+2. **Differentially tested.** The extracted model agrees with `Ops.normalize`, op for op, over
+   `ContentDiffTests`' generator with adjacent-collapse bias (`normalize-differential`), with the
+   three theorems instantiated on the model per sample, and with a blind bridge — the remove of a
+   cancelling pair renamed, nothing else — required to lose on every script carrying such a pair
+   and to agree on every script without one. The production law itself is `Conformance.normalizeLaws`
+   and the biased differential in `ContentDiffTests`, at this level since Phase 23.
+3. **Assumed, and stated as such.** Nothing new. The model stands on theorem 2's rows and inherits
+   them unchanged: **`tree-algebra-well-formed-states`** is `normalize_preserves`'s hypothesis and
+   no other statement's here; **`sets-are-lists`**; **`lawful-abstract-witness`** — a rewrite's
+   content is the kind tag at the witness level, so "the last rewrite wins" is proved about the
+   kind and transfers to the whole content through the witness laws; and theorem 1's
+   **`extractor-and-compiler-trusted`**.
+4. **Not claimed.** That `normalize` is a CANONICAL form — two scripts with the same effect need
+   not normalise to the same script, and STABILITY.md says so (`normalize` is not a canonical
+   form); the table is a peephole over ADJACENT pairs, and a collapsible pair with an unrelated op
+   between them is left alone by design. Anything about a script that does NOT apply, beyond the
+   counterexample above. Anything about `Ops.normalize`'s cost, beyond `ContentDiffTests`' scale
+   test — linearity is measured there, not proved here.
 
 ## Next
 

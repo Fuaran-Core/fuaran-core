@@ -31,7 +31,7 @@ let private withKind (k: string) (n: RNode) = { n with Kind = k }
 /// A random tree over `pool`: the root (`root`, kind `doc`) plus each id of a random subset of the
 /// pool attached under a random node already placed, with a random kind and value. Ids are unique by
 /// construction, so the tree is well-formed.
-let private drawTree (rng: Random) (pool: string list) : RNode =
+let drawTree (rng: Random) (pool: string list) : RNode =
     let chosen = pool |> List.filter (fun _ -> rng.Next(3) > 0)
     // parent id -> children (in insertion order), built bottom-up at the end
     let parentOf = Collections.Generic.Dictionary<string, string>()
@@ -60,7 +60,7 @@ let private drawTree (rng: Random) (pool: string list) : RNode =
 
     build "root"
 
-let private pool = [ for i in 1..10 -> sprintf "n%d" i ]
+let pool = [ for i in 1..10 -> sprintf "n%d" i ]
 
 /// A drawn container predicate: `doc` always holds, each other kind holds by a coin.
 let private drawCanHold (rng: Random) : RNode -> bool =
@@ -94,7 +94,7 @@ let private notPara (n: RNode) = n.Kind <> "para"
 /// rewrite of the inserted node, a move by another move of the same target, a reorder by another on
 /// the same parent, a rewrite by another or by the node's remove. Returns the script and the tree it
 /// reaches.
-let private drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, string> list * RNode =
+let drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, string> list * RNode =
     let ops = ResizeArray<SkeletonOp<RNode, string>>()
     let cur = ref tree
     let fresh = ref 0
