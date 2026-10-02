@@ -7018,10 +7018,11 @@ let private idlPairs () : (string * Set<string> * Set<string>) list =
 //
 //   `optional` — §15.4's row itself. A subject is INTRODUCED, the verdict is a NON-EMPTY
 //                `Additive`, the MINOR moves, and an old consumer is `Behind` rather than blind.
-//   `required` — introduced too, and the minor is still the honest profile answer: every existing
-//                document decodes. What moved is the EMITTER's obligation, carried on
-//                `BreaksEmitters` beside the profile because a major would tell every consumer to
-//                refuse documents that decode perfectly.
+//   `required` — RETIRED, since Phase 304: every document written under the old contract lacks the
+//                member and the decoder refuses it, so the MAJOR moves and an old consumer is
+//                `Foreign`. Until that phase this arm rode the minor on the claim that every
+//                existing document decodes, which the model's section 8 and the evolution
+//                differential in `IdlStabilityClassTests.fs` both refute.
 //   `hostOnly` — WIRE_FORMAT §9's wire-omitted fields: on no document in either direction, so no
 //                profile moves. This is the arm that makes the other two a MEASUREMENT rather
 //                than a constant, and it is the one the go-red gets wrong.
@@ -15173,12 +15174,12 @@ let proofOracleTests =
 
               Expect.equal
                   required.ProductionProfile
-                  (baseP.Name, baseP.Major, baseP.Minor + 1)
-                  "a REQUIRED field add is still a minor on the wire — every existing document decodes"
+                  (baseP.Name, baseP.Major + 1, 0)
+                  "a REQUIRED field add moves the MAJOR (Phase 304) — every old document lacks the member and is refused, so an old consumer must be `Foreign`, not a `Behind` that tolerates and then refuses"
 
-              Expect.isTrue
+              Expect.isFalse
                   required.BreaksEmitters
-                  "and the emitter obligation is carried BESIDE the profile, not folded into it: a major would tell every consumer to refuse documents that decode perfectly"
+                  "and it is not carried as a mere emitter break beside a minor: the old documents themselves are what break"
 
               let hostOnly = byClass "hostOnly"
 
@@ -15195,6 +15196,11 @@ let proofOracleTests =
                   hostOnly.GoRedProfile
                   hostOnly.ProductionProfile
                   "a classifier that ignores the optionality class publishes a minor for a field that is on no document — the comparison can fail"
+
+              Expect.notEqual
+                  required.GoRedProfile
+                  required.ProductionProfile
+                  "and a minor for a field every old document lacks, where production moves the major (Phase 304)"
 
               Expect.equal
                   optional.GoRedProfile

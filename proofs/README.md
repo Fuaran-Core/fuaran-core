@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 253 claims — 182 proved across 26 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 255 claims — 183 proved across 26 models, 43 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -4721,12 +4721,16 @@ content:
   retires none, so the verdict is a non-empty `Additive`, the minor moves, the major does not, and
   a consumer at the base profile is `Behind` — it tolerates the document and preserves what it
   does not understand. That is §15.4's row, and it is what the tag delta alone could not say.
-- **`required_field_addition_is_behind_not_foreign`.** The row that reads as a contradiction until
-  you ask whose profile it is. It bumps the same minor: every document valid under the old
-  contract is still valid, so an old CONSUMER is `Behind` rather than `Foreign`. What moved is the
-  obligation on EMITTERS, and the verdict carries that on `BreaksEmitters` beside the profile
-  rather than folded into it — a major would tell every consumer to refuse documents that decode
-  perfectly.
+- **`required_field_addition_is_foreign_not_behind`** (Phase 304; it was
+  `required_field_addition_is_behind_not_foreign`). The row used to bump the same minor on the
+  premise that every document valid under the old contract is still valid, with the emitter
+  obligation carried on `BreaksEmitters` beside it. The premise was false — every old document
+  lacks the added member and the decoder refuses it — and section 8's `field_additive_monotone`
+  is the theorem that says so: every field-add row kept off the major must leave every old
+  document decoding identically, which the pre-304 rule failed at the required class. Over the
+  corrected class the row RETIRES its subject: the major moves, the minor resets, and an old
+  consumer is `Foreign` — it refuses the profile rather than tolerating it and then refusing every
+  document.
 - **`host_only_field_addition_moves_no_profile`.** WIRE_FORMAT §9's wire-omitted fields are on no
   document in either direction, so no profile can honestly move. This is the arm that makes the
   other two a MEASUREMENT: a model in which every field addition bumped the minor would agree with

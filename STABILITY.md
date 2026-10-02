@@ -3850,6 +3850,51 @@ the generated TypeScript sees `1E+21` where it saw `1e+21`.
 **Class: additive** — `api/Fuaran.Core.Idl.Codegen.txt` gains `FStarTarget.vectorsModule` and the
 `VectorModel` record; no member is removed or retyped, and `CodegenError` gains no case.
 
+### The classifier grades by what old documents do (Phase 304, DECISIONS.md D107) — BREAKING (behavioural): classifier verdicts move, two of them stricter; no public member added, removed or retyped
+
+A class is now a fact about what an OLD document does under the NEW vocabulary — refused, read as a
+different value, re-encoded to different bytes, or unchanged — never about the emitter alone. The
+verdicts `Diff.classify` / `classifyDiff` / `classifyArtifacts`, `bumpProfile` and the
+`fuaran-core-idl classify` command return move for these rows, each recorded:
+
+| Row | Was | Now | What an old document does |
+|---|---|---|---|
+| a **required** field added | `breaking-for-emitters`, minor (`core@1.1`), `BreaksEmitters` true, class `breaking` (exit 3) | `breaking-wire`, **major** (`core@2.0`), `BreaksEmitters` false, class `breaking` (exit 3) | refused: it lacks the member (an authoring default never fills on decode) |
+| `optional` → `required`, `omitDefault` → `required` | `breaking-for-emitters`, minor | `breaking-wire`, **major** | refused where it omitted the member |
+| `required` → `optional` | `breaking-wire`, major, class `breaking` (exit 3) | `additive`, **minor**, class `additive` (exit 0) | decodes to the same value and re-encodes byte-identically |
+| `required` → `omitDefault` | `breaking-wire` | `breaking-wire` (rationale now names the bytes) | one sitting on the default re-encodes without the member |
+| `required` → `hostOnly` | `breaking-wire` ("stopped being required") | `breaking-wire` (the host-only boundary's rationale) | unchanged class |
+| int → float widening | `additive` (Phase 252, carried by 293) | unchanged | decodes and re-encodes byte-identically |
+
+**Stricter for a consumer's gate:** a revision adding a required field, or tightening one, now
+publishes a MAJOR profile where it published a minor, so a consumer that bumped the minor in CI meets a
+`Foreign` negotiation. **Looser:** `required` → `optional` now exits 0 (`additive`) where it exited 3.
+`Severity.BreakingForEmitters` remains, now only for authoring-default rows (removed or moved).
+
+- **The generated TypeScript `dInt` refuses an integral number outside the 32-bit int range**
+  ([-2147483648, 2147483647]), as the interpreter and the compiled F# host already did — one line in
+  every generated TypeScript decoder. A document carrying 2^31 at an int slot decoded on the TypeScript
+  host only; it is now refused there too.
+- `docs/idl-stability-classes.md` regenerated from the descriptor table; its definitions of
+  `breaking-for-emitters` and of the profile bump say which rows they cover.
+- **Proofs and tests.** `proofs/WireVersioning.fst` section 8: a vocabulary-dependent known-decoder
+  and `field_additive_monotone`, which failed on the pre-304 rule and verifies on the corrected one; the
+  section-7 required row restated as `required_field_addition_is_foreign_not_behind` (it was
+  `required_field_addition_is_behind_not_foreign`); twins and the extracted oracle regenerated.
+  `proofs.json` gains `evolution-field-additive-monotone` (proved) and
+  `evolution-old-document-differential` (tested) and amends two rows. The evolution differential
+  (`IdlStabilityClassTests.fs`) decodes old documents under seven perturbed vocabularies through the
+  interpreter and the generated TypeScript decoder; `IdlThreeHostTests.fs` plants out-of-range ints at
+  every certification vocabulary's int slots.
+
+**What a consumer does.** Nothing to compile against. A gate that asserts `--expect` over a revision
+adding or tightening a required field still reads `breaking`; one that publishes the profile
+`bumpProfile` returns now publishes a major for it, and a minor for `required` → `optional`. A TypeScript
+host regenerated from this version refuses out-of-range ints at int slots.
+
+**Class: breaking (behavioural)** — verdicts a consumer's CI reads grow stricter for the rows above (a
+classifier change that can turn a consumer's gate red with no change on its side is classed breaking), with
+one row looser; the public API surface does not move (`api/` baselines unchanged).
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

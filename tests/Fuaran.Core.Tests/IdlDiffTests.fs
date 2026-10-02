@@ -210,22 +210,24 @@ let tests =
 
           // --- the classification a human gets wrong -------------------------
 
-          testCase "a REQUIRED field added is breaking for emitters, not additive"
+          testCase "a REQUIRED field added breaks the WIRE, not additive and not merely emitters"
           <| fun _ ->
+              // Phase 304: graded by what an OLD document does under the new vocabulary — every
+              // stored `Heading` lacks `level`, and the decoder refuses a missing required member.
               let after =
                   { empty with
                       Kinds = [ kind "Heading" [ f "text" TStr Required; f "level" TInt Required ] ] }
 
               let cs = diffOf oneKind after
-              Expect.equal (severities cs) [ Diff.BreakingForEmitters ] "the 0.2.0 / orchestration-0.1.3 lesson"
+              Expect.equal (severities cs) [ Diff.BreakingWire ] "old documents are refused: a /v2/ event"
+
+              Expect.stringContains
+                  (cs |> List.head |> _.Rationale)
+                  "refuses"
+                  "and the rationale names what the old document does"
 
               let report = reportOf oneKind after
               Expect.stringContains report "stability_impact: breaking" "so the draft front-matter says breaking"
-
-              Expect.stringContains
-                  report
-                  "downstream emitters"
-                  "and the obligation set names the coordination the minor bump would hide"
 
           testCase "an optional field added is additive"
           <| fun _ ->
@@ -261,16 +263,38 @@ let tests =
                   "WIRE-VISIBLE"
                   "and the rationale says why, since this is the row most likely to be waved through"
 
-          testCase "required -> optional is still a wire event"
+          testCase "required -> optional is additive: every old document carries the member and re-encodes identically"
           <| fun _ ->
+              // Phase 304 — this row was `BreakingWire` on the consumer-presence argument. Graded by
+              // what an OLD document does, it is additive: every one carries the member, decodes to
+              // the same value and re-encodes byte-identically, and every old emitter writes it. The
+              // consumer that relied on presence meets absence only from a NEW emitter — host lag,
+              // which the rationale records.
               let after =
                   { empty with
                       Kinds = [ kind "Heading" [ f "text" TStr Optional ] ] }
 
-              Expect.equal
-                  (severities (diffOf oneKind after))
-                  [ Diff.BreakingWire ]
-                  "old documents stay valid, but a consumer that relied on presence now faces absence"
+              let cs = diffOf oneKind after
+              Expect.equal (severities cs) [ Diff.Additive ] "old documents are untouched"
+
+              Expect.stringContains
+                  (cs |> List.head |> _.Rationale)
+                  "host lag"
+                  "and the consumer-presence cost is named, not dropped"
+
+          testCase "required -> omitDefault stays a wire event: a document on the default changes bytes"
+          <| fun _ ->
+              let after =
+                  { empty with
+                      Kinds = [ kind "Heading" [ f "text" TStr (OmitDefault(VStr "")) ] ] }
+
+              let cs = diffOf oneKind after
+              Expect.equal (severities cs) [ Diff.BreakingWire ] "omit-at-default is wire-visible"
+
+              Expect.stringContains
+                  (cs |> List.head |> _.Rationale)
+                  "bytes move"
+                  "and the rationale names what the old document does"
 
           // --- host surface is not wire ---------------------------------------
 

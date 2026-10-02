@@ -1213,3 +1213,135 @@ let fstarFacts =
                   let said = CodegenError.describe e
                   Expect.stringContains said "vector 0" "the refusal names the vector"
                   Expect.stringContains said "Measure" "and the kind") ]
+
+// ---------------------------------------------------------------------------
+// Phase 304 — an int slot's RANGE, at every int slot the certification vocabularies carry.
+//
+// The vectors above are AUTHORED values, and an authored `VInt` is a 32-bit int, so no vector
+// ever put an integral number outside that range on the wire — and the generated TypeScript
+// decoder accepted one (2^31, say) that the interpreter and the compiled F# host refuse. The
+// evolution differential found it by narrowing a float slot to `int`; this block reaches the
+// same class at any int slot. Each vector is a drawn node whose FIRST int slot is set to a
+// marker, encoded, and the marker's digits replaced by an out-of-range literal: all three hosts
+// must refuse. The control is the same bytes with the marker left in, which all three accept,
+// so a refusal here is about the range and nothing else.
+// ---------------------------------------------------------------------------
+
+/// A value no sampler draws, so its digits locate the planted slot in the bytes.
+let private intMarker = 1987654321
+
+let private outOfRangeInts = [ "2147483648"; "-2147483649"; "9007199254740992" ]
+
+/// The node with its first int slot (in the walk's order) set to the marker; `None` when the
+/// node carries no int slot on the wire.
+let private plantMarker (idl: Idl) (v: IdlValue) : IdlValue option =
+    let mutable planted = false
+
+    let out =
+        rewrite
+            idl
+            (fun t x ->
+                match t, x with
+                | TInt, VInt _ when not planted ->
+                    planted <- true
+                    Some(VInt intMarker)
+                | _ -> None)
+            TNode
+            v
+
+    if planted then Some out else None
+
+/// The TypeScript decoder of `idl` over raw documents: `true` per document it accepted.
+let private tsAccepts (idl: Idl) (docs: string list) : bool list option =
+    let tsModule =
+        match Gen.typescriptModule idl (idl.Kinds |> List.map _.Tag) with
+        | Ok src -> src
+        | Error e -> failtestf "TypeScript codegen refused: %s" (CodegenError.describe e)
+
+    let harness =
+        tsModule
+        + "\nconst __docs = [\n"
+        + (docs
+           |> List.map (fun d -> "  " + Canon.render (JStr d) + ",")
+           |> String.concat "\n")
+        + "\n];\n"
+        + "for (const d of __docs) console.log(decodeNode(d).ok ? 'ok' : 'refused');\n"
+
+    runNode harness
+    |> Option.map (fun out ->
+        out.Replace("\r\n", "\n").Split('\n')
+        |> Array.filter (fun l -> l <> "")
+        |> Array.map (fun l -> l = "ok")
+        |> List.ofArray)
+
+[<Tests>]
+let intRange =
+    testList
+        "Phase 304 — every host refuses an integral number outside the int range at an int slot"
+        [ testCase "an out-of-range integer at an int slot is refused by all three hosts; the in-range control by none"
+          <| fun _ ->
+              let rows =
+                  [ for c in certified do
+                        for v in vectorsFor c.Idl c.HostedDraw (seedOf c) 60 do
+                            match plantMarker c.Idl v with
+                            | None -> ()
+                            | Some planted ->
+                                match Encode.encode c.Idl planted with
+                                | Error _ -> ()
+                                | Ok bytes ->
+                                    let marker = string intMarker
+                                    // Exactly one occurrence, so the replacement lands at the slot.
+                                    if bytes.Split(marker).Length = 2 then
+                                        yield c, bytes, [ for lit in outOfRangeInts -> bytes.Replace(marker, lit) ] ]
+
+              let vocabularies = rows |> List.map (fun (c, _, _) -> c.Name) |> List.distinct
+
+              Expect.isGreaterThan
+                  rows.Length
+                  20
+                  (sprintf "vectors reached an int slot (in %s)" (String.concat ", " vocabularies))
+
+              let findings =
+                  [ for (c, control, bad) in rows do
+                        if Result.isError (Decode.decode c.Idl control) then
+                            yield sprintf "%s: the interpreter refused the in-range control %s" c.Name control
+
+                        if Result.isError (c.Compiled.Decode control) then
+                            yield sprintf "%s: the compiled F# host refused the in-range control %s" c.Name control
+
+                        for b in bad do
+                            if Result.isOk (Decode.decode c.Idl b) then
+                                yield sprintf "%s: the interpreter ACCEPTED %s" c.Name b
+
+                            if Result.isOk (c.Compiled.Decode b) then
+                                yield sprintf "%s: the compiled F# host ACCEPTED %s" c.Name b ]
+
+              report "int range (interpreter and compiled F#)" findings
+
+              let tsFindings =
+                  [ for c in certified do
+                        let mine = rows |> List.filter (fun (r, _, _) -> r.Name = c.Name)
+
+                        if not mine.IsEmpty then
+                            let docs = mine |> List.collect (fun (_, control, bad) -> control :: bad)
+
+                            match tsAccepts c.Idl docs with
+                            | None -> yield noNode
+                            | Some answers ->
+                                let expected =
+                                    mine
+                                    |> List.collect (fun (_, _, bad) -> true :: (bad |> List.map (fun _ -> false)))
+
+                                for (d, want, got) in List.zip3 docs expected answers do
+                                    if want <> got then
+                                        yield
+                                            sprintf
+                                                "%s: TypeScript %s %s"
+                                                c.Name
+                                                (if got then "ACCEPTED" else "refused the control")
+                                                d ]
+
+              if tsFindings |> List.contains noNode then
+                  skiptest "node not on PATH — the TypeScript leg of the int-range block cannot run"
+
+              report "int range (TypeScript)" tsFindings ]
