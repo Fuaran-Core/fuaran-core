@@ -885,8 +885,10 @@ module TypeParams =
 [<RequireQualifiedAccess>]
 module SourceLit =
 
-    let private isHigh (c: char) = c >= '\uD800' && c <= '\uDBFF'
-    let private isLow (c: char) = c >= '\uDC00' && c <= '\uDFFF'
+    // Compared as code-unit values: Fable cannot write an unpaired surrogate char literal into its
+    // output, and the guard in SourceLiteralTests holds every literal under src/ to that.
+    let private isHigh (c: char) = int c >= 0xD800 && int c <= 0xDBFF
+    let private isLow (c: char) = int c >= 0xDC00 && int c <= 0xDFFF
 
     let private isLineBreak (c: char) =
         c = '\n' || c = '\r' || c = '\u0085' || c = '\u2028' || c = '\u2029'

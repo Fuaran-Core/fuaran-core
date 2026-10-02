@@ -325,6 +325,8 @@
          (every call site is a listed key, every listed key is a call site, no bare U+0001 join
          anywhere). Reads Snapshots.fs for the repository root; appended (append-only). -->
     <Compile Include="HashRosterTests.fs" />
+    <!-- No unpaired surrogate spelled in a literal under src/ (the 0.34.0 release candidate's Fable gate). -->
+    <Compile Include="SourceLiteralTests.fs" />
 
     <!-- Phase 299 — the codec refusal corpus (`conformance/refusals/`): the authored vectors, their
          emit-refusals renderer, and the test holding the committed files to a fresh render.
