@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 260 claims — 186 proved across 27 models, 43 tested, 29 assumed (6 `domain-obligation`, 19 `model-bridge`, 4 `premise`), 2 policy.
+**The ladder, counted:** 262 claims — 187 proved across 27 models, 44 tested, 29 assumed (6 `domain-obligation`, 19 `model-bridge`, 4 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
