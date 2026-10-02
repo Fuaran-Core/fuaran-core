@@ -1092,3 +1092,124 @@ let certificationWires () : (string * Idl * string list) list =
 let certificationOps () : Idl * string list =
     let idl, ops = opsOf ReferenceIdl.refIdl 303 200
     idl, ops |> List.choose (fun op -> Encode.encodeOp idl op |> Result.toOption)
+
+// ---------------------------------------------------------------------------
+// The F* leg of the differential: the interpreter's vectors as NORMALISER facts over each
+// certification vocabulary's generated model (`proofs/VocabularyVectors.fst`). The F* target
+// refuses a vector its model cannot express, naming it; the selection here keeps the first
+// `vectorsPerModel` the target admits, in the differential's own seeded order, so the drawn and
+// the adversarial vectors both reach it.
+// ---------------------------------------------------------------------------
+
+let private vectorsPerModel = 12
+
+/// The committed module's name and path.
+let vectorsModuleName = "VocabularyVectors"
+
+/// Whether a wire carries one of the adversarial pass's map keys that no vocabulary member is
+/// spelled as — the vectors that put a model's map members under the hostile keys. Sorted first
+/// (stably), so the facts carry them rather than whichever draws happen to come first.
+let private hostileKey (wire: string) =
+    [ ""; "a\"b"; "\\"; "\u0000"; "10"; "9"; "0" ]
+    |> List.exists (fun k -> wire.Contains(Canon.render (JStr k) + ":"))
+
+let private vectorModels () : FStarTarget.VectorModel list =
+    let wires = certificationWires ()
+
+    [ "DocVocabulary", "D", "document"
+      "ScoreVocabulary", "S", "score"
+      "Vocabulary", "R", "reference" ]
+    |> List.map (fun (model, prefix, name) ->
+        let _, idl, ws = wires |> List.find (fun (n, _, _) -> n = name)
+
+        let one (w: string) : FStarTarget.VectorModel =
+            { Model = model
+              Prefix = prefix
+              Idl = idl
+              Wires = [ w ] }
+
+        { one "" with
+            Wires =
+                ws
+                |> List.distinct
+                |> List.sortBy (fun w -> if hostileKey w then 0 else 1)
+                |> List.filter (fun w -> FStarTarget.vectorsModule "Probe" [ one w ] |> Result.isOk)
+                |> List.truncate vectorsPerModel })
+
+/// The facts module the generator writes for the certification set.
+let vectorsText () : Result<string, CodegenError> =
+    FStarTarget.vectorsModule vectorsModuleName (vectorModels ())
+
+let private vectorsFile () =
+    Snapshots.repoFile ("proofs/" + vectorsModuleName + ".fst")
+
+/// `--emit-fstar`'s share: rewrite `proofs/VocabularyVectors.fst`.
+let emitVectors () : int =
+    match vectorsText () with
+    | Error e ->
+        eprintfn "--emit-fstar: %s" (CodegenError.describe e)
+        2
+    | Ok text ->
+        File.WriteAllText(vectorsFile (), text.Replace("\r\n", "\n"), Text.UTF8Encoding false)
+        printfn "regenerated %s" (vectorsFile ())
+        0
+
+[<Tests>]
+let fstarFacts =
+    testList
+        "Phase 303 — the F* target writes the interpreter's vectors as normaliser facts"
+        [ testCase "generation diff: proofs/VocabularyVectors.fst is the generator's output" (fun _ ->
+              match vectorsText () with
+              | Error e -> failtestf "the F* target refused the vectors: %s" (CodegenError.describe e)
+              | Ok text ->
+                  let path = vectorsFile ()
+
+                  if not (File.Exists path) then
+                      failtestf
+                          "%s not found — regenerate with: dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar"
+                          path
+
+                  Expect.equal
+                      (File.ReadAllText(path).Replace("\r\n", "\n"))
+                      (text.Replace("\r\n", "\n"))
+                      "VECTOR DRIFT: the committed facts are not what the generator writes — regenerate with: dotnet run --project tests/Fuaran.Core.Tests -- --emit-fstar")
+
+          testCase "every certification model carries its full set of facts, adversarial ones among them" (fun _ ->
+              let models = vectorModels ()
+
+              for m in models do
+                  Expect.equal
+                      m.Wires.Length
+                      vectorsPerModel
+                      (sprintf "%s: the target admitted enough vectors" m.Model)
+
+              Expect.isTrue
+                  (models |> List.exists (fun m -> m.Wires |> List.exists hostileKey))
+                  "some fact puts a model's map member under an adversarial key"
+
+              for m in models do
+                  Expect.equal (List.distinct m.Wires) m.Wires (sprintf "%s: no fact is repeated" m.Model))
+
+          testCase "the target REFUSES a vector its model cannot express, naming it, rather than dropping it" (fun _ ->
+              // `Measure` is the reference model's one refused kind (its numeric default has no F*
+              // literal): a vector holding one is refused by name, never emitted or skipped.
+              let idl = ReferenceIdl.refIdl
+
+              let wire =
+                  match Encode.encode idl ReferenceIdl.measureAtDefault with
+                  | Ok w -> w
+                  | Error m -> failtestf "the probe did not encode: %s" m
+
+              match
+                  FStarTarget.vectorsModule
+                      "Probe"
+                      [ { Model = "Vocabulary"
+                          Prefix = "R"
+                          Idl = idl
+                          Wires = [ wire ] } ]
+              with
+              | Ok _ -> failtest "a node of a kind the model does not declare was emitted into a fact"
+              | Error e ->
+                  let said = CodegenError.describe e
+                  Expect.stringContains said "vector 0" "the refusal names the vector"
+                  Expect.stringContains said "Measure" "and the kind") ]

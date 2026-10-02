@@ -14,6 +14,7 @@ ctor Fuaran.Core.Idl.Diff+Snapshot..ctor(System.Int32, Microsoft.FSharp.Collecti
 ctor Fuaran.Core.Idl.Diff+UnionSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Diff+CaseSnap>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Diff+Verdict..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, Fuaran.Core.Versioning+Evolution, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FSharpConsequence>, System.String, System.String)
 ctor Fuaran.Core.Idl.FStarTarget+Provenance..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+ctor Fuaran.Core.Idl.FStarTarget+VectorModel..ctor(System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Idl.FStarTarget+Verdict..ctor(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Gen+GenSupport..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Gen+KindProjection>)
 ctor Fuaran.Core.Idl.Gen+KindProjection..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
@@ -138,6 +139,7 @@ method Fuaran.Core.Idl.FStarTarget.partition(Fuaran.Core.Idl.Idl) : Microsoft.FS
 method Fuaran.Core.Idl.FStarTarget.proofKinds(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.FStarTarget.proofsModule(System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.proofsModuleFrom(Fuaran.Core.Idl.FStarTarget+Provenance, System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.FStarTarget.vectorsModule(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.FStarTarget+VectorModel>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vocabularyModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vocabularyModuleFrom(Fuaran.Core.Idl.FStarTarget+Provenance, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
@@ -218,6 +220,10 @@ record-field Fuaran.Core.Idl.Diff+Verdict.StabilityImpact #5 : System.String
 record-field Fuaran.Core.Idl.Diff+Verdict.Undecided #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+Classification>
 record-field Fuaran.Core.Idl.FStarTarget+Provenance.Origin #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.FStarTarget+Provenance.Proves #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.FStarTarget+VectorModel.Idl #2 : Fuaran.Core.Idl.Idl
+record-field Fuaran.Core.Idl.FStarTarget+VectorModel.Model #0 : System.String
+record-field Fuaran.Core.Idl.FStarTarget+VectorModel.Prefix #1 : System.String
+record-field Fuaran.Core.Idl.FStarTarget+VectorModel.Wires #3 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.FStarTarget+Verdict.Refusal #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.FStarTarget+Verdict.Tag #0 : System.String
 record-field Fuaran.Core.Idl.Gen+GenSupport.AccessorSplice #4 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
@@ -328,6 +334,7 @@ type Fuaran.Core.Idl.FStarTarget+Slot+SRecord (type)
 type Fuaran.Core.Idl.FStarTarget+Slot+SSentinel (type)
 type Fuaran.Core.Idl.FStarTarget+Slot+SUnion (type)
 type Fuaran.Core.Idl.FStarTarget+Slot+Tags (type)
+type Fuaran.Core.Idl.FStarTarget+VectorModel (record)
 type Fuaran.Core.Idl.FStarTarget+Verdict (record)
 type Fuaran.Core.Idl.Gen (module)
 type Fuaran.Core.Idl.Gen+GenSupport (record)
