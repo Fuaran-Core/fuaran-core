@@ -17,9 +17,17 @@ namespace Fuaran.Core
 /// It lives beside the adequacy guard rather than beside the laws because it is what BOTH produce,
 /// and because the guard must be compiled ahead of every family that declares demands through it.
 type LawResult =
-    { Law: string
-      Passed: bool
-      Counterexample: string option }
+    {
+        /// The law's human-readable statement, stable across runs — the text a report and a
+        /// census name the law by.
+        Law: string
+        /// `true` when the law held on every assertion made. Zero assertions is not a pass: the
+        /// kit's runner reports such a law red unless an adequacy guard covers it.
+        Passed: bool
+        /// `None` exactly when `Passed`. The FIRST failure recorded, or the "never reached"
+        /// remedy when the law was not asserted at all.
+        Counterexample: string option
+    }
 
 /// One thing a family's SAMPLE must contain for the family's laws to have been tested at all.
 /// A family declares its demands beside its laws; the kit runs them alongside.

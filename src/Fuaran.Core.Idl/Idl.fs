@@ -38,20 +38,42 @@ open Fuaran.Core
 /// stands in until a host re-attaches behaviour. It is written at `'Msg = obj`
 /// for that reason.
 type ClosureSig =
-    { FSharp: string
-      TypeScript: string
-      Placeholder: string }
+    {
+        /// The slot's F# type text, spliced verbatim into the generated declaration
+        /// (e.g. `int -> 'Msg`).
+        FSharp: string
+        /// The slot's TypeScript type text, spliced verbatim into the generated
+        /// declaration; it plays no part in encoding or decoding.
+        TypeScript: string
+        /// The F# expression a decoded slot holds, written at `'Msg = obj`.
+        Placeholder: string
+    }
 
 /// The structural type of a field's value on the wire.
 type IdlType =
+    /// A JSON string, carried as-is.
     | TStr
+    /// A JSON integer in the 32-bit range; a fractional token is refused.
     | TInt
+    /// A JSON `true` / `false`.
     | TBool
+    /// A JSON number. An integer token is accepted on both encode and decode, and the
+    /// quoted tokens `"NaN"`, `"Infinity"` and `"-Infinity"` read back as the non-finite
+    /// value (WIRE_FORMAT §7).
     | TFloat
+    /// A bare string from the named [[IdlEnum]]'s closed set, checked against its WIRE
+    /// strings rather than its host case names.
     | TEnum of enumName: string
+    /// A discriminator-tagged object of the named [[IdlUnion]], applied to exactly as many
+    /// type arguments as it declares parameters (any other count is refused).
     | TUnion of unionName: string * args: IdlType list
+    /// A reference to a type parameter of the enclosing union. Substituted away at every
+    /// instantiation; one that reaches the encoder or decoder unsubstituted is refused.
     | TVar of paramName: string
+    /// A node — `id` plus a kind body tagged from [[Idl]]'s `Kinds`, laid out as the
+    /// vocabulary's [[NodeEnvelopeShape]] declares, with any declared envelope fields.
     | TNode
+    /// A JSON array whose every element is a value of the item type, kept in order.
     | TList of IdlType
     /// A function-typed field (Binding accessor, `Action` callback, `onChange`
     /// handler, column projection): unobservable on the wire, rendered as the
@@ -135,8 +157,13 @@ type IdlType =
 /// None` to keep its meaning, or declares the slot's wire form.
 and HostedCodec =
     {
+        /// The host type the generated F# declares for the slot, verbatim.
         FSharp: string
+        /// An F# expression of type `'host -> JVal`, spliced verbatim into the generated
+        /// encoder. Only the generated F# runs it; the interpreter carries the slot's JSON as is.
         Encode: string
+        /// An F# expression of type `JVal -> Result<'host, string>`, spliced verbatim into the
+        /// generated decoder, which checks a declared [[Wire]] form before calling it.
         Decode: string
         /// The IDL type the codec writes on the wire, when declared. A scalar, enum,
         /// record, list or map — never another erased slot (see
@@ -387,8 +414,13 @@ type Annotations =
 /// decoder restores `d` on absence — the Fuaran-UI Phase 147 (role/voice) + Phase
 /// 460 (tone/weight/emphasis/format/width) omit-when-default wire discipline.
 type Optionality =
+    /// Always on the wire: the encoder refuses an absent value and the decoder an absent member.
     | Required
+    /// Omitted on the wire when absent, and absent again after decode — presence is information.
     | Optional
+    /// Always has a value: emitted only when it differs from the default, compared as encoded
+    /// values (so `VInt 2` at a float slot whose default is `VFloat 2.0` is omitted), and
+    /// restored to the default when the member is absent.
     | OmitDefault of IdlValue
     /// **Never on the wire at all** (Phase 691) — present in the host declaration,
     /// absent from every encoding, restored from the slot's declared placeholder on
@@ -405,10 +437,16 @@ type Optionality =
     /// and whose wire form is fixed" — a host-only slot's wire form being *absence*.)
     | HostOnly
 
+/// One named slot of a kind, op, union case, record or the node envelope — its wire member
+/// name, the type of its value, and when it appears on the wire.
 and IdlField =
     {
+        /// The wire member name, which is also the generated host field name, so it must be an
+        /// identifier and unique within its owner ([[Declare.errors]]).
         Name: string
+        /// The type the member's value is encoded and decoded at.
         Type: IdlType
+        /// When the member is on the wire and what its absence means.
         Opt: Optionality
         /// What is true ABOUT this field, as opposed to its shape (Phase 113).
         /// [[Annotations.Empty]] for a field that says nothing, which is every field
@@ -419,8 +457,14 @@ and IdlField =
 /// A node kind — flat `$type`-discriminated on the wire (`Category` is metadata, not serialised).
 and IdlKind =
     {
+        /// The discriminator value the kind body is tagged with on the wire; unique among
+        /// [[Idl.Kinds]] (or among [[Idl.Ops]] for an op) and never empty.
         Tag: string
+        /// A free single-line classification for the generated layer (`"op"` on a tree op);
+        /// never encoded or decoded.
         Category: string
+        /// The kind body's fields, in declaration order — the order `KeyOrder.Declared`
+        /// renders them in.
         Fields: IdlField list
         /// What is true ABOUT this kind (Phase 119) — see [[IdlField.Annotations]].
         /// [[Annotations.Empty]] for a kind that says nothing.
@@ -434,9 +478,13 @@ and IdlKind =
         Annotations: Annotations
     }
 
+/// One case of an [[IdlUnion]]: its discriminator tag and the fields beside it.
 and IdlUnionCase =
     {
+        /// The discriminator value; unique within its union.
         Tag: string
+        /// The case's fields, which may mention the union's type parameters as [[TVar]]. A
+        /// declared transparent case has exactly one, and it is encoded bare.
         Fields: IdlField list
         /// What is true ABOUT this case (Phase 113) — see [[IdlField.Annotations]].
         Annotations: Annotations
@@ -444,9 +492,15 @@ and IdlUnionCase =
 
 /// A `$type`-discriminated value union (e.g. `Binding` has cases `Static` / `State`).
 and IdlUnion =
-    { Name: string
-      Params: string list
-      Cases: IdlUnionCase list }
+    {
+        /// The type name [[TUnion]] refers to; shares one namespace with enum and record names.
+        Name: string
+        /// The type parameter names, in order — a [[TUnion]]'s arguments bind to them by
+        /// position. Empty for a non-generic union.
+        Params: string list
+        /// The cases, in declaration order.
+        Cases: IdlUnionCase list
+    }
 
 /// A closed set of bare strings on the wire.
 ///
@@ -463,14 +517,18 @@ and IdlUnion =
 /// pushed out to a host codec via [[THosted]]) — "named rather than
 /// mis-modelled", but still a hole in the type model.
 ///
-/// **Build these with [[Idl.enumOf]] / [[Idl.enumWith]] rather than by record
+/// **Build these with [[Declare.enumOf]] / [[Declare.enumWith]] rather than by record
 /// literal.** `enumWith` takes `(case, wire)` PAIRS, so the parallel-arity
-/// invariant cannot be stated wrongly; [[Idl.enumWireErrors]] is the backstop
+/// invariant cannot be stated wrongly; [[Declare.enumWireErrors]] is the backstop
 /// for a record built by hand.
 and IdlEnum =
     {
+        /// The type name [[TEnum]] refers to; shares one namespace with union and record names.
         Name: string
+        /// The host case identifiers, in declaration order; each must be an identifier.
         Cases: string list
+        /// The wire string of each case, positionally parallel to [[Cases]], or `[]` when every
+        /// case is its own wire string. Read it through [[WireOf]] / [[CaseOf]].
         Wires: string list
         /// What is true ABOUT individual CASES (Phase 119), keyed by HOST case name —
         /// the [[Cases]] entry, not the wire string, because the host name is what the
@@ -537,17 +595,36 @@ and IdlEnum =
 
 /// A non-discriminated object type — named fields, no `$type` tag (referenced by
 /// [[TRecord]]). Fields may be `Optional` (omitted on the wire when absent).
-and IdlRecord = { Name: string; Fields: IdlField list }
+and IdlRecord =
+    {
+        /// The type name [[TRecord]] refers to; shares one namespace with enum and union names.
+        Name: string
+        /// The record's fields; a field-less record is well-formed.
+        Fields: IdlField list
+    }
 
 /// An authored value, checked and encoded against the IDL.
 and IdlValue =
+    /// A string value (matches [[TStr]]).
     | VStr of string
+    /// An integer value (matches [[TInt]]); also accepted at a [[TFloat]] slot, where it
+    /// encodes as the float.
     | VInt of int
+    /// A boolean value (matches [[TBool]]).
     | VBool of bool
+    /// A float value (matches [[TFloat]]); a non-finite one encodes as its quoted §7 token.
     | VFloat of float
+    /// An enum value carrying the case's WIRE string, not its host case name — the encoder
+    /// checks it against [[IdlEnum.WireCases]].
     | VEnum of string
+    /// A tagged value: a union case (matches [[TUnion]]), and also a bare kind ([[TKind]]) or a
+    /// tree op ([[TOp]]). `fields` are by name; one the owner does not declare is refused, and
+    /// order does not matter.
     | VUnion of tag: string * fields: (string * IdlValue) list
+    /// A list value (matches [[TList]]), every element at the list's item type.
     | VList of IdlValue list
+    /// A node with no envelope (matches [[TNode]]): its id, its kind tag, and the kind's fields
+    /// by name. The decoder answers this case whenever the envelope decodes to nothing.
     | VNode of id: string * kindTag: string * fields: (string * IdlValue) list
     /// A node carrying its ENVELOPE as well as its kind (Phase 698) — the
     /// `WIRE_FORMAT.md` §3.1 fields a node holds beside `id`/`kind`, declared per
@@ -566,6 +643,9 @@ and IdlValue =
     /// `style` (a `SemanticStyle`) and a `Drawing.style` kind field (a `DrawStyle`),
     /// so a single flat list could not say which one a `"style"` entry meant.
     | VNodeEnv of id: string * envelope: (string * IdlValue) list * kindTag: string * fields: (string * IdlValue) list
+    /// An authored "not provided" — in a field list it is treated as if the field were left
+    /// out (so a `Required` field holding it is refused). The decoder never produces it, and
+    /// encoding it anywhere but a field position is an error.
     | VAbsent
     /// A function-typed value (matches [[TClosure]]) — carries nothing; the
     /// encoder emits the `"<closure>"` sentinel. Present so a `TClosure` field can
@@ -609,18 +689,31 @@ and IdlValue =
 /// that genuinely wants absence to mean a value declares `OmitDefault`, and gets
 /// the fill in every leg.
 type IdlDefault =
-    { Kind: string
-      Field: string
-      Value: IdlValue }
+    {
+        /// The kind tag owning the field, or `""` for a node-envelope field.
+        Kind: string
+        /// The field's name within that owner. An address naming no field is inert and is not
+        /// refused; an address declared twice is.
+        Field: string
+        /// The value a smart constructor supplies when the caller passes none; it must encode
+        /// at the field's type.
+        Value: IdlValue
+    }
 
 /// The whole IDL — kinds, value-unions, enums, non-discriminated records, and
 /// field defaults. The canonical root.
 type Idl =
     {
+        /// The node kinds a [[TNode]] / [[TKind]] tag resolves against; tags are unique.
         Kinds: IdlKind list
+        /// The discriminated value unions a [[TUnion]] names.
         Unions: IdlUnion list
+        /// The closed string sets a [[TEnum]] names.
         Enums: IdlEnum list
+        /// The untagged object types a [[TRecord]] names.
         Records: IdlRecord list
+        /// The authoring defaults the generated smart constructors apply; they never fill a
+        /// member on decode (see [[IdlDefault]]).
         Defaults: IdlDefault list
         /// The node ENVELOPE — fields a `Node` carries beside `id` and `kind`
         /// (Phase 690). Empty (the default) generates `{ Id; Kind }`, exactly as
@@ -938,8 +1031,9 @@ module SourceLit =
 /// A "transparent" union case is encoded/decoded as a bare JSON value (its single
 /// field's value) rather than a `$type`-tagged object — the Fuaran-UI 0.2.0
 /// bare-string canonical `TextSource.Literal` (`{"$type":"Literal","text":"x"}` →
-/// `"x"`). Keyed on the well-known union name; the transparent case carries exactly
-/// one field. The `Bound` / non-transparent cases stay `$type`-tagged objects.
+/// `"x"`). Keyed on the vocabulary's declared `HardenPolicy.TransparentUnions`; the transparent
+/// case carries exactly one field. The `Bound` / non-transparent cases stay `$type`-tagged
+/// objects.
 ///
 /// **Public rather than internal since Phase 97**, because the split made the
 /// dependency real: the emitters moved to `Fuaran.Core.Idl.Codegen`, and an emitter
@@ -1174,6 +1268,10 @@ module Encode =
 
             go [] fields
 
+    /// A node with no envelope as its `JVal`, laid out by the declared [[NodeEnvelopeShape]] —
+    /// the tree, not the bytes: [[encode]] adds the declared key order and the refusal of an
+    /// ill-formed string. An unknown kind tag, a field the kind does not declare, or an absent
+    /// `Required` field is an `Error` naming it.
     and encodeNode (idl: Idl) (id: string) (kindTag: string) (fields: (string * IdlValue) list) : Result<JVal, string> =
         match findKind kindTag idl with
         | None -> Error(sprintf "unknown kind '%s'" kindTag)

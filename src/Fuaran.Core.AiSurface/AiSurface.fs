@@ -45,9 +45,16 @@ namespace Fuaran.Core
 /// `Fuaran.Core.Projection` scoped read (Phase 58) or a domain AiTools
 /// projection (outline / index / unbound-reference queries).
 type ReadTool<'State> =
-    { Name: string
-      Description: string
-      Run: 'State -> JVal }
+    {
+        /// The key `AiSurface.runTool` dispatches on, compared exactly (case-sensitive); where two
+        /// tools share a name the first in `ReadTools` wins.
+        Name: string
+        /// Prose the catalogue serves beside the name for a model choosing a tool; never parsed.
+        Description: string
+        /// The projection. Must be total and deterministic over a state (the AI-surface laws check
+        /// both); `runTool` returns its `JVal` verbatim.
+        Run: 'State -> JVal
+    }
 
 /// One mutation-op kind in the emission catalogue: the stable kind tag (the
 /// `"kind"` the wire codec emits), a description, and the op's parameter
@@ -55,16 +62,27 @@ type ReadTool<'State> =
 /// / `toJsonSchema` discipline (Phase 04), so an orchestrator emits the op
 /// from the schema without touching the wire encoder.
 type OpKindCard =
-    { Kind: string
-      Description: string
-      Schema: JVal }
+    {
+        /// The tag `KindOfOp` returns for ops of this kind. Catalogue completeness joins on it: every
+        /// kind an op can project to must be catalogued, and every catalogued kind must be emittable.
+        Kind: string
+        /// Prose the catalogue serves under `description`; never parsed.
+        Description: string
+        /// The op's parameter schema, served verbatim under `schema`; the core does not validate it.
+        Schema: JVal
+    }
 
 /// A canonical edit intent — the fast-path resolver's input: the natural-
 /// language text plus typed key→value args. A pure value (no clock, no rng),
 /// so resolution is a function of the intent alone.
 type Intent =
-    { Text: string
-      Args: (string * string) list }
+    {
+        /// The request the anchors are matched against — case-insensitively and ordinally, each
+        /// anchor's literal segments in order (`PatternBank.matchesAnchor`).
+        Text: string
+        /// Handed unchanged to the matched pattern's `Emit`; matching reads only `Text`, never these.
+        Args: (string * string) list
+    }
 
 /// One pattern-bank entry: a stable name, the prompt anchors the resolver
 /// matches against (literal segments; a `{...}` span is a wildcard), and the
@@ -72,10 +90,18 @@ type Intent =
 /// (the pattern *content*) stays domain-side; the core owns only matching and
 /// resolution discipline. `Emit` must be deterministic (`aiSurfaceLaws` checks).
 type PatternCard<'Op> =
-    { Name: string
-      Title: string
-      PromptAnchors: string list
-      Emit: (string * string) list -> Result<'Op list, string> }
+    {
+        /// The pattern's stable identifier, served in the catalogue; resolution never reads it.
+        Name: string
+        /// A human-readable label served in the catalogue beside `Name`; resolution never reads it.
+        Title: string
+        /// Any ONE matching anchor selects the pattern. An empty list never matches, and an anchor
+        /// with no literal segment is refused by the AI-surface laws because it would match everything.
+        PromptAnchors: string list
+        /// The emission from the intent's `Args`. An `Error` means the args were unusable, and
+        /// `PatternBank.resolve` surfaces it as `Some (Error _)` rather than falling through to the model.
+        Emit: (string * string) list -> Result<'Op list, string>
+    }
 
 /// The policy decision for one op by one actor — the shape of the domain's
 /// write policy (the rules stay domain-side). Default-deny lives in the domain;
@@ -89,8 +115,13 @@ type PatternCard<'Op> =
 /// reason alone. `RequireQualifiedAccess` (Phase 298): `PolicyDecision.Allow`, …
 [<RequireQualifiedAccess>]
 type PolicyDecision =
+    /// The op may apply now. A submitted sequence applies only when every op is allowed.
     | Allow
+    /// The op must be approved first: one such op parks the whole submitted sequence. When
+    /// `Proposals.approve` re-consults the policy for the approver, this is not a refusal.
     | NeedsApproval
+    /// The op is refused; one denial refuses the whole sequence, and the first denial's guidance
+    /// is the one reported.
     | Deny of guidance: RejectionGuidance
 
 /// Constructors for `PolicyDecision` (Phase 298).
@@ -170,13 +201,27 @@ module RejectionCodec =
 ///     guidance rendering (typically built on the domain's `Fuaran.Core.Validator`
 ///     defects / policy envelope).
 type AiSurfaceWitness<'State, 'Op, 'Rej> =
-    { ReadTools: ReadTool<'State> list
-      OpKinds: OpKindCard list
-      KindOfOp: 'Op -> string
-      Patterns: PatternCard<'Op> list
-      Decide: string -> 'Op -> PolicyDecision
-      Apply: 'Op -> 'State -> Result<'State, 'Rej>
-      Explain: 'Rej -> RejectionGuidance }
+    {
+        /// The tools `AiSurface.runTool` dispatches over and the catalogue lists, in this order.
+        ReadTools: ReadTool<'State> list
+        /// The mutation catalogue, served under `ops`; it must hold exactly the kinds `KindOfOp`
+        /// can return.
+        OpKinds: OpKindCard list
+        /// An op's catalogue `Kind` — the join the completeness law checks. Must be total.
+        KindOfOp: 'Op -> string
+        /// The pattern bank in resolution order: `PatternBank.resolve` takes the first pattern with a
+        /// matching anchor, so the most specific patterns come first.
+        Patterns: PatternCard<'Op> list
+        /// The write policy for an actor and an op. `Proposals.submit` consults it for the author,
+        /// and `Proposals.approve` consults it again for the approver, refusing on any `Deny`.
+        Decide: string -> 'Op -> PolicyDecision
+        /// The domain reducer. A proposal's ops fold through it in order, and the first `Error`
+        /// aborts the whole sequence — a partially applied state is never returned.
+        Apply: 'Op -> 'State -> Result<'State, 'Rej>
+        /// A reducer rejection as the guidance `Proposals.explainRejection` renders; the AI-surface
+        /// laws require the rendering to be non-empty.
+        Explain: 'Rej -> RejectionGuidance
+    }
 
 /// The NL→op fast-path: deterministic anchor matching over the witness's
 /// pattern bank. The resolver is a pure function of the intent — no clock, no
@@ -279,26 +324,52 @@ module Proposals =
     /// `ProposalStatus.Pending`.
     [<RequireQualifiedAccess>]
     type ProposalStatus =
+        /// Awaiting a decision — the only status `approve` and `reject` act on.
         | Pending
+        /// The ops applied through the reducer; `approver` signed off at `at` (caller-supplied
+        /// text), while the proposal's `Author` stays the proposer.
         | Approved of approver: string * at: string
+        /// Refused by `approver` at `at` for `reason`. Recorded rather than dropped, and the
+        /// artifact was never touched.
         | Rejected of approver: string * at: string * reason: string
 
     /// A parked op sequence. `ProposedAt` is ISO-8601, caller-supplied (no
     /// clock reads in the core).
     type Proposal<'Op> =
-        { Id: int
-          Author: string
-          ProposedAt: string
-          Intent: string option
-          Ops: 'Op list
-          Status: ProposalStatus }
+        {
+            /// Unique within its queue: `proposeWithId` refuses a held id, and `propose` mints one
+            /// past the largest held, so an id is never re-issued.
+            Id: int
+            /// The proposing actor. It can never approve its own proposal (`SelfApproval`).
+            Author: string
+            /// Carried verbatim; the core never parses it or orders proposals by it.
+            ProposedAt: string
+            /// The edit intent's text the ops answer, when there was one — kept for the approver,
+            /// never read by the lifecycle.
+            Intent: string option
+            /// Applied in order and as a unit on approval: the first reducer rejection leaves the
+            /// proposal pending and the state untouched.
+            Ops: 'Op list
+            /// Where the proposal stands; only a `Pending` one can be decided.
+            Status: ProposalStatus
+        }
 
-    type ProposalQueue<'Op> = { Proposals: Proposal<'Op> list }
+    /// The proposal queue — a pure value the host owns and persists. Decided proposals stay in it
+    /// with their status until the host prunes them.
+    type ProposalQueue<'Op> =
+        {
+            /// Every proposal in the order it was parked, decided ones included; no two share an id.
+            Proposals: Proposal<'Op> list
+        }
 
+    /// Reads over a `ProposalQueue`: the empty queue, the undecided view, and the next id.
     module Queue =
 
+        /// A queue holding nothing; the first `propose` on it mints id `1`.
         let empty<'Op> : ProposalQueue<'Op> = { Proposals = [] }
 
+        /// The proposals still awaiting a decision, in the order they were parked — the ids an
+        /// `UnknownProposal` refusal enumerates.
         let pending (q: ProposalQueue<'Op>) : Proposal<'Op> list =
             q.Proposals |> List.filter (fun p -> p.Status = ProposalStatus.Pending)
 
@@ -314,7 +385,10 @@ module Proposals =
     /// Why a proposal could not be parked under a caller-chosen id (Phase 298): the
     /// queue already holds that id; `held` enumerates the ids it holds.
     [<RequireQualifiedAccess>]
-    type ProposeFailure = DuplicateProposal of id: int * held: int list
+    type ProposeFailure =
+        /// `id` is already held; `held` lists every id in the queue, in queue order, decided
+        /// proposals included.
+        | DuplicateProposal of id: int * held: int list
 
     /// One pending proposal appended under `id` — unchecked; both proposers check first.
     let private append id author proposedAt intent (ops: 'Op list) (q: ProposalQueue<'Op>) : ProposalQueue<'Op> =
@@ -362,7 +436,11 @@ module Proposals =
     /// Why an approval/rejection was refused — total, and it enumerates the
     /// pending ids where a closed set is expected (GP5).
     type ApprovalFailure<'Rej> =
+        /// No proposal in the queue carries `id`; `pending` lists the ids still awaiting a
+        /// decision (decided ones are not offered).
         | UnknownProposal of id: int * pending: int list
+        /// The proposal was already decided — a second decision is refused, and `status` is the
+        /// `Approved` or `Rejected` it holds.
         | NotPending of id: int * status: ProposalStatus
         /// The artifact moved since the proposal was parked and an op no longer
         /// applies — the rejection is surfaced and the proposal STAYS pending:

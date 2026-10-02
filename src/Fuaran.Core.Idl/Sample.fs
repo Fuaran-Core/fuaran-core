@@ -39,8 +39,13 @@ module Sample =
     /// it can be drawn: an empty enum, union, kind or op set, a name the vocabulary does not
     /// declare, an unbound type variable, or a type with no finite value.
     type SampleRefusal =
-        { At: string
-          Reason: string }
+        {
+            /// A noun phrase locating the slot, written to follow "cannot sample" in
+            /// [[Describe]] — `enum 'Tone'`, `type variable 'T'`, or a type's `%A` rendering.
+            At: string
+            /// A lower-case clause, written to follow the colon in [[Describe]].
+            Reason: string
+        }
 
         /// The refusal as one sentence.
         member this.Describe = sprintf "cannot sample %s: %s" this.At this.Reason

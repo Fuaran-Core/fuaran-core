@@ -14,24 +14,40 @@ namespace Fuaran.Core
 /// Where a capability's body runs (spec §5) — a typed, portable placement contract, not a
 /// deploy-time accident. A `ClientIsland` carries its sub-kind.
 type IslandKind =
+    /// Python in the browser; wire tag `pyodide`.
     | Pyodide
+    /// F# compiled to JavaScript; wire tag `fable`.
     | Fable
+    /// Plain JavaScript; wire tag `js`.
     | Js
 
+/// Where the host runs a capability's body. The core only carries and round-trips it — no
+/// operation here reads it — so routing by it is the host's.
 type Placement =
+    /// Run when the app is built, not on request; wire tag `buildTime`.
     | BuildTime
+    /// Run on a server, so the body may answer `Pending`; wire tag `server`.
     | Server
+    /// Run in the client without a code island; wire tag `clientDeclarative`.
     | ClientDeclarative
+    /// Run in the client inside a code island of the given kind, so the body may answer `Pending`;
+    /// wire tag `clientIsland` with the kind as `island`.
     | ClientIsland of IslandKind
+    /// Served from a result computed ahead of time; wire tag `precomputed`.
     | Precomputed
 
 /// A registrable, invocable runtime capability. `Signature` (incl. its `Effect`) is reused
 /// verbatim from the artifact-function surface; `Placement` routes the host body. The wire carries
 /// this declaration + a typed invocation, never the body.
 type Capability =
-    { Id: string
-      Signature: Signature
-      Placement: Placement }
+    {
+        /// The registry key; a second registration under the same id is refused `DuplicateCapability`.
+        Id: string
+        /// The arguments it takes and the effect it declares; registration refuses a non-total one.
+        Signature: Signature
+        /// Where its body runs; carried, never acted on, by the core.
+        Placement: Placement
+    }
 
     /// The capture-keying axis: the signature's effect determinism, DERIVED (Phase 295). It was a
     /// field the smart constructor filled, so a hand-built record could disagree with its own
@@ -43,12 +59,20 @@ type Capability =
 /// closed set is expected, enumerates the alternatives (GP5). Default-deny by shape: only a
 /// registered id with in-space args dispatches.
 type InvokeError =
+    /// Dispatch named an id the registry does not hold; `known` lists every registered id, by id.
     | NoSuchCapability of id: string * known: string list
+    /// Registration under an id the registry already holds; the registry is left unchanged.
     | DuplicateCapability of id: string
+    /// An argument addresses no hole of the signature; `declared` lists every hole address.
     | UnknownArg of addr: string * declared: string list
+    /// An argument's value `got` is not in its hole's `space`; for a slot, a tree of the wrong kind.
     | ArgOutOfSpace of addr: string * space: ValueSpace * got: string
+    /// These required holes received no argument, in declaration order.
     | RequiredArgsUnbound of addrs: string list
+    /// The hole cannot take a caller's value at all: an action hole, or a slot sent something that
+    /// is not a `"kind"`-tagged object.
     | UninvocableArg of addr: string
+    /// The arguments validated and the body ran, answering `Failed reason`.
     | BodyFailed of reason: string
     /// A registration refused because the capability's signature is not total (Phase 295): the
     /// repeat holes it names range over an unbounded count space, or an entry projects to no hole
@@ -119,9 +143,13 @@ module InvokeError =
 /// `SlotTree` argument as `TreeValue`, the parsed wire document (decoding it into the domain's node
 /// stays the host's, per the witness pattern).
 type ArgValue =
+    /// An `IntRange` argument, within its bounds.
     | IntValue of int
+    /// A `FloatRange` argument, finite and within its bounds.
     | FloatValue of float
+    /// A `StringLen`, `Enum` or `AnyString` argument, exactly as sent.
     | TextValue of string
+    /// A `SlotTree` argument, parsed but not decoded into any domain node.
     | TreeValue of JVal
 
 /// The invocable-capability surface: the typed registry (populate + enumerate + dispatch), the
@@ -356,7 +384,10 @@ module Capability =
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
 /// dispatch — only a registered id resolves.
 type CapabilityRegistry =
-    { Capabilities: Map<string, Capability> }
+    {
+        /// Keyed by `Capability.Id`; every member was admitted by `register`, so each is total.
+        Capabilities: Map<string, Capability>
+    }
 
 /// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295,
 /// which kept that name as an obsolete alias for the 0.34.0 draft). `ModuleSuffix`, so the module
@@ -364,6 +395,8 @@ type CapabilityRegistry =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module CapabilityRegistry =
 
+    /// The registry with no capabilities: every dispatch through it is `NoSuchCapability` with an
+    /// empty `known` list.
     let empty: CapabilityRegistry = { Capabilities = Map.empty }
 
     /// Register a capability — additive, no silent overwrite (a duplicate id is a named error), and
@@ -380,6 +413,7 @@ module CapabilityRegistry =
                     { r with
                         Capabilities = Map.add c.Id c r.Capabilities }
 
+    /// The capability registered under exactly `id` (ordinal, case-sensitive), or `None`.
     let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Map.tryFind id r.Capabilities
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part
@@ -418,15 +452,20 @@ module CapabilityRegistry =
 [<System.Obsolete("Registry is CapabilityRegistry since Phase 295; this alias is removed at the next draft.")>]
 module Registry =
 
+    /// Forwards to `CapabilityRegistry.empty`; removed at the next draft.
     let empty: CapabilityRegistry = CapabilityRegistry.empty
 
+    /// Forwards to `CapabilityRegistry.register`; removed at the next draft.
     let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
         CapabilityRegistry.register c r
 
+    /// Forwards to `CapabilityRegistry.tryFind`; removed at the next draft.
     let tryFind (id: string) (r: CapabilityRegistry) : Capability option = CapabilityRegistry.tryFind id r
 
+    /// Forwards to `CapabilityRegistry.enumerate`; removed at the next draft.
     let enumerate (r: CapabilityRegistry) : Capability list = CapabilityRegistry.enumerate r
 
+    /// Forwards to `CapabilityRegistry.dispatch`; removed at the next draft.
     let dispatch
         (r: CapabilityRegistry)
         (id: string)
@@ -435,6 +474,7 @@ module Registry =
         : Result<Deferred<'v>, InvokeError> =
         CapabilityRegistry.dispatch r id args body
 
+    /// Forwards to `CapabilityRegistry.dispatchWithArgs`; removed at the next draft.
     let dispatchWithArgs
         (r: CapabilityRegistry)
         (id: string)
@@ -450,7 +490,9 @@ module Registry =
 /// beside an invocation, say), and the refusal is what tells the model so.
 [<RequireQualifiedAccess>]
 type ReadPolicy =
+    /// Read past members the decoder does not know; the policy of every reader without a policy argument.
     | Lenient
+    /// Refuse the first unknown member, naming it and the members that would have been read.
     | Strict
 
 /// The canonical wire codec for a `Capability` declaration + a typed invocation record. Round-trips
@@ -567,6 +609,9 @@ module CapabilityCodec =
                       Holes = holes
                       Effect = eff })))
 
+    /// Read a signature object (`name`, `effect`, `holes`) leniently, refusing a hole-kind tag
+    /// outside `HoleKind.tags`; a slot entry written without its space gets `SlotTree` of its
+    /// constraint back.
     let signatureOf (el: JVal) : Result<Signature, string> =
         Decoder.describing signatureOfDetailed el
 
@@ -609,6 +654,7 @@ module CapabilityCodec =
               "determinism", JStr(Effect.determinismTag c.Determinism)
               "placement", placementJson c.Placement ]
 
+    /// `encodeJson` rendered canonically: one capability always renders to the same string.
     let encode (c: Capability) : string = Canon.render (encodeJson c)
 
     let private decodeJsonDetailed (el: JVal) : Result<Capability, DecodeError> =
@@ -647,9 +693,12 @@ module CapabilityCodec =
                           Signature = sg
                           Placement = placement }))))
 
+    /// Read a capability declaration leniently. The wire `determinism` must equal the label the
+    /// decoded signature's effect derives; a disagreeing tag is refused, never silently corrected.
     let decodeJson (el: JVal) : Result<Capability, string> =
         Decoder.describing decodeJsonDetailed el
 
+    /// Parse, then `decodeJson`; a malformed document is refused with the parser's sentence.
     let decode (s: string) : Result<Capability, string> =
         Decode.parse s |> Result.bind decodeJson
 
@@ -662,6 +711,8 @@ module CapabilityCodec =
             [ "capabilityId", JStr capabilityId
               "args", JArr(args |> List.map (fun (a, v) -> JObj [ "addr", JStr a; "value", JStr v ])) ]
 
+    /// A typed invocation as a canonical `"$type":"invocation"` document. The arguments keep the
+    /// order given, each an `{addr, value}` object; nothing is validated against a signature here.
     let encodeInvocation (capabilityId: string) (args: (string * string) list) : string =
         Canon.render (encodeInvocationJson capabilityId args)
 
@@ -672,6 +723,8 @@ module CapabilityCodec =
         both (Decoder.field "capabilityId" Decoder.str) (Decoder.field "args" (Decoder.list arg)) (fun cid args ->
             cid, args)
 
+    /// Read an invocation back as `(capabilityId, args)` in wire order, leniently; argument values are
+    /// read as strings and checked against nothing until `validateArgs`.
     let decodeInvocation (s: string) : Result<string * (string * string) list, string> =
         Decode.parse s |> Result.bind (Decoder.describing invocationOf)
 
@@ -685,6 +738,7 @@ module CapabilityCodec =
         | Ready v -> Canon.typed "ready" [ "value", encodeT v ]
         | Failed m -> Canon.typed "failed" [ "message", JStr m ]
 
+    /// `deferredJson` rendered canonically.
     let encodeDeferred (encodeT: 'T -> JVal) (d: Deferred<'T>) : string = Canon.render (deferredJson encodeT d)
 
     /// Decode a `Deferred<'T>` from a `JVal`, using `decodeT` for a `ready` payload — `Result`-typed with
@@ -705,6 +759,7 @@ module CapabilityCodec =
                   "failed", Decoder.field "message" Decoder.str |> Decoder.map Failed ])
             el
 
+    /// Parse, then `deferredOf`; a refusal from `decodeT` is passed through as its own sentence.
     let decodeDeferred (decodeT: JVal -> Result<'T, string>) (s: string) : Result<Deferred<'T>, string> =
         Decode.parse s |> Result.bind (deferredOf decodeT)
 
@@ -729,6 +784,7 @@ module CapabilityCodec =
         | BodyFailed reason -> Canon.typed "bodyFailed" [ "reason", JStr reason ]
         | NonTotalCapability(id, addrs) -> Canon.typed "nonTotalCapability" [ "id", JStr id; "addrs", strs addrs ]
 
+    /// `invokeErrorJson` rendered canonically; `decodeInvokeError` reads it back to the same value.
     let encodeInvokeError (e: InvokeError) : string = Canon.render (invokeErrorJson e)
 
     /// Decode an `InvokeError` from a `JVal` — `Result`-typed with a named error.
@@ -757,6 +813,7 @@ module CapabilityCodec =
 
         Decoder.describing invokeError el
 
+    /// Parse, then `invokeErrorOf`; an unknown `$type` is refused as `unknown invoke error: <tag>`.
     let decodeInvokeError (s: string) : Result<InvokeError, string> =
         Decode.parse s |> Result.bind invokeErrorOf
 

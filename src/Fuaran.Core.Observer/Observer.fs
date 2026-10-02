@@ -35,9 +35,17 @@ namespace Fuaran.Core
 /// richer observation shape — e.g. the UI `LayoutObservation` reads
 /// width / height / viewport coordinates back off the input.
 type Observation<'Input, 'Flag> =
-    { NodeId: string
-      Input: 'Input
-      Flags: 'Flag list }
+    {
+        /// The registered node the snapshot was taken at — the key the
+        /// state and every subscriber callback use.
+        NodeId: string
+        /// The input the flags were derived from, retained verbatim so a
+        /// domain can read its own metrics back off the observation.
+        Input: 'Input
+        /// `Derive Input`, in the order the derivation produced them; no
+        /// de-duplication or sorting is applied.
+        Flags: 'Flag list
+    }
 
 /// The pure derivation: a domain's metric envelope → its flag list.
 /// MUST be a pure function — no clock, randomness, or network — so the
@@ -60,6 +68,7 @@ type ObserverOptions<'Flag> =
         FlagsEqual: 'Flag list -> 'Flag list -> bool
     }
 
+/// Stock emit policies for `ObserverOptions`.
 module ObserverOptions =
     /// Structural-equality, change-only defaults — the analogue of the
     /// UI `LayoutObserverOptions.defaults` emit policy.
@@ -71,16 +80,29 @@ module ObserverOptions =
 /// and its emit policy. The core composes registration, snapshots, the tree
 /// walk and the change-gate from these; a domain supplies no class.
 type ObserverWitness<'Input, 'Flag> =
-    { Derive: Derivation<'Input, 'Flag>
-      Options: ObserverOptions<'Flag> }
+    {
+        /// The domain's pure input-to-flags derivation; it runs before any
+        /// state is committed, so a throw leaves the state untouched.
+        Derive: Derivation<'Input, 'Flag>
+        /// The emit policy `update` consults; `register` ignores it and
+        /// always emits.
+        Options: ObserverOptions<'Flag>
+    }
 
 /// One registered node (Phase 298): its live input, the parent it was
 /// declared under (`None` for a root), and the flags last derived from the
 /// input — the change-gate's baseline.
 type ObserverEntry<'Input, 'Flag> =
-    { Current: 'Input
-      ParentId: string option
-      LastFlags: 'Flag list }
+    {
+        /// The most recent input given to `register` or `update`.
+        Current: 'Input
+        /// The parent named at registration; `update` never changes it, and
+        /// it is not checked to be registered.
+        ParentId: string option
+        /// The flags derived from `Current`, refreshed on every `update`
+        /// whether or not that update emitted.
+        LastFlags: 'Flag list
+    }
 
 /// The observer's state as a value (Phase 298): the registered entries by node
 /// id, and the ids in REGISTRATION order — re-registering an id keeps its
@@ -88,8 +110,12 @@ type ObserverEntry<'Input, 'Flag> =
 /// deterministic: a `Dictionary`'s enumeration, which the class used, reuses
 /// freed slots after a removal on .NET and does not under Fable.
 type ObserverState<'Input, 'Flag> =
-    { Entries: Map<string, ObserverEntry<'Input, 'Flag>>
-      Order: string list }
+    {
+        /// The registered nodes keyed by node id.
+        Entries: Map<string, ObserverEntry<'Input, 'Flag>>
+        /// Exactly the keys of `Entries`, oldest registration first.
+        Order: string list
+    }
 
 /// The observer functions over the witness (Phase 298). Every function is
 /// pure: a registration or update returns the new state and the emission it
@@ -259,6 +285,7 @@ type Derivation<'Input, 'Flag> = Fuaran.Core.Derivation<'Input, 'Flag>
 /// `Fuaran.Core.ObserverOptions` — moved to the spine's namespace in Phase 298.
 type ObserverOptions<'Flag> = Fuaran.Core.ObserverOptions<'Flag>
 
+/// Forwards to `Fuaran.Core.ObserverOptions`; kept for one draft (Phase 298).
 module ObserverOptions =
     /// `Fuaran.Core.ObserverOptions.defaults`.
     let defaults<'Flag when 'Flag: equality> : ObserverOptions<'Flag> =
@@ -358,6 +385,8 @@ type InMemoryObserver<'Input, 'Flag>(derive: Derivation<'Input, 'Flag>, options:
         member _.Unregister(nodeId: string) : unit =
             state <- ObserverWitness.unregister nodeId state
 
+/// Constructors for the `InMemoryObserver` adapter; kept for one draft
+/// (Phase 298) — new code builds an `ObserverWitness` instead.
 module InMemoryObserver =
     /// Construct with the change-only structural-equality defaults.
     let create<'Input, 'Flag when 'Flag: equality>

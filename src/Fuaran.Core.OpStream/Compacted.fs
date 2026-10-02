@@ -15,16 +15,28 @@ namespace Fuaran.Core
 /// host that persists a compacted stream persists `Keys` beside it (DECISIONS.md, the Phase 301
 /// entry); the snapshot line and the record lines are unchanged.
 type Compacted<'Op, 'State> =
-    { Snapshot: Snapshot<'State>
-      Tail: OpRecord<'Op> list
-      Keys: KeyIndex }
+    {
+        /// The checkpoint at the boundary. Its `Seq` is where the tail's numbering starts and its
+        /// `PrevHash` is the head while the tail is empty.
+        Snapshot: Snapshot<'State>
+        /// The records above the boundary, carrying their ORIGINAL sequence numbers and hashes — not a
+        /// stream that starts at zero, so never hand it to the plain `append` / `verifyChain`.
+        Tail: OpRecord<'Op> list
+        /// The invocation keys the discarded prefix produced, fixed at compaction and not hashed; the
+        /// tail's own keys are added on top by `keyIndex`.
+        Keys: KeyIndex
+    }
 
 /// The typed outcome of an idempotent append onto a compacted stream (Phase 301) — `AppendOutcome`
 /// with the compacted stream in place of the record list, so a caller is never handed a tail it
 /// could mistake for the whole history.
 [<RequireQualifiedAccess>]
 type CompactedOutcome<'Op, 'State> =
+    /// The key was new and the op applied: the advanced state, the compacted stream with the record
+    /// appended to its tail, and the caller's index with the key bound to that record.
     | Appended of state: 'State * stream: Compacted<'Op, 'State> * index: KeyIndex
+    /// The key was already in the caller's index: the entry it first produced. The reducer never ran
+    /// and nothing was appended.
     | Duplicate of existing: EntryRef
 
 /// The bodies of the `OpStream.Compacted` members (Phase 301). Internal: a consumer reaches each one

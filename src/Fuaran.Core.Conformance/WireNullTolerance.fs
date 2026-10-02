@@ -40,10 +40,18 @@ module WireNullTolerance =
         /// result. The controls that pin "the tolerant path changed nothing else".
         | UnaffectedByPolicy
 
+    /// One conformance case: an input document and what both read policies must do with it.
     type Vector =
-        { Name: string
-          Json: string
-          Claim: Claim }
+        {
+            /// The case's label; it names the outcome `runVector` reports and the law `laws`
+            /// emits (`wire null tolerance: <Name>`).
+            Name: string
+            /// The raw input text, read under both the strict and the tolerant policy — it may
+            /// be malformed on purpose (`Rejected`).
+            Json: string
+            /// What the two policies must do with `Json`, stated against both at once.
+            Claim: Claim
+        }
 
     /// A neutral foreign document of the shape that motivates the tolerance: an absent member
     /// spelled `null` at the root, two more nested a level down, alongside empty arrays and
@@ -58,6 +66,8 @@ module WireNullTolerance =
     let foreignDocumentNullFree =
         """{"formatVersion":1,"surface":{"enabled":false,"offers":{"names":[],"routes":[]},"tags":[],"visibility":"summary"}}"""
 
+    /// The fixed vector set `check` and `laws` run — every claim kind, the foreign document
+    /// among them; a host claiming the tolerant read passes all of it.
     let vectors: Vector list =
         [ { Name = "sole member erases to the empty object"
             Json = """{"a":null}"""

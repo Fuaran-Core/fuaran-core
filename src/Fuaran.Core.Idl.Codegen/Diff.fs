@@ -28,6 +28,10 @@ open Fuaran.Core
 // which is the whole point of having committed the artifact.
 // ---------------------------------------------------------------------------
 
+/// The IDL stability classifier over two `idl.json` revisions (and optionally each side's
+/// `support.json`): the change list, each change's wire severity and F# consequence, the
+/// host obligations it raises, and the verdict a gate branches on. Advisory: it writes no
+/// file, bumps no version and gates no build.
 module Diff =
 
     // -----------------------------------------------------------------------
@@ -50,16 +54,27 @@ module Diff =
     ///   every document that was sitting on it.
     type FieldSnap =
         {
+            /// The field's wire name — the key fields are paired on across revisions.
             Name: string
+            /// A human-readable rendering of the type, for report lines only; no verdict
+            /// is ever decided on it.
             Label: string
             /// The type object's own `$type` — `str` / `list` / `hosted` / `json` …
             /// Carried separately because three of them (`hosted`, `json`,
             /// `opaque`) are ERASED slots whose admitted values the artifact
             /// deliberately does not state, which is a classification boundary.
             TypeTag: string
+            /// The canonical JSON of the type object with every `hostSurface` key removed, at
+            /// any depth — a difference here is a wire-type change.
             TypeWire: string
+            /// The `hostSurface` blocks alone, as `path=<canonical JSON>` entries joined by
+            /// `"; "`; empty when the type carries none.
             TypeHost: string
+            /// The optionality's bare `$type` (`required` / `optional` / `omitDefault` /
+            /// `hostOnly`) — what the classification rules branch on; `?` when absent.
             OptClass: string
+            /// The optionality including an `omitDefault`'s canonical default value, so a moved
+            /// identity default compares unequal even though `OptClass` does not.
             Opt: string
             /// The declared annotation set (Phase 113), canonically rendered — `""`
             /// when the field declares none, which is what every revision predating
@@ -76,12 +91,19 @@ module Diff =
     /// What a field belongs to. `ONodeEnvelope` is the per-node field set beside
     /// `id` / `kind` (`WIRE_FORMAT.md` §3.1) — it has no name of its own.
     type Owner =
+        /// A node kind, by its `$type` tag.
         | OKind of tag: string
+        /// A tree-op, by its `$type` tag.
         | OOp of tag: string
+        /// One case of a value-union; the field belongs to the case, not to the union.
         | OUnionCase of union: string * case: string
+        /// A non-discriminated record, by name.
         | ORecord of name: string
+        /// The per-node field set every kind shares.
         | ONodeEnvelope
 
+        /// The owner as report prose — `kind X`, `op X`, `union U.C`, `record R` or
+        /// `node envelope` — the subject every change summary and rationale names.
         member this.Describe =
             match this with
             | OKind t -> sprintf "kind %s" t
@@ -102,18 +124,39 @@ module Diff =
     /// One union case — its fields, and (Phase 113) its own annotation set, which
     /// belongs to the CASE rather than to any of its fields.
     type CaseSnap =
-        { Fields: FieldSnap list
-          Annotations: string }
+        {
+            /// The case's fields in authored order; diffed by name under `OUnionCase`.
+            Fields: FieldSnap list
+            /// The case's own canonical annotation set — `""` when it declares none or the
+            /// revision predates the key.
+            Annotations: string
+        }
 
+    /// One value-union of a revision: its type parameters, its cases and the case it
+    /// encodes bare, if any.
     type UnionSnap =
-        { Params: string list
-          Cases: Map<string, CaseSnap>
-          CaseOrder: string list
-          TransparentCase: string option }
+        {
+            /// The declared type-parameter names in order. A move is host-surface (the wire
+            /// carries no type arguments) but breaks every reference at the old arity.
+            Params: string list
+            /// Cases keyed by tag, so a reorder alone never reads as a change.
+            Cases: Map<string, CaseSnap>
+            /// The case tags in artifact order. Read but never diffed, so reordering cases
+            /// produces no change row.
+            CaseOrder: string list
+            /// The case that encodes as a bare value instead of a `$type`-tagged object, or
+            /// `None`. Any move is a wire break.
+            TransparentCase: string option
+        }
 
+    /// One closed string set of a revision.
     type EnumSnap =
         {
+            /// The admitted wire strings, in artifact order. Cases pair by string, so a
+            /// rename reads as a removal plus an addition.
             WireCases: string list
+            /// The generated F# case names (`hostCases`, a host-surface key); empty when the
+            /// artifact omits the key. Compared as a whole list, order included.
             HostCases: string list
             /// Per-case annotation sets (Phase 119), keyed by the WIRE string the artifact
             /// keys them on and canonically rendered — a case that says nothing is absent
@@ -126,8 +169,13 @@ module Diff =
     /// authored order, which the artifact preserves deliberately.
     type Snapshot =
         {
+            /// The artifact ENCODING version (the shape of `idl.json` itself, not the
+            /// vocabulary); `0` when the key is missing or not an integer.
             Version: int
+            /// Kind tag → its fields in authored order.
             Kinds: Map<string, FieldSnap list>
+            /// Kind tag → its `category`, `""` when absent. Metadata only — never serialised,
+            /// so a move is host-surface.
             KindCategory: Map<string, string>
             /// A kind's OWN annotation set (Phase 119), canonically rendered — `""` when
             /// it declares none. A map beside [[Kinds]] rather than a field on it, for
@@ -135,17 +183,24 @@ module Diff =
             /// tag, and a per-tag fact that is not a field belongs beside that walk
             /// rather than inside it.
             KindAnnotations: Map<string, string>
+            /// Tree-op tag → its fields in authored order; empty when the revision predates
+            /// the `ops` key.
             Ops: Map<string, FieldSnap list>
             /// A tree-op's own annotation set (Phase 119) — the same slot as
             /// [[KindAnnotations]], read from the `ops` collection. Ops are `IdlKind`s,
             /// so they are annotatable on identical terms.
             OpAnnotations: Map<string, string>
+            /// Value-unions by name.
             Unions: Map<string, UnionSnap>
+            /// Closed string sets by name.
             Enums: Map<string, EnumSnap>
+            /// Non-discriminated records by name → their fields in authored order.
             Records: Map<string, FieldSnap list>
             /// `(kind, field) -> canonical value` — the smart-constructor defaults
             /// (`IdlDefault`), NOT the wire-visible `omitDefault` optionality.
             Defaults: Map<string * string, string>
+            /// The node-envelope fields (`nodeFields`) every kind carries beside `id` / `kind`,
+            /// diffed under `ONodeEnvelope`.
             NodeFields: FieldSnap list
             /// Phase 293 — the declared SUPPORT beside the vocabulary (`support.json`), keyed
             /// `doc:<path>` / `splice:<slot>` / `refine:<Union.Tag>` / `projection:<Kind>` /
@@ -153,9 +208,9 @@ module Diff =
             /// without a support document, so every pre-existing pair reads exactly as it did;
             /// with one, a projection or refine edit classifies instead of reading `unchanged`.
             Support: Map<string, string>
-            /// The declared wire shape (Phases 108/109), as `discriminator/envelope`
-            /// — `"$type/nestedKind"` when the artifact predates the key or the
-            /// vocabulary declares the default.
+            /// The declared wire shape (Phases 108/109), as `discriminator/nodeEnvelope/keyOrder`
+            /// — `"$type/nestedKind/sorted"` when the artifact predates the key, and each
+            /// segment its default when the `wire` block omits it.
             Wire: string
             /// The declared hardening vocabulary (Phase 116), rendered canonically — the
             /// all-empty block when the artifact predates the key, since Phase 180 made
@@ -303,9 +358,6 @@ module Diff =
         |> List.choose (fun x -> key x |> Option.map (fun k -> k, project x))
         |> Map.ofList
 
-    /// Read one `idl.json` revision. Tolerant of keys the revision predates
-    /// (`ops`, `hostCases`, `transparentCase` are all emitted conditionally) —
-    /// their absence is read as empty, which is what the emitter means by it.
     /// The support document's declared entries as one flat map of canonical texts — the
     /// shape the diff walk pairs by key.
     let private supportEntries (doc: SupportDocument) : Map<string, string> =
@@ -355,6 +407,12 @@ module Diff =
                     { snap with
                         Support = supportEntries doc }))
 
+    /// Read one `idl.json` revision. Tolerant of keys the revision predates
+    /// (`ops`, `hostCases`, `transparentCase` are all emitted conditionally) —
+    /// their absence is read as empty, which is what the emitter means by it.
+    ///
+    /// No support document is read, and a malformed member is skipped, so the only refusal is
+    /// a root that is not a JSON object.
     and snapshot (artifact: JVal) : Result<Snapshot, string> =
         match artifact with
         | JObj _ ->
@@ -479,41 +537,82 @@ module Diff =
     // The change list.
     // -----------------------------------------------------------------------
 
+    /// One difference between two snapshots. `changes` emits them sorted by a fixed rank
+    /// and key, so the same pair always yields the same list; `classify` grades each.
     type Change =
+        /// The `idl.json` encoding version moved. Graded host-surface, but a sign to
+        /// reconcile the two encodings before trusting any other row.
         | ArtifactVersionChanged of before: int * after: int
-        /// The declared wire shape moved (Phases 108/109) — `discriminator/envelope`.
+        /// The declared wire shape moved (Phases 108/109) — `discriminator/nodeEnvelope/keyOrder`.
         | WireShapeChanged of before: string * after: string
         /// The declared HARDENING vocabulary moved (Phase 116) — which kind the codegen
         /// trust boundary gates, what it mints in its place, which cases it sanitises,
         /// and which unions have a transparent case.
         | HardenPolicyChanged of before: string * after: string
+        /// A new `$type` branch: additive on the wire, an exhaustive-match break in F#.
         | KindAdded of tag: string
+        /// A `$type` retired: every document using it is invalidated — a wire break.
         | KindRemoved of tag: string
         /// Inferred, never declared — see `renamePairs`. Reported ALONGSIDE the
         /// add + remove it explains, not instead of them.
         | KindRenamed of before: string * after: string
+        /// A kind present in both revisions changed `category` — metadata that is never
+        /// serialised, so host-surface only.
         | KindCategoryChanged of tag: string * before: string * after: string
+        /// A new tree-op: additive; no generated F# shape exists for ops yet.
         | OpAdded of tag: string
+        /// A tree-op retired: every persisted op stream carrying it stops decoding — a wire
+        /// break.
         | OpRemoved of tag: string
+        /// A new value-union: additive, and moves no generated shape (nothing referenced it).
         | UnionAdded of name: string
+        /// A value-union retired: a wire break, and a type-name-reference break in F#.
         | UnionRemoved of name: string
+        /// A case added to a union present in both revisions: additive, at the same
+        /// wire-coupling cost as a new kind.
         | UnionCaseAdded of union: string * case: string
+        /// A case removed from a union present in both revisions: a wire break.
         | UnionCaseRemoved of union: string * case: string
+        /// The union's type-parameter list moved: host-surface on the wire (no type arguments
+        /// are carried), but every reference at the old arity breaks.
         | UnionParamsChanged of name: string * before: string list * after: string list
+        /// The union's bare-encoded case moved, appeared or vanished: every document using
+        /// it changes bytes — a wire break.
         | UnionTransparencyChanged of name: string * before: string option * after: string option
+        /// A new closed string set: additive.
         | EnumAdded of name: string
+        /// A closed string set retired: a wire break.
         | EnumRemoved of name: string
+        /// A wire string added to an existing set: additive, though a decoder predating it
+        /// refuses the value (host lag).
         | EnumCaseAdded of enumName: string * wire: string
+        /// A wire string removed from an existing set: documents carrying it stop
+        /// validating — a wire break.
         | EnumCaseRemoved of enumName: string * wire: string
+        /// The generated F# case names moved while the wire strings did not: host-surface,
+        /// but every match arm naming an old case breaks.
         | EnumHostMappingChanged of name: string * before: string list * after: string list
+        /// A new non-discriminated record: additive.
         | RecordAdded of name: string
+        /// A record retired: a wire break.
         | RecordRemoved of name: string
+        /// A field new to an existing owner. Its optionality class decides the severity:
+        /// `required` breaks the wire (old documents lack it), `hostOnly` is host-surface,
+        /// anything else is additive.
         | FieldAdded of Owner * FieldSnap
+        /// A field gone from an existing owner: a wire break, or host-surface for a
+        /// `hostOnly` field.
         | FieldRemoved of Owner * name: string * was: FieldSnap
+        /// The field's wire type moved: a wire break, except an `int` → `float` widening
+        /// (additive) or a move across an erased `hosted` / `json` / `opaque` slot at any
+        /// depth (undecided).
         | FieldTypeChanged of Owner * name: string * before: FieldSnap * after: FieldSnap
         /// The generated DECLARATION moved; the wire did not. `TFn`'s F#
         /// signature, a `THosted` slot's codec expressions.
         | FieldHostSurfaceChanged of Owner * name: string * before: string * after: string
+        /// The field's optionality (`Opt`, default value included) moved. Additive only for
+        /// `required` → `optional`; every other move, a changed identity default among them,
+        /// is a wire break.
         | FieldOptionalityChanged of Owner * name: string * before: FieldSnap * after: FieldSnap
         /// The declared ANNOTATIONS on a field moved (Phase 113) — `""` on either
         /// side means "declared none". Never a wire event: an annotation changes no
@@ -533,8 +632,14 @@ module Diff =
         /// case's wire string, which is how the artifact keys them and what a
         /// third-party reader sees.
         | EnumCaseAnnotationsChanged of enumName: string * wire: string * before: string * after: string
+        /// A smart-constructor (authoring) default appeared — not the wire-visible
+        /// omit-at-default. Additive; `value` is canonical JSON.
         | DefaultAdded of kind: string * field: string * value: string
+        /// An authoring default was withdrawn: the wire is unchanged, but host code that
+        /// relied on it emits a different document — breaks emitters.
         | DefaultRemoved of kind: string * field: string * value: string
+        /// An authoring default's value moved: every authoring site that omitted the field
+        /// now emits different bytes — breaks emitters.
         | DefaultChanged of kind: string * field: string * before: string * after: string
         /// Phase 293 — a declared SUPPORT entry (`support.json`) moved: a doc block, a verbatim
         /// splice, a case refine, a kind projection or the host prelude, keyed as
@@ -624,6 +729,8 @@ module Diff =
                       yield make (oldName, newName)
                   | _ -> () ]
 
+    /// A change's wire verdict — what an OLD document, or an old emitter, meets under the
+    /// new vocabulary. Independent of the F# consequence reported beside it.
     type Severity =
         /// Every previously-valid document stays valid and every
         /// previously-conformant emitter stays conformant.
@@ -660,11 +767,20 @@ module Diff =
         /// the useful one.
         | Unclassifiable
 
+    /// One change with its wire verdict and the reasoning behind it — a report row.
     type Classification =
-        { Change: Change
-          Severity: Severity
-          Rationale: string
-          Citation: string }
+        {
+            /// The graded change, carried so a row can be summarised, and joined against a
+            /// host roster by `obligations`, on its own.
+            Change: Change
+            /// Its wire severity, from the change's rule in the descriptor table.
+            Severity: Severity
+            /// Report prose explaining why the severity applies, naming the subject; for an
+            /// `Unclassifiable` row it also says what to check by hand.
+            Rationale: string
+            /// The rule document(s) the verdict rests on; `—` where none is cited.
+            Citation: string
+        }
 
     /// A field added to an existing owner. The optionality class decides
     /// everything, and the class is a fact about what an OLD document does under
@@ -2098,6 +2214,10 @@ module Diff =
         let r = ruleOf c
         r.Rank, r.Key c
 
+    /// Every difference between two snapshots, sorted by rule rank then by the change's
+    /// own key, so identical inputs give an identical list. A kind rename is INFERRED and
+    /// reported beside its add and remove, never instead of them; annotation and category
+    /// moves are reported only for members both revisions carry.
     let changes (before: Snapshot) (after: Snapshot) : Change list =
         let unordered =
             [ if before.Version <> after.Version then
@@ -2228,6 +2348,8 @@ module Diff =
     // Classification — `STABILITY.md` + `VOCABULARY.md` §4, applied.
     // -----------------------------------------------------------------------
 
+    /// Grade one change by its rule in the descriptor table. Total over `Change`, and
+    /// context-free: the severity depends on the change value alone.
     let classify (c: Change) : Classification =
         let sev, why, cite = (ruleOf c).Verdict c
 
@@ -2291,27 +2413,54 @@ module Diff =
     // The host-strand report — `WIRE_FORMAT.md` §11 obligations per host class.
     // -----------------------------------------------------------------------
 
+    /// What a roster host does with the wire, which decides the obligations a change
+    /// raises for it.
     type HostRole =
+        /// Encodes and decodes documents itself: every wire-touching change obliges its
+        /// encoder, decoder and schema in the same change-set.
         | CodecHost
+        /// Renders a tree it does not decode itself: obliged to add or drop a render arm on a
+        /// NodeKind-set change, and only checked otherwise.
         | RenderProjection
 
+    /// One entry of a vocabulary's host roster (`manifest.json` `hosts`).
     type Host =
-        { Id: string
-          Language: string
-          Role: HostRole }
+        {
+            /// The host's identifier, named in its obligation rows. The id `fuaran` is
+            /// special: its presence switches on the UI tier's full checklist.
+            Id: string
+            /// Display only; `?` when the manifest omits it.
+            Language: string
+            /// Read from the manifest's `role`: `render-projection` gives `RenderProjection`,
+            /// anything else (or nothing) gives `CodecHost`.
+            Role: HostRole
+        }
 
     /// How firmly an obligation binds. `Check` exists because the honest answer
     /// to several of these is conditional, and a report that stated them as
     /// `Required` would train its reader to skim.
     type Strength =
+        /// The surface must change in the same change-set (`MUST` in the report).
         | Required
+        /// Whether the surface is bound depends on something the artifact does not record;
+        /// the author decides (`CHECK`).
         | Check
+        /// The surface is not bound by this change (`n/a`); the weakest, so it loses every
+        /// consolidation.
         | NotBound
 
+    /// One surface a classified change obliges someone to touch.
     type Obligation =
-        { Surface: string
-          Strength: Strength
-          Note: string }
+        {
+            /// The surface's label, e.g. `codec: <id> (<language>)`. The consolidated set
+            /// de-duplicates on it, keeping the strongest `Strength`.
+            Surface: string
+            /// Printed as `MUST` / `CHECK` / `n/a`; the consolidated set sorts by it, strongest
+            /// first.
+            Strength: Strength
+            /// What to do on that surface, or why it is only conditionally bound.
+            Note: string
+        }
 
     /// The UI vocabulary's §11.0 roster, hand-declared — ONE vocabulary's hosts.
     ///
@@ -2653,12 +2802,6 @@ module Diff =
 
         sb.ToString()
 
-    /// Whole-pipeline entry: two `idl.json` texts and an optional `manifest.json`
-    /// text (used only for the roster).
-    ///
-    /// The roster is the manifest's `hosts` and nothing else (Phase 252): absent, it
-    /// is EMPTY, and the report says so, rather than falling back to one vocabulary's
-    /// hosts ([[declaredRoster]]) for every vocabulary.
     /// Phase 293 — `run` with each side's support document text, or `None` for a side with none.
     let runWith
         (manifestText: string option)
@@ -2686,6 +2829,14 @@ module Diff =
             |> Result.mapError (fun e -> "new: " + e)
             |> Result.map (fun after -> report (fst roster) (snd roster) before after))
 
+    /// Whole-pipeline entry: two `idl.json` texts and an optional `manifest.json`
+    /// text (used only for the roster).
+    ///
+    /// The roster is the manifest's `hosts` and nothing else (Phase 252): absent, it
+    /// is EMPTY, and the report says so, rather than falling back to one vocabulary's
+    /// hosts ([[declaredRoster]]) for every vocabulary.
+    ///
+    /// No support documents are read. `Error` names the side (`old:` / `new:`) that did not parse.
     let run (manifestText: string option) (oldText: string) (newText: string) : Result<string, string> =
         let roster =
             manifestText
@@ -2803,6 +2954,8 @@ module Diff =
     /// the F# consequence set, and the two prose drafts the report already emitted.
     type Verdict =
         {
+            /// Every classified row, in `changes` order; empty means the two revisions
+            /// describe the same contract (`VerdictClass.Unchanged`).
             Changes: Classification list
             /// The wire evolution as `Versioning.classify` decides it — the input
             /// `Versioning.bump` takes.
@@ -2854,8 +3007,6 @@ module Diff =
           StabilityImpact = stabilityImpact cs
           ProfileAdvice = profileBump cs }
 
-    /// The verdict over two `idl.json` TEXTS — the committed-artifact door, which
-    /// works across revisions whose F# vocabulary no longer compiles.
     /// Phase 293 — the verdict over two artifact texts WITH each side's support document
     /// text (`None` for a side with none): a projection or refine edit beside an unchanged
     /// vocabulary classifies `host-surface`, where the artifact-only door reads `unchanged`.
@@ -2872,6 +3023,11 @@ module Diff =
             |> Result.mapError (fun e -> "new: " + e)
             |> Result.map (verdictOf before))
 
+    /// The verdict over two `idl.json` TEXTS — the committed-artifact door, which
+    /// works across revisions whose F# vocabulary no longer compiles.
+    ///
+    /// No support documents are read, so a support-only edit reads `unchanged` here. `Error`
+    /// names the side (`old:` / `new:`) that did not parse.
     let classifyArtifacts (beforeText: string) (afterText: string) : Result<Verdict, string> =
         classifyArtifactsWith beforeText afterText None None
 
@@ -2921,6 +3077,9 @@ module Diff =
         /// gets published as a minor.
         | Undecided
 
+    /// The class of a verdict, by the one severity precedence the report's drafts also read:
+    /// any undecided row makes it `Undecided`, then a wire or emitter break `Breaking`, then
+    /// `Additive`, then `HostSurface`; no rows at all is `Unchanged`.
     let verdictClass (v: Verdict) : VerdictClass =
         // Phase 293 — the ONE precedence `stabilityImpact` and `profileBump` read too.
         match headline v.Changes with
@@ -3048,14 +3207,6 @@ module Diff =
         line ""
         sb.ToString()
 
-    /// Whole-pipeline entry for a caller that wants BOTH the text and something to
-    /// branch on: `run`'s advisory report, the verdict block under it, and the
-    /// `Verdict` value itself.
-    ///
-    /// It calls `run` rather than reproducing its roster resolution, so there stays
-    /// exactly one place that decides whether the manifest carries a host roster.
-    /// The cost is reading the two artifacts twice, which for two files on a gate's
-    /// command line is not a cost.
     /// Phase 293 — `runVerdict` with each side's support document text.
     let runVerdictWith
         (manifestText: string option)
@@ -3069,12 +3220,33 @@ module Diff =
             classifyArtifactsWith oldText newText oldSupport newSupport
             |> Result.map (fun v -> reportText + verdictBlock v, v))
 
+    /// Whole-pipeline entry for a caller that wants BOTH the text and something to
+    /// branch on: `run`'s advisory report, the verdict block under it, and the
+    /// `Verdict` value itself.
+    ///
+    /// It calls `run` rather than reproducing its roster resolution, so there stays
+    /// exactly one place that decides whether the manifest carries a host roster.
+    /// The cost is reading the two artifacts twice, which for two files on a gate's
+    /// command line is not a cost.
+    ///
+    /// No support documents are read (`runVerdictWith` reads them).
     let runVerdict
         (manifestText: string option)
         (oldText: string)
         (newText: string)
         : Result<string * Verdict, string> =
         runVerdictWith manifestText oldText newText None None
+
+    /// What `bumpProfile` answers: a profile to publish, or the undecided rows that stop one
+    /// being named.
+    [<RequireQualifiedAccess>]
+    type Bump =
+        /// Every row was decided: the base profile under `Versioning.bump` of the verdict's
+        /// evolution (unchanged when nothing on the wire moved).
+        | Bumped of Versioning.Profile
+        /// At least one row crosses an erased slot; `rows` are those rows, to check by hand
+        /// before any profile can be named.
+        | Undecided of rows: Classification list
 
     /// The profile a `baseProfile` bumps to under a verdict — `Versioning.bump`
     /// applied to `evolution`'s answer, which is the whole reason this module
@@ -3083,11 +3255,6 @@ module Diff =
     /// An UNDECIDED verdict yields no profile, and that is the load-bearing half: a
     /// function that returned `baseProfile` unchanged, or a minor bump, would hand a
     /// caller a number to publish for a revision whose class nobody has established.
-    [<RequireQualifiedAccess>]
-    type Bump =
-        | Bumped of Versioning.Profile
-        | Undecided of rows: Classification list
-
     let bumpProfile (baseProfile: Versioning.Profile) (v: Verdict) : Bump =
         match v.Undecided with
         | [] -> Bump.Bumped(Versioning.bump baseProfile v.Evolution)

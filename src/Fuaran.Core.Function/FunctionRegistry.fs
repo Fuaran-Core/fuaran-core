@@ -25,16 +25,25 @@ namespace Fuaran.Core
 /// `(ResultType, required-hole shape)` is what makes the catalogue queryable "by what it produces and
 /// what it requires", not by name. The entry's id is its `Capability.Id`.
 type FunctionEntry =
-    { Capability: Capability
-      ResultType: string }
+    {
+        /// The invocable function; its `Id` is the entry's registry key.
+        Capability: Capability
+        /// The node kind the function produces; the `ByResult` index key, compared exactly.
+        ResultType: string
+    }
 
 /// A signature query (Phase 50): the desired result type (`None` = any result type — a wildcard on the
 /// produce-axis) plus the available-context shape — the holes the caller can fill, each keyed by its
 /// absolute address (hygiene). `findBySignature` returns the entries whose REQUIRED holes are all
 /// satisfiable from this context.
 type SignatureQuery =
-    { ResultType: string option
-      Available: SigEntry list }
+    {
+        /// The result kind wanted, compared exactly; `None` matches every result kind.
+        ResultType: string option
+        /// The holes the caller can fill, matched to an entry's required holes by `Addr`. Under
+        /// `Exact` the address set must equal the entry's required set; under `Subsumes` it may be larger.
+        Available: SigEntry list
+    }
 
 /// How strictly an entry's signature must match a query (Phase 50).
 type MatchMode =
@@ -52,8 +61,13 @@ type MatchMode =
 /// by shape on dispatch (only a registered id resolves) — the same trust posture as
 /// `CapabilityRegistry`, reusing `Capability.invoke`.
 type FunctionRegistry =
-    { Entries: Map<string, FunctionEntry>
-      ByResult: Map<string, Set<string>> }
+    {
+        /// Every entry, keyed by its capability id; each was admitted by `register`, so each is total.
+        Entries: Map<string, FunctionEntry>
+        /// Result kind to the ids producing it; holds exactly the ids of `Entries`, and is maintained
+        /// only by `register` — a hand-built registry that lets the two drift misleads `findBySignature`.
+        ByResult: Map<string, Set<string>>
+    }
 
 /// Populate / enumerate / query / dispatch the signature-typed registry. Additive over the `Capability`
 /// surface; FSharp.Core-only, Fable-clean. (`ModuleSuffix` so the module and the `FunctionRegistry`
@@ -61,6 +75,7 @@ type FunctionRegistry =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module FunctionRegistry =
 
+    /// The registry with no entries and an empty result index; every query against it is empty.
     let empty: FunctionRegistry =
         { Entries = Map.empty
           ByResult = Map.empty }
@@ -93,6 +108,8 @@ module FunctionRegistry =
                     { Entries = Map.add id e r.Entries
                       ByResult = Map.add e.ResultType ids r.ByResult }
 
+    /// The entry registered under exactly `id` (ordinal, case-sensitive), or `None`; the result index
+    /// is not consulted.
     let tryFind (id: string) (r: FunctionRegistry) : FunctionEntry option = Map.tryFind id r.Entries
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part of

@@ -14,12 +14,21 @@ namespace Fuaran.Core
 // ============================================================================
 
 /// One node of the op-DAG. `Id` is the content hash; `Parents` is `[]` at genesis,
-/// `[parent]` for a linear/fork step, and `[left; right]` for a merge.
+/// `[parent]` for a linear/fork step, and two or more heads for a merge (`merge` writes
+/// `[left; right]`; `appendOn` / `mergeAll` write any number, Phase 311).
 type DagNode<'Op> =
-    { Id: string
-      Parents: string list
-      Actor: Actor
-      Op: 'Op }
+    {
+        /// The content id: `Dag.nodeId` of this node's parents, actor and op. `firstBreak` recomputes it,
+        /// so a node whose fields were edited is caught as `ContentIdMismatch`.
+        Id: string
+        /// Parent ids in the order the author gave them — the id is hashed over them sorted, so the order
+        /// changes no id. A repeated parent is kept as given.
+        Parents: string list
+        /// Who wrote the node; part of the content id, so re-attribution changes `Id`.
+        Actor: Actor
+        /// The domain op the node records. The DAG never applies it on write; replay does.
+        Op: 'Op
+    }
 
 /// WHICH integrity check a `DagBreak` failed (Phase 147) — the closed set of reasons the DAG
 /// walker can report, typed where the reason is MINTED rather than re-derived downstream by
@@ -73,10 +82,17 @@ module DagBreakReason =
 /// `Reason` is the closed `DagBreakReason` as of `0.24.0` — it was a bare `string`, which the
 /// measured consumer (this repo's own proof differential) had to compare by spelling.
 type DagBreak =
-    { NodeId: string
-      Reason: DagBreakReason
-      Expected: string
-      Got: string }
+    {
+        /// The id the faulty node is stored under — the earliest faulty node in topological order.
+        NodeId: string
+        /// Which check failed; the content id is checked before the parents.
+        Reason: DagBreakReason
+        /// For `ContentIdMismatch`, the recomputed content id; for `MissingParent`, `""`.
+        Expected: string
+        /// For `ContentIdMismatch`, the stored id; for `MissingParent`, the first parent id the DAG does
+        /// not hold.
+        Got: string
+    }
 
 /// The *shape* of a merge interference (Phase 64) — the closed enumeration (GP5) of how two ops,
 /// one from each of two branch deltas, target the same address and would collide under `apply`.
@@ -102,9 +118,16 @@ type DagBreak =
 ///     no conflict at all.
 [<RequireQualifiedAccess>]
 type MergeConflictShape =
+    /// Both ops touch the same node's content, at least one writing it. Takes priority: an address
+    /// tagged here is not also tagged `InsertPositionClash` or `MoveVsRemove`.
     | ConcurrentUpdate
+    /// Both ops write the child list of the same named parent; `Address` is that parent.
     | InsertPositionClash
+    /// One op removes or moves a node from a parent the script cannot name while the other writes any
+    /// structure; `Address` is the removed or moved id. Conservative — it may fire on ops that commute.
     | MoveVsRemove
+    /// Both ops access `slot` of the node at `Address`, at least one writing it. Reported beside the
+    /// node-keyed shapes, never deduplicated against them.
     | SlotClash of slot: string
 
 /// One enumerated merge interference (Phase 64): the two ops (`Left` from delta A, `Right` from
@@ -113,10 +136,18 @@ type MergeConflictShape =
 /// reconciliation consumes this report. Generic over the opaque `'Op` — no `comparison` and no
 /// witness field are demanded (GP2).
 type MergeConflict<'Op> =
-    { Left: 'Op
-      Right: 'Op
-      Address: string
-      Shape: MergeConflictShape }
+    {
+        /// The op from the first delta passed to `conflicts`.
+        Left: 'Op
+        /// The op from the second delta passed to `conflicts`.
+        Right: 'Op
+        /// The footprint address the two collide on — a node id, or a parent id for
+        /// `InsertPositionClash`. An op pair yields one conflict per address it collides on, plus one per
+        /// clashing slot.
+        Address: string
+        /// How the two collide at `Address`.
+        Shape: MergeConflictShape
+    }
 
 /// Why `Dag.append` / `Dag.merge` refused to build a node (Phase 300, Phase 296) — the typed refusals
 /// that make the DAG's structural premises properties of everything this module BUILDS rather than
@@ -145,6 +176,8 @@ type DagAppendFault =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module DagAppendFault =
 
+    /// One English sentence naming the fault and, where it has one, the offending id in double quotes.
+    /// For a log or an exception message; there is no parser back.
     let toString (f: DagAppendFault) : string =
         match f with
         | DagAppendFault.EmptyParentId -> "a merge parent is \"\", the genesis marker, not a node id"
@@ -163,7 +196,10 @@ module DagAppendFault =
 /// own rejection of the op at the state the caller named.
 [<RequireQualifiedAccess>]
 type DagAppendRejection<'Rej> =
+    /// A graph refusal, judged before the op is applied; the DAG is unchanged.
     | Fault of DagAppendFault
+    /// The graph accepted the node but `Apply` refused the op at the caller's state; the node is not
+    /// added.
     | Domain of 'Rej
 
 /// One lane an N-lane reconcile refused because the lane's own delta does not apply (Phase 300): the
@@ -171,10 +207,16 @@ type DagAppendRejection<'Rej> =
 /// node of that delta the domain rejected, with the rejection. A property of the lane alone — it is
 /// replayed on its own, never after another lane — so the set of these is arrival-order-invariant.
 type LaneRejection<'Op, 'Rej> =
-    { Head: string
-      Delta: 'Op list
-      NodeId: string
-      Reject: 'Rej }
+    {
+        /// The lane's head id, as named to `reconcileMany`; rejections are sorted ordinally by it.
+        Head: string
+        /// Every op of the lane's exclusive delta, in replay order — not only those before the rejection.
+        Delta: 'Op list
+        /// The first node of the delta whose op the domain rejected, replayed from the shared state.
+        NodeId: string
+        /// The domain's rejection of that node's op.
+        Reject: 'Rej
+    }
 
 /// Why `Dag.reconcileMany` refused to fold a lane set (Phase 300). Every case is a property of the
 /// lane SET, never of the order the heads were named in: the interference report is Phase 64's,
@@ -195,8 +237,14 @@ type ReconcileFault<'Op, 'Rej> =
 module Dag =
 
     /// The DAG: nodes keyed by content hash.
-    type T<'Op> = { Nodes: Map<string, DagNode<'Op>> }
+    type T<'Op> =
+        {
+            /// Every node by its content id. Built through this module, each key equals its node's `Id`;
+            /// a hand-built or loaded map may not, which `firstBreak` reports.
+            Nodes: Map<string, DagNode<'Op>>
+        }
 
+    /// The DAG with no nodes: no heads, and `append` with parent `""` adds its first (genesis) node.
     let empty: T<'Op> = { Nodes = Map.empty }
 
     /// `nodeHash = hashFn (sorted parents joined) (actor | encoded-op)` — content addressing,
@@ -486,8 +534,12 @@ module Dag =
     /// domain's rejection of the op at the state the caller holds for the expected heads.
     [<RequireQualifiedAccess>]
     type DagAppendIfRejection<'Rej> =
+        /// The DAG's head set is not the caller's: `expected` deduplicated, both sorted ordinally.
+        /// Checked first; nothing is built or applied.
         | StaleHeads of expected: string list * actual: string list
+        /// The heads matched but the node was refused structurally, before the op was applied.
         | Fault of DagAppendFault
+        /// The node was sound but `Apply` refused the op at the caller's state; nothing is added.
         | Domain of 'Rej
 
     /// Compare-and-append on the DAG (Phase 311) — `OpStream.appendIf`'s guard, over the HEAD SET: append
@@ -711,7 +763,11 @@ module Dag =
         /// The DAG holds no node with this id (Phase 296) — a typo'd head used to replay to the
         /// initial state as if it named an empty history.
         | UnknownHead of headId: string
+        /// The head's closure does not drain to a total order — a hand-built or tampered DAG. Where
+        /// several roots were replayed, the first root whose own closure is cyclic. Nothing is applied.
         | CyclicHistory of headId: string
+        /// The domain refused the op of `nodeId`, the first rejecting node in replay order; the ops
+        /// before it were applied, but no partial state is returned.
         | Rejected of nodeId: string * reject: 'Rej
 
     /// Replay the UNION of `roots`' ancestor closures from `state0` (Phase 329): every node once, in
@@ -799,14 +855,18 @@ module Dag =
     /// Why a whole-DAG order could not be drawn (Phase 311): nodes on or below a cycle, which no drain
     /// places — every one of them, in id order. Only a hand-built or unverified load can hold one.
     [<RequireQualifiedAccess>]
-    type TotalOrderFault = Cyclic of unplaced: string list
+    type TotalOrderFault =
+        /// Every node the drain could not place — on or below a cycle — in id order.
+        | Cyclic of unplaced: string list
 
     /// Why `replayAllBy` / `replayAll` refused (Phase 311): the union has no total order (`Cyclic`, the
     /// unplaced nodes in id order), or the domain rejected a node's op (`Rejected`, the first in the
     /// order, with the rejection).
     [<RequireQualifiedAccess>]
     type ReplayAllFault<'Rej> =
+        /// The whole DAG has no total order: `TotalOrderFault.Cyclic`'s unplaced nodes. Nothing is applied.
         | Cyclic of unplaced: string list
+        /// The domain refused the op of `nodeId`, the first rejecting node in the key's order.
         | Rejected of nodeId: string * reject: 'Rej
 
     /// The whole DAG in one total order (Phase 311): the Kahn drain over EVERY node, the ready frontier
@@ -1035,6 +1095,10 @@ module Dag =
         + opJson
         + "}"
 
+    /// The DAG as JSONL: one `{"node":true,…}` line per node, in id order, joined by `\n` with no
+    /// trailing newline — the same DAG always writes the same bytes. Unchecked: an `encode` output with
+    /// a line break or surrounding whitespace is embedded as-is and will not read back; `tryToJsonl`
+    /// refuses it.
     let toJsonl (encode: 'Op -> string) (dag: T<'Op>) : string =
         dag.Nodes
         |> Map.toList
@@ -2046,9 +2110,14 @@ module Dag =
     /// as its boundary hash, so a changed state, a changed node id or a changed seal each fail
     /// `verifyCheckpoint`. The linear `Snapshot<'State>`'s counterpart on the DAG.
     type Checkpoint<'State> =
-        { Node: string
-          State: 'State
-          Hash: string }
+        {
+            /// The id of the node the checkpoint stands at; history above it replays from `State`.
+            Node: string
+            /// The state after applying every op in `Node`'s ancestor closure, `Node`'s own op included.
+            State: 'State
+            /// The seal over `Node` and `State`; `verifyCheckpoint` recomputes it and refuses a mismatch.
+            Hash: string
+        }
 
     /// Why a checkpoint could not be taken, a DAG not compacted at one, or a replay from one not run
     /// (Phase 288).
@@ -2538,8 +2607,14 @@ module Dag =
     /// A lane store, loaded (Phase 311): the union `Dag`, and for every node of it the lane whose file
     /// holds it (`LaneOf`).
     type Loaded<'Op> =
-        { Dag: T<'Op>
-          LaneOf: Map<string, string> }
+        {
+            /// The union of every lane's nodes, each once. Structurally read only — `verifyLanes` it
+            /// before trusting it.
+            Dag: T<'Op>
+            /// Node id → the lane whose file holds it; a node held by several lanes with the same content
+            /// is attributed to the ordinally smallest. An id absent here counts as lane `""`.
+            LaneOf: Map<string, string>
+        }
 
     /// Why `loadLanes` refused (Phase 311).
     [<RequireQualifiedAccess>]
@@ -2553,7 +2628,13 @@ module Dag =
         | Collision of nodeId: string * lanes: string list
 
     /// A lane store's first integrity fault, and the lane whose file holds the node at fault (Phase 311).
-    type LaneBreak = { Lane: string; Break: DagBreak }
+    type LaneBreak =
+        {
+            /// The lane `LaneOf` attributes the faulty node to, or `""` when it names none.
+            Lane: string
+            /// The union's first break, exactly as `firstBreak` reports it.
+            Break: DagBreak
+        }
 
     /// The lanes of a store and the nodes each holds, in ordinal lane order; a node `LaneOf` does not
     /// name is under the lane `""`.

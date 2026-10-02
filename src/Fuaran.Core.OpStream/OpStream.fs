@@ -54,6 +54,8 @@ module OpStream =
     /// typed-actor migration `rehash`. See `legacyActorPayload`.
     let legacyActorConfig: StreamConfig = OpStreamChain.legacyActorConfig
 
+    /// The stream with no records. Its `head` is the config's genesis, and the first `append` onto it
+    /// chains a record at `Seq` 0.
     let empty: OpRecord<'Op> list = OpStreamChain.empty
 
     /// THE hash of one chained record (Phase 315): `hashFn prev (cfg.Payload seq actor encodedOp)`,

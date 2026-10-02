@@ -95,16 +95,27 @@ module Families =
     /// that verdict in words a reader can check against the code. Carried on the family's own
     /// record (`LawFamily.Refusal`, Phase 297), so the audit and the roster cannot disagree.
     type RefusalVerdict =
-        { Population: RefusalPopulation
-          Why: string }
+        {
+            /// Where the refused cases the family's laws read come from: none, built, or drawn.
+            Population: RefusalPopulation
+            /// The evidence for `Population`, in prose a reader checks against the family's laws —
+            /// which arms build their refused cases and which draw them. Read by people, not parsed.
+            Why: string
+        }
 
     /// One row of the refusable-family audit: a family, where its refusal population comes from,
     /// and the evidence for that verdict in words a reader can check against the code. Since Phase
     /// 297 a PROJECTION of the roster (`refusalAudit`, `refusalAuditOf`), never a declaration.
     type RefusalAudit =
-        { Family: string
-          Population: RefusalPopulation
-          Why: string }
+        {
+            /// The audited family's id — the `LawFamily.Id` it was projected from.
+            Family: string
+            /// The family's declared `Refusal.Population`, copied unchanged; a `Drawn` row must be
+            /// `Guarded` in the census.
+            Population: RefusalPopulation
+            /// The family's declared `Refusal.Why`, copied unchanged.
+            Why: string
+        }
 
     /// One law family: a public entry point of the kit that answers with `LawResult list`.
     type LawFamily =

@@ -35,27 +35,46 @@ namespace Fuaran.Core
 /// loading recomputes the live fingerprint and refuses a mismatch. Carries NO node / body — content-free
 /// (FGP 6): it is the typed DECLARATION of a partial application, not the curried tree itself.
 type PackedFunction =
-    { NewId: string
-      BaseId: string
-      BaseSignatureVersion: string
-      BoundAddrs: Set<string> }
+    {
+        /// The id the narrowed function registers under; a collision refuses the load `PackRegisterFailed`.
+        NewId: string
+        /// The function curried: any id in the registry when this entry loads, including one an earlier
+        /// entry of the same pack registered.
+        BaseId: string
+        /// The base signature's fingerprint at authoring time; it must equal the live one at load.
+        BaseSignatureVersion: string
+        /// The data-hole addresses bound away; an action hole or an undeclared address refuses the load.
+        BoundAddrs: Set<string>
+    }
 
 /// A content-pack manifest (Phase 57): a set of curried artifact-functions + metadata (`Domain`,
 /// `PackId`, `PackVersion`). The whole distribution surface a domain ships — and it carries no pack
 /// CONTENT (FGP 6): only ids, addresses, version tags. Loadable into any `FunctionRegistry` that holds
 /// the pack's base functions, through one mechanism shared across every domain.
 type PackManifest =
-    { PackId: string
-      Domain: string
-      PackVersion: int
-      Functions: PackedFunction list }
+    {
+        /// The pack's identity, named in every `PackLoadError` the load returns.
+        PackId: string
+        /// The domain the pack targets; metadata only, never checked by `load`.
+        Domain: string
+        /// The pack's own release number; metadata only, never compared by `load`.
+        PackVersion: int
+        /// The curried functions, loaded in list order; the first refusal stops the load.
+        Functions: PackedFunction list
+    }
 
 /// Why a content pack was refused at load time — total, and (per the envelope discipline, GP5) it names
 /// the failure and enumerates the alternatives where a closed set is expected. Default-deny by shape:
 /// only a known base + a matching signature version + a non-duplicate id loads.
 type PackLoadError =
+    /// The base id is not registered; `known` lists the ids registered at that point of the load,
+    /// earlier entries of this pack included.
     | UnknownBaseFunction of packId: string * baseId: string * known: string list
+    /// The base's live signature fingerprint `actual` differs from the pack's `declared` one: the
+    /// base changed shape since the pack was authored.
     | SignatureVersionMismatch of packId: string * baseId: string * declared: string * actual: string
+    /// Currying or registering `newId` failed with the registry's own refusal — typically a
+    /// `DuplicateCapability`, or a `NonTotalCapability` inherited from the base.
     | PackRegisterFailed of packId: string * newId: string * reason: InvokeError
     /// A `BoundAddrs` entry that is not a bindable hole of the base (Phase 295) — an address the
     /// base does not declare, or an action hole — naming the pack, the curried id, the address and
@@ -70,8 +89,10 @@ module ContentPack =
 
     /// A stable fingerprint of a signature's SHAPE — the canonical "signature version" a pack pins.
     /// Derived from the canonical tool-schema projection (`Function.toSchema` → `Json.render`) hashed
-    /// with the substrate's portable FNV-1a, so it changes iff the base signature's name / holes /
-    /// value-spaces / effect change. A pack curried against an old shape therefore fails the load-time
+    /// with the substrate's portable FNV-1a, so an unchanged name / holes / value-spaces / effect always
+    /// gives the same fingerprint, and a change to any of them shifts it except on a 32-bit hash
+    /// collision (the hash is not collision-resistant, so equal fingerprints are evidence, not proof,
+    /// of an equal shape). A pack curried against an old shape therefore fails the load-time
     /// version check (a renamed / re-typed / dropped hole shifts the fingerprint) rather than binding
     /// against addresses that no longer mean what the pack assumed. Deterministic + Fable-clean (the
     /// same FNV-1a arithmetic class as the rest of the substrate's portable hashing).

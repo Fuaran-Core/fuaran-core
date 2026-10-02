@@ -13,11 +13,20 @@ namespace Fuaran.Core
 /// optional ordinal within a session. `At` is a timestamp carried **as data** — Core never reads a
 /// clock (the Phase 27 effect discipline); the host supplies it, `""` meaning unstamped.
 type Attributed<'Op> =
-    { Actor: string
-      Session: string
-      Turn: int option
-      At: string
-      Op: 'Op }
+    {
+        /// The host's opaque actor id; the key `OpStream.Attributed.byActor` groups on.
+        Actor: string
+        /// The host's opaque session id; the key `OpStream.Attributed.bySession` groups on.
+        Session: string
+        /// The op's ordinal within its session, or `None` — encoded as JSON `null`, and a missing `turn`
+        /// member also decodes as `None`.
+        Turn: int option
+        /// The host-supplied timestamp, carried verbatim and never parsed; `""` means unstamped.
+        At: string
+        /// The wrapped domain op. The lifted witness applies only this; the envelope never reaches the
+        /// reducer.
+        Op: 'Op
+    }
 
 /// The bodies of the `OpStream.Attributed` members (Phase 332). Internal: a consumer reaches each one
 /// through its forward in `OpStream.Attributed` (OpStream.fs), which carries the member's contract

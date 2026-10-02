@@ -8,7 +8,10 @@ namespace Fuaran.Core
 /// guess.
 [<RequireQualifiedAccess>]
 type SnapshotMode =
+    /// The hash folds in the state's canonical encoding, so a swapped `State` fails verification.
     | Strict
+    /// The hash binds only the boundary `Seq` and `PrevHash`; the stored `State` is trusted, not
+    /// checked. Serialised as `"stateHashed":false`.
     | ChainOnly
 
 /// A checkpoint of the folded `'State` at a sequence boundary (Phase 244). `PrevHash` is
@@ -17,11 +20,20 @@ type SnapshotMode =
 /// from a snapshot instead of from the origin — bounded replay for unbounded histories (FGP 5).
 /// `Mode` (Phase 296) is how `Hash` was computed, and so how the snapshot verifies.
 type Snapshot<'State> =
-    { Seq: int
-      State: 'State
-      PrevHash: string
-      Hash: string
-      Mode: SnapshotMode }
+    {
+        /// The boundary: the number of records folded into `State`, and so the `Seq` the tail's first
+        /// record must carry.
+        Seq: int
+        /// The state after replaying records `0 .. Seq - 1` from the initial state.
+        State: 'State
+        /// The hash of record `Seq - 1`, or the config's genesis when `Seq` is zero.
+        PrevHash: string
+        /// `hashFn PrevHash` over the snapshot payload for `Mode`; verification recomputes it before
+        /// walking the tail.
+        Hash: string
+        /// Whether `Hash` covers the state; verification uses the mode stored here, not a caller's guess.
+        Mode: SnapshotMode
+    }
 
 /// Why a snapshot could not be taken, or its tail not replayed (Phase 296) — the typed faults the
 /// snapshot family reports where its string-returning forms used to discard them.
@@ -42,7 +54,10 @@ type SnapshotFault<'Rej> =
 /// break in the tail chain it anchors (indexed by position in the tail).
 [<RequireQualifiedAccess>]
 type SnapshotBreak =
+    /// The snapshot's own `Hash` does not recompute: `expected` is the recomputed digest, `got` the
+    /// stored one. Checked first; the tail is not walked.
     | SnapshotHash of expected: string * got: string
+    /// The snapshot verified but its tail did not; the break's `Index` is the position in the tail.
     | Tail of ChainBreak
 
 /// The bodies of the `OpStream` snapshot members (Phase 332): the `OpStream.Snapshots` family and

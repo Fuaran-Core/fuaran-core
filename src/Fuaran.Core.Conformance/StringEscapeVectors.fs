@@ -30,6 +30,8 @@ module StringEscapeVectors =
     /// wrote for it BEFORE Phase 287, which `OpStream.legacyEscapeConfig` still reproduces.
     type Vector =
         {
+            /// The case label — `U+XXXX` (uppercase hex) for a control character, a word for the
+            /// rest — prefixed to every outcome the runner reports for this vector.
             Name: string
             /// The one-character (or, for the plain-text control, longer) input.
             Input: string

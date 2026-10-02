@@ -299,6 +299,9 @@ let private agreement (f: string -> string) (g: string -> string) : string =
     | None -> "agrees:" + string (List.length exportCorpus)
     | Some i -> "diverges@" + string i
 
+/// The named table: `(label, value)` pairs, each value computed by calling a public surface
+/// and ASCII by construction. Only the first part of what `lines` emits — the hash and
+/// sanitiser sweeps follow it there — and its order is part of the comparison.
 let vectors: (string * string) list =
     [
       // ---- Hash.fnv1a — the 32-bit content fingerprint (D16's split-half multiply) ----

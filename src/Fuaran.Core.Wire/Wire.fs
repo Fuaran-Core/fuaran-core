@@ -13,36 +13,71 @@ namespace Fuaran.Core
 /// wire therefore silently misses whole values — read numbers through `JVal.asFloat`
 /// (the blessed numeric accessor), or match `JInt`/`JFloat` together.
 type JVal =
+    /// A string. Any value renders, but only a well-formed UTF-16 one survives `parse`; the guarded
+    /// renderers refuse a lone or ill-ordered surrogate.
     | JStr of string
+    /// A number `parse` read from an integer token within Int32. A larger integer token arrives as
+    /// `JFloat`, not here (exact up to 2^53; past it, only a double's canonical layout is admitted).
     | JInt of int
+    /// The `true` / `false` literal; no reader coerces a number or a string to it.
     | JBool of bool
+    /// A number with a point or an exponent, or an integer past Int32. Must be finite to render as
+    /// valid JSON (`tryRender` refuses NaN / ±Infinity). A whole value within Int32 renders without
+    /// a point, so it reads back from `parse` as `JInt`.
     | JFloat of float
+    /// Items in order. `parse` caps nesting at `Json.defaultMaxDepth`; the renderers cap nothing.
     | JArr of JVal list
+    /// Members in AUTHORED order, a repeated key kept as written: `Json.render` keeps the order,
+    /// `Canon.render` sorts keys Ordinal, and every reader takes the FIRST member of a repeated key.
     | JObj of (string * JVal) list
 
 /// The classified failure modes of the portable JSON parser (Phase 22) — so an orchestrator
 /// can branch on *what* went wrong structurally instead of string-scraping `parse`'s message.
 type JsonErrorKind =
+    /// A value position held a character no JSON value starts with.
     | UnexpectedChar
+    /// The input ended where a value was due — empty or all-whitespace input included.
     | UnexpectedEndOfInput
+    /// A specific token was missing: `:`, `,` or a closing bracket, the quote that opens a member
+    /// key, or the rest of a `true` / `false` literal.
     | ExpectedToken
+    /// The input ended inside a string, before its closing quote.
     | UnterminatedString
+    /// The input ended straight after a backslash inside a string.
     | UnterminatedEscape
+    /// A `\u` escape had fewer than four characters left before the input ended.
     | TruncatedUnicodeEscape
+    /// A backslash followed by a character outside the JSON escape set, OR a string that is not
+    /// well-formed UTF-16 (a lone or ill-ordered surrogate, raw or escaped).
     | BadEscape
+    /// A `\u` escape held a character that is not a hex digit (either case is accepted).
     | BadHexDigit
+    /// A number token outside the JSON grammar (`01`, `1.`, `-.5`, `1e`), outside the finite double
+    /// range, or an integer past 2^53 that is not the canonical layout of a double.
     | MalformedNumber
+    /// A `null` token: anywhere under `RejectNull`; only at the root or as an array item under
+    /// `EraseMemberNull`.
     | NullNotRepresentable
+    /// An object or array opened past the nesting cap. The one kind `DecodeError.ofJsonError` maps
+    /// to `LimitExceeded` rather than `InvalidJson`.
     | MaxDepthExceeded
+    /// Something other than whitespace follows one complete value.
     | TrailingCharacters
 
 /// A structured parse failure (Phase 22): the classified `Kind`, the human `Message` (no
 /// position suffix), and the 0-based `Position` in the input. `Json.parse`'s string error is
 /// `"not valid JSON: " + Message + " at position " + Position` — byte-identical to before.
 type JsonError =
-    { Position: int
-      Message: string
-      Kind: JsonErrorKind }
+    {
+        /// The parser's cursor at the refusal, as a 0-based UTF-16 index: AT the offending character
+        /// for a missing token, just PAST it where the parser had already consumed it (a bad escape).
+        Position: int
+        /// The refusal sentence without the position suffix. Its text is part of `parse`'s
+        /// string error, so it is stable.
+        Message: string
+        /// The classified fault — branch on this, not on `Message`.
+        Kind: JsonErrorKind
+    }
 
 /// The **read-side** policy for the JSON `null` token — the position rules as data.
 ///
@@ -465,6 +500,9 @@ module Json =
     /// `tag` leads; `fields` follow in author order (camelCase keys by discipline).
     let kindObj (tag: string) (fields: (string * JVal) list) : JVal = JObj(("kind", JStr tag) :: fields)
 
+    /// `render` under the `encode` name: author key order, round-trip float layout, and UNGUARDED —
+    /// a non-finite float or an ill-formed string yields text `parse` refuses. `tryEncode` refuses
+    /// both instead.
     let encode (v: JVal) : string = render v
 
     /// Total, guarded render (Phase 12). `render` formats a `JFloat` with `"{0:R}"`, so a
@@ -1140,7 +1178,9 @@ module Canon =
 /// by its zero-based index. A path is the list of steps from the document's root, root first.
 [<RequireQualifiedAccess>]
 type PathSegment =
+    /// A member of an object by its exact key; where a document repeats the key, the first.
     | Key of string
+    /// An item of an array, zero-based.
     | Index of int
 
 /// The closed code set a decode refusal carries (Phase 310) — the wire-level decode contract every
@@ -1183,10 +1223,19 @@ type DecodeCode =
 /// sentence the string-error forms return, so the typed and the legacy reading of one refusal are
 /// the same refusal.
 type DecodeError =
-    { Code: DecodeCode
-      Path: PathSegment list
-      Expected: string
-      Message: string }
+    {
+        /// What kind of fault it is — the field to branch on, closed across hosts.
+        Code: DecodeCode
+        /// Root-first steps to the value at fault, relative to the value the outermost decoder was
+        /// handed; empty for that value itself.
+        Path: PathSegment list
+        /// What the position admits, as a phrase (`object`, `one of 'a', 'b'`, `an int in [0, 9]`) —
+        /// for a reader or a repairing model, not for matching on.
+        Expected: string
+        /// The sentence the string-error forms return for this refusal, byte for byte. It carries no
+        /// path; `DecodeError.render` adds one.
+        Message: string
+    }
 
 /// A decoder over the typed refusal (Phase 310). `Decode.Decoder` is its string-error twin, kept
 /// for one draft.
@@ -1359,6 +1408,7 @@ module Decoder =
     let fail (code: DecodeCode) (expected: string) (message: string) : Decoder<'T> =
         fun _ -> Error(DecodeError.make code expected message)
 
+    /// Convert the answer; a refusal passes through untouched, its path included.
     let map (f: 'T -> 'U) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.map f
 
     /// Decode, then decode the SAME value with a decoder chosen by the first answer.
@@ -1402,11 +1452,14 @@ module Decoder =
     /// Any value, verbatim.
     let json: Decoder<JVal> = Ok
 
+    /// A `JStr`; any other kind is `WrongKind` — no number or bool is turned into text.
     let str: Decoder<string> =
         function
         | JStr s -> Ok s
         | other -> Error(wrongKind "string" other)
 
+    /// A `JInt` only — the strict integer read. A float token (`2.0`, `1e3`) and an integer past
+    /// Int32 both parse as `JFloat` and are refused as `WrongKind`; `float` is the lenient read.
     let int: Decoder<int> =
         function
         | JInt i -> Ok i
@@ -1419,6 +1472,7 @@ module Decoder =
         | JInt i -> Ok(float i)
         | other -> Error(wrongKind "number" other)
 
+    /// A `JBool`; `0`, `1` and `"true"` are `WrongKind`, never coerced.
     let bool: Decoder<bool> =
         function
         | JBool b -> Ok b
@@ -1943,8 +1997,20 @@ module Versioning =
     /// capability counter (a new kind/case/field bumps the minor — an older consumer tolerates
     /// it via the must-ignore-but-preserve rule).
     type Profile =
-        { Name: string; Major: int; Minor: int }
+        {
+            /// The capability namespace — a name of the grammar (`Profile.isValidName`) to cross the
+            /// wire. Two profiles with different names are `Foreign` to each other.
+            Name: string
+            /// The incompatibility boundary: any difference makes `negotiate` answer `Foreign`.
+            /// Non-negative on the wire.
+            Major: int
+            /// The additive counter: an artifact authored at a higher minor is `Behind`, and tolerated.
+            /// Non-negative on the wire.
+            Minor: int
+        }
 
+    /// The profile grammar: validation, the canonical rendering, and the parser that reads exactly
+    /// the strings `render` writes.
     module Profile =
 
         // THE PROFILE GRAMMAR (Phase 306) — a BIJECTION between the valid profiles and their
@@ -2071,6 +2137,8 @@ module Versioning =
     [<Literal>]
     let internal profileKey = "$profile"
 
+    /// The envelope member that carries the artifact. `$`-prefixed, so under `Canon.render` it sorts
+    /// before every lower-case data key, and before `$profile`.
     [<Literal>]
     let payloadKey = "$payload"
 
@@ -2082,7 +2150,14 @@ module Versioning =
     /// before any lower-case data key under `Canon.render`. The envelope is the
     /// capability-negotiation carrier — a consumer reads `$profile`, `negotiate`s, then decodes
     /// `$payload` (tolerantly when `Behind`).
-    type Envelope = { Profile: Profile; Payload: JVal }
+    type Envelope =
+        {
+            /// The profile the producer authored against — what a consumer `negotiate`s before it
+            /// reads the payload.
+            Profile: Profile
+            /// The artifact, carried verbatim; `decode` does not interpret it.
+            Payload: JVal
+        }
 
     /// Build the canonical envelope JVal.
     let encode (env: Envelope) : JVal =
@@ -2117,13 +2192,22 @@ module Versioning =
     /// bytes (must-ignore-but-preserve); `RequiredProfile` is the profile the artifact declared it
     /// needs (when present), so the consumer can name what it is missing in a degraded placeholder.
     type UnknownKind =
-        { Kind: string
-          Payload: JVal
-          RequiredProfile: Profile option }
+        {
+            /// The unrecognised discriminator, as the decode's `tagOf` read it.
+            Kind: string
+            /// The whole artifact object as parsed, discriminator included — what `reencode` hands
+            /// back unchanged.
+            Payload: JVal
+            /// The artifact's `requiredProfile` member when present and well-formed; a malformed one
+            /// reads as `None`, not as a refusal.
+            RequiredProfile: Profile option
+        }
 
     /// The result of a tolerant decode: a fully-understood `'T`, or a preserved `Unknown`.
     type Decoded<'T> =
+        /// A tag this consumer understands, fully decoded.
         | Known of 'T
+        /// A tag this consumer does not know, preserved for re-encoding. Only a decode produces one.
         | Unknown of UnknownKind
 
     /// Read an optional `requiredProfile` declaration off an artifact object (the
@@ -2177,7 +2261,10 @@ module Versioning =
     /// removal or rename (a tag present `before` and absent `after`) is *breaking* — a new `/vN/`
     /// major boundary requiring migration shims.
     type Evolution =
+        /// Tags only added, in ascending order — possibly none, which `bump` treats as no change.
         | Additive of added: string list
+        /// At least one tag removed (a rename is a removal plus an addition); both lists in
+        /// ascending order. Bumps the major and resets the minor.
         | Breaking of removed: string list * added: string list
 
     /// Classify the kind-tag delta `before` → `after`. No removals ⇒ `Additive`; any removal ⇒
@@ -2243,25 +2330,51 @@ module Corpus =
 
     /// A domain's encode + total decode pair.
     type Codec<'T> =
-        { Encode: 'T -> string
-          Decode: string -> Result<'T, string> }
+        {
+            /// Value to wire text. Must be total: the runners call it unguarded, so a throw aborts
+            /// the whole run rather than failing one case.
+            Encode: 'T -> string
+            /// Wire text to value. The runners only ask whether it is `Ok` or `Error` — the sentence
+            /// is copied into an `Outcome`, never checked.
+            Decode: string -> Result<'T, string>
+        }
 
+    /// Which law a corpus `Case` is held to.
     type CaseKind =
+        /// The JSON must decode, and the decoded value must survive encode-then-decode as an EQUAL
+        /// value. The re-encoded text is not compared with the fixture, so a non-canonical fixture
+        /// can pass.
         | RoundTrip
+        /// The decoder must refuse the JSON. Any `Error` passes, whatever it says; `RejectVector`
+        /// pins the code and the path.
         | Reject
 
     /// One corpus fixture: a `RoundTrip` JSON that must decode→encode→decode to an equal
     /// value, or a `Reject` JSON the decoder must refuse. `Tag` feeds the coverage gate.
     type Case =
-        { Name: string
-          Kind: CaseKind
-          Json: string
-          Tag: string }
+        {
+            /// The label the case's `Outcome` reports under.
+            Name: string
+            /// Which law `runCorpus` holds the case to.
+            Kind: CaseKind
+            /// The fixture text, handed to `Codec.Decode` as it stands.
+            Json: string
+            /// The kind or op tag the case exercises — counted by `coverageGate`, ignored by `runCorpus`.
+            Tag: string
+        }
 
+    /// The verdict on one corpus `Case` or one `RejectVector`.
     type Outcome =
-        { Name: string
-          Passed: bool
-          Detail: string }
+        {
+            /// The `Case.Name` or `RejectVector.Label` it reports on.
+            Name: string
+            /// True when the case held its law. A failing case is reported here, never as an `Error`
+            /// from the runner.
+            Passed: bool
+            /// `ok` or `rejected as expected` on a pass; on a failure, why — the decoder's own sentence
+            /// where it refused.
+            Detail: string
+        }
 
     /// Value-level round-trip: `encode v` must decode back to a structurally-equal value.
     let roundTrip (codec: Codec<'T>) (v: 'T) : Result<unit, string> =
@@ -2299,6 +2412,8 @@ module Corpus =
                   Passed = false
                   Detail = "expected reject but decoded" }
 
+    /// Hold every case to its law through `codec`, one `Outcome` per case in input order. Never
+    /// short-circuits: a failing case is an `Outcome` with `Passed = false`.
     let runCorpus (codec: Codec<'T>) (cases: Case list) : Outcome list = cases |> List.map (runCase codec)
 
     /// Coverage gate: every required kind/op tag must be exercised by at least one case.
@@ -2453,10 +2568,16 @@ module Corpus =
 
     /// A reject vector: the document, and the code and path the decoder's refusal must carry.
     type RejectVector =
-        { Label: string
-          Input: string
-          RefusedAs: DecodeCode
-          At: PathSegment list }
+        {
+            /// The label the vector's `Outcome` reports under.
+            Label: string
+            /// The document text handed to the decoder.
+            Input: string
+            /// The code the refusal must carry, exactly.
+            RefusedAs: DecodeCode
+            /// The path the refusal must carry, exactly — root first, `[]` for the root.
+            At: PathSegment list
+        }
 
     /// Run reject vectors against a typed decoder over text: each must be refused with exactly its
     /// code and its path.

@@ -4061,6 +4061,65 @@ specific node of a DAG with more than one fault reads the earliest one now.
 `api/Fuaran.Core.OpStream.txt`, `api/Fuaran.Core.Conformance.txt`). The one behaviour change is
 `firstBreak`'s choice among several breaks; its verdict and every single-fault answer are unchanged.
 
+### Every public member carries a doc comment, held by a ratchet that only moves up (Phase 339) — ADDITIVE: doc comments and a test; no public member added, removed or retyped
+
+Phase 254 made every package ship its XML documentation file; this phase makes the file say something
+about every member in it. Measured against the committed `api/*.txt` surfaces, 766 of 2,499 counted
+public members carried no doc comment — most of them union cases and record fields, which a consumer
+hovering a case or a field saw as a bare name. All 766 are documented now, and every package reads
+complete:
+
+| Package | Before | After |
+|---|---|---|
+| `Fuaran.Core.AiSurface` | 42 / 81 | 81 / 81 |
+| `Fuaran.Core.Column` | 80 / 122 | 122 / 122 |
+| `Fuaran.Core.Conformance` | 236 / 296 | 296 / 296 |
+| `Fuaran.Core.Function` | 158 / 298 | 298 / 298 |
+| `Fuaran.Core.Idl` | 180 / 244 | 244 / 244 |
+| `Fuaran.Core.Idl.Cli` | 0 / 2 | 2 / 2 |
+| `Fuaran.Core.Idl.Codegen` | 154 / 261 | 261 / 261 |
+| `Fuaran.Core.Observer` | 31 / 44 | 44 / 44 |
+| `Fuaran.Core.OpStream` | 200 / 258 | 258 / 258 |
+| `Fuaran.Core.OpStream.Dag` | 135 / 176 | 176 / 176 |
+| `Fuaran.Core.Ops` | 130 / 155 | 155 / 155 |
+| `Fuaran.Core.Projection` | 19 / 35 | 35 / 35 |
+| `Fuaran.Core.Propagation` | 33 / 45 | 45 / 45 |
+| `Fuaran.Core.Query` | 36 / 70 | 70 / 70 |
+| `Fuaran.Core.Tree` | 76 / 89 | 89 / 89 |
+| `Fuaran.Core.Validator` | 57 / 93 | 93 / 93 |
+| `Fuaran.Core.Wire` | 166 / 230 | 230 / 230 |
+
+- **What is counted.** Every `type`, `union-case`, `record-field`, `method`, `property` and literal
+  `field` token of a package's baseline, by the documentation id the compiler gives it; a member counts
+  as documented when its comment carries text. Four token classes are not counted, each because no
+  source line can carry a comment for it, and the ratchet file records the reason beside each: `ctor`
+  (a record's constructor is generated; a class's primary constructor is documented by its type), a
+  union's generated `Tags` class and literals, a union case's nested class (the case is counted once,
+  as its `union-case`), and `interface-marker`.
+- **The ratchet — `docs/doc-coverage.json`.** Per package, the members ALLOWED to carry no comment, by
+  documentation id; every list is empty today. `PackageDocsTests` holds each list exactly: a public
+  member that is undocumented and not listed is red, by name, at the commit that adds it (or deletes
+  its comment), and a listed member that gains a comment must leave the list, so the floor moves up
+  when the work is done. `CORE_APPROVE_DOCS=1` rewrites the file from the live measurement and refuses
+  to add an entry; a member that genuinely cannot carry a comment is listed by hand, where a reviewer
+  sees it.
+- **Existing comments corrected where they contradicted the code or sat on the wrong member.** Five
+  comments in `Idl.Codegen`'s `Diff` and one in `Ops`'s `Arbitration` had been separated from their
+  member by a later declaration and attached to its neighbour (in `Arbitration`, the whole `arbitrate`
+  contract sat on a private helper); each is back on the member it describes. Stale statements were
+  corrected: the `DagNode.Parents` shapes (any number of parents since Phase 311), the
+  `discriminator/nodeEnvelope/keyOrder` shape of the IDL diff's `Wire` row, `beyondEnvelope` answering
+  an empty list rather than `None`, the `Declare` module that builds an `IdlEnum`, the transparent-union
+  rule read from `HardenPolicy.TransparentUnions`, and `ContentPack.signatureFingerprint`, whose "changes
+  iff" overclaimed what a 32-bit hash can promise.
+
+**What a consumer does.** Nothing. A contributor adding a public member writes its doc comment in the
+same commit, or the suite names the member.
+
+**Class: additive** — no `api/` baseline moves; the source edits are `///` lines, plus records and
+unions laid out one field or case per line so each can carry its comment (same fields, same order,
+same types).
+
 
 ### Proof coverage at operation granularity (Phase 335) — additive: the kit's law-family roster gains an OPERATION roster, and every public operation maps to a ladder row, a law family or a recorded exclusion
 

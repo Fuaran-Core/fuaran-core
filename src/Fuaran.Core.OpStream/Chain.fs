@@ -5,11 +5,20 @@ namespace Fuaran.Core
 /// object since Phase 320). The chain makes tampering — including attribution tampering —
 /// detectable (`verifyChain`) and replay deterministic.
 type OpRecord<'Op> =
-    { Seq: int
-      Actor: Actor
-      Op: 'Op
-      PrevHash: string
-      Hash: string }
+    {
+        /// Zero-based position in the stream: the first record is `0`, and the verifiers refuse a
+        /// record whose `Seq` is not its index (`ChainBreakReason.SequenceMismatch`).
+        Seq: int
+        /// Who appended the op. Folded into the hashed payload, so rewriting it breaks `Hash`.
+        Actor: Actor
+        /// The domain op, applied by the witness's `Apply` on replay and hashed as its `Encode`.
+        Op: 'Op
+        /// The predecessor's `Hash`, or the config's `Genesis` (`""` canonically) on the first record.
+        PrevHash: string
+        /// `hashFn PrevHash payload` over the `{seq, actor, op}` payload; the next record's `PrevHash`
+        /// and, on the last record, the stream's `head`.
+        Hash: string
+    }
 
 /// WHICH integrity check a `ChainBreak` failed (Phase 125) — the closed set of reasons the chain
 /// walkers can report, typed where the reason is MINTED rather than re-derived downstream by
@@ -71,10 +80,18 @@ module ChainBreakReason =
 /// `Reason` is the closed `ChainBreakReason` as of `0.23.0` — it was a bare `string`, which every
 /// consumer that wanted to branch on it had to re-type by matching this module's own spellings.
 type ChainBreak =
-    { Index: int
-      Reason: ChainBreakReason
-      Expected: string
-      Got: string }
+    {
+        /// The failing item's position in the list that was walked — not its `Seq`, which differs for a
+        /// tail walked from a snapshot boundary.
+        Index: int
+        /// Which check failed. The walkers test sequence, then prev-link, then hash, and report the first.
+        Reason: ChainBreakReason
+        /// The value the check required: the sequence number as decimal text, the predecessor's hash, or
+        /// the recomputed digest, per `Reason`.
+        Expected: string
+        /// The value the item actually carried, spelled as `Expected` is.
+        Got: string
+    }
 
 /// The two-seam witness the whole module lifts over: `Apply` is the domain reducer,
 /// `Encode`/`Decode` the domain op codec. Per the Documents extraction assessment,
@@ -83,9 +100,17 @@ type ChainBreak =
 /// rest of the substrate follows, so a malformed op surfaces as a named `Error`, never an
 /// exception (the F3 adoption finding: every domain decode is already `Result`-returning).
 type StreamWitness<'Op, 'State, 'Rej> =
-    { Apply: 'Op -> 'State -> Result<'State, 'Rej>
-      Encode: 'Op -> string
-      Decode: string -> Result<'Op, string> }
+    {
+        /// The domain reducer. An `Error` refuses the op: `append` chains no record for it, and
+        /// `replay` stops at it with the record's index.
+        Apply: 'Op -> 'State -> Result<'State, 'Rej>
+        /// The op's JSON encoding. It is folded into every record's hash, so it must be deterministic —
+        /// the same op always renders the same bytes — or a stream stops verifying.
+        Encode: 'Op -> string
+        /// The inverse of `Encode`, used when a stream is read back; an `Error` names why the text is
+        /// not an op and surfaces as a read fault rather than an exception.
+        Decode: string -> Result<'Op, string>
+    }
 
 /// `prevHash -> payload -> hash`. Pluggable so a host can swap FNV-1a (portable,
 /// Fable-clean default) for SHA-256 at its boundary while keeping cross-host parity.
@@ -106,8 +131,13 @@ type HashFn = string -> string -> string
 /// between the two, whose actors carry such a character, verifies under `legacyEscapeConfig` and
 /// `rehash`es to canonical the same way; one whose actors carry none hashes identically under both.
 type StreamConfig =
-    { Payload: int -> Actor -> string -> string
-      Genesis: string }
+    {
+        /// `seq -> actor -> encodedOp -> payload`: the text the `HashFn` digests, after the previous
+        /// hash, for each record. Changing it changes every hash in the stream.
+        Payload: int -> Actor -> string -> string
+        /// The `PrevHash` of the first record, and the `head` of an empty stream.
+        Genesis: string
+    }
 
 /// The recoverable outcome of a compare-and-append (`OpStream.appendIf`, Phase 79) — the CAS envelope
 /// that turns the dispatcher's single-writer *process* convention into a *library* guarantee.
@@ -129,14 +159,23 @@ type StreamConfig =
 /// enumeration) is breaking.
 [<RequireQualifiedAccess>]
 type AppendRejection<'Rej> =
+    /// The stream's head is not the one the caller expected: `expected` is the caller's, `actual` the
+    /// stream's current head (its genesis when empty). Nothing was applied or chained.
     | StaleHead of expected: string * actual: string
+    /// The head matched but the witness's `Apply` refused the op; the rejection is forwarded verbatim.
     | Domain of 'Rej
 
 /// A stable reference to one chained record (Phase 82) — the entry an idempotency key already
 /// produced. `Seq` names its position in the stream; `Hash` its chain identity — together they let
 /// a retrying caller locate AND integrity-check the record its earlier attempt landed, without the
 /// index holding the record itself (the ref is O(1) per key regardless of op size).
-type EntryRef = { Seq: int; Hash: string }
+type EntryRef =
+    {
+        /// The record's zero-based `Seq` in its stream.
+        Seq: int
+        /// The record's chain `Hash` — compare it with the record at `Seq` to confirm it is the same entry.
+        Hash: string
+    }
 
 /// A pure index of seen invocation keys → the entry each key first produced (Phase 82). A **value
 /// the caller threads** — Core holds no registry state (GP6): rebuild it from any stream with
@@ -144,7 +183,12 @@ type EntryRef = { Seq: int; Hash: string }
 /// `OpStream.appendIdempotent` (the two agree — the rebuild-parity law). Key uniqueness scope is
 /// **per-stream**: an index is only meaningful against the stream it was built from / threaded
 /// alongside; cross-stream dedup is a host concern, like storage and locking (GP3/GP6).
-type KeyIndex = { Seen: Map<string, EntryRef> }
+type KeyIndex =
+    {
+        /// Invocation key → the entry that key FIRST produced; a later add under the same key never
+        /// replaces it.
+        Seen: Map<string, EntryRef>
+    }
 
 /// The typed outcome of an idempotent append (Phase 82) — enumerated, never a throw (GP4).
 /// `Appended` carries the advanced state, the extended stream, and the incrementally-updated
@@ -155,7 +199,11 @@ type KeyIndex = { Seen: Map<string, EntryRef> }
 /// forwarded on the `Result` error channel exactly as `append` forwards it.
 [<RequireQualifiedAccess>]
 type AppendOutcome<'Op, 'State> =
+    /// The key was new and the op applied: the advanced state, the WHOLE extended stream (not just the
+    /// new record), and the index with the key bound to that record.
     | Appended of state: 'State * records: OpRecord<'Op> list * index: KeyIndex
+    /// The key was already indexed: the entry it first produced. The op was not applied — the reducer
+    /// never ran — and nothing was chained.
     | Duplicate of existing: EntryRef
 
 /// Companion helpers for `KeyIndex` (Phase 82) — the empty index, first-wins incremental `add`,

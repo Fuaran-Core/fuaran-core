@@ -1,0 +1,113 @@
+{
+  "about": "Phase 339 - the doc-comment ratchet. Per package, the public members (by XML documentation id) ALLOWED to carry no doc comment. PackageDocsTests holds each list exactly: a new undocumented member is red by name, and a listed member that gains a comment must leave the list. documented/total are the measurement this file was written from. Regenerate with CORE_APPROVE_DOCS=1 dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter PackageDocs; the switch only removes entries, and an entry is added by hand.",
+  "excluded": {
+    "ctor": "a record's constructor is generated from its fields; a class's primary constructor is documented by its type",
+    "Tags": "a union's tag class and tag literals are generated constants",
+    "case class": "a union case's nested class is counted once, as its union-case token",
+    "interface-marker": "it names no member"
+  },
+  "packages": [
+    {
+      "package": "Fuaran.Core.AiSurface",
+      "documented": 81,
+      "total": 81,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Column",
+      "documented": 122,
+      "total": 122,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Conformance",
+      "documented": 296,
+      "total": 296,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Function",
+      "documented": 298,
+      "total": 298,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Idl",
+      "documented": 244,
+      "total": 244,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Idl.Cli",
+      "documented": 2,
+      "total": 2,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Idl.Codegen",
+      "documented": 261,
+      "total": 261,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Observer",
+      "documented": 44,
+      "total": 44,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.OpStream",
+      "documented": 258,
+      "total": 258,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.OpStream.Dag",
+      "documented": 176,
+      "total": 176,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Ops",
+      "documented": 155,
+      "total": 155,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Projection",
+      "documented": 35,
+      "total": 35,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Propagation",
+      "documented": 45,
+      "total": 45,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Query",
+      "documented": 70,
+      "total": 70,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Tree",
+      "documented": 89,
+      "total": 89,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Validator",
+      "documented": 93,
+      "total": 93,
+      "undocumented": []
+    },
+    {
+      "package": "Fuaran.Core.Wire",
+      "documented": 230,
+      "total": 230,
+      "undocumented": []
+    }
+  ]
+}

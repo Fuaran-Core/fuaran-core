@@ -56,9 +56,15 @@ type JsonlFaultReason =
 /// text (blank lines included, so it is the number an editor shows), the scanner's own 0-based
 /// `Position` within that line, and the `Reason`.
 type JsonlFault =
-    { Line: int
-      Position: int
-      Reason: JsonlFaultReason }
+    {
+        /// 1-based line number over every line of the text, blank lines included.
+        Line: int
+        /// 0-based character offset within the line where the scanner refused; `0` for a fault about
+        /// the line as a whole, such as a missing member.
+        Position: int
+        /// Why the line was refused.
+        Reason: JsonlFaultReason
+    }
 
 /// Render a `JsonlFault` for a log line or an `Error` string (Phase 296).
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -113,9 +119,14 @@ type JsonlWriteFaultReason =
 /// produced (the record's, capture's or node's position plus one; a snapshot line is line 1), the
 /// `Member` whose span was refused (`op`, `value` or `state`), and the `Reason`.
 type JsonlWriteFault =
-    { Line: int
-      Member: string
-      Reason: JsonlWriteFaultReason }
+    {
+        /// 1-based line of the output the refused item would have occupied.
+        Line: int
+        /// The member whose embedded span was refused: `op`, `value` or `state`.
+        Member: string
+        /// What is wrong with the encoding. The writer stops at the first refused item and emits nothing.
+        Reason: JsonlWriteFaultReason
+    }
 
 /// Render a `JsonlWriteFault` for a log line or an `Error` string (Phase 301).
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]

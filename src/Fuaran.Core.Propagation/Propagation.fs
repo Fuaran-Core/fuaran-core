@@ -25,8 +25,14 @@ module Propagation =
     /// strongly-connected group of >1 node, or a self-referential node — a circular reference is *data*
     /// (GP4), never a divergence.
     type TopoResult =
-        { Order: string list
-          Cycles: string list list }
+        {
+            /// The acyclic ids, each once, every one after each acyclic id it reads; ids in a cycle
+            /// and dangling reads never appear here.
+            Order: string list
+            /// One list per cyclic group, the groups in dependencies-first order; the order of ids
+            /// within a group is Tarjan's stack order, not sorted.
+            Cycles: string list list
+        }
 
     /// Build the dependency map of a tree: each node's string id → the set of string ids it references
     /// (via `readsOf`). Folds `readsOf` over `Tree.preorder`; every node appears (a leaf maps to the empty
@@ -411,7 +417,13 @@ module Propagation =
     /// One declared read — `Read` is the id read — narrowed to the parts of that node's value the
     /// reader depends on. `Parts = None` reads the whole value — the node-granular read every existing `readsOf` makes.
     type PartRead<'Id> =
-        { Read: 'Id; Parts: Set<string> option }
+        {
+            /// The node read; a read of an id absent from the tree is retained as a dangling read.
+            Read: 'Id
+            /// The parts of the read value the reader depends on — `None` for the whole value. Matched against the moved
+            /// parts on the first hop only; when those are unknown (`None`) every declaration meets them.
+            Parts: Set<string> option
+        }
 
     /// Build the part-granular dependency map of a tree (Phase 250): each node's string id → each id it
     /// reads → the parts it reads there (`None` = the whole value). Two reads of one node merge: their
@@ -507,8 +519,14 @@ module Propagation =
     /// `PropagationError.EvalNodeFailed`.
     [<RequireQualifiedAccess>]
     type PropagationError =
+        /// Some `changed` ids are not keys of the dependency map; `ids` lists every such id, in
+        /// ascending order. Raised before any node is evaluated.
         | EvalUnknownChange of ids: string list
+        /// The domain evaluator returned `Error message` at `node`; the walk stops at the first
+        /// failure in dependency order, so later nodes are not evaluated.
         | EvalNodeFailed of node: string * message: string
+        /// The evaluator at `node` asked the resolver for `read`, an id outside `deps[node]`; only
+        /// the first such read is named, and it outranks an `Error` the evaluator returned.
         | EvalUndeclaredRead of node: string * read: string
 
     /// The outcome of a (re)evaluation: the acyclic nodes' values, plus the cyclic SCCs that could not be
@@ -516,8 +534,14 @@ module Propagation =
     /// iteration policy of its own). A node downstream of a cycle evaluates with its cyclic read resolving to
     /// `None` — the domain's `evalNode` decides how to propagate that (Calc's `#CALC!` propagation).
     type EvalOutcome<'v> =
-        { Values: Map<string, 'v>
-          Cyclic: string list list }
+        {
+            /// One value per evaluated acyclic node — recomputed or reused from the prior. No cyclic
+            /// node and no dangling id has an entry; under `evalFor` only the needed nodes do.
+            Values: Map<string, 'v>
+            /// The cyclic groups, as `TopoResult.Cycles` reports them, never evaluated; under
+            /// `evalFor` only the groups that meet the needed set.
+            Cyclic: string list list
+        }
 
     /// Shared walk: evaluate the acyclic nodes in dependency order, threading the results; recompute a node
     /// when `recompute id` (or it is absent from `prior`), otherwise reuse its `prior` value. `evalNode
@@ -613,9 +637,17 @@ module Propagation =
     /// same plan until the GRAPH changes, and rebuilds it then. `Deps` is the map the plan was built
     /// from: a plan is a cache of it, never a second source of truth.
     type Plan =
-        { Deps: Map<string, Set<string>>
-          Topo: TopoResult
-          Dependents: Map<string, Set<string>> }
+        {
+            /// The dependency map the plan was prepared from; the resolver answers from it and an
+            /// unknown changed id is judged against its keys.
+            Deps: Map<string, Set<string>>
+            /// `sort Deps` — the walk order and the cyclic groups. A hand-built plan can hold it to
+            /// `validTopo`.
+            Topo: TopoResult
+            /// `dependents Deps` — the reverse edges the dirty set is grown over; an id nothing reads
+            /// has no key.
+            Dependents: Map<string, Set<string>>
+        }
 
     /// Prepare `deps` (Phase 298): one `sort`, one `dependents`.
     let plan (deps: Map<string, Set<string>>) : Plan =

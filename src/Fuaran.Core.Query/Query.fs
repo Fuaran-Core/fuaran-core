@@ -57,9 +57,15 @@ namespace Fuaran.Core
 /// out or bound to `Null`. This has held since Phase 226. Before it, `Required` checked only that
 /// the NAME was present, so a required parameter bound to `Null` reached the resolver.
 type QueryParam =
-    { Name: string
-      Type: ColumnType
-      Required: bool }
+    {
+        /// The key an argument binds under. Keep it unique within a query: `validateParams`
+        /// matches an argument to the first parameter of its name.
+        Name: string
+        /// The declared scalar type; a bound cell must widen to it (`ColumnType.widens`) or be `Null`.
+        Type: ColumnType
+        /// Whether the parameter must be bound to a non-`Null` value before the resolver runs.
+        Required: bool
+    }
 
 /// A query declaration: a named, registrable data-acquisition contract. Pure data — it carries no
 /// host code. `Effect` reuses `Function`'s two-axis `EffectClass` verbatim (an empty determinism set = pure
@@ -67,33 +73,68 @@ type QueryParam =
 /// is the `Column` `DataSource` (`Embedded` template or host-resolved `Ref`). `ResultSchema` is the
 /// typed shape the query produces — so a UI can be typed against it in a schema-only (no-rows) fetch.
 type Query =
-    { Id: string
-      Params: QueryParam list
-      ResultSchema: Schema
-      Effect: EffectClass
-      Source: DataSource
-      TimeoutMs: int option
-      PageSize: int option }
+    {
+        /// The registry key and the prefix of every `invocationKey`; a registry refuses a
+        /// second query under the same id.
+        Id: string
+        /// The parameters an invocation may bind, in declaration order; an argument naming none
+        /// of them is refused as `UnknownParam`.
+        Params: QueryParam list
+        /// The columns of one result row, as (name, type) pairs in column order.
+        ResultSchema: Schema
+        /// Tells the caller whether to journal: a non-empty determinism set means the realized
+        /// result is captured under `invocationKey`, an empty one that the query re-evaluates.
+        Effect: EffectClass
+        /// Where the rows come from — an `Embedded` table, or a `Ref` only the host resolver
+        /// can resolve (one it cannot is answered as `SourceNotResolved`).
+        Source: DataSource
+        /// The fetch's time budget in milliseconds, for the host resolver to honour; the seam
+        /// itself times nothing. `None` declares no budget, and the codec omits the member.
+        TimeoutMs: int option
+        /// The rows per page the host should return; `None` leaves paging to the source, and
+        /// the codec omits the member.
+        PageSize: int option
+    }
 
 /// A query invocation result — a page of typed rows. `TotalRowCount`/`NextPageToken` are present
 /// when the source can report them (streaming/paging); `None` when unknown.
 type QueryResult =
-    { Rows: Table
-      PageNum: int
-      TotalRowCount: int option
-      NextPageToken: string option }
+    {
+        /// The page's rows — always an embedded table; the codec refuses a result whose rows
+        /// are a `Ref`.
+        Rows: Table
+        /// The page's ordinal. The seam imposes no base; the shipped samples and laws number
+        /// from 0.
+        PageNum: int
+        /// The row count across every page, where the source reports it.
+        TotalRowCount: int option
+        /// The opaque token a host hands back to fetch the next page; `None` on the last page
+        /// or from a source that does not page.
+        NextPageToken: string option
+    }
 
 /// Why a typed invocation (or a registration) was refused — total, names the failure and, where a
 /// closed set is expected, enumerates the alternatives (GP5). Default-deny by shape: only a
 /// registered id with in-type params dispatches.
 type QueryError =
+    /// The id is not registered; `known` lists every registered id, in id order.
     | NoSuchQuery of id: string * known: string list
+    /// A registration under an id the registry already holds; the registry is left unchanged.
     | DuplicateQuery of id: string
+    /// An argument names no declared parameter; `declared` lists the parameter names in
+    /// declaration order.
     | UnknownParam of name: string * declared: string list
+    /// An argument's cell type does not widen to its parameter's declared type.
     | ParamTypeMismatch of name: string * expected: ColumnType * got: ColumnType
+    /// The required params the args leave out entirely, in declaration order.
     | RequiredParamsUnbound of names: string list
+    /// The resolver could not resolve the query's `Ref` source (`ResolveFault.SourceMissing`).
     | SourceNotResolved of ref: string
+    /// The resolver ran and failed; `recoverable` names the arguments a retry may change, and
+    /// is empty when the resolver answered an untyped `Deferred.Failed`. `QueryCodec.decodeArgs`
+    /// also answers this case, with a `decode:` / `parse:` detail, for input it cannot read at all.
     | ExecutionFailed of detail: string * recoverable: string list
+    /// The resolver ran out of time (`ResolveFault.TimedOut`); the seam itself never times a fetch.
     | Timeout
     /// The required params the args bind only to `Null` — present, but bound to no value (Phase 226).
     /// Distinct from `RequiredParamsUnbound` (left out), so a caller can tell the two apart.
@@ -107,8 +148,12 @@ type QueryError =
 /// (`Deferred.Failed`), so the first two cases were unreachable and `recoverable` was always empty.
 [<RequireQualifiedAccess>]
 type ResolveFault =
+    /// The host could not resolve the `Ref` named; surfaces as `QueryError.SourceNotResolved`.
     | SourceMissing of ref: string
+    /// The fetch ran out of time; surfaces as `QueryError.Timeout`.
     | TimedOut
+    /// Any other failure, with the arguments a retry may change; surfaces as
+    /// `QueryError.ExecutionFailed` carrying both unchanged.
     | Failed of detail: string * recoverable: string list
 
 /// What a model reads when a dispatch is refused (Phase 251) — the `InvokeError.describe` twin. Every
@@ -456,10 +501,18 @@ module Query =
 /// A typed query registry — the discovery surface an agent enumerates (the data-acquisition analogue
 /// of node-introspection / capability discovery): "what data may I acquire, with what typed params,
 /// producing what schema". Default-deny by shape on dispatch — only a registered id resolves.
-type QueryRegistry = { Queries: Map<string, Query> }
+type QueryRegistry =
+    {
+        /// The registered queries keyed by `Query.Id`. Build it with `QueryRegistry.register`,
+        /// which refuses a duplicate id, rather than adding to the map directly.
+        Queries: Map<string, Query>
+    }
 
+/// Building, enumerating and dispatching through a `QueryRegistry`.
 module QueryRegistry =
 
+    /// The registry with no queries: every dispatch against it is `NoSuchQuery` with an empty
+    /// `known` list.
     let empty: QueryRegistry = { Queries = Map.empty }
 
     /// Register a query — additive, no silent overwrite (a duplicate id is a named error).
@@ -471,6 +524,8 @@ module QueryRegistry =
                 { r with
                     Queries = Map.add q.Id q r.Queries }
 
+    /// The query registered under `id`, or `None`. A bare lookup: unlike `dispatch` it
+    /// validates nothing and names no alternatives.
     let tryFind (id: string) (r: QueryRegistry) : Query option = Map.tryFind id r.Queries
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part of
@@ -597,6 +652,8 @@ module QueryCodec =
             @ optIntJson "pageSize" q.PageSize
         )
 
+    /// A declaration as canonical JSON text (`"$type": "query"`): the same declaration always
+    /// renders to the same bytes, and `timeoutMs` / `pageSize` are omitted when `None`.
     let encode (q: Query) : string = Canon.render (queryJson q)
 
     // Phase 295 — a decode failure is a decode failure: the readers answer a typed `DecodeError` (the
@@ -653,6 +710,8 @@ module QueryCodec =
             @ nextTok
         )
 
+    /// A result page as canonical JSON text (`"$type": "queryResult"`), the rows written by the
+    /// column codec as an embedded table; `totalRowCount` / `nextPageToken` are omitted when `None`.
     let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
 
     let internal resultOf (el: JVal) : Result<QueryResult, DecodeError> =
@@ -685,6 +744,8 @@ module QueryCodec =
     let internal deferredResultJson (d: Deferred<QueryResult>) : JVal =
         CapabilityCodec.deferredJson resultJson d
 
+    /// The seam's async envelope as canonical JSON text, in the `pending` / `ready` / `failed`
+    /// shape `CapabilityCodec` uses, a `ready` payload written as `encodeResult` writes it.
     let encodeDeferredResult (d: Deferred<QueryResult>) : string = Canon.render (deferredResultJson d)
 
     let internal deferredResultOf (el: JVal) : Result<Deferred<QueryResult>, DecodeError> =
@@ -716,6 +777,8 @@ module QueryCodec =
         | Timeout -> Canon.typed "timeout" []
         | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
 
+    /// `queryErrorJson` as canonical JSON text — the wire form; `QueryError.describe` is the
+    /// sentence a model reads.
     let encodeQueryError (e: QueryError) : string = Canon.render (queryErrorJson e)
 
     let private queryErrorOfDetailed: Decoder<QueryError> =
@@ -757,6 +820,8 @@ module QueryCodec =
     let queryErrorOf (el: JVal) : Result<QueryError, string> =
         Decoder.describing queryErrorOfDetailed el
 
+    /// `queryErrorOf` over text. A parse failure or an unknown `$type` is the `Error` sentence,
+    /// never a `QueryError`.
     let decodeQueryError (s: string) : Result<QueryError, string> =
         Decode.parse s |> Result.bind queryErrorOf
 

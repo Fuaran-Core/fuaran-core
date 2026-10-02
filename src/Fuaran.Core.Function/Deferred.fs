@@ -9,20 +9,26 @@ namespace Fuaran.Core
 /// is named `Failed` (not `Error`) so it never shadows `Result.Error` in a consumer that opens
 /// `Fuaran.Core`.
 type Deferred<'T> =
+    /// Not yet settled; `map` and `bind` pass it through untouched.
     | Pending
+    /// Settled with a value; the only case the capture seam journals.
     | Ready of 'T
+    /// Settled with a failure, carried as rendered text so the envelope stays serialisable.
     | Failed of message: string
 
 /// Total combinators over `Deferred` (Phase 32). `map`/`bind` operate on a `Ready`; `Pending`/`Failed`
 /// propagate unchanged. `toResult` projects to a `Result` (`Pending` → `Error "pending"`).
 module Deferred =
 
+    /// Transforms a `Ready` value; `f` is not called on `Pending` or `Failed`.
     let map (f: 'a -> 'b) (d: Deferred<'a>) : Deferred<'b> =
         match d with
         | Ready v -> Ready(f v)
         | Pending -> Pending
         | Failed m -> Failed m
 
+    /// Chains a further deferred step on a `Ready` value, whose outcome (including `Pending`) is the
+    /// result; a `Pending` or `Failed` input short-circuits without calling `f`.
     let bind (f: 'a -> Deferred<'b>) (d: Deferred<'a>) : Deferred<'b> =
         match d with
         | Ready v -> f v

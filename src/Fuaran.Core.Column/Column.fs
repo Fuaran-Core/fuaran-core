@@ -18,11 +18,20 @@ namespace Fuaran.Core
 /// The fixed, Arrow-compatible scalar type set a column ranges over (spec §1). Closed by
 /// intent — a new scalar type is an additive case, never an open extension point.
 type ColumnType =
+    /// 32-bit signed integers, tagged `int`. An int `Sum` outside the int32 range is refused, never
+    /// wrapped.
     | IntType
+    /// IEEE doubles, tagged `float`; `Int` cells widen into it. Present values must be finite to
+    /// encode — the wire has no NaN or infinity.
     | FloatType
+    /// Booleans, tagged `bool`; ordered `false` before `true`.
     | BoolType
+    /// Free text, tagged `string`; ordered ordinally, never by culture.
     | StringType
+    /// Calendar days as canonical `YYYY-MM-DD` text, tagged `date` (`TemporalText.isCanonicalDate`).
     | DateType
+    /// UTC instants as canonical `YYYY-MM-DDThh:mm:ssZ` text, tagged `timestamp`; the decoder also
+    /// reads an epoch number in seconds or milliseconds.
     | TimestampType
     /// An EXACT decimal (`0.33.0`): a value a `float` cannot hold without rounding, such as a sum of
     /// money. Unparameterised — it carries no precision and no scale, because the text a cell
@@ -36,12 +45,25 @@ type ColumnType =
 /// `TemporalText`) so the model needs no host `DateTime` dependency and stays Fable-clean +
 /// byte-identical; `Table.validate` and the codec's decode refuse any other text (Phase 299).
 type Cell =
+    /// A 32-bit integer. It belongs in an int column and also widens into a float or a decimal
+    /// column, where the codec writes it as that type.
     | Int of int
+    /// A double. `Table.validate` refuses a non-finite one, which the wire cannot carry; the order
+    /// and the token treat every NaN as one value, and `-0.0` as `0`.
     | Float of float
+    /// Belongs only in a bool column — no other type widens to or from it; `Cell.compare` orders
+    /// `false` before `true`.
     | Bool of bool
+    /// A string cell, compared ordinally. Any text is valid, including the empty string — absence
+    /// is `Null`, not `""`.
     | Str of string
+    /// A date's canonical `YYYY-MM-DD` text; any other text is refused by `Table.validate` and decode.
     | Date of string
+    /// A UTC instant's canonical `YYYY-MM-DDThh:mm:ssZ` text (whole seconds); any other text is
+    /// refused by `Table.validate` and decode.
     | Timestamp of string
+    /// The absent cell, valid in a column of any type. Aggregates skip it (`First` / `Last` keep it),
+    /// and on the wire it is a `false` validity bit over a placeholder slot.
     | Null
     /// An exact decimal, carried as its CANONICAL text (`DecimalText`): an optional `-`, the integer
     /// digits with no leading zero, and a `.` with fraction digits only where the fraction is
@@ -57,9 +79,16 @@ type Cell =
 /// `Table.validate` (and so `ColumnCodec.tryEncode`) before encode, and `Column.aggregate` by name
 /// (Phase 299). `Column.create` checks nothing; a column built by hand is checked where it is used.
 type Column =
-    { Name: string
-      Type: ColumnType
-      Cells: Cell list }
+    {
+        /// The key a table matches against its schema entry and looks the column up by; unique
+        /// within a table (`Table.validate`), compared exactly.
+        Name: string
+        /// The declared type, which must equal the column's schema entry; a present cell must be of
+        /// a type that widens into it.
+        Type: ColumnType
+        /// One cell per row, in row order. A linked list, so an indexed read (`Column.cell`) is O(i).
+        Cells: Cell list
+    }
 
 /// A `(name, type)` ordered schema — the column order of a table follows it.
 type Schema = (string * ColumnType) list
@@ -72,7 +101,12 @@ type Schema = (string * ColumnType) list
 /// (`proofs/WireColumn.fst`: the round trip is to a normal form, and this is one of its three
 /// reasons).
 type Table =
-    { Schema: Schema; Columns: Column list }
+    {
+        /// The column names and types, in the table's column order; no name may appear twice.
+        Schema: Schema
+        /// The columns, in any order, matched to `Schema` by name; all the same length.
+        Columns: Column list
+    }
 
 /// A data source: embedded columns, or a host-resolved named `Ref` (spec §1 — the
 /// `Binding.Query` by-reference precedent). The evaluator resolves a `Ref` through a caller
@@ -81,7 +115,10 @@ type Table =
 /// `ref` source with or without one and keeps none (Phase 299 dropped the rule that a `ref` had to
 /// carry a schema the decoder then discarded).
 type DataSource =
+    /// The rows travel inline. `ColumnCodec.tryEncode` validates the table first; `encode` assumes
+    /// it is valid.
     | Embedded of Table
+    /// A name the host resolves to rows; the codec carries it uninterpreted and always encodes it.
     | Ref of string
 
 /// THE CODEC ENVELOPE — the closed set of refusals of the columnar codec and of `Table.validate`,
@@ -343,6 +380,8 @@ module TemporalText =
             | Some h, Some mi, Some se -> h <= 23 && mi <= 59 && se <= 59
             | _ -> false)
 
+/// The wire tags of the scalar types and the widening lattice — the one place both the codec and
+/// schema compatibility read "is this retype safe" from.
 module ColumnType =
 
     /// The canonical wire tag for a column type (the fixed scalar-set vocabulary).
@@ -366,6 +405,7 @@ module ColumnType =
           TimestampType
           DecimalType ]
 
+    /// The wire tags in `all`'s order — the `expected` list an `UnknownType` refusal carries.
     let allTags = all |> List.map tag
 
     /// Resolve a wire tag to its type, or `None` for an unknown tag.
@@ -388,6 +428,8 @@ module ColumnType =
         || (from = IntType && target = FloatType)
         || (from = IntType && target = DecimalType)
 
+/// Cell construction and THE cell identity and order: `decimal` canonicalises, `token` is the
+/// key every consumer partitions on, and `compare` the order every consumer sorts by.
 module Cell =
 
     /// Is the cell the null/NA marker?
@@ -502,14 +544,29 @@ module Cell =
 /// is a public, single-source surface). `Count` is non-null count; `Sum` keeps the source numeric type;
 /// `Mean`/`Median`/`StdDev` are `float`; `Min`/`Max`/`First`/`Last` keep the source type.
 type AggFn =
+    /// Numeric only. An int sum is checked against int32 (overflow is named, never wrapped), a decimal
+    /// sum is exact, a float sum folds left to right. With no present value the sum is `Null`, not
+    /// zero.
     | Sum
+    /// Numeric only, a `Float` (decimals at their nearest float); `Null` over no present value.
     | Mean
+    /// The least present cell by `Cell.compare` (NaN sorts last, so it is the minimum only of an
+    /// all-NaN column); `Null` when nothing is present.
     | Min
+    /// The greatest present cell by `Cell.compare` — NaN where the column holds one; `Null` when
+    /// nothing is present.
     | Max
+    /// The number of present cells, as an `Int`; `0` for an all-null column.
     | Count
+    /// Numeric only, a `Float`: the middle value, or the mean of the two middle values for an even
+    /// count, with NaN counted at the top; `Null` over no present value.
     | Median
+    /// Numeric only, the POPULATION standard deviation (divides by `n`) as a `Float`; one value
+    /// gives `0`, and no present value gives `Null`.
     | StdDev
+    /// The first row's cell — a `Null` included, not skipped; `Null` for an empty column.
     | First
+    /// The last row's cell — a `Null` included, not skipped; `Null` for an empty column.
     | Last
     /// Phase 101 — the count of DISTINCT present values (nulls skipped, so `CountDistinct` over an
     /// all-null column is `0`, exactly as `Count` is). Distinctness is the SAME canonical token the
@@ -523,7 +580,12 @@ type AggFn =
 /// types; an integer `Sum` outside the int32 band is a named overflow (the pinned no-silent-wrap posture
 /// shared with the compute layer's evaluator, Phase 39).
 type AggregateError =
+    /// A numeric aggregate over a non-numeric column: `fn` is the aggregate's tag (`"sum"`, …),
+    /// `colType` the column's type tag, and `expected` the numeric tags (`int`, `float`, `decimal`).
     | IncompatibleAggType of fn: string * colType: string * expected: string list
+    /// An answer outside its type's range: an int `Sum` past int32, a float `Sum` or a float
+    /// statistic that left the float range over finite input, or a decimal too large to read as a
+    /// float for a float-valued aggregate. `detail` says which, with the offending value or column.
     | AggregateOverflow of detail: string
     /// A present cell outside its column's type (Phase 299): the column, its declared type, and the
     /// cell — its type's tag, or, for a `Decimal` cell, the text that is not decimal text. The
@@ -532,6 +594,8 @@ type AggregateError =
     /// and counted in `Mean`. Now it is refused, by name, before any aggregate reads it.
     | CellOutsideType of column: string * colType: string * cell: string
 
+/// Column reads and the pinned aggregate semantics — the single `aggregate` the compute layer's
+/// grouping and pivoting call rather than copy.
 module Column =
 
     /// The number of rows in a column.
@@ -935,6 +999,7 @@ module Column =
                                 // Halved first: each half is exact, and their sum is within the range.
                                 finiteOr "median" (a / 2.0 + b / 2.0))
 
+/// Table reads and `validate`, the well-formedness check the codec encodes and decodes through.
 module Table =
 
     /// The row count of a table — the length of its first column, or 0 for a schema-only table.
@@ -943,6 +1008,8 @@ module Table =
         | c :: _ -> Column.length c
         | [] -> 0
 
+    /// The names in SCHEMA order — the table's column order, whatever order `Columns` holds; read
+    /// from the schema alone, so a name with no column is still listed.
     let columnNames (t: Table) : string list = t.Schema |> List.map fst
 
     /// Find a column by name.
@@ -1093,11 +1160,23 @@ module Table =
 /// `Schema.patch old (Schema.diff old target) = Ok target`. `Reordered` keeps its meaning and is
 /// now implied by `Order` (a reorder of the common columns is never the derived order).
 type SchemaDelta =
-    { Added: (string * ColumnType) list
-      Removed: (string * ColumnType) list
-      Retyped: (string * ColumnType * ColumnType) list
-      Reordered: bool
-      Order: string list }
+    {
+        /// Columns only the target holds, in target order; `Schema.patch` appends them in this order
+        /// and refuses one the schema already holds.
+        Added: (string * ColumnType) list
+        /// Columns only the old schema holds, in old order, each with its OLD type — `patch` refuses
+        /// to remove a column whose type disagrees.
+        Removed: (string * ColumnType) list
+        /// Columns in both whose type changed, in old order, as `(name, from, to)`; `patch` checks
+        /// `from` before retyping in place.
+        Retyped: (string * ColumnType * ColumnType) list
+        /// Whether the columns common to both schemas appear in a different relative order. A report
+        /// only — `patch` never reads it; `Order` carries where they go.
+        Reordered: bool
+        /// The target's full column order, or empty when it is the order `patch` derives without it;
+        /// a non-empty `Order` must be a permutation of the resulting columns.
+        Order: string list
+    }
 
 /// Why `Schema.patch` refused a delta (Phase 317) — named and enumerated (GP5). A refusal says the
 /// delta was not computed against the schema it is applied to; `patch` never repairs one.
