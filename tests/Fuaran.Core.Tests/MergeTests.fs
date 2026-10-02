@@ -55,6 +55,22 @@ let conflictShapeTests =
                   Expect.equal c.Address "a1" "keyed by the removed node"
               | other -> failtestf "expected a single MergeConflictShape.MoveVsRemove on a1, got %A" other
 
+          testCase "slot clash (Phase 340): two writes to one slot are reported at the node with the slot on the shape"
+          <| fun _ ->
+              // A domain op's footprint, not a skeleton op's: no skeleton op writes a slot.
+              let a = [ Footprint.slotEdit "p" "tier" ]
+              let b = [ Footprint.slotEdit "p" "tier" ]
+
+              match Dag.conflicts id a b with
+              | [ c ] ->
+                  Expect.equal c.Shape (MergeConflictShape.SlotClash "tier") "the slot rides the shape"
+                  Expect.equal c.Address "p" "the node is the address"
+              | other -> failtestf "expected a single MergeConflictShape.SlotClash on p, got %A" other
+
+              Expect.isEmpty
+                  (Dag.conflicts id [ Footprint.slotEdit "p" "tier" ] [ Footprint.slotEdit "p" "thinking" ])
+                  "two different slots of one node: no conflict"
+
           testCase "disjoint deltas return [] — no false positives"
           <| fun _ ->
               // inserts under DIFFERENT parents, disjoint new ids, no removes ⇒ footprint-independent.

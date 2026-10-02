@@ -2389,6 +2389,73 @@ and `Gen.typescriptValue`, and Phase 248 retyped `ArbitrationRejection.Conflicts
 its own class and the edit a consumer makes; the wire classes are recorded per entry. Pre-1.0 a breaking
 change is a minor bump, which this slot already is over `0.33.0`, so the number does not move.
 
+**Phase 340 — a footprint names the slot it writes: `Footprint` gains `SlotReads` and `SlotWrites`,
+`Ops.interference` three clauses, `MergeConflictShape` a `SlotClash` carrying the slot, and
+`Footprint.slotEdit` / `readingSlot` to declare one. Class: `breaking (source)` — a record widened
+(every full `Footprint` literal), two closed unions widened (every exhaustive match on `Interference`
+and `MergeConflictShape`). Rides the draft, whose class it already is.** The ruling is DECISIONS D104.
+
+- **What changed and why.** The four address sets are node-granular, so a write to PART of a node was
+  a write to the node, two ops touching different fields of one node interfered, and the fold halted on
+  a pair that commutes — measured twice in one consumer (two lanes writing different fields of one phase
+  halted a whole side as an operator-owned conflict), and in keyed domains, where two lanes editing
+  different keys under one holder halted at the holder. A footprint now carries the SLOTS an op reads
+  and writes, a slot being a `(node id, slot name)` pair: a named field, or the key a keyed child sits
+  under. Two writes to different slots of one node are independent; a write and an access of ONE slot
+  are an `Interference.SlotClash` naming the slot, and `Dag.conflicts` reports it as
+  `MergeConflictShape.SlotClash slot` at the node — one helper (`Footprint.slotClash`) behind both, so
+  arbitration and the fold say so in one vocabulary. A whole-node write is a write of every slot: a slot
+  access of `n` collides with a content write, a read or a structure write of `n`, and a slot read with a
+  content write of `n` (`Interference.LeftSlotsRightNode` / `RightSlotsLeftNode`; the fold reports those
+  as a `ConcurrentUpdate` at the node). **A domain that declares no slot access folds byte-identically to
+  before**: `Ops.footprint` and `Ops.footprintKeyed` leave both sets empty, because no skeleton op writes
+  a slot (an `UpdateNode` rewrites its target whole, and a pure script cannot say which part of a payload
+  changed), so every four-set verdict and every conflict report a domain got before is the one it gets.
+- **`Footprint` gains two fields, `SlotReads: Set<string * string>` and `SlotWrites: Set<string * string>`**
+  — BREAKING-SOURCE, `widen`. **The consumer edit:** every full `Footprint` literal — a domain's own
+  `'Op -> Footprint` lowering, a test's hand-built footprint, a host's mirror of the record — adds
+  `SlotReads = Set.empty; SlotWrites = Set.empty`, or is rewritten as `{ Footprint.empty with … }`, which
+  is the form that survives the next widening. A `{ f with … }` copy compiles unchanged. A projection
+  that compares or unions footprints field by field (a subset check, a union of two footprints) adds the
+  two fields to the comparison or the union, or the slot sets are silently dropped at that seam. The
+  record is not on any Core wire, so no wire class moves.
+- **`Interference` gains three cases, in `independent`'s clause order after `RightUnknownParent`:
+  `SlotClash of slots: Set<string * string>`, `LeftSlotsRightNode of nodes: Set<string>`,
+  `RightSlotsLeftNode of nodes: Set<string>`** — BREAKING-SOURCE, `widen` (closed union). **The consumer
+  edit:** every exhaustive match on `Interference` — a renderer, a mirror, a classifier of rejections —
+  gains three arms; a match with a wildcard compiles unchanged. `Ops.interference` over two footprints
+  with empty slot sets is exactly the list it was, so a consumer that never declares a slot sees no new
+  case at run time.
+- **`MergeConflictShape` gains `SlotClash of slot: string`** — BREAKING-SOURCE, `widen` (closed union); the
+  case carries a field where the three before it carry none. **The consumer edit:** every exhaustive
+  match on `MergeConflictShape` — a conflict classifier, a report renderer — gains an arm, and a renderer
+  keyed on the shape alone must put the slot in the key, or two clashes at one node on different slots
+  collapse into one line (`FoldConfluence.canonicalConflictReport` renders it `slot-clash:<slot>`). A
+  consumer's own `'Op -> Footprint` that lowers a field edit to `Footprint.contentEdit` keeps reporting
+  `ConcurrentUpdate` at the node; it sees `SlotClash` only once it lowers to `Footprint.slotEdit`.
+- **New: `Footprint.slotEdit id slot`** (a read and a write of the slot, nothing at the node),
+  **`Footprint.readingSlot id slot`** (a read of the slot alone), **`Footprint.slotNodes`**,
+  **`Footprint.slotClash a b`** and **`Footprint.slotsAgainstNode a b`** (the slot clauses' address sets,
+  shared by `Ops.interference` and `Dag.conflicts`). `additive`.
+- **`Conformance.footprintLawsAt` gains a cell and two demands** — "a slot clash is named at the slot",
+  and the guard counts the `slot-independent pair`s (independent only because slots are compared at the
+  slot) and `slot-clash pair`s a domain's draws reach, both vacuous BY DECLARATION for a footprint that
+  declares no slot access, so the family's verdict on such a domain is unchanged. `additive`.
+- **Not done, by ruling (D104): `KeyedWitness` is not widened with the key a keyed child sits under.**
+  The shard asked for it so `Ops.footprintKeyed` could declare a keyed placement as a write to
+  `(holder, key)`; measured against the tree, no skeleton op places a keyed child without rewriting its
+  holder whole (`KeyedSlotFoldTests` pins it), so a key in the witness would have had no op to serve. A
+  domain that places by key lowers its OWN op with `slotEdit holder key`, which needs no witness.
+- **Proofs.** `proofs/DagFold.fst` is restated over six sets: `independent` carries the slot clauses,
+  `pair_conflicts` tags one `SlotClash` per clashing slot, `pair_conflicts_nil_iff` (the fold fires iff
+  not independent) and the halt report's arrival-order invariance are re-proved, and section 17 proves
+  that two writes to different slots of one node commute at every slot of a slot store while two writes
+  to one slot do not (`slot_writes_commute`, `same_slot_writes_disagree`,
+  `slot_writes_independent_iff`, `whole_node_refuses_every_slot`); `TreeOps.fst` and `Arbitrate.fst`
+  re-verify over the widened record (`independent_sym`, `independent_union_left`,
+  `accepted_pairwise_independent`). The three oracles are re-extracted; six twins sample the slot
+  clauses at the extracted model.
+
 **Phase 305 — a content-aware `Diff`, a linear `normalize`, a closed undo script, arbitration that
 refuses a malformed base, and a freshness stamp that sees a content edit. Class: `additive` (six new
 members across `Fuaran.Core.Ops` and `Fuaran.Core.Tree`, no member moved or retyped; both baselines

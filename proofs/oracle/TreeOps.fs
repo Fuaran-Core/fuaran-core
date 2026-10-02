@@ -697,10 +697,10 @@ and apply_all : Prims.list<op>  ->  tree  ->  DagFold.outcome<tree, rejection> =
      end))
 
 
-let empty_fp : DagFold.footprint = {DagFold.reads = []; DagFold.structure_writes = []; DagFold.content_writes = []; DagFold.unknown_parent_writes = []}
+let empty_fp : DagFold.footprint = {DagFold.reads = []; DagFold.structure_writes = []; DagFold.content_writes = []; DagFold.unknown_parent_writes = []; DagFold.slot_reads = []; DagFold.slot_writes = []}
 
 
-let union_fp : DagFold.footprint  ->  DagFold.footprint  ->  DagFold.footprint = (fun ( a  :  DagFold.footprint ) ( b  :  DagFold.footprint ) -> {DagFold.reads = (DagFold.union a.reads b.reads); DagFold.structure_writes = (DagFold.union a.structure_writes b.structure_writes); DagFold.content_writes = (DagFold.union a.content_writes b.content_writes); DagFold.unknown_parent_writes = (DagFold.union a.unknown_parent_writes b.unknown_parent_writes)})
+let union_fp : DagFold.footprint  ->  DagFold.footprint  ->  DagFold.footprint = (fun ( a  :  DagFold.footprint ) ( b  :  DagFold.footprint ) -> {DagFold.reads = (DagFold.union a.reads b.reads); DagFold.structure_writes = (DagFold.union a.structure_writes b.structure_writes); DagFold.content_writes = (DagFold.union a.content_writes b.content_writes); DagFold.unknown_parent_writes = (DagFold.union a.unknown_parent_writes b.unknown_parent_writes); DagFold.slot_reads = (DagFold.union a.slot_reads b.slot_reads); DagFold.slot_writes = (DagFold.union a.slot_writes b.slot_writes)})
 
 
 let rec op_fp : op  ->  DagFold.footprint = (fun ( o  :  op ) -> (match (o) with
@@ -708,16 +708,16 @@ let rec op_fp : op  ->  DagFold.footprint = (fun ( o  :  op ) -> (match (o) with
      (
 
 let inserted = (ids n)
-in {DagFold.reads = (p)::inserted; DagFold.structure_writes = (p)::[]; DagFold.content_writes = inserted; DagFold.unknown_parent_writes = []})
+in {DagFold.reads = (p)::inserted; DagFold.structure_writes = (p)::[]; DagFold.content_writes = inserted; DagFold.unknown_parent_writes = []; DagFold.slot_reads = []; DagFold.slot_writes = []})
      end
 | RemoveNode (x) -> begin
-     {DagFold.reads = (x)::[]; DagFold.structure_writes = []; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]}
+     {DagFold.reads = (x)::[]; DagFold.structure_writes = []; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]; DagFold.slot_reads = []; DagFold.slot_writes = []}
      end
 | MoveNode (x, np) -> begin
-     {DagFold.reads = (x)::(np)::[]; DagFold.structure_writes = (np)::[]; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]}
+     {DagFold.reads = (x)::(np)::[]; DagFold.structure_writes = (np)::[]; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]; DagFold.slot_reads = []; DagFold.slot_writes = []}
      end
 | ReorderChildren (p, order) -> begin
-     {DagFold.reads = (p)::order; DagFold.structure_writes = (p)::[]; DagFold.content_writes = []; DagFold.unknown_parent_writes = []}
+     {DagFold.reads = (p)::order; DagFold.structure_writes = (p)::[]; DagFold.content_writes = []; DagFold.unknown_parent_writes = []; DagFold.slot_reads = []; DagFold.slot_writes = []}
      end
 | Batch (inner) -> begin
      (fp_all inner)
@@ -726,7 +726,7 @@ in {DagFold.reads = (p)::inserted; DagFold.structure_writes = (p)::[]; DagFold.c
      (
 
 let x = (tid_of n)
-in {DagFold.reads = (x)::[]; DagFold.structure_writes = []; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]})
+in {DagFold.reads = (x)::[]; DagFold.structure_writes = []; DagFold.content_writes = (x)::[]; DagFold.unknown_parent_writes = (x)::[]; DagFold.slot_reads = []; DagFold.slot_writes = []})
      end))
 and fp_all : Prims.list<op>  ->  DagFold.footprint = (fun ( os  :  Prims.list<op> ) -> (match (os) with
 | [] -> begin
@@ -862,7 +862,7 @@ type leaf_op = op
 let leaf_fp : leaf_op  ->  DagFold.footprint = (fun ( o  :  leaf_op ) -> (op_fp o))
 
 
-let but_for_relocation : DagFold.footprint  ->  DagFold.footprint  ->  Prims.bool = (fun ( a  :  DagFold.footprint ) ( b  :  DagFold.footprint ) -> ((((DagFold.disjoint a.content_writes b.content_writes) && (DagFold.disjoint a.content_writes b.reads)) && (DagFold.disjoint b.content_writes a.reads)) && (DagFold.disjoint a.structure_writes b.structure_writes)))
+let but_for_relocation : DagFold.footprint  ->  DagFold.footprint  ->  Prims.bool = (fun ( a  :  DagFold.footprint ) ( b  :  DagFold.footprint ) -> (((((((DagFold.disjoint a.content_writes b.content_writes) && (DagFold.disjoint a.content_writes b.reads)) && (DagFold.disjoint b.content_writes a.reads)) && (DagFold.disjoint a.structure_writes b.structure_writes)) && (DagFold.is_empty (DagFold.slot_clash a b))) && (DagFold.is_empty (DagFold.slots_against_node a b))) && (DagFold.is_empty (DagFold.slots_against_node b a))))
 
 
 let reloc_tree : tree = TNode ("root", "doc", (TNode ("x", "sec", (TNode ("p", "sec", []))::[]))::(TNode ("q", "sec", []))::[])

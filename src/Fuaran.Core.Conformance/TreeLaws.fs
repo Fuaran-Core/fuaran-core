@@ -2482,6 +2482,8 @@ module internal TreeLaws =
                     && fp.StructureWrites = fr.StructureWrites
                     && fp.ContentWrites = fr.ContentWrites
                     && fp.UnknownParentWrites = fr.UnknownParentWrites
+                    && fp.SlotReads = fr.SlotReads
+                    && fp.SlotWrites = fr.SlotWrites
                     && (written op |> List.forall (fun r -> fr.Reads.Contains(key r))),
                     fun () -> at (sprintf "footprintReferenced of %A is %A against footprint %A" op fr fp)
                 )

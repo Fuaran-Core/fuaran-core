@@ -19,9 +19,15 @@ module Fuaran.Core.Tests.KeyedSlotFoldTests
 //     Only a footprint that names neither the holder nor the slot folds the pair clean, and that is
 //     a footprint missing a write, not a gap in the fold.
 //
-// What remains true of the phase's motivation is the LABEL: the clash is reported at the holder,
-// under a shape that does not say "slot". That is a reporting refinement rather than a soundness
-// defect, and it is left to a decision rather than shipped as a breaking change on a false premise.
+// What remained of the phase's motivation was the LABEL: the clash is reported at the holder,
+// under a shape that does not say "slot". Phase 340 shipped the slot granularity — a footprint's
+// `SlotReads` / `SlotWrites`, `Footprint.slotEdit`, and `Dag.conflicts`' `SlotClash` shape — and the
+// cases at the end of this file say what that changes HERE and what it does not: a domain op that
+// places a keyed child BY KEY, lowered with `slotEdit holder key`, folds clean against a placement
+// into another key and halts with `SlotClash` at the key; the skeleton `UpdateNode` of the holder
+// keeps halting at the holder, because a pure script cannot say which keyed position a payload
+// changed, so `Ops.footprintKeyed` records the holder whole (the premise Phase 340 reported rather
+// than widening `KeyedWitness` for a key no skeleton op could use).
 
 open Expecto
 open Fuaran.Core
@@ -179,4 +185,49 @@ let tests =
                       (applyAll script (doc ()) |> Result.map slotOf)
                       (Ok(Some [ "on", "b" ]))
                       "the last lane wins"
-              | Error cs -> failtestf "the blind footprint still halted: %A" cs ]
+              | Error cs -> failtestf "the blind footprint still halted: %A" cs
+
+          // ---- Phase 340: a domain op that places BY KEY names the key as a slot ----
+
+          testCase
+              "Phase 340: a domain op placing by key, lowered with slotEdit, folds clean into different keys and halts with SlotClash at one key"
+          <| fun _ ->
+              // The footprint a domain gives its own `place child into (holder, key)`: the slot
+              // `(holder, key)` is written, and the child is authored — the holder itself is NOT
+              // written whole, which is the whole of the difference from `insertUnder holder child`.
+              let placeByKey (key: string) (child: string) =
+                  Footprint.union (Footprint.slotEdit "sw" key) (Footprint.contentEdit child)
+
+              Expect.isEmpty
+                  (Dag.conflicts id [ placeByKey "on" "a" ] [ placeByKey "off" "b" ])
+                  "two different keys of one holder: clean"
+
+              Expect.equal
+                  (shapes (Dag.conflicts id [ placeByKey "on" "a" ] [ placeByKey "on" "b" ]))
+                  [ MergeConflictShape.SlotClash "on", "sw" ]
+                  "one key, two children: a slot clash at the holder naming the key"
+
+              Expect.equal
+                  (Ops.interference (placeByKey "on" "a") (placeByKey "on" "b"))
+                  [ Interference.SlotClash(Set.singleton ("sw", "on")) ]
+                  "arbitration names the same key"
+
+          testCase
+              "Phase 340: the skeleton UpdateNode of the holder still halts at the holder — the footprint is whole-node by construction"
+          <| fun _ ->
+              let f = Ops.footprintKeyed keyw knodew idw [ placeInSlot "a" ]
+              Expect.isEmpty f.SlotWrites "no skeleton op narrows to a keyed slot"
+              Expect.contains f.ContentWrites "sw" "the holder is written whole"
+
+              let baseId, headA, headB, dag = forkDag [ placeInSlot "a" ] [ placeInSlot "b" ]
+
+              match Dag.reconcile (fun op -> Ops.footprintKeyed keyw knodew idw [ op ]) dag baseId headA headB with
+              | Ok script -> failtestf "two UpdateNodes of one holder folded clean: %A" script
+              | Error cs ->
+                  Expect.isEmpty
+                      (cs
+                       |> List.filter (fun c ->
+                           match c.Shape with
+                           | MergeConflictShape.SlotClash _ -> true
+                           | _ -> false))
+                      "and the halt is at the holder, not at a slot the script never named" ]
