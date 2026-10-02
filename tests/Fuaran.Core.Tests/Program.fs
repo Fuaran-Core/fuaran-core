@@ -170,6 +170,17 @@ let main argv =
             ReferenceIdl.refIdl
             (ReferenceIdl.refIdl.Kinds |> List.map (fun k -> k.Tag))
 
+        // Phase 337 — the decode vectors' vocabulary, so the decode error contract is held
+        // against a COMPILED generated host as well as the interpreter and the TypeScript one.
+        let decodeIdl, _, _ = DecodeVectorsIdl.current ()
+
+        writeGen
+            DecodeVectorsIdl.generatedFile
+            DecodeVectorsIdl.moduleName
+            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            decodeIdl
+            (decodeIdl.Kinds |> List.map (fun k -> k.Tag))
+
         0
     // Phase 127 — rewrite the committed `idl.json` fixtures the repository gate runs
     // the `fuaran-core-idl` command over:

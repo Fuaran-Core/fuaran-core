@@ -586,7 +586,7 @@ let tests =
                   + "\n];\n"
                   + "for (const [name, s] of __wire) {\n"
                   + "  const r = decodeNode(s);\n"
-                  + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + r.error));\n"
+                  + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + JSON.stringify(r.error)));\n"
                   + "}\n"
 
               let tmp =
@@ -1034,9 +1034,24 @@ module private SecondVocabulary =
             with _ ->
                 ()
 
-    /// One line per document: `ok\t<re-encoded>` or `err`.
+    /// One line per document: `ok\t<re-encoded>` or `err\t<code>\t<path as JSON>`.
     let lines (stdout: string) =
         stdout.Split('\n') |> Array.filter (fun l -> l <> "") |> Array.toList
+
+    /// Phase 337 — the refusal line a host must print for a document: the interpreter's code and
+    /// path (`Decode.decodeDetailed`), which both generated hosts are held to.
+    let refusalLine (doc: string) : string =
+        match Decode.decodeDetailed idl doc with
+        | Ok _ -> failwithf "the interpreter accepted a document the hosts must refuse: %s" doc
+        | Error e ->
+            "err\t"
+            + DecodeError.codeName e.Code
+            + "\t"
+            + Canon.render (DecodePath.toJson e.Path)
+
+    /// The refusal lines for the three refused departures.
+    let refusedLines () =
+        refusedDeparts |> List.map (tripWith >> refusalLine)
 
 [<Tests>]
 let secondVocabularyTests =
@@ -1103,7 +1118,7 @@ let secondVocabularyTests =
                   tsModule
                   + "\n\nconst __docs = "
                   + Canon.render (JArr(docs |> List.map JStr))
-                  + ";\nfor (const d of __docs) { const r = decodeNode(d); console.log(r.ok ? 'ok\\t' + encodeNode(r.value) : 'err'); }\n"
+                  + ";\nfor (const d of __docs) { const r = decodeNode(d); console.log(r.ok ? 'ok\\t' + encodeNode(r.value) : 'err\\t' + r.error.code + '\\t' + JSON.stringify(r.error.path)); }\n"
 
               SecondVocabulary.withTemp ".mjs" harness (fun path ->
                   match SecondVocabulary.run "node" ("\"" + path + "\"") with
@@ -1112,11 +1127,15 @@ let secondVocabularyTests =
                   | Some(_, stdout, _) ->
                       let got = SecondVocabulary.lines stdout
 
+                      // Phase 337 — refused with the interpreter's code and path, not only refused.
                       let expected =
                           (SecondVocabulary.documents |> List.map (fun w -> "ok\t" + w))
-                          @ [ "err"; "err"; "err" ]
+                          @ SecondVocabulary.refusedLines ()
 
-                      Expect.equal got expected "300 documents identical, the three refusals refused"))
+                      Expect.equal
+                          got
+                          expected
+                          "300 documents identical, the three refusals refused with the interpreter's code and path"))
 
           testCase
               "the generated F# host agrees with it, compiles with wire equality, and scaffolds the authored trip"
@@ -1169,7 +1188,7 @@ let secondVocabularyTests =
                       + "for d in __docs do\n"
                       + "    match decodeNode d with\n"
                       + "    | Ok n -> printfn \"ok\\t%s\" (encodeNode n)\n"
-                      + "    | Error _ -> printfn \"err\"\n"
+                      + "    | Error e -> printfn \"err\\t%s\\t%s\" (DecodeError.codeName e.Code) (Canon.render (DecodePath.toJson e.Path))\n"
                       + "let __trip : Node = "
                       + tripSrc
                       + "\nprintfn \"trip\\t%s\" (encodeNode __trip)\n"
@@ -1186,7 +1205,8 @@ let secondVocabularyTests =
 
                           let expected =
                               (SecondVocabulary.documents |> List.map (fun w -> "ok\t" + w))
-                              @ [ "err"; "err"; "err"; "trip\t" + expectedTrip; "eq\ttrue" ]
+                              @ SecondVocabulary.refusedLines ()
+                              @ [ "trip\t" + expectedTrip; "eq\ttrue" ]
 
                           Expect.equal got expected "the F# host agrees on every document, the scaffold, and equality"))
 

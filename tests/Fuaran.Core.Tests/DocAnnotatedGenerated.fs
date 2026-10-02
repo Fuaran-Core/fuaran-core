@@ -100,30 +100,52 @@ let encodeNodeJson (n: Node) : JVal = encNode n
 
 let encodeNodeKindJson (k: NodeKind) : JVal = encNodeKind k
 
-let private dObj (j: JVal) : Result<(string * JVal) list, string> =
+// Phase 337 — a refusal is Core's `DecodeError`: a code from the closed `DecodeCode` set, the
+// path from the value the outermost decoder was handed, what the position expected, and a
+// sentence. The code and the path are the ones the IDL interpreter reports for the same
+// document; the sentence is this layer's own.
+let private dFail (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
+    Error(DecodeError.make code expected message)
+
+// One step further from the root — what a refusal gains as it leaves a member or an item.
+let private dUnder (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error e -> Error(DecodeError.under step e)
+
+let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
     match j with
     | JObj fs -> Ok fs
-    | _ -> Error "expected an object"
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
-let private dTag (fs: (string * JVal) list) : Result<string, string> =
+// The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
+let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = "$type") with
     | Some(_, JStr t) -> Ok t
-    | _ -> Error "missing or non-string $type"
+    | Some _ -> dFail DecodeCode.WrongKind "string" "missing or non-string $type" |> dUnder (PathSegment.Key "$type")
+    | None ->
+        Error
+            { Decoder.missing "$type" with
+                Message = "missing or non-string $type" }
 
-let private dStr (j: JVal) : Result<string, string> =
+// A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
+let private dUnknown (expected: string) (message: string) : Result<'T, DecodeError> =
+    dFail DecodeCode.UnknownTag expected message |> dUnder (PathSegment.Key "$type")
+
+let private dStr (j: JVal) : Result<string, DecodeError> =
     match j with
     | JStr s -> Ok s
-    | _ -> Error "expected a string"
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"
 
-let private dInt (j: JVal) : Result<int, string> =
+let private dInt (j: JVal) : Result<int, DecodeError> =
     match j with
     | JInt i -> Ok i
-    | _ -> Error "expected an int"
+    | _ -> dFail DecodeCode.WrongKind "int" "expected an int"
 
-let private dBool (j: JVal) : Result<bool, string> =
+let private dBool (j: JVal) : Result<bool, DecodeError> =
     match j with
     | JBool b -> Ok b
-    | _ -> Error "expected a bool"
+    | _ -> dFail DecodeCode.WrongKind "bool" "expected a bool"
 
 // A whole-valued float renders without a decimal point, so it parses back as JInt.
 // WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
@@ -131,85 +153,92 @@ let private dBool (j: JVal) : Result<bool, string> =
 // to the string: a host that answered the string would hand a consumer a different tree on
 // the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
 // the float slot.
-let private dFloat (j: JVal) : Result<float, string> =
+let private dFloat (j: JVal) : Result<float, DecodeError> =
     match j with
     | JFloat f -> Ok f
     | JInt i -> Ok(float i)
     | JStr "NaN" -> Ok System.Double.NaN
     | JStr "Infinity" -> Ok System.Double.PositiveInfinity
     | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
-    | _ -> Error "expected a number"
+    | _ -> dFail DecodeCode.WrongKind "number" "expected a number"
 
-let private dUnit (_: JVal) : Result<unit, string> = Ok()
+let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()
 
 // Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
-let private dJson (j: JVal) : Result<JVal, string> = Ok j
+let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j
 
-let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =
+let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T list, DecodeError> =
     match j with
     | JArr xs ->
-        (Ok [], xs)
-        ||> List.fold (fun acc x ->
-            match acc with
-            | Error e -> Error e
-            | Ok items -> dec x |> Result.map (fun v -> v :: items))
-        |> Result.map List.rev
-    | _ -> Error "expected an array"
+        let rec go (i: int) (acc: 'T list) (rest: JVal list) =
+            match rest with
+            | [] -> Ok(List.rev acc)
+            | x :: tail ->
+                match dec x with
+                | Ok v -> go (i + 1) (v :: acc) tail
+                | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
 
-let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =
+        go 0 [] xs
+    | _ -> dFail DecodeCode.WrongKind "array" "expected an array"
+
+let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
     match j with
     | JObj fs ->
         (Ok [], fs)
         ||> List.fold (fun acc (k, v) ->
             match acc with
             | Error e -> Error e
-            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))
+            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
         |> Result.map (List.rev >> Map.ofList)
-    | _ -> Error "expected an object"
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
-let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =
+let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v
-    | None -> Error("missing required field '" + name + "'")
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
+    | None ->
+        Error
+            { Decoder.missing name with
+                Message = "missing required field '" + name + "'" }
 
-let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =
+let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T option, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> Result.map Some
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name) |> Result.map Some
     | None -> Ok None
 
-let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =
+let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) (dflt: 'T) : Result<'T, DecodeError> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt
 
 // An optional closure / opaque field: the value is a sentinel carrying nothing,
 // but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
-let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =
+let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
     Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
 
-let private decTone (j: JVal) : Result<Tone, string> =
+let private decTone (j: JVal) : Result<Tone, DecodeError> =
     match j with
     | JStr "Quiet" -> Ok Tone.Quiet
     | JStr "Loud" -> Ok Tone.Loud
-    | _ -> Error "not a Tone"
+    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Quiet', 'Loud'" "not a Tone"
+    | _ -> dFail DecodeCode.WrongKind "string" "not a Tone"
 
-let rec private decNodeKind (j: JVal) : Result<NodeKind, string> =
+let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dTag __fs |> Result.bind (fun __t ->
     match __t with
     | "Note" -> decNoteSpec j |> Result.map NodeKind.Note
-    | __other -> Error ("unknown node kind: " + __other)))
+    | __other -> dUnknown "one of 'Note'" ("unknown node kind: " + __other)))
 
-and private decNode (j: JVal) : Result<Node, string> =
+and private decNode (j: JVal) : Result<Node, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "id" __fs dStr |> Result.bind (fun id ->
     dReq "kind" __fs decNodeKind |> Result.bind (fun kind ->
     Ok { Id = id; Kind = kind })))
 
-and private decSrc (j: JVal) : Result<Src, string> =
+and private decSrc (j: JVal) : Result<Src, DecodeError> =
     match j with
-    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = "$type")) ->
+    | JObj __fs ->
         dTag __fs |> Result.bind (fun __t ->
         match __t with
         | "Lit" ->
@@ -218,16 +247,16 @@ and private decSrc (j: JVal) : Result<Src, string> =
         | "Ref" ->
             dReq "target" __fs dStr |> Result.bind (fun target ->
             Ok(Src.Ref(target)))
-        | __other -> Error ("unknown Src case: " + __other))
-    | _ -> Error "expected a Src object"
+        | __other -> dUnknown "one of 'Lit', 'Ref'" ("unknown Src case: " + __other))
+    | _ -> dFail DecodeCode.WrongKind "object" "expected a Src object"
 
-and private decPair (j: JVal) : Result<Pair, string> =
+and private decPair (j: JVal) : Result<Pair, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "left" __fs dStr |> Result.bind (fun left ->
     dReq "right" __fs dStr |> Result.bind (fun right ->
     Ok { Left = left; Right = right })))
 
-and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
+and private decNoteSpec (j: JVal) : Result<NoteSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "label" __fs dStr |> Result.bind (fun label ->
     dOpt "src" __fs decSrc |> Result.bind (fun src ->
@@ -237,8 +266,10 @@ and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
 
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
-let decodeNode (s: string) : Result<Node, string> =
-    Json.parse s |> Result.bind decNode
+/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter
+/// reports for the same document, and this layer's sentence (`DecodeError.describe`).
+let decodeNode (s: string) : Result<Node, DecodeError> =
+    Decoder.parse s |> Result.bind decNode
 
 let private witnessKindTag (n: Node) : string =
     match n.Kind with

@@ -287,6 +287,7 @@ let tests =
                   Expect.isFalse (src.Contains "Canon.typed \"") "no default-keyed emission remains"
 
               let ts = emitTsModule idl [ "Note" ]
-              Expect.isTrue (ts.Contains "'tag' in j") "the TS module's isTagged tests the declared key"
+              // Phase 337 — the discriminator is read by `dTag`, over the declared key.
+              Expect.isTrue (ts.Contains "const dDisc = 'tag';") "the TS module's dTag reads the declared key"
               Expect.isFalse (ts.Contains "$type") "no $type appears in a shaped TS module"
           } ]

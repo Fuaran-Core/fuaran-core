@@ -325,9 +325,17 @@ let private encFloat (f: float) : JVal =
     // types. The decode-side *policy* a schema cannot describe — the canonical
     // diagnostic codes with `$`-rooted paths, §16 lenient-accept normalisation,
     // and the reject set — stays hand-written ABOVE this, exactly as the
-    // `'Msg`-generic author facades sit above the generated encoder. So the
-    // generated error is a plain string: enough to locate a structural fault,
-    // deliberately not competing with the hand-written envelope.
+    // `'Msg`-generic author facades sit above the generated encoder.
+    //
+    // Phase 337 — the generated refusal is Core's typed `DecodeError` (Phase 310): a
+    // `DecodeCode`, the path from the value the outermost decoder was handed, what the
+    // position expected, and a sentence. The CODE and the PATH are the interpreter's
+    // (`Idl.Decode.decodeDetailed`) for the same document, so a host built from this
+    // module and a host running the interpreter refuse one malformed document the same
+    // way; the three-way differential holds them to it. The SENTENCE is this layer's own
+    // and is the string it returned before the phase, so `DecodeError.describe` reads a
+    // refusal exactly as the pre-337 decoder worded it — except where the refusal itself
+    // moved to the interpreter's (an object with no discriminator at a union slot).
     //
     // Two inversions are NOT symmetric with the encoder, and are the ones to get
     // right:
@@ -339,7 +347,7 @@ let private encFloat (f: float) : JVal =
     //     back as `JInt` — `dFloat` accepts both.
     // -----------------------------------------------------------------------
 
-    /// The decoder expression for a type — a `JVal -> Result<'T, string>`.
+    /// The decoder expression for a type — a `JVal -> Result<'T, DecodeError>`.
     /// Mirrors [[encFn]] arm for arm.
     let rec decFn (t: IdlType) : Result<string, CodegenError> =
         match t with
@@ -374,12 +382,14 @@ let private encFloat (f: float) : JVal =
         // Phase 252 — a declared wire form is checked FIRST (its type, then its format),
         // so this host refuses exactly what the interpreter and the TypeScript host refuse,
         // whatever the codec itself would admit.
+        // Phase 337 — the codec's own refusal is a SENTENCE (its contract is unchanged), lifted
+        // by `dHosted` to `OutOfRange` at the slot.
         | THosted h ->
             match hostedWireRefusal "the F# decoder emitter" h with
             | Some e -> Error e
             | None ->
                 match h.Wire with
-                | None -> Ok h.Decode
+                | None -> Ok(sprintf "(fun (__j: JVal) -> dHosted ((%s) __j))" h.Decode)
                 | Some w ->
                     decFn w
                     |> Result.map (fun wd ->
@@ -388,7 +398,11 @@ let private encFloat (f: float) : JVal =
                             | Some f -> sprintf " |> Result.bind (fun _ -> dFormat %s __j)" (SourceLit.fsString f)
                             | None -> ""
 
-                        sprintf "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> (%s) __j))" wd format h.Decode)
+                        sprintf
+                            "(fun (__j: JVal) -> %s __j%s |> Result.bind (fun _ -> dHosted ((%s) __j)))"
+                            wd
+                            format
+                            h.Decode)
         | TRecord n -> Ok("dec" + n)
         | TMap vt -> decFn vt |> Result.map (sprintf "(dMap %s)")
 
@@ -450,23 +464,45 @@ let private encFloat (f: float) : JVal =
         let closes = String.replicate (List.length binders + extraCloses) ")"
         (opens @ [ indent + final + closes ]) |> String.concat "\n"
 
+    /// [[bindChain]] for a case whose final is a declared case REFINE (Phase 945): the last
+    /// binder is `dRefine` rather than `Result.bind`, because a refine answers a sentence
+    /// (`Result<_, string>`) and every other step a typed refusal (Phase 337). Binding the
+    /// last step that way leaves the refine's text exactly where it always sat — its own
+    /// continuation lines are indented for that column, so it cannot be wrapped in place.
+    let bindChainRefined (indent: string) (binders: (string * string) list) (final: string) : string =
+        let count = List.length binders
+
+        let opens =
+            binders
+            |> List.mapi (fun i (v, e) ->
+                let bind = if i = count - 1 then "dRefine" else "Result.bind"
+                sprintf "%s%s |> %s (fun %s ->" indent e bind v)
+
+        (opens @ [ indent + final + String.replicate count ")" ]) |> String.concat "\n"
+
     let fieldBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
         fs
         |> List.map (fun f -> decField idl f |> Result.map (fun e -> ident f.Name, e))
         |> sequenceR
 
+    /// An enum decoder (Phase 337): a string naming no case is `UnknownTag`, anything else
+    /// `WrongKind` — the interpreter's split. Both keep the pre-337 sentence.
     let enumDecoder (e: IdlEnum) =
         let arms =
             e.Cases
             |> List.map (fun c -> sprintf "    | JStr %s -> Ok %s.%s" (SourceLit.fsString (e.WireOf c)) e.Name c)
             |> String.concat "\n"
 
+        let sentence = SourceLit.fsString ("not a " + e.Name)
+
         sprintf
-            "let private dec%s (j: JVal) : Result<%s, string> =\n    match j with\n%s\n    | _ -> Error %s"
+            "let private dec%s (j: JVal) : Result<%s, DecodeError> =\n    match j with\n%s\n    | JStr _ -> dFail DecodeCode.UnknownTag %s %s\n    | _ -> dFail DecodeCode.WrongKind \"string\" %s"
             e.Name
             e.Name
             arms
-            (SourceLit.fsString ("not a " + e.Name))
+            (SourceLit.fsString (oneOf e.WireCases))
+            sentence
+            sentence
 
     /// A union decoder. Generic unions take one `decX` codec per type parameter,
     /// with the explicit type-parameter list [[unionEncoder]] needs for the same
@@ -482,7 +518,7 @@ let private encFloat (f: float) : JVal =
         : Result<string, CodegenError> =
         let decArgs =
             u.Params
-            |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, string>)" p p)
+            |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, DecodeError>)" p p)
             |> String.concat ""
 
         // Declared params stay generic; `'Msg` alone is pinned to `obj`.
@@ -504,8 +540,14 @@ let private encFloat (f: float) : JVal =
             // policy expression (field binder names in scope); the binder chain around it
             // is untouched, so a refine cannot change WHICH fields decode, only what is
             // accepted once they have.
+            //
+            // Phase 337 — a refine answers a SENTENCE, as it always has; `dRefine` binds the
+            // case's last member and lifts the refine's refusal to `OutOfRange` at the case's
+            // object (see [[bindChainRefined]]).
+            let refine = refines.TryFind(u.Name + "." + c.Tag)
+
             let final =
-                match refines.TryFind(u.Name + "." + c.Tag) with
+                match refine with
                 | Some r -> r
                 | None -> sprintf "Ok(%s)" (ctor c)
 
@@ -518,13 +560,18 @@ let private encFloat (f: float) : JVal =
                         sprintf
                             "        | %s ->\n%s"
                             (SourceLit.fsString c.Tag)
-                            (bindChain "            " binders final 0))
+                            (match refine with
+                             | Some _ -> bindChainRefined "            " binders final
+                             | None -> bindChain "            " binders final 0))
 
             body
             |> Result.map (fun b -> docFn ("decarm:" + u.Name + "." + c.Tag) "        " + b)
 
-        // The declared transparent case is on the wire BARE, so it is recognised by
-        // the ABSENCE of a discriminator, not by a tag.
+        // The declared transparent case is on the wire BARE, so it is recognised as a
+        // value that is not an object. Every object goes to the tag dispatch, as the
+        // interpreter's does (Phase 337: an object with no discriminator is `MissingField`
+        // at it, never a payload; Phase 303 refuses a transparent case whose payload can be
+        // an object, so no bare payload is lost).
         let transparent: Result<string option, CodegenError> =
             match TransparentUnion.tag tokens u with
             | Some ttag ->
@@ -550,23 +597,26 @@ let private encFloat (f: float) : JVal =
             |> concatR "\n"
             |> Result.map (fun arms ->
                 sprintf
-                    "    | JObj __fs when (__fs |> List.exists (fun (k, _) -> k = %s)) ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> Error (%s + __other))"
-                    (SourceLit.fsString disc)
+                    "    | JObj __fs ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> dUnknown %s (%s + __other))"
                     arms
+                    (SourceLit.fsString (oneOf (u.Cases |> List.map (fun c -> c.Tag))))
                     (SourceLit.fsString ("unknown " + u.Name + " case: ")))
 
         let fallthrough =
             transparent
             |> Result.map (function
                 | Some t -> t
-                | None -> sprintf "    | _ -> Error %s" (SourceLit.fsString ("expected a " + u.Name + " object")))
+                | None ->
+                    sprintf
+                        "    | _ -> dFail DecodeCode.WrongKind \"object\" %s"
+                        (SourceLit.fsString ("expected a " + u.Name + " object")))
 
         taggedR
         |> Result.bind (fun tagged ->
             fallthrough
             |> Result.map (fun fall ->
                 sprintf
-                    "and private dec%s%s%s (j: JVal) : Result<%s%s, string> =\n    match j with\n%s\n%s"
+                    "and private dec%s%s%s (j: JVal) : Result<%s%s, DecodeError> =\n    match j with\n%s\n%s"
                     u.Name
                     declArgs
                     decArgs
@@ -582,7 +632,7 @@ let private encFloat (f: float) : JVal =
         fieldBinders idl k.Fields
         |> Result.map (fun binders ->
             sprintf
-                "and private dec%sSpec (j: JVal) : Result<%sSpec%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+                "and private dec%sSpec (j: JVal) : Result<%sSpec%s, DecodeError> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
                 k.Tag
                 k.Tag
                 (objParams msg (k.Tag + "Spec") [])
@@ -595,7 +645,7 @@ let private encFloat (f: float) : JVal =
         fieldBinders idl r.Fields
         |> Result.map (fun binders ->
             sprintf
-                "and private dec%s (j: JVal) : Result<%s%s, string> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+                "and private dec%s (j: JVal) : Result<%s%s, DecodeError> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
                 r.Name
                 r.Name
                 (objParams msg r.Name [])
@@ -604,28 +654,166 @@ let private encFloat (f: float) : JVal =
     /// The decode-side helper prelude, emitted once per module. `dTag` reads the
     /// DECLARED discriminator (Phase 108) — `"$type"` interpolates to exactly the
     /// pre-declarable bytes.
-    let decodeHelpers (disc: string) : string =
-        String.concat
-            "\n\n"
-            [ "let private dObj (j: JVal) : Result<(string * JVal) list, string> =\n    match j with\n    | JObj fs -> Ok fs\n    | _ -> Error \"expected an object\""
-              sprintf
-                  "let private dTag (fs: (string * JVal) list) : Result<string, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = %s) with\n    | Some(_, JStr t) -> Ok t\n    | _ -> Error %s"
-                  (SourceLit.fsString disc)
-                  (SourceLit.fsString ("missing or non-string " + disc))
-              "let private dStr (j: JVal) : Result<string, string> =\n    match j with\n    | JStr s -> Ok s\n    | _ -> Error \"expected a string\""
-              "let private dInt (j: JVal) : Result<int, string> =\n    match j with\n    | JInt i -> Ok i\n    | _ -> Error \"expected an int\""
-              "let private dBool (j: JVal) : Result<bool, string> =\n    match j with\n    | JBool b -> Ok b\n    | _ -> Error \"expected a bool\""
-              "// A whole-valued float renders without a decimal point, so it parses back as JInt.\n// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which\n// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never\n// to the string: a host that answered the string would hand a consumer a different tree on\n// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at\n// the float slot.\nlet private dFloat (j: JVal) : Result<float, string> =\n    match j with\n    | JFloat f -> Ok f\n    | JInt i -> Ok(float i)\n    | JStr \"NaN\" -> Ok System.Double.NaN\n    | JStr \"Infinity\" -> Ok System.Double.PositiveInfinity\n    | JStr \"-Infinity\" -> Ok System.Double.NegativeInfinity\n    | _ -> Error \"expected a number\""
-              "let private dUnit (_: JVal) : Result<unit, string> = Ok()"
-              "// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
+    ///
+    /// Phase 337 — every helper answers Core's `DecodeError`, with the CODE, PATH and
+    /// EXPECTED the interpreter's walk (`Idl.Decode`) reports for the same position and the
+    /// SENTENCE this prelude has always returned. `dHosted` is emitted when the vocabulary
+    /// declares a hosted slot and `dRefine` when the support declares a case refine — the two
+    /// places a verbatim expression answers a sentence rather than a typed refusal.
+    let decodeHelpers (disc: string) (hosted: bool) (refines: bool) : string =
+        let discLit = SourceLit.fsString disc
+        let discSentence = SourceLit.fsString ("missing or non-string " + disc)
+        // A triple-quoted template cannot END in a quote character; the helpers whose last
+        // token is a string literal close it with this.
+        let q = "\""
+
+        [ yield
+              """// Phase 337 — a refusal is Core's `DecodeError`: a code from the closed `DecodeCode` set, the
+// path from the value the outermost decoder was handed, what the position expected, and a
+// sentence. The code and the path are the ones the IDL interpreter reports for the same
+// document; the sentence is this layer's own.
+let private dFail (code: DecodeCode) (expected: string) (message: string) : Result<'T, DecodeError> =
+    Error(DecodeError.make code expected message)"""
+          yield
+              """// One step further from the root — what a refusal gains as it leaves a member or an item.
+let private dUnder (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error e -> Error(DecodeError.under step e)"""
+          yield
+              """let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
+    match j with
+    | JObj fs -> Ok fs
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"""
+              + q
+          yield
+              """// The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
+let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
+    match fs |> List.tryFind (fun (k, _) -> k = __DISC__) with
+    | Some(_, JStr t) -> Ok t
+    | Some _ -> dFail DecodeCode.WrongKind "string" __SENTENCE__ |> dUnder (PathSegment.Key __DISC__)
+    | None ->
+        Error
+            { Decoder.missing __DISC__ with
+                Message = __SENTENCE__ }"""
+                  .Replace("__DISC__", discLit)
+                  .Replace("__SENTENCE__", discSentence)
+          yield
+              """// A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
+let private dUnknown (expected: string) (message: string) : Result<'T, DecodeError> =
+    dFail DecodeCode.UnknownTag expected message |> dUnder (PathSegment.Key __DISC__)"""
+                  .Replace("__DISC__", discLit)
+          yield
+              """let private dStr (j: JVal) : Result<string, DecodeError> =
+    match j with
+    | JStr s -> Ok s
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"""
+              + q
+          yield
+              """let private dInt (j: JVal) : Result<int, DecodeError> =
+    match j with
+    | JInt i -> Ok i
+    | _ -> dFail DecodeCode.WrongKind "int" "expected an int"""
+              + q
+          yield
+              """let private dBool (j: JVal) : Result<bool, DecodeError> =
+    match j with
+    | JBool b -> Ok b
+    | _ -> dFail DecodeCode.WrongKind "bool" "expected a bool"""
+              + q
+          yield
+              """// A whole-valued float renders without a decimal point, so it parses back as JInt.
+// WIRE_FORMAT §7 — a float slot also accepts the three quoted non-finite sentinels, which
+// is how §5 spells a number JSON has no literal for. The value decodes to the FLOAT, never
+// to the string: a host that answered the string would hand a consumer a different tree on
+// the second decode while the bytes stayed identical. `dInt` is NOT widened — §7 stops at
+// the float slot.
+let private dFloat (j: JVal) : Result<float, DecodeError> =
+    match j with
+    | JFloat f -> Ok f
+    | JInt i -> Ok(float i)
+    | JStr "NaN" -> Ok System.Double.NaN
+    | JStr "Infinity" -> Ok System.Double.PositiveInfinity
+    | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
+    | _ -> dFail DecodeCode.WrongKind "number" "expected a number"""
+              + q
+          yield "let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()"
+          yield
+              """// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
-let private dJson (j: JVal) : Result<JVal, string> = Ok j"
-              "let private dList (dec: JVal -> Result<'T, string>) (j: JVal) : Result<'T list, string> =\n    match j with\n    | JArr xs ->\n        (Ok [], xs)\n        ||> List.fold (fun acc x ->\n            match acc with\n            | Error e -> Error e\n            | Ok items -> dec x |> Result.map (fun v -> v :: items))\n        |> Result.map List.rev\n    | _ -> Error \"expected an array\""
-              "let private dMap (dec: JVal -> Result<'T, string>) (j: JVal) : Result<Map<string, 'T>, string> =\n    match j with\n    | JObj fs ->\n        (Ok [], fs)\n        ||> List.fold (fun acc (k, v) ->\n            match acc with\n            | Error e -> Error e\n            | Ok items -> dec v |> Result.map (fun d -> (k, d) :: items))\n        |> Result.map (List.rev >> Map.ofList)\n    | _ -> Error \"expected an object\""
-              "let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v\n    | None -> Error(\"missing required field '\" + name + \"'\")"
-              "let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) : Result<'T option, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v |> Result.map Some\n    | None -> Ok None"
-              "let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, string>) (dflt: 'T) : Result<'T, string> =\n    match fs |> List.tryFind (fun (k, _) -> k = name) with\n    | Some(_, v) -> dec v\n    | None -> Ok dflt"
-              "// An optional closure / opaque field: the value is a sentinel carrying nothing,\n// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.\nlet private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, string> =\n    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))" ]
+let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j"""
+          yield
+              """let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T list, DecodeError> =
+    match j with
+    | JArr xs ->
+        let rec go (i: int) (acc: 'T list) (rest: JVal list) =
+            match rest with
+            | [] -> Ok(List.rev acc)
+            | x :: tail ->
+                match dec x with
+                | Ok v -> go (i + 1) (v :: acc) tail
+                | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
+
+        go 0 [] xs
+    | _ -> dFail DecodeCode.WrongKind "array" "expected an array"""
+              + q
+          yield
+              """let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
+    match j with
+    | JObj fs ->
+        (Ok [], fs)
+        ||> List.fold (fun acc (k, v) ->
+            match acc with
+            | Error e -> Error e
+            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
+        |> Result.map (List.rev >> Map.ofList)
+    | _ -> dFail DecodeCode.WrongKind "object" "expected an object"""
+              + q
+          yield
+              """let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
+    | None ->
+        Error
+            { Decoder.missing name with
+                Message = "missing required field '" + name + "'" }"""
+          yield
+              """let private dOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T option, DecodeError> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name) |> Result.map Some
+    | None -> Ok None"""
+          yield
+              """let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) (dflt: 'T) : Result<'T, DecodeError> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
+    | None -> Ok dflt"""
+          yield
+              """// An optional closure / opaque field: the value is a sentinel carrying nothing,
+// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
+let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
+    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))"""
+          if hosted then
+              yield
+                  """// A hosted slot's codec answers a SENTENCE (`JVal -> Result<'host, string>`): its refusal is
+// `OutOfRange` at the slot — any declared wire form has already been checked, so the value is
+// of the kind the slot takes and the codec does not admit it.
+let private dHosted (r: Result<'T, string>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error m -> dFail DecodeCode.OutOfRange "a value the slot's host codec admits" m"""
+          if refines then
+              yield
+                  """// A declared case refine answers a SENTENCE over the members it reads: `dRefine` binds the
+// case's last member and lifts the refine's refusal to `OutOfRange` at the case's object —
+// every member decoded, and together they are a value the case does not admit.
+let private dRefine (f: 'T -> Result<'U, string>) (r: Result<'T, DecodeError>) : Result<'U, DecodeError> =
+    match r with
+    | Error e -> Error e
+    | Ok v ->
+        match f v with
+        | Ok u -> Ok u
+        | Error m -> dFail DecodeCode.OutOfRange "a case its refinement admits" m""" ]
+        |> String.concat "\n\n"
 
     /// Phase 252 — the generated F# check of a hosted slot's declared FORMAT, emitted only
     /// when the vocabulary declares one ([[declaresHostedFormat]]). It restates
@@ -634,7 +822,7 @@ let private dJson (j: JVal) : Result<JVal, string> = Ok j"
     let fsFormatHelper =
         """// Phase 252 — a hosted slot's declared string format, checked before its host codec runs,
 // exactly as the interpreter and the TypeScript host check it.
-let private dFormat (format: string) (j: JVal) : Result<unit, string> =
+let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     let day (y: int) (m: int) (d: int) =
         y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
 
@@ -665,7 +853,10 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
             )
         | _ -> false
 
-    if ok then Ok() else Error("expected a '" + format + "' string")"""
+    if ok then
+        Ok()
+    else
+        dFail DecodeCode.OutOfRange ("a '" + format + "' string") ("expected a '" + format + "' string")"""
 
 
     // -----------------------------------------------------------------------
@@ -969,14 +1160,18 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
                             k.Tag)
                     |> String.concat "\n"
 
+                // Phase 337 — an unknown kind is `UnknownTag` at the discriminator, listing
+                // the kinds this module decodes.
                 sprintf
-                    "let rec private decNodeKind (j: JVal) : Result<NodeKind%s, string> =\n"
+                    "let rec private decNodeKind (j: JVal) : Result<NodeKind%s, DecodeError> =\n"
                     (objParams msg "NodeKind" [])
                 + "    dObj j |> Result.bind (fun __fs ->\n"
                 + "    dTag __fs |> Result.bind (fun __t ->\n"
                 + "    match __t with\n"
                 + arms
-                + "\n    | __other -> Error (\"unknown node kind: \" + __other)))"
+                + sprintf
+                    "\n    | __other -> dUnknown %s (\"unknown node kind: \" + __other)))"
+                    (SourceLit.fsString (oneOf (kinds |> List.map (fun k -> k.Tag))))
 
             let decNodeDecl =
                 // Phase 690 — the envelope binds through the same `bindChain` /
@@ -1005,7 +1200,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
                     let binders =
                         [ "id", "dReq \"id\" __fs dStr"; "kind", kindBinder ] @ envelopeBinders
 
-                    sprintf "and private decNode (j: JVal) : Result<Node%s, string> =\n" (objParams msg "Node" [])
+                    sprintf "and private decNode (j: JVal) : Result<Node%s, DecodeError> =\n" (objParams msg "Node" [])
                     + "    dObj j |> Result.bind (fun __fs ->\n"
                     + bindChain "    " binders final 1)
 
@@ -1060,12 +1255,14 @@ let private dFormat (format: string) (j: JVal) : Result<unit, string> =
                else
                    [])
               (sup.AccessorSplice |> Option.toList)
-              decodeHelpers idl.Wire.Discriminator
+              decodeHelpers idl.Wire.Discriminator (declaresHosted idl) (not sup.CaseRefines.IsEmpty)
               :: (if declaresHostedFormat idl then [ fsFormatHelper ] else [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
+              // Phase 337 — the parser's refusal through `Decoder.parse`: `InvalidJson` at the root,
+              // or `LimitExceeded` past the nesting cap, with `Json.parse`'s sentence.
               [ sprintf
-                    "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\nlet decodeNode (s: string) : Result<Node%s, string> =\n    Json.parse s |> Result.bind decNode"
+                    "/// Structural decode. The policy layer (diagnostics, §16 lenient-accept,\n/// the reject set) composes ABOVE this — see the Phase 672 note in the generator.\n/// A refusal is Core's `DecodeError` (Phase 337): the code and path the IDL interpreter\n/// reports for the same document, and this layer's sentence (`DecodeError.describe`).\nlet decodeNode (s: string) : Result<Node%s, DecodeError> =\n    Decoder.parse s |> Result.bind decNode"
                     (objParams msg "Node" []) ]
               [ witness ]
               [ validatorDecl msg ]

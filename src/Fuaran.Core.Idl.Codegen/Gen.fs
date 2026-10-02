@@ -28,7 +28,9 @@ module Gen =
             SpecDecl: string
             /// The full `and private enc<Tag>Spec …` member, verbatim.
             Encoder: string
-            /// The full `and private dec<Tag>Spec …` member, verbatim.
+            /// The full `and private dec<Tag>Spec …` member, verbatim. Since Phase 337 it
+            /// answers `Result<<Tag>Spec, DecodeError>`, as the generated decoders it composes
+            /// with do.
             Decoder: string
             /// The full `let mk<Tag> …` smart constructor, or None to emit none — the
             /// generated ctor would construct the IDL-derived record, which under a
@@ -51,13 +53,16 @@ module Gen =
             TypeSplice: string option
             /// Verbatim `and private …` member(s) appended to the encoder group.
             EncodeSplice: string option
-            /// Verbatim `and private …` member(s) appended to the decoder group.
+            /// Verbatim `and private …` member(s) appended to the decoder group. A member that
+            /// composes with a generated decoder answers `DecodeError`, as they do (Phase 337).
             DecodeSplice: string option
             /// Verbatim module-level lets emitted after the JVal accessor block.
             AccessorSplice: string option
             /// `"Union.Tag"` → the full final expression replacing `Ok(Case(…))` in that
             /// case's decoder — decode POLICY (e.g. `SetState`'s value-XOR-valueFrom) that
-            /// the structural inversion cannot express. Field binder names are in scope.
+            /// the structural inversion cannot express. Field binder names are in scope. The
+            /// expression answers `Result<Case, string>`; since Phase 337 its refusal reaches
+            /// the caller as `OutOfRange` at the case's object, its sentence unchanged.
             CaseRefines: Map<string, string>
             KindProjections: Map<string, KindProjection>
         }

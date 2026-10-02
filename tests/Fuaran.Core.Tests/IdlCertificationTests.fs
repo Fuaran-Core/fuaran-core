@@ -354,7 +354,7 @@ let valueCarryingDefaults =
                       + "\n];\n"
                       + "for (const [name, s] of __wire) {\n"
                       + "  const r = decodeNode(s);\n"
-                      + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + r.error));\n"
+                      + "  console.log(name + '\\u0001' + (r.ok ? encodeNode(r.value) : 'DECODE-ERROR: ' + JSON.stringify(r.error)));\n"
                       + "}\n"
 
                   let tmp =
