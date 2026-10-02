@@ -26,8 +26,10 @@ method Fuaran.Core.Hash.trySha256Hex(System.String) : Microsoft.FSharp.Core.FSha
 method Fuaran.Core.Hash.tryUtf8Bytes(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Byte[], Fuaran.Core.IllFormedUtf16>
 method Fuaran.Core.Hash.utf8Bytes(System.String) : System.Byte[]
 method Fuaran.Core.Tree+Index.ancestors`2(Fuaran.Core.IdWitness`1<!!0>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!1, !!0>) : Microsoft.FSharp.Collections.FSharpList`1<!!1>
+method Fuaran.Core.Tree+Index.buildWith`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>
 method Fuaran.Core.Tree+Index.build`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0) : Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>
 method Fuaran.Core.Tree+Index.depth`2(Fuaran.Core.IdWitness`1<!!0>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!1, !!0>) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
+method Fuaran.Core.Tree+Index.isFreshForWith`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>) : System.Boolean
 method Fuaran.Core.Tree+Index.isFreshFor`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>) : System.Boolean
 method Fuaran.Core.Tree+Index.parentOf`2(Fuaran.Core.IdWitness`1<!!0>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!1, !!0>) : Microsoft.FSharp.Core.FSharpOption`1<!!1>
 method Fuaran.Core.Tree+Index.path`2(Fuaran.Core.IdWitness`1<!!0>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!1, !!0>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<!!0>>

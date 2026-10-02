@@ -1316,10 +1316,46 @@ module Ops =
                 | ReorderChildren(parent, _) ->
                     let p = Tree.tryFind w idw parent pre |> Option.get
                     Ok(ReorderChildren(parent, p |> w.Children |> List.map w.Id))
-                // The pre-state node restores the content; its children are not read by the
-                // inverse either, so the children the tree holds when the undo runs are kept.
-                | UpdateNode node -> Ok(UpdateNode(Tree.tryFind w idw (w.Id node) pre |> Option.get))
+                // The pre-state node's CONTENT restores the content; the inverse carries it as a
+                // shell (`ReplaceChildren old []`, Phase 305), because `UpdateNode` never reads its
+                // payload's children — the children the tree holds when the undo runs are kept —
+                // and an undo stack that stored the whole pre-state subtree per edit held, and
+                // never read, a copy of everything below the node.
+                | UpdateNode node ->
+                    Ok(UpdateNode(w.ReplaceChildren (Tree.tryFind w idw (w.Id node) pre |> Option.get) []))
                 | Batch _ -> Ok op // unreachable (handled above) — keeps the match total
+
+    /// The script-level inverse (Phase 305): the inverses of `ops`, each derived against the state
+    /// the forward op saw, in REVERSE order — so `applyAll (invertAll w idw ops pre) (applyAll w idw
+    /// ops pre) = pre`, the law `invert` states per op lifted to the sequence. It refuses as
+    /// `applyAll` does, with the 0-based index of the first op that does not apply (or cannot be
+    /// inverted, which is the same op: `invert` refuses exactly what `canApply` refuses) and its
+    /// envelope.
+    ///
+    /// **Why a script and not `invert (Batch ops)`.** That form returns a `Batch`, and a `Batch` is
+    /// all-or-nothing INSIDE one operation where a script stops at the first refusal and keeps the
+    /// accepted prefix — so an undo stack that recorded the SCRIPT it applied, and inverted it as a
+    /// batch, would undo with a different failure shape from the one it did. `invertAll` stores the
+    /// shape it applied. The elements are the per-op inverses, so a `Batch` inside `ops` inverts to
+    /// one `Batch` as `invert` has always made it.
+    let invertAll
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (ops: SkeletonOp<'Node, 'Id> list)
+        (pre: 'Node)
+        : Result<SkeletonOp<'Node, 'Id> list, int * Rejection<'Id>> =
+        let rec go i acc state =
+            function
+            | [] -> Ok acc
+            | o :: rest ->
+                match invert w idw o state with
+                | Error e -> Error(i, e)
+                | Ok inv ->
+                    match apply w idw o state with
+                    | Ok state' -> go (i + 1) (inv :: acc) state' rest
+                    | Error e -> Error(i, e)
+
+        go 0 [] pre ops
 
     /// Normalise an op script (Phase 23): a conservative, structural peephole that collapses the
     /// redundancy classes it can prove safe *without the tree*, leaving everything else untouched.
@@ -1333,12 +1369,25 @@ module Ops =
     ///     applyable script), so only the net move survives;
     ///   - `ReorderChildren(p,_)` then `ReorderChildren(p,o)` — a reorder sets the full order, so the
     ///     last one on a parent wins;
+    ///   - (Phase 305, D65's case) `UpdateNode a` then `UpdateNode a'` of the same id — the last
+    ///     rewrite wins, since each keeps the children and replaces the content whole;
+    ///     `InsertChild(p, n)` then `UpdateNode n'` of `n`'s id — one insert carrying `n'`'s content
+    ///     over `n`'s children (what the pair leaves in the tree); `UpdateNode n` then
+    ///     `RemoveNode (id n)` — the remove, since a rewrite of a node about to leave is unobservable;
     ///   - an empty `Batch []` is dropped, and a `Batch` is normalised recursively.
-    /// Left-to-right peephole passes iterated to a fixpoint, so it is genuinely **idempotent**
-    /// (`normalize ∘ normalize = normalize`) and never lengthens a script. `'Node` needs no equality
-    /// (it compares ids only). **Caveat:** preservation is guaranteed only for a script that is
-    /// *applyable* to the tree — collapsing an insert/remove pair can turn an `applyAll` that would
-    /// have *failed* at that pair into one that succeeds, so normalise after validating, not before.
+    /// It is **idempotent** (`normalize ∘ normalize = normalize`) and never lengthens a script.
+    /// `'Node` needs no equality (it compares ids only). **Caveat:** preservation is guaranteed only
+    /// for a script that is *applyable* to the tree — collapsing an insert/remove pair can turn an
+    /// `applyAll` that would have *failed* at that pair into one that succeeds, so normalise after
+    /// validating, not before.
+    ///
+    /// **One left fold with an output stack (Phase 305).** Each op is pushed onto the ops already
+    /// committed; a push that collapses with the top replaces or drops it and re-examines the new
+    /// top, so a collapse that newly adjoins two collapsible ops (a cancelled insert/remove between
+    /// two same-target moves) is caught in the same pass. Linear in the script, a loop rather than a
+    /// recursion over it — the recursive peephole it replaces, iterated to a fixpoint, overflowed the
+    /// stack at about 2,000 flat ops — and the output has no adjacent collapsible pair by
+    /// construction, which is what makes a second pass the identity.
     let rec normalize
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -1346,41 +1395,56 @@ module Ops =
         : SkeletonOp<'Node, 'Id> list =
         let eq = idw.Equals
 
-        // 1. normalise inside batches; drop empties
-        let stripped =
-            ops
-            |> List.collect (fun op ->
-                match op with
-                | Batch inner ->
-                    match normalize w idw inner with
-                    | [] -> []
-                    | xs -> [ Batch xs ]
-                | _ -> [ op ])
+        // What the committed top and the incoming op collapse to, if they collapse: `None` keeps
+        // both, `Some []` drops both, `Some [y]` replaces the top with `y`.
+        let collapse (top: SkeletonOp<'Node, 'Id>) (x: SkeletonOp<'Node, 'Id>) =
+            match top, x with
+            | InsertChild(_, node), RemoveNode target when eq (w.Id node) target -> Some []
+            | MoveNode(t1, _), MoveNode(t2, _) when eq t1 t2 -> Some [ x ]
+            | ReorderChildren(p1, _), ReorderChildren(p2, _) when eq p1 p2 -> Some [ x ]
+            | UpdateNode a, UpdateNode a' when eq (w.Id a) (w.Id a') -> Some [ x ]
+            | InsertChild(p, n), UpdateNode n' when eq (w.Id n) (w.Id n') ->
+                Some [ InsertChild(p, w.ReplaceChildren n' (w.Children n)) ]
+            | UpdateNode n, RemoveNode target when eq (w.Id n) target -> Some [ x ]
+            | _ -> None
 
-        // 2. adjacency peephole — one pass commits each non-collapsing head before recursing, so a
-        //    collapse that newly adjoins two collapsible ops (e.g. a cancelled insert/remove between
-        //    two same-target moves) is not caught within the pass.
-        let rec peephole xs =
-            match xs with
-            | [] -> []
-            | InsertChild(_, node) :: RemoveNode target :: rest when eq (w.Id node) target -> peephole rest
-            | MoveNode(t1, _) :: (MoveNode(t2, _) as second) :: rest when eq t1 t2 -> peephole (second :: rest)
-            | ReorderChildren(p1, _) :: (ReorderChildren(p2, _) as second) :: rest when eq p1 p2 ->
-                peephole (second :: rest)
-            | x :: rest -> x :: peephole rest
+        // Push `x` onto the stack, collapsing against the top for as long as it collapses. The loop
+        // is bounded by the stack's depth and pops at every turn, so the whole fold is O(n).
+        let push (stack: SkeletonOp<'Node, 'Id> list) (x: SkeletonOp<'Node, 'Id>) =
+            let mutable stack = stack
+            let mutable pending = Some x
 
-        // …so iterate the pass to a fixpoint. A pass only ever drops ops, so the length is
-        // monotonically non-increasing; an unchanged length means no collapse fired ⇒ done. This is
-        // what makes `normalize` genuinely idempotent (no 'Node equality needed — length suffices).
-        let rec toFixpoint xs =
-            let xs' = peephole xs
+            while Option.isSome pending do
+                let x = Option.get pending
 
-            if List.length xs' = List.length xs then
-                xs'
-            else
-                toFixpoint xs'
+                match stack with
+                | top :: rest ->
+                    match collapse top x with
+                    | None ->
+                        stack <- x :: stack
+                        pending <- None
+                    | Some [] ->
+                        stack <- rest
+                        pending <- None
+                    | Some(y :: _) ->
+                        stack <- rest
+                        pending <- Some y
+                | [] ->
+                    stack <- [ x ]
+                    pending <- None
 
-        toFixpoint stripped
+            stack
+
+        // Batches are normalised inside first and dropped when empty; everything else is pushed.
+        (([], ops)
+         ||> List.fold (fun stack op ->
+             match op with
+             | Batch inner ->
+                 match normalize w idw inner with
+                 | [] -> stack
+                 | xs -> push stack (Batch xs)
+             | _ -> push stack op))
+        |> List.rev
 
     // ---- footprint + independence (Phase 78) ----
     // The multi-agent coordination invariant, computed structurally from the op-script (never
@@ -2240,15 +2304,31 @@ module Diff =
         /// `legal` enumerating what the grammar lets `parentKind` hold. Declared last.
         | IllegalChildInTree of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
 
-    /// Derive a script such that `Ops.applyAll (toOps w idw before after) before`
-    /// reproduces `after` structurally. Relocated subtrees diff to `MoveNode` (never
-    /// remove+insert), so an unchanged subtree is preserved, not destroyed and rebuilt.
-    /// The emitted order is always applyable: added nodes go in as leaf shells (top-down),
-    /// every survivor is then reattached/reordered to its `after` position, and removed
-    /// regions are deleted **last** (so a surviving child is pulled out before its old
-    /// container is removed). Structural only — per-kind property edits are out of scope
-    /// (`Core.Ops`' remit); the two roots must share an id.
-    let toOps
+    // ---- the one emitter behind every entry (Phase 305) ----
+    // The four structural passes are unchanged from Phase 245 and are what `proofs/TreeDiff.fst`
+    // models clause for clause. Phase 305 added the two CONTENT blocks around them — `UpdateNode`
+    // for every survivor whose own content differs between the trees, which only a caller's
+    // `encode` can see (the witness has no content accessor) — and moved the two maps and the
+    // step-4 lookup onto `Tree.Index` (the `parentMap` here was `Tree.Index.build`'s `ParentOf`
+    // written a second time, and step 4 walked `after` once per reordered parent).
+    //
+    // THE PLACEMENT RULE (DECISIONS D103). A content-changing survivor whose NEW node `canHold`
+    // accepts is updated FIRST, before any insert or move; every other update goes LAST, after the
+    // reorders. First, because a survivor that becomes a container is the parent of the inserts
+    // and moves under it, and `validateInsert` / `validateMove` read the kind the tree holds at
+    // that step — a leaf that is about to become a section refuses its own new children
+    // (`NotAContainer(p, para)`, the shape `TreeDiff.fst` section 12 pins) unless the rewrite
+    // lands before them. Last, because a survivor that becomes a LEAF may be rewritten only once
+    // its children have left (`validateUpdate` refuses a childful leaf), and they leave in the
+    // moves and the removals. An `UpdateNode` keeps the children the tree holds, so it is inert to
+    // the four structural blocks wherever it sits; the two sites are where the containment check
+    // is satisfied. Measured over 5,444 independent pairs with drawn kinds and a drawn `canHold`:
+    // 0 refused under `applyAllWith`, 0 round-trip mismatches, where the structural script had 41%
+    // refused and appending every update last still had 41% (`ProofOracleTests`, the content-aware
+    // bridge).
+    let private emitWith
+        (changed: ('Node -> 'Node -> bool) option)
+        (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (before: 'Node)
@@ -2258,26 +2338,22 @@ module Diff =
         let key (i: 'Id) = idw.ToString i
 
         // First duplicated id in a tree (by key), if any — Core's named structural predicate
-        // (Phase 139). This was a `groupBy` of its own until then, and the retirement is the point:
-        // a diff refusing a malformed tree and an insert refusing a malformed graft are the same
-        // notion of malformed, and they now read the same function.
+        // (Phase 139), read through `Tree.Index.tryBuild` since Phase 305 so the index the passes
+        // read is built in the same pass that refuses a malformed tree. This was a `groupBy` of its
+        // own until Phase 139, and the retirement is the point: a diff refusing a malformed tree
+        // and an insert refusing a malformed graft are the same notion of malformed.
         //
-        // ONE OBSERVABLE CHANGE, and it is which id is NAMED, never whether the tree is refused.
-        // The `groupBy` form reported the first id whose GROUP had more than one member, in
-        // first-appearance order of the keys; `Tree.wellFormed` reports the first id at its SECOND
-        // occurrence in preorder. For `[a; b; b; a]` the old form said `a` and the new says `b`.
-        // The new answer is the one `Rejection.DuplicateId` already gave on the accept path, so the
-        // two paths now name the same offender for the same tree. Recorded in STABILITY.md.
-        let dupId (root: 'Node) =
-            match Tree.wellFormed w idw root with
-            | Tree.RepeatedId d -> Some d
-            | Tree.Structural -> None
-
-        // key -> parent id, for every non-root node.
-        let parentMap (nodes: 'Node list) =
-            [ for p in nodes do
-                  for c in w.Children p -> key (w.Id c), w.Id p ]
-            |> Map.ofList
+        // ONE OBSERVABLE CHANGE at Phase 139, and it is which id is NAMED, never whether the tree is
+        // refused. The `groupBy` form reported the first id whose GROUP had more than one member,
+        // in first-appearance order of the keys; `Tree.wellFormed` reports the first id at its
+        // SECOND occurrence in preorder. For `[a; b; b; a]` the old form said `a` and the new says
+        // `b`. The new answer is the one `Rejection.DuplicateId` already gave on the accept path, so
+        // the two paths name the same offender for the same tree. Recorded in STABILITY.md.
+        let index (root: 'Node) =
+            match Tree.Index.tryBuild w idw root with
+            | Ok ix -> Ok ix
+            | Error(Tree.RepeatedId d) -> Error(DuplicateIdInTree d)
+            | Error Tree.Structural -> Ok(Tree.Index.build w idw root) // unreachable: `tryBuild` refuses only a repeat
 
         let childKeysOf (n: 'Node) =
             w.Children n |> List.map (fun c -> key (w.Id c))
@@ -2285,18 +2361,19 @@ module Diff =
         if key (w.Id before) <> key (w.Id after) then
             Error(RootIdMismatch(w.Id before, w.Id after))
         else
-            match dupId before with
-            | Some d -> Error(DuplicateIdInTree d)
-            | None ->
-                match dupId after with
-                | Some d -> Error(DuplicateIdInTree d)
-                | None ->
+            match index before with
+            | Error e -> Error e
+            | Ok bix ->
+                match index after with
+                | Error e -> Error e
+                | Ok aix ->
                     let beforeNodes = Tree.preorder w before
                     let afterNodes = Tree.preorder w after
-                    let bIds = beforeNodes |> List.map (fun n -> key (w.Id n)) |> Set.ofList
-                    let aIds = afterNodes |> List.map (fun n -> key (w.Id n)) |> Set.ofList
-                    let aParent = parentMap afterNodes
-                    let bParent = parentMap beforeNodes
+                    let bIds = bix.ById |> Map.keys |> Set.ofSeq
+                    let aIds = aix.ById |> Map.keys |> Set.ofSeq
+                    // key -> parent id, for every non-root node — the index's own map.
+                    let aParent = aix.ParentOf
+                    let bParent = bix.ParentOf
 
                     let bChildKeys =
                         beforeNodes |> List.map (fun n -> key (w.Id n), childKeysOf n) |> Map.ofList
@@ -2304,6 +2381,25 @@ module Diff =
                     let ops = ResizeArray<SkeletonOp<'Node, 'Id>>()
                     // Parents whose order must be restated once membership is final (step 4).
                     let reorderParents = ResizeArray<'Id>()
+                    // Content-changing survivors whose new node cannot hold children (step 5).
+                    let trailingUpdates = ResizeArray<SkeletonOp<'Node, 'Id>>()
+
+                    // 0. Content, first and last (Phase 305). A survivor is a node both trees
+                    //    carry; `changed` is the caller's encoder over the two SHELLS, so a
+                    //    difference in the children alone is never an update. The payload is the
+                    //    `after` node (its children are not read by `UpdateNode`, so carrying them
+                    //    costs nothing and keeps the op a faithful statement of `after`).
+                    match changed with
+                    | None -> ()
+                    | Some differs ->
+                        for n in afterNodes do
+                            match Map.tryFind (key (w.Id n)) bix.ById with
+                            | Some b when differs b n ->
+                                if canHold n then
+                                    ops.Add(UpdateNode n)
+                                else
+                                    trailingUpdates.Add(UpdateNode n)
+                            | _ -> ()
 
                     // 1. Added nodes → leaf shells under their after-parent (top-down via
                     //    preorder, so an added parent exists before an added child). They
@@ -2373,16 +2469,41 @@ module Diff =
                             | Some pid when aIds.Contains(key pid) -> ops.Add(RemoveNode(w.Id n))
                             | _ -> () // before-parent also removed → covered by removing it
 
-                    // 4. Order, last — every parent now holds exactly its after-children, so
-                    //    naming the after-order is a legal permutation. One op per changed
-                    //    parent, where the old sweep emitted one MoveNode per child.
+                    // 4. Order, last of the structure — every parent now holds exactly its
+                    //    after-children, so naming the after-order is a legal permutation. One
+                    //    op per changed parent, where the old sweep emitted one MoveNode per
+                    //    child. The parent is read off the index (Phase 305; a preorder walk of
+                    //    `after` per parent before).
                     for pid in reorderParents do
-                        match Tree.tryFind w idw pid after with
+                        match Tree.Index.tryFind idw pid aix with
                         | Some p when List.length (w.Children p) > 1 ->
                             ops.Add(ReorderChildren(pid, w.Children p |> List.map w.Id))
                         | _ -> ()
 
+                    // 5. The updates `canHold` refuses, last of all: by now each such node holds
+                    //    exactly its `after` children, which `firstUncontained` has already shown
+                    //    to be none (a childful node the predicate refuses is refused up front by
+                    //    `toOpsContained`, and the plain forms pass a predicate that refuses
+                    //    nothing, so this block is empty there).
+                    ops.AddRange trailingUpdates
+
                     Ok(List.ofSeq ops)
+
+    /// Derive a script such that `Ops.applyAll (toOps w idw before after) before`
+    /// reproduces `after` structurally. Relocated subtrees diff to `MoveNode` (never
+    /// remove+insert), so an unchanged subtree is preserved, not destroyed and rebuilt.
+    /// The emitted order is always applyable: added nodes go in as leaf shells (top-down),
+    /// every survivor is then reattached/reordered to its `after` position, and removed
+    /// regions are deleted **last** (so a surviving child is pulled out before its old
+    /// container is removed). Structural only — a survivor keeps `before`'s content, kind
+    /// included; `toOpsWith` is the form that diffs content too. The two roots must share an id.
+    let toOps
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        emitWith None (fun _ -> true) w idw before after
 
     /// Container-aware diff (Phase 09) — the `canHold`-aware mirror of `toOps`, the diff-path
     /// analogue of `Ops.applyContained`. Every parent the emitted script addresses comes from
@@ -2393,6 +2514,14 @@ module Diff =
     /// the same relationship `apply`/`applyContained` have). Containment *legality* (which kind
     /// may parent which) stays domain-side; `canHold` answers only "can this node hold children
     /// at all".
+    ///
+    /// **What the check buys, exactly (Phase 305).** The script's addresses resolve, in `after`,
+    /// to nodes `canHold` accepts (`proofs/TreeDiff.fst`, `diff_applicable_contained`). That is NOT
+    /// yet "`applyAllWith canHold` accepts every step": the script runs against `before`'s kinds,
+    /// and a structural diff carries no content, so a survivor that is a leaf in `before` and a
+    /// container in `after` refuses the inserts under it with `NotAContainer` — over independent
+    /// pairs with kinds drawn freely, 41% of the scripts this form returns are refused. The
+    /// content-aware `toOpsContainedWith` is the form that applies under the predicate it checked.
     let toOpsContained
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
@@ -2404,7 +2533,51 @@ module Diff =
         // such node cannot hold children, no container-legal script exists.
         match Ops.firstUncontained canHold w after with
         | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
-        | None -> toOps w idw before after
+        | None -> emitWith None canHold w idw before after
+
+    /// Content-aware, container-aware diff (Phase 305) — `toOpsContained` that also emits an
+    /// `UpdateNode` for every survivor whose own content differs, as the caller's `encode` sees it
+    /// over the two nodes' SHELLS (`ReplaceChildren n []`, so a change in the children alone is
+    /// never an update). The witness has no content accessor, so the encoder is the one way the
+    /// diff can see content — the same per-call parameter `Tree.encodeHash` and `Tree.Index.buildWith`
+    /// take, and like theirs it should be injective over a node's own content: a lossy encoder
+    /// makes two different nodes read as unchanged and the script lands on a tree that is not
+    /// `after`.
+    ///
+    /// **The guarantee this form adds.** For well-formed `before` and `after` and a child-blind
+    /// `canHold`, a script it returns is accepted at every step by `Ops.applyAllWith canHold` and
+    /// lands on `after`, content included — the placement rule in `emitWith`'s header (D103) is what
+    /// makes it so, and `ProofOracleTests`' content-aware bridge measures it over drawn kinds and a
+    /// drawn predicate. The refusals are `toOpsContained`'s, unchanged. With
+    /// `canHold = fun _ -> true` it is exactly `toOpsWith`.
+    let toOpsContainedWith
+        (canHold: 'Node -> bool)
+        (encode: 'Node -> string)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        let shell (n: 'Node) = encode (w.ReplaceChildren n [])
+        let differs (b: 'Node) (a: 'Node) = shell b <> shell a
+
+        match Ops.firstUncontained canHold w after with
+        | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
+        | None -> emitWith (Some differs) canHold w idw before after
+
+    /// Content-aware diff (Phase 305) — `toOps` that also emits an `UpdateNode` for every survivor
+    /// whose own content differs under the caller's `encode`; `toOpsContainedWith (fun _ -> true)`,
+    /// so every update sits before the structural blocks. `Ops.applyAll (toOpsWith encode w idw
+    /// before after) before` reproduces `after` structurally AND in every node's content the
+    /// encoder distinguishes.
+    let toOpsWith
+        (encode: 'Node -> string)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        toOpsContainedWith (fun _ -> true) encode w idw before after
 
     /// Grammar-aware diff (Phase 313) — `toOpsContained` with the domain's containment grammar
     /// beside `canHold`. Every refusal `toOpsContained` makes is made first and unchanged; then an
@@ -2414,7 +2587,8 @@ module Diff =
     /// holds — a shell is inserted under its `after` parent and never moved, a survivor is moved
     /// once, to its `after` parent — so for a `before` that keeps the grammar, `Ops.applyAllGrammar`
     /// accepts the script wherever the tree it builds keeps it (`Conformance.containmentLaws`).
-    /// Structural only, as `toOps` is: a survivor keeps `before`'s content, kind included.
+    /// Structural only, as `toOps` is: a survivor keeps `before`'s content, kind included;
+    /// `toOpsGrammarWith` is the content-aware form.
     let toOpsGrammar
         (allowedChildren: string -> string list option)
         (canHold: 'Node -> bool)
@@ -2424,6 +2598,27 @@ module Diff =
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
         match toOpsContained canHold w idw before after with
+        | Error e -> Error e
+        | Ok ops ->
+            match Ops.illegalChildren allowedChildren w after with
+            | (p, c) :: _ ->
+                let pk = w.KindTag p
+
+                Error(IllegalChildInTree(w.Id c, w.KindTag c, w.Id p, pk, allowedChildren pk |> Option.defaultValue []))
+            | [] -> Ok ops
+
+    /// `toOpsGrammar` over the content-aware `toOpsContainedWith` (Phase 305): the same two
+    /// refusals in the same order, and a script that carries the survivors' content changes.
+    let toOpsGrammarWith
+        (allowedChildren: string -> string list option)
+        (canHold: 'Node -> bool)
+        (encode: 'Node -> string)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        match toOpsContainedWith canHold encode w idw before after with
         | Error e -> Error e
         | Ok ops ->
             match Ops.illegalChildren allowedChildren w after with

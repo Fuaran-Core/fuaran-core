@@ -254,13 +254,44 @@ module Arbitration =
     /// policy, no quality judgement, no evaluator (GP6): which proposal is
     /// *better* is the host's business; Core only says which ones *can
     /// coexist*.
+    /// The base must be well-formed before anything is decided against it (Phase 305). On a base
+    /// that carries an id twice, `Ops.canApplyAll` can accept a pair of scripts that the footprint
+    /// calls independent and whose two orders reach DIFFERENT trees, the merged state losing a node
+    /// (the second-pass review's finding that filed this phase): an id names two positions, so
+    /// which one an op reaches depends on what the other script has already done. The confluence
+    /// the accepted set promises — `TreeOps.tree_independence_diamond` — is stated at `wf`, and the
+    /// promise is empty below it. So a malformed base is
+    /// REFUSED rather than arbitrated: every proposal is rejected `Inapplicable(0, DuplicateId d)`,
+    /// `d` the first id the base's preorder carries twice (`Tree.wellFormed`'s verdict), and the
+    /// accepted set and merged script are empty. Index 0 because no op was offered: the refusal is
+    /// the base's, and a proposer that reads it repairs nothing in its script. The four witness-
+    /// taking entries make the check; `arbitrateWith` takes a `canApply` and no witness, so a
+    /// domain composing it directly checks its own base (`Tree.wellFormedKeyed` for a keyed one).
+    let private atWellFormedBase
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        (decide: unit -> Arbitration<'Node, 'Id>)
+        : Arbitration<'Node, 'Id> =
+        match Tree.wellFormed nodew idw baseTree with
+        | Tree.Structural -> decide ()
+        | Tree.RepeatedId d ->
+            { Accepted = []
+              MergedScript = []
+              Rejected =
+                proposals
+                |> List.sortBy (fun p -> p.Id)
+                |> List.map (fun p -> p, Inapplicable(0, DuplicateId d)) }
+
     let arbitrate
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw) baseTree proposals
+        atWellFormedBase nodew idw baseTree proposals (fun () ->
+            arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAll nodew idw) baseTree proposals)
 
     /// `arbitrate` under a container capability (Phase 247) — the `applyContained` /
     /// `canApplyAllWith` precedent, at the partition: applicability is
@@ -283,7 +314,8 @@ module Arbitration =
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw) baseTree proposals
+        atWellFormedBase nodew idw baseTree proposals (fun () ->
+            arbitrateWith (Ops.footprint nodew idw) (Ops.canApplyAllWith canHold nodew idw) baseTree proposals)
 
     /// `arbitrateContained` under the domain's containment grammar as well (Phase 313):
     /// applicability is `Ops.canApplyAllGrammar allowedChildren canHold`, so a proposal that would
@@ -304,11 +336,12 @@ module Arbitration =
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        arbitrateWith
-            (Ops.footprint nodew idw)
-            (Ops.canApplyAllGrammar allowedChildren canHold nodew idw)
-            baseTree
-            proposals
+        atWellFormedBase nodew idw baseTree proposals (fun () ->
+            arbitrateWith
+                (Ops.footprint nodew idw)
+                (Ops.canApplyAllGrammar allowedChildren canHold nodew idw)
+                baseTree
+                proposals)
 
     /// `arbitrateGrammar` under a `RefWitness` as well (Phase 313): independence is
     /// `Ops.footprintReferenced`, so a proposal that writes a reference to a node another proposal
@@ -325,8 +358,9 @@ module Arbitration =
         (baseTree: 'Node)
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
-        arbitrateWith
-            (Ops.footprintReferenced refw nodew idw)
-            (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)
-            baseTree
-            proposals
+        atWellFormedBase nodew idw baseTree proposals (fun () ->
+            arbitrateWith
+                (Ops.footprintReferenced refw nodew idw)
+                (Ops.canApplyAllReferenced refw allowedChildren canHold nodew idw)
+                baseTree
+                proposals)

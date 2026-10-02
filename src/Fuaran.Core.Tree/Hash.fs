@@ -138,6 +138,8 @@ module Hash =
     ///   - `Tree.preimageWith` (the one pre-image `Tree.contentHash`, `Tree.encodePreimage` and
     ///     `Tree.encodeHash` share)
     ///   - `Tree.Index.fingerprintOf`
+    ///   - `Tree.Index.fingerprintOfWith` (Phase 305: the same term with the caller's content encoder
+    ///     between the kind and the child count — the stamp `buildWith` / `isFreshForWith` read)
     ///   - `Projection.snapshotDigestOf` (Phase 298: the changed-since baseline, under SHA-256)
     ///   - `ColumnValidator.ruleId` (Phase 298: a stock column rule's id over its parameters)
     ///   - `ColumnValidator.keyText` (Phase 298: one composite key of the `unique` rule)

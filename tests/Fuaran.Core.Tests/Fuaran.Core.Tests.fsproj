@@ -25,6 +25,7 @@
     <Compile Include="ContainedOpsTests.fs" />
     <Compile Include="InvertTests.fs" />
     <Compile Include="DiffTests.fs" />
+    <Compile Include="ContentDiffTests.fs" />
     <Compile Include="OpStreamTests.fs" />
     <Compile Include="IdempotentAppendTests.fs" />
     <Compile Include="SnapshotTests.fs" />

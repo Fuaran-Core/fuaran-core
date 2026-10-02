@@ -636,7 +636,10 @@ module Tree =
         /// current tree and compares it to the one captured at `build`. Returns `false` after any
         /// structural edit since the index was built (so a caller can `build` again instead of
         /// reading stale answers), `true` for an unedited tree. O(n) — an opt-in check, not on the
-        /// per-lookup hot path.
+        /// per-lookup hot path. **A content-only `UpdateNode` is invisible to it** (Phase 305): the
+        /// stamp reads id, kind and child ids, so a rewrite that keeps all three — the common
+        /// content edit — leaves it `true` while `ById` holds the node as it was. `isFreshForWith
+        /// encode`, over an index from `buildWith encode`, is the check that sees it.
         let isFreshFor
             (w: NodeWitness<'Node, 'Id>)
             (idw: IdWitness<'Id>)
@@ -644,6 +647,74 @@ module Tree =
             (ix: NodeIndex<'Node, 'Id>)
             : bool =
             treeStampOf w idw root = ix.Fingerprint
+
+        // ---- the content-aware stamp (Phase 305) ----
+        // `fingerprintOf` sees a node's id, kind and child ids and nothing else, so `isFreshFor`
+        // reports an index fresh across an `UpdateNode` that changed only the node's content: the
+        // index then hands back the node as it was before the rewrite. The witness has no content
+        // accessor, so the one way to stamp content is the caller's encoder — the same per-call
+        // parameter `Tree.encodeHash` takes, folded into each node's term beside its kind.
+
+        /// One node's term in the content-aware stamp: `fingerprintOf`'s fields plus `encode n`,
+        /// between the kind and the child count, so the stamp moves whenever the encoder's reading
+        /// of the node moves.
+        let private fingerprintOfWith
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (encode: 'Node -> string)
+            (n: 'Node)
+            : uint32 =
+            let kids = w.Children n
+
+            let digest =
+                idw.ToString(w.Id n)
+                :: w.KindTag n
+                :: encode n
+                :: string (List.length kids)
+                :: (kids |> List.map (fun c -> idw.ToString(w.Id c)))
+                |> Hash.canonicalFields
+                |> Hash.fnv1a
+
+            unstamp digest
+
+        let private treeStampOfWith
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (encode: 'Node -> string)
+            (root: 'Node)
+            : string =
+            preorder w root
+            |> List.fold (fun acc n -> add32 acc (fingerprintOfWith w idw encode n)) 0u
+            |> stampOf
+
+        /// `build`, stamped with the caller's content encoder as well (Phase 305): the same two maps
+        /// and root, and a `Fingerprint` that `isFreshForWith encode` moves for a content-only
+        /// `UpdateNode` as well as for every skeleton edit. The pair is a pair: an index built here
+        /// is checked with `isFreshForWith` under the SAME encoder (`isFreshFor` reads it as stale,
+        /// since the plain stamp omits the content term), and `Ops.Index.afterOp` maintains the
+        /// PLAIN stamp, so an index carried through it is a plain one — rebuild here after an edit
+        /// instead. The encoder should be injective over a node's own content, as `encodeHash`'s
+        /// must be: a reading two different contents share is a rewrite the stamp cannot see.
+        let buildWith
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (encode: 'Node -> string)
+            (root: 'Node)
+            : NodeIndex<'Node, 'Id> =
+            { build w idw root with
+                Fingerprint = treeStampOfWith w idw encode root }
+
+        /// `isFreshFor` under the content encoder `buildWith` stamped with (Phase 305): `false` after
+        /// any skeleton edit OR any `UpdateNode` whose new content the encoder reads differently,
+        /// `true` for an unedited tree. O(n), like `isFreshFor`.
+        let isFreshForWith
+            (w: NodeWitness<'Node, 'Id>)
+            (idw: IdWitness<'Id>)
+            (encode: 'Node -> string)
+            (root: 'Node)
+            (ix: NodeIndex<'Node, 'Id>)
+            : bool =
+            treeStampOfWith w idw encode root = ix.Fingerprint
 
         /// Re-index through an edit confined to known nodes (Phase 317) — the primitive an index is
         /// MAINTAINED through rather than rebuilt (`Ops.Index.afterOp` is its caller for the
