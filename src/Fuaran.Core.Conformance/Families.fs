@@ -1312,3 +1312,345 @@ module Families =
 
     /// The markdown half of the same, with no run behind it.
     let toMarkdown () : string = toMarkdownWith []
+
+    // Phase 335 — the OPERATION roster. `Proofs.Coverage` holds every public operation in the
+    // committed API baselines to a ladder row, a law family or a recorded exclusion, and this list is
+    // the law-family leg of that join: the Core operations whose contract each family's laws are ABOUT.
+    // A family that merely CALLS an operation as harness (hashing a fixture, walking a tree to draw a
+    // node) does not list it — the row says what a green run of the family is evidence for. A family
+    // entry point is mapped by its own `families` row and is not repeated here. Declared, not derived,
+    // for the reason the roster above is: what a family is about is a reader's statement, and the
+    // suite holds each name to the published surface and each row to a declared family.
+
+    /// One law family's OPERATION roster (Phase 335): the public Core operations whose contract the
+    /// family's laws state, spelled `<Owner>.<member>` the way `proofs/coverage-exclusions.json`
+    /// spells them — the `Fuaran.Core.` prefix, generic arity and the compiler's `Module` suffix
+    /// dropped, nested names joined by `.` (`Dag.Reach.ancestors`).
+    type FamilyOperations =
+        {
+            /// The family's roster key — a `LawFamily.Id` in `families`.
+            Family: string
+            /// The operations a green run of the family at a domain's witness is evidence for.
+            Operations: string list
+        }
+
+    /// Every family's operation roster, by family id. `Proofs.Coverage` reads it as the law-family
+    /// leg of the operation clause: an operation listed here is mapped, and a name here that is not a
+    /// published operation, or a family id that `families` does not declare, reds the suite.
+    let operations: FamilyOperations list =
+        [ { Family = "Conformance.aggregateNullSkipLaws"
+            Operations = [ "Column.aggregate"; "Cell.isNull" ] }
+          { Family = "Conformance.aiSurfaceLawsAt"
+            Operations =
+              [ "AiSurface.runTool"
+                "PatternBank.resolve"
+                "PatternBank.literalSegments"
+                "Proposals.submit"
+                "Proposals.approve"
+                "Proposals.reject"
+                "Proposals.explainRejection"
+                "Proposals.Queue.empty"
+                "PolicyDecision.deny" ] }
+          { Family = "Conformance.arbitrationLaws"
+            Operations =
+              [ "Arbitration.arbitrate"
+                "Arbitration.arbitrateWith"
+                "Arbitration.duplicateIds" ] }
+          { Family = "Conformance.attestationLaws"
+            Operations = [ "OpStream.attestHead"; "OpStream.verifyAttestation" ] }
+          { Family = "Conformance.attributedLaws"
+            Operations = [ "OpStream.Attributed.liftWitness" ] }
+          { Family = "Conformance.canonicalFloatLaws"
+            Operations = [ "Canon.canonicalFloat"; "FloatLayout.finite" ] }
+          { Family = "Conformance.capabilityLaws"
+            Operations =
+              [ "Capability.create"
+                "Capability.invoke"
+                "Capability.invocationKey"
+                "Capability.determinismTag"
+                "Capability.validateArgs"
+                "CapabilityCodec.encode"
+                "CapabilityCodec.decode"
+                "CapabilityRegistry.register"
+                "CapabilityRegistry.dispatch"
+                "CapabilityRegistry.enumerate" ] }
+          { Family = "Conformance.capabilityLawsAt"
+            Operations =
+              [ "CapabilityRegistry.tryFind"
+                "CapabilityRegistry.dispatch"
+                "CapabilityRegistry.enumerate"
+                "Capability.validateArgs" ] }
+          { Family = "Conformance.capabilityPipelineIncrementalLaws"
+            Operations =
+              [ "CapabilityPipeline.dirtySet"
+                "CapabilityPipeline.evalFrom"
+                "CapabilityPipeline.eval" ] }
+          { Family = "Conformance.capabilityPipelineLaws"
+            Operations =
+              [ "CapabilityPipeline.typeCheck"
+                "CapabilityPipeline.eval"
+                "CapabilityPipeline.encode"
+                "CapabilityPipeline.decode"
+                "CapabilityPipeline.nodeInvocationKey"
+                "CapabilityPipeline.nodeId"
+                "CapabilityLookup.ofRegistry" ] }
+          { Family = "Conformance.captureReplayLaws"
+            Operations =
+              [ "OpStream.captureEffect"
+                "OpStream.replayEffect"
+                "OpStream.verifyCaptures"
+                "OpStream.captureToJsonl"
+                "OpStream.captureFromJsonl"
+                "OpStream.tryCaptureToJsonl" ] }
+          { Family = "Conformance.casLaws"
+            Operations = [ "OpStream.appendIf" ] }
+          { Family = "Conformance.chainBreakReasonLaws"
+            Operations =
+              [ "ChainBreakReason.ofString"
+                "ChainBreakReason.toString"
+                "OpStream.firstChainBreakWith"
+                "OpStream.firstCaptureBreak" ] }
+          { Family = "Conformance.checkpointLaws"
+            Operations =
+              [ "Dag.checkpointAt"
+                "Dag.compactAt"
+                "Dag.compactFrom"
+                "Dag.replayFrom"
+                "Dag.replayFromWith"
+                "Dag.verifyCheckpoint"
+                "Dag.verifyDagFrom"
+                "Dag.toJsonlWithCheckpoints" ] }
+          { Family = "Conformance.columnarValidatorLaws"
+            Operations =
+              [ "ColumnValidator.inRange"
+                "ColumnValidator.notNull"
+                "ColumnValidator.ofRules"
+                "ColumnValidator.ofType"
+                "ColumnValidator.unique"
+                "ColumnValidator.validate"
+                "Validator.canonicalCodes" ] }
+          { Family = "Conformance.compositionLaws"
+            Operations =
+              [ "Function.composeAcross"
+                "Function.composedEffectAcross"
+                "Function.curry"
+                "Function.apply"
+                "Effect.join"
+                "Effect.covers" ] }
+          { Family = "Conformance.concurrencyLawsWith"
+            Operations = [ "Ops.applyAll"; "Ops.independent" ] }
+          { Family = "Conformance.constructThenEncodeLaws"
+            Operations = [ "Corpus.roundTrip"; "Corpus.runCorpus" ] }
+          { Family = "Conformance.containerLaws"
+            Operations = [ "Ops.applyContained"; "Ops.canApplyContained" ] }
+          { Family = "Conformance.containmentLaws"
+            Operations =
+              [ "Ops.applyGrammar"
+                "Ops.canApplyGrammar"
+                "Ops.applyAllGrammar"
+                "Ops.canApplyAllGrammar"
+                "Ops.illegalChildren"
+                "Diff.toOpsGrammar"
+                "Arbitration.arbitrateGrammar"
+                "Validator.containment" ] }
+          { Family = "Conformance.dagBreakReasonLaws"
+            Operations = [ "DagBreakReason.ofString"; "DagBreakReason.toString"; "Dag.firstBreak" ] }
+          { Family = "Conformance.dagLaws"
+            Operations =
+              [ "Dag.empty"
+                "Dag.append"
+                "Dag.appendChecked"
+                "Dag.appendVerified"
+                "Dag.merge"
+                "Dag.mergeChecked"
+                "Dag.mergeVerified"
+                "Dag.toJsonl"
+                "Dag.fromJsonl"
+                "Dag.verifyDag"
+                "Dag.tryReplayTo" ] }
+          { Family = "Conformance.deferredLaws"
+            Operations =
+              [ "Deferred.map"
+                "Deferred.toResult"
+                "CapabilityCodec.encodeDeferred"
+                "CapabilityCodec.decodeDeferred" ] }
+          { Family = "Conformance.diffContainedLaws"
+            Operations = [ "Diff.toOpsContained"; "Ops.applyAllWith"; "Ops.canApplyAllWith" ] }
+          { Family = "Conformance.diffLaws"
+            Operations = [ "Diff.toOps"; "Ops.applyAll"; "Ops.canApplyAll" ] }
+          { Family = "Conformance.dirtyPropagationLaws"
+            Operations =
+              [ "Propagation.dirtyFromChangedIds"
+                "Propagation.sort"
+                "Propagation.cycleThrough" ] }
+          { Family = "Conformance.footprintLaws"
+            Operations = [ "Ops.footprint"; "Ops.independent" ] }
+          { Family = "Conformance.footprintLawsAt"
+            Operations = [ "Ops.interference"; "Dag.conflicts"; "Footprint.slotNodes" ] }
+          { Family = "Conformance.freshIdLaws"
+            Operations = [ "FreshIds.repairDuplicates"; "TreePlacement.cloneContained" ] }
+          { Family = "Conformance.functionVerifyLaws"
+            Operations =
+              [ "Conformance.verifyFunction"
+                "Conformance.verifyFunctionSymbolic"
+                "Function.auditEffect" ] }
+          { Family = "Conformance.hashFnAdversarialLaws"
+            Operations = [ "OpStream.defaultHash" ] }
+          { Family = "Conformance.hashFnLaws"
+            Operations = [ "OpStream.append"; "OpStream.verifyChain"; "OpStream.head" ] }
+          { Family = "Conformance.idempotencyLaws"
+            Operations =
+              [ "OpStream.appendIdempotent"
+                "OpStream.appendIdempotentIf"
+                "KeyIndex.add"
+                "KeyIndex.ofStream"
+                "KeyIndex.tryFind" ] }
+          { Family = "Conformance.keyedApplyLaws"
+            Operations =
+              [ "Ops.applyContainedKeyed"
+                "Ops.canApplyContainedKeyed"
+                "Tree.wellFormedKeyed"
+                "Tree.idsKeyed"
+                "Tree.keyedIds"
+                "Tree.traversal" ] }
+          { Family = "Conformance.keyedArbitrationLaws"
+            Operations = [ "Ops.footprintKeyed"; "Ops.canApplyAllKeyed" ] }
+          { Family = "Conformance.keyedChildrenLaws"
+            Operations = [ "Ops.applyContainedKeyed"; "Tree.keyedIds" ] }
+          { Family = "Conformance.laneLaws"
+            Operations =
+              [ "Dag.loadLanes"
+                "Dag.verifyLanes"
+                "Dag.laneCollisions"
+                "Dag.appendOnLane"
+                "Dag.lanesToJsonl"
+                "Dag.totalOrderBy"
+                "Dag.totalOrder"
+                "Dag.replayAll"
+                "Dag.appendOn"
+                "Dag.mergeAll"
+                "Dag.commonBase"
+                "Dag.Reach.commonBase"
+                "Dag.rehashWith"
+                "Dag.prunable" ] }
+          { Family = "Conformance.loweringLaws"
+            Operations = [ "Ops.lower"; "Ops.shellOf"; "Ops.skeletonRoot" ] }
+          { Family = "Conformance.memoLaws"
+            Operations = [ "Function.applyMemo"; "Memo.empty" ] }
+          { Family = "Conformance.memoSoundnessLaws"
+            Operations = [ "Memo.isMemoisable"; "Function.observedEffect"; "Function.applyMemo" ] }
+          { Family = "Conformance.mergeConflictLaws"
+            Operations = [ "Dag.conflicts" ] }
+          { Family = "Conformance.noAttestationVacuityLaws"
+            Operations = [ "OpStream.verifyAttestation" ] }
+          { Family = "Conformance.normalizeLaws"
+            Operations = [ "Ops.normalize" ] }
+          { Family = "Conformance.observerLaws"
+            Operations =
+              [ "ObserverWitness.empty"
+                "ObserverWitness.register"
+                "ObserverWitness.unregister"
+                "ObserverWitness.update"
+                "ObserverWitness.derive"
+                "ObserverWitness.snapshot"
+                "ObserverWitness.observeTree"
+                "Observer.InMemoryObserver.createWith" ] }
+          { Family = "Conformance.opAlgebra"
+            Operations = [ "Ops.applyContained"; "Ops.canApplyContained"; "Ops.invert" ] }
+          { Family = "Conformance.packLoadingLaws"
+            Operations =
+              [ "ContentPack.load"
+                "ContentPack.pack"
+                "ContentPack.signatureFingerprint"
+                "FunctionRegistry.findBySignature" ] }
+          { Family = "Conformance.placementLaws"
+            Operations =
+              [ "TreePlacement.placeContained"
+                "TreePlacement.moveContained"
+                "TreePlacement.place"
+                "TreePlacement.move" ] }
+          { Family = "Conformance.projectionLaws"
+            Operations =
+              [ "Projection.project"
+                "Projection.render"
+                "Projection.parseBack"
+                "Projection.renderLine"
+                "Projection.lineText"
+                "Projection.sizeOf"
+                "Projection.snapshot"
+                "Projection.idKey" ] }
+          { Family = "Conformance.propagationEvalLaws"
+            Operations =
+              [ "Propagation.eval"
+                "Propagation.evalFrom"
+                "Propagation.dirtyFromChangedIds" ] }
+          { Family = "Conformance.propagationEvaluatorLawsWith"
+            Operations = [ "Propagation.evalWith"; "Propagation.evalFromWith"; "Propagation.sort" ] }
+          { Family = "Conformance.queryLaws"
+            Operations =
+              [ "Query.invocationKey"
+                "Query.determinismTag"
+                "Query.validateParams"
+                "QueryCodec.encode"
+                "QueryCodec.decode"
+                "QueryCodec.encodeResult"
+                "QueryCodec.decodeResult"
+                "QueryCodec.encodeDeferredResult"
+                "QueryCodec.decodeDeferredResult"
+                "QueryRegistry.register"
+                "QueryRegistry.dispatch"
+                "QueryRegistry.dispatchWithArgs"
+                "QueryRegistry.enumerate" ] }
+          { Family = "Conformance.queryLawsAt"
+            Operations = [ "QueryRegistry.enumerate"; "QueryRegistry.tryFind"; "Query.validateParams" ] }
+          { Family = "Conformance.reachLaws"
+            Operations =
+              [ "Dag.Reach.ofDag"
+                "Dag.Reach.ancestors"
+                "Dag.Reach.reaches"
+                "Dag.Reach.tryTopoOrder"
+                "Dag.Reach.mergeBase"
+                "Dag.Reach.between"
+                "Dag.Reach.dag"
+                "Dag.appendIndexed"
+                "Dag.mergeIndexed"
+                "Dag.reconcileManyWith"
+                "Dag.tryReplayToWith" ] }
+          { Family = "Conformance.reconcileLawsWith"
+            Operations = [ "Dag.reconcile"; "Dag.mergeBase"; "Dag.replayTo" ] }
+          { Family = "Conformance.referenceLaws"
+            Operations =
+              [ "Ops.applyReferenced"
+                "Ops.footprintReferenced"
+                "Validator.referenceIntegrity"
+                "Validator.referenceOrder"
+                "Validator.referenceDefects"
+                "Validator.forwardReferences" ] }
+          { Family = "Conformance.registryLaws"
+            Operations =
+              [ "FunctionRegistry.register"
+                "FunctionRegistry.dispatch"
+                "FunctionRegistry.entry"
+                "FunctionRegistry.findBySignature"
+                "FunctionRegistry.partiallyApply" ] }
+          { Family = "Conformance.snapshotLawsWith"
+            Operations =
+              [ "OpStream.Snapshots.compact"
+                "OpStream.Snapshots.replayFrom"
+                "OpStream.Snapshots.verify"
+                "OpStream.appendWith" ] }
+          { Family = "Conformance.streamLaws"
+            Operations =
+              [ "OpStream.empty"
+                "OpStream.append"
+                "OpStream.replay"
+                "OpStream.verifyChain"
+                "OpStream.toJsonl"
+                "OpStream.fromJsonl"
+                "OpStream.tryToJsonl" ] }
+          { Family = "Conformance.verifyHonestyLaws"
+            Operations = [ "Conformance.verifyFunction"; "Conformance.renderCounterexample" ] }
+          { Family = "FoldConfluence.laneFoldLaws"
+            Operations = [ "FoldConfluence.foldOnce"; "Dag.reconcileMany" ] }
+          { Family = "WireNullTolerance.laws"
+            Operations = [ "Json.parseTolerantOfNull"; "Json.parseDetailedTolerantOfNull" ] } ]

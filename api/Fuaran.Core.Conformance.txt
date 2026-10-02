@@ -12,6 +12,7 @@ ctor Fuaran.Core.ConfRng+T..ctor(System.UInt32)
 ctor Fuaran.Core.ConformanceReport..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>, System.Boolean)
 ctor Fuaran.Core.ConstructWitness`1..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)
 ctor Fuaran.Core.EvaluatorWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!0, Fuaran.Core.ConfRng+T>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!1, System.String>>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<System.Tuple`2<!0, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>, Fuaran.Core.ConfRng+T>>>)
+ctor Fuaran.Core.Families+FamilyOperations..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Families+LawFamily..ctor(System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Families+OptInReason>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.AdequacyClass, Fuaran.Core.Families+RefusalVerdict)
 ctor Fuaran.Core.Families+RefusalAudit..ctor(System.String, Fuaran.Core.Families+RefusalPopulation, System.String)
 ctor Fuaran.Core.Families+RefusalVerdict..ctor(Fuaran.Core.Families+RefusalPopulation, System.String)
@@ -193,6 +194,7 @@ property Fuaran.Core.Families.families : Microsoft.FSharp.Collections.FSharpList
 property Fuaran.Core.Families.ids : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Families.modules : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Families.obligations : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>> { get }
+property Fuaran.Core.Families.operations : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+FamilyOperations> { get }
 property Fuaran.Core.Families.refusalAudit : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+RefusalAudit> { get }
 property Fuaran.Core.Families.roster : Fuaran.Core.Families+Roster { get }
 property Fuaran.Core.FoldConfluence.permutationBound : System.Int32 { get }
@@ -231,6 +233,8 @@ record-field Fuaran.Core.EvaluatorWitness`2.Deps #2 : Microsoft.FSharp.Core.FSha
 record-field Fuaran.Core.EvaluatorWitness`2.EvalNode #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!1, System.String>>>>
 record-field Fuaran.Core.EvaluatorWitness`2.Model #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!0, Fuaran.Core.ConfRng+T>>
 record-field Fuaran.Core.EvaluatorWitness`2.Surface #0 : System.String
+record-field Fuaran.Core.Families+FamilyOperations.Family #0 : System.String
+record-field Fuaran.Core.Families+FamilyOperations.Operations #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Families+LawFamily.Adequacy #7 : Fuaran.Core.AdequacyClass
 record-field Fuaran.Core.Families+LawFamily.Discharges #6 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Families+LawFamily.Entry #2 : System.String
@@ -303,6 +307,7 @@ type Fuaran.Core.ConformanceReport (record)
 type Fuaran.Core.ConstructWitness`1 (record)
 type Fuaran.Core.EvaluatorWitness`2 (record)
 type Fuaran.Core.Families (module)
+type Fuaran.Core.Families+FamilyOperations (record)
 type Fuaran.Core.Families+LawFamily (record)
 type Fuaran.Core.Families+OptInReason (union)
 type Fuaran.Core.Families+OptInReason+Tags (type)

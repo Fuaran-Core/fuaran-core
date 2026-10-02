@@ -912,6 +912,64 @@ row makes a scheduling claim and the file is inert, the clause FAILS. A check th
 without its instrument is worse than an absent one, and
 the first row to carry a phase is the row that will find out.
 
+### Clause 4 — every public operation is mapped (Phase 335)
+
+Clause 1 stops at PACKAGE granularity: a package with a model is covered, so an operation inside
+it could ship with no proved row, no law family and no recorded reason, and nothing said so. The
+operation clause reads the committed API baselines (`../api/*.txt`) as its census, every `method`
+line, and holds each to at least one of:
+
+- a `proved` or `tested` row in `../proofs.json` whose `evidence.operations` names it;
+- a law family whose operation roster (`Fuaran.Core.Families.operations`, shipped with the kit)
+  lists it, a family's own entry point being mapped by its roster row; or
+- an entry in `coverage-exclusions.json`'s `operations` block, with a one-line reason and a class
+  from that file's closed `operationClasses` vocabulary: `trivial`, `forward`, `obsolete`,
+  `host-seam`, `measured-elsewhere`.
+
+An operation is spelled `<Owner>.<member>`, with the `Fuaran.Core.` prefix, generic arity and the
+compiler's `Module` suffix dropped (`Dag+ReachModule.ancestors` is `Dag.Reach.ancestors`). An
+unmapped operation reds the family and names itself, and because the census IS the baselines, a
+newly published operation reds at the commit that publishes it. The check runs both ways: an entry
+for an operation that is no longer published, or that has since gained a ladder row or a roster
+line, fails too. Each class is held to what it says as far as a file can be — a `forward` names a
+target that is itself mapped, an `obsolete` entry's member carries `System.Obsolete` (read by
+reflection), and a `measured-elsewhere` entry names a test file under `tests/` that mentions the
+member, or the measured operation it is reached `through`. The family prints one more line beside
+the package predicate, saying which verdict it computed.
+
+**What `measured-elsewhere` admits is the weakest thing in this directory, and it says so.** It
+records that no theorem and no law family states the operation's contract and that example tests
+stand in. It is not a pass on the operation's design; it is the inventory of where the next law
+family would earn its keep. A law family that DRIVES an operation as harness (hashing a fixture,
+walking a tree to draw a node) does not list it on its roster: the roster says what a green run is
+evidence FOR. And a roster line is credit for what the family SAMPLES: the kit's op generator
+(`LawKit`) builds a `Batch` of one to three structural ops and never a `Batch` inside a `Batch`, so the
+families that draw ops credit the apply operations over flat batches only. Nested batches are the
+models' (the apply-engine theorems recurse through `Batch`), not a sampled family's.
+
+<!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by the Proofs.Coverage family; CORE_APPROVE_LADDER=1 rewrites it -->
+| Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `Fuaran.Core.AiSurface` | 21 | 0 | 9 | 2 | 0 | 0 | 0 | 10 |
+| `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
+| `Fuaran.Core.Conformance` | 129 | 1 | 82 | 2 | 6 | 0 | 1 | 37 |
+| `Fuaran.Core.Function` | 105 | 12 | 35 | 5 | 1 | 5 | 0 | 47 |
+| `Fuaran.Core.Idl` | 61 | 0 | 0 | 1 | 1 | 0 | 0 | 59 |
+| `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
+| `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
+| `Fuaran.Core.Observer` | 20 | 0 | 8 | 2 | 2 | 0 | 5 | 3 |
+| `Fuaran.Core.OpStream` | 123 | 10 | 28 | 3 | 1 | 0 | 2 | 79 |
+| `Fuaran.Core.OpStream.Dag` | 81 | 24 | 33 | 0 | 0 | 0 | 0 | 24 |
+| `Fuaran.Core.Ops` | 66 | 22 | 21 | 6 | 0 | 0 | 0 | 17 |
+| `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
+| `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
+| `Fuaran.Core.Query` | 32 | 6 | 8 | 0 | 0 | 0 | 0 | 18 |
+| `Fuaran.Core.Tree` | 57 | 7 | 5 | 0 | 1 | 0 | 0 | 44 |
+| `Fuaran.Core.Validator` | 34 | 0 | 12 | 3 | 0 | 0 | 0 | 19 |
+| `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
+| **Total** | 984 | 109 | 264 | 29 | 15 | 5 | 9 | 553 |
+<!-- operation-coverage:end -->
+
 ## Exit criteria, with evidence
 
 1. **Reproducible — met.** `check.ps1 -Runs 3` verifies the module three times from a cold
