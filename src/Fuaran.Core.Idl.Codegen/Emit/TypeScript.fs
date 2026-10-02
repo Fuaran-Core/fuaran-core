@@ -915,7 +915,10 @@ const encJson = (v) => {
   if (v === null || v === undefined) return 'null';
   if (typeof v === 'string') return encStr(v);
   if (typeof v === 'boolean') return encBool(v);
-  if (typeof v === 'number') return Number.isInteger(v) ? encInt(v) : encFloat(v);
+  // Phase 303 — a SAFE integer only: a whole value at or past 2^53 takes the float layout,
+  // where the canonical form switches to an exponent (1E+17) and String() does not (1e+21 at
+  // the earliest, digits before that), so the verbatim passthrough wrote other bytes.
+  if (typeof v === 'number') return Number.isSafeInteger(v) ? encInt(v) : encFloat(v);
   if (Array.isArray(v)) return '[' + v.map(encJson).join(',') + ']';
   const keys = Object.keys(v).sort();
   return '{' + keys.map((k) => encStr(k) + ':' + encJson(v[k])).join(',') + '}';

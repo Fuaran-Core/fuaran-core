@@ -3751,6 +3751,38 @@ existed; they were somewhere the consumer could not see.
 ruling. **Breaking (wire)** for the repeat hole's `required`, the descriptor bytes and the
 fingerprints that follow it. The rest is **additive**.
 
+### The IDL emitter compiles what it emits, and the three hosts agree by value (Phase 303, DECISIONS.md D104) — ADDITIVE: two public members added; refusals where silence was
+
+- **A field-less kind or record emits as a marker type** (`R = | R`, value `R.R`) in the one F# type
+  emitter, the codec, the smart constructors, the default literals and the scaffold — F# has no empty
+  record, and the `{ }` emitted before did not compile. Every vocabulary whose declarations all carry
+  fields emits byte-identically.
+- **The interpreter's float slot reads the WIRE_FORMAT §7 tokens** (`"NaN"`, `"Infinity"`,
+  `"-Infinity"`) its encoder writes and the generated hosts and schema already read; an `int` or `json`
+  slot does not widen. `Artifact.parse` reads a non-finite declared default back.
+- **`Trust.checkHardenPolicy` validates the caller's entries**: a `UrlFields` / `MarkdownFields` entry
+  naming no kind, no field, a host-only field, or a field the sanitisation floor does not rewrite is
+  refused as `CodegenError.UnsupportedConstruct`, naming the entry; a `str`-typed entry is sanitised
+  directly. A policy that was admitted and silently left a field unsanitised is now refused (a token
+  check still runs first, unchanged).
+- **The generated TypeScript's verbatim JSON encoder** writes a whole number at or past 2^53 in the
+  canonical float layout (`1E+21`), as the interpreter does; it wrote `String()` layout before — a byte
+  difference in `json` and hosted slots only.
+- **`FStarTarget.vectorsModule`** and **`FStarTarget.VectorModel`** (new): the interpreter's vectors as
+  `assert_norm` facts over a generated model; `proofs/VocabularyVectors.fst` is the certification set's,
+  registered in the proof leg (`proofs.json` `vocabulary-vectors-agree`).
+- **Certification**: the score and reference vocabularies' generated F# modules are committed and
+  compiled by the suite; a standing three-way differential (interpreter / compiled F# / TypeScript under
+  node) with an adversarial pass asserts value equality beside byte identity; the schema leg is validated
+  by the pinned JsonSchema.Net over the same wires, with a closed-reference check.
+
+**What a consumer does.** Nothing to compile against. A caller whose harden policy names a field the
+floor cannot reach now meets the refusal and fixes the entry; a reader of `json` or hosted slots under
+the generated TypeScript sees `1E+21` where it saw `1e+21`.
+
+**Class: additive** — `api/Fuaran.Core.Idl.Codegen.txt` gains `FStarTarget.vectorsModule` and the
+`VectorModel` record; no member is removed or retyped, and `CodegenError` gains no case.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

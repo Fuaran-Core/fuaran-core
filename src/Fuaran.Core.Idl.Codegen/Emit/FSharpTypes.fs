@@ -321,13 +321,20 @@ module internal FSharpTypes =
             else
                 ""
 
+        // Phase 303 — a declaration with NO fields has no record form (F# refuses `{ }`, FS3863),
+        // so it is the single-case marker type `R = | R`; [[Core.recordLit]] spells its value.
+        let declBody (typeName: string) (fields: IdlField list) (decls: string) =
+            if List.isEmpty fields then
+                sprintf "%s%s =\n    | %s" typeName (declParams msg typeName []) typeName
+            else
+                sprintf "%s%s =\n    {\n%s\n    }" typeName (declParams msg typeName []) decls
+
         let recordBody (r: IdlRecord) =
             fieldDecls r.Name r.Fields
             |> Result.map (fun fields ->
                 docOpt ("type:" + r.Name),
                 eqAttr ("R:" + r.Name),
-                sprintf "%s%s =\n    {\n%s\n    }" r.Name (declParams msg r.Name []) fields
-                + eqMembers ("R:" + r.Name) r.Name r.Fields)
+                declBody r.Name r.Fields fields + eqMembers ("R:" + r.Name) r.Name r.Fields)
 
         let specBody (k: IdlKind) =
             // Phase 119 — the kind's own declared annotations: the doc block joins
@@ -352,7 +359,7 @@ module internal FSharpTypes =
                 |> Result.map (fun fields ->
                     comment,
                     attrs @ eqAttr ("S:" + k.Tag),
-                    sprintf "%sSpec%s =\n    {\n%s\n    }" k.Tag (declParams msg (k.Tag + "Spec") []) fields
+                    declBody (k.Tag + "Spec") k.Fields fields
                     + eqMembers ("S:" + k.Tag) (k.Tag + "Spec") k.Fields)
 
         let nodeKindBody =

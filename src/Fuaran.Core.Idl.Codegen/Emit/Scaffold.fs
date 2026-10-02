@@ -132,7 +132,7 @@ module internal Scaffold =
             | None -> Error(valueMismatch (sprintf "a value of the undeclared record '%s'" name))
             | Some r ->
                 fsAssignments idl ("record '" + name + "'") r.Fields fields
-                |> Result.map (fun assigns -> "{ " + String.concat "; " assigns + " }")
+                |> Result.map (recordLit name)
         | TNode, VNode(id, kindTag, fields) ->
             match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
             | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
@@ -140,10 +140,10 @@ module internal Scaffold =
                 fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields
                 |> Result.map (fun recFields ->
                     sprintf
-                        "{ Id = %s; Kind = NodeKind.%s { %s } }"
+                        "{ Id = %s; Kind = NodeKind.%s %s }"
                         (SourceLit.fsString id)
                         kindTag
-                        (String.concat "; " recFields))
+                        (recordLit (kindTag + "Spec") recFields))
         // Phase 698 — the enveloped form. The envelope's assignments sit on the
         // `Node` record itself (`Style = Some …`), the kind's on the spec record, and
         // both go through the SAME `fsAssignments`, so the presence rules cannot
@@ -161,10 +161,10 @@ module internal Scaffold =
                 | Ok recFields, Ok envFields ->
                     Ok(
                         sprintf
-                            "{ Id = %s; Kind = NodeKind.%s { %s }%s }"
+                            "{ Id = %s; Kind = NodeKind.%s %s%s }"
                             (SourceLit.fsString id)
                             kindTag
-                            (String.concat "; " recFields)
+                            (recordLit (kindTag + "Spec") recFields)
                             (envFields |> List.map (fun a -> "; " + a) |> String.concat "")
                     )
         | TList inner, VList xs ->

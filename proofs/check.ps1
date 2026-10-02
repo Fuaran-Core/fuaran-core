@@ -161,6 +161,12 @@ $ErrorActionPreference = 'Stop'
 #                idempotence proved through a stability invariant on the output, and the script
 #                proved never to lengthen. Opens DagFold, TreeOps and Preservation and cites
 #                TreeDiff's `tree_ext`, so it follows all four.
+#   VocabularyVectors — Phase 303, the interpreter's vectors as NORMALISER facts over the three
+#                generated models: for each vector the three-way differential draws (drawn and
+#                adversarial), `assert_norm` that the model's `enc_node` maps the interpreter's
+#                decoded value to the jval its bytes parse to. Emitted by the same target from the
+#                test project (`--emit-fstar`). Opens Vocabulary, DocVocabulary and ScoreVocabulary,
+#                so it follows them; checked but not extracted, like them.
 #
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
@@ -171,7 +177,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
@@ -222,7 +228,7 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # independent-oracle differential instead (the Proofs.Oracle family holds `Hash.utf8Bytes` to the
 # platform's own encoder over every code unit), and the ladder records the model-to-code step as
 # assumed, with that differential as its evidence.
-$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8')
+$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8', 'VocabularyVectors')
 
 # The host step, in this order. Separate invocations rather than one prefix filter, so each failure
 # reads as what it is rather than as one red suite.

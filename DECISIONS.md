@@ -1,5 +1,71 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D105: a transparent case never carries what can be an object; at a float slot the §7 tokens are read back, not refused; a map's value is its key set; a field-less declaration is a marker type
+
+**Recorded by Phase 303. `src/Fuaran.Core.Idl/Idl.fs` (`Decode`, `FloatToken`), `Artifact.fs`,
+`src/Fuaran.Core.Idl.Codegen/` (the one type emitter, `Trust.checkHardenPolicy`, the TypeScript
+runtime's verbatim encoder, `FStarTarget.vectorsModule`), `tests/Fuaran.Core.Tests/IdlThreeHostTests.fs`,
+`IdlSchemaValidatorTests.fs`, `proofs/VocabularyVectors.fst`, `proofs.json`
+(`vocabulary-vectors-agree`); rides the `0.34.0` draft (STABILITY.md, "Phase 303").**
+
+**D104.1 — the transparent-case rule, stated once.** A declared transparent union case goes on the wire
+BARE — its one field's value with no discriminator — and a reader tells it from the union's tagged
+cases by the absence of the discriminator. That test is sound only when the bare value can never be an
+object: the reference interpreter sends every object to the tagged arm, the generated F# and TypeScript
+send anything without the discriminator to the bare arm, so a bare object either changes case on one
+host or, carrying the discriminator, decodes on every host as a DIFFERENT case under identical re-encoded
+bytes (`Lit({"$type":"Ref",…})` reading as `Ref`). The rule is therefore a property of the
+DECLARATION, not of a value: a transparent case whose field type is object-capable — `json`, a record, a
+map, a union, a node, or a type variable instantiated at one — is refused by `Declare.errors` at load
+(`Artifact.ofJson`, `Proposal.applyDelta`), which Phase 292 shipped and this phase pins at the loading
+boundary. It is the premise the F* target always stated in its own refusal; now there is one statement of
+it, at the one place every vocabulary passes.
+
+**D104.2 — the §7 direction.** WIRE_FORMAT §7 spells a non-finite float at a FLOAT slot as the quoted
+token `"NaN"`, `"Infinity"` or `"-Infinity"`. The interpreter's encoder writes it, the generated F#
+`dFloat`, the generated TypeScript decoder and the emitted schema read it, and the interpreter's own
+decoder refused it — the reference host was the odd one out, refusing its own output. The direction is
+to ACCEPT: the decoder's float arm reads exactly those three strings (nothing else, and at no other
+slot — an `int` slot and a `json` slot do not widen), and the artifact reader reads a non-finite declared
+default back. The opposite direction — routing the encoder through the guarded renderer so a non-finite
+float is refused — was the second pass's first reading of Phase 292's task and is declined: it would
+move the reference interpreter further from every host, and the guarded renderer stays where §7 does not
+reach (a non-finite float inside a verbatim `json` or hosted value, which has no token of its own and is
+refused by path).
+
+**D104.3 — a map's value is its key set (the second pass's P1).** A decoded map is an entry list on the
+interpreter (wire order), a `Map` on the generated F# (key order) and an object on the TypeScript host
+(insertion order, integer-like keys first). The bytes agree — every encoder sorts a map's entries
+Ordinal, under either key order — and the VALUES differ only in an order no reader may depend on. Settled by
+statement rather than by sorting in any one host: the three-way differential's value normal form compares
+a map as its key set, and so does its TypeScript leg's deep equality.
+
+**D104.4 — a field-less declaration is a marker type.** F# has no empty record (`{ }` is FS3863), so a
+field-less kind or record emits as the single-case union `R = | R`, its value spelled `R.R` through one
+record-literal helper every F# site shares. Chosen over a nullary `NodeKind` case or a `unit` payload
+because it keeps every `NodeKind` case carrying its spec, so the codec, the projection seam and the smart
+constructors stay one shape. Before this phase the score vocabulary's generated module did not compile
+and the suite, which only regenerated it, did not notice; every certification vocabulary's generated F#
+is now compiled.
+
+**D104.5 — a harden entry names what the floor can reach.** `Trust.checkHardenPolicy` refuses a
+`UrlFields` / `MarkdownFields` entry naming no kind, no field, a host-only field, or a field whose type
+the floor does not rewrite (anything but a `str` or a union carrying the declared literal case), through
+the existing `UnsupportedConstruct` case, and a `str`-typed entry is sanitised directly. An entry used to
+be matched by name and silently passed when it did not fit: a record-typed `href` holding
+`javascript:alert(1)` survived `harden` verbatim.
+
+**What the differential found, and was fixed in the same phase.** The TypeScript runtime's verbatim
+JSON encoder wrote a whole number at or past 2^53 in `String()` layout (`1e+21`, or digits) rather than
+the canonical float layout (`1E+21`); and the reference vocabulary's support document's projection
+encoder omitted the kind discriminator — wrong since it was written, and visible only once the module was
+compiled and run against the interpreter.
+
+**What is not done here.** The F* facts see structure, presence and key order, not the float layout (the
+model's float carrier is opaque) and not the §7 tokens; the three-way differential, a test, covers both.
+The generated F# and TypeScript layers carry no op root, so a root op is certified on the interpreter and
+against the schema only.
+
 ## 2026-10-02 — D104: one space relation answers every "does this value fit" question; a wire document's value space is `$type`-tagged and the descriptor's spelling is frozen; a signature and strict application agree on what a repeat requires; a registry holds only total capabilities
 
 **Context (Phase 295).** The invocable seams had drifted around the parts that were designed
@@ -85,6 +151,7 @@ The other drift:
 - `proofs/Capability.fst` and `proofs/Query.fst` restate required-ness, totality, registration, the
   widening and the keyed list, and both oracles are re-extracted.
 - `capabilityPipelineLaws`, `registryLaws` and `queryLaws` each pin their call site to the relation.
+
 
 ## 2026-10-02 — D103: a content-changing survivor is rewritten before the children it gains and after the children it loses; a contained undo is closed only from a contained pre-state; arbitration refuses a malformed base instead of arbitrating it
 

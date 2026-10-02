@@ -2963,6 +2963,17 @@
         "model": "proofs/Query.fst",
         "prover": "proofs/fstar-pin.json"
       }
+    },
+    {
+      "id": "vocabulary-vectors-agree",
+      "level": "proved",
+      "claim": "The GENERATED vocabulary models and the REFERENCE INTERPRETER write the same object for every vector the three-way differential carries into F*: `proofs/VocabularyVectors.fst`, emitted by `FStarTarget.vectorsModule` from the test project, holds `d_vectors_agree`, `s_vectors_agree` and `r_vectors_agree` — one per certification model (`DocVocabulary`, `ScoreVocabulary`, `Vocabulary`) — each a sequence of `assert_norm (enc_node v == e)` facts, where `v` is the model value of what the interpreter DECODES a vector's canonical bytes to and `e` is the `jval` those bytes PARSE to, member for member and key for key, at the instantiation `num = int`, `flt = string` (a float carried as its canonical layout). The vectors are the differential's own seeded draws, drawn and adversarial, twelve per model, hostile map keys sorted first; a vector the model cannot express (a kind the model refuses, a non-finite float, a string F* cannot spell, a transparent union) is REFUSED by the target naming it, never dropped, and the test project selects among the admitted ones. The facts are discharged by the NORMALISER, not by Z3: a model encoder that put a member under another key, in another order, or a presence rule the interpreter does not follow fails the module (measured: one renamed key in one expected value fails it with `Assertion failed`). Proved with no assume and no admit under --report_assumes error. Held to a fresh generation by `IdlThreeHostTests`. WHAT IS NOT CLAIMED: the float LAYOUT (the model's `flt` is opaque, so the facts carry the canonical layout as a string on both sides) and the WIRE_FORMAT section-7 sentinels (a non-finite float is spelled on the wire as a string the model's float slot does not carry); both are covered by the three-way differential over the interpreter, the compiled generated F# and the generated TypeScript, which is a TEST, not this row. A fact is about its vector: these are instances of the round trip `rt_node` proves universally, pinned to the bytes the interpreter actually writes.",
+      "phase": "fuaran-core#303",
+      "evidence": {
+        "theorem": "r_vectors_agree",
+        "model": "proofs/VocabularyVectors.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
     }
   ]
 }
