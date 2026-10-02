@@ -256,6 +256,10 @@ let private runs =
                    288
                    100)
            run
+               "Conformance.laneLaws"
+               100
+               (Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 311 100)
+           run
                "Conformance.casLaws"
                200
                (Conformance.casLaws

@@ -413,7 +413,7 @@
     {
       "id": "dangling-parent-policy",
       "level": "proved",
-      "claim": "What the drain does with a parent OUTSIDE the set is a parameter of the model, because the two production call sites differ on it and a theorem about \"the drain\" that did not say which would be a theorem about neither. `IgnoreDangling` is `Dag.topoCore`'s closure walk with `Dag.ancestorsOf`'s `ContainsKey` guard and the `parentsIn` filter that follows — the parent never enters the closure, is filtered out of the in-degree, constrains nothing, and the drain proceeds; it is the policy on the fold path (`topoOrder` to `between` to `betweenOps` to `reconcileMany` to `foldOnce`) and on `replayTo`. `RefuseDangling` is `Dag.firstBreak`'s `MissingParent`, hence `verifyDag` and `fromJsonlVerified`, which refuse the whole set before any drain runs. `drain_policies_agree` proves the two are the same function on a set holding every parent it names, so the fold path pays nothing for the refusing one's existence; `drain_refusal_characterised` proves the refusal fires exactly when a parent lies outside, and `drain_refusal_needs_a_dangler` the converse. The refusal names the SMALLEST offending id rather than the first in the work list, matching `firstBreak`'s `Map.toList` id-ordered scan, which is what lets `drain_deterministic` cover the refusing policy too. NOT modelled: the refusal's diagnostic payload — `firstBreak` reports the missing parent beside the node, and the node determines it.",
+      "claim": "What the drain does with a parent OUTSIDE the set is a parameter of the model, because the two production call sites differ on it and a theorem about \"the drain\" that did not say which would be a theorem about neither. `IgnoreDangling` is `Dag.topoCore`'s closure walk with `Dag.ancestorsOf`'s `ContainsKey` guard and the `parentsIn` filter that follows — the parent never enters the closure, is filtered out of the in-degree, constrains nothing, and the drain proceeds; it is the policy on the fold path (`topoOrder` to `between` to `betweenOps` to `reconcileMany` to `foldOnce`) and on `replayTo`. `RefuseDangling` is `Dag.firstBreak`'s `MissingParent`, hence `verifyDag` and `fromJsonlVerified`, which refuse the whole set before any drain runs. `drain_policies_agree` proves the two are the same function on a set holding every parent it names, so the fold path pays nothing for the refusing one's existence; `drain_refusal_characterised` proves the refusal fires exactly when a parent lies outside, and `drain_refusal_needs_a_dangler` the converse. The refusal names the SMALLEST offending id rather than the first in the work list — an order-invariant choice, which is what lets `drain_deterministic` cover the refusing policy too. Production's `firstBreak` makes another order-invariant choice: it scanned `Map.toList` in id order until Phase 311 and scans the whole DAG's drain since, naming the EARLIEST faulty node; which node production names among several is not modelled. NOT modelled: the refusal's diagnostic payload — `firstBreak` reports the missing parent beside the node, and the node determines it.",
       "phase": "fuaran-core#156",
       "evidence": {
         "theorem": "drain_policies_agree",
@@ -3113,6 +3113,53 @@
       "class": "premise",
       "evidence": {
         "assumption": "the domain's node evaluator returns Ok or Error at every node it is handed and never throws"
+      }
+    },
+    {
+      "id": "append-on-is-merge-all",
+      "level": "proved",
+      "claim": "An N-parent node is named before it is built: over distinct parents, the node `Dag.appendOn` mints has exactly the id `Dag.mergeAll` gives the same heads (`append_on_is_merge_all`), and two head lists holding the same ids, in any order and with any repetition, converge to one id (`merge_all_set_determined`) — so two replicas folding the same heads mint the same node, and no consumer needs a private `nodeHash` (`Dag.nodeId` is the public one). Section 5's two-parent `merge_id_parent_order_independent` is the smallest case. Needs the comparison to be a TRANSITIVE total order, which `String.CompareOrdinal(a, b) <= 0` is, and nothing about the hash. NOT claimed: anything about a list WITH a repeated parent under `appendOn`, which stores and hashes it as given.",
+      "phase": "fuaran-core#311",
+      "evidence": {
+        "theorem": "append_on_is_merge_all",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "merge-all-set-determined",
+      "level": "proved",
+      "claim": "`Dag.mergeAll` is a function of the head SET: two head lists with the same members — in any order, with any repetition — store the same deduplicated, sorted parents and mint the same content id (`merge_all_set_determined`). The model's `dedup` keeps last occurrences where `List.distinct` keeps first; the sort that follows erases the difference, which the theorem is the statement of.",
+      "phase": "fuaran-core#311",
+      "evidence": {
+        "theorem": "merge_all_set_determined",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "total-order-by-linear-extension",
+      "level": "proved",
+      "claim": "`Dag.totalOrderBy key` at ANY key is section 13's drain at a total order: the frontier's comparison — the key first, the id breaking ties, read through the node set by id — is proved a total order whenever the key order and the id order are (`by_key_total`), so the drain at it places every node once after its in-set parents (`total_order_by_is_a_linear_extension`), places every node of an acyclic set and yields a topological enumeration (`total_order_by_total_on_acyclic`), and is a function of the node set under every arrival order (`total_order_by_deterministic`). The three downstream orders — the smallest id, a Lamport rank then lane then id, a domain rank then id — are this drain at three keys. The key order is a PARAMETER (any strict total order), as the id order is; NOT claimed: that any particular key is the right one for a domain, which is the domain's to choose.",
+      "phase": "fuaran-core#311",
+      "evidence": {
+        "theorem": "total_order_by_is_a_linear_extension",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "lane-store-laws",
+      "level": "tested",
+      "claim": "The lane store, sampled on drawn multi-writer stores: `Dag.loadLanes` of `Dag.lanesToJsonl` is the store and its union is `fromJsonl` of the lane texts concatenated; the lane files read in any order load, order and replay identically; `totalOrderBy` is a linear extension at the default key and a drawn one, and restricts to every head's `tryTopoOrder` at a constant key; `laneCollisions` names exactly a lane handed a second, incomparable node and `loadLanes` refuses a node two lane files hold with different content; `appendOn` over the heads in any order mints `mergeAll`'s id, and the history below it is the folded binary merges' without their merge nodes, in the same drain order; `commonBase` is order-free and is `mergeBase` at two heads; `rehashWith` to SHA-256 verifies there and rehashes back to the store, and refuses an unverified one; `verifyLanes` names the lane of a changed node; and a DAG pruned of `prunable` keeps every retained root's replay, order and verification. A sample without a cross-lane merge, two heads, a lane fork or a content collision reds the family's guard rather than reading green.",
+      "phase": "fuaran-core#311",
+      "evidence": {
+        "family": "Conformance.laneLaws",
+        "cases": [
+          "laneLaws certify the reference stream witness green",
+          "laneLaws under SHA-256 certify green too",
+          "a hash that answers one id reds the lane-shape guard rather than reading green"
+        ]
       }
     }
   ]

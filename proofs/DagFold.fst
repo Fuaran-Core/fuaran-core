@@ -2427,10 +2427,12 @@ let rec first_outside (ps:list string) (closure:list string) : Tot (found string
   | [] -> Missing
   | p :: t -> if mem p closure then first_outside t closure else Found p
 
-(* F#: the nodes `Dag.firstBreak` would fault with `MissingParent`. It scans `Map.toList`, which is
-   id-ordered, and its docstring says so — so its answer does not depend on insertion order, which
-   is why the refusal below names the SMALLEST such id rather than the first in the work list, and
-   why `drain_deterministic` can cover the refusing policy too. *)
+(* F#: the nodes `Dag.firstBreak` would fault with `MissingParent`. Its answer does not depend on
+   insertion order — it scanned `Map.toList`, in id order, until Phase 311, and scans the whole
+   DAG's drain since — which is why the refusal below names an ORDER-INVARIANT choice, the SMALLEST
+   such id, rather than the first in the work list, and why `drain_deterministic` can cover the
+   refusing policy too. Which node production names among several is not modelled: the subject
+   here is that the refusal fires, and fires the same under every arrival order. *)
 let rec dangling_ids (#op:eqtype) (ns:list (node op)) (closure:list string) : Tot (list string) =
   match ns with
   | [] -> []
@@ -3053,6 +3055,139 @@ let spine_drain_is_append_order (#op:eqtype) (lt:string -> string -> bool)
           (ensures drain_order lt kfuel (bn :: ns) == bn.nid :: ids_of ns)
   = pick_min_is_a_tie_break lt;
     kahn_drain_is_such_an_enumeration (pick_min lt) kfuel bn ns
+
+(* ---- 13.13 the drain at a KEY: `Dag.totalOrderBy` (Phase 311) ---- *)
+
+(* F#: `Dag.totalOrderBy key dag` drains the WHOLE node set with the ready frontier ordered by
+   `(key node, id)`, smallest first — `Dag.drainBy`'s `Set<'K * string>` frontier. Consumers order
+   the union of a lane store three ways (the smallest id; a Lamport rank, then the lane, then the id;
+   a domain rank, then the id), and each is this drain at its own key. This section is the sentence
+   "whatever the key, the order is a linear extension of the parent relation, total on an acyclic
+   set, and a function of the node set": it builds the comparison the frontier uses out of the key
+   and the id order, proves it a total order (`by_key_total`), and then every section-13 theorem
+   holds of it by instantiation — section 13 took the order as a parameter for exactly this.
+
+   THE KEY IS READ THROUGH A NODE TABLE BY ID. The drain's selector compares ids, so the key is
+   looked up: `by_key tbl key ltk lt a b` compares `a`'s and `b`'s keys where the table holds them,
+   and an id the table does not hold sorts after every one it does, by `lt` among themselves. The
+   drain never asks about such an id when the table is the drained set (every frontier id is a node
+   of it); the clause is there so the comparison is total on ALL strings, which is what section
+   13's `total_order` asks.
+
+   THE KEY ORDER IS A PARAMETER, as the id order is: `ltk` is any strict total order on the key
+   type. F#'s structural comparison on a key tuple — `(int, string)`, `(string, int, string)` — is
+   one; the claim is that replicas sharing a key agree, never that a key is any particular one.
+
+   NO TUPLES are matched in the extracted part, for the reason `found` is spelled locally (README,
+   finding 2). *)
+
+(* A strict total order on any equality type — `total_order`'s three properties, generic. *)
+let strict_total (#a:eqtype) (lt:a -> a -> bool) : prop =
+  (forall (x:a). not (lt x x)) /\
+  (forall (x y z:a). lt x y /\ lt y z ==> lt x z) /\
+  (forall (x y:a). x =!= y ==> (lt x y \/ lt y x))
+
+(* F#: the frontier's comparison in `Dag.drainBy` — `(key node, id)` lexicographically. *)
+let by_key (#op:eqtype) (#k:eqtype) (tbl:list (node op)) (key:node op -> k) (ltk:k -> k -> bool)
+  (lt:string -> string -> bool) (a b:string) : Tot bool =
+  match lookup tbl a with
+  | Found na ->
+    (match lookup tbl b with
+     | Found nb -> ltk (key na) (key nb) || (key na = key nb && lt a b)
+     | Missing -> true)
+  | Missing ->
+    (match lookup tbl b with
+     | Found _ -> false
+     | Missing -> lt a b)
+
+(* The key comparison is a total order whenever the key order and the id order are. *)
+#push-options "--z3rlimit 60"
+let by_key_total (#op:eqtype) (#k:eqtype) (tbl:list (node op)) (key:node op -> k)
+  (ltk:k -> k -> bool) (lt:string -> string -> bool)
+  : Lemma (requires strict_total ltk /\ total_order lt)
+          (ensures total_order (by_key tbl key ltk lt))
+  = let r = by_key tbl key ltk lt in
+    let irr (x:string) : Lemma (not (r x x)) =
+      match lookup tbl x with
+      | Found _ -> ()
+      | Missing -> ()
+    in
+    let tri (x y:string) : Lemma (x =!= y ==> (r x y \/ r y x)) =
+      match lookup tbl x with
+      | Found nx ->
+        (match lookup tbl y with
+         | Found ny -> if key nx = key ny then () else assert (ltk (key nx) (key ny) \/ ltk (key ny) (key nx))
+         | Missing -> ())
+      | Missing ->
+        (match lookup tbl y with
+         | Found _ -> ()
+         | Missing -> ())
+    in
+    let trans (x y z:string) : Lemma (r x y /\ r y z ==> r x z) =
+      match lookup tbl x with
+      | Found nx ->
+        (match lookup tbl y with
+         | Found ny ->
+           (match lookup tbl z with
+            | Found nz ->
+              assert (ltk (key nx) (key ny) /\ ltk (key ny) (key nz) ==> ltk (key nx) (key nz))
+            | Missing -> ())
+         | Missing ->
+           (match lookup tbl z with
+            | Found _ -> ()
+            | Missing -> ()))
+      | Missing ->
+        (match lookup tbl y with
+         | Found _ -> ()
+         | Missing ->
+           (match lookup tbl z with
+            | Found _ -> ()
+            | Missing -> ()))
+    in
+    FStar.Classical.forall_intro irr;
+    FStar.Classical.forall_intro_2 tri;
+    FStar.Classical.forall_intro_3 trans
+#pop-options
+
+(* THEOREM (Phase 311). `Dag.totalOrderBy` at ANY key is section 13's drain at a total order, so
+   what it places it places once, after every one of its in-set parents: a linear extension of the
+   parent relation, whatever the key. *)
+let total_order_by_is_a_linear_extension (#op:eqtype) (#k:eqtype) (key:node op -> k)
+  (ltk:k -> k -> bool) (lt:string -> string -> bool) (fuel ns:list (node op))
+  : Lemma (requires strict_total ltk /\ total_order lt /\ distinct (ids_of ns))
+          (ensures (let r = by_key ns key ltk lt in
+                    let ord = drain_order r fuel ns in
+                    total_order r /\
+                    distinct ord /\
+                    (forall (x:string). mem x ord ==> mem x (ids_of ns)) /\
+                    placed_follow_parents ns (ids_of ns) [] ord))
+  = by_key_total ns key ltk lt;
+    drain_linear_extension (by_key ns key ltk lt) fuel ns
+
+(* THEOREM (Phase 311). … TOTAL on an acyclic set: every node placed exactly once, and the order a
+   topological enumeration — `Dag.totalOrderBy` returns `Ok` exactly on such a set. *)
+let total_order_by_total_on_acyclic (#op:eqtype) (#k:eqtype) (key:node op -> k)
+  (ltk:k -> k -> bool) (lt:string -> string -> bool) (fuel ns:list (node op)) (w:list string)
+  : Lemma (requires strict_total ltk /\ total_order lt /\ distinct (ids_of ns) /\
+                    covers fuel (ids_of ns) /\ is_topo_enum ns w)
+          (ensures (let ord = drain_order (by_key ns key ltk lt) fuel ns in
+                    distinct ord /\ (forall (x:string). mem x ord == mem x (ids_of ns)) /\
+                    is_topo_enum ns ord))
+  = drain_total_on_acyclic (by_key ns key ltk lt) fuel ns w
+
+(* THEOREM (Phase 311). … and a function of the node SET: two replicas holding the same nodes in any
+   order — F#: the lane files read in any order — draw the same order at the same key. The key is
+   read through one table `tbl` (the store both replicas loaded), so the comparison is one function
+   and section 13's determinism applies to it unchanged. *)
+let total_order_by_deterministic (#op:eqtype) (#k:eqtype) (tbl:list (node op)) (key:node op -> k)
+  (ltk:k -> k -> bool) (lt:string -> string -> bool) (f1 f2 r1 r2:list (node op))
+  (p:perm (node op) r1 r2)
+  : Lemma (requires strict_total ltk /\ total_order lt /\ distinct (ids_of r1) /\ distinct (ids_of r2) /\
+                    covers f1 (ids_of r1) /\ covers f2 (ids_of r2))
+          (ensures drain IgnoreDangling (by_key tbl key ltk lt) f1 r1 ==
+                   drain IgnoreDangling (by_key tbl key ltk lt) f2 r2)
+  = by_key_total tbl key ltk lt;
+    drain_deterministic IgnoreDangling (by_key tbl key ltk lt) f1 f2 r1 r2 p
 
 (* ======================================================================================
    14. Delta recovery over a MERGED HEAD (Phase 158).
@@ -4623,6 +4758,8 @@ let twin_dag : dag string =
 
 let twin_fuel : list (node string) = app twin_dag.nodes twin_dag.nodes
 
+let twin_bool_lt (p q:bool) : Tot bool = not p && q
+
 let twin_apply (o:string) (s:string) : Tot (outcome string string) =
   if o = "x" then Error "refused" else Ok (s ^ o)
 
@@ -4671,6 +4808,10 @@ let twins : list twin = [
   { tname = "add-node-refuses-a-differing-node";
     tholds = (fun () ->
       add_node (fun (p q:node string) -> p.nop = q.nop) ({ nid = "a"; nparents = []; nop = "z" }) twin_dag
-      = Collision "a") } ]
+      = Collision "a") };
+  { tname = "total-order-by-takes-the-key-before-the-id";
+    tholds = (fun () ->
+      drain_order (by_key twin_dag.nodes (fun (n:node string) -> n.nid = "b") twin_bool_lt twin_lt) twin_fuel twin_dag.nodes
+      = [ "a"; "c"; "b"; "m" ]) } ]
 
 let _ = assert_norm (twins_hold twins == true)

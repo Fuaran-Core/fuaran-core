@@ -1277,6 +1277,458 @@ module internal StreamLaws =
                   "compaction refused", compactRefused
                   "compaction keeping a band behind its checkpoint", banded ] ]
 
+    /// Lane-store laws (Phase 311) — the teeth on `Dag.loadLanes` / `lanesToJsonl`, `verifyLanes`,
+    /// `laneCollisions`, `totalOrderBy` / `totalOrder` / `replayAll`, `mergeAll` / `appendOn`,
+    /// `commonBase`, `rehashWith` and `prunable`. Each iteration draws a lane store from the caller's ops:
+    /// two to four lanes, each lane one writer (its own actor) whose nodes go onto its own last node, onto
+    /// every head of the union (a convergence, the shape a writer that folds before it writes takes), or —
+    /// for a lane's first node — onto any node already written. Then:
+    ///
+    ///  - **load ≡ union** — `loadLanes` of `lanesToJsonl` is the store (nodes and attribution), and its
+    ///    union is `fromJsonl` of the lane texts concatenated;
+    ///  - **order determinism under lane permutation** — the lane files handed in a shuffled order load
+    ///    to the same store, order to the same `totalOrder` and replay to the same `replayAll`;
+    ///  - **a linear extension at every key** — `totalOrderBy` places every node once, after its parents,
+    ///    at the default key and at a key drawn per node; at a constant key it restricts to every head's
+    ///    closure as `tryTopoOrder` of that head;
+    ///  - **collision refusal** — `laneCollisions` is `[]` on the drawn store and names a lane handed a
+    ///    second, incomparable node, with both tips; `loadLanes` refuses a node a second lane file holds
+    ///    with different content, naming both lanes, and keeps one it holds identically;
+    ///  - **mergeAll ≡ folded binary merges** — over the store's heads, `appendOn` in a shuffled order
+    ///    mints `mergeAll`'s id, and the history below the `mergeAll` node is the history below the last
+    ///    of a left fold of binary merges, with the fold's merge nodes removed, in the same drain order;
+    ///  - **one common base** — `commonBase` is the same under a shuffle of the heads, is `mergeBase` at
+    ///    two, and `Reach.commonBase` answers as it does;
+    ///  - **rehashWith round trip** — the store re-minted under SHA-256 verifies there and re-minted back
+    ///    under the caller's hash is the store, every id mapped back to itself; a tampered store is
+    ///    refused as `Unverified`;
+    ///  - **verifyLanes names the lane** — `Ok` on the drawn store, and the lane of a node whose op is
+    ///    changed under its id;
+    ///  - **retention** — the DAG with `prunable` dropped verifies, and every retained root replays and
+    ///    orders as it did.
+    ///
+    /// `'State` and `'Rej` need equality; ops are compared through `Encode`.
+    ///
+    /// `Guarded [ "lane shape" ]` (the Phase 245 guard): the permutation, merge and collision laws say
+    /// nothing a single chain does not unless the store holds a node whose parents lie in two lanes, a
+    /// fork handed to one lane, and a content collision across lane files — and whether a draw produces
+    /// them depends on the caller's ops (the same op on the same parent is one node, and a step whose id
+    /// the caller's hash has already given another node is refused and skipped). So the family demands
+    /// all three, and counts the stores without a cross-lane merge and the folds a collision skipped
+    /// beside them.
+    let laneLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (hashFn: HashFn)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let family = "Conformance.laneLaws"
+        let dimension = "lane shape"
+
+        let loadCell =
+            LawKit.LawCell
+                "loadLanes of lanesToJsonl is the store, and its union is fromJsonl of the lane texts concatenated"
+
+        let permCell =
+            LawKit.LawCell "loadLanes, totalOrder and replayAll are the same under every order of the lane files"
+
+        let orderCell =
+            LawKit.LawCell
+                "totalOrderBy places every node once after its parents at any key, and at a constant key restricts to tryTopoOrder of every head"
+
+        let collisionCell =
+            LawKit.LawCell
+                "laneCollisions names exactly a lane holding two incomparable nodes, and loadLanes refuses a node two lanes hold with different content"
+
+        let mergeAllCell =
+            LawKit.LawCell(
+                "appendOn over the heads in any order mints mergeAll's id, and the history below it is the folded binary merges' without their merge nodes",
+                Some dimension
+            )
+
+        let baseCell =
+            LawKit.LawCell
+                "commonBase is order-free, is mergeBase at two heads, and Reach.commonBase answers as it does"
+
+        let rehashCell =
+            LawKit.LawCell
+                "rehashWith to SHA-256 verifies there and rehashes back to the store; an unverified store is refused"
+
+        let verifyCell =
+            LawKit.LawCell "verifyLanes accepts the drawn store and names the lane of a node changed under its id"
+
+        let pruneCell =
+            LawKit.LawCell
+                "the DAG with prunable dropped verifies, and every retained root replays and orders as it did"
+
+        let mutable crossMerged = 0
+        let mutable noCrossMerge = 0
+        let mutable forked = 0
+        let mutable collided = 0
+        let mutable foldSkipped = 0
+        let mutable manyHeads = 0
+
+        let render (l: Dag.Loaded<'Op>) = Dag.lanesToJsonl sw.Encode l, l.LaneOf
+
+        let renderLoad (r: Result<Dag.Loaded<'Op>, Dag.LaneLoadFault>) =
+            r |> Result.map render |> Result.mapError (sprintf "%A")
+
+        LawKit.run iterations seed (fun rng i at ->
+            // ---- draw a lane store ----
+            let laneIds = [ for k in 0 .. 1 + rng.IntBelow 3 -> "lane-" + string k ]
+            let mutable store: Dag.Loaded<'Op> = { Dag = Dag.empty; LaneOf = Map.empty }
+            let mutable tips: Map<string, string> = Map.empty
+            let actorOf (lane: string) = Human lane
+
+            let write (lane: string) (parents: string list) =
+                match Dag.appendOnLane hashFn sw (actorOf lane) (rng.Draw gen.Op) parents lane store with
+                | Ok(id, s) ->
+                    store <- s
+                    tips <- Map.add lane id tips
+                | Error _ -> () // a content-id collision under the caller's hash: the step is skipped
+
+            write (List.head laneIds) []
+
+            for _ in 1 .. 3 + rng.IntBelow 12 do
+                let lane = rng.Choose laneIds
+                let nodes = store.Dag.Nodes |> Map.toList |> List.map fst
+
+                match Map.tryFind lane tips with
+                | None when List.isEmpty nodes -> write lane []
+                | None -> write lane [ rng.Choose nodes ]
+                | Some tip ->
+                    if rng.IntBelow 10 < 6 then
+                        write lane [ tip ]
+                    else
+                        write lane (Dag.heads store.Dag)
+
+            let dag = store.Dag
+            let ids = dag.Nodes |> Map.toList |> List.map fst
+            let heads = Dag.heads dag
+
+            let crossLane =
+                dag.Nodes
+                |> Map.exists (fun _ n ->
+                    n.Parents
+                    |> List.choose (fun p -> Map.tryFind p store.LaneOf)
+                    |> List.distinct
+                    |> List.length
+                    >= 2)
+
+            if crossLane then
+                crossMerged <- crossMerged + 1
+            else
+                noCrossMerge <- noCrossMerge + 1
+
+            let texts = Dag.lanesToJsonl sw.Encode store
+
+            // ---- load ≡ union ----
+            let reloaded = Dag.loadLanes sw texts
+
+            let concatenated =
+                Dag.fromJsonl sw (texts |> List.map snd |> List.filter (fun t -> t <> "") |> String.concat "\n")
+                |> Result.map (Dag.toJsonl sw.Encode)
+
+            loadCell.Check(
+                renderLoad reloaded = Ok(render store)
+                && concatenated = Ok(Dag.toJsonl sw.Encode dag),
+                fun () ->
+                    at (sprintf "lanes %A: reloaded %A, concatenated %A" texts (renderLoad reloaded) concatenated)
+            )
+
+            // ---- order determinism under lane permutation ----
+            let state0 = gen.State0
+            let order0 = Dag.totalOrder store
+            let replay0 = Dag.replayAll sw state0 store
+
+            for _ in 1..3 do
+                let shuffled = rng.Shuffle texts
+
+                match Dag.loadLanes sw shuffled with
+                | Ok l ->
+                    permCell.Check(
+                        render l = render store
+                        && Dag.totalOrder l = order0
+                        && Dag.replayAll sw state0 l = replay0,
+                        fun () -> at (sprintf "lane files in the order %A" (shuffled |> List.map fst))
+                    )
+                | Error f -> permCell.Check(false, fun () -> at (sprintf "a shuffled load refused: %A" f))
+
+            // ---- a linear extension at every key ----
+            let drawn = ids |> List.map (fun id -> id, rng.IntBelow 4) |> Map.ofList
+
+            let isExtension (order: Result<string list, Dag.TotalOrderFault>) =
+                match order with
+                | Error _ -> false
+                | Ok o ->
+                    let pos = o |> List.mapi (fun k id -> id, k) |> Map.ofList
+
+                    List.length o = Map.count dag.Nodes
+                    && Map.count pos = List.length o
+                    && o
+                       |> List.forall (fun id ->
+                           dag.Nodes.[id].Parents
+                           |> List.forall (fun p ->
+                               match Map.tryFind p pos with
+                               | Some pp -> pp < pos.[id]
+                               | None -> not (dag.Nodes.ContainsKey p)))
+
+            let constant = Dag.totalOrderBy (fun _ -> 0) dag
+
+            let restricts =
+                match constant with
+                | Error _ -> false
+                | Ok o ->
+                    heads
+                    |> List.forall (fun h ->
+                        let c = Dag.ancestorsOf dag h
+                        Dag.tryTopoOrder dag h = Ok(o |> List.filter (fun id -> Set.contains id c)))
+
+            orderCell.Check(
+                isExtension order0
+                && isExtension (Dag.totalOrderBy (fun (n: DagNode<'Op>) -> drawn.[n.Id]) dag)
+                && isExtension constant
+                && restricts,
+                fun () -> at (sprintf "order %A, constant-key order %A" order0 constant)
+            )
+
+            // ---- collision refusal ----
+            let clean = Dag.laneCollisions store
+
+            collisionCell.Check(
+                List.isEmpty clean,
+                fun () -> at (sprintf "a one-head-per-lane store reported %A" clean)
+            )
+
+            let forkLane = rng.Choose(tips |> Map.toList)
+
+            match forkLane with
+            | lane, tip ->
+                let tipNode = dag.Nodes.[tip]
+
+                match LawKit.drawDistinct rng gen.Op (fun op -> sw.Encode op <> sw.Encode tipNode.Op) with
+                | Some op ->
+                    match Dag.appendOnLane hashFn sw tipNode.Actor op tipNode.Parents lane store with
+                    | Ok(sibling, forkedStore) when sibling <> tip && not (dag.Nodes.ContainsKey sibling) ->
+                        forked <- forked + 1
+                        let reported = Dag.laneCollisions forkedStore
+
+                        let expected =
+                            [ lane, List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) [ tip; sibling ] ]
+
+                        collisionCell.Check(
+                            (reported = expected),
+                            fun () ->
+                                at (sprintf "a fork of %s in lane %s: expected %A, got %A" tip lane expected reported)
+                        )
+                    | _ -> ()
+                | None -> ()
+
+                // a second lane file holding a node of this lane: identically, and with its op changed
+                let held = tipNode
+                let copy = "zz-copy", Dag.toJsonl sw.Encode { Nodes = Map.ofList [ held.Id, held ] }
+
+                collisionCell.Check(
+                    renderLoad (Dag.loadLanes sw (texts @ [ copy ])) = Ok(render store),
+                    fun () -> at (sprintf "a node held identically by a second lane file changed the store")
+                )
+
+                match LawKit.drawDistinct rng gen.Op (fun op -> sw.Encode op <> sw.Encode held.Op) with
+                | Some op ->
+                    collided <- collided + 1
+
+                    let forged =
+                        "zz-forged", Dag.toJsonl sw.Encode { Nodes = Map.ofList [ held.Id, { held with Op = op } ] }
+
+                    let expected =
+                        Error(
+                            sprintf
+                                "%A"
+                                (Dag.LaneLoadFault.Collision(held.Id, [ store.LaneOf.[held.Id]; "zz-forged" ]))
+                        )
+
+                    let got = renderLoad (Dag.loadLanes sw (rng.Shuffle(texts @ [ forged ])))
+
+                    collisionCell.Check(
+                        (got = expected),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "a node %s held with different content: expected %A, got %A"
+                                    held.Id
+                                    expected
+                                    got
+                            )
+                    )
+                | None -> ()
+
+            // ---- mergeAll ≡ folded binary merges ----
+            if List.length heads >= 2 then
+                manyHeads <- manyHeads + 1
+                let op = rng.Draw gen.Op
+                let actor = Human "merge"
+
+                match
+                    Dag.mergeAll hashFn sw actor op heads dag, Dag.appendOn hashFn sw actor op (rng.Shuffle heads) dag
+                with
+                | Ok(m, dm), Ok(m', _) ->
+                    let hs = rng.Shuffle heads
+
+                    let folded =
+                        (Ok(List.head hs, dag, []), List.tail hs)
+                        ||> List.fold (fun acc h ->
+                            acc
+                            |> Result.bind (fun (left, d, merges) ->
+                                Dag.merge hashFn sw actor op left h d
+                                |> Result.map (fun (id, d') -> id, d', id :: merges)))
+
+                    match folded with
+                    | Ok(last, df, merges) ->
+                        let below (d: Dag.T<'Op>) (top: string) (drop: string list) =
+                            Dag.tryTopoOrder d top
+                            |> Result.map (List.filter (fun id -> not (List.contains id drop)))
+
+                        let viaAll = below dm m [ m ]
+                        let viaFold = below df last merges
+
+                        mergeAllCell.Check(
+                            m = m' && viaAll = viaFold && Result.isOk viaAll,
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "heads %A: mergeAll %s, appendOn %s; below %A vs %A"
+                                        heads
+                                        m
+                                        m'
+                                        viaAll
+                                        viaFold
+                                )
+                        )
+                    | Error _ -> foldSkipped <- foldSkipped + 1
+                | _ -> foldSkipped <- foldSkipped + 1
+
+            // ---- one common base ----
+            let baseHeads = [ for _ in 0 .. rng.IntBelow 4 -> rng.Choose(ids @ [ "absent" ]) ]
+            let cb = Dag.commonBase dag baseHeads
+            let reach = Dag.Reach.ofDag dag
+
+            let atTwo =
+                match baseHeads |> List.distinct with
+                | [ a; b ] -> cb = Dag.mergeBase dag a b
+                | _ -> true
+
+            baseCell.Check(
+                Dag.commonBase dag (rng.Shuffle baseHeads) = cb
+                && Dag.Reach.commonBase reach baseHeads = cb
+                && atTwo,
+                fun () -> at (sprintf "heads %A: commonBase %A" baseHeads cb)
+            )
+
+            // ---- rehashWith round trip ----
+            match Dag.rehashWith hashFn OpStream.sha256Hash sw dag with
+            | Ok(there, ids1) ->
+                let back = Dag.rehashWith OpStream.sha256Hash hashFn sw there
+
+                let roundTrip =
+                    match back with
+                    | Ok(d, ids2) ->
+                        Dag.toJsonl sw.Encode d = Dag.toJsonl sw.Encode dag
+                        && ids |> List.forall (fun id -> ids2.[ids1.[id]] = id)
+                    | Error _ -> false
+
+                rehashCell.Check(
+                    Dag.verifyDag OpStream.sha256Hash sw there && roundTrip,
+                    fun () ->
+                        at (
+                            sprintf
+                                "rehash round trip: %A"
+                                (back |> Result.map fst |> Result.map (Dag.toJsonl sw.Encode))
+                        )
+                )
+            | Error f -> rehashCell.Check(false, fun () -> at (sprintf "a verified store refused: %A" f))
+
+            // ---- verifyLanes names the lane ----
+            verifyCell.Check(
+                Dag.verifyLanes hashFn sw store = Ok(),
+                fun () -> at (sprintf "the drawn store does not verify: %A" (Dag.verifyLanes hashFn sw store))
+            )
+
+            let victim = rng.Choose ids
+            let vNode = dag.Nodes.[victim]
+
+            match LawKit.drawDistinct rng gen.Op (fun op -> sw.Encode op <> sw.Encode vNode.Op) with
+            | Some op ->
+                let tampered =
+                    { store with
+                        Dag = { Nodes = Map.add victim { vNode with Op = op } dag.Nodes } }
+
+                let lane = store.LaneOf.[victim]
+
+                verifyCell.Check(
+                    (match Dag.verifyLanes hashFn sw tampered with
+                     | Error b -> b.Lane = lane && b.Break.NodeId = victim
+                     | Ok() -> false),
+                    fun () ->
+                        at (sprintf "node %s of lane %s changed: %A" victim lane (Dag.verifyLanes hashFn sw tampered))
+                )
+
+                rehashCell.Check(
+                    (match Dag.rehashWith hashFn OpStream.sha256Hash sw tampered.Dag with
+                     | Error(Dag.RehashFault.Unverified b) -> b.NodeId = victim
+                     | _ -> false),
+                    fun () -> at (sprintf "a tampered store was re-minted, node %s" victim)
+                )
+            | None -> ()
+
+            // ---- retention ----
+            let roots =
+                match rng.Shuffle heads with
+                | [] -> []
+                | hs -> List.truncate (1 + rng.IntBelow(List.length hs)) hs
+
+            match Dag.prunable reach roots with
+            | Error r -> pruneCell.Check(false, fun () -> at (sprintf "a held root %s was refused" r))
+            | Ok dropped ->
+                let kept =
+                    roots
+                    |> List.fold (fun acc r -> Set.union acc (Dag.ancestorsOf dag r)) Set.empty
+
+                let pruned: Dag.T<'Op> =
+                    { Nodes = dag.Nodes |> Map.filter (fun id _ -> not (List.contains id dropped)) }
+
+                pruneCell.Check(
+                    (dropped = (ids |> List.filter (fun id -> not (Set.contains id kept))))
+                    && Dag.verifyDag hashFn sw pruned
+                    && roots
+                       |> List.forall (fun r ->
+                           Dag.tryReplayTo sw state0 pruned r = Dag.tryReplayTo sw state0 dag r
+                           && Dag.tryTopoOrder pruned r = Dag.tryTopoOrder dag r)
+                    && Dag.prunable reach [ "absent-root" ] = Error "absent-root",
+                    fun () -> at (sprintf "roots %A dropped %A" roots dropped)
+                ))
+
+        LawKit.results
+            [ loadCell
+              permCell
+              orderCell
+              collisionCell
+              mergeAllCell
+              baseCell
+              rehashCell
+              verifyCell
+              pruneCell ]
+        @ [ SampleAdequacy.reachedBeside
+                family
+                dimension
+                seed
+                [ "cross-lane merge", crossMerged
+                  "two or more heads", manyHeads
+                  "fork handed to one lane", forked
+                  "content collision across lane files", collided ]
+                [ "no cross-lane merge", noCrossMerge
+                  "merge fold skipped on a collision", foldSkipped ] ]
+
     /// The determinism-capture / replay laws (Phase 27) — the teeth on `OpStream.captureEffect` /
     /// `replayEffect`. A domain supplies a value `Codec` (`encode`/`decode`) and a `draw` of a
     /// realized effect value (the stand-in for a live non-deterministic source); the kit certifies:

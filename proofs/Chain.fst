@@ -559,9 +559,10 @@ let node_injective_derived
    node's id and compares it against the MAP KEY — never against the node's own `Id` field, which
    the walk does not read. The model therefore carries the key beside the node as an `entry`, and
    an `entry` list stands in for the map: membership is the meaning, as in the models beside this
-   one. Production walks `Map.toList`, which is ascending key order; the model walks its list in
-   the order it is given, and the differential host hands it exactly the list `Map.toList`
-   produced, so the order under test is production's own.
+   one. Production walks the whole DAG's drain — parents first, the smallest key among the ready
+   nodes — and then any node on or below a cycle in ascending key order (Phase 311; it walked
+   `Map.toList` until then); the model walks its list in the order it is given, and the differential
+   host hands it exactly the order production walks, so the order under test is production's own.
    ====================================================================================== *)
 
 type dnode (op: eqtype) = { dparents: list string; dactor: string; dop: op }
@@ -1136,8 +1137,9 @@ let parent_reorder_undetected
 
 (* … and what the sort buys, which is Phase 64.1's whole point: `merge(A,B)` and `merge(B,A)`
    converge to one content id, so two hosts reconciling the same pair mint the same node. Needs
-   only that the comparison is a total order — nothing about the hash. Production has at most two
-   parents (`append` gives none or one, `merge` exactly two), so this is the general case. *)
+   only that the comparison is a total order — nothing about the hash. `append` gives none or one
+   parent and `merge` exactly two; since Phase 311 `appendOn` / `mergeAll` give any number, and
+   section 5b states the general case. *)
 let merge_id_parent_order_independent
   (#op: eqtype)
   (h: string -> string -> string)
@@ -1150,6 +1152,225 @@ let merge_id_parent_order_independent
   : Lemma
     (requires total_order le)
     (ensures node_hash h enc_op le [x; y] a o == node_hash h enc_op le [y; x] a o) = ()
+
+(* ======================================================================================
+   5b. N-parent nodes (Phase 311; F#: `Dag.appendOn`, `Dag.mergeAll`, `Dag.nodeId`).
+
+   Production builds a node over ANY number of parents since Phase 311: `appendOn` stores the
+   parents as given, and `mergeAll` stores the heads it converges DEDUPLICATED and SORTED, so the
+   node a set of heads converges in is a function of the set. Both mint the id through the one
+   `nodeHash`, which sorts again. Two theorems say what that buys:
+
+     - `append_on_is_merge_all` — over distinct parents, the node `appendOn` mints has the id
+       `mergeAll` gives the same heads: no consumer needs a private `nodeHash` to name the
+       convergence it is about to write.
+     - `merge_all_set_determined` — two head lists holding the same ids, in any order and with any
+       repetition, converge to one id: two replicas folding the same heads mint the same node. Section
+       5's two-parent `merge_id_parent_order_independent` is its smallest case.
+
+   Both need the comparison to be a total order that is also TRANSITIVE, which `total_order` above
+   does not state (it was enough for two elements). `String.CompareOrdinal(a, b) <= 0` is all three.
+   Prims-only, as the rest of the module: the sortedness and distinctness helpers are spelled here.
+   ====================================================================================== *)
+
+(* What `le` must also be for a sorted list to be unique: transitive. *)
+let le_transitive (le: string -> string -> bool) : prop =
+  forall (x: string) (y: string) (z: string). (le x y /\ le y z) ==> le x z
+
+(* Adjacent pairs in order — what `isort` produces under a total order. *)
+let rec sorted (le: string -> string -> bool) (l: list string) : Tot bool =
+  match l with
+  | [] -> true
+  | [_] -> true
+  | x :: y :: t -> le x y && sorted le (y :: t)
+
+(* No id twice. *)
+let rec no_dup (l: list string) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t -> not (mem x t) && no_dup t
+
+(* F#: `List.distinct`. Kept LAST occurrences rather than first — the order is erased by the sort
+   that follows it in `mergeAll`, so only the set it keeps matters. *)
+let rec dedup (l: list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | x :: t -> if mem x t then dedup t else x :: dedup t
+
+(* F#: the parents `Dag.mergeAll` stores — `heads |> List.distinct |> ordinalSort`. *)
+let merge_all_parents (le: string -> string -> bool) (heads: list string) : Tot (list string) =
+  isort le (dedup heads)
+
+(* F#: the id `Dag.mergeAll` mints — `nodeHash` over the parents it stores. *)
+let merge_all_id
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (enc_op: op -> string)
+  (le: string -> string -> bool)
+  (heads: list string)
+  (actor: string)
+  (o: op)
+  : Tot string =
+  node_hash h enc_op le (merge_all_parents le heads) actor o
+
+let rec insert_mem (le: string -> string -> bool) (x: string) (l: list string) (y: string)
+  : Lemma (ensures mem y (insert le x l) == (y = x || mem y l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | z :: t -> if le x z then () else insert_mem le x t y
+
+let rec isort_mem (le: string -> string -> bool) (l: list string) (y: string)
+  : Lemma (ensures mem y (isort le l) == mem y l) (decreases l) =
+  match l with
+  | [] -> ()
+  | x :: t -> isort_mem le t y; insert_mem le x (isort le t) y
+
+let rec insert_sorted (le: string -> string -> bool) (x: string) (l: list string)
+  : Lemma (requires total_order le /\ sorted le l) (ensures sorted le (insert le x l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | z :: t ->
+    if le x z then ()
+    else begin
+      insert_sorted le x t;
+      match t with
+      | [] -> ()
+      | w :: _ -> insert_mem le x t w
+    end
+
+let rec isort_sorted (le: string -> string -> bool) (l: list string)
+  : Lemma (requires total_order le) (ensures sorted le (isort le l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | x :: t -> isort_sorted le t; insert_sorted le x (isort le t)
+
+let rec insert_no_dup (le: string -> string -> bool) (x: string) (l: list string)
+  : Lemma (requires no_dup l /\ not (mem x l)) (ensures no_dup (insert le x l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | z :: t ->
+    if le x z then ()
+    else begin
+      insert_no_dup le x t;
+      insert_mem le x t z
+    end
+
+let rec isort_no_dup (le: string -> string -> bool) (l: list string)
+  : Lemma (requires no_dup l) (ensures no_dup (isort le l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | x :: t ->
+    isort_no_dup le t;
+    isort_mem le t x;
+    insert_no_dup le x (isort le t)
+
+let rec dedup_mem (l: list string) (y: string)
+  : Lemma (ensures mem y (dedup l) == mem y l) (decreases l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> dedup_mem t y
+
+let rec dedup_no_dup (l: list string)
+  : Lemma (ensures no_dup (dedup l)) (decreases l) =
+  match l with
+  | [] -> ()
+  | x :: t -> dedup_no_dup t; dedup_mem t x
+
+(* A sorted list's head is below every member — where transitivity is used. *)
+let rec sorted_head_least (le: string -> string -> bool) (x: string) (t: list string) (y: string)
+  : Lemma (requires le_transitive le /\ sorted le (x :: t) /\ mem y t) (ensures le x y) (decreases t) =
+  match t with
+  | [] -> ()
+  | z :: r -> if y = z then () else sorted_head_least le z r y
+
+(* THE UNIQUENESS a set-determined id rests on: two sorted, repetition-free lists holding the same
+   ids are the same list. *)
+let rec sorted_unique (le: string -> string -> bool) (a: list string) (b: list string)
+  : Lemma
+    (requires total_order le /\ le_transitive le /\ sorted le a /\ sorted le b /\ no_dup a /\ no_dup b /\
+              (forall (y: string). mem y a == mem y b))
+    (ensures a == b)
+    (decreases a) =
+  match a, b with
+  | [], [] -> ()
+  | [], y :: _ -> assert (mem y b)
+  | x :: _, [] -> assert (mem x a)
+  | x :: ta, y :: tb ->
+    if x = y then begin
+      assert (forall (z: string). mem z ta == mem z tb);
+      sorted_unique le ta tb
+    end
+    else begin
+      assert (mem y a);
+      sorted_head_least le x ta y;
+      assert (mem x b);
+      sorted_head_least le y tb x
+    end
+
+(* THEOREM (Phase 311). Over distinct parents, `appendOn` mints `mergeAll`'s id. *)
+let append_on_is_merge_all
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (enc_op: op -> string)
+  (le: string -> string -> bool)
+  (parents: list string)
+  (actor: string)
+  (o: op)
+  : Lemma
+    (requires total_order le /\ le_transitive le /\ no_dup parents)
+    (ensures node_hash h enc_op le parents actor o == merge_all_id h enc_op le parents actor o) =
+  let s = isort le parents in
+  let m = isort le (merge_all_parents le parents) in
+  isort_sorted le parents;
+  isort_no_dup le parents;
+  isort_sorted le (dedup parents);
+  dedup_no_dup parents;
+  isort_no_dup le (dedup parents);
+  isort_sorted le (merge_all_parents le parents);
+  isort_no_dup le (merge_all_parents le parents);
+  let same (y: string) : Lemma (mem y s == mem y m) =
+    isort_mem le parents y;
+    isort_mem le (merge_all_parents le parents) y;
+    isort_mem le (dedup parents) y;
+    dedup_mem parents y
+  in
+  FStar.Classical.forall_intro same;
+  sorted_unique le s m
+
+(* THEOREM (Phase 311). Two head lists holding the same ids — any order, any repetition — converge
+   to one id. *)
+let merge_all_set_determined
+  (#op: eqtype)
+  (h: string -> string -> string)
+  (enc_op: op -> string)
+  (le: string -> string -> bool)
+  (heads1: list string)
+  (heads2: list string)
+  (actor: string)
+  (o: op)
+  : Lemma
+    (requires total_order le /\ le_transitive le /\ (forall (y: string). mem y heads1 == mem y heads2))
+    (ensures merge_all_id h enc_op le heads1 actor o == merge_all_id h enc_op le heads2 actor o) =
+  let m1 = isort le (merge_all_parents le heads1) in
+  let m2 = isort le (merge_all_parents le heads2) in
+  dedup_no_dup heads1;
+  dedup_no_dup heads2;
+  isort_no_dup le (dedup heads1);
+  isort_no_dup le (dedup heads2);
+  isort_no_dup le (merge_all_parents le heads1);
+  isort_no_dup le (merge_all_parents le heads2);
+  isort_sorted le (merge_all_parents le heads1);
+  isort_sorted le (merge_all_parents le heads2);
+  let same (y: string) : Lemma (mem y m1 == mem y m2) =
+    isort_mem le (merge_all_parents le heads1) y;
+    isort_mem le (merge_all_parents le heads2) y;
+    isort_mem le (dedup heads1) y;
+    isort_mem le (dedup heads2) y;
+    dedup_mem heads1 y;
+    dedup_mem heads2 y
+  in
+  FStar.Classical.forall_intro same;
+  sorted_unique le m1 m2
 
 (* ======================================================================================
    6. The linear chain (F#: `OpRecord<'Op>` and the `OpStream` walkers).
@@ -3527,6 +3748,8 @@ let twin_h (p e:string) : Tot string = p ^ "/" ^ e
 
 let twin_enc (o:string) : Tot string = o
 
+let twin_le (x y:string) : Tot bool = x = "a" || y = "b"
+
 let twin_chain : list (record string) =
   build_chain twin_h twin_show twin_enc "" PZero [ { cactor = "A"; cop = "x" }; { cactor = "B"; cop = "y" } ]
 
@@ -3553,6 +3776,12 @@ let twins : list twin = [
     tholds = (fun () ->
       first_break twin_h twin_enc (fun _ _ -> true)
         [ { ekey = "bad"; enode = { dparents = []; dactor = "A"; dop = "x" } } ]
-      = Found ({ bnode = "bad"; breason = "content-id mismatch (tampered node)"; bexpected = "/A|x"; bgot = "bad" })) } ]
+      = Found ({ bnode = "bad"; breason = "content-id mismatch (tampered node)"; bexpected = "/A|x"; bgot = "bad" })) };
+  { tname = "merge-all-parents-dedups-and-sorts";
+    tholds = (fun () -> merge_all_parents twin_le [ "b"; "a"; "b" ] = [ "a"; "b" ]) };
+  { tname = "merge-all-id-is-set-determined";
+    tholds = (fun () ->
+      merge_all_id twin_h twin_enc twin_le [ "b"; "a" ] "A" "x"
+      = merge_all_id twin_h twin_enc twin_le [ "a"; "b"; "a" ] "A" "x") } ]
 
 let _ = assert_norm (twins_hold twins == true)

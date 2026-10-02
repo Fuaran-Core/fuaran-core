@@ -393,6 +393,18 @@ module Families =
               (Guarded [ "DAG shape" ])
               (Drawn,
                "the uncovered refusal comes from the kit's drawn shape and is demanded by the DAG-shape guard, and a refused compaction is counted beside it; a replay rejection comes from the caller's drawn ops, and its agreement law holds when none is drawn, so it is counted beside the guard, not demanded")
+          // Phase 311 — the lane store. The lanes are drawn by the kit, but whether a draw holds a
+          // cross-lane merge, two heads, a fork handed to one lane or a content collision across lane
+          // files depends on the caller's ops (the same op on the same parent is one node), so the
+          // lane-shape guard demands all four and counts the folds a collision skipped beside them.
+          c
+              "laneLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "lane shape" ])
+              (Drawn,
+               "the lane fork and the cross-lane content collision are built from a replacement op the caller's generator must draw distinct, and are demanded by the lane-shape guard; the refusals the store's own draws produce (a collision skipping a step or a fold) are counted beside them, not demanded")
           // Phase 223 — the six drawn-refusal families Phase 220's audit (`Families.refusalAudit`)
           // found and left for this phase. Each was `Unconditional` on the strength of what every
           // iteration BUILDS, and each also carries a law that compares a REFUSED outcome — an

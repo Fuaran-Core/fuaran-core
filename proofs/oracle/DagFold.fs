@@ -1104,6 +1104,27 @@ let drain = (fun ( policy  :  dangling_policy ) ( lt  :  Prims.string  ->  Prims
      end))
 
 
+let by_key = (fun ( tbl  :  Prims.list<node<'op>> ) ( key  :  node<'op>  ->  'k ) ( ltk  :  'k  ->  'k  ->  Prims.bool ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( a  :  Prims.string ) ( b  :  Prims.string ) -> (match ((lookup tbl a)) with
+| Found (na) -> begin
+     (match ((lookup tbl b)) with
+| Found (nb) -> begin
+     ((ltk (key na) (key nb)) || ((Prims.op_Equals (key na) (key nb)) && (lt a b)))
+     end
+| Missing -> begin
+     true
+     end)
+     end
+| Missing -> begin
+     (match ((lookup tbl b)) with
+| Found (uu___) -> begin
+     false
+     end
+| Missing -> begin
+     (lt a b)
+     end)
+     end))
+
+
 let rec walk_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( id  :  Prims.string ) -> (match (fuel) with
 | [] -> begin
      (match ((lookup d.nodes id)) with
@@ -1571,6 +1592,9 @@ let twin_dag : dag<Prims.string> = {nodes = ({nid = "m"; nparents = ("b")::("c")
 let twin_fuel : Prims.list<node<Prims.string>> = (app twin_dag.nodes twin_dag.nodes)
 
 
+let twin_bool_lt : Prims.bool  ->  Prims.bool  ->  Prims.bool = (fun ( p  :  Prims.bool ) ( q  :  Prims.bool ) -> ((not (p)) && q))
+
+
 let twin_apply : Prims.string  ->  Prims.string  ->  outcome<Prims.string, Prims.string> = (fun ( o  :  Prims.string ) ( s  :  Prims.string ) ->  
 if (Prims.op_Equals o "x") then begin
      Error ("refused")
@@ -1585,7 +1609,7 @@ let expected = {left = (("n"), ("tier")); right = (("n"), ("tier")); address = "
 in (
 
 let cs = (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("tier")))
-in ((mem_u expected cs) && (all_ueq expected cs)))))})::({tname = "different-slots-fold-clean"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({tname = "slot-writes-commute-at-every-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::[]
+in ((mem_u expected cs) && (all_ueq expected cs)))))})::({tname = "different-slots-fold-clean"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({tname = "slot-writes-commute-at-every-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::({tname = "total-order-by-takes-the-key-before-the-id"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order (by_key twin_dag.nodes (fun ( n  :  node<Prims.string> ) -> (Prims.op_Equals n.nid "b")) twin_bool_lt twin_lt) twin_fuel twin_dag.nodes) (("a")::("c")::("b")::("m")::[])))})::[]
 
 
 

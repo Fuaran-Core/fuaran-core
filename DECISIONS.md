@@ -1,5 +1,87 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D110: lanes are a writer partition carried beside the node map; the whole union orders by one drain with the key as a parameter, `(lane, seq, id)` by default; a convergence is a function of the head set
+
+**Recorded by Phase 311. `src/Fuaran.Core.OpStream.Dag/DagOpStream.fs` (the lane store, `totalOrderBy`,
+the multi-parent primitives, `rehashWith`, attestation, `prunable`, `appendIf`), `OpStream.attestationSubject`,
+`Conformance.laneLaws`, `proofs/Chain.fst` section 5b, `proofs/DagFold.fst` section 13.13; rides the `0.34.0`
+draft (STABILITY.md, "Phase 311").**
+
+**D110.1 — lanes partition WHO wrote a node, never a resource, so D51 admits them.** A lane is one
+writer's file; nothing about a lane changes what a node means, how it hashes or how it replays. That is
+why the lane identity rides BESIDE the node map (`Loaded.LaneOf`) rather than in `DagNode` — content ids,
+every file written before this phase and every existing function are untouched — and why the Lease
+precedent (a resource partition, declined from this substrate) does not apply. `loadLanes` reads the
+lanes in ordinal lane-id order whatever order they are handed in, so the store is a function of the lane
+SET; a node two lane files hold identically is one node, attributed to the smallest lane, and with
+different content it is refused naming both lanes. Of the three ways downstream consumers attributed a
+shared node — the last lane wins, the first lane wins, refuse — only the order-free one was admissible,
+and refusing an identical copy would turn a sync artefact into a load failure.
+
+**D110.2 — one drain, the key a parameter; the default key is `(lane, seq, id)`.** Consumers ordered the
+union three ways: the smallest id, a sort by (Lamport rank, lane, id), and a drain at (domain rank, id).
+Each is the Kahn drain over the whole node set with the frontier ordered by `(key node, id)` at a
+different key — the sort included, because a rank strictly increases along every edge, so the smallest
+remaining key is always ready. So Core exposes `totalOrderBy key`, proves it a linear extension, total on
+an acyclic set and set-determined at EVERY key (DagFold 13.13, by proving the key comparison a total
+order and instantiating section 13), and leaves the key to the consumer. The lane store's default,
+`laneKey`, is `(lane, seq, id)`: a node's lane, its position in that lane's own history (how many nodes of
+its lane it descends from), and its id — each writer's history kept together as far as the parent
+relation allows, lanes in lane-id order. It is a default, not a recommendation: a domain whose concurrent
+ops do not commute passes a key that encodes its own order (one downstream consumer's "a kill folds after
+the fork it kills" is `(rank op, id)`), and two replicas sharing a key agree by construction whatever
+their ids happen to sort as. Rejected: making the smallest-id drain the only order (the defect class a
+downstream replay recorded — which of two concurrent nodes folds first decided by hash luck — is a
+property of that key, not of the drain).
+
+**D110.3 — a convergence is a function of the head SET; `appendOn` stores what it is given.** `mergeAll`
+deduplicates and sorts the heads before storing them, so two replicas converging the same heads mint the
+same node, bytes and id (`merge_all_set_determined`); `appendOn` stores its parents as given (the id sorts
+them anyway), so `appendOn [p]` IS `append p` and `appendOn [l; r]` IS `merge l r` — both are now written
+over it. Over distinct parents the two mint one id (`append_on_is_merge_all`). A repeated parent under
+`appendOn` is kept, as `merge x x` keeps it: refusing it would need a new `DagAppendFault` case, a
+breaking widening for a shape nothing builds by accident.
+
+**D110.4 — a merge script is recorded as a merge node and a chain, not as a new op case.** `mergeWith`
+records `[o1; …; on]` over `left` and `right` as a merge node carrying `o1` and a chain of the rest, so a
+replay of the last node folds both parents' closures and then the script — what a merge whose op were a
+`Batch` would apply — with no `Batch` case demanded of the domain. An empty script records NOTHING:
+a merge node needs an op, and a convergence with nothing to record is `merge` with the domain's own
+no-op.
+
+**D110.5 — one head per lane is judged in the UNION.** `laneCollisions` names a lane holding two nodes
+neither of which reaches the other in the union DAG. A downstream verifier judged each lane file ALONE,
+and a lane whose nodes name parents in other lanes did not verify alone, so it was skipped — exactly the
+lanes a converging writer produces. Comparability in the union holds for those lanes too: a writer whose
+next node descends from its last only through another lane's merge still has one head.
+
+**D110.6 — `firstBreak` names the earliest fault.** It scans the whole DAG's drain and then any node on
+or below a cycle, where it scanned `Map.toList`. Which nodes are faulty and `verifyDag`'s verdict do not
+move; where several faults exist, the one named is the first in the history rather than the smallest id,
+so `verifyLanes` names the lane where the history first goes wrong. The model's refusal names the
+smallest dangling id, another order-invariant choice; which node production names among several is not
+modelled, and `proofs.json`'s `dangling-parent-policy` says so.
+
+**D110.7 — the rest of the linear stream's parity, each the smallest shape.** `rehashWith` verifies the
+source under `fromHash` first and returns the old-to-new id map, because heads, lanes, checkpoints and
+attestations are keyed by id and only the caller knows which it holds. An attestation is bound to the
+PARTY that makes it — `OpStream.attestationSubject hashFn party head`, `"attest|"` before the party's
+encoding so the pre-image is never a node's — because on a multi-writer store the signature must say who
+vouched, and `IAttestationSink` signs that subject unchanged (no interface member added). `prunable`
+NAMES the nodes no retained root needs and removes nothing: dropping them leaves every retained closure
+whole by content addressing, and what to do with them is the host's (GP6). `appendIf` guards on the head
+set and applies the op at the caller's state — the positional check is the head set, nothing is
+replayed — and appends onto every head, the convergence a writer that folds before it writes takes.
+`commonBase` is `mergeBase`'s rule over all heads at once; a left fold of pairwise merge bases, which a
+downstream verifier used, can depend on the order of the heads on a criss-cross.
+
+**Premise verdicts.** The shard's premises hold at the base commit: Core ordered the DAG per head only
+and carried no lane identity; `append` and `merge` were the only constructors and `nodeHash` was private;
+`reconcile` returned an `'Op list` and `MergeConflict` carried ops; `firstBreak` scanned in map order;
+`rehash`, attestation and retention existed for the linear stream only. One is narrowed: the linear
+stream's "retention" is compaction behind a snapshot, which the DAG has had since Phase 288; what the DAG
+lacked was branch retention, which is what `prunable` is.
+
 ## 2026-10-02 — D109: the generated decoders refuse with Core's `DecodeError`, held to the interpreter's code and path; a verbatim decode expression keeps answering a sentence
 
 **Recorded by Phase 337. `src/Fuaran.Core.Idl.Codegen/Emit/FSharpCodec.fs` (the decode helpers, the
@@ -60,6 +142,7 @@ certification vocabularies' documents complete the law. Two positions are not mu
 disagreement this phase does not move: a closure / opaque sentinel (the generated hosts read only a
 sentinel slot's presence; the interpreter reads the sentinel), and a hosted slot declaring no wire
 form (only the compiled host runs its codec, Phase 252).
+
 
 ## 2026-10-02 — D108: a structural edit's change set is the diff of the two trees; the order is certified by a checker the walk does not run; the evaluator contract is about evaluators that return
 

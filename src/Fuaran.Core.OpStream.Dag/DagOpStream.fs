@@ -291,6 +291,41 @@ module Dag =
 
             Ok(id, { Nodes = Map.add id node dag.Nodes })
 
+    /// The content id a node of (`parents`, `actor`, `op`) has (Phase 311) — `nodeHash`, public, so a
+    /// consumer that names a node before (or without) building it computes the id this module mints
+    /// instead of re-deriving the pre-image: `hashFn (sorted parents joined by ",") (Actor.encode
+    /// actor + "|" + encode op)`, the parents sorted ordinally, so the id is a function of the parent
+    /// SET's order-free spelling. `encode` is the witness's `Encode`. `firstBreak` and `verifyDag`
+    /// recompute ids through this same function.
+    let nodeId (hashFn: HashFn) (encode: 'Op -> string) (parents: string list) (actor: Actor) (op: 'Op) : string =
+        nodeHash hashFn encode parents actor op
+
+    /// Append `op` as a child of EVERY id in `parents` (Phase 311) — the N-parent constructor `append`
+    /// (one parent) and `merge` (two) are the cases of. `[]` is a genesis node. The parents are stored
+    /// in the order given (the content id sorts them, so the order changes no id) and are judged in
+    /// that order, the first refusal returned: `EmptyParentId` for `""` (here a parent id, never the
+    /// genesis marker — genesis is the empty list), `CommaInParentId`, `UnknownParent`, and
+    /// `ContentIdCollision` exactly as for `append`. A parent named twice is kept twice, as `merge x x`
+    /// keeps it; `mergeAll` is the form that deduplicates. `appendOn [ p ]` is `append p` for a
+    /// non-empty `p`, and `appendOn [ l; r ]` is `merge l r`, byte for byte — both are written over it.
+    let appendOn
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (parents: string list)
+        (dag: T<'Op>)
+        : Result<string * T<'Op>, DagAppendFault> =
+        let judge (p: string) =
+            if p = "" then
+                Some DagAppendFault.EmptyParentId
+            else
+                knownParent dag p
+
+        match parents |> List.tryPick judge with
+        | Some f -> Error f
+        | None -> addNode hashFn w.Encode actor op parents dag
+
     /// Append `op` as a child of `parentId` (`""` for genesis). Appending onto a node that already has
     /// a child *forks* a branch. Returns the new node's content id and the extended DAG.
     ///
@@ -323,9 +358,7 @@ module Dag =
         if parentId = "" then
             addNode hashFn w.Encode actor op [] dag
         else
-            match knownParent dag parentId with
-            | Some f -> Error f
-            | None -> addNode hashFn w.Encode actor op [ parentId ] dag
+            appendOn hashFn w actor op [ parentId ] dag
 
     /// Merge two heads into a convergent node (`Parents = [leftId; rightId]`). `op` is the merge
     /// commit's own reconciliation op (a domain no-op where the merge adds nothing).
@@ -345,15 +378,67 @@ module Dag =
         (rightId: string)
         (dag: T<'Op>)
         : Result<string * T<'Op>, DagAppendFault> =
+        appendOn hashFn w actor op [ leftId; rightId ] dag
+
+    /// Converge a set of heads in ONE node (Phase 311): `appendOn` over `heads` deduplicated and
+    /// sorted ordinally, so the node a set of heads converges in — its id AND its stored parents — is
+    /// a function of the head SET, never of the order the heads arrived in. Two replicas converging
+    /// the same heads mint the same node, and an `appendOn` over the same heads in any order mints the
+    /// same id (`proofs/Chain.fst`, `append_on_is_merge_all`). `[]` is a genesis node and one distinct
+    /// head an append onto it; the refusals are `appendOn`'s, judged in the sorted order. Where a
+    /// consumer folded N heads into N-1 binary merges, this is the one node those merges stood for:
+    /// the history below it is the same, in the same drain order (`Conformance.laneLaws`).
+    let mergeAll
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (heads: string list)
+        (dag: T<'Op>)
+        : Result<string * T<'Op>, DagAppendFault> =
+        appendOn hashFn w actor op (heads |> List.distinct |> ordinalSort) dag
+
+    /// Record a merge of `leftId` and `rightId` whose reconciliation is a SCRIPT rather than one op
+    /// (Phase 311): the merge node carries the script's first op, and each further op is appended in
+    /// order onto the node before it, so the history a replay of the last node folds is both parents'
+    /// closures and then the script, op by op — what a merge whose op were a `Batch` of the script
+    /// would apply, recorded without the domain needing a `Batch` case. Returns the ids recorded, in
+    /// order (the last is the new head). The parents are judged as `merge` judges them whatever the
+    /// script; an EMPTY script then records nothing and returns `Ok([], dag)` — a merge node needs an op,
+    /// and a convergence with nothing to record is `merge` with the domain's own no-op. Each recorded
+    /// node is an ordinary node: an identical one already held deduplicates, a colliding one is refused
+    /// (`ContentIdCollision`) and nothing is recorded.
+    let mergeWith
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (script: 'Op list)
+        (leftId: string)
+        (rightId: string)
+        (dag: T<'Op>)
+        : Result<string list * T<'Op>, DagAppendFault> =
         let judge (p: string) =
             if p = "" then
                 Some DagAppendFault.EmptyParentId
             else
                 knownParent dag p
 
-        match judge leftId |> Option.orElse (judge rightId) with
-        | Some f -> Error f
-        | None -> addNode hashFn w.Encode actor op [ leftId; rightId ] dag
+        match [ leftId; rightId ] |> List.tryPick judge, script with
+        | Some f, _ -> Error f
+        | None, [] -> Ok([], dag)
+        | None, first :: rest ->
+            match merge hashFn w actor first leftId rightId dag with
+            | Error f -> Error f
+            | Ok(m, d) ->
+                let rec go (acc: string list) (tip: string) (d: T<'Op>) =
+                    function
+                    | [] -> Ok(List.rev acc, d)
+                    | (op: 'Op) :: more ->
+                        match append hashFn w actor op tip d with
+                        | Error f -> Error f
+                        | Ok(id, d') -> go (id :: acc) id d' more
+
+                go [ m ] m d rest
 
     /// `append` that also APPLIES the op (Phase 296): `state` is the state `parentId`'s closure
     /// replays to — the caller's, exactly as `OpStream.append` takes the stream's current state — and
@@ -396,13 +481,113 @@ module Dag =
             | Ok state' -> Ok(state', id, dag')
             | Error rej -> Error(DagAppendRejection.Domain rej)
 
-    /// The first integrity fault in the DAG, scanned in deterministic id order (Phase 21): a node
-    /// whose stored id is not the content hash of its (parents, actor, op) — a tampered node — or a
-    /// node naming a parent the DAG does not contain. `None` for an intact DAG. Localises what
-    /// `verifyDag` only reports as a boolean, so `fromJsonlVerified` / an operator can say *where*.
-    let firstBreak (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : DagBreak option =
+    /// Why `Dag.appendIf` refused (Phase 311) — `AppendRejection<'Rej>`'s shape on the DAG: the head
+    /// set moved (`StaleHeads`, both sets named, each sorted ordinally), a structural `Fault`, or the
+    /// domain's rejection of the op at the state the caller holds for the expected heads.
+    [<RequireQualifiedAccess>]
+    type DagAppendIfRejection<'Rej> =
+        | StaleHeads of expected: string list * actual: string list
+        | Fault of DagAppendFault
+        | Domain of 'Rej
+
+    /// Compare-and-append on the DAG (Phase 311) — `OpStream.appendIf`'s guard, over the HEAD SET: append
+    /// `op` onto every one of `expectedHeads` (`mergeAll`'s node: one head is an append, several a
+    /// convergence, none a genesis) ONLY if they are exactly the DAG's current heads, compared as sets.
+    /// Otherwise `StaleHeads(expected, actual)` and nothing changes — another writer added a node since
+    /// the caller read the heads. On a match the op is applied at `state`, the state the caller holds
+    /// for those heads (`appendChecked`'s discipline), so the positional check is the head set and the
+    /// domain check one `Apply`: nothing is replayed, where the alternative — re-deriving the state by
+    /// replaying the whole union before each write — pays the history on every append. A caller that
+    /// cannot vouch for `state` replays first (`replayAllBy`, `tryReplayTo`), once, outside the loop.
+    /// Graph refusals are judged before the op is applied.
+    let appendIf
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (expectedHeads: string list)
+        (actor: Actor)
+        (op: 'Op)
+        (state: 'State)
+        (dag: T<'Op>)
+        : Result<'State * string * T<'Op>, DagAppendIfRejection<'Rej>> =
+        let expected = expectedHeads |> List.distinct |> ordinalSort
+        let actual = heads dag |> ordinalSort
+
+        if expected <> actual then
+            Error(DagAppendIfRejection.StaleHeads(expected, actual))
+        else
+            match mergeAll hashFn w actor op expected dag with
+            | Error f -> Error(DagAppendIfRejection.Fault f)
+            | Ok(id, dag') ->
+                match w.Apply op state with
+                | Ok state' -> Ok(state', id, dag')
+                | Error rej -> Error(DagAppendIfRejection.Domain rej)
+
+    /// The Kahn drain over the WHOLE node set (Phase 311): `(placed, unplaced)`. The ready frontier is
+    /// ordered by `(key node, id)` — the caller's key first, the ordinal id breaking every tie, so the
+    /// order is total whatever the key — and drained smallest first; a parent the DAG does not hold
+    /// constrains nothing (the fold path's policy, `topoCore`'s). In-degrees count a parent named twice
+    /// twice, as `Reach.ofDag` does. Nodes on or below a cycle never become ready: they are `unplaced`,
+    /// in id order. Iterative — no recursion over the graph's depth. With a constant key the placed
+    /// order is the drain `Reach.ofDag` numbers its slots in, and on a down-closed node set it is every
+    /// per-head drain restricted (DagFold section 13).
+    let private drainBy (key: DagNode<'Op> -> 'K) (dag: T<'Op>) : string list * string list =
+        let mutable indeg: Map<string, int> = Map.empty
+        let mutable children: Map<string, string list> = Map.empty
+
+        for KeyValue(id, n) in dag.Nodes do
+            let held = n.Parents |> List.filter dag.Nodes.ContainsKey
+            indeg <- Map.add id (List.length held) indeg
+
+            for p in held do
+                children <- Map.add p (id :: (Map.tryFind p children |> Option.defaultValue [])) children
+
+        let mutable ready: Set<'K * string> =
+            indeg
+            |> Map.toSeq
+            |> Seq.filter (fun (_, d) -> d = 0)
+            |> Seq.map (fun (id, _) -> key dag.Nodes.[id], id)
+            |> Set.ofSeq
+
+        let placed = ResizeArray<string>()
+
+        while not (Set.isEmpty ready) do
+            let top = Set.minElement ready
+            ready <- Set.remove top ready
+            let id = snd top
+            placed.Add id
+
+            match Map.tryFind id children with
+            | Some kids ->
+                for k in kids do
+                    let d = indeg.[k] - 1
+                    indeg <- Map.add k d indeg
+
+                    if d = 0 then
+                        ready <- Set.add (key dag.Nodes.[k], k) ready
+            | None -> ()
+
+        let placedSet = Set.ofSeq placed
+
+        List.ofSeq placed,
         dag.Nodes
         |> Map.toList
+        |> List.map fst
+        |> List.filter (fun id -> not (Set.contains id placedSet))
+
+    /// The first integrity fault in the DAG (Phase 21): a node whose stored id is not the content hash
+    /// of its (parents, actor, op) — a tampered node — or a node naming a parent the DAG does not
+    /// contain. `None` for an intact DAG. Localises what `verifyDag` only reports as a boolean, so
+    /// `fromJsonlVerified` / an operator can say *where*.
+    ///
+    /// **The scan is TOPOLOGICAL since Phase 311** — the whole DAG's drain (`drainBy`, smallest id first
+    /// among the ready nodes), then any node on or below a cycle in id order — so where a DAG holds
+    /// several faults the one named is the EARLIEST in its history, never whichever id sorts first. It
+    /// was the id order until `0.34.0`; which nodes are faulty, and `verifyDag`'s verdict, are unchanged.
+    let firstBreak (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : DagBreak option =
+        let placed, unplaced = drainBy (fun _ -> 0) dag
+
+        placed @ unplaced
+        |> List.map (fun id -> id, dag.Nodes.[id])
         |> List.tryPick (fun (id, n) ->
             let h = nodeHash hashFn w.Encode n.Parents n.Actor n.Op
 
@@ -600,6 +785,92 @@ module Dag =
         | Error(ReplayFault.Rejected(id, e)) -> Error(id, e)
         | Error(ReplayFault.UnknownHead h) -> invalidArg "headId" ("Dag.replayTo: the DAG holds no node " + h)
         | Error(ReplayFault.CyclicHistory h) -> invalidArg "headId" ("Dag.replayTo: cyclic history at " + h)
+
+    // ---- the whole-DAG total order (Phase 311) ----
+    // Every function above orders ONE head's closure (`tryTopoOrder`, `tryReplayTo`), or a union of
+    // heads' closures above a base (`reconcileMany`). A store of several writers' lanes needs the order
+    // of the WHOLE union — what a clone folds on load — and consumers drew it three ways: the drain at
+    // the smallest id, a sort by (Lamport rank, lane, id), and a drain at (domain rank, id). Each is the
+    // same drain at a different key, so Core exposes the drain with the key as a parameter: the order is
+    // a linear extension of the parent relation whatever the key (`DagFold.total_order_by_is_a_linear_
+    // extension`), a function of the node SET (the drain's determinism, section 13), and a consumer with
+    // its own key passes it. The lane store's default key is `laneKey` (lane, seq, id), below.
+
+    /// Why a whole-DAG order could not be drawn (Phase 311): nodes on or below a cycle, which no drain
+    /// places — every one of them, in id order. Only a hand-built or unverified load can hold one.
+    [<RequireQualifiedAccess>]
+    type TotalOrderFault = Cyclic of unplaced: string list
+
+    /// Why `replayAllBy` / `replayAll` refused (Phase 311): the union has no total order (`Cyclic`, the
+    /// unplaced nodes in id order), or the domain rejected a node's op (`Rejected`, the first in the
+    /// order, with the rejection).
+    [<RequireQualifiedAccess>]
+    type ReplayAllFault<'Rej> =
+        | Cyclic of unplaced: string list
+        | Rejected of nodeId: string * reject: 'Rej
+
+    /// The whole DAG in one total order (Phase 311): the Kahn drain over EVERY node, the ready frontier
+    /// taken smallest `(key node, id)` first — the key the caller's, the ordinal id breaking every tie,
+    /// so the order is total for any key, including one that is constant. Parents first, always: the
+    /// key chooses only among nodes that are ready. A parent the DAG does not hold constrains nothing (a
+    /// compacted or partial load still orders). `Error(TotalOrderFault.Cyclic unplaced)` when a cycle
+    /// leaves nodes the drain cannot place. Iterative, O(N log N) comparisons of keys.
+    ///
+    /// A constant key is the smallest-id drain — the order `Reach.ofDag` numbers its slots in, and on
+    /// one head's closure exactly `tryTopoOrder`'s. A consumer with its own order passes its own key:
+    /// a Lamport-rank order is `totalOrderBy (fun n -> ranks.[n.Id], lane n)`, a domain-rank order
+    /// `totalOrderBy (fun n -> rankOf n.Op)`. The lane store's default is `totalOrder` (`laneKey`).
+    let totalOrderBy (key: DagNode<'Op> -> 'K) (dag: T<'Op>) : Result<string list, TotalOrderFault> =
+        match drainBy key dag with
+        | placed, [] -> Ok placed
+        | _, unplaced -> Error(TotalOrderFault.Cyclic unplaced)
+
+    /// The Lamport depth of every node (Phase 311): `0` for a node with no parent the DAG holds, and
+    /// otherwise one more than its deepest held parent — the longest path from a root. Computed along the
+    /// whole-DAG drain, iteratively, so a history of any depth costs no stack. `Error Cyclic` exactly where
+    /// `totalOrderBy` refuses.
+    let ranks (dag: T<'Op>) : Result<Map<string, int>, TotalOrderFault> =
+        totalOrderBy (fun _ -> 0) dag
+        |> Result.map (fun order ->
+            order
+            |> List.fold
+                (fun (acc: Map<string, int>) id ->
+                    let r =
+                        dag.Nodes.[id].Parents
+                        |> List.fold
+                            (fun m p ->
+                                match Map.tryFind p acc with
+                                | Some rp -> max m (rp + 1)
+                                | None -> m)
+                            0
+
+                    Map.add id r acc)
+                Map.empty)
+
+    /// Replay the WHOLE DAG from `state0` in `totalOrderBy key`'s order (Phase 311): every node once, its
+    /// op applied after every parent's. `Error(Cyclic unplaced)` where there is no total order, and
+    /// `Error(Rejected(node, rejection))` at the first node the domain refuses. Where a history's
+    /// concurrent ops do not commute, the KEY decides which runs first — so a domain whose ops carry an
+    /// order of their own (a kill after the fork it kills) passes a key that encodes it, and the replay
+    /// is the same on every replica however its node ids happen to sort.
+    let replayAllBy
+        (key: DagNode<'Op> -> 'K)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (dag: T<'Op>)
+        : Result<'State, ReplayAllFault<'Rej>> =
+        match totalOrderBy key dag with
+        | Error(TotalOrderFault.Cyclic unplaced) -> Error(ReplayAllFault.Cyclic unplaced)
+        | Ok order ->
+            let rec go st =
+                function
+                | [] -> Ok st
+                | (id: string) :: rest ->
+                    match w.Apply dag.Nodes.[id].Op st with
+                    | Ok st' -> go st' rest
+                    | Error e -> Error(ReplayAllFault.Rejected(id, e))
+
+            go state0 order
 
     // ---- the verified append (Phase 329) ----
     // `appendChecked` / `mergeChecked` apply the op at a state the CALLER hands in, and do not replay
@@ -911,6 +1182,29 @@ module Dag =
             |> List.maxBy (fun id -> Set.count (ancestorsOf dag id), id)
             |> Some
 
+    /// The common base of N heads (Phase 311): `mergeBase`'s rule over all of them at once — of the
+    /// nodes in EVERY head's ancestor closure, the one with the largest closure, tie-broken by id.
+    /// `None` for no heads, or when no node is common to all of them. At two heads it is `mergeBase`,
+    /// and at one head it is that head. A function of the head SET: unlike a left fold of pairwise
+    /// `mergeBase` calls, whose answer on a criss-cross can depend on which pair is folded first, no
+    /// intermediate base is chosen, so the order the heads are named in cannot reach the answer. A head
+    /// the DAG does not hold contributes an empty closure, so the answer is `None`. Total.
+    let commonBase (dag: T<'Op>) (heads: string list) : string option =
+        match heads |> List.distinct with
+        | [] -> None
+        | h :: rest ->
+            let common =
+                rest
+                |> List.fold (fun acc x -> Set.intersect acc (ancestorsOf dag x)) (ancestorsOf dag h)
+
+            if Set.isEmpty common then
+                None
+            else
+                common
+                |> Set.toList
+                |> List.maxBy (fun id -> Set.count (ancestorsOf dag id), id)
+                |> Some
+
     /// The branch delta: the nodes on the region from (exclusive) `baseId` to (inclusive)
     /// `head`, in topological order — the ops a reconciler replays. Equals `head`'s
     /// ancestor-closure minus `baseId`'s. `base = head` ⇒ `[]`; an unrelated base ⇒ the whole
@@ -1032,6 +1326,18 @@ module Dag =
                             Address = node
                             Shape = MergeConflictShape.SlotClash slot } ]
 
+    /// `conflicts` over NODES rather than ops (Phase 311): the same report — every shape, the Phase 340
+    /// slot clash included, at the same addresses, in the same order — with `Left` and `Right` the
+    /// nodes whose ops collide, so a consumer reads the node ids off the report instead of building an
+    /// index from op back to node. `footprintOf` is the caller's projection of the op, as for
+    /// `conflicts`; it is `conflicts` at `fun n -> footprintOf n.Op`, so the two can never disagree.
+    let conflictsOfNodes
+        (footprintOf: 'Op -> Footprint)
+        (deltaA: DagNode<'Op> list)
+        (deltaB: DagNode<'Op> list)
+        : MergeConflict<DagNode<'Op>> list =
+        conflicts (fun (n: DagNode<'Op>) -> footprintOf n.Op) deltaA deltaB
+
     // ---- branch reconciliation (Phase 83; the delta rule Phase 300) ----
     // The mechanical FOLD half of a merge. Given the DAG, a base, and the heads: when the lanes'
     // deltas do NOT conflict (Phase 64), emit the deterministic merge script that folds them all;
@@ -1121,6 +1427,31 @@ module Dag =
         match interference footprintOf deltas with
         | [] -> Ok(opsOf dag r.Shared @ List.concat deltas)
         | cs -> Error cs
+
+    /// The interference of N heads over a base, naming NODES (Phase 311): the region above the base
+    /// partitioned exactly as `reconcileMany` partitions it (heads deduplicated, shared history set
+    /// aside, one exclusive delta per head), and `conflictsOfNodes` over every unordered pair of
+    /// exclusive deltas, in the order `heads` names them. Empty exactly when `reconcileMany` would not
+    /// refuse with `LanesInterfere`, and otherwise that report with each op replaced by its node — so
+    /// `List.map (fun c -> c.Left.Op, …)` of it IS the `LanesInterfere` report. Nothing is applied.
+    let conflictsOfHeads
+        (footprintOf: 'Op -> Footprint)
+        (dag: T<'Op>)
+        (baseId: string)
+        (heads: string list)
+        : MergeConflict<DagNode<'Op>> list =
+        let r = region dag baseId heads
+
+        let deltas =
+            r.Exclusive
+            |> List.map (fun (_, ids) -> ids |> List.map (fun id -> dag.Nodes.[id]))
+
+        let indexed = List.indexed deltas
+
+        [ for (i, a) in indexed do
+              for (j, b) in indexed do
+                  if i < j then
+                      yield! conflictsOfNodes footprintOf a b ]
 
     // ---- N-lane reconciliation (Phase 100; the lanes-apply test Phase 300) ----
     // `reconcile` folds TWO heads. A local-first deployment routinely converges N concurrent lanes
@@ -1439,6 +1770,38 @@ module Dag =
                     if best < 0 then None else Some reach.Ids.[best]
                 | _ -> mergeBase reach.Graph left right
 
+        /// `Dag.commonBase`, from the index (Phase 311): the node common to every head's closure with
+        /// the largest closure, tie-broken by id; `None` for no heads, a head the DAG does not hold, or
+        /// histories with nothing in common to all.
+        let commonBase (reach: Reach<'Op>) (heads: string list) : string option =
+            let hs = heads |> List.distinct
+
+            if List.isEmpty hs then
+                None
+            elif hs |> List.exists (fun h -> not (reach.Graph.Nodes.ContainsKey h)) then
+                None
+            else
+                let slots = hs |> List.map (fun h -> Map.tryFind h reach.Slot)
+
+                if slots |> List.exists Option.isNone then
+                    commonBase reach.Graph heads
+                else
+                    let ss = slots |> List.choose id
+                    let top = ss |> List.min
+                    let mutable best = -1
+
+                    for j in 0..top do
+                        if ss |> List.forall (fun s -> hasBit reach.Bits.[s] j) then
+                            if
+                                best < 0
+                                || reach.Count.[j] > reach.Count.[best]
+                                || (reach.Count.[j] = reach.Count.[best]
+                                    && System.String.CompareOrdinal(reach.Ids.[j], reach.Ids.[best]) > 0)
+                            then
+                                best <- j
+
+                    if best < 0 then None else Some reach.Ids.[best]
+
         /// `Dag.between`, from the index: the nodes in `head`'s closure and not in `baseId`'s, in
         /// topological order; `[]` for a head the DAG does not hold.
         let between (reach: Reach<'Op>) (baseId: string) (head: string) : DagNode<'Op> list =
@@ -1624,6 +1987,37 @@ module Dag =
                         |> List.map (fun (j, _) -> reach.Ids.[j])) }
 
             reconcileRegion w footprintOf dag r baseState
+
+    // ---- retention (Phase 311) ----
+    // The linear stream retains by compaction behind a snapshot. A DAG has a second kind of history a
+    // store may want to stop carrying: whole branches no retained head needs — an abandoned lane, a
+    // superseded fork. Content addressing means such a node can be TOMBSTONED without excising
+    // anything that remains: every retained node's id is a hash over its own closure, and a node outside
+    // every retained closure is in none of them. Core names the set; what a host does with it (drop it
+    // from a lane file, archive it, keep it) is the host's call (GP6), and nothing here removes a node.
+
+    /// The nodes no retained root needs (Phase 311): every node of the index's DAG outside the ancestor
+    /// closure of every id in `roots`, sorted ordinally. The closures are read from the index's bitsets
+    /// (a node the drain cannot order falls back to the unindexed walk). Dropping exactly these leaves
+    /// every root's closure whole — the retained set is down-closed, so nothing kept names a parent that
+    /// went — and each root replays, verifies and orders as before (`Conformance.laneLaws`).
+    /// `Error root` for the first root, in the order given, the DAG does not hold: a mistyped root
+    /// would otherwise retain nothing and mark everything prunable.
+    let prunable (reach: Reach<'Op>) (roots: string list) : Result<string list, string> =
+        let dag = reach.Graph
+
+        match roots |> List.tryFind (fun r -> not (dag.Nodes.ContainsKey r)) with
+        | Some r -> Error r
+        | None ->
+            let kept =
+                roots
+                |> List.fold (fun acc r -> Set.union acc (Reach.ancestors reach r)) Set.empty
+
+            dag.Nodes
+            |> Map.toList
+            |> List.map fst
+            |> List.filter (fun id -> not (Set.contains id kept))
+            |> Ok
 
     // ---- checkpoints (Phase 288) ----
     // The linear stream has had a checkpoint since Phase 244 — a `Snapshot` sealed into the chain, a
@@ -2130,3 +2524,382 @@ module Dag =
                 OpStream.Jsonl.scanRecords (checkpointOf stateDecode) side
                 |> Result.map (fun cps -> dag, cps)
                 |> Result.mapError (fun f -> "checkpoint sidecar: " + JsonlFault.toString f))
+
+    // ---- lanes (Phase 311) ----
+    // A multi-writer store keeps one file per writer — a LANE (`<store>/ops/<lane>.jsonl` is the shape
+    // consumers use) — and folds their union. Lanes partition WHO wrote a node, never a resource: every
+    // node belongs to the lane whose file holds it, a lane is one writer's history, and nothing about a
+    // lane changes what a node means or how it replays. So the lane identity rides BESIDE the node map
+    // (`Loaded.LaneOf`), not in the node: content ids, files written before this phase and every
+    // function above are untouched. Core loads the union one way, verifies it naming the lane at fault,
+    // checks the two lane properties a store relies on — one head per lane, and heads that share a
+    // history — and orders the union by a default key a consumer with another key replaces.
+
+    /// A lane store, loaded (Phase 311): the union `Dag`, and for every node of it the lane whose file
+    /// holds it (`LaneOf`).
+    type Loaded<'Op> =
+        { Dag: T<'Op>
+          LaneOf: Map<string, string> }
+
+    /// Why `loadLanes` refused (Phase 311).
+    [<RequireQualifiedAccess>]
+    type LaneLoadFault =
+        /// Two of the lane texts carry one lane id.
+        | DuplicateLane of lane: string
+        /// A lane's text does not parse: `fromJsonl`'s rendered fault.
+        | Unparseable of lane: string * reason: string
+        /// Two lanes hold one content id for DIFFERENT content (parents modulo order, actor or op) — the
+        /// two lanes, sorted ordinally.
+        | Collision of nodeId: string * lanes: string list
+
+    /// A lane store's first integrity fault, and the lane whose file holds the node at fault (Phase 311).
+    type LaneBreak = { Lane: string; Break: DagBreak }
+
+    /// The lanes of a store and the nodes each holds, in ordinal lane order; a node `LaneOf` does not
+    /// name is under the lane `""`.
+    let private lanePartition (loaded: Loaded<'Op>) : (string * T<'Op>) list =
+        loaded.Dag.Nodes
+        |> Map.toList
+        |> List.groupBy (fun (id, _) -> Map.tryFind id loaded.LaneOf |> Option.defaultValue "")
+        |> List.map (fun (lane, ns) -> lane, { Nodes = Map.ofList ns })
+        |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+
+    /// Load a lane store (Phase 311): one `(lane id, JSONL text)` per lane file, in any order. Each text
+    /// is read by `fromJsonl` — structural, so run `verifyLanes` before trusting the union — and the union
+    /// holds every node once. A node two lanes hold with the SAME content is one node, attributed to the
+    /// ordinally smallest of those lanes; with different content it is refused (`Collision`). The lanes
+    /// are read in ordinal lane-id order whatever order they are handed in, so the store is a function of
+    /// the lane SET. Refused by name: a lane id given twice (`DuplicateLane`), a text that does not parse
+    /// (`Unparseable`, the first such lane in lane-id order), and a collision across lanes. Equal, as a
+    /// DAG, to `fromJsonl` of the lanes' texts concatenated — the union is the union whichever way it is
+    /// read — with the attribution beside it.
+    let loadLanes
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (lanes: (string * string) list)
+        : Result<Loaded<'Op>, LaneLoadFault> =
+        let sorted =
+            lanes |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
+
+        match sorted |> List.pairwise |> List.tryFind (fun ((a, _), (b, _)) -> a = b) with
+        | Some((l, _), _) -> Error(LaneLoadFault.DuplicateLane l)
+        | None ->
+            let add (lane: string) (st: Result<Loaded<'Op>, LaneLoadFault>) (id: string) (n: DagNode<'Op>) =
+                st
+                |> Result.bind (fun (l: Loaded<'Op>) ->
+                    match Map.tryFind id l.Dag.Nodes with
+                    | None ->
+                        Ok
+                            { Dag = { Nodes = Map.add id n l.Dag.Nodes }
+                              LaneOf = Map.add id lane l.LaneOf }
+                    | Some held when sameNode w.Encode held n.Parents n.Actor n.Op -> Ok l
+                    | Some _ -> Error(LaneLoadFault.Collision(id, ordinalSort [ l.LaneOf.[id]; lane ])))
+
+            let rec go (acc: Loaded<'Op>) =
+                function
+                | [] -> Ok acc
+                | (lane: string, text: string) :: rest ->
+                    match fromJsonl w text with
+                    | Error e -> Error(LaneLoadFault.Unparseable(lane, e))
+                    | Ok d ->
+                        match Map.fold (add lane) (Ok acc) d.Nodes with
+                        | Ok acc' -> go acc' rest
+                        | Error f -> Error f
+
+            go { Dag = empty; LaneOf = Map.empty } sorted
+
+    /// The lane files of a store (Phase 311): one `(lane id, text)` per lane, in ordinal lane order, each
+    /// text `toJsonl` of exactly the nodes `LaneOf` attributes to that lane — so `loadLanes` of the result
+    /// is the store again (`Conformance.laneLaws`). A node `LaneOf` does not name is written under `""`.
+    let lanesToJsonl (encode: 'Op -> string) (loaded: Loaded<'Op>) : (string * string) list =
+        lanePartition loaded |> List.map (fun (lane, d) -> lane, toJsonl encode d)
+
+    /// `lanesToJsonl` through the checked writer (Phase 311): each lane by `tryToJsonl`, the first lane
+    /// (in lane order) whose op encoding the reader could not read back refused with its lane and
+    /// `tryToJsonl`'s fault. On `Ok`, `lanesToJsonl`'s texts byte for byte.
+    let tryLanesToJsonl
+        (encode: 'Op -> string)
+        (loaded: Loaded<'Op>)
+        : Result<(string * string) list, string * JsonlWriteFault> =
+        let rec go (acc: (string * string) list) =
+            function
+            | [] -> Ok(List.rev acc)
+            | (lane: string, d: T<'Op>) :: rest ->
+                match tryToJsonl encode d with
+                | Error f -> Error(lane, f)
+                | Ok text -> go ((lane, text) :: acc) rest
+
+        go [] (lanePartition loaded)
+
+    /// Verify a lane store (Phase 311): `firstBreak` over the UNION — a parent link crosses lane files, so
+    /// no lane verifies alone — with the lane whose file holds the faulty node. `Ok()` for an intact
+    /// store. The break is the earliest in the union's history (`firstBreak`'s topological scan), so the
+    /// lane named is the one where the history first goes wrong; a node `LaneOf` does not name reports
+    /// the lane `""`.
+    let verifyLanes
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (loaded: Loaded<'Op>)
+        : Result<unit, LaneBreak> =
+        match firstBreak hashFn w loaded.Dag with
+        | None -> Ok()
+        | Some b ->
+            Error
+                { Lane = Map.tryFind b.NodeId loaded.LaneOf |> Option.defaultValue ""
+                  Break = b }
+
+    /// For each lane, its nodes as `(id, seq, under)`: `seq` the number of nodes of the SAME lane the
+    /// node descends from in the union, `under` whether some other node of the lane descends from it.
+    /// Read from the reachability index's bitsets — a per-lane mask over slots, one pass per node — with
+    /// the unindexed walk for a lane holding a node the drain cannot order.
+    let private laneShape (loaded: Loaded<'Op>) : (string * (string * int * bool) list) list =
+        let reach = Reach.ofDag loaded.Dag
+
+        let bitOf (bits: int array) (j: int) =
+            let w = j >>> 5
+            w < bits.Length && ((bits.[w] >>> (j &&& 31)) &&& 1) = 1
+
+        lanePartition loaded
+        |> List.map (fun (lane, d) ->
+            let ids = d.Nodes |> Map.toList |> List.map fst
+            let slots = ids |> List.map (fun i -> Map.tryFind i reach.Slot)
+
+            if slots |> List.forall Option.isSome then
+                let ss = slots |> List.choose id
+                let width = (reach.Ids.Length >>> 5) + 1
+                let mask = Array.zeroCreate<int> width
+                let below = Array.zeroCreate<int> width
+
+                for s in ss do
+                    mask.[s >>> 5] <- mask.[s >>> 5] ||| (1 <<< (s &&& 31))
+                    let b = reach.Bits.[s]
+
+                    for k in 0 .. b.Length - 1 do
+                        let v =
+                            if k = (s >>> 5) then
+                                b.[k] &&& ~~~(1 <<< (s &&& 31))
+                            else
+                                b.[k]
+
+                        below.[k] <- below.[k] ||| v
+
+                lane,
+                ss
+                |> List.map (fun s ->
+                    let b = reach.Bits.[s]
+                    let mutable c = 0
+
+                    for j in 0 .. s - 1 do
+                        if bitOf b j && bitOf mask j then
+                            c <- c + 1
+
+                    reach.Ids.[s], c, bitOf below s)
+            else
+                lane,
+                ids
+                |> List.map (fun a ->
+                    let seq =
+                        ids |> List.sumBy (fun b -> if b <> a && Reach.reaches reach b a then 1 else 0)
+
+                    a, seq, ids |> List.exists (fun b -> b <> a && Reach.reaches reach a b)))
+
+    /// The lanes that hold more than one writer's history (Phase 311): every lane holding two nodes
+    /// NEITHER of which reaches the other in the union — one lane file must mean one head, and two
+    /// incomparable nodes in one lane are two heads, which is what two writers sharing a lane id produce.
+    /// Each with its TIPS (its nodes no other node of the same lane descends from), sorted; lanes in
+    /// ordinal order; `[]` for a sound store. Comparability is read in the UNION, so a writer whose next
+    /// node descends from its last only through another lane's merge still has one head, and a lane is
+    /// judged whether or not it verifies on its own.
+    let laneCollisions (loaded: Loaded<'Op>) : (string * string list) list =
+        laneShape loaded
+        |> List.choose (fun (lane, ns) ->
+            match ns |> List.filter (fun (_, _, under) -> not under) with
+            | _ :: _ :: _ as tips -> Some(lane, tips |> List.map (fun (id, _, _) -> id) |> ordinalSort)
+            | _ -> None)
+
+    /// Heads that share no history (Phase 311): when the DAG has two or more heads and `commonBase` of
+    /// all of them is `None`, every head with its ROOT — the ordinally smallest node of its closure that
+    /// has no parent the DAG holds (the head itself when there is none); `[]` otherwise. A store whose
+    /// writers began from different genesis nodes and never merged: a structural fault no fold can
+    /// repair, since no base exists to fold over. Heads in ordinal order.
+    let disjointRoots (dag: T<'Op>) : (string * string) list =
+        match heads dag with
+        | []
+        | [ _ ] -> []
+        | hs when (commonBase dag hs).IsSome -> []
+        | hs ->
+            hs
+            |> List.map (fun h ->
+                let root =
+                    ancestorsOf dag h
+                    |> Set.toList
+                    |> List.filter (fun id ->
+                        dag.Nodes.[id].Parents |> List.forall (fun p -> not (dag.Nodes.ContainsKey p)))
+                    |> List.tryHead
+                    |> Option.defaultValue h
+
+                h, root)
+
+    /// `appendOn` into a lane (Phase 311): the node is added to the union and attributed to `lane`. An
+    /// identical node the store already holds is one node, and keeps the lane it already has — the
+    /// writer that wrote it first. Refusals are `appendOn`'s.
+    let appendOnLane
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (actor: Actor)
+        (op: 'Op)
+        (parents: string list)
+        (lane: string)
+        (loaded: Loaded<'Op>)
+        : Result<string * Loaded<'Op>, DagAppendFault> =
+        appendOn hashFn w actor op parents loaded.Dag
+        |> Result.map (fun (id, d) ->
+            id,
+            { Dag = d
+              LaneOf =
+                if loaded.LaneOf.ContainsKey id then
+                    loaded.LaneOf
+                else
+                    Map.add id lane loaded.LaneOf })
+
+    /// The lane store's DEFAULT order key (Phase 311): `(lane, seq, id)` — the node's lane, its position
+    /// in that lane's own history (the number of nodes of the same lane it descends from, so a one-head
+    /// lane's nodes are 0, 1, 2, … in the order its writer wrote them), and its id. Under it the drain
+    /// takes, among the nodes that are ready, the smallest lane's next node: each writer's history is
+    /// kept together as far as the parent relation allows, lanes in lane-id order, and the id breaks the
+    /// ties a lane with two heads leaves. Computed once per store (the returned function answers per
+    /// node); a node `LaneOf` does not name has lane `""` and `seq` 0. A consumer whose history carries
+    /// an order of its own passes its own key to `totalOrderBy` / `replayAllBy` instead.
+    let laneKey (loaded: Loaded<'Op>) : DagNode<'Op> -> string * int * string =
+        let seqs =
+            laneShape loaded
+            |> List.collect (fun (_, ns) -> ns |> List.map (fun (id, s, _) -> id, s))
+            |> Map.ofList
+
+        fun n ->
+            (Map.tryFind n.Id loaded.LaneOf |> Option.defaultValue ""),
+            (Map.tryFind n.Id seqs |> Option.defaultValue 0),
+            n.Id
+
+    /// The lane store in its default total order (Phase 311): `totalOrderBy (laneKey loaded)`.
+    let totalOrder (loaded: Loaded<'Op>) : Result<string list, TotalOrderFault> =
+        totalOrderBy (laneKey loaded) loaded.Dag
+
+    /// Replay a lane store in its default total order (Phase 311): `replayAllBy (laneKey loaded)`.
+    let replayAll
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (state0: 'State)
+        (loaded: Loaded<'Op>)
+        : Result<'State, ReplayAllFault<'Rej>> =
+        replayAllBy (laneKey loaded) w state0 loaded.Dag
+
+    // ---- rehash between hash functions (Phase 311) ----
+    // The linear stream migrates its chain between formats with `OpStream.rehash`, verifying the source
+    // first. A DAG's ids ARE its hashes, so a change of hash function — the 32-bit FNV-1a default to a
+    // host's SHA-256 — re-mints every node, and each child's parent ids with it.
+
+    /// Why `rehashWith` refused (Phase 311).
+    [<RequireQualifiedAccess>]
+    type RehashFault =
+        /// The source does not verify under `fromHash`: its first break. A history that does not verify is
+        /// not re-blessed under a new hash.
+        | Unverified of DagBreak
+        /// Nodes no drain places — a cycle — every one, in id order.
+        | Cyclic of unplaced: string list
+        /// Two nodes mint one id under `toHash`: the target hash collides, at that id.
+        | Collision of nodeId: string
+
+    /// Re-mint a DAG under another hash function (Phase 311): verify it under `fromHash` (`firstBreak`;
+    /// a break is `Unverified`), then rebuild every node in topological order under `toHash`, each
+    /// parent id replaced by its new id — the ops, actors and parent ORDER are the source of truth, only
+    /// the ids change. `Ok(dag', ids)`, with `ids` mapping every old id to its new one (for heads,
+    /// lanes, checkpoints and attestations a host keys by id). The result verifies under `toHash`, and
+    /// `rehashWith toHash fromHash` of it is the source again (`Conformance.laneLaws`).
+    let rehashWith
+        (fromHash: HashFn)
+        (toHash: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (dag: T<'Op>)
+        : Result<T<'Op> * Map<string, string>, RehashFault> =
+        match firstBreak fromHash w dag with
+        | Some b -> Error(RehashFault.Unverified b)
+        | None ->
+            match drainBy (fun _ -> 0) dag with
+            | _, (_ :: _ as unplaced) -> Error(RehashFault.Cyclic unplaced)
+            | order, [] ->
+                let rec go (d: T<'Op>) (ids: Map<string, string>) =
+                    function
+                    | [] -> Ok(d, ids)
+                    | (id: string) :: rest ->
+                        let n = dag.Nodes.[id]
+                        let parents = n.Parents |> List.map (fun p -> ids.[p])
+                        let id' = nodeHash toHash w.Encode parents n.Actor n.Op
+
+                        match addNode toHash w.Encode n.Actor n.Op parents d with
+                        | Ok(_, d') when Map.count d'.Nodes = Map.count d.Nodes -> Error(RehashFault.Collision id')
+                        | Ok(_, d') -> go d' (Map.add id id' ids) rest
+                        | Error _ -> Error(RehashFault.Collision id')
+
+                go empty Map.empty order
+
+    /// `rehashWith` over a lane store (Phase 311): the union re-minted, and every node's lane carried to
+    /// its new id.
+    let rehashLanes
+        (fromHash: HashFn)
+        (toHash: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (loaded: Loaded<'Op>)
+        : Result<Loaded<'Op> * Map<string, string>, RehashFault> =
+        rehashWith fromHash toHash w loaded.Dag
+        |> Result.map (fun (d, ids) ->
+            { Dag = d
+              LaneOf =
+                loaded.LaneOf
+                |> Map.toList
+                |> List.choose (fun (k, l) -> Map.tryFind k ids |> Option.map (fun k' -> k', l))
+                |> Map.ofList },
+            ids)
+
+    // ---- attestation (Phase 311) ----
+    // The linear stream signs its chain head through `IAttestationSink` (Phase 320). A DAG node's id is a
+    // hash over its whole closure, so signing a node signs its history; on a store several parties write,
+    // the signature also says WHO vouched (`OpStream.attestationSubject`, a party-bound subject).
+
+    /// Why `attestHead` refused (Phase 311).
+    [<RequireQualifiedAccess>]
+    type DagAttestFault =
+        /// The DAG holds no node with this id.
+        | UnknownNode of nodeId: string
+
+    /// Attest a node of the DAG — usually a head — as `party` (Phase 311): the sink signs
+    /// `OpStream.attestationSubject hashFn party headId`, and since the node id is a hash over its whole
+    /// ancestor closure one signature covers that history. `Ok None` from the no-op sink; `Error
+    /// UnknownNode` for an id the DAG does not hold. Integrity is a separate act, as for the linear
+    /// stream: verify the DAG (`verifyDag`, `verifyLanes`) before attesting it.
+    let attestHead
+        (sink: IAttestationSink)
+        (hashFn: HashFn)
+        (party: Actor)
+        (dag: T<'Op>)
+        (headId: string)
+        : Result<Attestation option, DagAttestFault> =
+        if not (dag.Nodes.ContainsKey headId) then
+            Error(DagAttestFault.UnknownNode headId)
+        else
+            Ok(sink.Sign(OpStream.attestationSubject hashFn party headId))
+
+    /// Re-verify a party's attestation of a node (Phase 311): `true` only when the DAG holds `headId`, the
+    /// attestation names the subject `attestHead` would sign for this party and node, and the sink accepts
+    /// it there — an attestation by another party, or of another node, is refused before the sink is asked.
+    let verifyAttestation
+        (sink: IAttestationSink)
+        (hashFn: HashFn)
+        (party: Actor)
+        (attestation: Attestation)
+        (dag: T<'Op>)
+        (headId: string)
+        : bool =
+        let subject = OpStream.attestationSubject hashFn party headId
+
+        dag.Nodes.ContainsKey headId
+        && attestation.Head = subject
+        && sink.Verify attestation subject

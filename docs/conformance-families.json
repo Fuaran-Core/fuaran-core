@@ -601,6 +601,19 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.laneLaws",
+      "module": "Conformance",
+      "entry": "laneLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
+    },
+    {
       "id": "Conformance.loweringLaws",
       "module": "Conformance",
       "entry": "loweringLaws",
