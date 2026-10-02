@@ -3751,7 +3751,7 @@ existed; they were somewhere the consumer could not see.
 ruling. **Breaking (wire)** for the repeat hole's `required`, the descriptor bytes and the
 fingerprints that follow it. The rest is **additive**.
 
-### The IDL emitter compiles what it emits, and the three hosts agree by value (Phase 303, DECISIONS.md D104) — ADDITIVE: two public members added; refusals where silence was
+### The IDL emitter compiles what it emits, and the three hosts agree by value (Phase 303, DECISIONS.md D105) — ADDITIVE: two public members added; refusals where silence was
 
 - **A field-less kind or record emits as a marker type** (`R = | R`, value `R.R`) in the one F# type
   emitter, the codec, the smart constructors, the default literals and the scaffold — F# has no empty
