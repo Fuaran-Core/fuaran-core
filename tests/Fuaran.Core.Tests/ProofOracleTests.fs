@@ -16461,6 +16461,407 @@ let proofOracleTests =
 
               Expect.isEmpty ranUnknown "and no evaluator ran"
 
+          // ---- Phase 308: the order by certificate, and the prior-aware drivers, beside production ----
+
+          testCase
+              "the extracted certificate is production's validTopo, and production's sort passes it on every generated graph — `valid_topo_distinct`"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 308
+              let mutable sorted = 0
+              let mutable cyclic = 0
+              let mutable refused = 0
+              let mutable diffs = []
+
+              let draw n =
+                  let v, r' = ConfRng.intBelow n rng
+                  rng <- r'
+                  v
+
+              for i in 1..300 do
+                  let nNodes = draw 7 + 1
+                  let shape = draw 4
+
+                  let deps =
+                      [ for k in 0 .. nNodes - 1 ->
+                            let lower =
+                                [ for j in 0 .. k - 1 do
+                                      if draw 3 = 0 then
+                                          yield string j ]
+
+                            let back =
+                                if shape = 1 && draw 2 = 0 then
+                                    [ string (k + draw (nNodes - k)) ]
+                                else
+                                    []
+
+                            let dangling = if shape = 2 && draw 4 = 0 then [ "zz" ] else []
+                            string k, Set.ofList (lower @ back @ dangling) ]
+                      |> Map.ofList
+
+                  let topo = Propagation.sort deps
+
+                  if not (List.isEmpty topo.Cycles) then
+                      cyclic <- cyclic + 1
+
+                  // production's sort, held to production's checker and to the extracted one, and
+                  // four perturbations of it the checker must refuse wherever they differ from it
+                  let candidates: (string * Propagation.TopoResult) list =
+                      [ "sort", topo
+                        "Order reversed",
+                        { topo with
+                            Order = List.rev topo.Order }
+                        "an id twice",
+                        { topo with
+                            Order = topo.Order @ List.truncate 1 topo.Order }
+                        "an id dropped",
+                        { topo with
+                            Order = List.skip (min 1 topo.Order.Length) topo.Order }
+                        "a cycle walked as acyclic",
+                        { Order = topo.Order @ List.concat topo.Cycles
+                          Cycles = [] } ]
+
+                  for label, cand in candidates do
+                      let prod = Propagation.validTopo deps cand
+                      let model = ModelProp.valid_topo (depsToModel deps) (topoToModel cand)
+
+                      if prod <> model then
+                          diffs <-
+                              sprintf
+                                  "trial %d %s: production validTopo=%b, model valid_topo=%b, deps=%A topo=%A"
+                                  i
+                                  label
+                                  prod
+                                  model
+                                  (Map.toList deps)
+                                  cand
+                              :: diffs
+
+                      if label = "sort" then
+                          if prod then
+                              sorted <- sorted + 1
+                          else
+                              diffs <-
+                                  sprintf
+                                      "trial %d: sort's own result FAILS the certificate: %A over %A"
+                                      i
+                                      cand
+                                      (Map.toList deps)
+                                  :: diffs
+                      elif not prod then
+                          refused <- refused + 1
+
+              match diffs with
+              | d :: _ -> failtestf "the certificate and production DISAGREE\n%s" d
+              | [] -> ()
+
+              Expect.equal sorted 300 "every generated graph's sort passed the certificate"
+              Expect.isGreaterThan cyclic 20 "cyclic graphs were drawn, so the Cycles half was exercised"
+              Expect.isGreaterThan refused 300 "the perturbed orders were refused, so the checker can lose"
+
+          testCase
+              "evalWith and evalFromWith are the extracted eval_with and eval_from_with, and evalFromWith agrees with evalWith — `evalfromwith_agrees`"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 3080
+              let mutable diffs = []
+              let mutable agreed = 0
+              let mutable handedPrior = 0
+
+              let draw n =
+                  let v, r' = ConfRng.intBelow n rng
+                  rng <- r'
+                  v
+
+              for i in 1..200 do
+                  let nNodes = draw 6 + 2
+                  let ids = [ for k in 0 .. nNodes - 1 -> string k ]
+
+                  let deps =
+                      [ for k in 0 .. nNodes - 1 ->
+                            string k,
+                            Set.ofList
+                                [ for j in 0 .. k - 1 do
+                                      if draw 3 = 0 then
+                                          yield string j ] ]
+                      |> Map.ofList
+
+                  let base0 = [ for id in ids -> id, draw 100 ] |> Map.ofList
+                  let changed = [ for _ in 1 .. draw 3 + 1 -> string (draw nNodes) ] |> Set.ofList
+
+                  let base1 =
+                      (base0, changed)
+                      ||> Set.fold (fun m c -> Map.add c (if draw 6 = 0 then failBase else Map.find c base0 + 1000) m)
+
+                  // A prior-aware evaluator that consults its prior and answers as it would with none
+                  // (the prior is reused only when it IS the value it computes): the class
+                  // `prior_blind_along` admits, with the prior path taken.
+                  let prodWith (baseOf: Map<string, int>) (seen: ResizeArray<string>) =
+                      fun (resolve: string -> int option) (prior: int option) (id: string) ->
+                          if Option.isSome prior then
+                              seen.Add id
+
+                          match propSpec baseOf deps resolve id, prior with
+                          | Ok v, Some p when p = v -> Ok p
+                          | r, _ -> r
+
+                  let modelWith (baseOf: Map<string, int>) : ModelProp.evaluator_with<int> =
+                      fun resolve prior id ->
+                          match propSpec baseOf deps (fun k -> ofMOpt (resolve k)) id, ofMOpt prior with
+                          | Ok v, Some p when p = v -> ModelProp.Ok p
+                          | Ok v, _ -> ModelProp.Ok v
+                          | Error m, _ -> ModelProp.Error m
+
+                  let mdeps = depsToModel deps
+                  let mtopo = topoToModel (Propagation.sort deps)
+                  let mreads = declaredReads deps
+
+                  let where =
+                      sprintf "trial %d deps=%A changed=%A" i (Map.toList deps) (Set.toList changed)
+
+                  let full0 = Propagation.evalWith (prodWith base0 (ResizeArray())) deps
+                  let mfull0 = ModelProp.eval_with (modelWith base0) mreads mdeps mtopo
+
+                  if prodOutcomeRender full0 <> modelOutcomeRender mfull0 then
+                      diffs <-
+                          sprintf
+                              "%s: evalWith production=%s model=%s"
+                              where
+                              (prodOutcomeRender full0)
+                              (modelOutcomeRender mfull0)
+                          :: diffs
+
+                  match full0 with
+                  | Ok out0 ->
+                      let seen = ResizeArray()
+                      let incr = Propagation.evalFromWith (prodWith base1 seen) out0.Values changed deps
+
+                      let mincr =
+                          ModelProp.eval_from_with
+                              (modelWith base1)
+                              mreads
+                              (Map.toList out0.Values)
+                              (Set.toList changed)
+                              mdeps
+                              mtopo
+
+                      let full1 = Propagation.evalWith (prodWith base1 (ResizeArray())) deps
+
+                      if prodOutcomeRender incr <> modelOutcomeRender mincr then
+                          diffs <-
+                              sprintf
+                                  "%s: evalFromWith production=%s model=%s"
+                                  where
+                                  (prodOutcomeRender incr)
+                                  (modelOutcomeRender mincr)
+                              :: diffs
+                      elif incr <> full1 then
+                          diffs <-
+                              sprintf
+                                  "%s: evalFromWith=%s but evalWith=%s"
+                                  where
+                                  (prodOutcomeRender incr)
+                                  (prodOutcomeRender full1)
+                              :: diffs
+                      else
+                          agreed <- agreed + 1
+
+                      if seen.Count > 0 then
+                          handedPrior <- handedPrior + 1
+                  | Error _ -> ()
+
+              match diffs with
+              | d :: _ -> failtestf "the prior-aware drivers and the model DISAGREE\n%s" d
+              | [] -> ()
+
+              Expect.isGreaterThan agreed 100 "most trials primed and replayed"
+              Expect.isGreaterThan handedPrior 50 "and a recomputed node was handed its prior, so the prior path ran"
+
+          testCase
+              "changedForOp names every survivor the edit moved and every reader of a removed id, over every op kind with nested Batch — `changed_for_op_complete`"
+          <| fun _ ->
+              // The theorem's statement, checked of PRODUCTION over generated trees and ops: the set
+              // `changed_for_op_complete` says the change set contains is computed here directly from
+              // the two trees, and `evalFrom` from the survivors' prior is held to `eval` under an
+              // evaluator that is a function of a node's own content, its child ids and its resolved
+              // declared reads — the class the theorem's corollary is about.
+              let mutable rng = ConfRng.ofSeed 30800
+              let mutable diffs = []
+              let mutable accepted = 0
+              let mutable readerOfRemoved = 0
+              let mutable nestedBatch = 0
+              let kinds = System.Collections.Generic.HashSet<string>()
+
+              let draw n =
+                  let v, r' = ConfRng.intBelow n rng
+                  rng <- r'
+                  v
+
+              let reads (n: RNode) : string seq =
+                  if n.Value = "" then Seq.empty else Seq.singleton n.Value
+
+              let readValue () =
+                  match draw 3 with
+                  | 0 -> ""
+                  | 1 -> "zz"
+                  | _ -> sprintf "n%d" (draw 9)
+
+              let genTree () =
+                  let size = draw 8 + 2
+
+                  let rec build (i: int) : RNode =
+                      let kids =
+                          [ for j in i + 1 .. size - 1 do
+                                if (j - 1) / 2 = i then
+                                    yield build j ]
+
+                      { RNode.node (sprintf "n%d" i) (if draw 2 = 0 then "section" else "para") kids with
+                          Value = readValue () }
+
+                  build 0
+
+              let rec genOp (t: RNode) (depth: int) : SkeletonOp<RNode, string> =
+                  let ids = Tree.ids nodew t
+                  let pick () = List.item (draw ids.Length) ids
+
+                  match draw (if depth = 0 then 6 else 7) with
+                  | 0 ->
+                      InsertChild(
+                          pick (),
+                          { RNode.leaf (sprintf "f%d" (draw 1000)) "para" "" with
+                              Value = readValue () }
+                      )
+                  | 1 -> RemoveNode(pick ())
+                  | 2 -> MoveNode(pick (), pick ())
+                  | 3 ->
+                      let p = pick ()
+
+                      match Tree.tryFind nodew idw p t with
+                      | Some n ->
+                          let kidIds = n.Children |> List.map (fun c -> c.Id)
+                          let order, r' = ConfRng.shuffle kidIds rng
+                          rng <- r'
+                          ReorderChildren(p, order)
+                      | None -> ReorderChildren(p, [])
+                  | 4 ->
+                      match Tree.tryFind nodew idw (pick ()) t with
+                      | Some n ->
+                          UpdateNode
+                              { n with
+                                  Kind = (if draw 2 = 0 then n.Kind else "rewritten")
+                                  Value = readValue () }
+                      | None -> Batch []
+                  | _ ->
+                      // a Batch drawn against the same pre-state, one level of it NESTED
+                      Batch [ for _ in 0 .. draw 3 -> genOp t (depth + 1) ]
+
+              let rec kindOf (op: SkeletonOp<RNode, string>) =
+                  match op with
+                  | InsertChild _ -> "insert"
+                  | RemoveNode _ -> "remove"
+                  | MoveNode _ -> "move"
+                  | ReorderChildren _ -> "reorder"
+                  | UpdateNode _ -> "update"
+                  | Batch ops when ops |> List.exists (fun o -> o.IsBatch) -> "nested batch"
+                  | Batch _ -> "batch"
+
+              let rec noteKinds (op: SkeletonOp<RNode, string>) =
+                  kinds.Add(kindOf op) |> ignore
+
+                  match op with
+                  | Batch ops -> List.iter noteKinds ops
+                  | _ -> ()
+
+              let eval (t: RNode) (resolve: string -> int option) (id: string) : Result<int, string> =
+                  match Tree.tryFind nodew idw id t with
+                  | None -> Error("no node " + id)
+                  | Some n ->
+                      let own = n.Kind.Length + 10 * List.length n.Children
+
+                      let read =
+                          if n.Value = "" then
+                              0
+                          else
+                              resolve n.Value |> Option.defaultValue 7
+
+                      Ok(own + 100 * read % 9973)
+
+              for i in 1..1500 do
+                  let pre = genTree ()
+                  let op = genOp pre 0
+
+                  match Ops.apply nodew idw op pre with
+                  | Error _ -> ()
+                  | Ok post ->
+                      accepted <- accepted + 1
+                      noteKinds op
+
+                      if kindOf op = "nested batch" then
+                          nestedBatch <- nestedBatch + 1
+
+                      let changed = Propagation.changedForOp nodew idw reads pre post op
+
+                      let index t =
+                          Tree.preorder nodew t |> List.map (fun n -> n.Id, n) |> Map.ofList
+
+                      let before = index pre
+                      let after = index post
+                      let shell (n: RNode) = { n with Children = [] }
+                      let kidIds (n: RNode) = n.Children |> List.map (fun c -> c.Id)
+                      let removedIds = before |> Map.filter (fun k _ -> not (after.ContainsKey k))
+
+                      for KeyValue(x, n) in after do
+                          let moved =
+                              match before.TryFind x with
+                              | None -> true
+                              | Some m -> shell m <> shell n || kidIds m <> kidIds n
+
+                          let readsRemoved =
+                              match before.TryFind x with
+                              | Some m -> m.Value <> "" && removedIds.ContainsKey m.Value
+                              | None -> false
+
+                          if readsRemoved then
+                              readerOfRemoved <- readerOfRemoved + 1
+
+                          if (moved || readsRemoved) && not (Set.contains x changed) then
+                              diffs <-
+                                  sprintf
+                                      "trial %d: %s %s but changedForOp gave %A for %A over %A"
+                                      i
+                                      x
+                                      (if moved then "moved" else "read a removed id")
+                                      (Set.toList changed)
+                                      op
+                                      pre
+                                  :: diffs
+
+                      let deps0 = Propagation.dependencyMap nodew idw reads pre
+                      let deps1 = Propagation.dependencyMap nodew idw reads post
+
+                      match Propagation.eval (eval pre) deps0 with
+                      | Ok out0 ->
+                          let prior = out0.Values |> Map.filter (fun k _ -> deps1.ContainsKey k)
+                          let incr = Propagation.evalFrom (eval post) prior changed deps1
+                          let full = Propagation.eval (eval post) deps1
+
+                          if incr <> full then
+                              diffs <-
+                                  sprintf "trial %d: evalFrom=%A but eval=%A for %A over %A" i incr full op pre
+                                  :: diffs
+                      | Error e -> diffs <- sprintf "trial %d: the pre-edit tree did not evaluate: %A" i e :: diffs
+
+              match diffs with
+              | d :: _ -> failtestf "changedForOp missed what the theorem says it names\n%s" d
+              | [] -> ()
+
+              Expect.equal
+                  (Set.ofSeq kinds)
+                  (Set.ofList [ "insert"; "remove"; "move"; "reorder"; "update"; "batch"; "nested batch" ])
+                  "every op kind, a nested Batch included, was drawn and accepted"
+
+              Expect.isGreaterThan accepted 500 "most trials applied"
+              Expect.isGreaterThan readerOfRemoved 20 "a survivor read a removed id, so that clause was reached"
+              Expect.isGreaterThan nestedBatch 5 "nested batches were accepted"
+
           // ---- Phase 300: the reconcile's partition and the rejecting-lane pool, beside production ----
 
           testCase "the extracted reconcile partition is production's over the four shapes"

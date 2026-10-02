@@ -141,6 +141,45 @@ module Propagation =
 
         { Order = order; Cycles = cycles }
 
+    /// The CERTIFICATE `sort`'s result is checked against (Phase 308): `true` exactly when `topo` is a
+    /// valid evaluation order of `deps` —
+    ///
+    ///   1. `Order` holds no id twice;
+    ///   2. `Order` and the members of `Cycles` together PARTITION the ids `deps` holds — every id once,
+    ///      in one of them, and nothing else;
+    ///   3. every read of an `Order` id that `deps` holds appears EARLIER in `Order`, or lies in a cycle.
+    ///
+    /// The first clause is the one premise the agreement theorems take of the walked order
+    /// (`valid_topo_distinct`, `proofs/Propagation.fst`), and the third is what makes the values the walk
+    /// computes mean something: an acyclic read is computed before its reader. It is a CHECKER, not a
+    /// second sort: it says whether an order is acceptable and never builds one, so it is the half of
+    /// `sort` the proofs can state. `sort` itself runs Tarjan's algorithm and is held to this checker
+    /// by the propagation laws and the proof differential on every graph they draw; a caller that
+    /// builds a `Plan` by hand can hold its own order to it. Linear in ids plus reads, up to the set
+    /// lookups. Pure, total.
+    let validTopo (deps: Map<string, Set<string>>) (topo: TopoResult) : bool =
+        let cyclic = topo.Cycles |> List.concat
+        let all = topo.Order @ cyclic
+        let distinct = List.length (List.distinct all) = List.length all
+        let keys = deps |> Map.toList |> List.map fst |> Set.ofList
+
+        if not distinct || Set.ofList all <> keys then
+            false
+        else
+            let inCycle = Set.ofList cyclic
+
+            let rec ordered (seen: Set<string>) =
+                function
+                | [] -> true
+                | id :: rest ->
+                    let reads = Map.tryFind id deps |> Option.defaultValue Set.empty
+
+                    reads
+                    |> Set.forall (fun r -> not (Set.contains r keys) || Set.contains r seen || Set.contains r inCycle)
+                    && ordered (Set.add id seen) rest
+
+            ordered Set.empty topo.Order
+
     /// The cycle group through `target`, if any — the enumeration a rejection envelope carries (GP5: a cycle
     /// rejection enumerates the cycle path).
     let cycleThrough (target: string) (deps: Map<string, Set<string>>) : string list option =
@@ -206,6 +245,17 @@ module Propagation =
     /// touched; a `RemoveNode` touches the whole removed subtree (its former dependents dangle — surfaced as
     /// dirty by the closure, named as a defect by the validator, not here). Resolves subtrees against `root`
     /// (an op carries only ids, not nodes).
+    ///
+    /// **Every container whose child list moved (Phase 308).** A `MoveNode` touches the target, the new
+    /// parent AND the parent it left; a `RemoveNode` touches the removed subtree AND the parent it was
+    /// removed from — the containers whose child list changed, as the `InsertChild` and
+    /// `ReorderChildren` arms always named theirs. Before, a node whose value counts its children read a
+    /// stale count after a move out of it or a removal from it. And a `Batch` resolves each sub-op
+    /// against the tree the sub-ops BEFORE it produced (`Ops.apply`, threaded), because that is the tree
+    /// the sub-op is applied to: resolved against `root`, a move followed by the removal of the moved
+    /// node's new parent touched neither the moved subtree nor its readers. A sub-op `Ops.apply` refuses
+    /// (a domain's own engine may accept what the unconstrained one does not, below a keyed position for
+    /// instance) is resolved against the tree in hand and the threading continues from it.
     let rec touchedBy
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -222,14 +272,26 @@ module Propagation =
             | Some node -> idsOf node
             | None -> Set.singleton (s tid)
 
+        let parentIds (tid: 'Id) =
+            match Tree.parentOf w idw tid root with
+            | Some p -> Set.singleton (s (w.Id p))
+            | None -> Set.empty
+
         match op with
         | InsertChild(parent, node) -> Set.add (s parent) (idsOf node)
-        | RemoveNode target -> subtreeIds target
-        | MoveNode(target, newParent) -> Set.ofList [ s target; s newParent ]
+        | RemoveNode target -> Set.union (subtreeIds target) (parentIds target)
+        | MoveNode(target, newParent) -> Set.union (Set.ofList [ s target; s newParent ]) (parentIds target)
         | ReorderChildren(parent, _) -> Set.singleton (s parent)
         | Batch ops ->
-            (Set.empty, ops)
-            ||> List.fold (fun acc o -> Set.union acc (touchedBy w idw root o))
+            let step (acc: Set<string>, tree: 'Node) (o: SkeletonOp<'Node, 'Id>) =
+                let next =
+                    match Ops.apply w idw o tree with
+                    | Ok tree' -> tree'
+                    | Error _ -> tree
+
+                Set.union acc (touchedBy w idw tree o), next
+
+            ((Set.empty, root), ops) ||> List.fold step |> fst
         // Phase 250 — the node ALONE. An in-place rewrite keeps the node's id and its children, so
         // no container's structure moved: what changed is the one definition, and its readers are
         // reached by the closure. Before `UpdateNode`, a redefinition was a remove plus an insert,
@@ -251,8 +313,9 @@ module Propagation =
         dirtyFromChangedIds deps (touchedBy w idw root op)
 
     /// The change set to hand `evalFrom` over the POST-edit graph after a structural `SkeletonOp`
-    /// (Phase 250): `dirtyFromOp` over the PRE-edit tree, restricted to the ids the post-edit tree
-    /// still holds.
+    /// (Phase 250): a dirty closure over the PRE-edit tree's dependency graph, restricted to the ids
+    /// the post-edit tree still holds — seeded since Phase 308 from the diff of the two trees (below),
+    /// where it was seeded from `touchedBy` alone.
     ///
     /// Both halves are load-bearing, and each is the obvious thing to get wrong. The dirty set must
     /// be computed over `pre`, because a removed node's dependents are reachable from it only in the
@@ -267,6 +330,32 @@ module Propagation =
     /// The result names every surviving node whose value the edit can move, so it is an honest
     /// `changed` for `evalFrom`: over-approximating (a closure handed in as a change set closes to
     /// itself), never missing a reader. `post` must be the tree `op` produced from `pre`.
+    ///
+    /// **Derived from the DIFF of `pre` and `post` (Phase 308, DECISIONS D108).** The seeds are
+    ///
+    ///   - every id of `post` that `pre` does not hold (inserted);
+    ///   - every id of `post` whose CHILD LIST (the ids `w.Children` reports, in order) differs from its
+    ///     child list in `pre` — the old parent of a move, the parent of a removal, a reordered or
+    ///     grown container;
+    ///   - every id of `post` whose READ SET (`readsOf`) differs from its read set in `pre` — a node
+    ///     whose reads are derived from its subtree reads differently when something below it moved;
+    ///   - every id the op CONTENT-WRITES (`Ops.footprint`'s `ContentWrites`: an inserted subtree, an
+    ///     `UpdateNode` target, a removed or moved target), which is how a node's own content can
+    ///     differ — the witness has no content accessor, and `Ops.apply` rewrites content nowhere else;
+    ///   - every id `pre` holds and `post` does not (removed), so that the closure reaches its readers;
+    ///   - and `touchedBy` over `pre`, so the set never shrinks below what it was;
+    ///
+    /// closed over the PRE-edit dependency graph and restricted to the survivors. A `Batch` needs no
+    /// special case: the diff compares the two ends, so every intermediate tree is accounted for by
+    /// what it left behind — a node a batch moves under a parent it then removes is simply absent from
+    /// `post`, and its readers are reached through it.
+    ///
+    /// The completeness this buys is a theorem (`changed_for_op_complete`, `proofs/PropagationOps.fst`):
+    /// for an op `Ops.apply` accepts, every survivor whose content, child list or reads differ, and every
+    /// survivor that reads a removed id, is named. So `agree_off` / `touches_off` hold for any evaluator
+    /// that is a function of a node's own content, its child ids and its resolved declared reads — an
+    /// evaluator that reads a node's whole SUBTREE without declaring it is outside that class, and is
+    /// what declared reads are for.
     let changedForOp
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -275,8 +364,41 @@ module Propagation =
         (post: 'Node)
         (op: SkeletonOp<'Node, 'Id>)
         : Set<string> =
-        let survivors = Tree.ids w post |> List.map idw.ToString |> Set.ofList
-        Set.intersect (dirtyFromOp w idw pre readsOf op) survivors
+        let s = idw.ToString
+
+        let index (root: 'Node) =
+            Tree.preorder w root |> List.map (fun n -> s (w.Id n), n) |> Map.ofList
+
+        let before = index pre
+        let after = index post
+
+        let kids (n: 'Node) =
+            w.Children n |> List.map (fun c -> s (w.Id c))
+
+        let reads (n: 'Node) = readsOf n |> Seq.map s |> Set.ofSeq
+        let written = (Ops.footprint w idw [ op ]).ContentWrites
+
+        let local =
+            after
+            |> Map.toList
+            |> List.choose (fun (k, n) ->
+                match Map.tryFind k before with
+                | None -> Some k
+                | Some m when Set.contains k written || kids m <> kids n || reads m <> reads n -> Some k
+                | Some _ -> None)
+            |> Set.ofList
+
+        let removed =
+            before
+            |> Map.toList
+            |> List.map fst
+            |> List.filter (fun k -> not (Map.containsKey k after))
+
+        let seeds = Set.unionMany [ local; Set.ofList removed; touchedBy w idw pre op ]
+
+        let deps = dependencyMap w idw readsOf pre
+        let survivors = after |> Map.toList |> List.map fst |> Set.ofList
+        Set.intersect (dirtyFromChangedIds deps seeds) survivors
 
     // ---- column-granular reads (Phase 250) ----
     // A read of a node may name the PARTS of that node's value it depends on — the columns of a table,

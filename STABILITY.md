@@ -3895,6 +3895,35 @@ host regenerated from this version refuses out-of-range ints at int slots.
 **Class: breaking (behavioural)** — verdicts a consumer's CI reads grow stricter for the rows above (a
 classifier change that can turn a consumer's gate red with no change on its side is classed breaking), with
 one row looser; the public API surface does not move (`api/` baselines unchanged).
+
+### A structural edit's change set is the diff of the two trees, and the order is certified (Phase 308, DECISIONS.md D108) — ADDITIVE: one public member added; change sets grow, a stale value becomes a correct one
+
+- **`Propagation.changedForOp`** is seeded from the diff of `pre` and `post` — new ids, survivors whose
+  child ids or declared reads differ, the op's content writes, removed ids, and `touchedBy` — closed over
+  the pre-edit dependency graph and restricted to the survivors. It names a move's old parent, a
+  removal's parent, a node whose subtree-derived reads moved, and the readers of anything a `Batch`
+  removed at any step. Every set it returned before is a subset of the one it returns now.
+- **`Propagation.touchedBy`** touches the parent a `RemoveNode` removes from and the parent a `MoveNode`
+  leaves, and resolves a `Batch`'s sub-ops against the tree the sub-ops before each produced (`Ops.apply`,
+  threaded). `dirtyFromOp` grows with it.
+- **`Propagation.validTopo`** (new): the certificate an evaluation order is checked against. `sort` is
+  unchanged and does not call it; the laws and the proof differential hold `sort` to it.
+- **`Conformance.propagationEvaluatorLawsWith`** replays an edit that moves the dependency map from the
+  survivors' prior, as `propagationEvaluatorLaws` has since Phase 302, and counts it beside its guard.
+- **Proofs**: `valid_topo_distinct`, `evalfrom_agrees_certified` and `evalfromwith_agrees_certified` in
+  `proofs/Propagation.fst`; `proofs/PropagationOps.fst` (new, checked, not extracted) with
+  `changed_for_op_complete` and `kind_kept`. `proofs.json` restates `propagation-evalfrom-agrees` ("any
+  TOTAL evaluator") and `propagation-order-distinct` (narrowed to the certificate) and adds seven rows.
+
+**What a consumer does.** Nothing to compile against. A domain that replays `changedForOp` through
+`evalFrom` recomputes more nodes after a move, a removal or a batch, and reads correct values where it
+read stale ones. A test that pinned the old, smaller set of `touchedBy` / `dirtyFromOp` / `changedForOp`
+for a removal or a move sees the parent in it now.
+
+**Class: additive** — `api/Fuaran.Core.Propagation.txt` gains `validTopo`; nothing is removed or retyped,
+and `PropagationError` gains no case. The behaviour change is a superset: every id the old functions
+named is still named.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

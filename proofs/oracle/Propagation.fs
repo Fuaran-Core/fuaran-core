@@ -650,6 +650,54 @@ let eval_for = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targ
 
 let walk_for_invoked = (fun ( ev  :  evaluator<'v> ) ( touches  :  read_witness ) ( targets  :  Prims.list<Prims.string> ) ( deps  :  dmap ) ( topo  :  topo_result ) -> (go_invoked ev touches deps always [] [] (keep (needed_for deps targets) topo.order)))
 
+
+let rec concat_all : Prims.list<Prims.list<Prims.string>>  ->  Prims.list<Prims.string> = (fun ( gs  :  Prims.list<Prims.list<Prims.string>> ) -> (match (gs) with
+| [] -> begin
+     []
+     end
+| (g)::r -> begin
+     (app g (concat_all r))
+     end))
+
+
+let rec keys : dmap  ->  Prims.list<Prims.string> = (fun ( d  :  dmap ) -> (match (d) with
+| [] -> begin
+     []
+     end
+| ((k, uu___))::r -> begin
+     (k)::(keys r)
+     end))
+
+
+let same_set : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( a  :  Prims.list<Prims.string> ) ( b  :  Prims.list<Prims.string> ) -> ((subset a b) && (subset b a)))
+
+
+let rec reads_ok : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( deps  :  dmap ) ( cyc  :  Prims.list<Prims.string> ) ( seen  :  Prims.list<Prims.string> ) ( rs  :  Prims.list<Prims.string> ) -> (match (rs) with
+| [] -> begin
+     true
+     end
+| (r)::rest -> begin
+     ((((not ((has_key r deps))) || (mem r seen)) || (mem r cyc)) && (reads_ok deps cyc seen rest))
+     end))
+
+
+let rec ordered : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( deps  :  dmap ) ( cyc  :  Prims.list<Prims.string> ) ( seen  :  Prims.list<Prims.string> ) ( order  :  Prims.list<Prims.string> ) -> (match (order) with
+| [] -> begin
+     true
+     end
+| (id)::rest -> begin
+     ((reads_ok deps cyc seen (reads_of deps id)) && (ordered deps cyc ((id)::seen) rest))
+     end))
+
+
+let valid_topo : dmap  ->  topo_result  ->  Prims.bool = (fun ( deps  :  dmap ) ( topo  :  topo_result ) -> (
+
+let cyc = (concat_all topo.cycles)
+in (
+
+let all = (app topo.order cyc)
+in (((distinct all) && (same_set all (keys deps))) && (ordered deps cyc [] topo.order)))))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -677,7 +725,7 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
 let twin_deps : dmap = ((("b"), (("a")::[])))::((("c"), (("b")::[])))::[]
 
 
-let twins : Prims.list<twin> = ({tname = "dependents-inverts-the-edges"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dependents twin_deps) (((("a"), (("b")::[])))::((("b"), (("c")::[])))::[])))})::({tname = "dirty-set-is-the-downstream-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_from_changed_ids twin_deps (("a")::[])) (("a")::("b")::("c")::[])))})::({tname = "an-edge-has-a-direction"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge twin_deps "b" "c") false))})::[]
+let twins : Prims.list<twin> = ({tname = "dependents-inverts-the-edges"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dependents twin_deps) (((("a"), (("b")::[])))::((("b"), (("c")::[])))::[])))})::({tname = "dirty-set-is-the-downstream-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dirty_from_changed_ids twin_deps (("a")::[])) (("a")::("b")::("c")::[])))})::({tname = "an-edge-has-a-direction"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge twin_deps "b" "c") false))})::({tname = "the-certificate-accepts-a-dependency-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("b")::("c")::[]; cycles = []}) true))})::({tname = "the-certificate-refuses-a-reader-before-its-read"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (valid_topo twin_deps {order = ("c")::("b")::[]; cycles = []}) false))})::[]
 
 
 

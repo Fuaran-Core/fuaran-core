@@ -159,3 +159,76 @@ let propagationEvaluatorLawTests =
               // The counterexample renders every count and then the arms it never reached; the arm
               // list must be exactly the one this witness starves.
               Expect.stringContains why "never reached failing evaluator —" "it names that arm, and only that arm" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 308 — the honesty law sees the READERS of a removed node. A removed node is not held to
+//  naming (nothing evaluates it after the edit), but a node that read it stays in the map with an
+//  input that vanished, so a change set that leaves it out hands `evalFrom` a stale value.
+// ---------------------------------------------------------------------------
+
+/// A sheet edit that REMOVES a cell some other cell reads, and names nothing: the removal-blind
+/// change set. `honest` names the readers instead, which is what the honest set must hold.
+let private removing (honest: bool) : EvaluatorWitness<RefSheet, int> =
+    { sheetw with
+        Surface =
+            if honest then
+                "the reference sheet, a read cell removed and its readers named"
+            else
+                "the reference sheet, a read cell removed and nothing named"
+        Change =
+            fun s r ->
+                let read =
+                    s
+                    |> Map.toList
+                    |> List.collect (fun (_, f) -> Set.toList (refsOf f))
+                    |> List.filter s.ContainsKey
+
+                match List.distinct read with
+                | [] -> (s, Set.empty), r
+                | ids ->
+                    let gone, r = ConfRng.choose ids r
+                    let s' = Map.remove gone s
+
+                    let named =
+                        if honest then
+                            s'
+                            |> Map.filter (fun _ f -> Set.contains gone (refsOf f))
+                            |> Map.keys
+                            |> Set.ofSeq
+                        else
+                            Set.empty
+
+                    (s', named), r }
+
+[<Tests>]
+let removalHonestyTests =
+    testList
+        "Conformance.propagationEvaluatorLaws — removed reads (Phase 308)"
+        [ testCase "go-red: a change set blind to the readers of a removed cell loses honesty, naming the reader"
+          <| fun _ ->
+              let results = Conformance.propagationEvaluatorLaws (removing false) 2110 200
+              let law = evaluatorLaw "off the change set the domain names" results
+              Expect.isFalse law.Passed "the removal-blind change set is refused"
+
+              Expect.stringContains
+                  (law.Counterexample |> Option.defaultValue "")
+                  "which the edit removed"
+                  "the counterexample names the removed read"
+
+          testCase "naming the readers is honest, and the survivors' replay agrees"
+          <| fun _ ->
+              let results = Conformance.propagationEvaluatorLaws (removing true) 2110 200
+
+              let red =
+                  results
+                  |> List.filter (fun r -> not r.Passed && not (r.Law.StartsWith SampleAdequacy.guardOpening))
+
+              Expect.isEmpty red (sprintf "%A" red)
+
+              let withPrior (s: RefSheet) resolve (_: int option) id = sheetEvalNode s resolve id
+
+              let redWith =
+                  Conformance.propagationEvaluatorLawsWith (removing true) withPrior 2110 200
+                  |> List.filter (fun r -> not r.Passed && not (r.Law.StartsWith SampleAdequacy.guardOpening))
+
+              Expect.isEmpty redWith (sprintf "%A" redWith) ]
