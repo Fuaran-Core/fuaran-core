@@ -2503,18 +2503,25 @@ let private dagDifferential
                 | None -> true)
             |> Option.map fst
 
-        for ((w1, d1), (w2, d2)) in List.pairwise singles do
-            match changedKey d1, changedKey d2 with
-            | Some k1, Some k2 when k1 <> k2 && d1.Nodes.ContainsKey k1 && d2.Nodes.ContainsKey k2 ->
-                let both: Dag.T<'Op> =
-                    { Nodes = dag.Nodes |> Map.add k1 d1.Nodes.[k1] |> Map.add k2 d2.Nodes.[k2] }
+        // one in-place tamper per node (a tamper that removes a node changes no node in place)
+        let perNode =
+            singles
+            |> List.choose (fun (what, d) ->
+                changedKey d
+                |> Option.filter d.Nodes.ContainsKey
+                |> Option.map (fun k -> k, what, d.Nodes.[k]))
+            |> List.distinctBy (fun (k, _, _) -> k)
 
-                let p = compare (w1 + " and " + w2) both
-                t <- { t with Tampers = t.Tampers + 1 }
+        for (i, (k1, w1, n1)) in List.indexed perNode do
+            for (j, (k2, w2, n2)) in List.indexed perNode do
+                if i < j then
+                    let both: Dag.T<'Op> = { Nodes = dag.Nodes |> Map.add k1 n1 |> Map.add k2 n2 }
 
-                if p <> DagIntact then
-                    t <- { t with Detected = t.Detected + 1 }
-            | _ -> ()
+                    let p = compare (w1 + " and " + w2) both
+                    t <- { t with Tampers = t.Tampers + 1 }
+
+                    if p <> DagIntact then
+                        t <- { t with Detected = t.Detected + 1 }
 
     t
 
