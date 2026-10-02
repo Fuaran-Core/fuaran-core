@@ -48,6 +48,8 @@ module Gen =
     /// (including their `///` or `//` markers), indented by the emitter.
     type GenSupport =
         {
+            /// Declaration path (`type:Name`, `case:Union.Tag`, `field:Owner.Field`, …) → the
+            /// comment lines emitted above it, markers included; a path with no entry emits none.
             Docs: Map<string, string list>
             /// Verbatim `and …` member(s) appended to the type-recursion group.
             TypeSplice: string option
@@ -64,9 +66,13 @@ module Gen =
             /// expression answers `Result<Case, string>`; since Phase 337 its refusal reaches
             /// the caller as `OutOfRange` at the case's object, its sentence unchanged.
             CaseRefines: Map<string, string>
+            /// Kind tag → the host projection that replaces that kind's derived record, encoder
+            /// and decoder; a kind with no entry is emitted from its IDL fields.
             KindProjections: Map<string, KindProjection>
         }
 
+        /// No docs, no splices, no refines, no projections: `fsharpModuleWith` under this record
+        /// emits byte-identically to the generator before the support channel existed.
         static member Empty =
             { Docs = Map.empty
               TypeSplice = None

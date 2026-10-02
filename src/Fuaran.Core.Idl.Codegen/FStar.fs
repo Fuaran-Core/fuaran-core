@@ -743,7 +743,14 @@ module FStarTarget =
     // -----------------------------------------------------------------------
 
     /// One kind's verdict.
-    type Verdict = { Tag: string; Refusal: string option }
+    type Verdict =
+        {
+            /// The kind's tag; `partition` yields one verdict per kind, in declaration order.
+            Tag: string
+            /// The described `CodegenError` explaining why the target cannot model the kind,
+            /// or `None` when it can; the emitted header prints it beside the refused kind's tag.
+            Refusal: string option
+        }
 
     /// Where a generated model COMES FROM, for the emitted header — so the artefact says what
     /// it was generated from, what regenerates it and what a theorem over it is a property
@@ -763,6 +770,7 @@ module FStarTarget =
             Proves: string list
         }
 
+    /// Stock `Provenance` values for callers that have no named source of their own.
     [<RequireQualifiedAccess>]
     module Provenance =
         /// The provenance the un-suffixed entry points emit: honest about the one thing the
@@ -821,7 +829,7 @@ module FStarTarget =
         |> List.filter (fun tag -> Set.isSubset (declaredTypes idl [ tag ]) envelope)
 
     /// Why a kind the target CAN express is nonetheless outside the proof vocabulary — the
-    /// declared types it would add. `None` when it is inside it (or cannot be expressed at all,
+    /// declared types it would add. Empty when it is inside it (or cannot be expressed at all,
     /// which `partition` already answers).
     let beyondEnvelope (idl: Idl) (tag: string) : string list =
         let envelope = declaredTypes idl []

@@ -5,8 +5,11 @@ namespace Fuaran.Core
 
 /// Axis 1 — does the artifact touch the world.
 type HostEffect =
+    /// Touches nothing outside its inputs; the bottom of the host chain.
     | Pure
+    /// Reads state outside its inputs but changes none; wider than `Pure`.
     | ReadsHost
+    /// Changes state outside its inputs; the top of the host chain, wider than `ReadsHost`.
     | WritesHost
 
 /// One atomic source of non-determinism a body may read beyond its explicit inputs. The
@@ -14,8 +17,11 @@ type HostEffect =
 /// `Effect.determinismTag` renders a set in, held by an explicit list there rather than by the
 /// derived comparison, so a reordered case cannot silently reorder a wire label.
 type DeterminismFactor =
+    /// Reads the wall clock; labelled `clock` on the wire.
     | ClockFactor
+    /// Reads a random source; labelled `random` on the wire.
     | RandomFactor
+    /// Reads the network; labelled `network` on the wire.
     | NetworkFactor
 
 /// Axis 2 — which non-deterministic sources the artifact reads: a SET of factors, joined by union.
@@ -27,8 +33,12 @@ type DeterminismSource = Set<DeterminismFactor>
 
 /// The mandatory, total effect signature — two orthogonal axes, never optional.
 type EffectClass =
-    { Host: HostEffect
-      Determinism: DeterminismSource }
+    {
+        /// Axis 1: how far the artifact reaches into the host; joined by the widest.
+        Host: HostEffect
+        /// Axis 2: every non-deterministic source read; joined by union, `Set.empty` when reproducible.
+        Determinism: DeterminismSource
+    }
 
 /// The effect lattice + the composition join. `compose` propagates the join
 /// componentwise (pure ∘ impure = impure; clock ∘ random = clock ∪ random).
@@ -46,6 +56,8 @@ module Effect =
     /// The determinism of a body that reads exactly the network.
     let network: DeterminismSource = Set.singleton NetworkFactor
 
+    /// The bottom of the lattice on both axes — the identity of `join`, and covered by every
+    /// declaration.
     let pureDeterministic =
         { Host = Pure
           Determinism = deterministic }

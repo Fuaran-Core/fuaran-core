@@ -103,11 +103,23 @@ type Rejection<'Id> =
 /// it, redefining a node was `Batch [RemoveNode id; InsertChild(parent, node')]`, which moved the
 /// node to the end of its parent and dirtied the parent as well as the node.
 type SkeletonOp<'Node, 'Id> =
+    /// Append `node` — a whole subtree — as `parent`'s LAST child. An id the subtree repeats, or
+    /// one the tree already carries, is refused first (`DuplicateId`); then an absent `parent`.
     | InsertChild of parent: 'Id * node: 'Node
+    /// Remove `target` and its whole subtree. The root is refused (`CannotRemoveRoot`), as is an
+    /// absent id (`UnknownNode`).
     | RemoveNode of target: 'Id
+    /// Detach `target` with its subtree and APPEND it under `newParent`. Refused for the root, an
+    /// absent id on either side, and a `newParent` inside the moved subtree (`WouldNestUnderSelf`).
     | MoveNode of target: 'Id * newParent: 'Id
+    /// Put `parent`'s children in `order`, which must be a permutation of their ids
+    /// (`ReorderMismatch`, carrying the current list, otherwise). Nothing is added or dropped.
     | ReorderChildren of parent: 'Id * order: 'Id list
+    /// The ops in order, each against the tree the previous one left. All-or-nothing: the first
+    /// refusal is the batch's, and no earlier step survives it.
     | Batch of SkeletonOp<'Node, 'Id> list
+    /// Rewrite the node whose id is `w.Id node` in place: it takes `node`'s content and keeps its
+    /// own children (the payload's are not read). An absent id is `UnknownNode`.
     | UpdateNode of node: 'Node
 
 /// The structural read/write **footprint** of an op-script (Phase 78) — the multi-agent coordination
@@ -148,12 +160,25 @@ type SkeletonOp<'Node, 'Id> =
 /// tree-aware analysis would. `Ops.independent = true` is therefore a *promise* (the scripts provably
 /// commute); `independent = false` is always a safe answer, never a defect report.
 type Footprint =
-    { Reads: Set<string>
-      StructureWrites: Set<string>
-      ContentWrites: Set<string>
-      UnknownParentWrites: Set<string>
-      SlotReads: Set<string * string>
-      SlotWrites: Set<string * string> }
+    {
+        /// Ids whose existence an op depends on. A content write of one of them in the other script
+        /// collides.
+        Reads: Set<string>
+        /// Named parents whose child list an op changes. The same parent written by both scripts
+        /// collides.
+        StructureWrites: Set<string>
+        /// Ids of nodes an op authors, destroys, relocates or rewrites — every id of an inserted
+        /// subtree. Collides with the same id written or read by the other script.
+        ContentWrites: Set<string>
+        /// Ids standing for a parent the script cannot name (removes, moves, in-place rewrites).
+        /// Non-empty, it collides with ANY structure or unknown-parent write of the other script.
+        UnknownParentWrites: Set<string>
+        /// `(node id, slot)` pairs read without the whole node. Always empty for a skeleton op.
+        SlotReads: Set<string * string>
+        /// `(node id, slot)` pairs written without the whole node; writes to different slots of one
+        /// node commute. Always empty for a skeleton op.
+        SlotWrites: Set<string * string>
+    }
 
 /// One clause of `Ops.independent` that two footprints fail, with the addresses it fails on
 /// (Phase 248) — what `Ops.interference` reports, so a refused party learns HOW its script
@@ -205,13 +230,27 @@ type Interference =
 /// Defined here since Phase 315 (it was declared in `Fuaran.Core.AiSurface`), so `Rejection.explain`
 /// can return it; the namespace is unchanged, so every `RejectionGuidance` in source still means it.
 type RejectionGuidance =
-    { Message: string
-      Alternatives: string list }
+    {
+        /// One sentence naming the failure in the domain's `RejectionNouns`; for a domain `Rejected`,
+        /// the domain's own message verbatim.
+        Message: string
+        /// The repair choices the envelope enumerates — addressable ids, the children a reorder must
+        /// permute, a grammar's legal kinds, the referrers to clear — already rendered; `[]` where it
+        /// enumerates none.
+        Alternatives: string list
+    }
 
 /// The words `Rejection.explain` speaks in (Phase 315) — what the domain calls a node and its root,
 /// so the same explainer serves a document ("block", "document root") and a sheet ("cell",
 /// "workbook"). `RejectionNouns.generic` is "node" / "root".
-type RejectionNouns = { Node: string; Root: string }
+type RejectionNouns =
+    {
+        /// The word for one node. The sentences put a fixed `a` / `no` before it and pluralise it by
+        /// appending `s`, so pick a word that reads correctly both ways.
+        Node: string
+        /// The word for the tree's root, spoken after `the`.
+        Root: string
+    }
 
 /// The stock nouns.
 [<RequireQualifiedAccess>]
@@ -447,8 +486,14 @@ module Footprint =
 /// `Ops.footprintReferenced` reads every id a script writes a reference to; and the reference-aware
 /// engine (`Ops.applyReferenced`) refuses a `RemoveNode` that would leave a reference dangling.
 type RefWitness<'Node, 'Id> =
-    { RefsOf: 'Node -> 'Id list
-      DeclsOf: 'Node -> 'Id list }
+    {
+        /// The ids this node refers to, in the domain's order; each resolves when some node's
+        /// `DeclsOf` carries it.
+        RefsOf: 'Node -> 'Id list
+        /// The ids this node offers as reference targets — its own id where every node is referable,
+        /// the names it defines where names are not node ids.
+        DeclsOf: 'Node -> 'Id list
+    }
 
 /// The generic apply engine over the skeleton ops. Total: every failure is a typed
 /// `Rejection` envelope. Generic over the `NodeWitness` / `IdWitness` — no domain

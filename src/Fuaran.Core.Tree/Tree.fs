@@ -7,9 +7,19 @@ namespace Fuaran.Core
 /// so this witness carries no effectful `fresh` — id minting stays domain-side.
 /// FSharp.Core only, Fable-clean.
 type IdWitness<'Id> =
-    { ToString: 'Id -> string
-      OfString: string -> 'Id
-      Equals: 'Id -> 'Id -> bool }
+    {
+        /// The id's string key — what every map, set and stamp here keys by (`Tree.wellFormed`,
+        /// `Tree.Index`, `FreshIds`). Must be injective: two ids that render alike are one id to
+        /// every uniqueness check.
+        ToString: 'Id -> string
+        /// The inverse of `ToString` (`OfString (ToString id)` equals `id`). In this package only
+        /// `FreshIds` reads it, to turn a minted candidate key back into an id.
+        OfString: string -> 'Id
+        /// Id equality for the walking lookups (`tryFind`, `parentOf`, `path`, `updateNode`). Must
+        /// hold exactly when the two `ToString` keys are equal, or the walks and the keyed index
+        /// answer differently.
+        Equals: 'Id -> 'Id -> bool
+    }
 
 /// Witness over a domain's node type. The core owns NO base node type — closed
 /// exhaustive `NodeKind` DUs are load-bearing (a compiler-checked totality guarantee no
@@ -20,10 +30,20 @@ type IdWitness<'Id> =
 ///   - `Children`        — the ordered child list (a finite walk — totality by construction)
 ///   - `ReplaceChildren` — rebuild a node with a new child list (the structural-edit seam)
 type NodeWitness<'Node, 'Id> =
-    { Id: 'Node -> 'Id
-      KindTag: 'Node -> string
-      Children: 'Node -> 'Node list
-      ReplaceChildren: 'Node -> 'Node list -> 'Node }
+    {
+        /// The node's identity. The engine never changes it; only `Tree.remapIds` rewrites one,
+        /// through a setter the caller passes.
+        Id: 'Node -> 'Id
+        /// The node's kind as a string — read by every shape hash and staleness stamp, and the key
+        /// the op layer's container rules look a parent up by.
+        KindTag: 'Node -> string
+        /// The ordered structural children: the only nodes the unkeyed walks reach, and the list
+        /// every structural edit rebuilds. Nodes held in keyed positions belong in `KeyedWitness`.
+        Children: 'Node -> 'Node list
+        /// The node with exactly this child list and its own `Id` and `KindTag` kept
+        /// (`Children (ReplaceChildren n cs) = cs`) — the seam every rebuild and edit goes through.
+        ReplaceChildren: 'Node -> 'Node list -> 'Node
+    }
 
 /// The domain-supplied KEYED-CHILDREN declaration (Phase 189; moved here from the conformance kit
 /// and widened by Phase 286): the nodes a domain holds where `NodeWitness.Children` does not report
@@ -194,6 +214,8 @@ module Tree =
     let tryFind (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (target: 'Id) (root: 'Node) : 'Node option =
         preorder w root |> List.tryFind (fun n -> idw.Equals (w.Id n) target)
 
+    /// Whether any node the `Children` walk reaches carries `target` — a preorder scan under
+    /// `Equals`, O(n). A keyed position is reached only through `Tree.traversal`.
     let exists (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (target: 'Id) (root: 'Node) : bool =
         tryFind w idw target root |> Option.isSome
 
@@ -492,10 +514,19 @@ module Tree =
     // answers, so `build` stamps a `Fingerprint` over the (id, child-ids) preorder and
     // `Index.isFreshFor` lets a caller detect a stale index instead of trusting it blindly.
 
+    /// A one-pass, read-only snapshot of a tree for O(log n) lookups (see above). Stale after any
+    /// edit unless carried through `Index.rebind` / `Ops.Index.afterOp`; `Index.isFreshFor` detects
+    /// a stale one.
     type NodeIndex<'Node, 'Id> =
         {
+            /// Every node the preorder reaches, keyed by `IdWitness.ToString` of its id. For an id
+            /// carried twice the LAST occurrence wins.
             ById: Map<string, 'Node>
+            /// Each non-root node's key to its parent's id. The root has no entry, which is how
+            /// `Index.path` knows it has reached the top.
             ParentOf: Map<string, 'Id>
+            /// The root's id at `build`; `Index.rebind` keeps it, since no skeleton op replaces the
+            /// root.
             Root: 'Id
             /// Staleness stamp captured at `build` — the sum, modulo 2^32, of one FNV-1a term per
             /// node over its id, kind, child count and ordered child-ids (Phase 317; until then one
@@ -507,6 +538,9 @@ module Tree =
             Fingerprint: string
         }
 
+    /// Building, checking and maintaining a `NodeIndex`. Each lookup answers exactly what the
+    /// matching `Tree` combinator answers over the tree the index was built from — a cache, not a
+    /// new semantics.
     module Index =
 
         // Arithmetic modulo 2^32, masked as `Hash.fnv1a` masks, so every host wraps alike.

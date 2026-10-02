@@ -5,8 +5,13 @@ namespace Fuaran.Core
 /// consumer that `open`s `Fuaran.Core` — write `Severity.Error`.
 [<RequireQualifiedAccess>]
 type Severity =
+    /// A fault: the one severity `Validator.hasErrors` counts. A throwing rule's `RULE-FAULT`
+    /// finding is always one.
     | Error
+    /// Worth a reader's attention but not a fault — `hasErrors` ignores it (the stock `REF-UNUSED`
+    /// finding is one).
     | Warning
+    /// Informational only; `hasErrors` ignores it.
     | Info
 
 /// A single validation finding. `Code` is the domain's stable defect code (e.g.
@@ -22,12 +27,25 @@ type Severity =
 /// `Rejection.UnknownNode(target, addressable)` and `RejectionGuidance.Alternatives` instead of each
 /// domain adding the field to its own copy of this record. `[]` when there is nothing to enumerate.
 type Defect<'Id> =
-    { Code: string
-      Severity: Severity
-      Message: string
-      Node: 'Id option
-      Family: string
-      Related: 'Id list }
+    {
+        /// The stable code hosts compare — `Validator.canonicalCodes` projects these, and only these,
+        /// into the cross-host parity string.
+        Code: string
+        /// How serious the finding is; only `Severity.Error` makes `Validator.hasErrors` true.
+        Severity: Severity
+        /// Human-readable explanation. Outside the cross-host parity projection, which reads only
+        /// `Code`, so rewording a message never breaks parity.
+        Message: string
+        /// Where the finding is located, or `None` for a finding about the whole subject (a thrown
+        /// rule's `RULE-FAULT`).
+        Node: 'Id option
+        /// The producing family, rule or `pack/rule` id. A rule body leaves it `""`; the walker
+        /// that runs the rule overwrites it, so whatever the body writes is discarded.
+        Family: string
+        /// The other locations the finding is about (a cycle's members, the declaration referred
+        /// to), `[]` when there are none.
+        Related: 'Id list
+    }
 
 /// Constructors for `Defect` (Phase 298): the two provenance fields defaulted, for a rule body
 /// whose walker stamps them.
@@ -49,13 +67,22 @@ module Defect =
 /// enumerates the ids the registry holds, in registration order, so the refusal names the closed
 /// set (GP5).
 [<RequireQualifiedAccess>]
-type RegistrationError = DuplicateRule of id: string * registered: string list
+type RegistrationError =
+    /// `id` is already registered; `registered` lists every id the registry holds, in
+    /// registration order.
+    | DuplicateRule of id: string * registered: string list
 
 /// A registered rule family — a named bundle of checks the walker runs over a tree.
 /// The framework owns registration + walking; the rule *body* is domain-supplied.
 type RuleFamily<'Node, 'Id> =
-    { Id: string
-      Run: NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list }
+    {
+        /// The family's registry key and the provenance stamped on every finding it produces;
+        /// unique within a registry (`Validator.register` refuses a repeat).
+        Id: string
+        /// The checks over a whole tree, given its root. May throw: the walker turns a throw into
+        /// one `RULE-FAULT` error and keeps running the other families.
+        Run: NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list
+    }
 
 /// The rule-pack extension point: a rule contributed by a pack layered atop a base
 /// domain's rule families (the Documents → Legal pack-atop-pack composition). This is the
@@ -71,7 +98,13 @@ type RuleFamily<'Node, 'Id> =
 /// band for pack/host-assigned codes so they never collide with its own spec rules — see the
 /// consuming domain's error-code reference). This keeps pack-layering certifiable through the
 /// public framework without the framework ever shipping pack rules.
-type PackRule = { Pack: string; RuleId: string }
+type PackRule =
+    {
+        /// The contributing pack's name — the part of a family id before the `/`.
+        Pack: string
+        /// The rule's id within its pack — the part after the `/`.
+        RuleId: string
+    }
 
 /// The rule-family framework: registration, the per-node walker scaffolding, defect
 /// aggregation, and the cross-host defect-code byte-parity helper. All rule content
@@ -81,11 +114,16 @@ module Validator =
     /// An ordered registry of rule families, one family per id (Phase 298: renamed from
     /// `Registry`, which sat beside `Function`'s registry under the same name).
     type RuleRegistry<'Node, 'Id> =
-        { Families: RuleFamily<'Node, 'Id> list }
+        {
+            /// The families in registration order — the order `runAll` runs them and reports their
+            /// findings in; no two share an id when built through `register` / `ofFamilies`.
+            Families: RuleFamily<'Node, 'Id> list
+        }
 
     /// The pre-298 name of `RuleRegistry` — an alias kept for one draft, removed in the next.
     type Registry<'Node, 'Id> = RuleRegistry<'Node, 'Id>
 
+    /// A registry holding no family, so `runAll` over it finds nothing; the seed `ofFamilies` folds from.
     let empty<'Node, 'Id> : RuleRegistry<'Node, 'Id> = { Families = [] }
 
     /// The registered family ids, in registration order.
@@ -157,16 +195,24 @@ module Validator =
     let runAll (w: NodeWitness<'Node, 'Id>) (reg: RuleRegistry<'Node, 'Id>) (root: 'Node) : Defect<'Id> list =
         runAllTagged w reg root |> List.map snd
 
+    /// True when any finding is a `Severity.Error`; warnings and infos alone never make it true.
     let hasErrors (defects: Defect<'Id> list) : bool =
         defects |> List.exists (fun d -> d.Severity = Severity.Error)
 
     /// Per-severity counts over a defect list (Phase 25) — the everyday summary domains otherwise
     /// re-derive by hand. Pure and total.
     type Summary =
-        { Errors: int
-          Warnings: int
-          Infos: int }
+        {
+            /// The count of `Severity.Error` findings; non-zero exactly when `hasErrors` is true.
+            Errors: int
+            /// The count of `Severity.Warning` findings — never a fault on its own.
+            Warnings: int
+            /// The count of `Severity.Info` findings — never a fault on its own.
+            Infos: int
+        }
 
+    /// The three counts in one value. They always add up to the length of `defects`, since every
+    /// finding has exactly one severity.
     let summary (defects: Defect<'Id> list) : Summary =
         { Errors = defects |> List.filter (fun d -> d.Severity = Severity.Error) |> List.length
           Warnings = defects |> List.filter (fun d -> d.Severity = Severity.Warning) |> List.length
@@ -192,21 +238,38 @@ module Validator =
 
     /// One rule of a pack: its id within the pack (the citation key) and its check.
     type PackCheck<'Subject, 'Id> =
-        { RuleId: string
-          Run: 'Subject -> Defect<'Id> list }
+        {
+            /// The key the rule is cited by (`<pack>@<version>/<ruleId>`) and stamped into each
+            /// finding's `Family` as `<pack>/<ruleId>`; `runPack` does not check it is unique.
+            RuleId: string
+            /// The check. May throw: `runPack` turns a throw into one `RULE-FAULT` finding and runs
+            /// the rules after it.
+            Run: 'Subject -> Defect<'Id> list
+        }
 
     /// A versioned rule pack. `Version` is the pack's own, cited on every finding.
     type Pack<'Subject, 'Id> =
-        { Name: string
-          Version: string
-          Rules: PackCheck<'Subject, 'Id> list }
+        {
+            /// The pack's name — the `Pack` of every `PackRule` it stamps and the citation's prefix.
+            Name: string
+            /// Opaque text cited after the `@`; never parsed or compared as a version number.
+            Version: string
+            /// The rules in the order `runPack` runs them and reports their findings in.
+            Rules: PackCheck<'Subject, 'Id> list
+        }
 
     /// One finding of a pack run: the defect, the `PackRule` that produced it (stamped by `runPack`,
     /// so a rule cannot mis-cite itself), and the citation `<pack>@<version>/<ruleId>`.
     type PackFinding<'Id> =
-        { Rule: PackRule
-          Citation: string
-          Defect: Defect<'Id> }
+        {
+            /// The pack and rule that produced the finding, stamped by `runPack` rather than taken
+            /// from the rule body.
+            Rule: PackRule
+            /// `<pack>@<version>/<ruleId>` — the same rule under another pack version cites differently.
+            Citation: string
+            /// The finding itself, its `Family` stamped `<pack>/<ruleId>`.
+            Defect: Defect<'Id>
+        }
 
     /// The citation of a pack's rule: `<pack>@<version>/<ruleId>` — the `PackRule` family id
     /// convention (`pack + "/" + ruleId`) with the version the finding was produced under.
@@ -302,12 +365,18 @@ module Validator =
     [<Literal>]
     let DanglingReferenceCode = "REF-DANGLING"
 
+    /// The code of an `UnusedDeclaration` finding — a `Severity.Warning`, the one reference finding
+    /// that is not an error.
     [<Literal>]
     let UnusedDeclarationCode = "REF-UNUSED"
 
+    /// The code of a `ForwardReference` finding — an error, emitted only by the opt-in
+    /// `referenceOrder` family, never by `referenceIntegrity`.
     [<Literal>]
     let ForwardReferenceCode = "REF-FORWARD"
 
+    /// The code of a `ReferenceCycle` finding — an error located at the cycle's first node, with
+    /// every member of the cycle in `Related`.
     [<Literal>]
     let ReferenceCycleCode = "REF-CYCLE"
 
@@ -482,8 +551,14 @@ module Validator =
 /// `'Id` is a `string`: a column name, or `column#row` for a cell-level fault. Rules are functions over
 /// the data strand — no base type (GP1), mirroring the witness discipline.
 type ColumnRule =
-    { Id: string
-      Run: Table -> Defect<string> list }
+    {
+        /// The registry key and the provenance stamped on every finding; the stock rules mint it
+        /// with `ColumnValidator.ruleId`, so two rules share an id exactly when they are one rule.
+        Id: string
+        /// The check over the whole table. May throw: `validate` turns a throw into one
+        /// `RULE-FAULT` error and runs the rules after it.
+        Run: Table -> Defect<string> list
+    }
 
 /// The columnar validator surface (Phase 37): a rule family over a `Table` (registration + walker +
 /// stock rules), reusing the `Validator` defect/severity model + the `canonicalCodes` byte-parity
@@ -689,8 +764,14 @@ module ColumnValidator =
                     List.ofSeq found)
 
     /// An ordered registry of columnar rules, one rule per id.
-    type Registry = { Rules: ColumnRule list }
+    type Registry =
+        {
+            /// The rules in registration order — the order `validate` runs them and reports their
+            /// findings in; no two share an id when built through `register` / `ofRules`.
+            Rules: ColumnRule list
+        }
 
+    /// A registry holding no rule, so `validate` over it finds nothing; the seed `ofRules` folds from.
     let empty: Registry = { Rules = [] }
 
     /// The registered rule ids, in registration order.

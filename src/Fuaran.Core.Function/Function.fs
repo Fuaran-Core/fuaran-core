@@ -29,9 +29,15 @@ namespace Fuaran.Core
 /// ceiling. So typed dispatch becomes "bind holes, type-checked against the signature" —
 /// uniform across every host — rather than a `Node<'Msg>` type parameter.
 type HoleKind =
+    /// A scalar value, bound by a `ValueArg` whose string lies in the space.
     | ValueHole of ValueSpace
+    /// A tree-typed slot, bound by a `SlotArg` whose kind tag equals the constraint when one is given.
     | SlotHole of kindConstraint: string option
+    /// A repeat whose count is a `ValueArg` in `countSpace`; an unbounded count space makes the
+    /// artifact non-total, so every application of it is refused `NonTotal`.
     | RepeatHole of countSpace: ValueSpace
+    /// A dispatch slot bound by `bindHandlers`, never by `apply`; `effect` is the widest effect a
+    /// handler bound here may declare.
     | ActionHole of effect: EffectClass
 
 /// The hole kinds' wire tags (Phase 295) — the ONE place a kind is spelled. `SigEntry.Kind` carries
@@ -71,9 +77,14 @@ module HoleKind =
 /// surface: binding is by `Addr`, never by `Name`, so two same-named holes at
 /// different addresses cannot capture one another.
 type HoleDecl =
-    { Addr: string
-      Name: string
-      Kind: HoleKind }
+    {
+        /// The absolute id-path every binding keys on.
+        Addr: string
+        /// The human-facing label; display only, never used to bind.
+        Name: string
+        /// What the hole accepts, and on which axis (data or behaviour) it is bound.
+        Kind: HoleKind
+    }
 
 /// A signature entry — the introspectable projection of a hole (the AiTools surface).
 /// `Slot` carries a slot hole's kind-constraint (None for non-slots / unconstrained slots),
@@ -87,13 +98,24 @@ type HoleDecl =
 /// carries a value in its space, and "bound" and "bound to a value" coincide (Phase 226, which
 /// made `Required` mean non-`Null` on the query seam, where they did not).
 type SigEntry =
-    { Addr: string
-      Name: string
-      Kind: string
-      Space: ValueSpace option
-      Slot: string option
-      Action: EffectClass option
-      Required: bool }
+    {
+        /// The hole's absolute address; the key an argument is bound by.
+        Addr: string
+        /// The hole's display label; never used to bind.
+        Name: string
+        /// The hole-kind tag (`value`, `slot`, `repeat`, `action`); read it through `HoleKind`.
+        Kind: string
+        /// The space an argument must lie in: a value or repeat hole's space, `SlotTree` of the
+        /// constraint for a slot, `None` for an action hole.
+        Space: ValueSpace option
+        /// A slot hole's kind constraint; `None` for every other kind and for an unconstrained slot.
+        Slot: string option
+        /// An action hole's effect ceiling; `None` for every data hole.
+        Action: EffectClass option
+        /// `true` for value and slot holes and a bounded repeat; `false` for an action hole, which is
+        /// bound on the behaviour axis, and for an unbounded repeat, which no application accepts.
+        Required: bool
+    }
 
     /// The entry as the hole kind it projects (Phase 295; `HoleKind.tryOf`) — the typed reading of
     /// `Kind`, so no reader compares the tag against a literal.
@@ -101,24 +123,41 @@ type SigEntry =
 
 /// The artifact's derived signature: which holes, what spaces, and its effect class.
 type Signature =
-    { Name: string
-      Holes: SigEntry list
-      Effect: EffectClass }
+    {
+        /// The caller-chosen artifact name; `toSchema` writes it as `name`, `toJsonSchema` as `title`.
+        Name: string
+        /// One entry per declared hole, in the witness's declaration order.
+        Holes: SigEntry list
+        /// The artifact's declared (root) effect, not the observed one — `Function.auditEffect`
+        /// checks the two agree.
+        Effect: EffectClass
+    }
 
 /// An argument bound into a hole: a leaf value, or a tree (for slots / composition).
 type Arg<'Node> =
+    /// A scalar for a value or repeat hole, checked against the hole's space before binding.
     | ValueArg of string
+    /// A tree for a slot hole; any other hole kind refuses it `NotASlot`.
     | SlotArg of 'Node
 
 /// Application failure — total, and (per the envelope discipline) it names what was
 /// expected.
 type ApplyError =
+    /// An argument (or a compose target) addresses no declared hole; `declared` lists the addresses
+    /// that were open to it — action holes excluded on the data axis.
     | UnknownHoleAddr of addr: string * declared: string list
+    /// A value or repeat argument `got` lies outside its hole's `space`.
     | ValueOutOfSpace of addr: string * space: ValueSpace * got: string
+    /// A full application left these holes unbound, in declaration order.
     | RequiredHolesUnbound of addrs: string list
+    /// The argument's shape does not fit the hole: a tree into a value or repeat hole, a scalar into
+    /// a slot, or a compose target that is not a slot.
     | NotASlot of addr: string
+    /// A slot's kind constraint `expected` refused a tree whose kind tag is `got`.
     | SlotKindMismatch of addr: string * expected: string * got: string
+    /// A repeat hole ranges over an unbounded count space; checked before any argument is read.
     | NonTotal of addr: string
+    /// The witness's `Bind` refused the binding; `reason` is its message, verbatim.
     | BindFailed of addr: string * reason: string
 
 // ---- the behaviour axis: typed handler-table binding (Phase 318) ----
@@ -130,24 +169,35 @@ type ApplyError =
 /// checked against its action hole's declared ceiling so a bound handler can never do more
 /// than the artifact declared.
 type HandlerBinding<'Handler> =
-    { Handler: 'Handler
-      Effect: EffectClass }
+    {
+        /// The host's handler value; opaque to the core and never serialised.
+        Handler: 'Handler
+        /// What the handler declares it does; it must be covered by its action hole's ceiling.
+        Effect: EffectClass
+    }
 
 /// The validated behavioural sidecar — a typed handler table bound to an artifact's action
 /// holes by absolute address (hygiene). The artifact tree itself is unchanged (it stays pure,
 /// `Node<unit>`-equivalent); this is the host-side companion that supplies dispatch. Producing
 /// it is the whole "typed dispatch = bind holes, type-checked against the signature" move.
 type HandlerTable<'Handler> =
-    { Handlers: Map<string, HandlerBinding<'Handler>> }
+    {
+        /// Keyed by action-hole address: exactly the artifact's action holes, each within its ceiling.
+        Handlers: Map<string, HandlerBinding<'Handler>>
+    }
 
 /// Why a handler-table binding was refused — total, and (per the envelope discipline) it names
 /// the failure and, where a closed set is expected, enumerates the alternatives (GP5).
 /// Default-deny by shape: only a declared action hole accepts a handler, and only a handler
 /// within the declared effect ceiling binds.
 type BindHandlerError =
+    /// A handler key addresses no hole at all; `declaredActions` lists the action-hole addresses.
     | UnknownActionAddr of addr: string * declaredActions: string list
+    /// A handler key addresses a declared data hole (value, slot or repeat), which takes no handler.
     | NotAnActionHole of addr: string
+    /// These action holes received no handler, in declaration order.
     | RequiredActionsUnbound of addrs: string list
+    /// The handler's declared effect is not covered by the hole's ceiling on one axis or both.
     | HandlerEffectExceedsCeiling of addr: string * ceiling: EffectClass * handler: EffectClass
 
 /// The domain-witness record the generic functions take. The witness never exposes a
@@ -156,7 +206,11 @@ type BindHandlerError =
 /// / fragment expansion), returning the re-derived tree.
 type ArtifactWitness<'Node, 'Id> =
     {
+        /// The domain's tree accessors; the protocol reads a slot argument's kind tag and walks
+        /// subtrees through it.
         Tree: NodeWitness<'Node, 'Id>
+        /// The domain's id witness. No operation in `Function` reads it; it completes the record so
+        /// one value names the whole domain.
         IdW: IdWitness<'Id>
         /// Enumerate the declared holes of a tree, each with its absolute lexical address.
         Holes: 'Node -> HoleDecl list
@@ -174,10 +228,16 @@ type ArtifactWitness<'Node, 'Id> =
 /// computed + stored a fresh result; a `Bypass` means a non-memoisable (effecting / non-deterministic)
 /// function was computed directly and never cached (the soundness guard — Fork 3).
 type MemoCache<'Node> =
-    { Entries: Map<string, 'Node>
-      Hits: int
-      Misses: int
-      Bypasses: int }
+    {
+        /// The result trees, keyed by the full `(function, param-set)` pre-image, not a digest of it.
+        Entries: Map<string, 'Node>
+        /// Applications served from `Entries` without re-deriving.
+        Hits: int
+        /// Memoisable applications computed and stored; a refused application counts nowhere.
+        Misses: int
+        /// Applications computed directly because the observed effect was not pure and deterministic.
+        Bypasses: int
+    }
 
 /// Companion helpers for `MemoCache` — the empty memo, its size, and the memoisability predicate.
 module Memo =

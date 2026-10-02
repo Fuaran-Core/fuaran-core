@@ -8,7 +8,10 @@ namespace Fuaran.Core
 /// tamper-evident, not merely recorded. FSharp.Core-only + Fable-clean (the encoder is hand-rolled
 /// canonical JSON, no `System.Text.Json`), so it hashes byte-identically on every host.
 type Actor =
+    /// A person or account, by its host-assigned `id`.
     | Human of id: string
+    /// An automated emitter: the `model` and `version` that produced the op, and the `id` it acts
+    /// under. All three are hashed, so a re-labelled model breaks the chain like any other edit.
     | Agent of model: string * version: string * id: string
 
 /// Why an actor was refused (Phase 315) — an actor that names nobody. `Actor.validate` /

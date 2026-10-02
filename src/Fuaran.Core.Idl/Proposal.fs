@@ -126,7 +126,15 @@ type ProposalAlternative =
 /// already expressible and the demand is a teaching problem) and must decode and
 /// round-trip against the post vocabulary (else the change does not do what it
 /// says).
-type ProposalFixture = { Name: string; Wire: string }
+type ProposalFixture =
+    {
+        /// A label telling this candidate apart from the proposal's others; read verbatim.
+        Name: string
+        /// The candidate document as canonical JSON text: the reader re-renders the
+        /// document's `wire` member through `Canon.render`, so authored key order and
+        /// spacing do not survive.
+        Wire: string
+    }
 
 /// A complete proposal.
 type Proposal =
@@ -140,12 +148,21 @@ type Proposal =
         DraftedBy: string
         /// ISO-8601 instant.
         DraftedAt: string
+        /// The additive steps, applied in order by [[applyDelta]]; the first that collides
+        /// or names a missing declaration refuses the whole delta. Empty is inadmissible.
         Delta: ProposalDelta list
+        /// The candidate wire documents the change claims to make expressible (the document's
+        /// `candidateFixtures`). Empty is inadmissible.
         Fixtures: ProposalFixture list
+        /// The recorded signals the proposal rests on. Empty is inadmissible, and so is an
+        /// entry with no `RunId`, no `PromptDigest` or a count below 1 ([[validate]]).
         Evidence: ProposalEvidence list
         /// Why the pattern is claimed not to reduce to an existing composition,
         /// role or variant. Drafted here, judged elsewhere.
         Irreducibility: string
+        /// The cheaper dispositions priced instead. Each of [[requiredAlternatives]] must
+        /// appear (matched case-insensitively on `Disposition`), and every entry must carry
+        /// an argument.
         Alternatives: ProposalAlternative list
         /// The distinction between RE-ADMITTING a previously-retired spelling and
         /// admitting a new normalisation of a spelling that was never in the
@@ -161,6 +178,9 @@ type Proposal =
         ConfusionPlan: string
     }
 
+/// Reading, validating and applying a [[Proposal]]. Reading checks structure, [[validate]]
+/// checks the argument is complete, and [[applyDelta]] yields the post-change vocabulary as a
+/// new value — none of them writes anything or reaches a verdict.
 [<RequireQualifiedAccess>]
 module Proposal =
 
@@ -550,6 +570,8 @@ module Proposal =
     let parseDetailed (text: string) : Result<Proposal, DecodeError> =
         Decoder.parse text |> Result.bind ofJsonDetailed
 
+    /// Read a proposal document from JSON text — the sentence of [[parseDetailed]]'s refusal.
+    /// Structural only: a document that parses can still fail [[validate]].
     let parse (text: string) : Result<Proposal, string> =
         parseDetailed text |> Result.mapError DecodeError.describe
 

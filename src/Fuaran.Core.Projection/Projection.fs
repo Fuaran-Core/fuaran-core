@@ -34,11 +34,23 @@ namespace Fuaran.Core
 ///                          back to domain ops: the write path that keeps an edit
 ///                          expressed against the projection trackable as ops.
 type ProjectionWitness<'Node, 'Id, 'Op> =
-    { Tree: NodeWitness<'Node, 'Id>
-      IdW: IdWitness<'Id>
-      Encode: 'Node -> string
-      Snippet: 'Node -> string
-      ParseBack: string -> Result<'Op list, string> }
+    {
+        /// Children, id and kind tag of a node; the projection walks it in preorder
+        /// and reads `KindTag` for the kind cell.
+        Tree: NodeWitness<'Node, 'Id>
+        /// Renders an id to the string `idKey` escapes; ids that render alike are one
+        /// key to every scope and to the snapshot.
+        IdW: IdWitness<'Id>
+        /// The node's own content without its children; must be injective, since the
+        /// line digest and the snapshot digest are both computed over it.
+        Encode: 'Node -> string
+        /// The trailing human/AI-readable cell; newlines are flattened to spaces, it
+        /// is not part of any digest, and `parseBack` never reads it back.
+        Snippet: 'Node -> string
+        /// One non-blank rendered line, indentation included and any trailing `\r`
+        /// removed, to its ops; an `Error` aborts `parseBack` at that line.
+        ParseBack: string -> Result<'Op list, string>
+    }
 
 /// One projected node. `Depth` is PRESENTATION (the render indent encoding the
 /// tree shape); the node's identity-bearing content cell is `lineText` (id +
@@ -47,16 +59,31 @@ type ProjectionWitness<'Node, 'Id, 'Op> =
 /// `IdKey` and `Kind` are the ESCAPED cells (`Projection.escapeCell`), so `IdKey`
 /// is the one key every scope compares (`Projection.idKey`).
 type ProjectionLine =
-    { IdKey: string
-      Kind: string
-      Depth: int
-      Digest: string
-      Snippet: string }
+    {
+        /// The node's escaped id (`Projection.idKey`) — the first field of the line.
+        IdKey: string
+        /// The node's escaped kind tag, so it holds no space or line break.
+        Kind: string
+        /// Absolute depth below the projected root (the root is 0), even in a scoped
+        /// read; rendered as two spaces per level.
+        Depth: int
+        /// The lowercase-hex FNV-1a content digest (`Projection.digestOf`) — not the
+        /// changed-since snapshot digest.
+        Digest: string
+        /// The witness snippet with newlines flattened to spaces; empty omits the
+        /// field from the line.
+        Snippet: string
+    }
 
 /// A projection: one terse line per node, in preorder, at absolute depth. A
 /// scoped projection is therefore a sub-list of the whole projection's lines
 /// (the ⊆ law holds by construction).
-type Projection = { Lines: ProjectionLine list }
+type Projection =
+    {
+        /// The selected nodes' lines in whole-tree preorder; empty when a `ById` or
+        /// `Subtree` id is absent.
+        Lines: ProjectionLine list
+    }
 
 /// The changed-since baseline: each node's SNAPSHOT digest keyed by its id key
 /// (`Projection.idKey`), captured from a prior read. A projection can only carry
@@ -71,7 +98,12 @@ type Projection = { Lines: ProjectionLine list }
 /// 32-bit content digest saw neither, and over enough random edits let a real
 /// content edit read as unchanged. A snapshot taken before Phase 298 holds the
 /// old digests, and reads every node as changed once.
-type ProjectionSnapshot = { Digests: Map<string, string> }
+type ProjectionSnapshot =
+    {
+        /// Id key → `snapshotDigestOf` (64 lowercase hex). When two nodes share an id
+        /// key, the later one in preorder holds the entry.
+        Digests: Map<string, string>
+    }
 
 /// The read window. `Whole` is the full artifact; `ById` a single node's line;
 /// `Subtree` a node and everything below it (the contiguous preorder slice);
@@ -81,9 +113,15 @@ type ProjectionSnapshot = { Digests: Map<string, string> }
 /// consumer's own `Whole` or `ById`.
 [<RequireQualifiedAccess>]
 type Scope<'Id> =
+    /// Every node, in preorder.
     | Whole
+    /// Every node whose id key equals this id's — more than one line when ids repeat.
     | ById of 'Id
+    /// The first node in preorder with this id key, then each following node deeper
+    /// than it.
     | Subtree of 'Id
+    /// Every current node whose snapshot digest differs from, or is missing in, the
+    /// snapshot; nodes deleted since are not reported.
     | ChangedSince of ProjectionSnapshot
 
 /// The generic projection functions. No domain content is ever in scope here —

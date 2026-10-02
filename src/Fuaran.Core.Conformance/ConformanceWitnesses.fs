@@ -6,14 +6,27 @@ namespace Fuaran.Core
 /// witness whose `ReplaceChildren` is partial on leaves certifies green without restricting
 /// the generator to containers; `None` uses the plain `apply` (every node can hold children).
 type OpGen<'Node, 'Id> =
-    { Tree: ConfRng.T -> 'Node * ConfRng.T
-      FreshNode: Set<string> -> ConfRng.T -> 'Node * ConfRng.T
-      CanHold: ('Node -> bool) option }
+    {
+        /// Draws a random base tree for one iteration; the ops the laws apply are drawn against
+        /// it, so the generator's breadth bounds what the laws can reach.
+        Tree: ConfRng.T -> 'Node * ConfRng.T
+        /// Mints a node whose id, in its `IdWitness.ToString` form, is NOT in the given set — the
+        /// kit passes the ids already taken and relies on the fresh id colliding with none of them.
+        FreshNode: Set<string> -> ConfRng.T -> 'Node * ConfRng.T
+        /// The container predicate the laws apply through, or `None` when every node can hold
+        /// children.
+        CanHold: ('Node -> bool) option
+    }
 
 /// The domain-supplied op-stream generator: the base state and a random op source.
 type StreamGen<'Op, 'State> =
-    { State0: 'State
-      Op: ConfRng.T -> 'Op * ConfRng.T }
+    {
+        /// The state every drawn stream is reduced and replayed from.
+        State0: 'State
+        /// Draws one op, independently of any state — a drawn op may be one the reducer rejects,
+        /// and the stream laws must hold over those too.
+        Op: ConfRng.T -> 'Op * ConfRng.T
+    }
 
 // ---- Phase 246: the seam witnesses ----
 //
@@ -39,31 +52,60 @@ type StreamGen<'Op, 'State> =
 ///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a
 ///   refused dispatch.
 type CapabilitySeamWitness<'v> =
-    { Registry: CapabilityRegistry
-      Body: (string * string) list -> Capability -> unit -> Deferred<'v>
-      Dispatch:
-          string -> (string * string) list -> (Capability -> unit -> Deferred<'v>) -> Result<Deferred<'v>, InvokeError>
-      GenCall: ConfRng.T -> (string * (string * string) list) * ConfRng.T }
+    {
+        /// The oracle: whether a call should reach the body, and which error it must be refused
+        /// with otherwise, is read from this registry alone.
+        Registry: CapabilityRegistry
+        /// The domain's body, arguments first. The kit counts its runs: a refused call must run it
+        /// zero times, any other call exactly once.
+        Body: (string * string) list -> Capability -> unit -> Deferred<'v>
+        /// The host's invocation path — id, arguments, body. It must refuse with exactly the
+        /// registry's error and must never return `Ok(Failed _)`; a throw fails the family.
+        Dispatch:
+            string
+                -> (string * string) list
+                -> (Capability -> unit -> Deferred<'v>)
+                -> Result<Deferred<'v>, InvokeError>
+        /// Draws one `(id, arguments)` call. It must reach a settled, a pending and a refused
+        /// dispatch, or the family reports itself starved.
+        GenCall: ConfRng.T -> (string * (string * string) list) * ConfRng.T
+    }
 
 /// A domain's query seam, as `Conformance.queryLawsWith` certifies it (Phase 246) — the query
 /// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Resolver` the domain's resolver
 /// (handed the call's arguments first), `Dispatch` the host path (`QueryRegistry.dispatch queries`
 /// for a host that delegates to Core), and `GenQuery` the calls a model could make.
 type QuerySeamWitness =
-    { Queries: QueryRegistry
-      Resolver: (string * Cell) list -> Query -> Deferred<QueryResult>
-      Dispatch:
-          string
-              -> (string * Cell) list
-              -> (Query -> Deferred<QueryResult>)
-              -> Result<Deferred<QueryResult>, QueryError>
-      GenQuery: ConfRng.T -> (string * (string * Cell) list) * ConfRng.T }
+    {
+        /// The oracle: whether a call should reach the resolver, and which error refuses it
+        /// otherwise, is read from this registry alone.
+        Queries: QueryRegistry
+        /// The domain's resolver, arguments first. The kit counts its runs: a refused call must
+        /// run it zero times, any other call exactly once.
+        Resolver: (string * Cell) list -> Query -> Deferred<QueryResult>
+        /// The host's query path — id, arguments, resolver. It must refuse with exactly the
+        /// registry's error; a throw fails the family.
+        Dispatch:
+            string
+                -> (string * Cell) list
+                -> (Query -> Deferred<QueryResult>)
+                -> Result<Deferred<QueryResult>, QueryError>
+        /// Draws one `(id, arguments)` call. It must reach a settled, a pending and a refused
+        /// dispatch, or the family reports itself starved.
+        GenQuery: ConfRng.T -> (string * (string * Cell) list) * ConfRng.T
+    }
 
 /// A domain's capability pipelines, as `Conformance.capabilityPipelineLawsWith` certifies them
 /// (Phase 246): the registry they compose against, and the pipelines the domain builds.
 type CapabilityPipelineWitness =
-    { PipelineRegistry: CapabilityRegistry
-      GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T }
+    {
+        /// The registry every drawn pipeline must type-check against; the kit also derives an id
+        /// absent from it to build the unregistered-capability refusal.
+        PipelineRegistry: CapabilityRegistry
+        /// Draws one pipeline the domain would build. The default-deny laws are built per `Invoke`
+        /// node, so pipelines with none leave the family starved.
+        GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T
+    }
 
 // `LawResult` — one law's verdict — is defined in `SampleAdequacy.fs`, which is compiled ahead of
 // this file. It moved there in Phase 121 for one reason: the adequacy guard produces `LawResult`s
@@ -84,8 +126,14 @@ type CapabilityPipelineWitness =
 /// It is deliberately NOT part of any existing witness. A domain opts in by supplying one, and a
 /// domain that supplies none is reported by name rather than skipped — see `constructThenEncodeLaws`.
 type ConstructWitness<'T> =
-    { Surface: string
-      Construct: 'T -> Result<'T, string> }
+    {
+        /// The authoring surface as an author would name it; it appears verbatim in every
+        /// counterexample.
+        Surface: string
+        /// Rebuilds a decoded value through that surface. `Error` is a refusal the laws report as a
+        /// finding, never an exception.
+        Construct: 'T -> Result<'T, string>
+    }
 
 // `KeyedWitness` (Phase 189) was declared here until Phase 286, which moved it to
 // `Fuaran.Core.Tree` beside `NodeWitness`: the keyed walks and `Ops.applyContainedKeyed` read it,
@@ -124,8 +172,12 @@ type EvaluatorWitness<'Model, 'V> =
 
 /// The aggregate certification report.
 type ConformanceReport =
-    { Results: LawResult list
-      AllPassed: bool }
+    {
+        /// Every law's verdict, in the order the aggregate ran its families.
+        Results: LawResult list
+        /// `true` when every result passed — vacuously `true` for an empty `Results`.
+        AllPassed: bool
+    }
 
 /// The composition sample (Phase 47) a domain supplies per draw to certify cross-witness
 /// `composeAcross`. `Outer` is an `'A`-function carrying TWO independent typed slots (`SlotA`,
@@ -135,15 +187,31 @@ type ConformanceReport =
 /// `OpenHoleName` but at DISTINCT ids (so the two re-rooted copies get distinct absolute
 /// addresses — the hygiene case), fillable with `OpenHoleArg`.
 type CompositionSample<'A, 'B> =
-    { Outer: 'A
-      SlotA: string
-      SlotB: string
-      OuterArgs: (string * string) list
-      ClosedInner: 'B
-      OpenInnerA: 'B
-      OpenInnerB: 'B
-      OpenHoleName: string
-      OpenHoleArg: string }
+    {
+        /// The outer function, holding both slots and the value holes `OuterArgs` binds.
+        Outer: 'A
+        /// The first slot's absolute address in `Outer`; it must be disjoint from `SlotB`, since
+        /// the laws compose into both in either order.
+        SlotA: string
+        /// The second slot's absolute address in `Outer`.
+        SlotB: string
+        /// `(address, value)` for every value hole of `Outer`, each value in its hole's space —
+        /// strict application must succeed with exactly these.
+        OuterArgs: (string * string) list
+        /// A fully-bound inner function; composed into both slots, it leaves no hole open.
+        ClosedInner: 'B
+        /// The inner function composed into `SlotA` for the hygiene law, with one open value hole
+        /// named `OpenHoleName`.
+        OpenInnerA: 'B
+        /// The inner function composed into `SlotB`; its open hole shares `OpenHoleName` but sits
+        /// at a different id from `OpenInnerA`'s.
+        OpenInnerB: 'B
+        /// The name both open holes carry; after composition exactly two holes must bear it, at
+        /// distinct addresses.
+        OpenHoleName: string
+        /// An in-space value for the open hole, bound to one copy to show the other stays open.
+        OpenHoleArg: string
+    }
 
 // ---- artifact-function property-verification (Phase 48) ----
 // Lift verification from "is this *tree* valid?" to "does this *function* produce a valid tree
@@ -167,24 +235,44 @@ type VerifyDefect<'Id> =
 /// A reproducible counterexample: the offending param-set, the defect, and the seed/iteration
 /// (a failure is reproduced by re-running the same seed — deterministic seed-replay).
 type VerifyCounterexample<'Node, 'Id> =
-    { ParamSet: (string * Arg<'Node>) list
-      Defect: VerifyDefect<'Id>
-      Seed: int
-      Iteration: int }
+    {
+        /// The failing bindings as `(address, argument)`, sorted by address.
+        ParamSet: (string * Arg<'Node>) list
+        /// Why the bindings failed: refused by `apply`, faulted by the validator, or an effect the
+        /// declared class does not cover.
+        Defect: VerifyDefect<'Id>
+        /// The seed the run was given — the same for every iteration, so re-running with it
+        /// reproduces the whole run.
+        Seed: int
+        /// The 0-based index of the failing param-set: its draw within the run, or its position
+        /// in the enumeration when coverage is `Exhaustive`.
+        Iteration: int
+    }
 
 /// How the param space was covered — coverage honesty (never silently sample-and-claim-verified):
 /// the whole finite space was enumerated (`Exhaustive`), or a sample of `drawn` cases was taken
 /// from a space of `SpaceSize` (`None` = unbounded: a hole ranges over `FloatRange` / `StringLen`
 /// / `AnyString`).
 type VerifyCoverage =
+    /// Every combination of the finite hole domains was enumerated; `cases` is the size of that
+    /// product, reported even when a counterexample stopped the enumeration early.
     | Exhaustive of cases: int
+    /// A sample was drawn: `drawn` is the planned sample size under `verifyFunctionSymbolic` and
+    /// the count actually drawn under `verifyFunction`; `spaceSize` is `None` when the space is
+    /// unbounded, too large for an `int`, or (under `verifyFunction`) not known.
     | Sampled of drawn: int * spaceSize: int option
 
 /// The verification verdict: certified across the covered param space, or a counterexample.
 type FunctionVerifyReport<'Node, 'Id> =
-    { Verified: bool
-      Coverage: VerifyCoverage
-      Counterexample: VerifyCounterexample<'Node, 'Id> option }
+    {
+        /// `true` exactly when `Counterexample` is `None`: no covered param-set failed. Structural
+        /// validity only — never a claim about output quality or determinism.
+        Verified: bool
+        /// How much of the param space the verdict stands on; read it before trusting `Verified`.
+        Coverage: VerifyCoverage
+        /// The first failing param-set, if any — the run stops there.
+        Counterexample: VerifyCounterexample<'Node, 'Id> option
+    }
 
 // ---- memoised application (Phase 49) ----
 // The teeth on `Function.applyMemo` (content-addressed application caching) + its collapse of
@@ -196,11 +284,22 @@ type FunctionVerifyReport<'Node, 'Id> =
 /// misses" case). `EffectingFn` is a non-memoisable (non-deterministic / host-effecting) function
 /// with a valid full param-set `EffectingArgs` (the soundness-guard case — never served from cache).
 type MemoSample<'Node> =
-    { PureFn: 'Node
-      Args: Map<string, Arg<'Node>>
-      ArgsAlt: Map<string, Arg<'Node>>
-      EffectingFn: 'Node
-      EffectingArgs: Map<string, Arg<'Node>> }
+    {
+        /// A pure, deterministic function — memoisable, so a repeat application must hit the cache.
+        PureFn: 'Node
+        /// A valid full param-set for `PureFn`, applied twice: the first a miss, the second a hit.
+        /// When it has two or more bindings and the first by address is a value, it also drives
+        /// the key-collision arm.
+        Args: Map<string, Arg<'Node>>
+        /// A second valid full param-set for `PureFn` that must key differently from `Args` — a
+        /// lookup with it must miss.
+        ArgsAlt: Map<string, Arg<'Node>>
+        /// A function whose effect class is not memoisable; `applyMemo` must never serve it from
+        /// cache.
+        EffectingFn: 'Node
+        /// A valid full param-set for `EffectingFn`.
+        EffectingArgs: Map<string, Arg<'Node>>
+    }
 
 /// The domain-supplied CONTENT-EDIT generator (Phase 297): given a node the tree holds, an edited
 /// node carrying the SAME id — what `UpdateNode` rewrites a node with. The kit cannot draw a content

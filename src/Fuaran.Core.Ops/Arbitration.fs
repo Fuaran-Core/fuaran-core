@@ -21,9 +21,17 @@ namespace Fuaran.Core
 /// timestamp, approval status, intent) is a host concern: `AiSurface.Proposals`
 /// keeps one and projects to this record with `Proposals.toOpScript`.
 type OpScriptProposal<'Node, 'Id> =
-    { Id: int
-      Holder: string
-      Ops: SkeletonOp<'Node, 'Id> list }
+    {
+        /// The order key: proposals are decided in ascending `Id`. Expected unique
+        /// (`Arbitration.duplicateIds` checks); a duplicate keeps the partition total but loses its
+        /// invariance under arrival order.
+        Id: int
+        /// Whom the decision is reported to; carried through untouched, never read by the partition.
+        Holder: string
+        /// The script, judged whole: it applies to the base as a batch or not at all, and its
+        /// footprint is the whole script's.
+        Ops: SkeletonOp<'Node, 'Id> list
+    }
 
 /// Why arbitration rejected one proposal — the AI-feedback protocol shape (GP5):
 /// a rejected agent knows exactly what to repair or rebase against.
@@ -73,9 +81,16 @@ type StaleProposal<'Id> =
 /// `Rejected` pairs every non-accepted proposal with its typed reason (GP5);
 /// nothing is ever silently dropped.
 type Arbitration<'Node, 'Id> =
-    { Accepted: OpScriptProposal<'Node, 'Id> list
-      MergedScript: SkeletonOp<'Node, 'Id> list
-      Rejected: (OpScriptProposal<'Node, 'Id> * ArbitrationRejection<'Id>) list }
+    {
+        /// The proposals that land, pairwise independent, in ascending `Id`.
+        Accepted: OpScriptProposal<'Node, 'Id> list
+        /// The accepted scripts concatenated in `Accepted` order — one order that lands them; any
+        /// other reaches the same tree.
+        MergedScript: SkeletonOp<'Node, 'Id> list
+        /// Every other proposal with its reason, in ascending `Id`. With `Accepted` it holds each input
+        /// proposal exactly once.
+        Rejected: (OpScriptProposal<'Node, 'Id> * ArbitrationRejection<'Id>) list
+    }
 
 /// Proposal arbitration over the skeleton-op algebra — the concurrency half of
 /// `Ops.footprint` / `Ops.independent`. (`ModuleSuffix` so the module coexists
@@ -217,6 +232,36 @@ module Arbitration =
           MergedScript = acceptedProposals |> List.collect (fun p -> p.Ops)
           Rejected = rejected }
 
+    /// The base must be well-formed before anything is decided against it (Phase 305). On a base
+    /// that carries an id twice, `Ops.canApplyAll` can accept a pair of scripts that the footprint
+    /// calls independent and whose two orders reach DIFFERENT trees, the merged state losing a node
+    /// (the second-pass review's finding that filed this phase): an id names two positions, so
+    /// which one an op reaches depends on what the other script has already done. The confluence
+    /// the accepted set promises — `TreeOps.tree_independence_diamond` — is stated at `wf`, and the
+    /// promise is empty below it. So a malformed base is
+    /// REFUSED rather than arbitrated: every proposal is rejected `Inapplicable(0, DuplicateId d)`,
+    /// `d` the first id the base's preorder carries twice (`Tree.wellFormed`'s verdict), and the
+    /// accepted set and merged script are empty. Index 0 because no op was offered: the refusal is
+    /// the base's, and a proposer that reads it repairs nothing in its script. The four witness-
+    /// taking entries make the check; `arbitrateWith` takes a `canApply` and no witness, so a
+    /// domain composing it directly checks its own base (`Tree.wellFormedKeyed` for a keyed one).
+    let private atWellFormedBase
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (baseTree: 'Node)
+        (proposals: OpScriptProposal<'Node, 'Id> list)
+        (decide: unit -> Arbitration<'Node, 'Id>)
+        : Arbitration<'Node, 'Id> =
+        match Tree.wellFormed nodew idw baseTree with
+        | Tree.Structural -> decide ()
+        | Tree.RepeatedId d ->
+            { Accepted = []
+              MergedScript = []
+              Rejected =
+                proposals
+                |> List.sortBy (fun p -> p.Id)
+                |> List.map (fun p -> p, Inapplicable(0, DuplicateId d)) }
+
     /// Arbitrate N op-script proposals against one base tree (Phase 85) —
     /// decide which subset can land together. A deterministic, total partition
     /// (GP4: analysis only — the base is never mutated, and no input throws):
@@ -254,36 +299,11 @@ module Arbitration =
     /// policy, no quality judgement, no evaluator (GP6): which proposal is
     /// *better* is the host's business; Core only says which ones *can
     /// coexist*.
-    /// The base must be well-formed before anything is decided against it (Phase 305). On a base
-    /// that carries an id twice, `Ops.canApplyAll` can accept a pair of scripts that the footprint
-    /// calls independent and whose two orders reach DIFFERENT trees, the merged state losing a node
-    /// (the second-pass review's finding that filed this phase): an id names two positions, so
-    /// which one an op reaches depends on what the other script has already done. The confluence
-    /// the accepted set promises — `TreeOps.tree_independence_diamond` — is stated at `wf`, and the
-    /// promise is empty below it. So a malformed base is
-    /// REFUSED rather than arbitrated: every proposal is rejected `Inapplicable(0, DuplicateId d)`,
-    /// `d` the first id the base's preorder carries twice (`Tree.wellFormed`'s verdict), and the
-    /// accepted set and merged script are empty. Index 0 because no op was offered: the refusal is
-    /// the base's, and a proposer that reads it repairs nothing in its script. The four witness-
-    /// taking entries make the check; `arbitrateWith` takes a `canApply` and no witness, so a
-    /// domain composing it directly checks its own base (`Tree.wellFormedKeyed` for a keyed one).
-    let private atWellFormedBase
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (baseTree: 'Node)
-        (proposals: OpScriptProposal<'Node, 'Id> list)
-        (decide: unit -> Arbitration<'Node, 'Id>)
-        : Arbitration<'Node, 'Id> =
-        match Tree.wellFormed nodew idw baseTree with
-        | Tree.Structural -> decide ()
-        | Tree.RepeatedId d ->
-            { Accepted = []
-              MergedScript = []
-              Rejected =
-                proposals
-                |> List.sortBy (fun p -> p.Id)
-                |> List.map (fun p -> p, Inapplicable(0, DuplicateId d)) }
-
+    ///
+    /// The partition under the skeleton defaults — `arbitrateWith (Ops.footprint nodew idw)
+    /// (Ops.canApplyAll nodew idw)` — once the base is well-formed; a base carrying an id twice
+    /// rejects every proposal `Inapplicable(0, DuplicateId d)` and accepts none. Greedy in ascending
+    /// `Id`, so the accepted set is maximal, not maximum.
     let arbitrate
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)

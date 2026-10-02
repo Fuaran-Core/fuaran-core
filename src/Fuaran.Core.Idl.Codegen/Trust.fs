@@ -18,9 +18,16 @@ module Trust =
     /// An allowlisted foreign component: which module/component may resolve live,
     /// and the content-hash it must carry.
     type AllowEntry =
-        { ModuleId: string
-          ComponentId: string
-          Hash: string }
+        {
+            /// Matched exactly against the gated node's `moduleId` field.
+            ModuleId: string
+            /// Matched exactly against the gated node's `componentId` field; an entry admits
+            /// only the pair, never every component of the module.
+            ComponentId: string
+            /// Compared ordinally with the node's `contentHash.hash`. A mismatch makes the node
+            /// inert unless the node's own `strictness` is `AdvisoryWarning`.
+            Hash: string
+        }
 
     /// The caller's TRUST decisions: which foreign components may resolve live, and
     /// which of the vocabulary's fields carry values that must be sanitised at codegen
@@ -40,13 +47,27 @@ module Trust =
     /// Renamed from `HardenPolicy` at Phase 116, when that name was taken by the
     /// vocabulary tokens it is passed beside.
     type Policy =
-        { Allowlist: AllowEntry list
-          UrlFields: Set<string * string>
-          MarkdownFields: Set<string * string> }
+        {
+            /// The components allowed to resolve live; a gated node matching no entry, or
+            /// carrying no `contentHash`, becomes the inert placeholder.
+            Allowlist: AllowEntry list
+            /// `(kindTag, fieldName)` pairs whose value is routed through
+            /// `Sanitize.sanitizeUrlOrBlank`; each must be a `str` field or a union carrying the
+            /// declared value-literal case, or `checkHardenPolicy` refuses the policy.
+            UrlFields: Set<string * string>
+            /// `(kindTag, fieldName)` pairs whose value is routed through `Sanitize.scrubMarkdown`;
+            /// each must be a `str` field or a union carrying the declared text-literal case, or
+            /// `checkHardenPolicy` refuses the policy.
+            MarkdownFields: Set<string * string>
+        }
 
     /// The gate decision for a node of the gated kind.
     type CustomGate =
+        /// Allowlisted with a matching hash (or an advisory mismatch): the node stays live and
+        /// its fields are still hardened recursively.
         | Allowed
+        /// The node is replaced by the vocabulary's placeholder kind, keeping its id; `reason`
+        /// is rendered into the placeholder's visible label.
         | InertPlaceholder of reason: string
 
     let private fieldOf (name: string) (fields: (string * IdlValue) list) : IdlValue option =

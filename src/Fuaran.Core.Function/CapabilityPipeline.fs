@@ -18,19 +18,31 @@ namespace Fuaran.Core
 /// Where an `Invoke` node's argument comes from: a literal scalar, or the output of an upstream node
 /// (the edge that wires the DAG).
 type ArgSource =
+    /// A fixed argument string, which must lie in its hole's space.
     | Literal of value: string
+    /// The output of the node with this id, which must be declared EARLIER and whose output space
+    /// must fit the hole's.
     | FromNode of nodeId: string
 
 /// A node in a capability pipeline. `Source` is a named data ref (the `DataSource.Ref` precedent) with a
 /// declared output value-space; `Invoke` runs a registered capability, declaring its output value-space
 /// and wiring each arg (by hole address) to a `Literal` or an upstream node's output.
 type PipelineNode =
+    /// An input the host supplies: `dataRef` is opaque to the core, and `outputType` is what
+    /// downstream edges are checked against.
     | Source of id: string * dataRef: string * outputType: ValueSpace
+    /// A call of `capabilityId`, each argument keyed by hole address; `outputType` is declared, not
+    /// derived, and every downstream edge is checked against it.
     | Invoke of id: string * capabilityId: string * outputType: ValueSpace * args: (string * ArgSource) list
 
 /// A serializable, typed capability-DAG (Phase 35) — nodes in topological (declaration) order; edges are
 /// the `FromNode` arg references. `OpStream.Dag` can host it; type-checked at composition.
-type CapabilityPipeline = { Nodes: PipelineNode list }
+type CapabilityPipeline =
+    {
+        /// The nodes in declaration order, which must be a topological order: an edge may point only
+        /// to an earlier node, and node ids must be unique.
+        Nodes: PipelineNode list
+    }
 
 /// Why a pipeline was rejected — recoverable + enumerated (GP5), never a throw (GP4). Default-deny by
 /// shape: only a registered capability + a type-compatible, fully-bound, ACYCLIC edge set in
@@ -44,8 +56,11 @@ type CapabilityPipeline = { Nodes: PipelineNode list }
 /// replaced `PipelineUnknownArg`, `PipelineArgOutOfSpace` and `PipelineRequiredUnbound`, which
 /// carried the address alone.
 type PipelineError =
+    /// Two nodes share this id; checked before anything else.
     | DuplicateNode of id: string
+    /// A `FromNode` edge names an id that is no node of the pipeline.
     | UnknownNode of id: string
+    /// An `Invoke` names a capability the lookup does not resolve; `known` is the lookup's ids.
     | PipelineNoSuchCapability of id: string * known: string list
     /// The node's capability refuses this argument (Phase 295): the wrapped `InvokeError` is the
     /// refusal `Capability.validateArgs` gives it.
@@ -53,6 +68,9 @@ type PipelineError =
     /// An edge closes a cycle (Phase 295): `cycle` is the node ids around it, starting at `node`
     /// and following each `FromNode` edge to its upstream; a self-edge is `[node]`.
     | PipelineCycle of node: string * cycle: string list
+    /// The upstream's output space does not fit argument `arg` of `node`. `producer` and `consumer`
+    /// name only the space FAMILIES (`int`, `float`, `string`, `enum`, `anyString`, `slotTree`), so a
+    /// bounds mismatch inside one family reads as e.g. `int` against `int`.
     | EdgeTypeMismatch of node: string * arg: string * producer: string * consumer: string
     /// An acyclic edge that points FORWARD in declaration order (Phase 295) — the pipeline is not in
     /// topological order, so the upstream would not have run.
@@ -62,7 +80,9 @@ type PipelineError =
 /// a declared literal. The engine resolves each `ArgSource` edge into one of these before handing the arg
 /// list to the host `body` — so the body sees values, never the wire-level `FromNode` reference.
 type PipelineArg<'v> =
+    /// The upstream node's realised value, already checked (through `spell`) to lie in the hole's space.
     | FromUpstream of 'v
+    /// The node's `Literal` string, as declared; `typeCheck` put it in the hole's space.
     | LiteralArg of string
 
 /// Why pipeline evaluation failed — recoverable + named (GP5), never a throw (GP4). Since Phase 295
@@ -71,8 +91,12 @@ type PipelineArg<'v> =
 /// An upstream value outside the space of the hole it feeds is `EvalArgRefused`, wrapping the
 /// `ArgOutOfSpace` the capability gives it; a host `body` failure is `EvalNodeFailed`.
 type PipelineEvalError =
+    /// `typeCheck` refused the pipeline; no body ran.
     | EvalIllTyped of reason: PipelineError
+    /// The host `body` answered `Error message` for this node; evaluation stops there.
     | EvalNodeFailed of node: string * message: string
+    /// An upstream value, spelled, lies outside the space of the hole it feeds; `reason` is the
+    /// `ArgOutOfSpace` carrying that spelling.
     | EvalArgRefused of node: string * reason: InvokeError
 
 /// Where a pipeline resolves its `Invoke` nodes' capabilities (Phase 295): a lookup and the ids it
@@ -80,8 +104,13 @@ type PipelineEvalError =
 /// `ofFunctionRegistry` — so a host that loads content packs into a `FunctionRegistry` type-checks
 /// and evaluates against it, and keeps no second registry.
 type CapabilityLookup =
-    { TryFind: string -> Capability option
-      Known: string list }
+    {
+        /// Resolves a capability id; `None` makes an `Invoke` of it a `PipelineNoSuchCapability`.
+        TryFind: string -> Capability option
+        /// The ids `TryFind` resolves, reported in `PipelineNoSuchCapability`; it is not consulted to
+        /// resolve, so a hand-built lookup should keep the two in step.
+        Known: string list
+    }
 
 /// The two projections onto `CapabilityLookup`.
 module CapabilityLookup =
@@ -100,6 +129,7 @@ module CapabilityLookup =
 /// `Capability` surface; FSharp.Core-only, Fable-clean.
 module CapabilityPipeline =
 
+    /// The id of either node case — the key `FromNode` edges, the result map and the dirty set use.
     let nodeId (n: PipelineNode) : string =
         match n with
         | Source(id, _, _) -> id

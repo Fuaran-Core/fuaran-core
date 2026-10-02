@@ -1,3 +1,6 @@
+/// The `fuaran-core-idl` command: the IDL stability classifier (`classify`), the F#
+/// consequence table (`table`) and the proposal pricer (`spike-proposal`) over the
+/// `Fuaran.Core.Idl.Diff` library, for repositories with no F# build of their own.
 module Fuaran.Core.Idl.Cli.Program
 
 open System.IO
@@ -319,6 +322,9 @@ let private spikeProposal (proposalPath: string) (rest: string list) : int =
 
             if report.Green then 0 else 1
 
+/// Dispatches on the verb. Exit 2 means no verdict was reached (bad usage, an unknown verb,
+/// an empty argument list, an unreadable or malformed input); `--help` exits 0. Every other
+/// code is the verb's own — see the usage text.
 [<EntryPoint>]
 let main argv =
     match List.ofArray argv with

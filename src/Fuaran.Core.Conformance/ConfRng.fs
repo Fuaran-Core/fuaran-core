@@ -35,7 +35,14 @@ namespace Fuaran.Core
 /// the same run, which is how a counterexample is reproduced.
 module ConfRng =
 
-    type T = { State: uint32 }
+    /// An immutable generator position: every draw returns the value and the NEXT `T`, so a
+    /// stream is reproduced by re-threading from the same `ofSeed`.
+    type T =
+        {
+            /// The xorshift32 state — non-zero whenever it came from `ofSeed`. A hand-built
+            /// `{ State = 0u }` is the fixed point and draws 0 forever.
+            State: uint32
+        }
 
     /// The xorshift32 step (Marsaglia 2003): three shift/XOR rounds, full period over the
     /// 2^32 - 1 non-zero states.
@@ -117,6 +124,8 @@ module ConfRng =
 
             candidate, rng
 
+    /// A uniformly chosen element of `xs` (index drawn by `intBelow`) and the advanced state.
+    /// Throws on an empty list — `intBelow 0` answers 0, which `List.item` rejects.
     let choose (xs: 'a list) (r: T) : 'a * T =
         let i, r' = intBelow (List.length xs) r
         List.item i xs, r'

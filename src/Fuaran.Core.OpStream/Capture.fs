@@ -17,12 +17,23 @@ namespace Fuaran.Core
 /// `Deterministic` effect emits no capture, so the determinism label is always a non-deterministic
 /// label: one or more factors.
 type EffectCapture =
-    { Seq: int
-      Eff: string
-      Determinism: string
-      Value: string
-      PrevHash: string
-      Hash: string }
+    {
+        /// Zero-based position in the capture chain, independent of any op stream's `Seq`.
+        Seq: int
+        /// The effect-identity key. Replay consumes captures in order and refuses one whose `Eff` is not
+        /// the effect requested.
+        Eff: string
+        /// The determinism label the value was captured under — never `deterministic`, which captures
+        /// nothing. Strict replay compares it exactly with the label requested.
+        Determinism: string
+        /// The realized value as the domain codec encoded it: raw JSON, embedded and hashed verbatim.
+        Value: string
+        /// The previous capture's `Hash`, or the config's `Genesis` on the first capture.
+        PrevHash: string
+        /// `hashFn PrevHash` over the `{capture, seq, eff, det, value}` payload; a capture whose fields
+        /// were edited no longer recomputes to it (`verifyCaptures`).
+        Hash: string
+    }
 
 /// A signed checkpoint over a chain head (Phase 320). `Head` is the hash being attested — a chain
 /// `Hash` at a commit / publish boundary. The hash-chain already attests the *whole prefix* (each
@@ -31,9 +42,15 @@ type EffectCapture =
 /// opaque attestation token (hex / base64). Verification re-checks the signature against the head —
 /// Core owns the *seam*, the host owns the crypto.
 type Attestation =
-    { Head: string
-      KeyId: string
-      Signature: string }
+    {
+        /// The chain head that was signed — `OpStream.head` of the stream at the time — which covers
+        /// every record up to it.
+        Head: string
+        /// The signing key's name. Opaque to Core: only the `IAttestationSink` interprets it.
+        KeyId: string
+        /// The host's signature token. Core never inspects it; only the sink's `Verify` does.
+        Signature: string
+    }
 
 /// The cryptographic-attestation seam (Phase 320), following the default-no-op portability-interface
 /// pattern (mirrors `IFuaranTelemetrySink` et al.). Core stays FSharp.Core-only + Fable-clean: the

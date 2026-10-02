@@ -10,13 +10,23 @@ namespace Fuaran.Core
 /// domain's node is the host's, per the witness pattern. `Function.signature` enters every
 /// `SlotHole` with this space, which is what makes a capability over a slotted artifact invocable.
 type ValueSpace =
+    /// An integer between `lo` and `hi`, both inclusive, written with no `+`, white space or fraction.
     | IntRange of lo: int * hi: int
+    /// A finite decimal number between `lo` and `hi`, both inclusive; an `IntRange` its bounds
+    /// contain widens into it.
     | FloatRange of lo: float * hi: float
+    /// A string whose length (in UTF-16 code units) is between `lo` and `hi`, both inclusive.
     | StringLen of lo: int * hi: int
+    /// Exactly one of the listed members, compared ordinally; an empty list admits no value.
     | Enum of string list
+    /// Any string: the top of the scalar spaces, and unbounded, so no repeat may count over it.
     | AnyString
+    /// A `"kind"`-tagged wire document, of the constrained kind when one is given; unbounded, and
+    /// admitted by no scalar space.
     | SlotTree of kindConstraint: string option
 
+/// The value-space operations: the seam's culture-invariant readers, the one canonical spelling of
+/// a value, membership, the sub-space relation, and the space in words for a refusal.
 module Space =
 
     /// The kind tag of a tree argument (Phase 229): `Some kind` when the string is a well-formed

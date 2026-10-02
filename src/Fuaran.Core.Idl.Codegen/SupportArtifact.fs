@@ -42,7 +42,14 @@ open Fuaran.Core
 ///
 /// `Path` is relative to the document that declares it, so the triple moves as a
 /// directory and stays resolvable wherever the domain checks it out.
-type HostPreludeRef = { Module: string; Path: string }
+type HostPreludeRef =
+    {
+        /// The module name the prelude declares — what a `THosted` slot's `hostSurface`
+        /// strings resolve against; the generator never reads the prelude's text.
+        Module: string
+        /// The prelude's source file, relative to the `support.json` that names it.
+        Path: string
+    }
 
 /// The declared-support record plus the host-prelude declaration — members 2 and 3
 /// of the triple, as one document beside the vocabulary.
@@ -52,8 +59,13 @@ type HostPreludeRef = { Module: string; Path: string }
 /// would put a field on a contract that never reads it. The document is the thing
 /// that carries both.
 type SupportDocument =
-    { Support: Gen.GenSupport
-      HostPrelude: HostPreludeRef option }
+    {
+        /// The generator's input, passed to `Gen.fsharpModuleWith` unchanged.
+        Support: Gen.GenSupport
+        /// The prelude compiled ahead of the generated module, or `None` when none is
+        /// declared — the rendered document then carries no `hostPrelude` key at all.
+        HostPrelude: HostPreludeRef option
+    }
 
     /// A vocabulary that declares no support at all — the shape every domain starts
     /// from, and what `Gen.fsharpModule` (the pre-945 entry) means.
