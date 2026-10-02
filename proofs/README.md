@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 239 claims — 170 proved across 24 models, 40 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 241 claims — 172 proved across 24 models, 40 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -3635,7 +3635,7 @@ clauses were stated nowhere: not in a test, not in the conformance pack, not in 
   it. For a script it has real content, because `applyWith`'s `go` threads the tree and several
   intermediate trees exist by the time a step fails — so the statement is quantified over an
   arbitrary failure position in an arbitrary batch, and says none of them escapes.
-- **`apply_preserves_wf`.** Unconditional at last, for all five operations. It is true now because
+- **`apply_preserves_wf`.** Unconditional at last, for all five operations (six since Phase 250 added `UpdateNode`, whose arm is `upd_wf`). It is true now because
   Phase 137 changed the CODE, not because the model changed its mind, and the bridge between those
   two facts is its own theorem: `TreeOps.first_dup_none_iff` proves the shipped scan decides exactly
   `ins_wf`'s hypothesis — neither weaker, which would leave the invariant breakable, nor stronger,
@@ -3768,7 +3768,7 @@ statuses, and the difference is Phase 161.**
   requires the predicate to be unchanged, so an adopting domain meets the premise as a red law
   rather than as a broken tree.
 
-With `child_blind`, `contained_preserves` holds for all five operations including a nested batch,
+With `child_blind`, `contained_preserves` holds for all five operations (six since Phase 250; `upd_contained` is the `UpdateNode` arm) including a nested batch,
 and `MoveNode` is covered as well as `InsertChild`: the moved subtree inherits the invariant from
 the tree it came out of, the removal preserves both the invariant and the destination's capability,
 and the graft is then an insert under an admitted parent.
@@ -3920,7 +3920,7 @@ already proves — must make the run lose, and it does.
    - **The extractor and the F# compiler are trusted** — the same link, and the same wording, as for
      the other four theorems.
 4. **Not claimed.**
-   - **A `Batch`'s inverse.** `invert_applicable` is stated over the four non-`Batch` operations. A
+   - **A `Batch`'s inverse.** `invert_applicable` is stated over the five non-`Batch` operations (`leaf_op`; four until Phase 250, and this line said four until Phase 305). A
      batch's inverse is its members' inverses in reverse order, each derived against the state that
      member saw, so the lift is the one `DagFold.replay_diamond` already performs at lane
      granularity — no new idea, and not done here.

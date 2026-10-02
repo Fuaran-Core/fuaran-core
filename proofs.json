@@ -1163,6 +1163,28 @@
       }
     },
     {
+      "id": "invert-batch-round-trip",
+      "level": "proved",
+      "claim": "`Ops.invert` over the WHOLE skeleton alphabet, `Batch` nested to any depth: on a well-formed tree the inverse of an accepted operation is accepted at the result and restores the tree exactly, and an operation that is refused has no inverse (the inverse exists iff the forward operation applies). The `Batch` arm is modelled as production has it since Phase 23 — the pre-state threaded through the members and each inverse PREPENDED, so a batch undoes as its members' inverses in reverse forward order, each derived against the state that member saw — and the induction carries the accumulator: the inverses collected so far take the current state back to the original. `invert_applicable` (the leaf alphabet) is the per-member step. Phase 305 closed what the README had listed as not claimed since Phase 138.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "invert_batch_round_trip",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "invert-all-round-trip",
+      "level": "proved",
+      "claim": "`Ops.invertAll` (Phase 305), the script-level inverse: on a well-formed `pre`, `applyAll (invertAll s pre) (applyAll s pre) = pre` — the undo script is accepted at the tree the script reaches and restores `pre` exactly — and the undo script exists iff the script applies. The same accumulator induction as `invert_batch_round_trip`, over a list rather than a `Batch`; the model carries `applyAll`'s 0-based index of the first refused op, which the production law's refusal clause states and the `ContentDiffTests` law samples.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "invert_all_round_trip",
+        "model": "proofs/Preservation.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "preservation-differential",
       "level": "tested",
       "claim": "The extracted preservation model agrees with the shipped `Ops.apply`, `Ops.canApply` and `Ops.invert` over the generated pool AND over grafts minted per state from the state's own ids: a subtree whose descendant id the tree already holds, a subtree that repeats an id within itself, and one that does both. Compared at once: the verdict, an accepted result through production's own `Tree.encodeHash`, a rejection by class, the dry run against the mutating call on each side separately, the derived inverse as an operation, and the round trip run on production. The go-red hands the differential the model of the PRE-137 validator and requires it to lose — which is the same comparison that was silently green throughout Phase 137, because the generator's contract is a fresh id and it cannot mint a colliding graft. Agreement is over the pool drawn, never over all inputs.",

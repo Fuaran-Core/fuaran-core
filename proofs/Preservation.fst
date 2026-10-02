@@ -3252,6 +3252,182 @@ and grammar_trivial_all (ch:tree -> bool) (os:list op) (t:tree)
        | Error _ -> ())
 
 (* ======================================================================================
+   15. THE `Batch` AND SCRIPT LIFTS OF `invert_applicable` (Phase 305).
+
+      `invert_applicable` (section 12) is the per-operation round trip over the five leaf
+      operations. `Ops.invert`'s `Batch` arm threads the pre-state through the members and
+      PREPENDS each inverse, so a batch's inverse is its members' inverses in reverse forward
+      order, each derived against the state that member saw; `Ops.invertAll` (Phase 305) does the
+      same for a SCRIPT and returns the list rather than a `Batch`. Both are modelled here clause
+      for clause and the round trip is proved for each:
+
+        wf t /\ Ok? (apply o t)  ==>  invert_op o t = Ok inv /\ apply o t = Ok t' /\ apply inv t' = Ok t
+        wf t /\ Ok? (apply_all s t)  ==>  invert_all s t = Ok u /\ apply_all s t = Ok t' /\ apply_all u t' = Ok t
+
+      with the refusal half beside each: on a well-formed tree an inverse is refused EXACTLY when
+      the forward operation (script) is refused. The induction carries the accumulator — "the
+      inverses collected so far take the current state back to the original" — which is why the
+      prepending order is the right one and not merely a convention: the first inverse to run is
+      the last member's, against the state the last member left.
+   ====================================================================================== *)
+
+(* F#: `Ops.invert`, every arm — the `Batch` arm threads `pre` through `apply` and prepends; the
+   leaf arms are `invert_leaf`. *)
+let rec invert_op (o:op) (pre:tree) : Tot (outcome op rejection) (decreases o) =
+  match o with
+  | Batch os ->
+    (match invert_batch os pre [] with
+     | Ok acc -> Ok (Batch acc)
+     | Error e -> Error e)
+  | _ -> invert_leaf o pre
+and invert_batch (os:list op) (state:tree) (acc:list op) : Tot (outcome (list op) rejection) (decreases os) =
+  match os with
+  | [] -> Ok acc
+  | o :: rest ->
+    (match invert_op o state with
+     | Error e -> Error e
+     | Ok inv ->
+       (match apply o state with
+        | Ok state' -> invert_batch rest state' (inv :: acc)
+        | Error e -> Error e))
+
+(* F#: `Ops.invertAll` — the same thread over a script, with `applyAll`'s 0-based index of the
+   first op that does not apply (an op `invert` refuses is one `apply` refuses, `canapply_preserves`). *)
+let rec invert_all_from (i:nat) (os:list op) (state:tree) (acc:list op)
+  : Tot (outcome (list op) (nat & rejection)) (decreases os) =
+  match os with
+  | [] -> Ok acc
+  | o :: rest ->
+    (match invert_op o state with
+     | Error e -> Error (i, e)
+     | Ok inv ->
+       (match apply o state with
+        | Ok state' -> invert_all_from (i + 1) rest state' (inv :: acc)
+        | Error e -> Error (i, e)))
+
+let invert_all (os:list op) (pre:tree) : Tot (outcome (list op) (nat & rejection)) =
+  invert_all_from 0 os pre []
+
+(* `apply (Batch acc) t == apply_all acc t`, by definition — named so the lifts can cite it. *)
+let apply_batch_is_apply_all (acc:list op) (t:tree)
+  : Lemma (ensures apply (Batch acc) t == apply_all acc t) = ()
+
+#push-options "--z3rlimit 100 --fuel 1 --ifuel 1"
+let rec invert_op_applicable (o:op) (t:tree)
+  : Lemma (requires wf t /\ Ok? (apply o t))
+          (ensures (match invert_op o t, apply o t with
+                    | Ok inv, Ok t' -> apply inv t' == Ok t
+                    | _, _ -> False))
+          (decreases o)
+  = match o with
+    | Batch os ->
+      invert_batch_applicable os t [] t;
+      (match invert_batch os t [], apply_all os t with
+       | Ok acc, Ok t' -> apply_batch_is_apply_all acc t'
+       | _, _ -> ())
+    | _ -> invert_applicable o t
+
+(* The accumulator invariant: `acc` takes the current state back to `t0`; then the inverses of
+   `os`, prepended, take the state `os` reaches back to `t0`. *)
+and invert_batch_applicable (os:list op) (t:tree) (acc:list op) (t0:tree)
+  : Lemma (requires wf t /\ Ok? (apply_all os t) /\ apply_all acc t == Ok t0)
+          (ensures (match invert_batch os t acc, apply_all os t with
+                    | Ok acc', Ok t' -> apply_all acc' t' == Ok t0
+                    | _, _ -> False))
+          (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: rest ->
+      invert_op_applicable o t;
+      (match invert_op o t, apply o t with
+       | Ok inv, Ok t1 ->
+         apply_preserves_wf o t;
+         invert_batch_applicable rest t1 (inv :: acc) t0
+       | _, _ -> ())
+
+let rec invert_all_from_applicable (i:nat) (os:list op) (t:tree) (acc:list op) (t0:tree)
+  : Lemma (requires wf t /\ Ok? (apply_all os t) /\ apply_all acc t == Ok t0)
+          (ensures (match invert_all_from i os t acc, apply_all os t with
+                    | Ok acc', Ok t' -> apply_all acc' t' == Ok t0
+                    | _, _ -> False))
+          (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: rest ->
+      invert_op_applicable o t;
+      (match invert_op o t, apply o t with
+       | Ok inv, Ok t1 ->
+         apply_preserves_wf o t;
+         invert_all_from_applicable (i + 1) rest t1 (inv :: acc) t0
+       | _, _ -> ())
+
+(* ---- the refusal half: an inverse is refused exactly when the forward form is ---- *)
+
+let rec invert_op_refuses_iff (o:op) (t:tree)
+  : Lemma (requires wf t)
+          (ensures Ok? (invert_op o t) <==> Ok? (apply o t))
+          (decreases o)
+  = match o with
+    | Batch os -> invert_batch_refuses_iff os t []
+    | _ ->
+      canapply_preserves o t;
+      if Ok? (apply o t) then invert_applicable o t
+
+and invert_batch_refuses_iff (os:list op) (t:tree) (acc:list op)
+  : Lemma (requires wf t)
+          (ensures Ok? (invert_batch os t acc) <==> Ok? (apply_all os t))
+          (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: rest ->
+      invert_op_refuses_iff o t;
+      (match invert_op o t, apply o t with
+       | Ok inv, Ok t1 ->
+         apply_preserves_wf o t;
+         invert_batch_refuses_iff rest t1 (inv :: acc)
+       | _, _ -> ())
+
+let rec invert_all_from_refuses_iff (i:nat) (os:list op) (t:tree) (acc:list op)
+  : Lemma (requires wf t)
+          (ensures Ok? (invert_all_from i os t acc) <==> Ok? (apply_all os t))
+          (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: rest ->
+      invert_op_refuses_iff o t;
+      (match invert_op o t, apply o t with
+       | Ok inv, Ok t1 ->
+         apply_preserves_wf o t;
+         invert_all_from_refuses_iff (i + 1) rest t1 (inv :: acc)
+       | _, _ -> ())
+#pop-options
+
+(* ---- the two theorems a reader cites ---- *)
+
+(* `Ops.invert` over the WHOLE alphabet, `Batch` nested to any depth: on a well-formed tree the
+   inverse of an accepted operation is accepted at the result and restores the tree, and an
+   operation that is refused has no inverse. *)
+let invert_batch_round_trip (o:op) (t:tree)
+  : Lemma (requires wf t)
+          (ensures (Ok? (invert_op o t) <==> Ok? (apply o t)) /\
+                   (match invert_op o t, apply o t with
+                    | Ok inv, Ok t' -> apply inv t' == Ok t
+                    | _, _ -> True))
+  = invert_op_refuses_iff o t;
+    if Ok? (apply o t) then invert_op_applicable o t
+
+(* `Ops.invertAll`: `applyAll (invertAll s pre) (applyAll s pre) = pre` on a well-formed `pre`,
+   and the undo script exists exactly when the script applies. *)
+let invert_all_round_trip (os:list op) (t:tree)
+  : Lemma (requires wf t)
+          (ensures (Ok? (invert_all os t) <==> Ok? (apply_all os t)) /\
+                   (match invert_all os t, apply_all os t with
+                    | Ok undo, Ok t' -> apply_all undo t' == Ok t
+                    | _, _ -> True))
+  = invert_all_from_refuses_iff 0 os t [];
+    if Ok? (apply_all os t) then invert_all_from_applicable 0 os t [] t
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing

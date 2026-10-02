@@ -739,6 +739,64 @@ if (Prims.op_Equals h x) then begin
      end
      end))
 
+
+let rec invert_op : TreeOps.op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps.op, TreeOps.rejection> = (fun ( o  :  TreeOps.op ) ( pre  :  TreeOps.tree ) -> (match (o) with
+| TreeOps.Batch (os) -> begin
+     (match ((invert_batch os pre [])) with
+| DagFold.Ok (acc) -> begin
+     DagFold.Ok (TreeOps.Batch (acc))
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end
+| uu___ -> begin
+     (invert_leaf o pre)
+     end))
+and invert_batch : Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  Prims.list<TreeOps.op>  ->  DagFold.outcome<Prims.list<TreeOps.op>, TreeOps.rejection> = (fun ( os  :  Prims.list<TreeOps.op> ) ( state  :  TreeOps.tree ) ( acc  :  Prims.list<TreeOps.op> ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (acc)
+     end
+| (o)::rest -> begin
+     (match ((invert_op o state)) with
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end
+| DagFold.Ok (inv) -> begin
+     (match ((TreeOps.apply o state)) with
+| DagFold.Ok (state') -> begin
+     (invert_batch rest state' ((inv)::acc))
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (e)
+     end)
+     end)
+     end))
+
+
+let rec invert_all_from : Prims.nat  ->  Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  Prims.list<TreeOps.op>  ->  DagFold.outcome<Prims.list<TreeOps.op>, (Prims.nat * TreeOps.rejection)> = (fun ( i  :  Prims.nat ) ( os  :  Prims.list<TreeOps.op> ) ( state  :  TreeOps.tree ) ( acc  :  Prims.list<TreeOps.op> ) -> (match (os) with
+| [] -> begin
+     DagFold.Ok (acc)
+     end
+| (o)::rest -> begin
+     (match ((invert_op o state)) with
+| DagFold.Error (e) -> begin
+     DagFold.Error (((i), (e)))
+     end
+| DagFold.Ok (inv) -> begin
+     (match ((TreeOps.apply o state)) with
+| DagFold.Ok (state') -> begin
+     (invert_all_from (i + (Prims.parse_int "1")) rest state' ((inv)::acc))
+     end
+| DagFold.Error (e) -> begin
+     DagFold.Error (((i), (e)))
+     end)
+     end)
+     end))
+
+
+let invert_all : Prims.list<TreeOps.op>  ->  TreeOps.tree  ->  DagFold.outcome<Prims.list<TreeOps.op>, (Prims.nat * TreeOps.rejection)> = (fun ( os  :  Prims.list<TreeOps.op> ) ( pre  :  TreeOps.tree ) -> (invert_all_from (Prims.parse_int "0") os pre []))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 

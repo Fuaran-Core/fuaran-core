@@ -78,8 +78,10 @@ after appends: dropping it changes the modelled pass 4 and needs the order-predi
 passes 1–3 a parent holds its kept survivors in `before` order, then the inserted shells, then the
 moved-in survivors, each in `after` order) inside section 10's induction; dropping it in production
 alone would break the extraction differential against the model that proves reconstruction. (b) The
-four theorems — the content-aware run theorem, `Normalize.fst`, `merged_applies_and_order_free`, the
-`Batch` lift of `invert_applicable` — each need a model this repository does not yet have or an
+`Batch` and script lifts of `invert_applicable` are PROVED (`Preservation.fst` section 15,
+`invert_batch_round_trip` / `invert_all_round_trip`, added when the phase was re-opened to finish).
+The other three theorems — the content-aware run theorem, `Normalize.fst`,
+`merged_applies_and_order_free` — each need a model this repository does not yet have or an
 induction restated over it; their bridges ship now (`ContentDiffTests`), the pre-fix counterexample
 is proved, and the claims stay on the README's not-claimed list rather than becoming assumed rows (a
 not-claimed item is the absence of a row). Each is a `deferred` entry on the phase with the reason

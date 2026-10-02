@@ -2429,7 +2429,8 @@ regenerated). Rides the draft.** The ruling behind each change is DECISIONS D103
 - **New: `Tree.Index.buildWith encode` / `isFreshForWith encode`** — the content-aware stamp. The plain
   `isFreshFor` stays as it was and its doc now says what it cannot see: a content-only `UpdateNode`.
 - **Not changed, by ruling (D103):** `validateUpdate`'s containment check, and the structural diff's
-  redundant trailing `ReorderChildren`; the four theorems the phase named are deferred to a successor
+  redundant trailing `ReorderChildren`; the `Batch` and script lifts of `invert_applicable` are proved
+  (`Preservation.fst` section 15), the other three theorems the phase named are deferred
   with the counterexample for the pre-fix rule (`TreeDiff.contained_script_refused_at_before_kinds`) and
   the `diff-applicable-contained` row reworded now. Wire classes: none — nothing on the wire moved.
 
