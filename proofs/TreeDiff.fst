@@ -299,19 +299,41 @@ let rec pass_removes (a_ids:list string) (b_par:list (string & string)) (ns:list
          else pass_removes a_ids b_par r
        | None -> pass_removes a_ids b_par r)
 
+(* THE ORDER PASSES 1-3 LEAVE A PARENT IN (Phase 305, 305.t1) is a function of the two trees
+   alone: its kept survivors in BEFORE-order (a before-child that is still its child), then the
+   inserted shells, then the moved-in survivors, the last two each in AFTER-order — because an
+   insert and a move both APPEND, pass 1 walks `after`'s preorder (so a parent's new children
+   arrive in its child order), pass 2 walks a parent's child list in order, and a removal or a
+   move-out deletes in place. Section 10's `ord1`/`ord2`/`ord3` carry that order through the
+   three passes step by step, and `settled_run` is the lemma. F#: `settled` in `emitWith`'s
+   step 4, clause for clause — `in_list ak` is `Set.contains c aKidSet` over the before-children,
+   `new_pred` is `not (bIds.Contains c)`, `moved_pred` is `bIds.Contains c && not (bKidSet.Contains c)`. *)
+let in_list (l:list string) (c:string) : Tot bool = mem c l
+let new_pred (b_ids:list string) (c:string) : Tot bool = not (mem c b_ids)
+let moved_pred (b_ids bk:list string) (c:string) : Tot bool = mem c b_ids && not (mem c bk)
+
+let settled_order (b_ids bk ak:list string) : Tot (list string) =
+  app (keep (in_list ak) bk) (app (keep (new_pred b_ids) ak) (keep (moved_pred b_ids bk) ak))
+
 (* PASS 4 — order, last of all: every parent now holds exactly its after-children, so naming the
-   after-order is a legal permutation. One op per CHANGED parent, and none at all for a parent with
-   fewer than two children, where every permutation is the identity. *)
-let rec pass_reorders (after:tree) (ps:list string) : Tot (list op) (decreases ps) =
+   after-order is a legal permutation. One op per CHANGED parent, none at all for a parent with
+   fewer than two children, where every permutation is the identity, and — since Phase 305 — none
+   for a parent the three passes have already LEFT in after-order (`settled_order`): the reorder
+   that used to trail every append restated an order the tree already held. `bk` is the parent's
+   before-children off the kid map (F#: `bChildKeys`), `[]` for a parent `before` does not carry. *)
+let rec pass_reorders (b_ids:list string) (b_kids:list (string & list string)) (after:tree)
+                      (ps:list string) : Tot (list op) (decreases ps) =
   match ps with
   | [] -> []
   | pid :: r ->
     (match find_in pid after with
      | Some p ->
-       if more_than_one (kids_of p)
-       then ReorderChildren pid (kid_ids (kids_of p)) :: pass_reorders after r
-       else pass_reorders after r
-     | None -> pass_reorders after r)
+       let ak = kid_ids (kids_of p) in
+       let bk = (match lookup_kids pid b_kids with Some bk -> bk | None -> []) in
+       if more_than_one (kids_of p) && settled_order b_ids bk ak <> ak
+       then ReorderChildren pid ak :: pass_reorders b_ids b_kids after r
+       else pass_reorders b_ids b_kids after r
+     | None -> pass_reorders b_ids b_kids after r)
 
 (* ======================================================================================
    4. `Diff.toOps` itself (F#: `Ops.fs`, clause for clause), and `Diff.toOpsContained`.
@@ -333,7 +355,7 @@ let diff_blocks (before after:tree) : Tot (list op & list op & list op & list op
   (pass_inserts a_par b_ids a_nodes,
    fst p2,
    pass_removes a_ids b_par b_nodes,
-   pass_reorders after (snd p2))
+   pass_reorders b_ids b_kids after (snd p2))
 
 let script_of (bl:(list op & list op & list op & list op)) : Tot (list op) =
   let (p1, p2, p3, p4) = bl in
@@ -499,11 +521,12 @@ let rec pass_removes_all (a_ids:list string) (b_par:list (string & string)) (ns:
     | [] -> ()
     | _ :: r -> pass_removes_all a_ids b_par r
 
-let rec pass_reorders_all (after:tree) (ps:list string)
-  : Lemma (ensures all_ops is_reorder (pass_reorders after ps)) (decreases ps)
+let rec pass_reorders_all (b_ids:list string) (b_kids:list (string & list string)) (after:tree)
+                          (ps:list string)
+  : Lemma (ensures all_ops is_reorder (pass_reorders b_ids b_kids after ps)) (decreases ps)
   = match ps with
     | [] -> ()
-    | _ :: r -> pass_reorders_all after r
+    | _ :: r -> pass_reorders_all b_ids b_kids after r
 
 let diff_emission_order (b a:tree)
   : Lemma (requires Ok? (to_ops b a))
@@ -519,7 +542,7 @@ let diff_emission_order (b a:tree)
     pass_inserts_all (parent_map a_nodes) (ids b) a_nodes;
     pass_moves_all (ids b) (parent_map b_nodes) (kid_map b_nodes) a_nodes;
     pass_removes_all (ids a) (parent_map b_nodes) b_nodes;
-    pass_reorders_all a (snd p2)
+    pass_reorders_all (ids b) (kid_map b_nodes) a (snd p2)
 
 (* ======================================================================================
    7. What each block GUARANTEES — the four clauses of the emission argument.
@@ -635,11 +658,12 @@ let reorder_shape (after:tree) (o:op) : Tot bool =
      | None -> false)
   | _ -> true
 
-let rec pass_reorders_shape (after:tree) (ps:list string)
-  : Lemma (ensures all_ops (reorder_shape after) (pass_reorders after ps)) (decreases ps)
+let rec pass_reorders_shape (b_ids:list string) (b_kids:list (string & list string)) (after:tree)
+                            (ps:list string)
+  : Lemma (ensures all_ops (reorder_shape after) (pass_reorders b_ids b_kids after ps)) (decreases ps)
   = match ps with
     | [] -> ()
-    | _ :: r -> pass_reorders_shape after r
+    | _ :: r -> pass_reorders_shape b_ids b_kids after r
 
 (* ---- and the four, composed over the whole script ---- *)
 
@@ -660,15 +684,15 @@ let diff_script_shape (b a:tree)
     let p1 = pass_inserts a_par (ids b) a_nodes in
     let p2 = fst (pass_moves (ids b) b_par b_kids a_nodes) in
     let p3 = pass_removes (ids a) b_par b_nodes in
-    let p4 = pass_reorders a (snd (pass_moves (ids b) b_par b_kids a_nodes)) in
+    let p4 = pass_reorders (ids b) b_kids a (snd (pass_moves (ids b) b_par b_kids a_nodes)) in
     pass_inserts_all a_par (ids b) a_nodes;
     pass_inserts_shape a_par (ids b) a_nodes;
     pass_moves_all (ids b) b_par b_kids a_nodes;
     pass_moves_shape (ids b) b_par b_kids a_nodes;
     pass_removes_all (ids a) b_par b_nodes;
     pass_removes_shape (ids a) b_par b_nodes;
-    pass_reorders_all a (snd (pass_moves (ids b) b_par b_kids a_nodes));
-    pass_reorders_shape a (snd (pass_moves (ids b) b_par b_kids a_nodes));
+    pass_reorders_all (ids b) b_kids a (snd (pass_moves (ids b) b_par b_kids a_nodes));
+    pass_reorders_shape (ids b) b_kids a (snd (pass_moves (ids b) b_par b_kids a_nodes));
     all_ops_and is_insert (insert_shape (ids b) a_par) p1;
     all_ops_and is_move (move_shape (ids b) b_par a_nodes) p2;
     all_ops_and is_remove (remove_shape (ids a) b_par) p3;
@@ -1345,6 +1369,163 @@ let rec apply_all_app (l m:list op) (t:tree)
                  | Ok t' -> apply_all_app r m t'
                  | Error _ -> ())
 
+(* ================= the list algebra the ORDER invariants stand on (Phase 305) ================= *)
+
+(* Section 10's four invariants were written about MEMBERSHIP — which children a parent holds
+   after a prefix of the script — because that is all `diff_applicable` and `diff_reconstructs`
+   needed: pass 4 restated every changed parent's order, so no earlier pass had to be exact about
+   it. Dropping the reorder that trails an append (305.t1) is what makes the order of passes 1-3
+   load-bearing, and `ord1`/`ord2`/`ord3` below track it EXACTLY, beside the membership
+   invariants rather than inside them, so the queries that were green stay the queries they were.
+   Each is a `keep` over one of the two trees' child lists under a predicate that names the pass's
+   worklist, and these are the facts about `keep` and `drop_id` the steps assemble with. *)
+
+let rec keep_app (f:string -> bool) (l m:list string)
+  : Lemma (ensures keep f (app l m) == app (keep f l) (keep f m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_app f t m
+
+(* `DagFold.keep_ext` wants agreement everywhere; the invariants' predicates agree only on the
+   list in hand, which is all `keep` reads. *)
+let rec keep_ext_mem (f g:string -> bool) (l:list string)
+  : Lemma (requires forall (c:string). mem c l ==> f c == g c)
+          (ensures keep f l == keep g l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_ext_mem f g t
+
+let rec keep_none (f:string -> bool) (l:list string)
+  : Lemma (requires forall (c:string). mem c l ==> not (f c)) (ensures keep f l == []) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_none f t
+
+let rec keep_all (f:string -> bool) (l:list string)
+  : Lemma (requires forall (c:string). mem c l ==> f c) (ensures keep f l == l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_all f t
+
+let rec drop_id_app (x:string) (l m:list string)
+  : Lemma (ensures drop_id x (app l m) == app (drop_id x l) (drop_id x m)) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> drop_id_app x t m
+
+(* deleting one id from a kept list is keeping under the predicate that also excludes it *)
+let rec keep_drop (f g:string -> bool) (k:string) (l:list string)
+  : Lemma (requires forall (c:string). mem c l ==> g c == (f c && c <> k))
+          (ensures drop_id k (keep f l) == keep g l) (decreases l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keep_drop f g k t
+
+let rec precedes_mem (p x:string) (l:list string)
+  : Lemma (requires precedes p x l) (ensures mem p l /\ mem x l) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: r -> if h = p then () else if h = x then () else precedes_mem p x r
+
+(* the mirror of `precedes_prefix`: what an id precedes in a duplicate-free list is in the
+   suffix after it *)
+let rec precedes_suffix (k c:string) (l m:list string)
+  : Lemma (requires precedes k c (app l (k :: m)) /\ no_dups (app l (k :: m)))
+          (ensures mem c m) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      mem_app k t (k :: m);
+      if h = k then () else if h = c then () else precedes_suffix k c t m
+
+(* THE APPEND LEMMA. Widening a filter by exactly one id `k` of a duplicate-free list — where
+   nothing the list holds AFTER `k` passes the wider filter — appends `k` to the narrower
+   selection. It is how an insert's shell and a move's survivor land at the END of their
+   segment: pass 1 reaches a parent's new children in child order, pass 2 reaches a parent's
+   kids in child order, so at each step the ids later in the list are still on the worklist. *)
+let rec keep_split_at (f g:string -> bool) (k:string) (l:list string)
+  : Lemma (requires no_dups l /\ mem k l /\ not (f k) /\ g k /\
+                    (forall (c:string). mem c l /\ c <> k ==> f c == g c) /\
+                    (forall (c:string). mem c l /\ precedes k c l ==> not (g c)))
+          (ensures keep g l == app (keep f l) [k]) (decreases l)
+  = match l with
+    | [] -> ()
+    | h :: t ->
+      if h = k then begin
+        keep_none g t;
+        keep_none f t
+      end
+      else begin
+        let later (c:string)
+          : Lemma (mem c t /\ precedes k c t ==> not (g c))
+          = if mem c t && precedes k c t then precedes_mem k c t else ()
+        in
+        FStar.Classical.forall_intro later;
+        keep_split_at f g k t
+      end
+
+(* ---- sibling order is preorder order ---- *)
+
+(* `pre_precedes` carries a node's precedence over its SUBTREE up to the whole walk; this carries
+   any precedence inside a node's child ids up the same way. The structure is `pre_precedes`'s
+   exactly, including the one well-formedness step. *)
+let rec kids_precede_all (cs:list tree) (c1 c2:string)
+  : Lemma (requires wf_all cs /\ precedes c1 c2 (kid_ids cs))
+          (ensures precedes c1 c2 (ids_all cs)) (decreases cs)
+  = match cs with
+    | [] -> ()
+    | c :: r ->
+      inter_nil_iff (ids c) (ids_all r);
+      (match c with
+       | TNode ci _ _ ->
+         if ci = c1 then begin
+           kid_ids_sub c2 r;
+           precedes_app_split c1 c2 (ids c) (ids_all r)
+         end
+         else if ci = c2 then ()
+         else begin
+           kids_precede_all r c1 c2;
+           precedes_mem c1 c2 (ids_all r);
+           precedes_app_right c1 c2 (ids c) (ids_all r)
+         end)
+
+let rec pre_precedes_within (t:tree) (n:tree) (p x:string)
+  : Lemma (requires wf t /\ mem n (pre t) /\ precedes p x (ids_all (kids_of n)))
+          (ensures precedes p x (ids t)) (decreases t)
+  = match t with
+    | TNode i _ cs ->
+      if n = t then precedes_mem p x (ids_all cs)
+      else begin
+        pre_all_precedes_within cs n p x;
+        precedes_mem p x (ids_all cs)
+      end
+and pre_all_precedes_within (ts:list tree) (n:tree) (p x:string)
+  : Lemma (requires wf_all ts /\ mem n (pre_all ts) /\ precedes p x (ids_all (kids_of n)))
+          (ensures precedes p x (ids_all ts)) (decreases ts)
+  = match ts with
+    | [] -> ()
+    | c :: r ->
+      mem_app n (pre c) (pre_all r);
+      if mem n (pre c) then begin
+        pre_precedes_within c n p x;
+        precedes_app_left p x (ids c) (ids_all r)
+      end
+      else begin
+        pre_all_precedes_within r n p x;
+        precedes_mem p x (ids_all r);
+        inter_nil_iff (ids c) (ids_all r);
+        precedes_app_right p x (ids c) (ids_all r)
+      end
+
+(* two children of one node of `after`, in child order, are in that order in `after`'s walk *)
+let kids_precede (a:tree) (n:tree) (c1 c2:string)
+  : Lemma (requires wf a /\ mem n (pre a) /\ precedes c1 c2 (kid_ids (kids_of n)))
+          (ensures precedes c1 c2 (ids a))
+  = pre_find a n;
+    find_in_wf (tid_of n) a n;
+    (match n with TNode _ _ cs -> kids_precede_all cs c1 c2);
+    pre_precedes_within a n c1 c2
+
 (* ================= the prefix invariant, and pass 1 ================= *)
 
 (* which tree a node's PARENT is currently read from: `after` once the script has placed it *)
@@ -1371,13 +1552,119 @@ let absent_no_kids (t:tree) (q:string)
   : Lemma (requires not (mem q (ids t))) (ensures kids_at q t == [] /\ kind_at q t == None)
   = find_in_some_iff q t
 
+(* ---- the ORDER pass 1 leaves (Phase 305): before's children, then the shells placed so far,
+   in after-order ---- *)
+
+(* an added child the walk has already reached *)
+let new1 (b_ids:list string) (ns:list tree) (c:string) : Tot bool =
+  not (mem c b_ids) && not (mem c (tids ns))
+
+[@@"opaque_to_smt"]
+let ord1 (b a:tree) (ns:list tree) (t:tree) : prop =
+  forall (q:string). mem q (ids a) ==>
+    kids_at q t == app (kids_at q b) (keep (new1 (ids b) ns) (kids_at q a))
+
+let ord1_init (b a:tree)
+  : Lemma (requires wf a) (ensures ord1 b a (pre a) b)
+  = reveal_opaque (`%ord1) (ord1 b a (pre a) b);
+    ids_is_pre a;
+    let aux (q:string)
+      : Lemma (mem q (ids a) ==> kids_at q b == app (kids_at q b) (keep (new1 (ids b) (pre a)) (kids_at q a)))
+      = if mem q (ids a) then begin
+          FStar.Classical.forall_intro (FStar.Classical.move_requires (kids_in_ids a q));
+          keep_none (new1 (ids b) (pre a)) (kids_at q a);
+          app_nil_r (kids_at q b)
+        end
+        else ()
+    in
+    FStar.Classical.forall_intro aux
+
+(* a node `before` carries is skipped by pass 1, and the worklist's head leaving changes the
+   filter at that node alone, where it is false either side *)
+let ord1_skip (b a:tree) (n:tree) (r:list tree) (t:tree)
+  : Lemma (requires ord1 b a (n :: r) t /\ mem (tid_of n) (ids b)) (ensures ord1 b a r t)
+  = reveal_opaque (`%ord1) (ord1 b a (n :: r) t);
+    reveal_opaque (`%ord1) (ord1 b a r t);
+    let aux (q:string)
+      : Lemma (keep (new1 (ids b) (n :: r)) (kids_at q a) == keep (new1 (ids b) r) (kids_at q a))
+      = keep_ext (new1 (ids b) (n :: r)) (new1 (ids b) r) (kids_at q a)
+    in
+    FStar.Classical.forall_intro aux
+
 #push-options "--z3rlimit 200 --fuel 2 --ifuel 1"
+(* the shell lands at the END of its parent's list, and that end is where `after` has it among
+   the children placed so far: the children after it in `after`'s child order are later in the
+   walk (`kids_precede`), so still on the worklist *)
+let ins_ord_core (b a:tree) (done:list tree) (n:tree) (r:list tree) (t:tree) (pid:string)
+  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done (n :: r) /\
+                    inv1 b a (n :: r) t /\ ord1 b a (n :: r) t /\ not (mem (tid_of n) (ids b)) /\
+                    lookup (tid_of n) (parent_map (pre a)) == Some pid /\
+                    mem pid (ids t) /\ not (mem (tid_of n) (ids t)))
+          (ensures ord1 b a r (ins pid (shell n) t))
+  = reveal_opaque (`%ord1) (ord1 b a (n :: r) t);
+    reveal_opaque (`%ord1) (ord1 b a r (ins pid (shell n) t));
+    let k = tid_of n in
+    let t' = ins pid (shell n) t in
+    let f = new1 (ids b) (n :: r) in
+    let g = new1 (ids b) r in
+    ids_is_pre a;
+    tids_app done (n :: r);
+    wf_iff_no_dups a;
+    no_dups_app (tids done) (tids (n :: r));
+    inter_nil_iff (tids done) (tids (n :: r));
+    mem_app_r_tree done (n :: r) n;
+    lookup_is_parent a k pid;
+    kids_in_ids a pid k;
+    kids_at_pre a n;
+    absent_no_kids b k;
+    find_in_some_iff pid a;
+    (match find_in pid a with
+     | Some pn ->
+       find_in_mem_pre pid a pn;
+       kids_at_no_dups pid a;
+       let later (c:string)
+         : Lemma (mem c (kids_at pid a) /\ precedes k c (kids_at pid a) ==> not (g c))
+         = if mem c (kids_at pid a) && precedes k c (kids_at pid a) then begin
+             kids_precede a pn k c;
+             precedes_suffix k c (tids done) (tids r)
+           end
+           else ()
+       in
+       FStar.Classical.forall_intro later;
+       keep_split_at f g k (kids_at pid a);
+       app_assoc (kids_at pid b) (keep f (kids_at pid a)) [k]
+     | None -> ());
+    let aux (q:string)
+      : Lemma (mem q (ids a) ==> kids_at q t' == app (kids_at q b) (keep g (kids_at q a)))
+      = if mem q (ids a) then begin
+          if q = k then begin
+            ins_view_inside pid (shell n) t k;
+            let under (c:string)
+              : Lemma (mem c (kids_at k a) ==> not (g c))
+              = if mem c (kids_at k a) then sfx_holder a done (n :: r) c n else ()
+            in
+            FStar.Classical.forall_intro under;
+            keep_none g (kids_at k a)
+          end
+          else begin
+            ins_view pid (shell n) t q;
+            if q = pid then ()
+            else begin
+              (if mem k (kids_at q a) then kid_unique a q pid k else ());
+              keep_ext_mem f g (kids_at q a)
+            end
+          end
+        end
+        else ()
+    in
+    FStar.Classical.forall_intro aux
+
 let ins_step (b a:tree) (done:list tree) (n:tree) (r:list tree) (t:tree) (pid:string)
   : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done (n :: r) /\
-                    inv1 b a (n :: r) t /\ not (mem (tid_of n) (ids b)) /\
+                    inv1 b a (n :: r) t /\ ord1 b a (n :: r) t /\ not (mem (tid_of n) (ids b)) /\
                     lookup (tid_of n) (parent_map (pre a)) == Some pid)
           (ensures apply (InsertChild pid (shell n)) t == Ok (ins pid (shell n) t) /\
-                   inv1 b a r (ins pid (shell n) t))
+                   inv1 b a r (ins pid (shell n) t) /\ ord1 b a r (ins pid (shell n) t))
   = let k = tid_of n in
     let t' = ins pid (shell n) t in
     ids_is_pre a;
@@ -1394,6 +1681,7 @@ let ins_step (b a:tree) (done:list tree) (n:tree) (r:list tree) (t:tree) (pid:st
     precedes_prefix pid k (tids done) (tids r);
     assert (mem pid (ids t));
     assert (not (mem k (ids t)));
+    ins_ord_core b a done n r t pid;
     first_dup_none_iff (shell n) t;
     inter_nil_iff (ids (shell n)) (ids t);
     assert (apply (InsertChild pid (shell n)) t == Ok t');
@@ -1441,9 +1729,10 @@ let inv1_skip (b a:tree) (n:tree) (r:list tree) (t:tree)
   = ()
 
 let rec inserts_run (b a:tree) (done ns:list tree) (t:tree)
-  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done ns /\ inv1 b a ns t)
+  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done ns /\
+                    inv1 b a ns t /\ ord1 b a ns t)
           (ensures (match apply_all (pass_inserts (parent_map (pre a)) (ids b) ns) t with
-                    | Ok t1 -> inv1 b a [] t1
+                    | Ok t1 -> inv1 b a [] t1 /\ ord1 b a [] t1
                     | Error _ -> False))
           (decreases ns)
   = match ns with
@@ -1453,6 +1742,7 @@ let rec inserts_run (b a:tree) (done ns:list tree) (t:tree)
       app_assoc done [n] r;
       if mem k (ids b) then begin
         inv1_skip b a n r t;
+        ord1_skip b a n r t;
         inserts_run b a (app done [n]) r t
       end
       else begin
@@ -1498,6 +1788,64 @@ let holder_exists (a:tree) (c:string)
        | None -> ())
     | None -> ()
 
+(* ---- the ORDER pass 2 leaves (Phase 305): before's children still in place, then the shells,
+   then the survivors moved in so far, in after-order ---- *)
+
+(* a before-child still in place: still its parent's child in `after`, or not yet moved out *)
+let kept2 (b a:tree) (rest:list string) (ns:list tree) (q c:string) : Tot bool =
+  mem c (kids_at q a) || not (cond2 b a rest ns c)
+
+(* a survivor moved in from elsewhere, already *)
+let moved2 (b a:tree) (rest:list string) (ns:list tree) (q c:string) : Tot bool =
+  mem c (ids b) && not (mem c (kids_at q b)) && cond2 b a rest ns c
+
+[@@"opaque_to_smt"]
+let ord2 (b a:tree) (rest:list string) (ns:list tree) (t:tree) : prop =
+  forall (q:string). mem q (ids a) ==>
+    kids_at q t == app (keep (kept2 b a rest ns q) (kids_at q b))
+                       (app (keep (new_pred (ids b)) (kids_at q a))
+                            (keep (moved2 b a rest ns q) (kids_at q a)))
+
+let ord1_to_ord2 (b a t:tree)
+  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ ord1 b a [] t)
+          (ensures ord2 b a [] (pre a) t)
+  = reveal_opaque (`%ord1) (ord1 b a [] t);
+    reveal_opaque (`%ord2) (ord2 b a [] (pre a) t);
+    let aux (q:string)
+      : Lemma (mem q (ids a) ==>
+               kids_at q t == app (keep (kept2 b a [] (pre a) q) (kids_at q b))
+                                  (app (keep (new_pred (ids b)) (kids_at q a))
+                                       (keep (moved2 b a [] (pre a) q) (kids_at q a))))
+      = if mem q (ids a) then begin
+          let still (c:string)
+            : Lemma (mem c (kids_at q b) ==> kept2 b a [] (pre a) q c)
+            = if mem c (kids_at q b) && not (mem c (kids_at q a)) then begin
+                kids_in_ids b q c;
+                kid_not_root b q c;
+                if mem c (ids a) then holder_exists a c else ()
+              end
+              else ()
+          in
+          let none_yet (c:string)
+            : Lemma (mem c (kids_at q a) ==> not (moved2 b a [] (pre a) q c))
+            = if mem c (kids_at q a) && mem c (ids b) then begin
+                kids_in_ids a q c;
+                kid_not_root a q c;
+                holder_exists a c
+              end
+              else ()
+          in
+          FStar.Classical.forall_intro still;
+          FStar.Classical.forall_intro none_yet;
+          keep_all (kept2 b a [] (pre a) q) (kids_at q b);
+          keep_ext (new1 (ids b) []) (new_pred (ids b)) (kids_at q a);
+          keep_none (moved2 b a [] (pre a) q) (kids_at q a);
+          app_nil_r (keep (new_pred (ids b)) (kids_at q a))
+        end
+        else ()
+    in
+    FStar.Classical.forall_intro aux
+
 let inv1_to_inv2 (b a t:tree)
   : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ inv1 b a [] t)
           (ensures inv2 b a [] (pre a) t)
@@ -1540,14 +1888,144 @@ let d_closed (b a:tree) (done:list tree) (p:tree) (ns:list tree) (rest:list stri
          kid_holder_intro (p :: ns) c qn
        | None -> ())
 
-let move_step (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string) (rest:list string)
+(* the moved survivor lands at the END of its new parent's list — and that is where `after` has
+   it among the survivors moved in so far, because pass 2 walks the parent's child list in order
+   (`kid_ids (kids_of p) == app dk (ck :: rest)`: the kids after `ck` are exactly `rest`, still
+   waiting) — and leaves its old parent's kept segment, where it was never a kept child *)
+#push-options "--z3rlimit 100 --fuel 1 --ifuel 1"
+(* the kept segment of any after-parent: the two filters move only at `ck`, and there the moved
+   survivor is no kept child of its old parent *)
+let move_ord_kept (b a:tree) (ns:list tree) (ck pk:string) (rest:list string) (q:string)
+  : Lemma (requires wf a /\ mem ck (ids a) /\ mem ck (kids_at pk a) /\ None? (kid_holder ns ck) /\
+                    not (mem ck rest) /\ (mem ck (kids_at q b) ==> q <> pk))
+          (ensures drop_id ck (keep (kept2 b a (ck :: rest) ns q) (kids_at q b))
+                     == keep (kept2 b a rest ns q) (kids_at q b))
+  = let kb = kids_at q b in
+    let f1 = kept2 b a (ck :: rest) ns q in
+    let g1 = kept2 b a rest ns q in
+    let ag (c:string)
+      : Lemma (mem c kb ==> g1 c == (f1 c && c <> ck))
+      = if mem c kb && c = ck then (if mem ck (kids_at q a) then kid_unique a q pk ck else ()) else ()
+    in
+    FStar.Classical.forall_intro ag;
+    keep_drop f1 g1 ck kb
+
+(* the moved-in segment of the new parent gains `ck` at its END: the kids after it in the child
+   list are `rest`, still waiting *)
+let move_ord_in (b a:tree) (ns:list tree) (ck pk:string) (rest dk:list string)
+  : Lemma (requires wf a /\ mem ck (ids a) /\ mem ck (ids b) /\ not (mem ck (kids_at pk b)) /\
+                    None? (kid_holder ns ck) /\ not (mem ck rest) /\
+                    kids_at pk a == app dk (ck :: rest) /\ no_dups (kids_at pk a))
+          (ensures keep (moved2 b a rest ns pk) (kids_at pk a)
+                     == app (keep (moved2 b a (ck :: rest) ns pk) (kids_at pk a)) [ck])
+  = let ak = kids_at pk a in
+    let f3 = moved2 b a (ck :: rest) ns pk in
+    let g3 = moved2 b a rest ns pk in
+    mem_app ck dk (ck :: rest);
+    let later (c:string)
+      : Lemma (mem c ak /\ precedes ck c ak ==> not (g3 c))
+      = if mem c ak && precedes ck c ak then precedes_suffix ck c dk rest else ()
+    in
+    FStar.Classical.forall_intro later;
+    keep_split_at f3 g3 ck ak
+
+(* the moved-in segment of every other after-parent is untouched *)
+let move_ord_other (b a:tree) (ns:list tree) (ck:string) (rest:list string) (q:string)
+  : Lemma (requires not (mem ck (kids_at q a)))
+          (ensures keep (moved2 b a (ck :: rest) ns q) (kids_at q a)
+                     == keep (moved2 b a rest ns q) (kids_at q a))
+  = keep_ext_mem (moved2 b a (ck :: rest) ns q) (moved2 b a rest ns q) (kids_at q a)
+
+(* the worklist regrouping is the same filter: `kid_holder (p :: ns)` reads `p`'s kids first *)
+let cond2_regroup (b a:tree) (p:tree) (ns:list tree) (c:string)
+  : Lemma (ensures cond2 b a [] (p :: ns) c == cond2 b a (kid_ids (kids_of p)) ns c)
+  = ()
+#pop-options
+
+#push-options "--z3rlimit 100 --fuel 1 --ifuel 1"
+let move_ord_core (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string)
+                  (rest dk:list string) (t:tree) (pid:string) (sub:tree)
+  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done (p :: ns) /\
+                    inv2 b a (ck :: rest) ns t /\ ord2 b a (ck :: rest) ns t /\
+                    no_dups (ck :: rest) /\ kid_ids (kids_of p) == app dk (ck :: rest) /\
+                    mem ck (ids b) /\
+                    (match lookup ck (parent_map (pre b)) with
+                     | Some bp -> bp <> tid_of p
+                     | None -> true) /\
+                    parent_of ck t == Some pid /\ find_in ck t == Some sub /\
+                    mem (tid_of p) (ids t) /\ not (mem (tid_of p) (ids sub)))
+          (ensures ord2 b a rest ns (ins (tid_of p) sub (rem_at pid ck t)))
+  = reveal_opaque (`%ord2) (ord2 b a (ck :: rest) ns t);
+    reveal_opaque (`%ord2) (ord2 b a rest ns (ins (tid_of p) sub (rem_at pid ck t)));
+    let pk = tid_of p in
+    let t' = ins pk sub (rem_at pid ck t) in
+    let ak = kid_ids (kids_of p) in
+    mem_app_r_tree done (p :: ns) p;
+    kids_at_pre a p;
+    kids_in_ids a pk ck;
+    ids_is_pre a;
+    tids_app done (p :: ns);
+    wf_iff_no_dups a;
+    no_dups_app (tids done) (tids (p :: ns));
+    kids_at_no_dups pk a;
+    (if mem ck (kids_at pk b) then parent_is_lookup b ck pk else ());
+    (match kid_holder ns ck with
+     | Some h ->
+       kid_holder_some ns ck h;
+       mem_app_r_tree done (p :: ns) h;
+       kids_at_pre a h;
+       kid_unique a (tid_of h) pk ck;
+       tids_mem ns h
+     | None -> ());
+    assert (None? (kid_holder ns ck));
+    mem_app ck dk (ck :: rest);
+    let aux (q:string)
+      : Lemma (mem q (ids a) ==>
+               kids_at q t' == app (keep (kept2 b a rest ns q) (kids_at q b))
+                                   (app (keep (new_pred (ids b)) (kids_at q a))
+                                        (keep (moved2 b a rest ns q) (kids_at q a))))
+      = if mem q (ids a) then begin
+          move_view ck pk t pid sub q;
+          let kb = kids_at q b in
+          let ka = kids_at q a in
+          let f1 = kept2 b a (ck :: rest) ns q in
+          let g1 = kept2 b a rest ns q in
+          let f3 = moved2 b a (ck :: rest) ns q in
+          let nn = keep (new_pred (ids b)) ka in
+          drop_id_app ck (keep f1 kb) (app nn (keep f3 ka));
+          drop_id_app ck nn (keep f3 ka);
+          drop_id_absent ck nn;
+          drop_id_absent ck (keep f3 ka);
+          (if mem ck kb then parent_is_lookup b ck q else ());
+          move_ord_kept b a ns ck pk rest q;
+          if q = pk then begin
+            move_ord_in b a ns ck pk rest dk;
+            app_assoc (keep g1 kb) (app nn (keep f3 ak)) [ck];
+            app_assoc nn (keep f3 ak) [ck]
+          end
+          else begin
+            (if mem ck ka then kid_unique a q pk ck else ());
+            move_ord_other b a ns ck rest q;
+            app_nil_r (app (keep g1 kb) (app nn (keep (moved2 b a rest ns q) ka)))
+          end
+        end
+        else ()
+    in
+    FStar.Classical.forall_intro aux
+#pop-options
+
+let move_step (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string) (rest dk:list string)
               (t:tree)
   : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done (p :: ns) /\
-                    inv2 b a (ck :: rest) ns t /\ no_dups (ck :: rest) /\
+                    inv2 b a (ck :: rest) ns t /\ ord2 b a (ck :: rest) ns t /\
+                    no_dups (ck :: rest) /\ kid_ids (kids_of p) == app dk (ck :: rest) /\
                     (forall (z:string). mem z (ck :: rest) ==> mem z (kid_ids (kids_of p))) /\
-                    not (same_kids b a (tid_of p)) /\ mem ck (ids b))
+                    not (same_kids b a (tid_of p)) /\ mem ck (ids b) /\
+                    (match lookup ck (parent_map (pre b)) with
+                     | Some bp -> bp <> tid_of p
+                     | None -> true))
           (ensures (match apply (MoveNode ck (tid_of p)) t with
-                    | Ok t' -> inv2 b a rest ns t'
+                    | Ok t' -> inv2 b a rest ns t' /\ ord2 b a rest ns t'
                     | Error _ -> False))
   = let pk = tid_of p in
     mem_app_r_tree done (p :: ns) p;
@@ -1584,6 +2062,7 @@ let move_step (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string) (r
          apply_preserves_wf (MoveNode ck pk) t;
          tid_ins pk sub (rem_at pid ck t);
          tid_rem pid ck t;
+         move_ord_core b a done p ns ck rest dk t pid sub;
          let aux_i (y:string) : Lemma (mem y (ids t') == (mem y (ids b) || mem y (ids a)))
            = move_ids ck pk t pid sub y
          in
@@ -1634,13 +2113,16 @@ let move_step (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string) (r
 let move_skip (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string) (rest:list string)
               (t:tree)
   : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done (p :: ns) /\
-                    inv2 b a (ck :: rest) ns t /\ mem ck (kid_ids (kids_of p)) /\
+                    inv2 b a (ck :: rest) ns t /\ ord2 b a (ck :: rest) ns t /\
+                    mem ck (kid_ids (kids_of p)) /\
                     not (mem ck (ids b) &&
                          (match lookup ck (parent_map (pre b)) with
                           | Some bp -> bp <> tid_of p
                           | None -> true)))
-          (ensures inv2 b a rest ns t)
-  = let pk = tid_of p in
+          (ensures inv2 b a rest ns t /\ ord2 b a rest ns t)
+  = reveal_opaque (`%ord2) (ord2 b a (ck :: rest) ns t);
+    reveal_opaque (`%ord2) (ord2 b a rest ns t);
+    let pk = tid_of p in
     mem_app_r_tree done (p :: ns) p;
     kids_at_pre a p;
     let aux (q c:string)
@@ -1652,16 +2134,36 @@ let move_skip (b a:tree) (done:list tree) (p:tree) (ns:list tree) (ck:string) (r
         end
         else ()
     in
-    FStar.Classical.forall_intro_2 aux
+    FStar.Classical.forall_intro_2 aux;
+    (* the order: the filters move only at `ck`, and there they agree on both lists *)
+    let aux_o (q:string)
+      : Lemma (keep (kept2 b a (ck :: rest) ns q) (kids_at q b) == keep (kept2 b a rest ns q) (kids_at q b) /\
+               keep (moved2 b a (ck :: rest) ns q) (kids_at q a) == keep (moved2 b a rest ns q) (kids_at q a))
+      = let ag (c:string)
+          : Lemma ((mem c (kids_at q b) ==> kept2 b a (ck :: rest) ns q c == kept2 b a rest ns q c) /\
+                   (mem c (kids_at q a) ==> moved2 b a (ck :: rest) ns q c == moved2 b a rest ns q c))
+          = if c = ck && mem ck (ids b) then begin
+              lookup_is_parent b ck pk;
+              (if mem ck (kids_at q a) then kid_unique a q pk ck else ());
+              (if mem ck (kids_at q b) then kid_unique b q pk ck else ())
+            end
+            else ()
+        in
+        FStar.Classical.forall_intro ag;
+        keep_ext_mem (kept2 b a (ck :: rest) ns q) (kept2 b a rest ns q) (kids_at q b);
+        keep_ext_mem (moved2 b a (ck :: rest) ns q) (moved2 b a rest ns q) (kids_at q a)
+    in
+    FStar.Classical.forall_intro aux_o
 
-let rec moves_under_run (b a:tree) (done:list tree) (p:tree) (ns:list tree) (cs:list tree)
-                        (t:tree)
+let rec moves_under_run (b a:tree) (done:list tree) (p:tree) (ns:list tree) (dk:list string)
+                        (cs:list tree) (t:tree)
   : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done (p :: ns) /\
-                    inv2 b a (kid_ids cs) ns t /\ no_dups (kid_ids cs) /\
+                    inv2 b a (kid_ids cs) ns t /\ ord2 b a (kid_ids cs) ns t /\
+                    no_dups (kid_ids cs) /\ kid_ids (kids_of p) == app dk (kid_ids cs) /\
                     (forall (z:string). mem z (kid_ids cs) ==> mem z (kid_ids (kids_of p))) /\
                     not (same_kids b a (tid_of p)))
           (ensures (match apply_all (moves_under (tid_of p) (ids b) (parent_map (pre b)) cs) t with
-                    | Ok t' -> inv2 b a [] ns t'
+                    | Ok t' -> inv2 b a [] ns t' /\ ord2 b a [] ns t'
                     | Error _ -> False))
           (decreases cs)
   = match cs with
@@ -1674,26 +2176,39 @@ let rec moves_under_run (b a:tree) (done:list tree) (p:tree) (ns:list tree) (cs:
         (match lookup ck (parent_map (pre b)) with
          | Some bp -> bp <> pk
          | None -> true) in
+      app_assoc dk [ck] (kid_ids r);
       if moved then begin
-        move_step b a done p ns ck (kid_ids r) t;
+        move_step b a done p ns ck (kid_ids r) dk t;
         (match apply (MoveNode ck pk) t with
-         | Ok t' -> moves_under_run b a done p ns r t'
+         | Ok t' -> moves_under_run b a done p ns (app dk [ck]) r t'
          | Error _ -> ())
       end
       else begin
         move_skip b a done p ns ck (kid_ids r) t;
-        moves_under_run b a done p ns r t
+        moves_under_run b a done p ns (app dk [ck]) r t
       end
 
 let inv2_regroup (b a:tree) (p:tree) (ns:list tree) (t:tree)
-  : Lemma (requires inv2 b a [] (p :: ns) t) (ensures inv2 b a (kid_ids (kids_of p)) ns t)
-  = ()
+  : Lemma (requires inv2 b a [] (p :: ns) t /\ ord2 b a [] (p :: ns) t)
+          (ensures inv2 b a (kid_ids (kids_of p)) ns t /\ ord2 b a (kid_ids (kids_of p)) ns t)
+  = reveal_opaque (`%ord2) (ord2 b a [] (p :: ns) t);
+    reveal_opaque (`%ord2) (ord2 b a (kid_ids (kids_of p)) ns t);
+    FStar.Classical.forall_intro (cond2_regroup b a p ns);
+    let aux_o (q:string)
+      : Lemma (keep (kept2 b a [] (p :: ns) q) (kids_at q b) == keep (kept2 b a (kid_ids (kids_of p)) ns q) (kids_at q b) /\
+               keep (moved2 b a [] (p :: ns) q) (kids_at q a) == keep (moved2 b a (kid_ids (kids_of p)) ns q) (kids_at q a))
+      = keep_ext (kept2 b a [] (p :: ns) q) (kept2 b a (kid_ids (kids_of p)) ns q) (kids_at q b);
+        keep_ext (moved2 b a [] (p :: ns) q) (moved2 b a (kid_ids (kids_of p)) ns q) (kids_at q a)
+    in
+    FStar.Classical.forall_intro aux_o
 
 let inv2_unchanged (b a:tree) (done:list tree) (p:tree) (ns:list tree) (t:tree)
   : Lemma (requires wf b /\ wf a /\ pre a == app done (p :: ns) /\ inv2 b a [] (p :: ns) t /\
-                    same_kids b a (tid_of p))
-          (ensures inv2 b a [] ns t)
-  = let pk = tid_of p in
+                    ord2 b a [] (p :: ns) t /\ same_kids b a (tid_of p))
+          (ensures inv2 b a [] ns t /\ ord2 b a [] ns t)
+  = reveal_opaque (`%ord2) (ord2 b a [] (p :: ns) t);
+    reveal_opaque (`%ord2) (ord2 b a [] ns t);
+    let pk = tid_of p in
     mem_app_r_tree done (p :: ns) p;
     kids_at_pre a p;
     let aux (q c:string)
@@ -1704,13 +2219,32 @@ let inv2_unchanged (b a:tree) (done:list tree) (p:tree) (ns:list tree) (t:tree)
         end
         else ()
     in
-    FStar.Classical.forall_intro_2 aux
+    FStar.Classical.forall_intro_2 aux;
+    (* the order: a kid of an unchanged parent is kept wherever it is a before-child and moved in
+       nowhere, whichever worklist the filter reads *)
+    let aux_o (q:string)
+      : Lemma (keep (kept2 b a [] (p :: ns) q) (kids_at q b) == keep (kept2 b a [] ns q) (kids_at q b) /\
+               keep (moved2 b a [] (p :: ns) q) (kids_at q a) == keep (moved2 b a [] ns q) (kids_at q a))
+      = let ag (c:string)
+          : Lemma ((mem c (kids_at q b) ==> kept2 b a [] (p :: ns) q c == kept2 b a [] ns q c) /\
+                   (mem c (kids_at q a) ==> moved2 b a [] (p :: ns) q c == moved2 b a [] ns q c))
+          = if mem c (kid_ids (kids_of p)) then begin
+              (if mem c (kids_at q a) then kid_unique a q pk c else ());
+              (if mem c (kids_at q b) then kid_unique b q pk c else ())
+            end
+            else ()
+        in
+        FStar.Classical.forall_intro ag;
+        keep_ext_mem (kept2 b a [] (p :: ns) q) (kept2 b a [] ns q) (kids_at q b);
+        keep_ext_mem (moved2 b a [] (p :: ns) q) (moved2 b a [] ns q) (kids_at q a)
+    in
+    FStar.Classical.forall_intro aux_o
 
 let rec moves_run (b a:tree) (done ns:list tree) (t:tree)
   : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a /\ pre a == app done ns /\
-                    inv2 b a [] ns t)
+                    inv2 b a [] ns t /\ ord2 b a [] ns t)
           (ensures (match apply_all (fst (pass_moves (ids b) (parent_map (pre b)) (kid_map (pre b)) ns)) t with
-                    | Ok t' -> inv2 b a [] [] t'
+                    | Ok t' -> inv2 b a [] [] t' /\ ord2 b a [] [] t'
                     | Error _ -> False))
           (decreases ns)
   = match ns with
@@ -1729,7 +2263,7 @@ let rec moves_run (b a:tree) (done ns:list tree) (t:tree)
       else begin
         inv2_regroup b a p r t;
         kids_at_no_dups pk a;
-        moves_under_run b a done p r (kids_of p) t;
+        moves_under_run b a done p r [] (kids_of p) t;
         apply_all_app (moves_under pk (ids b) (parent_map (pre b)) (kids_of p))
                       (fst (pass_moves (ids b) (parent_map (pre b)) (kid_map (pre b)) r)) t;
         (match apply_all (moves_under pk (ids b) (parent_map (pre b)) (kids_of p)) t with
@@ -1759,7 +2293,57 @@ let inv3 (b a:tree) (ns:list tree) (t:tree) : prop =
   (forall (q:string). mem q (ids t) ==> kind_at q t == kind_src b a q) /\
   (forall (q:string). same_kids b a q ==> kids_at q t == kids_at q b)
 
+(* ---- the ORDER pass 3 leaves (Phase 305): the before-children still in place — a kept child,
+   or a removed one the pass has not reached — then the shells, then the moved-in survivors ---- *)
+
+let kept3 (b a:tree) (ns:list tree) (q c:string) : Tot bool =
+  mem c (kids_at q a) || (not (mem c (ids a)) && mem c (tids ns))
+
+[@@"opaque_to_smt"]
+let ord3 (b a:tree) (ns:list tree) (t:tree) : prop =
+  forall (q:string). mem q (ids a) ==>
+    kids_at q t == app (keep (kept3 b a ns q) (kids_at q b))
+                       (app (keep (new_pred (ids b)) (kids_at q a))
+                            (keep (moved_pred (ids b) (kids_at q b)) (kids_at q a)))
+
+(* what the three passes leave — `settled_order` read at the two trees' child lists *)
+[@@"opaque_to_smt"]
+let predicted (b a:tree) (q:string) : Tot (list string) =
+  settled_order (ids b) (kids_at q b) (kids_at q a)
+
 #push-options "--z3rlimit 200 --fuel 2 --ifuel 1"
+let ord2_to_ord3 (b a t:tree)
+  : Lemma (requires wf b /\ wf a /\ ord2 b a [] [] t) (ensures ord3 b a (pre b) t)
+  = reveal_opaque (`%ord2) (ord2 b a [] [] t);
+    reveal_opaque (`%ord3) (ord3 b a (pre b) t);
+    ids_is_pre b;
+    let aux (q:string)
+      : Lemma (keep (kept2 b a [] [] q) (kids_at q b) == keep (kept3 b a (pre b) q) (kids_at q b) /\
+               keep (moved2 b a [] [] q) (kids_at q a) == keep (moved_pred (ids b) (kids_at q b)) (kids_at q a))
+      = let ag (c:string)
+          : Lemma ((mem c (kids_at q b) ==> kept2 b a [] [] q c == kept3 b a (pre b) q c) /\
+                   (mem c (kids_at q a) ==> moved2 b a [] [] q c == moved_pred (ids b) (kids_at q b) c))
+          = (if mem c (kids_at q b) then kids_in_ids b q c else ());
+            (if mem c (kids_at q a) then kids_in_ids a q c else ())
+        in
+        FStar.Classical.forall_intro ag;
+        keep_ext_mem (kept2 b a [] [] q) (kept3 b a (pre b) q) (kids_at q b);
+        keep_ext_mem (moved2 b a [] [] q) (moved_pred (ids b) (kids_at q b)) (kids_at q a)
+    in
+    FStar.Classical.forall_intro aux
+
+let ord3_to_predicted (b a t:tree)
+  : Lemma (requires ord3 b a [] t)
+          (ensures forall (q:string). mem q (ids a) ==> kids_at q t == predicted b a q)
+  = reveal_opaque (`%ord3) (ord3 b a [] t);
+    let aux (q:string)
+      : Lemma (keep (kept3 b a [] q) (kids_at q b) == keep (in_list (kids_at q a)) (kids_at q b) /\
+               predicted b a q == settled_order (ids b) (kids_at q b) (kids_at q a))
+      = reveal_opaque (`%predicted) (predicted b a q);
+        keep_ext (kept3 b a [] q) (in_list (kids_at q a)) (kids_at q b)
+    in
+    FStar.Classical.forall_intro aux
+
 let inv2_to_inv3 (b a t:tree)
   : Lemma (requires wf b /\ wf a /\ inv2 b a [] [] t) (ensures inv3 b a (pre b) t)
   = ids_is_pre b;
@@ -1777,11 +2361,47 @@ let rem_closed (b a:tree) (ns:list tree) (t:tree) (k:string) (q c:string)
     if mem c (ids a) then kids_in_ids a q c
     else parent_is_lookup b c q
 
+(* a removed child leaves its before-parent's kept segment in place; it was never in the other
+   two, which hold only nodes `after` carries *)
+let rem_ord_core (b a:tree) (n:tree) (r:list tree) (t:tree) (pid:string) (sub:tree)
+  : Lemma (requires wf b /\ wf a /\ inv3 b a (n :: r) t /\ ord3 b a (n :: r) t /\
+                    no_dups (tids (n :: r)) /\ top b a (tid_of n) /\
+                    parent_of (tid_of n) t == Some pid /\ find_in (tid_of n) t == Some sub /\
+                    (forall (q:string). mem q (ids a) ==> not (mem q (ids sub))))
+          (ensures ord3 b a r (rem_at pid (tid_of n) t))
+  = reveal_opaque (`%ord3) (ord3 b a (n :: r) t);
+    reveal_opaque (`%ord3) (ord3 b a r (rem_at pid (tid_of n) t));
+    let k = tid_of n in
+    let t' = rem_at pid k t in
+    let aux (q:string)
+      : Lemma (mem q (ids a) ==>
+               kids_at q t' == app (keep (kept3 b a r q) (kids_at q b))
+                                   (app (keep (new_pred (ids b)) (kids_at q a))
+                                        (keep (moved_pred (ids b) (kids_at q b)) (kids_at q a))))
+      = if mem q (ids a) then begin
+          rem_view pid k t sub q;
+          let kb = kids_at q b in
+          let ka = kids_at q a in
+          let f1 = kept3 b a (n :: r) q in
+          let g1 = kept3 b a r q in
+          let nn = keep (new_pred (ids b)) ka in
+          let mm = keep (moved_pred (ids b) kb) ka in
+          (if mem k ka then kids_in_ids a q k else ());
+          drop_id_app k (keep f1 kb) (app nn mm);
+          drop_id_app k nn mm;
+          drop_id_absent k nn;
+          drop_id_absent k mm;
+          keep_drop f1 g1 k kb
+        end
+        else ()
+    in
+    FStar.Classical.forall_intro aux
+
 let rem_step (b a:tree) (n:tree) (r:list tree) (t:tree)
-  : Lemma (requires wf b /\ wf a /\ inv3 b a (n :: r) t /\ no_dups (tids (n :: r)) /\
-                    top b a (tid_of n))
+  : Lemma (requires wf b /\ wf a /\ inv3 b a (n :: r) t /\ ord3 b a (n :: r) t /\
+                    no_dups (tids (n :: r)) /\ top b a (tid_of n))
           (ensures (match apply (RemoveNode (tid_of n)) t with
-                    | Ok t' -> inv3 b a r t'
+                    | Ok t' -> inv3 b a r t' /\ ord3 b a r t'
                     | Error _ -> False))
   = let k = tid_of n in
     tid_in_ids a;
@@ -1797,6 +2417,9 @@ let rem_step (b a:tree) (n:tree) (r:list tree) (t:tree)
       in
       FStar.Classical.forall_intro_2 clo;
       closed_outside d t sub;
+      let outside (q:string) : Lemma (mem q (ids a) ==> not (mem q (ids sub))) = () in
+      FStar.Classical.forall_intro outside;
+      rem_ord_core b a n r t pid sub;
       let t' = rem_at pid k t in
       apply_preserves_wf (RemoveNode k) t;
       tid_rem pid k t;
@@ -1834,19 +2457,35 @@ let rem_step (b a:tree) (n:tree) (r:list tree) (t:tree)
     | _, _ -> ()
 
 let rem_skip (b a:tree) (n:tree) (r:list tree) (t:tree)
-  : Lemma (requires wf b /\ inv3 b a (n :: r) t /\ not (top b a (tid_of n)))
-          (ensures inv3 b a r t)
-  = let k = tid_of n in
+  : Lemma (requires wf b /\ inv3 b a (n :: r) t /\ ord3 b a (n :: r) t /\ not (top b a (tid_of n)))
+          (ensures inv3 b a r t /\ ord3 b a r t)
+  = reveal_opaque (`%ord3) (ord3 b a (n :: r) t);
+    reveal_opaque (`%ord3) (ord3 b a r t);
+    let k = tid_of n in
     let aux (q c:string)
       : Lemma (mem q (ids t) ==> side3 b a (n :: r) q c == side3 b a r q c)
       = if c = k && mem k (kids_at q b) then parent_is_lookup b k q else ()
     in
-    FStar.Classical.forall_intro_2 aux
+    FStar.Classical.forall_intro_2 aux;
+    (* the order: a skipped node that is some after-parent's before-child is one `after` keeps *)
+    let aux_o (q:string)
+      : Lemma (mem q (ids a) ==> keep (kept3 b a (n :: r) q) (kids_at q b) == keep (kept3 b a r q) (kids_at q b))
+      = if mem q (ids a) then begin
+          let ag (c:string)
+            : Lemma (mem c (kids_at q b) ==> kept3 b a (n :: r) q c == kept3 b a r q c)
+            = if c = k && mem k (kids_at q b) then parent_is_lookup b k q else ()
+          in
+          FStar.Classical.forall_intro ag;
+          keep_ext_mem (kept3 b a (n :: r) q) (kept3 b a r q) (kids_at q b)
+        end
+        else ()
+    in
+    FStar.Classical.forall_intro aux_o
 
 let rec removes_run (b a:tree) (ns:list tree) (t:tree)
-  : Lemma (requires wf b /\ wf a /\ inv3 b a ns t /\ no_dups (tids ns))
+  : Lemma (requires wf b /\ wf a /\ inv3 b a ns t /\ ord3 b a ns t /\ no_dups (tids ns))
           (ensures (match apply_all (pass_removes (ids a) (parent_map (pre b)) ns) t with
-                    | Ok t' -> inv3 b a [] t'
+                    | Ok t' -> inv3 b a [] t' /\ ord3 b a [] t'
                     | Error _ -> False))
           (decreases ns)
   = match ns with
@@ -1866,12 +2505,18 @@ let rec removes_run (b a:tree) (ns:list tree) (t:tree)
 
 (* ================= pass 4: the reorders ================= *)
 
+(* The last conjunct is Phase 305's: a listed parent not yet reached holds the order passes 1-3
+   left it in (`predicted`) — or `after`'s, which is what lets the pass SKIP it when the two
+   agree. A disjunction rather than `predicted` alone so that nothing here depends on the
+   worklist being duplicate-free. *)
 let inv4 (b a:tree) (ps:list string) (t:tree) : prop =
   wf t /\ tid_of t == tid_of a /\
   (forall (y:string). mem y (ids a) ==> mem y (ids t)) /\
   (forall (q c:string). mem q (ids t) ==> mem c (kids_at q t) == side3 b a [] q c) /\
   (forall (q:string). mem q (ids t) ==> kind_at q t == kind_src b a q) /\
-  (forall (q:string). mem q (ids a) /\ not (mem q ps) ==> kids_at q t == kids_at q a)
+  (forall (q:string). mem q (ids a) /\ not (mem q ps) ==> kids_at q t == kids_at q a) /\
+  (forall (q:string). mem q (ids a) /\ mem q ps ==>
+     (kids_at q t == predicted b a q \/ kids_at q t == kids_at q a))
 
 let rec changed_listed (b a:tree) (ns:list tree) (q:string)
   : Lemma (requires wf b /\ wf a /\ (forall (n:tree). mem n ns ==> mem n (pre a)) /\
@@ -1943,9 +2588,36 @@ let reorder_short (b a:tree) (pid:string) (r:list string) (t:tree) (pn:tree)
      | _ -> ());
     short_eq (kids_at pid t) (kids_at pid a)
 
+(* THE DROP (Phase 305, 305.t1): the pass reads the parent's before-children off the kid map,
+   which is `kids_at pid b` for a survivor and `[]` for a parent `before` does not carry, so
+   `settled_order` there IS `predicted`; and a parent whose predicted order is `after`'s already
+   holds `after`'s list, by `inv4`'s last conjunct either way round. *)
+let reorder_settled (b a:tree) (pid:string) (r:list string) (t:tree) (pn:tree)
+  : Lemma (requires wf b /\ wf a /\ inv4 b a (pid :: r) t /\ find_in pid a == Some pn /\
+                    settled_order (ids b)
+                                  (match lookup_kids pid (kid_map (pre b)) with Some bk -> bk | None -> [])
+                                  (kid_ids (kids_of pn))
+                      == kid_ids (kids_of pn))
+          (ensures inv4 b a r t)
+  = find_in_some_iff pid a;
+    ids_is_pre b;
+    let ak = kid_ids (kids_of pn) in
+    let bk = (match lookup_kids pid (kid_map (pre b)) with Some bk -> bk | None -> []) in
+    (if mem pid (ids b) then lookup_kids_is b pid
+     else begin
+       absent_no_kids b pid;
+       (match lookup_kids pid (kid_map (pre b)) with
+        | Some v -> lookup_kids_sound b (pre b) pid v
+        | None -> ())
+     end);
+    reveal_opaque (`%predicted) (predicted b a pid);
+    assert (bk == kids_at pid b);
+    assert (kids_at pid a == ak);
+    assert (predicted b a pid == ak)
+
 let rec reorders_run (b a:tree) (ps:list string) (t:tree)
-  : Lemma (requires wf a /\ inv4 b a ps t)
-          (ensures (match apply_all (pass_reorders a ps) t with
+  : Lemma (requires wf b /\ wf a /\ inv4 b a ps t)
+          (ensures (match apply_all (pass_reorders (ids b) (kid_map (pre b)) a ps) t with
                     | Ok t' -> inv4 b a [] t'
                     | Error _ -> False))
           (decreases ps)
@@ -1954,11 +2626,17 @@ let rec reorders_run (b a:tree) (ps:list string) (t:tree)
     | pid :: r ->
       (match find_in pid a with
        | Some pn ->
-         if more_than_one (kids_of pn) then begin
+         let ak = kid_ids (kids_of pn) in
+         let bk = (match lookup_kids pid (kid_map (pre b)) with Some bk -> bk | None -> []) in
+         if more_than_one (kids_of pn) && settled_order (ids b) bk ak <> ak then begin
            reorder_step b a pid r t pn;
-           (match apply (ReorderChildren pid (kid_ids (kids_of pn))) t with
+           (match apply (ReorderChildren pid ak) t with
             | Ok t' -> reorders_run b a r t'
             | Error _ -> ())
+         end
+         else if more_than_one (kids_of pn) then begin
+           reorder_settled b a pid r t pn;
+           reorders_run b a r t
          end
          else begin
            reorder_short b a pid r t pn;
@@ -2024,21 +2702,24 @@ let diff_run (b a:tree)
     let pm = pass_moves (ids b) b_par b_kids (pre a) in
     let p2 = fst pm in
     let p3 = pass_removes (ids a) b_par (pre b) in
-    let p4 = pass_reorders a (snd pm) in
+    let p4 = pass_reorders (ids b) b_kids a (snd pm) in
     apply_all_app p1 (app p2 (app p3 p4)) b;
     inv1_init b a;
+    ord1_init b a;
     inserts_run b a [] (pre a) b;
     match apply_all p1 b with
     | Error _ -> ()
     | Ok t1 ->
       apply_all_app p2 (app p3 p4) t1;
       inv1_to_inv2 b a t1;
+      ord1_to_ord2 b a t1;
       moves_run b a [] (pre a) t1;
       (match apply_all p2 t1 with
        | Error _ -> ()
        | Ok t2 ->
          apply_all_app p3 p4 t2;
          inv2_to_inv3 b a t2;
+         ord2_to_ord3 b a t2;
          ids_is_pre b;
          wf_iff_no_dups b;
          removes_run b a (pre b) t2;
@@ -2046,6 +2727,7 @@ let diff_run (b a:tree)
           | Error _ -> ()
           | Ok t3 ->
             ids_is_pre a;
+            ord3_to_predicted b a t3;
             let listed (q:string)
               : Lemma (mem q (ids a) /\ not (same_kids b a q) ==> mem q (snd pm))
               = FStar.Classical.move_requires (changed_listed b a (pre a)) q
@@ -2053,6 +2735,55 @@ let diff_run (b a:tree)
             FStar.Classical.forall_intro listed;
             assert (inv4 b a (snd pm) t3);
             reorders_run b a (snd pm) t3))
+#pop-options
+
+(* THE ORDER-PREDICTION LEMMA (Phase 305, 305.t1): after the first three blocks, every parent of
+   `after` holds its kept survivors in `before`'s order, then the inserted shells, then the moved-in
+   survivors, the last two each in `after`'s order — `settled_order`, the order pass 4 reads to
+   decide that a parent needs no reorder. The three exact-order invariants assemble it. *)
+#push-options "--z3rlimit 200 --fuel 2 --ifuel 1"
+let diff_settles_order (b a:tree)
+  : Lemma (requires wf b /\ wf a /\ tid_of b == tid_of a)
+          (ensures (let (p1, p2, p3, _) = diff_blocks b a in
+                    match apply_all (app p1 (app p2 p3)) b with
+                    | Ok t3 -> forall (q:string). mem q (ids a) ==>
+                                 kids_at q t3 == settled_order (ids b) (kids_at q b) (kids_at q a)
+                    | Error _ -> False))
+  = let a_par = parent_map (pre a) in
+    let b_par = parent_map (pre b) in
+    let b_kids = kid_map (pre b) in
+    let p1 = pass_inserts a_par (ids b) (pre a) in
+    let pm = pass_moves (ids b) b_par b_kids (pre a) in
+    let p2 = fst pm in
+    let p3 = pass_removes (ids a) b_par (pre b) in
+    apply_all_app p1 (app p2 p3) b;
+    inv1_init b a;
+    ord1_init b a;
+    inserts_run b a [] (pre a) b;
+    match apply_all p1 b with
+    | Error _ -> ()
+    | Ok t1 ->
+      apply_all_app p2 p3 t1;
+      inv1_to_inv2 b a t1;
+      ord1_to_ord2 b a t1;
+      moves_run b a [] (pre a) t1;
+      (match apply_all p2 t1 with
+       | Error _ -> ()
+       | Ok t2 ->
+         inv2_to_inv3 b a t2;
+         ord2_to_ord3 b a t2;
+         ids_is_pre b;
+         wf_iff_no_dups b;
+         removes_run b a (pre b) t2;
+         (match apply_all p3 t2 with
+          | Error _ -> ()
+          | Ok t3 ->
+            ord3_to_predicted b a t3;
+            let unfold_q (q:string)
+              : Lemma (predicted b a q == settled_order (ids b) (kids_at q b) (kids_at q a))
+              = reveal_opaque (`%predicted) (predicted b a q)
+            in
+            FStar.Classical.forall_intro unfold_q))
 #pop-options
 
 (* THE OPERATIONAL `diff_applicable`: `apply` accepts every step of the script `toOps` emits, in
@@ -2632,11 +3363,11 @@ let diff_script_after_kind (b a:tree)
     let pm = pass_moves (ids b) b_par b_kids a_nodes in
     let p2 = fst pm in
     let p3 = pass_removes (ids a) b_par b_nodes in
-    let p4 = pass_reorders a (snd pm) in
+    let p4 = pass_reorders (ids b) b_kids a (snd pm) in
     pass_inserts_after_kind a a_par (ids b) a_nodes;
     pass_moves_all (ids b) b_par b_kids a_nodes;
     pass_removes_all (ids a) b_par b_nodes;
-    pass_reorders_all a (snd pm);
+    pass_reorders_all (ids b) b_kids a (snd pm);
     all_ops_weaken is_move (after_kind a) p2;
     all_ops_weaken is_remove (after_kind a) p3;
     all_ops_weaken is_reorder (after_kind a) p4;
@@ -2656,11 +3387,11 @@ let diff_script_structural (b a:tree)
     let pm = pass_moves (ids b) b_par b_kids a_nodes in
     let p2 = fst pm in
     let p3 = pass_removes (ids a) b_par b_nodes in
-    let p4 = pass_reorders a (snd pm) in
+    let p4 = pass_reorders (ids b) b_kids a (snd pm) in
     pass_inserts_all a_par (ids b) a_nodes;
     pass_moves_all (ids b) b_par b_kids a_nodes;
     pass_removes_all (ids a) b_par b_nodes;
-    pass_reorders_all a (snd pm);
+    pass_reorders_all (ids b) b_kids a (snd pm);
     all_ops_weaken is_insert structural_op p1;
     all_ops_weaken is_move structural_op p2;
     all_ops_weaken is_remove structural_op p3;
@@ -3037,10 +3768,14 @@ let rec twins_hold (l:list twin) : Tot bool =
   | [] -> true
   | t :: r -> t.tholds () && twins_hold r
 let twins : list twin = [
-  { tname = "to-ops-inserts-then-reorders";
+  { tname = "to-ops-appends-with-no-trailing-reorder";
     tholds = (fun () ->
       to_ops (TNode "r" "doc" [ TNode "a" "sec" [] ]) (TNode "r" "doc" [ TNode "a" "sec" []; TNode "b" "para" [] ])
-      = Ok [ InsertChild "r" (TNode "b" "para" []); ReorderChildren "r" [ "a"; "b" ] ]) };
+      = Ok [ InsertChild "r" (TNode "b" "para" []) ]) };
+  { tname = "to-ops-prepends-then-reorders";
+    tholds = (fun () ->
+      to_ops (TNode "r" "doc" [ TNode "a" "sec" [] ]) (TNode "r" "doc" [ TNode "b" "para" []; TNode "a" "sec" [] ])
+      = Ok [ InsertChild "r" (TNode "b" "para" []); ReorderChildren "r" [ "b"; "a" ] ]) };
   { tname = "to-ops-contained-with-rewrites-the-container-first";
     tholds = (fun () ->
       to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after

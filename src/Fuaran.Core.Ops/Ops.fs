@@ -2406,8 +2406,9 @@ module Diff =
         | IllegalChildInTree of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
 
     // ---- the one emitter behind every entry (Phase 305) ----
-    // The four structural passes are unchanged from Phase 245 and are what `proofs/TreeDiff.fst`
-    // models clause for clause. Phase 305 added the two CONTENT blocks around them — `UpdateNode`
+    // The four structural passes are Phase 245's, and are what `proofs/TreeDiff.fst` models
+    // clause for clause; Phase 305 changed one clause of step 4 (the settled-order drop, below).
+    // Phase 305 also added the two CONTENT blocks around them — `UpdateNode`
     // for every survivor whose own content differs between the trees, which only a caller's
     // `encode` can see (the witness has no content accessor) — and moved the two maps and the
     // step-4 lookup onto `Tree.Index` (the `parentMap` here was `Tree.Index.build`'s `ParentOf`
@@ -2575,10 +2576,38 @@ module Diff =
                     //    op per changed parent, where the old sweep emitted one MoveNode per
                     //    child. The parent is read off the index (Phase 305; a preorder walk of
                     //    `after` per parent before).
+                    //
+                    //    THE DROP (Phase 305, 305.t1). The order steps 1-3 LEAVE a parent in is
+                    //    a function of the two trees alone: its kept survivors in before-order (a
+                    //    before-child that is still its child), then the inserted shells, then
+                    //    the moved-in survivors, the last two each in after-order — an insert and
+                    //    a move both append, step 1 walks `after`'s preorder (a parent's new
+                    //    children arrive in its child order), step 2 walks a parent's children in
+                    //    order, and a move-out or a removal deletes in place. A parent whose
+                    //    after-order IS that order needs no reorder, and the reorder that used to
+                    //    trail every append restated an order the tree already held. `settled`
+                    //    is `TreeDiff.fst`'s `settled_order` clause for clause; the order-
+                    //    prediction lemma behind the drop is section 10's `ord1`/`ord2`/`ord3`,
+                    //    and `reorder_settled` is the step that skips. "Moved in" is tested
+                    //    against the parent's before-children rather than step 2's `bParent`:
+                    //    the two agree on a well-formed `before` (a before-child of `p` has
+                    //    before-parent `p`), and this form reads the map step 2 already built.
                     for pid in reorderParents do
                         match Tree.Index.tryFind idw pid aix with
                         | Some p when List.length (w.Children p) > 1 ->
-                            ops.Add(ReorderChildren(pid, w.Children p |> List.map w.Id))
+                            let aKidKeys = childKeysOf p
+                            let bKidKeys = defaultArg (Map.tryFind (key pid) bChildKeys) []
+                            let aKidSet = Set.ofList aKidKeys
+                            let bKidSet = Set.ofList bKidKeys
+
+                            let settled =
+                                (bKidKeys |> List.filter (fun c -> Set.contains c aKidSet))
+                                @ (aKidKeys |> List.filter (fun c -> not (bIds.Contains c)))
+                                @ (aKidKeys
+                                   |> List.filter (fun c -> bIds.Contains c && not (Set.contains c bKidSet)))
+
+                            if settled <> aKidKeys then
+                                ops.Add(ReorderChildren(pid, w.Children p |> List.map w.Id))
                         | _ -> ()
 
                     // 5. The updates `canHold` refuses, last of all: by now each such node holds

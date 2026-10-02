@@ -415,11 +415,26 @@ unchanged — a keyed domain checks `Tree.wellFormedKeyed` before composing it. 
 accepted set promises (`TreeOps.tree_independence_diamond`) is stated at `wf`; below it the promise was
 empty and the function ran anyway.
 
-**D103.5 — what stays open, and why it is not debt.** (a) The redundant trailing `ReorderChildren`
-after appends: dropping it changes the modelled pass 4 and needs the order-prediction lemma (after
-passes 1–3 a parent holds its kept survivors in `before` order, then the inserted shells, then the
-moved-in survivors, each in `after` order) inside section 10's induction; dropping it in production
-alone would break the extraction differential against the model that proves reconstruction. (b) The
+**D103.5 — what stayed open across the re-open, and how each closed.** (a) The redundant trailing
+`ReorderChildren` after appends is DROPPED (the last item of the re-open to land). Dropping it
+changes the modelled pass 4, so it needed the order-prediction lemma — after passes 1–3 a parent
+holds its kept survivors in `before` order, then the inserted shells, then the moved-in survivors,
+each in `after` order — and dropping it in production alone would have broken the extraction
+differential against the model that proves reconstruction. The lemma is `TreeDiff.diff_settles_order`
+(`diff-settled-order` in `proofs.json`), and HOW it was proved is the decision worth recording:
+section 10's four invariants were written about MEMBERSHIP, and they were left exactly as they were;
+three exact-order invariants (`ord1`/`ord2`/`ord3`, one per pass, each a `keep` over one of the two
+trees' child lists under a predicate naming the pass's worklist) ride BESIDE them through the same
+`_run` lemmas, with one order lemma per step (`ins_ord_core`, `move_ord_core`, `rem_ord_core`) that
+reads the per-node view and the list algebra and nothing else. Two choices inside that: the order
+invariants are `opaque_to_smt` and revealed only where a body is used, because a transparent `ord1`
+in `inserts_run`'s context sent Z3 past the leg's memory on the first attempt (the run lemmas only
+pass the invariant along); and production's "moved in" test in step 4 reads the parent's
+before-children (`bChildKeys`) rather than step 2's `bParent`, the two agreeing on a well-formed
+`before`, so the model's `settled_order` is `keep` over child lists and the kid map — the same three
+lists the invariants are stated over — with no parent-map bridge to carry. `inv4` gained one
+disjunct (a listed parent holds the predicted order OR `after`'s) rather than the predicted order
+alone, so nothing depends on the worklist being duplicate-free. (b) The
 `Batch` and script lifts of `invert_applicable` are PROVED (`Preservation.fst` section 15,
 `invert_batch_round_trip` / `invert_all_round_trip`, added when the phase was re-opened to finish).
 `Normalize.fst` is PROVED too (the continuation of the same re-open): `normalize_preserves` for an
