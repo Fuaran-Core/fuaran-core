@@ -2061,6 +2061,17 @@ there.
   change touches. The other twenty are untouched, and the full leg is the continuous-integration
   job's on the push.
 
+**K1 measured, and it HOLDS (2026-10-02).** K1's reopening evidence was a measured cost of parsing text
+on a hot path that a typed vector behind the `Table` boundary cannot absorb. The compute repository's
+Phase 280 measured exactly that. With the text path as the baseline, the premium of a decimal column
+over a float column cleared its committed bar of 2.0 (sort 19.6x and 10.9x, group-and-sum 8.5x and 6.2x
+on .NET at 10,000 and 100,000 rows; up to 20.6x under node; joins about 1.0x). It then built the typed
+vector: a decimal column whose values fit 15 significant digits at one scale holds each value as an
+exact integer in a float64, with the cells kept beside it, and every other column keeps the text path.
+Every premium fell under 2.0 on both hosts, with every cell read byte-identical to the text path. So
+the cost K1 named is absorbed behind the boundary, and the carrier stays text. Nothing in this
+repository changes.
+
 ## 2026-09-26 — D71: D66 is EXECUTED — the compute strand has left this repository, on the `0.33.0` draft, moved rather than removed
 
 **Recorded (Phase 258).** D66 ruled that `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` are
