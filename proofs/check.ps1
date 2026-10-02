@@ -167,6 +167,12 @@ $ErrorActionPreference = 'Stop'
 #                decoded value to the jval its bytes parse to. Emitted by the same target from the
 #                test project (`--emit-fstar`). Opens Vocabulary, DocVocabulary and ScoreVocabulary,
 #                so it follows them; checked but not extracted, like them.
+#   PropagationOps — Phase 308, `Propagation.touchedBy` and the diff-based `changedForOp` clause
+#                for clause over TreeOps' tree and `apply`, with the change set proved COMPLETE
+#                (`changed_for_op_complete`: every survivor whose content, child ids or reads moved,
+#                and every reader of a removed id, Batch included at any depth). Opens DagFold and
+#                TreeOps and cites Propagation's closure, so it follows all three. Checked but not
+#                extracted — see the Phase 308 paragraph below the exemption list.
 #
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
@@ -177,7 +183,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
@@ -228,7 +234,16 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # independent-oracle differential instead (the Proofs.Oracle family holds `Hash.utf8Bytes` to the
 # platform's own encoder over every code unit), and the ladder records the model-to-code step as
 # assumed, with that differential as its evidence.
-$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8', 'VocabularyVectors')
+#
+# Phase 308 adds `PropagationOps` on Utf8's footing, for a third reason. Its production side reads
+# a node through the caller's `readsOf` and the witness, and the model reads a node's content as
+# its kind tag with the reads a parameter over the model's tree; an extraction would run beside
+# production only through a bridge that re-encodes both, which is the step under test. So the
+# Proofs.Oracle family holds production's `changedForOp` to the THEOREM'S STATEMENT directly —
+# over generated trees and every op kind, a nested Batch included, computing from the two trees
+# the set `changed_for_op_complete` says is named — and the ladder records the model-to-code step
+# as assumed (`propagation-ops-model-bridge`), with that differential as its evidence.
+$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8', 'VocabularyVectors', 'PropagationOps')
 
 # The host step, in this order. Separate invocations rather than one prefix filter, so each failure
 # reads as what it is rather than as one red suite.

@@ -1,5 +1,57 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D106: a structural edit's change set is the diff of the two trees; the order is certified by a checker the walk does not run; the evaluator contract is about evaluators that return
+
+**Recorded by Phase 308. `src/Fuaran.Core.Propagation/Propagation.fs` (`touchedBy`, `changedForOp`,
+`validTopo`), `src/Fuaran.Core.Conformance/PropagationLaws.fs` (`propagationEvaluatorLawsWith`),
+`proofs/Propagation.fst` section 8, `proofs/PropagationOps.fst`, `proofs.json`; rides the `0.34.0` draft
+(STABILITY.md, "Phase 308").**
+
+**D106.1 — the change set is defined by what the edit did to the two trees, not by what the op names.**
+`changedForOp pre post op` seeds its closure with every post-edit id that is NEW, every survivor whose
+CHILD IDS differ, every survivor whose DECLARED READS differ, every id the op CONTENT-WRITES
+(`Ops.footprint`'s `ContentWrites`), every REMOVED id, and `touchedBy pre op`; it closes them over the
+PRE-edit dependency graph and keeps the survivors. Each seed answers one way a value can move under an
+evaluator that is a function of a node's own content, its child ids and its resolved declared reads:
+content (only an op's content writes move it — `kind_kept` proves `Ops.apply` rewrites content nowhere
+else, which is what lets a witness with no content accessor see it), children, reads, and a read whose
+target vanished (reached through the removed id in the graph that still holds it). A read whose
+target's VALUE moved needs no seed: `evalFrom` closes the change set over the post-edit graph itself.
+The op-directed form it replaces named what the op's arms named, resolved against the pre-edit tree, and
+was wrong three ways the diff cannot be: a move's old parent and a removal's parent were not touched (a
+count of children went stale), and a `Batch` was resolved against the tree its first sub-op saw (a node
+moved under a parent the batch then removed took its readers' staleness with it). `touchedBy`'s two arms
+and its batch threading are corrected too, and it stays a seed, so the set never shrinks below the
+pre-edit closure it was. The completeness is a theorem (`changed_for_op_complete`), stated for a
+well-formed tree and an op `Ops.apply` accepts; an evaluator that reads a node's subtree without
+declaring the reads is outside its class, and declared reads are the remedy.
+
+**D106.2 — `sort` is certified by a checker, and the walk does not run it.** `Propagation.validTopo` is
+the certificate: `Order` and the cycles' members distinct and holding exactly the map's ids, and every
+read of an `Order` id the map holds earlier or in a cycle. Its meaning is proved (`valid_topo_distinct`:
+acceptance implies the one order premise the agreement theorems take), and Tarjan's output is held to it
+on every graph the differential draws. `sort` itself does not call it. Running it there would make the
+order premise hold of every run rather than of every sampled one — but a failed check would then have to
+be reported as SOMETHING, and the only total answer `TopoResult` can carry is a cycle verdict the graph
+does not have: an internal defect delivered as a plausible wrong answer, the failure this phase exists to
+remove. Declined on that ground (the operator's ruling for the phase); the order bridge stays an assumed
+row, narrowed from "Tarjan's output holds no id twice" to "Tarjan's output passes the checker". A runtime
+check that fails LOUDLY — a typed internal fault — would need a new `PropagationError` case and is a
+separate, breaking decision, not taken here.
+
+**D106.3 — the evaluator returns.** Every agreement theorem quantifies over a total evaluator, and the
+driver does not catch. Wrapping the call so a throw becomes `EvalNodeFailed` was considered and
+declined: it would catch what no total function raises, report a host fault (an out-of-memory, a
+bug in the caller's own code) as a domain failure of one node, and give a domain that throws a value
+where it should get a stack trace. The claims read "any TOTAL evaluator", and the premise is a row of
+its own (`propagation-evaluator-total`).
+
+**D106.4 — what 302 had already done, and what this phase added to the laws.** The honesty law's
+reader-of-a-removed-node clause, the asked-within-declared clause and the survivor-restricted agreement
+arm shipped with Phase 302 in `propagationEvaluatorLaws`; this phase pins the first with a go-red
+(a removal-blind change set loses honesty, naming the reader) and gives `propagationEvaluatorLawsWith`
+the survivor arm it lacked, counted beside its guard.
+
 ## 2026-10-02 — D105: a transparent case never carries what can be an object; at a float slot the §7 tokens are read back, not refused; a map's value is its key set; a field-less declaration is a marker type
 
 **Recorded by Phase 303. `src/Fuaran.Core.Idl/Idl.fs` (`Decode`, `FloatToken`), `Artifact.fs`,

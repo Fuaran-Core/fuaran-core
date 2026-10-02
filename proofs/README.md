@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 251 claims — 180 proved across 26 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 258 claims — 184 proved across 27 models, 43 tested, 29 assumed (6 `domain-obligation`, 19 `model-bridge`, 4 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -611,7 +611,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 27 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 29 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -627,11 +627,11 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 18 rows.
+  `unscheduled` where something could and nobody has. 19 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 3 rows.
+  on. 4 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -676,6 +676,8 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `canon-unit-spelling` | `model-bridge` | `permanent` |
 | `column-int-layouts` | `model-bridge` | `permanent` |
 | `column-codec-abstractions` | `model-bridge` | `permanent` |
+| `propagation-ops-model-bridge` | `model-bridge` | `unscheduled` |
+| `propagation-evaluator-total` | `premise` | — |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -5091,7 +5093,7 @@ total function, `reuse`, and `reuse_is_guard` proves it is `None` exactly when t
 
 ### What is proved
 
-Over any dependency map, any change set, any value type and any evaluator:
+Over any dependency map, any change set, any value type and any TOTAL evaluator (one that returns at every node — `propagation-evaluator-total`):
 
 1. **`dirty_sound`** — every id whose input changed is dirty: for any read path
    `c <- n1 <- … <- n` out of a changed `c` (each id reading the one before it), `n` is in
@@ -5239,6 +5241,35 @@ differential now uses as a regression test. The first outside consumer is filed 
 It consumes the dirty-set half — theorems 1 and 2 here — and it should be built against the
 restricted driver: an evaluator it supplies to `evalFrom` is refused at the read rather than trusted
 to keep a clause.
+
+### What Phase 308 changed here: the order by certificate, and the change set proved complete
+
+**The order.** `sort` stays a parameter, but the checker production holds it to does not:
+`Propagation.validTopo` (section 8 of `Propagation.fst`, `valid_topo` clause for clause) accepts an
+order exactly when `Order` and the cycles' members are distinct, hold exactly the map's ids, and
+every read of an `Order` id the map holds appears earlier or lies in a cycle. **`valid_topo_distinct`**
+proves acceptance implies the one premise the agreement theorems take of the order, and
+**`evalfrom_agrees_certified`** / **`evalfromwith_agrees_certified`** restate them over the
+certificate. The bridge `propagation-order-distinct` narrows to "Tarjan's output passes the
+checker", which the differential checks on every generated graph. `sort`'s hot path does not run the
+checker: a failed check would have to be reported as something, and reporting it as a cycle would be
+a wrong answer delivered as data.
+
+**The change set.** `changedForOp` was seeded from `touchedBy`, which omitted the parent a `MoveNode`
+leaves and the parent a `RemoveNode` removes from, and resolved a `Batch`'s sub-ops against the
+pre-edit tree — so a node counting its children kept a stale count, and a reader of a node a batch
+moved and then removed kept a stale value. Both arms are corrected, the batch is threaded through
+its intermediate trees, and `changedForOp` is now seeded from the DIFF of the two trees.
+`proofs/PropagationOps.fst` models both over `TreeOps.fst`'s tree and `apply` and proves
+**`changed_for_op_complete`**: for an op `apply` accepts on a well-formed tree, every survivor that is
+new, whose content, child ids or declared reads differ, and every survivor that read a removed id,
+is named — through `kind_kept` (content moves only where the op content-writes), which is what lets
+a witness with no content accessor see content change. The model is checked, not extracted
+(`propagation-ops-model-bridge`); the differential holds production to the theorem's statement.
+
+**"Any evaluator" now reads "any TOTAL evaluator".** The model's evaluator is a `Tot` function, and
+production does not catch: an evaluator that throws is outside every theorem here
+(`propagation-evaluator-total`, a premise).
 
 ### The differential
 

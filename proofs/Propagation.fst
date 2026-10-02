@@ -30,7 +30,8 @@
    `dependencyMap`, `cycleThrough`, `touchedBy` and `dirtyFromOp` are outside the model: they
    build a dependency map or a change set from a tree, and the theorems start from both.
 
-   WHAT IS PROVED, over any dependency map, any change set, any value type and any evaluator:
+   WHAT IS PROVED, over any dependency map, any change set, any value type and any TOTAL evaluator
+   (a `Tot` function here; production does not catch an evaluator that throws — Phase 308):
 
      - `dirty_sound` — the dirty set holds every changed id and every id DOWNSTREAM of one: for
        any read path `c <- n1 <- ... <- n` starting at a changed `c`, `n` is dirty. It is read
@@ -1493,6 +1494,96 @@ let eval_for_invokes_needed (#v:Type) (ev:evaluator v) (touches:read_witness) (t
   mem_keep s topo.order x
 
 (* ======================================================================================
+   8. The order by CERTIFICATE (Phase 308) — `Propagation.validTopo`, clause for clause.
+
+   `sort` stays outside the model: it is Tarjan's algorithm over mutable dictionaries and a stack.
+   What this section models is the CHECKER production holds its result to — a function the model
+   can state exactly — and it proves that an order the checker accepts discharges the one premise
+   the agreement theorems take of the walked order. So the order bridge narrows from "Tarjan's
+   output holds no id twice", which nothing proved, to "Tarjan's output passes `validTopo`", which
+   the differential checks on every graph it draws, with the checker's own meaning proved here.
+
+   The checker's third clause — every read of an `Order` id that the map holds appears earlier, or
+   lies in a cycle — is what makes the walk's values MEAN something (an acyclic read is computed
+   before its reader). No theorem in this model needs it: agreement holds over any duplicate-free
+   order, as section 5 says. It is modelled so the extracted checker is production's, clause for
+   clause, and the differential can hold the two to each other.
+   ====================================================================================== *)
+
+(* F#: `topo.Cycles |> List.concat`. *)
+let rec concat_all (gs:list (list string)) : Tot (list string) =
+  match gs with
+  | [] -> []
+  | g :: r -> app g (concat_all r)
+
+(* F#: `deps |> Map.toList |> List.map fst`. *)
+let rec keys (d:dmap) : Tot (list string) =
+  match d with
+  | [] -> []
+  | (k, _) :: r -> k :: keys r
+
+(* F#: `Set.ofList all <> keys`, negated — two lists hold the same ids. *)
+let same_set (a b:list string) : Tot bool = subset a b && subset b a
+
+(* F#: the `Set.forall` over one node's reads — each is not held by the map, already walked, or
+   cyclic. *)
+let rec reads_ok (deps:dmap) (cyc seen:list string) (rs:list string) : Tot bool =
+  match rs with
+  | [] -> true
+  | r :: rest -> (not (has_key r deps) || mem r seen || mem r cyc) && reads_ok deps cyc seen rest
+
+(* F#: the private `ordered` loop, `seen` the ids of `Order` already passed. *)
+let rec ordered (deps:dmap) (cyc seen order:list string) : Tot bool (decreases order) =
+  match order with
+  | [] -> true
+  | id :: rest -> reads_ok deps cyc seen (reads_of deps id) && ordered deps cyc (id :: seen) rest
+
+(* F#: `Propagation.validTopo`. The F# measures distinctness as `List.distinct` keeping the length,
+   which is `distinct` here. *)
+let valid_topo (deps:dmap) (topo:topo_result) : Tot bool =
+  let cyc = concat_all topo.cycles in
+  let all = app topo.order cyc in
+  distinct all && same_set all (keys deps) && ordered deps cyc [] topo.order
+
+let rec distinct_app_left (a b:list string)
+  : Lemma (requires distinct (app a b)) (ensures distinct a) (decreases a) =
+  match a with
+  | [] -> ()
+  | h :: t -> mem_app h t b; distinct_app_left t b
+
+(* THEOREM — valid_topo_distinct. An order the checker accepts holds no id twice: the premise
+   `evalfrom_agrees`, `evalfromwith_agrees` and the pull theorems take of the walked order. *)
+let valid_topo_distinct (deps:dmap) (topo:topo_result)
+  : Lemma (requires valid_topo deps topo) (ensures distinct topo.order) =
+  distinct_app_left topo.order (concat_all topo.cycles)
+
+(* THEOREM — evalfrom_agrees_certified. The agreement theorem with its order premise replaced by
+   the certificate: whatever produced the order, if `validTopo` accepts it the incremental walk
+   agrees with the full one. *)
+let evalfrom_agrees_certified (#v:Type) (ev0 ev1:evaluator v) (t0 t1:read_witness) (deps:dmap)
+                              (changed:list string) (topo:topo_result) (out0:eval_outcome v)
+                              (prior:list (string & v))
+  : Lemma (requires agree_off ev0 ev1 changed /\ touches_off t0 t1 changed /\ valid_topo deps topo /\
+                    Nil? (unknown_of deps changed) /\ eval ev0 t0 deps topo == Ok out0 /\
+                    prior_of prior out0.values)
+          (ensures eval_from ev1 t1 prior changed deps topo == eval ev1 t1 deps topo) =
+  valid_topo_distinct deps topo;
+  evalfrom_agrees ev0 ev1 t0 t1 deps changed topo out0 prior
+
+(* THEOREM — evalfromwith_agrees_certified. The prior-aware reading, the same substitution. *)
+let evalfromwith_agrees_certified (#v:Type) (evw0 evw1:evaluator_with v) (t0 t1:read_witness)
+                                  (deps:dmap) (changed:list string) (topo:topo_result)
+                                  (out0:eval_outcome v) (prior:list (string & v))
+  : Lemma (requires agree_off (blind evw0) (blind evw1) changed /\ touches_off t0 t1 changed /\
+                    valid_topo deps topo /\ Nil? (unknown_of deps changed) /\
+                    eval_with evw0 t0 deps topo == Ok out0 /\ prior_of prior out0.values /\
+                    prior_blind_along evw1 t1 deps (in_set (dirty_from_changed_ids deps changed))
+                                      prior [] topo.order)
+          (ensures eval_from_with evw1 t1 prior changed deps topo == eval_with evw1 t1 deps topo) =
+  valid_topo_distinct deps topo;
+  evalfromwith_agrees evw0 evw1 t0 t1 deps changed topo out0 prior
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -1522,6 +1613,10 @@ let twins : list twin = [
   { tname = "dirty-set-is-the-downstream-closure";
     tholds = (fun () -> dirty_from_changed_ids twin_deps [ "a" ] = [ "a"; "b"; "c" ]) };
   { tname = "an-edge-has-a-direction";
-    tholds = (fun () -> edge twin_deps "b" "c" = false) } ]
+    tholds = (fun () -> edge twin_deps "b" "c" = false) };
+  { tname = "the-certificate-accepts-a-dependency-order";
+    tholds = (fun () -> valid_topo twin_deps ({ order = [ "b"; "c" ]; cycles = [] }) = true) };
+  { tname = "the-certificate-refuses-a-reader-before-its-read";
+    tholds = (fun () -> valid_topo twin_deps ({ order = [ "c"; "b" ]; cycles = [] }) = false) } ]
 
 let _ = assert_norm (twins_hold twins == true)

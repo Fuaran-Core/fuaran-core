@@ -843,7 +843,10 @@ module internal PropagationLaws =
     ///   premise, sampled; an evaluator that trusts a prior out of step with its inputs fails here.
     /// - **Agreement, with the prior.** Where the edit keeps the dependency map, `evalFromWith` of the
     ///   edited evaluator over `evalWith`'s own prior — whole and with holes — equals `evalWith` of the
-    ///   edited evaluator.
+    ///   edited evaluator. Where the edit MOVES the map (Phase 308, the reference family's Phase-302
+    ///   arm), `evalFromWith` from the prior restricted to the survivors the change set leaves clean
+    ///   equals `evalWith` of the edited evaluator — run where the change set names every node whose
+    ///   declared reads moved and every reader of a removed id, and counted beside the guard.
     ///
     /// The theorem's equality is the VALUE TYPE's: a value that carries a reuse cache defines its
     /// equality over what it means, not over the cache, or these laws compare caches.
@@ -876,6 +879,7 @@ module internal PropagationLaws =
 
         let mutable priorHanded = 0
         let mutable cleanReused = 0
+        let mutable movedMap = 0
 
         let probe (ev: (string -> 'V option) -> string -> Result<'V, string>) (answers: Map<string, 'V>) (id: string) =
             let asked = ResizeArray<string>()
@@ -1044,13 +1048,55 @@ module internal PropagationLaws =
                     |> List.exists (fun id -> not (Set.contains id dirty) && Map.containsKey id out0.Values)
                 then
                     cleanReused <- cleanReused + 1
+            // Phase 308 — an edit that MOVES the map, replayed as `propagationEvaluatorLaws` replays it
+            // (Phase 302): `evalFromWith` over the edited map from `evalWith`'s prior restricted to the
+            // survivors the change set leaves clean, with the named ids the edited map holds as the
+            // change. Run where the change set is honest about the map — it names every node whose
+            // declared reads moved and every reader of a removed id — since a change set that is not
+            // is the reference laws' finding, reported there.
+            | Ok out0 ->
+                let removed = Set.difference (Set.ofList (keysOf deps0)) (Set.ofList (keysOf deps1))
+
+                let mapHonest =
+                    keysOf deps1
+                    |> List.forall (fun id ->
+                        Set.contains id changed
+                        || (Map.tryFind id deps0 = Map.tryFind id deps1
+                            && Map.find id deps1 |> Set.intersect removed |> Set.isEmpty))
+
+                if mapHonest then
+                    movedMap <- movedMap + 1
+
+                    let survivors =
+                        out0.Values
+                        |> Map.filter (fun id _ -> Map.containsKey id deps1 && not (Set.contains id changed))
+
+                    let changed1 = changed |> Set.filter (fun c -> Map.containsKey c deps1)
+
+                    let viaSurvivors =
+                        Propagation.evalFromWith (evalNodeWith m1) survivors changed1 deps1
+
+                    agreement.Check(
+                        (viaSurvivors = full),
+                        fun () ->
+                            at (
+                                sprintf
+                                    "%s — over an edit that moved the map, evalFromWith from the survivors' prior %A (changed=%A) returned %A, and evalWith of the edited evaluator %A"
+                                    evw.Surface
+                                    (survivors |> Map.toList |> List.map fst)
+                                    (Set.toList changed1)
+                                    viaSurvivors
+                                    full
+                            )
+                    )
             | _ -> ())
 
         reference
         @ LawKit.results [ blind; discipline; agreement ]
-        @ [ SampleAdequacy.reached
+        @ [ SampleAdequacy.reachedBeside
                 "Conformance.propagationEvaluatorLawsWith"
                 "prior-aware edit"
                 seed
                 [ "recomputed node handed a prior", priorHanded
-                  "clean node reused from prior", cleanReused ] ]
+                  "clean node reused from prior", cleanReused ]
+                [ "moved-map edit replayed from its survivors", movedMap ] ]
