@@ -48,5 +48,2571 @@
       "note": "The proposal surface — pattern bank, proposals, decide/submit plumbing. The family runs the domain's own `Decide` (Phase 246) and is starved unless that policy allows, parks and denies something the generator draws; `Conformance.aiSurfaceLawsUnderKitPolicy` is the variant that swaps in the kit's policy to certify the plumbing for any policy. The one part of this strand that IS proved is arbitration, and it is proved where it lives: `Arbitration` ships in `Fuaran.Core.Ops` and carries `proofs/Arbitrate.fst` — which is why this entry is about the surface and not about the algorithm behind it."
     }
   ],
-  "$retired": "Phase 154 RETIRED the `Fuaran.Core.DataFrame` entry (`law-tested-by-design`, citing `Conformance.incrementalLaws`, filed by Phase 203): the package has a model now — `proofs/Pipeline.fst`, the counted pipeline driver over an abstract step evaluator — and clause 1's second direction fails an exclusion for a package that has since gained one. What that entry declined is still declined and is still a recorded decision, only now it is the model's own: the fourteen verb SEMANTICS are the step evaluator, a parameter, and stay with the laws the entry named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) rather than with a theorem — see `pipeline-step-evaluator-abstract` in `../proofs.json` and theorem 14 in `README.md`. The supersession of D14's reading for this package is `DECISIONS.md` D57 (operator decision 2026-09-25), which is where the decision lives; an operator who wants a verb proved reads that row and that entry, not this file. Phase 258 moved the package itself, with `proofs/Pipeline.fst`, `proofs/ColumnOps.fst`, their `proofs.json` rows and the two Phase 257 exclusions (`Fuaran.Core.DataFrame.CSharp`, `Fuaran.Core.DataFrame.Conformance`), to https://github.com/Fuaran-Core/fuaran-core-compute (DECISIONS.md D66); the rows and theorems this note cites are that repository's now. Phase 306 RETIRED the `Fuaran.Core.Column` entry (`law-tested-by-design`, citing `Conformance.aggregateNullSkipLaws`, filed by Phase 203): the package has a model now — `proofs/WireColumn.fst`, the columnar codec at the `JVal`, with the codec's image proved inside what `Table.validate` accepts and the round trip proved up to a normal form — which is the theorem that entry said an operator who wanted the codec proved would ask for by deleting it. What the entry cited is unchanged and is NOT what the model is about: `Column.aggregate` is still held by `aggregateNullSkipLaws` and, since the same phase, by a bit-for-bit differential against the fold it replaced; `DecimalText`'s arithmetic, `Schema.*` and the lenient-ingest arms of the decoder are not modelled, and the model's header says so."
+  "$retired": "Phase 154 RETIRED the `Fuaran.Core.DataFrame` entry (`law-tested-by-design`, citing `Conformance.incrementalLaws`, filed by Phase 203): the package has a model now — `proofs/Pipeline.fst`, the counted pipeline driver over an abstract step evaluator — and clause 1's second direction fails an exclusion for a package that has since gained one. What that entry declined is still declined and is still a recorded decision, only now it is the model's own: the fourteen verb SEMANTICS are the step evaluator, a parameter, and stay with the laws the entry named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) rather than with a theorem — see `pipeline-step-evaluator-abstract` in `../proofs.json` and theorem 14 in `README.md`. The supersession of D14's reading for this package is `DECISIONS.md` D57 (operator decision 2026-09-25), which is where the decision lives; an operator who wants a verb proved reads that row and that entry, not this file. Phase 258 moved the package itself, with `proofs/Pipeline.fst`, `proofs/ColumnOps.fst`, their `proofs.json` rows and the two Phase 257 exclusions (`Fuaran.Core.DataFrame.CSharp`, `Fuaran.Core.DataFrame.Conformance`), to https://github.com/Fuaran-Core/fuaran-core-compute (DECISIONS.md D66); the rows and theorems this note cites are that repository's now. Phase 306 RETIRED the `Fuaran.Core.Column` entry (`law-tested-by-design`, citing `Conformance.aggregateNullSkipLaws`, filed by Phase 203): the package has a model now — `proofs/WireColumn.fst`, the columnar codec at the `JVal`, with the codec's image proved inside what `Table.validate` accepts and the round trip proved up to a normal form — which is the theorem that entry said an operator who wanted the codec proved would ask for by deleting it. What the entry cited is unchanged and is NOT what the model is about: `Column.aggregate` is still held by `aggregateNullSkipLaws` and, since the same phase, by a bit-for-bit differential against the fold it replaced; `DecimalText`'s arithmetic, `Schema.*` and the lenient-ingest arms of the decoder are not modelled, and the model's header says so.",
+  "operationClasses": {
+    "trivial": "The operation constructs, projects or looks up a value and computes nothing a law could be wrong about: a record builder, an accessor, a `List.tryFind` over declared data. The entry says what it does in one line so a reader can disagree.",
+    "forward": "The operation delegates to ONE other public operation, adding only a default argument, a renamed spelling or a sentence rendering. It names that operation in `forwardsTo`, which must itself be mapped, so a forward's coverage is its target's and a forward to nothing is refused.",
+    "obsolete": "The operation carries `System.Obsolete` and forwards to its replacement, which it names in `forwardsTo`. The clause reads the attribute by reflection, so an entry for an operation that is NOT marked obsolete is refused.",
+    "host-seam": "The operation is a boundary whose content a host supplies: an interface member, a tool's entry point, an export another language's host diffs. What Core owns at that boundary is certified where the host meets it.",
+    "measured-elsewhere": "The operation has behaviour and no theorem or law family states its contract; tests stand in. The entry names the test file in `standIn`, and the clause holds that file to mentioning the operation (`<Owner>.<member>`) or the `through` token naming the measured operation it is reached by, so a stand-in cannot point at a file that never touches it."
+  },
+  "$operationsComment": "Phase 335. The OPERATION clause of `Proofs.Coverage`: every public method or function in the committed API baselines (`../api/*.txt`, the `method` lines) maps to at least one of a `../proofs.json` row whose `evidence.operations` names it, a law family whose operation roster (`Fuaran.Core.Families.operations`) lists it, or an entry below with a class from `operationClasses` and a one-line reason. A law family's own entry point is mapped by its roster row. An operation is spelled `<Owner>.<member>` with the `Fuaran.Core.` prefix, generic arity and the compiler's `Module` suffix dropped and nested types joined by `.` (`Dag+ReachModule.ancestors` is `Dag.Reach.ancestors`). The baselines are the census, so a newly published operation reds the suite at the commit that adds it and names itself. The check runs both ways: an entry for an operation that is no longer published, or that has since gained a ladder row or a roster line, fails, as a member listed twice does. An entry is a recorded decision, not a pass: `measured-elsewhere` says no law states the contract, which is weaker than a theorem and says so.",
+  "operations": [
+    {
+      "members": [
+        "AiSurface.catalogueJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders the witness's declared read tools and op-kind cards as the catalogue an agent reads: a presentation of declared data, with no algebra to state beyond its examples.",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "AiSurface.catalogue"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The catalogue as a JSON value; `catalogueJson` renders it, and the AI-surface tests read that rendering.",
+      "through": "AiSurface.catalogueJson",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "PatternBank.matchesAnchor"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Pattern-bank anchor matching; the resolve path the aiSurface family drives calls it, and its edge cases are pinned by example.",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "PolicyDecision.denyWith"
+      ],
+      "class": "trivial",
+      "reason": "Constructs a Deny decision carrying the caller's guidance; no computation."
+    },
+    {
+      "members": [
+        "Proposals.toOpScript"
+      ],
+      "class": "trivial",
+      "reason": "Copies a proposal's id, author and ops into an arbitration script record; no computation."
+    },
+    {
+      "members": [
+        "Proposals.propose",
+        "Proposals.renderGuidance",
+        "Proposals.Queue.pending"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Proposal construction and guidance rendering around the queue the aiSurface family certifies; example-tested, no law states their contract.",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "Proposals.proposeWithId"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Proposal construction and guidance rendering around the queue the aiSurface family certifies; example-tested, no law states their contract.",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Proposals.Queue.nextId"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Allocates the id `propose` stamps (one past the largest held); measured through `propose`, whose tests read the ids it returns.",
+      "through": "Proposals.propose",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "RejectionCodec.render"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Rejection guidance codec: renders and encodes what a refused proposal tells an agent; example-tested at named refusals.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "RejectionCodec.encode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The rejection-guidance JSON value; `render` is its canonical text, which the tests read.",
+      "through": "RejectionCodec.render",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "Cell.typeOf",
+        "Cell.decimal"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Cell primitives under the columnar codec; `WireColumn.fst` models the codec at the JVal and leaves these out, and the column tests pin them by example.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "Cell.compare",
+        "Cell.token"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Cell primitives under the columnar codec; `WireColumn.fst` models the codec at the JVal and leaves these out, and the column tests pin them by example.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "Column.aggType",
+        "Column.cell",
+        "Column.create"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Column construction and aggregation typing; `Column.aggregate` itself is rostered, these are the constructors and type readers around it.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "Column.length"
+      ],
+      "class": "trivial",
+      "reason": "Returns the stored length of a column; no computation."
+    },
+    {
+      "members": [
+        "Table.columnNames",
+        "Table.rowCount",
+        "Table.tryColumn"
+      ],
+      "class": "trivial",
+      "reason": "Accessors over a table's columns; no computation beyond a lookup."
+    },
+    {
+      "members": [
+        "ColumnCodec.decode",
+        "ColumnCodec.encode",
+        "ColumnCodec.errorString",
+        "ColumnCodec.tryEncode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The JVal-level arms of the columnar codec beneath the modelled JSON entry points (`encodeJson` / `decodeJson` are on the ladder); round-trip and refusal tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "ColumnType.ofTag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Column-type tag codec; the widening lattice is on the ladder, the tag spelling is pinned by example.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "ColumnType.tag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Column-type tag codec; the widening lattice is on the ladder, the tag spelling is pinned by example.",
+      "standIn": "tests/Fuaran.Core.Tests/HashTests.fs"
+    },
+    {
+      "members": [
+        "DecimalText.add",
+        "DecimalText.isCanonical",
+        "DecimalText.tryToFloat"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "DecimalText's arithmetic and float projection are not modelled (`WireColumn.fst`'s header says so); example and boundary tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "Schema.classify",
+        "Schema.diff",
+        "Schema.fingerprint"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Schema evolution over columnar tables: classify, diff, fingerprint and patch; example-tested, no model or family states their contract.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "Schema.patch"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Schema evolution over columnar tables: classify, diff, fingerprint and patch; example-tested, no model or family states their contract.",
+      "standIn": "tests/Fuaran.Core.Tests/AlgebraSymmetryTests.fs"
+    },
+    {
+      "members": [
+        "SchemaDeltaCodec.decode",
+        "SchemaDeltaCodec.encode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The schema-delta codec; round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/AlgebraSymmetryTests.fs"
+    },
+    {
+      "members": [
+        "SchemaDeltaCodec.decodeJson",
+        "SchemaDeltaCodec.encodeJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The JSON-text form of the schema-delta codec, a rendering of `encode` / a parse into `decode`; measured through them.",
+      "through": "SchemaDeltaCodec.encode",
+      "standIn": "tests/Fuaran.Core.Tests/AlgebraSymmetryTests.fs"
+    },
+    {
+      "members": [
+        "TemporalText.isCanonicalDate",
+        "TemporalText.isCanonicalTimestamp"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Canonical date and timestamp spelling checks; example-tested at the boundaries.",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "ConfRng.choose",
+        "ConfRng.intBelow",
+        "ConfRng.next",
+        "ConfRng.ofSeed",
+        "ConfRng.shuffle"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The kit's seeded generator: what the kit relies on is that a seed replays, which the seed-replay tests pin; it has no other contract.",
+      "standIn": "tests/Fuaran.Core.Tests/OpsTests.fs"
+    },
+    {
+      "members": [
+        "Conformance.certify",
+        "Conformance.certifyStream"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Aggregates over the base-run families, each of which is rostered; the aggregate's composition is what the certification tests exercise.",
+      "standIn": "tests/Fuaran.Core.Tests/ConformanceTests.fs"
+    },
+    {
+      "members": [
+        "Conformance.witnessCoverageLaw",
+        "Conformance.witnessFieldsLaw"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests.",
+      "standIn": "tests/Fuaran.Core.Tests/SurfaceLawsTests.fs"
+    },
+    {
+      "members": [
+        "Families.adequacyTokenOf",
+        "Families.refusalTokenOf",
+        "Families.toJsonOf",
+        "Families.toMarkdownOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projections and renderings of the law-family roster; held to the tree by the roster tests and the generated `docs/conformance-families.*` approval.",
+      "standIn": "tests/Fuaran.Core.Tests/KitRoster.fs"
+    },
+    {
+      "members": [
+        "Families.censusOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projections of the roster; measured through the values they build (`Families.census`, `Families.refusalAudit`) and the roster lookups the suite performs.",
+      "through": "Families.census",
+      "standIn": "tests/Fuaran.Core.Tests/ReachTests.fs"
+    },
+    {
+      "members": [
+        "Families.refusalAuditOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projection of the roster into the refusal audit; measured through `Families.refusalAudit`, which the vacuity suite reads.",
+      "through": "Families.refusalAudit",
+      "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
+    },
+    {
+      "members": [
+        "Families.reasonToken"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders an opt-in reason token into the roster exports; measured through the generated export approval.",
+      "through": "Families.toJsonOf",
+      "standIn": "tests/Fuaran.Core.Tests/KitRoster.fs"
+    },
+    {
+      "members": [
+        "Families.tryFind"
+      ],
+      "class": "trivial",
+      "reason": "A lookup of one roster row by id; no computation beyond `List.tryFind`."
+    },
+    {
+      "members": [
+        "Families.tryRefusal"
+      ],
+      "class": "trivial",
+      "reason": "A lookup of one row in the shipped refusal audit by family id; no computation beyond `List.tryFind`."
+    },
+    {
+      "members": [
+        "Families.adequacyToken"
+      ],
+      "class": "forward",
+      "reason": "The roster-default form of its `...Of` sibling, adding only the shipped roster as the argument.",
+      "forwardsTo": "Families.adequacyTokenOf"
+    },
+    {
+      "members": [
+        "Families.refusalToken"
+      ],
+      "class": "forward",
+      "reason": "The roster-default form of its `...Of` sibling, adding only the shipped roster as the argument.",
+      "forwardsTo": "Families.refusalTokenOf"
+    },
+    {
+      "members": [
+        "Families.toJsonWith"
+      ],
+      "class": "forward",
+      "reason": "The roster-default form of `toJsonOf`, adding only the shipped roster.",
+      "forwardsTo": "Families.toJsonOf"
+    },
+    {
+      "members": [
+        "Families.toMarkdownWith"
+      ],
+      "class": "forward",
+      "reason": "The roster-default form of `toMarkdownOf`, adding only the shipped roster.",
+      "forwardsTo": "Families.toMarkdownOf"
+    },
+    {
+      "members": [
+        "Families.toJson"
+      ],
+      "class": "forward",
+      "reason": "`toJsonWith []`: the export with no measured case counts.",
+      "forwardsTo": "Families.toJsonWith"
+    },
+    {
+      "members": [
+        "Families.toMarkdown"
+      ],
+      "class": "forward",
+      "reason": "`toMarkdownWith []`: the rendering with no measured case counts.",
+      "forwardsTo": "Families.toMarkdownWith"
+    },
+    {
+      "members": [
+        "FoldConfluence.arrivalOrders",
+        "FoldConfluence.canonicalConflictReport",
+        "FoldConfluence.certifyFold",
+        "FoldConfluence.shrinkLanes"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The fold-confluence harness around `foldOnce` (on the ladder) and the lane-fold families (rostered): arrival orders, canonical reports, shrinking and the lane DAG; the fold-confluence tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/FoldConfluenceTests.fs"
+    },
+    {
+      "members": [
+        "FoldConfluence.laneDag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The fold-confluence harness around `foldOnce` (on the ladder) and the lane-fold families (rostered): arrival orders, canonical reports, shrinking and the lane DAG; the fold-confluence tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/FootprintLawsAtTests.fs"
+    },
+    {
+      "members": [
+        "FoldConfluence.canonicalRejectionReport"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The fold-confluence harness around `foldOnce` (on the ladder) and the lane-fold families (rostered): arrival orders, canonical reports, shrinking and the lane DAG; the fold-confluence tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "SampleAdequacy.cases",
+        "SampleAdequacy.isVacuous",
+        "SampleAdequacy.lawPrefix",
+        "SampleAdequacy.renderCases"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The kit's sample-adequacy machinery: it is how every gated family counts what it built, and its own tests (Phase 302's floor) stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ConformanceTests.fs"
+    },
+    {
+      "members": [
+        "SampleAdequacy.check",
+        "SampleAdequacy.reached",
+        "SampleAdequacy.spanned"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The kit's sample-adequacy machinery: it is how every gated family counts what it built, and its own tests (Phase 302's floor) stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SampleAdequacyTests.fs"
+    },
+    {
+      "members": [
+        "StringEscapeVectors.check",
+        "StringEscapeVectors.run",
+        "StringEscapeVectors.runVector"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Committed vector sets and their runners; the vectors are shared with the other hosts and the runners are exercised over them.",
+      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+    },
+    {
+      "members": [
+        "WireNullTolerance.check",
+        "WireNullTolerance.runVector"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Committed vector sets and their runners; the vectors are shared with the other hosts and the runners are exercised over them.",
+      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
+    },
+    {
+      "members": [
+        "ParityVectors.lines"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Committed vector sets and their runners; the vectors are shared with the other hosts and the runners are exercised over them.",
+      "standIn": "tests/Fuaran.Core.Tests/ParityVectorTests.fs"
+    },
+    {
+      "members": [
+        "StringEscapeVectors.lines"
+      ],
+      "class": "host-seam",
+      "reason": "The escape table rendered as lines for a host in another language to diff against; what it renders is the vector set `run` / `check` execute and `Actor.encode`, both measured, and the diff is the other host's."
+    },
+    {
+      "members": [
+        "StringEscapeVectors.runActor"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The actor-encoding arm of the escape vectors; `run` dispatches to it, and the escape tests call `run`.",
+      "through": "StringEscapeVectors.run",
+      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+    },
+    {
+      "members": [
+        "WireNullTolerance.run"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Runs the committed null-tolerance vectors; `check` is `run` over them, and the wire tests call `check`.",
+      "through": "WireNullTolerance.check",
+      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
+    },
+    {
+      "members": [
+        "Capability.invokeWithArgs",
+        "Capability.typeArgs",
+        "Capability.validateArgsAll"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Argument-typed invocation and the all-errors validator beside the rostered `invoke` / `validateArgs`; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.decodeDeferredWith",
+        "CapabilityCodec.decodeInvocation",
+        "CapabilityCodec.decodeInvocationWith",
+        "CapabilityCodec.decodeInvokeError",
+        "CapabilityCodec.decodeWith",
+        "CapabilityCodec.encodeInvocation",
+        "CapabilityCodec.encodeInvokeError"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Capability codec arms beside the rostered `encode` / `decode` / deferred pair: invocation, invoke-error and policy-parameterised forms; the decode layer's refusal corpus and round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.decodeJsonDetailedWith",
+        "CapabilityCodec.decodeJsonWith",
+        "CapabilityCodec.encodeJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Capability codec arms beside the rostered `encode` / `decode` / deferred pair: invocation, invoke-error and policy-parameterised forms; the decode layer's refusal corpus and round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.decodeDetailedWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error, policy-parameterised reader; `decodeWith` is it plus the sentence, and the tests call that.",
+      "through": "CapabilityCodec.decodeWith",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.decodeInvocationDetailedWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error invocation reader; the string-error `decodeInvocationWith` is it plus the sentence, and the decode tests call that.",
+      "through": "CapabilityCodec.decodeInvocationWith",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.decodeJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads a capability from a JSON value; `decode` parses the text and calls it.",
+      "through": "CapabilityCodec.decode",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.deferredJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A deferred envelope as a JSON value; `encodeDeferred` (rostered) is its canonical text.",
+      "through": "CapabilityCodec.encodeDeferred",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.deferredOfWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The policy-parameterised deferred reader; `decodeDeferredWith` parses the text and calls it.",
+      "through": "CapabilityCodec.decodeDeferredWith",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.deferredOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads a deferred envelope from a JSON value; `decodeDeferred` (rostered) parses the text and calls it.",
+      "through": "CapabilityCodec.decodeDeferred",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.invokeErrorJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The invoke error as a JSON value; `encodeInvokeError` is its canonical text, which the tests read.",
+      "through": "CapabilityCodec.encodeInvokeError",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.invokeErrorOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads an invoke error from its JSON value; `decodeInvokeError` is the text entry point the tests call.",
+      "through": "CapabilityCodec.decodeInvokeError",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.signatureOf"
+      ],
+      "class": "forward",
+      "reason": "`Decoder.describing` over the private signature reader `decode` itself runs: the string-error spelling of a reader the capability codec tests exercise through `decode`.",
+      "forwardsTo": "Decoder.describing"
+    },
+    {
+      "members": [
+        "CapabilityLookup.ofFunctionRegistry"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Adapts a function registry to the pipeline's capability lookup; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityPipeline.decodeDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Pipeline decode with the typed error, and node enumeration; the pipeline family covers encode/decode/eval, these are the detailed and listing forms.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityPipeline.enumerate"
+      ],
+      "class": "trivial",
+      "reason": "Returns the pipeline's node list; no computation."
+    },
+    {
+      "members": [
+        "CapabilityRegistry.dispatchWithArgs"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The argument-typed dispatch; the seam-model tests reach it through the obsolete `Registry` alias, which forwards to it.",
+      "through": "Registry.dispatchWithArgs",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "Deferred.bind",
+        "Deferred.settled"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Deferred combinators beside the rostered `map` / `toResult` (the theorem's own row says the combinators stay outside the model).",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Deferred.tryValue"
+      ],
+      "class": "trivial",
+      "reason": "`Some v` for `Ready v`, `None` otherwise; no computation."
+    },
+    {
+      "members": [
+        "Effect.determinismTag",
+        "Effect.tryDeterminismOfTag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Determinism-tag spelling and its inverse; the capture rows hold the label vocabulary equal to this reading by test.",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "EffectCodec.hostTag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The host-effect spelling inside a signature's effect object; measured through the capability encoder, whose round-trip tests read it.",
+      "through": "CapabilityCodec.encode",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "EffectCodec.toJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "An effect class as a JSON value; every signature the capability encoder writes carries one.",
+      "through": "CapabilityCodec.encode",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Function.applyMemoComposed",
+        "Function.bindHandlers",
+        "Function.compose",
+        "Function.composedEffect",
+        "Function.isTotal",
+        "Function.signatureExcluding",
+        "Function.toJsonSchema",
+        "Function.toSchema"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Function-algebra operations beside the rostered composition and memo laws: composed memo, handler binding, plain composition, totality, signature projections and schema export.",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "FunctionRegistry.enumerate"
+      ],
+      "class": "trivial",
+      "reason": "Returns the registry's entries; no computation beyond a map projection."
+    },
+    {
+      "members": [
+        "FunctionRegistry.tryFind"
+      ],
+      "class": "trivial",
+      "reason": "A lookup of one entry by id; no computation beyond `Map.tryFind`."
+    },
+    {
+      "members": [
+        "HoleKind.tag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The hole-kind spelling `Function.signature` writes into every entry; measured through the signature tests (and the ladder's `capability-slot-hole-invocable-in-space`).",
+      "through": "Function.signature",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "HoleKind.tryOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed reading behind `SigEntry.HoleKind`; the totality check dispatches on it, and the function tests call `isTotal`.",
+      "through": "Function.isTotal",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "InvokeError.describe",
+        "InvokeError.describeAll"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders invoke errors for a reader; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "Memo.count"
+      ],
+      "class": "trivial",
+      "reason": "Returns the number of memoised entries; no computation."
+    },
+    {
+      "members": [
+        "Space.validate"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Space description and value validation beside the rostered `subsumes` and the ladder's `canonical` / `slotKindOf`; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Space.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Space description and value validation beside the rostered `subsumes` and the ladder's `canonical` / `slotKindOf`; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "SpaceCodec.decoder",
+        "SpaceCodec.descriptorJson",
+        "SpaceCodec.toJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The value-space codec; round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Registry.dispatchWithArgs"
+      ],
+      "class": "obsolete",
+      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
+      "forwardsTo": "CapabilityRegistry.dispatchWithArgs"
+    },
+    {
+      "members": [
+        "Registry.dispatch"
+      ],
+      "class": "obsolete",
+      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
+      "forwardsTo": "CapabilityRegistry.dispatch"
+    },
+    {
+      "members": [
+        "Registry.enumerate"
+      ],
+      "class": "obsolete",
+      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
+      "forwardsTo": "CapabilityRegistry.enumerate"
+    },
+    {
+      "members": [
+        "Registry.register"
+      ],
+      "class": "obsolete",
+      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
+      "forwardsTo": "CapabilityRegistry.register"
+    },
+    {
+      "members": [
+        "Registry.tryFind"
+      ],
+      "class": "obsolete",
+      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
+      "forwardsTo": "CapabilityRegistry.tryFind"
+    },
+    {
+      "members": [
+        "Idl.Artifact.identityOf",
+        "Idl.Artifact.json",
+        "Idl.Artifact.parse",
+        "Idl.Artifact.render",
+        "Idl.Artifact.renderJson",
+        "Idl.Artifact.renderWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The IDL artifact's codec and canonical form; the IDL decode-layer, refusal-vector and three-host tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Artifact.ofJson",
+        "Idl.Artifact.ofJsonDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The IDL artifact's codec and canonical form; the IDL decode-layer, refusal-vector and three-host tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Artifact.canonicalise"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The IDL artifact's codec and canonical form; the IDL decode-layer, refusal-vector and three-host tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Artifact.identityOfJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The identity of an artifact given as JSON; `identityOf` parses and calls it.",
+      "through": "Artifact.identityOf",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Artifact.jsonWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The artifact as JSON under an explicit identity; `json` is it under the artifact's own.",
+      "through": "Artifact.json",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Artifact.parseDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error artifact reader; `parse` is it plus the sentence.",
+      "through": "Artifact.parse",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Declare.enumAnnotate",
+        "Idl.Declare.enumOf",
+        "Idl.Declare.enumWireErrors",
+        "Idl.Declare.enumWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Vocabulary well-formedness: every rule a declaration must satisfy, refused at parse (Phase 292); the declare tests enumerate each rule.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlKindAnnotationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Declare.errors"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Vocabulary well-formedness: every rule a declaration must satisfy, refused at parse (Phase 292); the declare tests enumerate each rule.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeVectorsIdl.fs"
+    },
+    {
+      "members": [
+        "Idl.Declare.wireShapeErrors"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Vocabulary well-formedness: every rule a declaration must satisfy, refused at parse (Phase 292); the declare tests enumerate each rule.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Declare.hostedWireErrors"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Vocabulary well-formedness: every rule a declaration must satisfy, refused at parse (Phase 292); the declare tests enumerate each rule.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlSpikeTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Decode.decode",
+        "Idl.Decode.decodeDetailed",
+        "Idl.Decode.decodeOp",
+        "Idl.Decode.value",
+        "Idl.Encode.encode",
+        "Idl.Encode.encodeOp"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The interpreter's decode and encode of a declared vocabulary; the three-way differential (interpreter, compiled F#, TypeScript) and the decode vectors stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Decode.decodeOpDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error op reader; `decodeOp` is it plus the sentence.",
+      "through": "Decode.decodeOp",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Decode.valueDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error value reader; `value` is it plus the sentence.",
+      "through": "Decode.value",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Encode.encodeNode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Encodes one node; `encode` dispatches a node value to it.",
+      "through": "Encode.encode",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Idl.HostedFormat.admits"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Hosted-format admission (dates, timestamps); the interpreter's decode admits a hosted value through it, and the decode tests and vectors exercise both outcomes.",
+      "through": "Decode.decode",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Idl.IdlEnum.AnnotationsOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A case's declared annotations; the annotation tests read it as a member.",
+      "through": ".AnnotationsOf",
+      "standIn": "tests/Fuaran.Core.Tests/IdlDocAnnotationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.IdlEnum.CaseOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Resolves a wire spelling to its case; the enum-wire tests call it as a member.",
+      "through": ".CaseOf",
+      "standIn": "tests/Fuaran.Core.Tests/IdlEnumWireTests.fs"
+    },
+    {
+      "members": [
+        "Idl.IdlEnum.WireOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A case's wire spelling; the enum-wire tests read it as a member.",
+      "through": ".WireOf",
+      "standIn": "tests/Fuaran.Core.Tests/IdlEnumWireTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Proposal.applyDelta",
+        "Idl.Proposal.parse",
+        "Idl.Proposal.validate"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Vocabulary proposals: parse, validate and apply a delta; the proposal tests and the refusal corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlProposalTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Proposal.parseDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Vocabulary proposals: parse, validate and apply a delta; the proposal tests and the refusal corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Proposal.ofJson"
+      ],
+      "class": "forward",
+      "reason": "`ofJsonDetailed` with the error rendered as its sentence.",
+      "forwardsTo": "Idl.Proposal.ofJsonDetailed"
+    },
+    {
+      "members": [
+        "Idl.Proposal.ofJsonDetailed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error proposal reader over a JSON value; `parseDetailed` parses the text and calls it.",
+      "through": "Proposal.parseDetailed",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Proposal.touchedKinds"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The spike's sampling cross-section; `ProposalSpike.run` calls it on every applied delta, and the proposal tests run the spike.",
+      "through": "ProposalSpike.run",
+      "standIn": "tests/Fuaran.Core.Tests/IdlProposalTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Sample.sampleNodes",
+        "Idl.Sample.trySampleNodes"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Sample-tree generation from a vocabulary (total since Phase 292); its tests and every differential that draws from it stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlValidationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Sanitize.isAllowedAttributeKey",
+        "Idl.Sanitize.isSafeAttributeValue",
+        "Idl.Sanitize.sanitizeAttributes",
+        "Idl.Sanitize.sanitizeUrl",
+        "Idl.Sanitize.sanitizeUrlOrBlank",
+        "Idl.Sanitize.scrubMarkdown"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The sanitiser's attribute, URL and markdown scrubbers; example-, vector- and generated-input tests stand in. Not modelled.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.SourceLit.fsAttribute",
+        "Idl.SourceLit.fsDocLines",
+        "Idl.SourceLit.fsString",
+        "Idl.SourceLit.fstarString",
+        "Idl.SourceLit.isWellFormed",
+        "Idl.SourceLit.tsCommentLines",
+        "Idl.SourceLit.tsKey",
+        "Idl.SourceLit.tsString",
+        "Idl.SourceLit.tsStringSingle"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "One escaping policy per target language (Phase 292); the source-literal tests and the three-way differential stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlValidationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.SourceLit.fsDocXml"
+      ],
+      "class": "trivial",
+      "reason": "Escapes `&` and `<` in one XML-doc line; two `String.Replace` calls."
+    },
+    {
+      "members": [
+        "Idl.SourceLit.tsIsIdentifier"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Whether a key can be written bare in TypeScript; `tsKey` decides quoting with it, and the source-literal tests call `tsKey`.",
+      "through": "SourceLit.tsKey",
+      "standIn": "tests/Fuaran.Core.Tests/IdlValidationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.TypeParams.bind",
+        "Idl.TypeParams.substitute"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Transparent-union tag reading and type-parameter substitution; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
+    },
+    {
+      "members": [
+        "Idl.TransparentUnion.tag"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Transparent-union tag reading and type-parameter substitution; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Cli.Program.main"
+      ],
+      "class": "host-seam",
+      "reason": "The dotnet tool's entry point: argv parsing and file I/O over the generation half, which the package-level `facade` exclusion already records."
+    },
+    {
+      "members": [
+        "Idl.CodegenError.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders a codegen error for a reader; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.changes",
+        "Idl.Diff.classify",
+        "Idl.Diff.classifyDiff",
+        "Idl.Diff.classifyDiffWith",
+        "Idl.Diff.consequences",
+        "Idl.Diff.exitCode",
+        "Idl.Diff.obligations",
+        "Idl.Diff.run",
+        "Idl.Diff.verdictClass"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlDiffTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.classLabel",
+        "Idl.Diff.classOfLabel",
+        "Idl.Diff.consequenceLabel",
+        "Idl.Diff.consequenceWhy",
+        "Idl.Diff.verdictBlock"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.snapshot"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The evolution classifier's reporting and CLI surface around the modelled `evolution` / `classifyArtifacts` / `bumpProfile` / `parse`: labels, consequences, obligations, verdicts and snapshots; the diff tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.classifyArtifactsWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The support-aware classifier; `classifyArtifacts` (on the ladder) is it with no support documents.",
+      "through": "Diff.classifyArtifacts",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.parseWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Snapshot parse with an optional support document; reached through `classifyArtifacts`.",
+      "through": "Diff.classifyArtifacts",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.report"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The advisory report text; `run` renders it, and the diff tests read that output.",
+      "through": "Diff.run",
+      "standIn": "tests/Fuaran.Core.Tests/IdlDiffTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.runVerdict"
+      ],
+      "class": "forward",
+      "reason": "`runVerdictWith` with no support document on either side.",
+      "forwardsTo": "Idl.Diff.runVerdictWith"
+    },
+    {
+      "members": [
+        "Idl.Diff.runVerdictWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "What the CLI's `classify` verb runs; the stability-class tests drive the verb in a child process with and without each side's support document.",
+      "through": "--support-before",
+      "standIn": "tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.runWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The support-aware report path behind the CLI's `classify` verb (through `runVerdictWith`); the stability-class tests drive the verb in a child process with and without each side's support document.",
+      "through": "--support-before",
+      "standIn": "tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.snapshotWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Snapshot construction with an optional support document; reached through `classifyArtifacts`.",
+      "through": "Diff.classifyArtifacts",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Diff.verdictOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The verdict over two snapshots; `classifyArtifacts` returns it.",
+      "through": "Diff.classifyArtifacts",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "Idl.FStarTarget.beyondEnvelope",
+        "Idl.FStarTarget.partition",
+        "Idl.FStarTarget.proofsModule",
+        "Idl.FStarTarget.vocabularyModule"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The F* target's envelope partition and default-vocabulary forms beside the modelled `...From` emitters; the vocabulary tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlFStarTargetTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Gen.fsharpModule",
+        "Idl.Gen.fsharpTypes",
+        "Idl.Gen.fsharpValue",
+        "Idl.Gen.jsonSchema",
+        "Idl.Gen.provenanceHeader",
+        "Idl.Gen.typescriptDeclarations",
+        "Idl.Gen.typescriptModule",
+        "Idl.Gen.typescriptValue"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Code generation for F#, TypeScript and JSON Schema; the generated-output approvals and the three-way differential stand in. The F* target is the modelled one.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlSpikeTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Gen.fsharpModuleWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Code generation for F#, TypeScript and JSON Schema; the generated-output approvals and the three-way differential stand in. The F* target is the modelled one.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.SupportArtifact.parse",
+        "Idl.SupportArtifact.render"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The support-artifact codec; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.SupportArtifact.json"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A support document as JSON; `render` is its canonical text.",
+      "through": "SupportArtifact.render",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.SupportArtifact.ofJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads a support document from JSON; `parse` parses the text and calls it.",
+      "through": "SupportArtifact.parse",
+      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
+    },
+    {
+      "members": [
+        "Idl.Trust.checkHardenPolicy",
+        "Idl.Trust.harden",
+        "Idl.Trust.hardenOrRefuse",
+        "Idl.Trust.scaffoldFSharp"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Harden-policy checking and scaffolding; the trust tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlTrustTests.fs"
+    },
+    {
+      "members": [
+        "Observer.IObserver.Observe",
+        "Observer.IObserver.ObserveTree",
+        "Observer.IObserver.Register",
+        "Observer.IObserver.Subscribe",
+        "Observer.IObserver.Unregister"
+      ],
+      "class": "host-seam",
+      "reason": "An interface member: its content is the implementer's. `InMemoryObserver` is the shipped implementation and the observer family certifies the pure witness it delegates to."
+    },
+    {
+      "members": [
+        "ObserverWitness.create"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Constructs the in-memory observer over the pure witness; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
+    },
+    {
+      "members": [
+        "Observer.InMemoryObserver.create"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Constructs the in-memory observer over the pure witness; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ObserverTests.fs"
+    },
+    {
+      "members": [
+        "ObserverWitness.createWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Builds the pure observer witness with explicit options; the observer family builds its witnesses with it.",
+      "through": "Conformance.observerLaws",
+      "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
+    },
+    {
+      "members": [
+        "Observer.InMemoryObserver.RegisterNode"
+      ],
+      "class": "forward",
+      "reason": "Forwards to the pure witness under the observer's lock (Phase 298); the witness is rostered.",
+      "forwardsTo": "ObserverWitness.register"
+    },
+    {
+      "members": [
+        "Observer.InMemoryObserver.Update"
+      ],
+      "class": "forward",
+      "reason": "Forwards to the pure witness under the observer's lock (Phase 298); the witness is rostered.",
+      "forwardsTo": "ObserverWitness.update"
+    },
+    {
+      "members": [
+        "Observer.ObserverOptions.defaults",
+        "ObserverOptions.defaults"
+      ],
+      "class": "trivial",
+      "reason": "The default observer options record; no computation."
+    },
+    {
+      "members": [
+        "Actor.agent",
+        "Actor.human",
+        "Actor.id"
+      ],
+      "class": "trivial",
+      "reason": "Actor constructors and the id accessor; no computation."
+    },
+    {
+      "members": [
+        "Actor.validate"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Actor validation and the legacy-string reading the legacy-actor JSONL reader uses; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "Actor.ofLegacyString"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads the pre-Phase-145 actor spelling; measured through the legacy-actor JSONL reader.",
+      "through": "OpStream.fromJsonlLegacyActor",
+      "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
+    },
+    {
+      "members": [
+        "IAttestationSink.Sign",
+        "IAttestationSink.Verify"
+      ],
+      "class": "host-seam",
+      "reason": "An interface member: signing and verifying are the domain's key material. The attestation families certify the chain side at a domain's own sink."
+    },
+    {
+      "members": [
+        "JsonlWriteFault.toString"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders a JSONL read or write fault for a reader; example-tested at named faults.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "JsonlFault.reasonText"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The reason sentence inside a JSONL read fault's text; measured through the stream readers' errors.",
+      "through": "OpStream.fromJsonl",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "JsonlFault.toString"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders a JSONL read fault; the stream readers return it as their error text, and the stream tests read those errors.",
+      "through": "OpStream.fromJsonl",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "JsonlWriteFault.reasonText"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The reason sentence inside a JSONL write fault's text; `toString` renders it.",
+      "through": "JsonlWriteFault.toString",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.compactChainOnlyWith",
+        "OpStream.compactChainOnly",
+        "OpStream.compact",
+        "OpStream.fromJsonlVerified",
+        "OpStream.fromJsonlWithSnapshots",
+        "OpStream.replayFrom",
+        "OpStream.snapshotAtChainOnly",
+        "OpStream.snapshotAtOpt",
+        "OpStream.snapshotAt",
+        "OpStream.snapshotFromJsonlResult",
+        "OpStream.snapshotFromJsonl",
+        "OpStream.snapshotStateHashedFromJsonl",
+        "OpStream.snapshotToJsonlChainOnly",
+        "OpStream.snapshotToJsonl",
+        "OpStream.verifyAcrossChainOnlyWith",
+        "OpStream.verifyAcrossChainOnly",
+        "OpStream.verifyAcrossWith",
+        "OpStream.verifyAcross",
+        "OpStream.verifyChainWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SnapshotTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.appendChainOnly",
+        "OpStream.appendIfWith",
+        "OpStream.appendMany",
+        "OpStream.captureHead",
+        "OpStream.capturedSeed",
+        "OpStream.firstChainBreak",
+        "OpStream.headWith",
+        "OpStream.isDeterminismLabel",
+        "OpStream.rehash",
+        "OpStream.replayLenient",
+        "OpStream.tryRehash",
+        "OpStream.verifyCapturesAt"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.attestHeadAs",
+        "OpStream.attestationSubject",
+        "OpStream.sha256Hash",
+        "OpStream.verifyAttestationAs"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/LaneTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.compactWith",
+        "OpStream.snapshotAtOptWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.chainHashOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.fromJsonlLegacyActor"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.appendManyWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The hash-parameterised batch append; `appendMany` is it at the default hash. No test passes another hash.",
+      "through": "OpStream.appendMany",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.captureEffectWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The hash-parameterised capture; `captureEffect` (rostered) is it at the default hash. No test passes another hash.",
+      "through": "OpStream.captureEffect",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.captureHeadWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The hash-parameterised capture head; `captureHead` is it at the default hash. No test passes another hash.",
+      "through": "OpStream.captureHead",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.firstCaptureBreakWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The hash-parameterised capture-break scan; `firstCaptureBreak` (rostered) is it at the default hash. No test passes another hash.",
+      "through": "OpStream.firstCaptureBreak",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.verifyAcrossWithOpt"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Cross-snapshot verification with an optional state encoder; `verifyAcrossWith` is it with the encoder supplied.",
+      "through": "OpStream.verifyAcrossWith",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.verifyCapturesAtWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The hash-parameterised anchored capture check; `verifyCapturesAt` is it at the default hash. No test passes another hash.",
+      "through": "OpStream.verifyCapturesAt",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.Attributed.byActor",
+        "OpStream.Attributed.bySession",
+        "OpStream.Attributed.decodeEnvelope",
+        "OpStream.Attributed.encodeEnvelope"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Attributed-envelope codec and per-actor / per-session projections beside the rostered `liftWitness`; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.Compacted.appendIdempotentTo",
+        "OpStream.Compacted.appendIfTo",
+        "OpStream.Compacted.compactAt",
+        "OpStream.Compacted.verify"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Compacted-stream operations beside the modelled `appendTo` / `compactFrom` / `keyIndex` / `head`: conditional and idempotent appends, compaction at a sequence, replay and verify; the compacted-stream tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.Compacted.replayFrom"
+      ],
+      "class": "forward",
+      "reason": "Replays the compacted stream's tail from its snapshot: `Snapshots.replayFrom` over the record's two fields.",
+      "forwardsTo": "OpStream.Snapshots.replayFrom"
+    },
+    {
+      "members": [
+        "OpStream.Jsonl.actorField",
+        "OpStream.Jsonl.checkRaw",
+        "OpStream.Jsonl.intField",
+        "OpStream.Jsonl.lineNumber",
+        "OpStream.Jsonl.lineText",
+        "OpStream.Jsonl.parseLine",
+        "OpStream.Jsonl.rawField",
+        "OpStream.Jsonl.rawSpan",
+        "OpStream.Jsonl.refuse",
+        "OpStream.Jsonl.scanRecords",
+        "OpStream.Jsonl.stringField",
+        "OpStream.Jsonl.stringsField",
+        "OpStream.Jsonl.topFields",
+        "OpStream.Jsonl.tryRawField",
+        "OpStream.Jsonl.unquote"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The JSONL line reader's public building blocks (Phase 301's checked writer reads through them); measured through the stream and DAG JSONL readers whose tests feed them well-formed, malformed and hostile lines.",
+      "through": "OpStream.fromJsonl",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "OpStream.Snapshots.firstBreak",
+        "OpStream.Snapshots.ofJsonl",
+        "OpStream.Snapshots.take",
+        "OpStream.Snapshots.toJsonl",
+        "OpStream.Snapshots.tryToJsonl"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Snapshot-sidecar operations beside the rostered compact / replayFrom / verify; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "Dag.appendIf",
+        "Dag.attestHead",
+        "Dag.between",
+        "Dag.conflictsOfHeads",
+        "Dag.conflictsOfNodes",
+        "Dag.disjointRoots",
+        "Dag.heads",
+        "Dag.laneKey",
+        "Dag.mergeWith",
+        "Dag.ranks",
+        "Dag.rehashLanes",
+        "Dag.replayAllBy",
+        "Dag.tryLanesToJsonl",
+        "Dag.verifyAttestation"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/LaneTests.fs"
+    },
+    {
+      "members": [
+        "Dag.checkpointFrom",
+        "Dag.firstBreakFrom",
+        "Dag.fromJsonlWithCheckpoints",
+        "Dag.sealAt",
+        "Dag.tryToJsonlWithCheckpoints"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/CheckpointTests.fs"
+    },
+    {
+      "members": [
+        "Dag.appendVerifiedWith",
+        "Dag.fromJsonlVerified",
+        "Dag.mergeVerifiedWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DagTests.fs"
+    },
+    {
+      "members": [
+        "Dag.tryToJsonl"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "DAG operations beside the rostered and modelled core (append / merge / reach / replay / checkpoint / lanes): conditional and hash-parameterised appends, attestation, sealing, multi-head conflict views, verified and checkpointed readers, ranks and rehash of a lane set. The DAG, lane and checkpoint tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+    },
+    {
+      "members": [
+        "DagAppendFault.toString"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders a DAG append fault for a reader; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ReachTests.fs"
+    },
+    {
+      "members": [
+        "Arbitration.interference",
+        "Arbitration.stale"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Arbitration variants beside the modelled `arbitrate` and the rostered keyed and grammar forms: containment, references, the interference report and the stale reading; the arbitration tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ArbitrationTests.fs"
+    },
+    {
+      "members": [
+        "Arbitration.arbitrateContained"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Arbitration variants beside the modelled `arbitrate` and the rostered keyed and grammar forms: containment, references, the interference report and the stale reading; the arbitration tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ContentDiffTests.fs"
+    },
+    {
+      "members": [
+        "Arbitration.arbitrateReferenced"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Arbitration variants beside the modelled `arbitrate` and the rostered keyed and grammar forms: containment, references, the interference report and the stale reading; the arbitration tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/StructuralIntegrityTests.fs"
+    },
+    {
+      "members": [
+        "Diff.toOpsWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Diff variants with a content projection; the content-aware diff tests stand in (the contained form is on the ladder).",
+      "standIn": "tests/Fuaran.Core.Tests/ContentDiffTests.fs"
+    },
+    {
+      "members": [
+        "Diff.toOpsGrammarWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The content-aware grammar diff; `toOpsGrammar` (rostered under `containmentLaws`) is it with no content projection.",
+      "through": "Diff.toOpsGrammar",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Footprint.contentEdit",
+        "Footprint.insertUnder",
+        "Footprint.moveTo",
+        "Footprint.reading",
+        "Footprint.readingSlot",
+        "Footprint.removeNode"
+      ],
+      "class": "trivial",
+      "reason": "Builds a footprint record naming the nodes an op reads or writes; no computation."
+    },
+    {
+      "members": [
+        "Footprint.slotClash",
+        "Footprint.slotsAgainstNode",
+        "Footprint.union"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Footprint set algebra beside the modelled slot clauses (`slot-conflicts-agree` states the relation they compute); example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SlotFootprintTests.fs"
+    },
+    {
+      "members": [
+        "Ops.applyAllReferenced",
+        "Ops.canApplyAllReferenced",
+        "Ops.canApplyReferenced",
+        "Ops.isLegalChild"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The reference-witness sequence forms and the containment predicate beside the rostered reference and containment families; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/StructuralIntegrityTests.fs"
+    },
+    {
+      "members": [
+        "Ops.Index.afterOp"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Index maintenance across an op; the index tests compare it with a rebuild.",
+      "standIn": "tests/Fuaran.Core.Tests/AlgebraSymmetryTests.fs"
+    },
+    {
+      "members": [
+        "Rejection.code",
+        "Rejection.explain"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Rejection codes and explanations for a reader; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "TreePlacement.clone"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Uncontained clone beside the rostered `cloneContained`; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/PlacementTests.fs"
+    },
+    {
+      "members": [
+        "Projection.escapeCell",
+        "Projection.unescapeCell"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projection digests and cell escaping beside the rostered project / render / parseBack; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Projection.digestOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projection digests and cell escaping beside the rostered project / render / parseBack; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/HashRosterTests.fs"
+    },
+    {
+      "members": [
+        "Projection.lineOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Projection digests and cell escaping beside the rostered project / render / parseBack; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ProjectionTests.fs"
+    },
+    {
+      "members": [
+        "Projection.snapshotDigestOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The SHA-256 digest a projection snapshot carries; `snapshot` (rostered) computes it.",
+      "through": "Projection.snapshot",
+      "standIn": "tests/Fuaran.Core.Tests/ProjectionTests.fs"
+    },
+    {
+      "members": [
+        "Graph.cycleThrough",
+        "Graph.dependents",
+        "Graph.sort"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic dependency graph's cycle detection, dependents and sort; the propagation tests stand in (`Propagation.sort` is rostered over a tree).",
+      "standIn": "tests/Fuaran.Core.Tests/StructuralIntegrityTests.fs"
+    },
+    {
+      "members": [
+        "Propagation.dependencyMap",
+        "Propagation.dirtyFromChangedParts",
+        "Propagation.dirtyFromOp",
+        "Propagation.nodeDependencies",
+        "Propagation.partDependencyMap",
+        "Propagation.touchedBy"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Propagation operations beside the rostered eval / dirty / sort core and the modelled `changedForOp` / `validTopo`: dependency maps, part-level dirtiness, planned and targeted evaluation, staleness. The propagation tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/PropagationCompositionTests.fs"
+    },
+    {
+      "members": [
+        "Propagation.evalForWith",
+        "Propagation.evalFor",
+        "Propagation.neededFor",
+        "Propagation.staleSet"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Propagation operations beside the rostered eval / dirty / sort core and the modelled `changedForOp` / `validTopo`: dependency maps, part-level dirtiness, planned and targeted evaluation, staleness. The propagation tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Propagation.evalFromPlan",
+        "Propagation.plan"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Propagation operations beside the rostered eval / dirty / sort core and the modelled `changedForOp` / `validTopo`: dependency maps, part-level dirtiness, planned and targeted evaluation, staleness. The propagation tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Propagation.evalFromWithPlan"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Incremental evaluation from a precomputed plan; `evalFromWith` (rostered) plans and calls it.",
+      "through": "Propagation.evalFromWith",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Query.invokeWithArgs",
+        "Query.toJsonSchema",
+        "Query.validateParamsAll"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Query invocation and its argument-typed and all-errors forms, and schema export, beside the rostered key / tag / validate; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "Query.invoke"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Query invocation and its argument-typed and all-errors forms, and schema export, beside the rostered key / tag / validate; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "QueryCodec.decodeArgs",
+        "QueryCodec.decodeArgsJson",
+        "QueryCodec.decodeDeferredResultWith",
+        "QueryCodec.decodeQueryError",
+        "QueryCodec.decodeResultWith",
+        "QueryCodec.decodeWith",
+        "QueryCodec.encodeQueryError"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Query codec arms beside the rostered encode/decode pairs: argument decoding, typed-error and policy-parameterised forms, query-error codec; the decode layer's refusal corpus and round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "QueryCodec.decodeDetailedWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Query codec arms beside the rostered encode/decode pairs: argument decoding, typed-error and policy-parameterised forms, query-error codec; the decode layer's refusal corpus and round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
+    },
+    {
+      "members": [
+        "QueryCodec.decodeDeferredResultDetailedWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error, policy-parameterised deferred-result reader; `decodeDeferredResult` (rostered) is it, lenient, plus the sentence.",
+      "through": "QueryCodec.decodeDeferredResult",
+      "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
+    },
+    {
+      "members": [
+        "QueryCodec.decodeResultDetailedWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed-error, policy-parameterised result reader; `decodeResult` (rostered) is it, lenient, plus the sentence.",
+      "through": "QueryCodec.decodeResult",
+      "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
+    },
+    {
+      "members": [
+        "QueryCodec.queryErrorJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A query error as a JSON value; `encodeQueryError` is its canonical text.",
+      "through": "QueryCodec.encodeQueryError",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "QueryCodec.queryErrorOf"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads a query error from its JSON value; `decodeQueryError` parses the text and calls it.",
+      "through": "QueryCodec.decodeQueryError",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "QueryError.describe",
+        "QueryError.describeAll"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders query errors for a reader; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "FreshIds.derived",
+        "FreshIds.sequential"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Fresh-id strategies a domain hands to placement; the fresh-id tests stand in (`repairDuplicates` is rostered).",
+      "standIn": "tests/Fuaran.Core.Tests/PlacementTests.fs"
+    },
+    {
+      "members": [
+        "Hash.sha256Bytes",
+        "Hash.sha256Hex",
+        "Hash.sha256HexOfBytes"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Hash primitives beside the modelled UTF-8 and canonical-field encodings: the FNV-1a and SHA-256 digests over bytes the models fix. Collision behaviour is a claim about the hash, which the ladder declines to make.",
+      "standIn": "tests/Fuaran.Core.Tests/HashTests.fs"
+    },
+    {
+      "members": [
+        "Hash.fnv1a32"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Hash primitives beside the modelled UTF-8 and canonical-field encodings: the FNV-1a and SHA-256 digests over bytes the models fix. Collision behaviour is a claim about the hash, which the ladder declines to make.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "Hash.canonicalField"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Hash primitives beside the modelled UTF-8 and canonical-field encodings: the FNV-1a and SHA-256 digests over bytes the models fix. Collision behaviour is a claim about the hash, which the ladder declines to make.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Hash.trySha256Hex"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Hash primitives beside the modelled UTF-8 and canonical-field encodings: the FNV-1a and SHA-256 digests over bytes the models fix. Collision behaviour is a claim about the hash, which the ladder declines to make.",
+      "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    },
+    {
+      "members": [
+        "Hash.fnv1a"
+      ],
+      "class": "forward",
+      "reason": "The 32-bit FNV-1a under its older name; forwards to `fnv1a32`.",
+      "forwardsTo": "Hash.fnv1a32"
+    },
+    {
+      "members": [
+        "Tree.ancestors",
+        "Tree.count",
+        "Tree.depth",
+        "Tree.descendants",
+        "Tree.filter",
+        "Tree.fold",
+        "Tree.ids",
+        "Tree.map",
+        "Tree.parentOf",
+        "Tree.path",
+        "Tree.preorder",
+        "Tree.remapIds",
+        "Tree.siblings",
+        "Tree.subtree",
+        "Tree.tryFind",
+        "Tree.tryPick",
+        "Tree.updateNode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Tree traversals, queries and well-formedness checks beside the modelled apply engine and the rostered keyed forms; the tree tests stand in. The well-formedness predicate is the model's `wf`, and the apply-engine theorems are stated over it.",
+      "standIn": "tests/Fuaran.Core.Tests/TreeExtTests.fs"
+    },
+    {
+      "members": [
+        "Tree.foldKeyed",
+        "Tree.graftWellFormedKeyed",
+        "Tree.graftWellFormed",
+        "Tree.isWellFormed",
+        "Tree.preorderKeyed",
+        "Tree.wellFormed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Tree traversals, queries and well-formedness checks beside the modelled apply engine and the rostered keyed forms; the tree tests stand in. The well-formedness predicate is the model's `wf`, and the apply-engine theorems are stated over it.",
+      "standIn": "tests/Fuaran.Core.Tests/KeyedApplyTests.fs"
+    },
+    {
+      "members": [
+        "Tree.exists"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Tree traversals, queries and well-formedness checks beside the modelled apply engine and the rostered keyed forms; the tree tests stand in. The well-formedness predicate is the model's `wf`, and the apply-engine theorems are stated over it.",
+      "standIn": "tests/Fuaran.Core.Tests/TreeTests.fs"
+    },
+    {
+      "members": [
+        "Tree.firstRepeatedId"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The first repeated id in a tree, the witness `graftWellFormed` refuses with; the tree tests exercise the refusal.",
+      "through": "Tree.graftWellFormed",
+      "standIn": "tests/Fuaran.Core.Tests/KeyedApplyTests.fs"
+    },
+    {
+      "members": [
+        "Tree.Index.ancestors",
+        "Tree.Index.build",
+        "Tree.Index.depth",
+        "Tree.Index.isFreshFor",
+        "Tree.Index.parentOf",
+        "Tree.Index.path",
+        "Tree.Index.tryFind"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The tree index: build, lookups and freshness, compared against a rebuild by the index tests.",
+      "standIn": "tests/Fuaran.Core.Tests/TreeExtTests.fs"
+    },
+    {
+      "members": [
+        "Tree.Index.buildWith",
+        "Tree.Index.isFreshForWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The tree index: build, lookups and freshness, compared against a rebuild by the index tests.",
+      "standIn": "tests/Fuaran.Core.Tests/ContentDiffTests.fs"
+    },
+    {
+      "members": [
+        "Tree.Index.tryBuild"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The tree index: build, lookups and freshness, compared against a rebuild by the index tests.",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Tree.Index.rebind"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Re-points an index entry after an op; `Ops.Index.afterOp` calls it and the index tests compare its result with a rebuild.",
+      "through": "Index.afterOp",
+      "standIn": "tests/Fuaran.Core.Tests/AlgebraSymmetryTests.fs"
+    },
+    {
+      "members": [
+        "ColumnValidator.asCheck",
+        "ColumnValidator.validateTagged"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Column-validator registry and tagged validation beside the rostered rule constructors and `validate`; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "ColumnValidator.enumerate"
+      ],
+      "class": "trivial",
+      "reason": "Returns the registry's rule ids; no computation beyond a list projection."
+    },
+    {
+      "members": [
+        "ColumnValidator.register"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Registers one rule; `ofRules` (rostered) folds it over a rule list.",
+      "through": "ColumnValidator.ofRules",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "ColumnValidator.rule"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The rule constructor the shipped rules are built with; measured through them (`inRange` is rostered).",
+      "through": "ColumnValidator.inRange",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "ColumnValidator.ruleId"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The canonical rule id the rule constructors stamp; measured through them (`inRange` is rostered).",
+      "through": "ColumnValidator.inRange",
+      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
+    },
+    {
+      "members": [
+        "ColumnValidator.tryFind"
+      ],
+      "class": "trivial",
+      "reason": "A lookup of one rule by id; no computation beyond `List.tryFind`."
+    },
+    {
+      "members": [
+        "Defect.create"
+      ],
+      "class": "trivial",
+      "reason": "Builds a defect record; no computation."
+    },
+    {
+      "members": [
+        "Defect.inFamily"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Family membership of a defect; measured through the tagged run, which groups defects by family.",
+      "through": "Validator.runAllTagged",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Validator.asCheck",
+        "Validator.empty",
+        "Validator.enumerate",
+        "Validator.ofFamilies",
+        "Validator.perNode",
+        "Validator.register",
+        "Validator.runAllTagged",
+        "Validator.runAll",
+        "Validator.runPack",
+        "Validator.tryFind"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion): a registry and a fold over the domain's own rules. The validator tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/SmallSeamsTests.fs"
+    },
+    {
+      "members": [
+        "Validator.hasErrors",
+        "Validator.summary"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion): a registry and a fold over the domain's own rules. The validator tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ValidatorTests.fs"
+    },
+    {
+      "members": [
+        "Validator.citation"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The generic rule framework (the package-level `content-free-seam` exclusion): a registry and a fold over the domain's own rules. The validator tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
+    },
+    {
+      "members": [
+        "Canon.typed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Typed canonical rendering; example-tested beside the modelled `render`.",
+      "standIn": "tests/Fuaran.Core.Tests/ApplyVectorExport.fs"
+    },
+    {
+      "members": [
+        "Corpus.codecLaws",
+        "Corpus.coverageGate",
+        "Corpus.fuzzRoundTrip"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The corpus harness: codec laws, the coverage gate, fuzzing, mutations, refusal laws and reject runs; exercised over the committed corpus by the corpus and decode-layer tests.",
+      "standIn": "tests/Fuaran.Core.Tests/WireTests.fs"
+    },
+    {
+      "members": [
+        "Corpus.refusalLaws",
+        "Corpus.runRejects"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The corpus harness: codec laws, the coverage gate, fuzzing, mutations, refusal laws and reject runs; exercised over the committed corpus by the corpus and decode-layer tests.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Corpus.mutations"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The mutations the refusal laws apply to a valid document; measured through them.",
+      "through": "Corpus.refusalLaws",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Decode.asBool",
+        "Decode.asFloat",
+        "Decode.asInt",
+        "Decode.asString",
+        "Decode.getProp",
+        "Decode.intField",
+        "Decode.kindOf",
+        "Decode.mapList",
+        "Decode.strField"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Decode.arrayWith",
+        "Decode.propWith",
+        "Decode.stringWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/WireSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "Decode.parse"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
+    },
+    {
+      "members": [
+        "Decode.tryProp"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Decode.parseTolerantOfNull"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
+    },
+    {
+      "members": [
+        "Decode.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A decode fault in the words the string-error helpers use; `getProp` and its siblings return it.",
+      "through": "Decode.getProp",
+      "standIn": "tests/Fuaran.Core.Tests/ConstructThenEncodeTests.fs"
+    },
+    {
+      "members": [
+        "DecodeError.codeName",
+        "DecodeError.make",
+        "DecodeError.resolvesIn",
+        "DecodeError.tryCodeOfName",
+        "DecodeError.under",
+        "DecodePath.ofJson",
+        "DecodePath.render",
+        "DecodePath.resolve",
+        "DecodePath.toJson"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed decode error and its path (Phase 310): construction, rendering, codes and path resolution; the decode-layer tests and the `conformance/decode/` vectors stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "DecodeError.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed decode error and its path (Phase 310): construction, rendering, codes and path resolution; the decode-layer tests and the `conformance/decode/` vectors stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeVectorsGenerated.fs"
+    },
+    {
+      "members": [
+        "DecodeError.render"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed decode error and its path (Phase 310): construction, rendering, codes and path resolution; the decode-layer tests and the `conformance/decode/` vectors stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlThreeHostTests.fs"
+    },
+    {
+      "members": [
+        "DecodeError.ofJsonError"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Lifts a JSON parse error into the typed decode error; `Decoder.parseWith` returns it for unparsable text.",
+      "through": "Decoder.parseWith",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "DecodeError.reword"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Rewrites a decode error's sentence; the artifact reader uses it for its field-level messages.",
+      "through": "Artifact.parse",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
+    },
+    {
+      "members": [
+        "DecodeError.toJson"
+      ],
+      "class": "trivial",
+      "reason": "Builds the four-member object (code, path, expected, message); no computation beyond `DecodePath.toJson`."
+    },
+    {
+      "members": [
+        "DecodeError.within"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Prefixes a decode error's path; `Decoder.at` calls it.",
+      "through": "Decoder.at",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.all",
+        "Decoder.at",
+        "Decoder.bool",
+        "Decoder.boundedList",
+        "Decoder.closed",
+        "Decoder.fail",
+        "Decoder.fieldOr",
+        "Decoder.field",
+        "Decoder.float",
+        "Decoder.int",
+        "Decoder.intRange",
+        "Decoder.json",
+        "Decoder.kindDispatch",
+        "Decoder.listAll",
+        "Decoder.list",
+        "Decoder.map",
+        "Decoder.obj",
+        "Decoder.ofString",
+        "Decoder.oneOf",
+        "Decoder.optField",
+        "Decoder.parse",
+        "Decoder.parseWith",
+        "Decoder.sequence",
+        "Decoder.str",
+        "Decoder.succeed",
+        "Decoder.tagDispatch",
+        "Decoder.tryMember",
+        "Decoder.undeclared",
+        "Decoder.wrongKind"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed decoder combinators (Phase 310); the decode-layer tests and the `conformance/decode/` vectors, which every host agrees on by code and path, stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.missing"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed decoder combinators (Phase 310); the decode-layer tests and the `conformance/decode/` vectors, which every host agrees on by code and path, stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeVectorsGenerated.fs"
+    },
+    {
+      "members": [
+        "Decoder.andThen"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Decoder sequencing; the capability codec's readers are written in it.",
+      "through": "CapabilityCodec.decode",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.bind"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Decoder bind; the capability codec's readers are written in it.",
+      "through": "CapabilityCodec.decode",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.describing"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Lowers a typed-error decoder to the string-error form; the capability codec's string readers are it.",
+      "through": "CapabilityCodec.decode",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.items"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The element decoder under the list combinators; `boundedList` calls it.",
+      "through": "Decoder.boundedList",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.mapListIndexed"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Indexed list decoding; `Decoder.list` is it.",
+      "through": "Decoder.list",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Decoder.members"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The strict-member check (the decode layer's strict policy); the policy-parameterised readers call it.",
+      "through": "CapabilityCodec.decodeWith",
+      "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "FloatLayout.roundTrip"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Float layout round trip; the parity vectors are built with it and the parity tests diff them against the other hosts.",
+      "through": "ParityVectors.lines",
+      "standIn": "tests/Fuaran.Core.Tests/ParityVectorTests.fs"
+    },
+    {
+      "members": [
+        "JVal.kindName",
+        "JVal.nonFiniteToken"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JVal readers; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/WireSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "JVal.asFloat"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JVal readers; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeTests.fs"
+    },
+    {
+      "members": [
+        "Json.kindObj",
+        "Json.parseDetailed",
+        "Json.parseDetailedWith",
+        "Json.parseWith",
+        "Json.render",
+        "Json.tryRender"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeTests.fs"
+    },
+    {
+      "members": [
+        "Json.firstIllFormedUnit",
+        "Json.isWellFormedUtf16",
+        "Json.readInt32"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    },
+    {
+      "members": [
+        "Json.escape"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Json.parseTolerantOfNullWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
+    },
+    {
+      "members": [
+        "Json.firstNonFinite"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/WireSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "Json.encode"
+      ],
+      "class": "forward",
+      "reason": "The older name of `render`; forwards to it.",
+      "forwardsTo": "Json.render"
+    },
+    {
+      "members": [
+        "Json.parseWithPolicy"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Policy-parameterised parse to a string error; `parseTolerantOfNullWith` is it under the tolerant policy.",
+      "through": "Json.parseTolerantOfNullWith",
+      "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
+    },
+    {
+      "members": [
+        "Json.tryEncode"
+      ],
+      "class": "forward",
+      "reason": "The older name of `tryRender`; forwards to it.",
+      "forwardsTo": "Json.tryRender"
+    },
+    {
+      "members": [
+        "RowCodec.decodeRows",
+        "RowCodec.encodeRows"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The row codec over columnar tables; round-trip tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/WireTests.fs"
+    },
+    {
+      "members": [
+        "Versioning.decodeTolerant",
+        "Versioning.negotiate",
+        "Versioning.parse",
+        "Versioning.reencode",
+        "Versioning.render",
+        "Versioning.Profile.render",
+        "Versioning.Profile.tryParse"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Versioning envelope codec, negotiation and profile spelling beside the modelled bump / classify; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/VersioningTests.fs"
+    },
+    {
+      "members": [
+        "Versioning.tryRender",
+        "Versioning.Profile.isValid",
+        "Versioning.Profile.tryRender"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Versioning envelope codec, negotiation and profile spelling beside the modelled bump / classify; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    },
+    {
+      "members": [
+        "Versioning.decode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Reads a versioning envelope from a JSON value; `parse` parses the text and calls it.",
+      "through": "Versioning.parse",
+      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
+    },
+    {
+      "members": [
+        "Versioning.encode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The versioning envelope as a JSON value; `render` is its canonical text.",
+      "through": "Versioning.render",
+      "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    },
+    {
+      "members": [
+        "Versioning.Profile.isValidName"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Profile-name validity; `isValid` is it over the parsed name.",
+      "through": "Profile.isValid",
+      "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    }
+  ]
 }

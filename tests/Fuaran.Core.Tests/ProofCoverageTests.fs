@@ -673,6 +673,607 @@ let private expectOneFinding
     Expect.stringContains only subject (sprintf "%s: the finding names what it is about" name)
 
 // ---------------------------------------------------------------------------
+//  Phase 335 — the OPERATION clause
+//
+//  Clause 1 stops at PACKAGE granularity: a package with a model is covered, so a public operation
+//  inside it could ship with no proved row, no law family and no recorded reason, and nothing said
+//  so. The census here is the committed API baselines (`api/*.txt`), which already enumerate every
+//  public operation by signature: every `method` line maps to at least one of
+//
+//    (a) a `proofs.json` row whose `evidence.operations` names it (a `proved` or `tested` row);
+//    (b) a law family whose operation roster (`Families.operations`) lists it — and a family's own
+//        entry point is mapped by its roster row;
+//    (c) an entry in `proofs/coverage-exclusions.json`'s `operations` block, with a class from that
+//        file's closed `operationClasses` vocabulary and a one-line reason.
+//
+//  An unmapped operation reds the suite and names itself, and because the census IS the baselines,
+//  a newly published operation reds at the commit that publishes it. The check runs both ways, on
+//  clause 1's precedent: an entry for an operation that is no longer published, or that has since
+//  gained a ladder row or a roster line, fails too. And each class is held to what it says, as far
+//  as a file can be: a `forward` names a mapped target, an `obsolete` entry's member carries
+//  `System.Obsolete`, and a `measured-elsewhere` entry names a test file that mentions the member or
+//  the measured operation it is reached `through`.
+// ---------------------------------------------------------------------------
+
+/// One public operation of the census: the package whose baseline publishes it, its spelling in the
+/// coverage records, and the baseline's CLR name.
+type Operation =
+    { Package: string
+      Name: string
+      Clr: string }
+
+/// One entry of `coverage-exclusions.json`'s `operations` block.
+type OperationExclusion =
+    { Members: string list
+      Class: string
+      Reason: string
+      ForwardsTo: string option
+      StandIn: string option
+      Through: string option }
+
+type OperationInputs =
+    {
+        Census: Operation list
+        /// `proofs.json` rows that carry `evidence.operations`: (row id, level, operations).
+        Ladder: (string * string * string list) list
+        /// The kit's operation roster: (family id, operations).
+        Rosters: (string * string list) list
+        /// Every declared law-family id — an entry point named here is mapped by its own row.
+        Families: Set<string>
+        Exclusions: OperationExclusion list
+        /// The class vocabulary, read from the exclusions file's own `operationClasses` block.
+        Classes: Set<string>
+        /// The text of each stand-in a `measured-elsewhere` entry names, by its repo-relative path. A
+        /// path absent from the map does not exist (or is not under `tests/`).
+        StandIns: Map<string, string>
+        /// The census operations that carry `System.Obsolete`, on itself or its declaring type.
+        Obsolete: Set<string>
+    }
+
+/// How the census divides, each operation counted once, by the first route that maps it.
+type OperationTally =
+    { Operations: int
+      Ladder: int
+      Rostered: int
+      ByClass: (string * int) list
+      ByPackage: (string * int * int * int * (string * int) list) list }
+
+/// The class order the records and the README table use.
+let operationClassOrder =
+    [ "trivial"; "forward"; "obsolete"; "host-seam"; "measured-elsewhere" ]
+
+/// A baseline's CLR member name as the coverage records spell it: `Fuaran.Core.` dropped, generic
+/// arity dropped, nested types joined by `.`, and the compiler's `Module` suffix dropped from every
+/// type segment (`Fuaran.Core.Dag+ReachModule.ancestors` is `Dag.Reach.ancestors`).
+let operationName (clr: string) : string =
+    let rest =
+        if clr.StartsWith "Fuaran.Core." then
+            clr.Substring "Fuaran.Core.".Length
+        else
+            clr
+
+    let segs = Regex.Replace(rest, "`[0-9]+", "").Replace('+', '.').Split('.')
+
+    segs
+    |> Array.mapi (fun i s ->
+        if i < segs.Length - 1 && s.Length > 6 && s.EndsWith "Module" then
+            s.Substring(0, s.Length - 6)
+        else
+            s)
+    |> String.concat "."
+
+/// The `method` lines of one package's baseline, as operations.
+let censusOf (package: string) (baselineText: string) : Operation list =
+    baselineText.Split('\n')
+    |> Array.choose (fun raw ->
+        let line = raw.TrimEnd '\r'
+
+        if line.StartsWith "method " && line.IndexOf '(' > 7 then
+            let clr = line.Substring(7, line.IndexOf '(' - 7)
+
+            Some
+                { Package = package
+                  Name = operationName clr
+                  Clr = clr }
+        else
+            None)
+    |> List.ofArray
+
+/// `<Owner>.<member>` — the last two segments, which is how a test file names an operation.
+let private twoSegments (op: string) =
+    let s = op.Split '.'
+
+    if s.Length >= 2 then
+        s[s.Length - 2] + "." + s[s.Length - 1]
+    else
+        op
+
+/// Whether `text` mentions `token`, bounded as a word on each side where the token has a word
+/// character there (a `.Member` token may follow an identifier).
+let private mentions (text: string) (token: string) =
+    let isWord (c: char) = Char.IsLetterOrDigit c || c = '_'
+
+    token.Length > 0
+    && Regex.IsMatch(
+        text,
+        (if isWord token[0] then @"(?<![\w])" else "")
+        + Regex.Escape token
+        + (if isWord token[token.Length - 1] then @"(?![\w])" else "")
+    )
+
+/// Every finding the operation clause yields, with the tally the README table renders.
+let checkOperations (inputs: OperationInputs) : string list * OperationTally =
+    let census = inputs.Census |> List.map _.Name |> Set.ofList
+
+    let ladderOps =
+        inputs.Ladder
+        |> List.filter (fun (_, level, _) -> level = "proved" || level = "tested")
+        |> List.collect (fun (_, _, ops) -> ops)
+        |> Set.ofList
+
+    let rosterOps = inputs.Rosters |> List.collect snd |> Set.ofList
+
+    let entryOps = Set.intersect census inputs.Families
+
+    let excluded =
+        inputs.Exclusions
+        |> List.collect (fun e -> e.Members |> List.map (fun m -> m, e))
+        |> List.groupBy fst
+        |> List.map (fun (m, es) -> m, es |> List.map snd)
+        |> Map.ofList
+
+    let directlyMapped (op: string) =
+        ladderOps.Contains op
+        || rosterOps.Contains op
+        || entryOps.Contains op
+        || (match Map.tryFind op excluded with
+            | Some(e :: _) -> e.Class <> "forward" && e.Class <> "obsolete"
+            | _ -> false)
+
+    // A forward's coverage is its target's: follow `forwardsTo` until a directly mapped operation,
+    // refusing a cycle and a chain that ends nowhere.
+    let rec resolves (seen: Set<string>) (op: string) =
+        if directlyMapped op then
+            true
+        elif seen.Contains op then
+            false
+        else
+            match Map.tryFind op excluded with
+            | Some(e :: _) when (e.Class = "forward" || e.Class = "obsolete") ->
+                match e.ForwardsTo with
+                | Some t -> resolves (seen.Add op) t
+                | None -> false
+            | _ -> false
+
+    let ladderFindings =
+        inputs.Ladder
+        |> List.collect (fun (id, level, ops) ->
+            [ if level <> "proved" && level <> "tested" then
+                  yield
+                      finding
+                          id
+                          "operation-ladder"
+                          (sprintf
+                              "a %s row names operations; only a proved or tested row is evidence an operation is covered"
+                              level)
+              for op in ops do
+                  if not (census.Contains op) then
+                      yield
+                          finding
+                              id
+                              "operation-ladder"
+                              (sprintf "`evidence.operations` names %s, which no API baseline publishes" op) ])
+
+    let rosterFindings =
+        [ for fam, ops in inputs.Rosters do
+              if not (inputs.Families.Contains fam) then
+                  yield
+                      finding fam "operation-roster" "an operation-roster row for a family the roster does not declare"
+
+              for op in ops do
+                  if not (census.Contains op) then
+                      yield finding fam "operation-roster" (sprintf "lists %s, which no API baseline publishes" op)
+          for fam, n in inputs.Rosters |> List.countBy fst do
+              if n > 1 then
+                  yield finding fam "operation-roster" (sprintf "%d operation-roster rows; one per family" n) ]
+
+    let exclusionFindings =
+        [ for KeyValue(m, es) in excluded do
+              if List.length es > 1 then
+                  yield
+                      finding
+                          m
+                          "operation-exclusion-stale"
+                          (sprintf "listed by %d entries; one decision per operation" es.Length)
+
+              if not (census.Contains m) then
+                  yield finding m "operation-exclusion-stale" "an exclusion for an operation no API baseline publishes"
+              elif ladderOps.Contains m || rosterOps.Contains m || entryOps.Contains m then
+                  yield
+                      finding
+                          m
+                          "operation-exclusion-stale"
+                          "an exclusion for an operation that has since gained a ladder row or a roster line — delete the entry"
+          for e in inputs.Exclusions do
+              let subject = String.concat ", " e.Members
+
+              if List.isEmpty e.Members then
+                  yield finding "(empty entry)" "operation-exclusion-class" "an entry naming no operation"
+
+              if not (inputs.Classes.Contains e.Class) then
+                  yield
+                      finding
+                          subject
+                          "operation-exclusion-class"
+                          (sprintf "class '%s' is not in the closed vocabulary %A" e.Class (Set.toList inputs.Classes))
+
+              if String.IsNullOrWhiteSpace e.Reason then
+                  yield finding subject "operation-exclusion-reason" "an entry with no reason"
+
+              let forwarding = e.Class = "forward" || e.Class = "obsolete"
+
+              match forwarding, e.ForwardsTo with
+              | true, None ->
+                  yield finding subject "operation-forward" (sprintf "a %s entry names no `forwardsTo`" e.Class)
+              | false, Some _ ->
+                  yield finding subject "operation-forward" "`forwardsTo` belongs to a forward or obsolete entry"
+              | true, Some t when not (census.Contains t) ->
+                  yield
+                      finding subject "operation-forward" (sprintf "forwards to %s, which no API baseline publishes" t)
+              | true, Some t ->
+                  for m in e.Members do
+                      if census.Contains m && not (resolves Set.empty m) then
+                          yield
+                              finding
+                                  m
+                                  "operation-forward"
+                                  (sprintf "forwards to %s, which is not itself mapped (or the chain is a cycle)" t)
+              | false, None -> ()
+
+              if e.Class = "obsolete" then
+                  for m in e.Members do
+                      if census.Contains m && not (inputs.Obsolete.Contains m) then
+                          yield
+                              finding
+                                  m
+                                  "operation-obsolete"
+                                  "an obsolete entry for an operation that carries no System.Obsolete"
+
+              match e.Class = "measured-elsewhere", e.StandIn with
+              | true, None -> yield finding subject "operation-stand-in" "a measured-elsewhere entry names no `standIn`"
+              | false, Some _ ->
+                  yield finding subject "operation-stand-in" "`standIn` belongs to a measured-elsewhere entry"
+              | true, Some path ->
+                  match Map.tryFind path inputs.StandIns with
+                  | None ->
+                      yield
+                          finding
+                              subject
+                              "operation-stand-in"
+                              (sprintf "stand-in %s is not a test file under tests/ in this repository" path)
+                  | Some text ->
+                      for m in e.Members do
+                          let token = e.Through |> Option.defaultValue (twoSegments m)
+
+                          if not (mentions text token) then
+                              yield
+                                  finding m "operation-stand-in" (sprintf "stand-in %s never mentions `%s`" path token)
+              | false, None -> ()
+
+              if e.Class <> "measured-elsewhere" && e.Through.IsSome then
+                  yield finding subject "operation-stand-in" "`through` belongs to a measured-elsewhere entry" ]
+
+    let unmapped =
+        inputs.Census
+        |> List.filter (fun o -> not (resolves Set.empty o.Name) && not (Map.containsKey o.Name excluded))
+        |> List.map (fun o ->
+            finding
+                o.Name
+                "operation-mapped"
+                (sprintf
+                    "published by %s and mapped to no ladder row, law-family roster line or recorded exclusion"
+                    o.Package))
+
+    let routeOf (op: string) =
+        if ladderOps.Contains op then
+            "ladder"
+        elif rosterOps.Contains op || entryOps.Contains op then
+            "family"
+        else
+            match Map.tryFind op excluded with
+            | Some(e :: _) -> e.Class
+            | _ -> "unmapped"
+
+    let countIn (ops: Operation list) (route: string) =
+        ops |> List.filter (fun o -> routeOf o.Name = route) |> List.length
+
+    let tally =
+        { Operations = List.length inputs.Census
+          Ladder = countIn inputs.Census "ladder"
+          Rostered = countIn inputs.Census "family"
+          ByClass = operationClassOrder |> List.map (fun c -> c, countIn inputs.Census c)
+          ByPackage =
+            inputs.Census
+            |> List.groupBy _.Package
+            |> List.sortBy fst
+            |> List.map (fun (p, ops) ->
+                p,
+                List.length ops,
+                countIn ops "ladder",
+                countIn ops "family",
+                operationClassOrder |> List.map (fun c -> c, countIn ops c)) }
+
+    ladderFindings @ rosterFindings @ exclusionFindings @ unmapped, tally
+
+/// The operation clause's line, emitted whatever the verdict.
+let renderOperationPredicate (mapped: bool) (t: OperationTally) : string =
+    sprintf
+        "proofs: operations %s (%d public operations: %d on the ladder, %d by a law family, %d excluded — %s)"
+        (if mapped then "mapped" else "NOT mapped")
+        t.Operations
+        t.Ladder
+        t.Rostered
+        (t.ByClass |> List.sumBy snd)
+        (t.ByClass |> List.map (fun (c, n) -> sprintf "%d %s" n c) |> String.concat ", ")
+
+let operationTableBegin =
+    "<!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by the Proofs.Coverage family; CORE_APPROVE_LADDER=1 rewrites it -->"
+
+let operationTableEnd = "<!-- operation-coverage:end -->"
+
+/// The README's per-package table: each package's operations by the route that maps them.
+let renderOperationTable (t: OperationTally) : string =
+    let header =
+        [ "| Package | Operations | Ladder | Law family | "
+          + (operationClassOrder |> String.concat " | ")
+          + " |"
+          "|---|---:|---:|---:|"
+          + (operationClassOrder |> List.map (fun _ -> "---:|") |> String.concat "") ]
+
+    let row (name: string) (ops: int) (lad: int) (fam: int) (classes: (string * int) list) =
+        sprintf
+            "| %s | %d | %d | %d | %s |"
+            name
+            ops
+            lad
+            fam
+            (classes |> List.map (snd >> string) |> String.concat " | ")
+
+    let rows =
+        t.ByPackage
+        |> List.map (fun (p, ops, lad, fam, cls) -> row ("`" + p + "`") ops lad fam cls)
+
+    header @ rows @ [ row "**Total**" t.Operations t.Ladder t.Rostered t.ByClass ]
+    |> String.concat "\n"
+
+/// The README with its operation table replaced by `table`, or why the markers were not found.
+let regenerateOperationTable (table: string) (readmeText: string) : Result<string, string> =
+    let text = readmeText.Replace("\r\n", "\n")
+
+    match text.IndexOf operationTableBegin, text.IndexOf operationTableEnd with
+    | -1, _
+    | _, -1 -> Error "the operation-coverage markers are missing from proofs/README.md"
+    | b, e when e < b -> Error "the operation-coverage end marker precedes its begin marker"
+    | b, e ->
+        Ok(
+            text.Substring(0, b + operationTableBegin.Length)
+            + "\n"
+            + table
+            + "\n"
+            + text.Substring e
+        )
+
+// ---- the live inputs ----
+
+let private liveCensus () : Operation list =
+    Directory.GetFiles(Snapshots.repoFile "api", "*.txt")
+    |> Array.sort
+    |> Array.toList
+    |> List.collect (fun path -> censusOf (Path.GetFileNameWithoutExtension path) (File.ReadAllText path))
+
+let private liveLadderOperations () =
+    use doc = readJson "proofs.json"
+
+    doc.RootElement.GetProperty("claims").EnumerateArray()
+    |> Seq.choose (fun row ->
+        match objMember row "evidence" with
+        | Some ev ->
+            match ev.TryGetProperty "operations" with
+            | true, ops when ops.ValueKind = JsonValueKind.Array ->
+                Some(
+                    strMember row "id" |> Option.defaultValue "",
+                    strMember row "level" |> Option.defaultValue "",
+                    ops.EnumerateArray() |> Seq.map _.GetString() |> List.ofSeq
+                )
+            | _ -> None
+        | None -> None)
+    |> List.ofSeq
+
+let private operationExclusionsOf (root: JsonElement) : OperationExclusion list =
+    match root.TryGetProperty "operations" with
+    | true, ops when ops.ValueKind = JsonValueKind.Array ->
+        ops.EnumerateArray()
+        |> Seq.map (fun el ->
+            { Members =
+                match el.TryGetProperty "members" with
+                | true, v when v.ValueKind = JsonValueKind.Array ->
+                    v.EnumerateArray() |> Seq.map _.GetString() |> List.ofSeq
+                | _ -> []
+              Class = strMember el "class" |> Option.defaultValue ""
+              Reason = strMember el "reason" |> Option.defaultValue ""
+              ForwardsTo = strMember el "forwardsTo"
+              StandIn = strMember el "standIn"
+              Through = strMember el "through" })
+        |> List.ofSeq
+    | _ -> []
+
+let private operationClassesOf (root: JsonElement) : Set<string> =
+    match root.TryGetProperty "operationClasses" with
+    | true, v when v.ValueKind = JsonValueKind.Object -> v.EnumerateObject() |> Seq.map _.Name |> Set.ofSeq
+    | _ -> Set.empty
+
+/// Whether the baseline member carries `System.Obsolete`, on itself or on a declaring type —
+/// read from the loaded assembly, so an `obsolete` entry cannot claim an attribute the code lacks.
+let private carriesObsolete (o: Operation) : bool =
+    try
+        let asm = Reflection.Assembly.Load(Reflection.AssemblyName o.Package)
+        let cut = o.Clr.LastIndexOf '.'
+        let ty = asm.GetType(o.Clr.Substring(0, cut))
+        let name = Regex.Replace(o.Clr.Substring(cut + 1), "`[0-9]+$", "")
+
+        let rec typeObsolete (t: Type) =
+            not (isNull t)
+            && (t.IsDefined(typeof<ObsoleteAttribute>, false) || typeObsolete t.DeclaringType)
+
+        not (isNull ty)
+        && (typeObsolete ty
+            || ty.GetMethods(
+                Reflection.BindingFlags.Public
+                ||| Reflection.BindingFlags.Static
+                ||| Reflection.BindingFlags.Instance
+               )
+               |> Array.exists (fun m -> m.Name = name && m.IsDefined(typeof<ObsoleteAttribute>, false)))
+    with _ ->
+        false
+
+let private liveOperationInputs () : OperationInputs =
+    use exclusionsDoc = liveExclusionsDoc ()
+    let exclusions = operationExclusionsOf exclusionsDoc.RootElement
+    let census = liveCensus ()
+
+    let claimedObsolete =
+        exclusions
+        |> List.filter (fun e -> e.Class = "obsolete")
+        |> List.collect _.Members
+        |> Set.ofList
+
+    let standIns =
+        exclusions
+        |> List.choose _.StandIn
+        |> List.distinct
+        |> List.choose (fun p ->
+            let full = Snapshots.repoFile p
+
+            if p.StartsWith "tests/" && not (p.Contains "..") && File.Exists full then
+                Some(p, File.ReadAllText full)
+            else
+                None)
+        |> Map.ofList
+
+    { Census = census
+      Ladder = liveLadderOperations ()
+      Rosters = Fuaran.Core.Families.operations |> List.map (fun r -> r.Family, r.Operations)
+      Families = KitRoster.ids |> Set.ofList
+      Exclusions = exclusions
+      Classes = operationClassesOf exclusionsDoc.RootElement
+      StandIns = standIns
+      Obsolete =
+        census
+        |> List.filter (fun o -> claimedObsolete.Contains o.Name && carriesObsolete o)
+        |> List.map _.Name
+        |> Set.ofList }
+
+// ---- the synthetic baseline the go-reds perturb ----
+
+let private opFixture: OperationInputs =
+    let op pkg name =
+        { Package = pkg
+          Name = name
+          Clr = "Fuaran.Core." + name }
+
+    { Census =
+        [ op "Pkg.A" "Thing.proved"
+          op "Pkg.A" "Thing.lawed"
+          op "Pkg.A" "Conformance.fixtureLaws"
+          op "Pkg.B" "Thing.tiny"
+          op "Pkg.B" "Thing.alias"
+          op "Pkg.B" "Thing.old"
+          op "Pkg.B" "Thing.tested"
+          op "Pkg.B" "Thing.reached" ]
+      Ladder = [ "t1", "proved", [ "Thing.proved" ] ]
+      Rosters = [ "Conformance.fixtureLaws", [ "Thing.lawed" ] ]
+      Families = Set.ofList [ "Conformance.fixtureLaws" ]
+      Exclusions =
+        [ { Members = [ "Thing.tiny" ]
+            Class = "trivial"
+            Reason = "builds a record"
+            ForwardsTo = None
+            StandIn = None
+            Through = None }
+          { Members = [ "Thing.alias" ]
+            Class = "forward"
+            Reason = "the older name"
+            ForwardsTo = Some "Thing.proved"
+            StandIn = None
+            Through = None }
+          { Members = [ "Thing.old" ]
+            Class = "obsolete"
+            Reason = "renamed"
+            ForwardsTo = Some "Thing.lawed"
+            StandIn = None
+            Through = None }
+          { Members = [ "Thing.tested" ]
+            Class = "measured-elsewhere"
+            Reason = "example-tested"
+            ForwardsTo = None
+            StandIn = Some "tests/ThingTests.fs"
+            Through = None }
+          { Members = [ "Thing.reached" ]
+            Class = "measured-elsewhere"
+            Reason = "reached through tested"
+            ForwardsTo = None
+            StandIn = Some "tests/ThingTests.fs"
+            Through = Some "Thing.via" } ]
+      Classes = Set.ofList operationClassOrder
+      StandIns = Map.ofList [ "tests/ThingTests.fs", "let t = Thing.tested 1 |> Thing.via" ]
+      Obsolete = Set.ofList [ "Thing.old" ] }
+
+/// An operation go-red: this perturbation yields EXACTLY one finding, naming the clause and subject.
+let private expectOneOperationFinding (name: string) (inputs: OperationInputs) (clause: string) (subject: string) =
+    let findings, _ = checkOperations inputs
+
+    Expect.equal
+        (List.length findings)
+        1
+        (sprintf
+            "%s carries exactly one defect, so exactly one finding is expected — got:\n%s"
+            name
+            (String.concat "\n" findings))
+
+    let only = List.head findings
+    Expect.stringContains only (sprintf "[%s]" clause) (sprintf "%s: the finding names the clause" name)
+    Expect.stringContains only subject (sprintf "%s: the finding names what it is about" name)
+
+/// A go-red whose subject a forward in the baseline leans on: the operation names itself under
+/// `operation-mapped`, and every other finding is the forward that pointed at it, naming it.
+let private expectNamedUnmapped (name: string) (inputs: OperationInputs) (subject: string) =
+    let findings, _ = checkOperations inputs
+
+    Expect.exists
+        findings
+        (fun f -> f.StartsWith(sprintf "'%s' [operation-mapped]" subject))
+        (sprintf
+            "%s: the unmapped operation names itself — got:
+%s"
+            name
+            (String.concat
+                "
+"
+                findings))
+
+    for f in findings do
+        Expect.stringContains f subject (sprintf "%s: every finding is about %s" name subject)
+
+let private withExclusion
+    (members: string list)
+    (f: OperationExclusion -> OperationExclusion)
+    (inputs: OperationInputs)
+    =
+    { inputs with
+        Exclusions = inputs.Exclusions |> List.map (fun e -> if e.Members = members then f e else e) }
+
+
+// ---------------------------------------------------------------------------
 
 [<Tests>]
 let proofCoverageTests =
@@ -992,4 +1593,286 @@ let proofCoverageTests =
                   | Ok _ -> ()
                   | Error why -> failtestf "tests/Fuaran.Core.Tests/open-phases.json is malformed: %s" why
               finally
-                  Environment.SetEnvironmentVariable("FUARAN_CORE_ROADMAP", before) ]
+                  Environment.SetEnvironmentVariable("FUARAN_CORE_ROADMAP", before)
+
+          // ---- Phase 335: the operation clause ----
+
+          testCase "the synthetic operation baseline is mapped, by every route"
+          <| fun _ ->
+              let findings, tally = checkOperations opFixture
+
+              Expect.isEmpty findings (sprintf "the baseline must be clean — got:\n%s" (String.concat "\n" findings))
+              Expect.equal tally.Ladder 1 "one on the ladder"
+              Expect.equal tally.Rostered 2 "one by a roster line, one as a family entry point"
+
+              Expect.equal
+                  tally.ByClass
+                  [ "trivial", 1
+                    "forward", 1
+                    "obsolete", 1
+                    "host-seam", 0
+                    "measured-elsewhere", 2 ]
+                  "and each exclusion counted under its class"
+
+          testCase "every public operation is mapped on this tree, and the clause says so in one line"
+          <| fun _ ->
+              let inputs = liveOperationInputs ()
+              let findings, tally = checkOperations inputs
+
+              printfn "%s" (renderOperationPredicate (List.isEmpty findings) tally)
+
+              Expect.isEmpty
+                  findings
+                  (sprintf
+                      "every public operation maps to a ladder row, a law family or a recorded exclusion — each finding names the clause and the subject:\n%s"
+                      (String.concat "\n" findings))
+
+          testCase "the operation inputs are real, so the clause is not quantifying over nothing"
+          <| fun _ ->
+              let inputs = liveOperationInputs ()
+
+              Expect.isGreaterThan (List.length inputs.Census) 900 "the census reads every baseline's method lines"
+              Expect.isGreaterThan (List.length inputs.Ladder) 50 "ladder rows name the operations they cover"
+              Expect.isGreaterThan (List.length inputs.Rosters) 40 "the kit's operation roster is read"
+              Expect.isNonEmpty inputs.Exclusions "the operation exclusions are read"
+
+              Expect.equal
+                  inputs.Classes
+                  (Set.ofList operationClassOrder)
+                  "the closed class vocabulary is read from the file"
+
+              Expect.equal
+                  (inputs.Census |> List.map _.Name |> List.distinct |> List.length)
+                  (List.length inputs.Census)
+                  "no two published operations share a spelling, so a name maps one operation"
+
+              Expect.isNonEmpty inputs.Obsolete "the obsolete entries' attribute is read by reflection"
+
+          testCase "every operation class in the closed vocabulary is carried by at least one entry"
+          <| fun _ ->
+              let inputs = liveOperationInputs ()
+              let used = inputs.Exclusions |> List.map _.Class |> Set.ofList
+
+              Expect.equal
+                  (Set.difference inputs.Classes used)
+                  Set.empty
+                  "a class no entry carries is a vocabulary term nothing tests — carry it or drop it"
+
+          testCase
+              "proofs/README.md's operation table is the census's projection (CORE_APPROVE_LADDER=1 regenerates it)"
+          <| fun _ ->
+              let _, tally = checkOperations (liveOperationInputs ())
+              let path = Snapshots.repoFile "proofs/README.md"
+              let committed = File.ReadAllText path
+
+              match regenerateOperationTable (renderOperationTable tally) committed with
+              | Error why -> failtest why
+              | Ok expected when expected = committed.Replace("\r\n", "\n") -> ()
+              | Ok expected when Environment.GetEnvironmentVariable "CORE_APPROVE_LADDER" = "1" ->
+                  File.WriteAllText(path, expected)
+              | Ok _ ->
+                  failtest
+                      "proofs/README.md's operation-coverage table is not the census's projection — re-run with CORE_APPROVE_LADDER=1 and commit the README"
+
+          testCase "operation names drop the prefix, the arity and the Module suffix, and join nested types"
+          <| fun _ ->
+              Expect.equal
+                  (operationName "Fuaran.Core.Dag+ReachModule.ancestors`1")
+                  "Dag.Reach.ancestors"
+                  "nested module"
+
+              Expect.equal (operationName "Fuaran.Core.FootprintModule.union") "Footprint.union" "module suffix"
+              Expect.equal (operationName "Fuaran.Core.Idl.Diff.run") "Idl.Diff.run" "namespace kept"
+
+              Expect.equal
+                  (operationName "Fuaran.Core.Observer.IObserver`2.Observe")
+                  "Observer.IObserver.Observe"
+                  "interface"
+
+              Expect.equal
+                  (censusOf
+                      "P"
+                      "# header\nmethod Fuaran.Core.Ops.apply`2(A, B) : C\nproperty Fuaran.Core.X.y : Z { get }\n")
+                  [ { Package = "P"
+                      Name = "Ops.apply"
+                      Clr = "Fuaran.Core.Ops.apply`2" } ]
+                  "only method lines are operations"
+
+          testCase "go-red: operation-mapped — a newly published operation that maps to nothing names itself"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "a new census line"
+                  { opFixture with
+                      Census =
+                          opFixture.Census
+                          @ [ { Package = "Pkg.B"
+                                Name = "Thing.brandNew"
+                                Clr = "Fuaran.Core.Thing.brandNew" } ] }
+                  "operation-mapped"
+                  "Thing.brandNew"
+
+          testCase "go-red: operation-mapped — a family's roster mention deleted, the operation names itself"
+          <| fun _ ->
+              // The probe Phase 335 was asked to prove: the operation names itself, and the
+              // obsolete forward that leaned on it is refused naming it too.
+              expectNamedUnmapped
+                  "a roster line removed"
+                  { opFixture with
+                      Rosters = [ "Conformance.fixtureLaws", [] ] }
+                  "Thing.lawed"
+
+          testCase "go-red: operation-mapped — a ladder row's operations removed"
+          <| fun _ ->
+              expectNamedUnmapped
+                  "a ladder mention removed"
+                  { opFixture with
+                      Ladder = [ "t1", "proved", [] ] }
+                  "Thing.proved"
+
+          testCase "go-red: operation-ladder — an assumed row naming operations"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "an assumed row"
+                  { opFixture with
+                      Ladder = opFixture.Ladder @ [ "t3", "assumed", [] ] }
+                  "operation-ladder"
+                  "t3"
+
+          testCase "go-red: operation-ladder — a row naming an operation no baseline publishes"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "a stale ladder name"
+                  { opFixture with
+                      Ladder = [ "t1", "proved", [ "Thing.proved"; "Thing.gone" ] ] }
+                  "operation-ladder"
+                  "Thing.gone"
+
+          testCase "go-red: operation-roster — a roster row for an undeclared family, and one naming nothing published"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "an undeclared family"
+                  { opFixture with
+                      Rosters = opFixture.Rosters @ [ "Conformance.ghostLaws", [] ] }
+                  "operation-roster"
+                  "Conformance.ghostLaws"
+
+              expectOneOperationFinding
+                  "a stale roster name"
+                  { opFixture with
+                      Rosters = [ "Conformance.fixtureLaws", [ "Thing.lawed"; "Thing.gone" ] ] }
+                  "operation-roster"
+                  "Thing.gone"
+
+          testCase "go-red: operation-exclusion-stale — an entry for an operation that has since gained a mapping"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "an excluded operation now on the ladder"
+                  { opFixture with
+                      Ladder = [ "t1", "proved", [ "Thing.proved"; "Thing.tiny" ] ] }
+                  "operation-exclusion-stale"
+                  "Thing.tiny"
+
+          testCase "go-red: operation-exclusion-stale — an entry for an operation no longer published"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "a retired operation still excluded"
+                  { opFixture with
+                      Census = opFixture.Census |> List.filter (fun o -> o.Name <> "Thing.tiny") }
+                  "operation-exclusion-stale"
+                  "Thing.tiny"
+
+          testCase "go-red: operation-exclusion-class — a class outside the closed vocabulary"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "an invented class"
+                  (withExclusion [ "Thing.tiny" ] (fun e -> { e with Class = "harmless" }) opFixture)
+                  "operation-exclusion-class"
+                  "harmless"
+
+          testCase "go-red: operation-exclusion-reason — an entry with no reason"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "a blank reason"
+                  (withExclusion [ "Thing.tiny" ] (fun e -> { e with Reason = " " }) opFixture)
+                  "operation-exclusion-reason"
+                  "Thing.tiny"
+
+          testCase "go-red: operation-forward — a forward whose target maps to nothing, and one naming no target"
+          <| fun _ ->
+              let toBare =
+                  { (withExclusion
+                        [ "Thing.alias" ]
+                        (fun e ->
+                            { e with
+                                ForwardsTo = Some "Thing.bare" })
+                        opFixture) with
+                      Census =
+                          opFixture.Census
+                          @ [ { Package = "Pkg.B"
+                                Name = "Thing.bare"
+                                Clr = "Fuaran.Core.Thing.bare" } ] }
+
+              let findings, _ = checkOperations toBare
+
+              Expect.exists
+                  findings
+                  (fun f -> f.Contains "[operation-forward]" && f.Contains "Thing.alias")
+                  "a forward's coverage is its target's, so a forward to an unmapped operation is refused"
+
+              let untargeted, _ =
+                  checkOperations (withExclusion [ "Thing.alias" ] (fun e -> { e with ForwardsTo = None }) opFixture)
+
+              Expect.exists
+                  untargeted
+                  (fun f -> f.Contains "[operation-forward]" && f.Contains "Thing.alias")
+                  "a forward naming no target is refused"
+
+          testCase "go-red: operation-forward — two forwards that name each other are a cycle, not coverage"
+          <| fun _ ->
+              let cyc =
+                  opFixture
+                  |> withExclusion [ "Thing.alias" ] (fun e -> { e with ForwardsTo = Some "Thing.old" })
+                  |> withExclusion [ "Thing.old" ] (fun e ->
+                      { e with
+                          ForwardsTo = Some "Thing.alias" })
+
+              let findings, _ = checkOperations cyc
+
+              Expect.exists
+                  findings
+                  (fun f -> f.Contains "[operation-forward]" && f.Contains "Thing.alias")
+                  "the cycle is named"
+
+          testCase "go-red: operation-obsolete — an obsolete entry for an operation the attribute is not on"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "an unmarked obsolete claim"
+                  { opFixture with Obsolete = Set.empty }
+                  "operation-obsolete"
+                  "Thing.old"
+
+          testCase "go-red: operation-stand-in — a stand-in that does not exist, and one that never mentions the member"
+          <| fun _ ->
+              expectOneOperationFinding
+                  "a missing stand-in"
+                  (withExclusion
+                      [ "Thing.tested" ]
+                      (fun e ->
+                          { e with
+                              StandIn = Some "tests/Nowhere.fs" })
+                      opFixture)
+                  "operation-stand-in"
+                  "tests/Nowhere.fs"
+
+              expectOneOperationFinding
+                  "a stand-in that never touches the member"
+                  { opFixture with
+                      StandIns = Map.ofList [ "tests/ThingTests.fs", "let t = Thing.testedLater 1 |> Thing.via" ] }
+                  "operation-stand-in"
+                  "Thing.tested"
+
+              expectOneOperationFinding
+                  "a measured-elsewhere entry with no stand-in"
+                  (withExclusion [ "Thing.reached" ] (fun e -> { e with StandIn = None }) opFixture)
+                  "operation-stand-in"
+                  "Thing.reached" ]

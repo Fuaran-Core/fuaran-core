@@ -28,6 +28,16 @@ the floor because it is the oldest slot for which the record can still be writte
 every earlier release predates this document's per-slot classes, so entries for them would be
 invention rather than record, and they are deliberately not retro-fitted.
 
+**Adding a public operation now carries a coverage line (Phase 335).** The `Proofs.Coverage` family
+reads the committed API baselines (`api/*.txt`) as its census of public operations, so the commit that
+publishes a new method or function, and regenerates its baseline, reds the suite until the operation
+is mapped in the same commit: named by a `proofs.json` row's `evidence.operations`, listed on a law
+family's operation roster (`Families.operations`), or entered in `proofs/coverage-exclusions.json`'s
+`operations` block with a class (`trivial`, `forward`, `obsolete`, `host-seam`, `measured-elsewhere`)
+and a one-line reason. Removing or renaming an operation reds the stale direction until its line goes.
+The line is a record of what stands behind the operation, not a gate on its design; see
+`proofs/README.md`, "Clause 4".
+
 ## Public-surface baselines — the class of a move is a gate output, not an argument (Phase 183)
 
 Every packable package carries a committed baseline of its public contract at
@@ -4051,6 +4061,32 @@ specific node of a DAG with more than one fault reads the earliest one now.
 `api/Fuaran.Core.OpStream.txt`, `api/Fuaran.Core.Conformance.txt`). The one behaviour change is
 `firstBreak`'s choice among several breaks; its verdict and every single-fault answer are unchanged.
 
+
+### Proof coverage at operation granularity (Phase 335) — additive: the kit's law-family roster gains an OPERATION roster, and every public operation maps to a ladder row, a law family or a recorded exclusion
+
+- **The operation roster.** `Families.FamilyOperations = { Family; Operations }` and
+  `Families.operations` — per law family, the public Core operations whose contract the family's laws
+  state, spelled `<Owner>.<member>` (`Dag.Reach.ancestors`). A family that only drives an operation as
+  harness does not list it. The `families` rows, the roster exports and every existing member are
+  unchanged.
+- **The operation clause.** `Proofs.Coverage` reads the API baselines' `method` lines (984 today) and
+  holds each to a `proofs.json` row whose new `evidence.operations` member names it (118 `proved` /
+  `tested` rows carry one), a roster line, or an entry in `proofs/coverage-exclusions.json`'s new
+  `operations` block (closed `operationClasses`: `trivial`, `forward`, `obsolete`, `host-seam`,
+  `measured-elsewhere`). A forward names a mapped target, an obsolete entry's member carries
+  `System.Obsolete` (read by reflection), a `measured-elsewhere` entry names a test file that mentions
+  the member or the measured operation it is reached `through`. The check runs both ways; the README's
+  per-package table is its generated projection (`CORE_APPROVE_LADDER=1`).
+- **Two operations had no test at all** and gained one rather than an exclusion:
+  `Dag.tryToJsonlWithCheckpoints` (its `Ok` is `toJsonlWithCheckpoints`'s bytes; a refused state names
+  its sidecar line) and `FStarTarget.beyondEnvelope` (empty exactly when `proofKinds` keeps the kind).
+
+**What a consumer does.** Nothing. A kit consumer that renders the roster may also read
+`Families.operations`; a contributor adding a public operation adds its coverage line (see "Versioning
+policy").
+
+**Class: additive** — `api/Fuaran.Core.Conformance.txt` gains one record type and one value; no member
+moves. The two record files gain members their readers ignore when absent.
 
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 

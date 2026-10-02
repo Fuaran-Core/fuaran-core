@@ -1522,3 +1522,31 @@ let idlFStarTargetTests =
               Expect.isFalse
                   (proofs.Contains "#set-options \"--z3rlimit")
                   "the in-file `--z3rlimit 200` Phase 150 measured at UI scale is gone: the leg's own rlimit is what the split is checked under" ]
+
+// Phase 335 — the operation-coverage clause found `FStarTarget.beyondEnvelope` published with no
+// test and no caller: `proofKinds` inlines the same set difference rather than calling it. These
+// cases hold the two to one relation, so the helper cannot drift from the rule it explains.
+[<Tests>]
+let beyondEnvelopeTests =
+    testList
+        "Idl.FStarTarget — beyondEnvelope (Phase 335)"
+        [ testCase "an expressible kind is in proofKinds exactly when nothing lies beyond the envelope"
+          <| fun _ ->
+              for g in generated do
+                  let kinds = FStarTarget.proofKinds g.Idl |> Set.ofList
+
+                  for tag in selection g.Idl do
+                      Expect.equal
+                          (List.isEmpty (FStarTarget.beyondEnvelope g.Idl tag))
+                          (kinds.Contains tag)
+                          (sprintf "%s.%s" g.Module tag)
+
+          testCase "the relation is not vacuous: a certification kind lies beyond the envelope"
+          <| fun _ ->
+              // The reference vocabulary's envelope is two scalars, so the rule keeps one of its
+              // kinds (the `selection` note above); the others must name what they would add.
+              let beyond =
+                  selection ReferenceIdl.refIdl
+                  |> List.filter (fun tag -> not (List.isEmpty (FStarTarget.beyondEnvelope ReferenceIdl.refIdl tag)))
+
+              Expect.isNonEmpty beyond "at least one reference kind adds a declared type" ]

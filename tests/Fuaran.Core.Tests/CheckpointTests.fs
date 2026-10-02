@@ -562,3 +562,37 @@ let checkpointLawTests =
 
               Expect.notEqual (Ok blind) (Dag.tryReplayTo logWitness "" dag m) "the blind fold is wrong"
               Expect.equal (Dag.replayFrom logWitness cp dag m) (Error(Dag.CheckpointFault.Uncovered c)) "refused" ]
+
+// Phase 335 — the operation-coverage clause found `Dag.tryToJsonlWithCheckpoints` published with no
+// test: its doc promises `toJsonlWithCheckpoints`'s bytes on `Ok` and a refusal by SIDECAR line, and
+// nothing held either. These two cases are the stand-in its coverage entry names.
+[<Tests>]
+let checkedWriterTests =
+    testList
+        "Dag checkpoints — the checked writer (Phase 335)"
+        [ testCase "on Ok both texts are toJsonlWithCheckpoints's, byte for byte"
+          <| fun _ ->
+              let _, _, _, m, y, dag = forkMergeTail ()
+              let cp = Dag.checkpointAt h enc sw 0 dag m |> ok
+              let cpY = Dag.checkpointAt h enc sw 0 dag y |> ok
+
+              for cps in [ []; [ cp ]; [ cp; cpY ] ] do
+                  Expect.equal
+                      (Dag.tryToJsonlWithCheckpoints encode enc dag cps)
+                      (Ok(Dag.toJsonlWithCheckpoints encode enc dag cps))
+                      (sprintf "%d checkpoint(s)" (List.length cps))
+
+          testCase "a refused state is the Error by its 1-based sidecar line, member state"
+          <| fun _ ->
+              let _, _, _, m, y, dag = forkMergeTail ()
+              let cp = Dag.checkpointAt h enc sw 0 dag m |> ok
+              let cpY = Dag.checkpointAt h enc sw 0 dag y |> ok
+              Expect.notEqual cp.State cpY.State "the two checkpoints hold different states"
+              // Only the SECOND checkpoint's state encodes across a line break.
+              let split (s: int) = if s = cpY.State then "1\n2" else enc s
+
+              match Dag.tryToJsonlWithCheckpoints encode split dag [ cp; cpY ] with
+              | Error f ->
+                  Expect.equal f.Line 2 "the second sidecar line"
+                  Expect.equal f.Member "state" "the state member"
+              | Ok v -> failtestf "accepted a state with a line break: %A" v ]
