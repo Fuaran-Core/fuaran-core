@@ -149,7 +149,9 @@ module Measure =
             { Reads = Set.empty
               StructureWrites = Set.empty
               ContentWrites = Set.empty
-              UnknownParentWrites = Set.empty }
+              UnknownParentWrites = Set.empty
+              SlotReads = Set.empty
+              SlotWrites = Set.empty }
 
         // the base of each drawn head pair, taken from the index (the same answer, pinned by the laws)
         let reconcileArgs =
@@ -412,7 +414,9 @@ let tests =
                   { Reads = Set.empty
                     StructureWrites = Set.empty
                     ContentWrites = Set.singleton (sw.Encode op)
-                    UnknownParentWrites = Set.empty }
+                    UnknownParentWrites = Set.empty
+                    SlotReads = Set.empty
+                    SlotWrites = Set.empty }
 
               for baseId in ids do
                   for x in ids do

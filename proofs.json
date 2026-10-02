@@ -26,6 +26,28 @@
       }
     },
     {
+      "id": "slot-conflicts-agree",
+      "level": "proved",
+      "claim": "Over SIX address sets — the four node sets and, since Phase 340, the slot reads and slot writes a footprint carries as `(node, slot)` pairs — `Dag.conflicts` fires on an op pair exactly when `Ops.independent` refuses it: the node-level slot collisions (a slot access of a node the other side touches whole, `slots_against_node`) join the `ConcurrentUpdate` class, and each slot one side writes and the other accesses (`slot_clash`) is tagged `SlotClash` at its node. The halt report's arrival-order invariance (`conflicts_sym`, `all_conflicts_perm`) is re-proved over the widened record, and the fold theorems consume `independent` abstractly, so they are untouched. What this row does NOT say: that a slot write and a whole-node write of one node commute — the model refuses that pair on purpose (`whole_node_refuses_every_slot`), because a whole-node write is a write of every slot.",
+      "phase": "fuaran-core#340",
+      "evidence": {
+        "theorem": "pair_conflicts_nil_iff",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "slot-writes-commute",
+      "level": "proved",
+      "claim": "Two writes to DIFFERENT slots of one node commute, at every slot a reader of the store can look up, and two slot writes are independent exactly when their slots differ (`slot_writes_independent_iff`) — so the precision the slot clauses buy is sound against a model of what a slot write does. The model is a store of `(slot, value)` bindings, latest first, where a write binds its slot and a read finds the latest binding; commutation is UP TO LOOKUP, which is all a reader of the store can observe — the two stores are not list-equal, and the theorem does not say they are. Two writes to ONE slot with different values disagree at that slot and the footprint refuses the pair (`same_slot_writes_disagree`); a whole-node write of the slot's node is refused against each of its slots, from either side (`whole_node_refuses_every_slot`). No skeleton op writes a slot — `TreeOps.op_fp` leaves both slot sets empty — so this row is about a DOMAIN's own lowering (`Footprint.slotEdit`), sampled at its ops by `Conformance.footprintLawsAt`.",
+      "phase": "fuaran-core#340",
+      "evidence": {
+        "theorem": "slot_writes_commute",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "reconcile-sound",
       "level": "proved",
       "claim": "The reconcile's partition of the region above the base (F#: `region` in DagOpStream.fs, clause for clause: shared history held by two or more heads' closures, one exclusive delta per head) puts each node in the script AT MOST ONCE, and exactly the enumerated nodes above the base that some head holds — for any closures, overlapping, nested (a fast-forward), repeated (a duplicate head) or criss-crossed. Stated over any duplicate-free enumeration of the heads' closures, which the drain is by `general-topological-order`. The shard's further clause, that the script replays to `replayTo` of a merge of the heads under the diamond, is REFUTED rather than proved: a merged history whose branches do not commute has no order-free replay of its own (`ReconcileShapeTests.fs` pins the witness).",
@@ -3049,7 +3071,7 @@
     {
       "id": "propagation-evaluator-total",
       "level": "assumed",
-      "claim": "THE EVALUATOR RETURNS (Phase 308). Every theorem about `eval`, `evalFrom`, `evalWith`, `evalFromWith` and the pull drivers quantifies over a node evaluator that is a total function — the model's evaluator is a `Tot` function — so the claims are about evaluators that return, `Ok` or `Error`, at every node they are handed. Production does not catch: an evaluator that throws propagates its exception out of the driver, and nothing the driver promises holds of that call. Wrapping the call to turn an exception into `EvalNodeFailed` was declined (DECISIONS D106): it would catch what no total function raises and report a host fault as a domain failure. A domain whose evaluator can throw returns `Error` instead; that is its contract to keep, and no run of anything discharges it.",
+      "claim": "THE EVALUATOR RETURNS (Phase 308). Every theorem about `eval`, `evalFrom`, `evalWith`, `evalFromWith` and the pull drivers quantifies over a node evaluator that is a total function — the model's evaluator is a `Tot` function — so the claims are about evaluators that return, `Ok` or `Error`, at every node they are handed. Production does not catch: an evaluator that throws propagates its exception out of the driver, and nothing the driver promises holds of that call. Wrapping the call to turn an exception into `EvalNodeFailed` was declined (DECISIONS D107): it would catch what no total function raises and report a host fault as a domain failure. A domain whose evaluator can throw returns `Error` instead; that is its contract to keep, and no run of anything discharges it.",
       "phase": "fuaran-core#308",
       "class": "premise",
       "evidence": {

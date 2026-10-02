@@ -131,6 +131,9 @@ module FoldConfluence =
         | MergeConflictShape.ConcurrentUpdate -> "concurrent-update"
         | MergeConflictShape.InsertPositionClash -> "insert-position-clash"
         | MergeConflictShape.MoveVsRemove -> "move-vs-remove"
+        // Phase 340 — the slot is part of the shape's identity: two clashes at one node on different
+        // slots are two lines, not one.
+        | MergeConflictShape.SlotClash slot -> "slot-clash:" + slot
 
     /// The canonical, arrival-order-independent rendering of a conflict report: one line per
     /// distinct (shape, address, unordered op pair), sorted ordinally. `Dag.conflicts` is

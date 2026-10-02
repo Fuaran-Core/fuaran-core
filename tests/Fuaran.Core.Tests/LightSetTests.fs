@@ -141,7 +141,9 @@ let private genFootprint (rng: ConfRng.T) : Footprint * ConfRng.T =
     { Reads = reads
       StructureWrites = sw
       ContentWrites = cw
-      UnknownParentWrites = up },
+      UnknownParentWrites = up
+      SlotReads = Set.empty
+      SlotWrites = Set.empty },
     r4
 
 let private sub (a: Footprint) (b: Footprint) =

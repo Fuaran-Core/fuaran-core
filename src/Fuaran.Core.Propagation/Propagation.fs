@@ -331,7 +331,7 @@ module Propagation =
     /// `changed` for `evalFrom`: over-approximating (a closure handed in as a change set closes to
     /// itself), never missing a reader. `post` must be the tree `op` produced from `pre`.
     ///
-    /// **Derived from the DIFF of `pre` and `post` (Phase 308, DECISIONS D106).** The seeds are
+    /// **Derived from the DIFF of `pre` and `post` (Phase 308, DECISIONS D107).** The seeds are
     ///
     ///   - every id of `post` that `pre` does not hold (inserted);
     ///   - every id of `post` whose CHILD LIST (the ids `w.Children` reports, in order) differs from its

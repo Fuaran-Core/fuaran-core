@@ -49,19 +49,25 @@ let private cell (op: COp) : Footprint =
         { Reads = none
           StructureWrites = none
           ContentWrites = none
-          UnknownParentWrites = none }
+          UnknownParentWrites = none
+          SlotReads = Set.empty
+          SlotWrites = Set.empty }
     | _ ->
         { Reads = Set.singleton "c"
           StructureWrites = none
           ContentWrites = Set.singleton "c"
-          UnknownParentWrites = none }
+          UnknownParentWrites = none
+          SlotReads = Set.empty
+          SlotWrites = Set.empty }
 
 /// No addresses at all: every pair is independent (true of `Inc`/`Dec`, which commute where both apply).
 let private blind (_: COp) : Footprint =
     { Reads = none
       StructureWrites = none
       ContentWrites = none
-      UnknownParentWrites = none }
+      UnknownParentWrites = none
+      SlotReads = Set.empty
+      SlotWrites = Set.empty }
 
 let private h = OpStream.defaultHash
 

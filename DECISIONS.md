@@ -1,13 +1,13 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-02 — D106: a structural edit's change set is the diff of the two trees; the order is certified by a checker the walk does not run; the evaluator contract is about evaluators that return
+## 2026-10-02 — D107: a structural edit's change set is the diff of the two trees; the order is certified by a checker the walk does not run; the evaluator contract is about evaluators that return
 
 **Recorded by Phase 308. `src/Fuaran.Core.Propagation/Propagation.fs` (`touchedBy`, `changedForOp`,
 `validTopo`), `src/Fuaran.Core.Conformance/PropagationLaws.fs` (`propagationEvaluatorLawsWith`),
 `proofs/Propagation.fst` section 8, `proofs/PropagationOps.fst`, `proofs.json`; rides the `0.34.0` draft
 (STABILITY.md, "Phase 308").**
 
-**D106.1 — the change set is defined by what the edit did to the two trees, not by what the op names.**
+**D107.1 — the change set is defined by what the edit did to the two trees, not by what the op names.**
 `changedForOp pre post op` seeds its closure with every post-edit id that is NEW, every survivor whose
 CHILD IDS differ, every survivor whose DECLARED READS differ, every id the op CONTENT-WRITES
 (`Ops.footprint`'s `ContentWrites`), every REMOVED id, and `touchedBy pre op`; it closes them over the
@@ -26,7 +26,7 @@ pre-edit closure it was. The completeness is a theorem (`changed_for_op_complete
 well-formed tree and an op `Ops.apply` accepts; an evaluator that reads a node's subtree without
 declaring the reads is outside its class, and declared reads are the remedy.
 
-**D106.2 — `sort` is certified by a checker, and the walk does not run it.** `Propagation.validTopo` is
+**D107.2 — `sort` is certified by a checker, and the walk does not run it.** `Propagation.validTopo` is
 the certificate: `Order` and the cycles' members distinct and holding exactly the map's ids, and every
 read of an `Order` id the map holds earlier or in a cycle. Its meaning is proved (`valid_topo_distinct`:
 acceptance implies the one order premise the agreement theorems take), and Tarjan's output is held to it
@@ -39,18 +39,91 @@ row, narrowed from "Tarjan's output holds no id twice" to "Tarjan's output passe
 check that fails LOUDLY — a typed internal fault — would need a new `PropagationError` case and is a
 separate, breaking decision, not taken here.
 
-**D106.3 — the evaluator returns.** Every agreement theorem quantifies over a total evaluator, and the
+**D107.3 — the evaluator returns.** Every agreement theorem quantifies over a total evaluator, and the
 driver does not catch. Wrapping the call so a throw becomes `EvalNodeFailed` was considered and
 declined: it would catch what no total function raises, report a host fault (an out-of-memory, a
 bug in the caller's own code) as a domain failure of one node, and give a domain that throws a value
 where it should get a stack trace. The claims read "any TOTAL evaluator", and the premise is a row of
 its own (`propagation-evaluator-total`).
 
-**D106.4 — what 302 had already done, and what this phase added to the laws.** The honesty law's
+**D107.4 — what 302 had already done, and what this phase added to the laws.** The honesty law's
 reader-of-a-removed-node clause, the asked-within-declared clause and the survivor-restricted agreement
 arm shipped with Phase 302 in `propagationEvaluatorLaws`; this phase pins the first with a go-red
 (a removal-blind change set loses honesty, naming the reader) and gives `propagationEvaluatorLawsWith`
 the survivor arm it lacked, counted beside its guard.
+
+## 2026-10-02 — D106: a footprint names the slot it writes; a whole-node write stays the conservative default; the keyed witness is not widened for a key no skeleton op can use
+
+**Context.** Phase 340. A `Footprint` had four sets, all node-granular, so any write to part of a node
+was a write to the node: two ops touching different fields of one node interfered, and the fold halted
+on a pair that commutes. The imprecision had a measured cost in a consumer that maps every op of a
+roadmap onto this record — two lanes writing different fields of one phase halted a whole side as an
+operator-owned conflict no verb could resolve, twice, and each new field-versus-field pair would have
+needed another hand-written safe class — and in keyed domains, where two lanes editing different keys
+under one holder halted at the holder and the report named only the holder. Phase 334 had set out to
+add a keyed-slot set and was retired on a refuted premise (two lanes placing different nodes into one
+keyed slot do NOT fold clean; they halt at the holder), leaving the label as the residue.
+
+**Decision.**
+
+1. **A footprint carries two slot sets, not one.** `SlotWrites` and `SlotReads`, each a set of
+   `(node id, slot name)` pairs. The shard asked for a fifth set and for `Footprint.readingSlot` — a
+   reader of one field that does not depend on a write to another — and a slot read cannot be
+   expressed in a write set or in the whole-node `Reads` (a whole-node read collides with every slot
+   write of the node, which is exactly the dependence the reader is declining). Two sets mirror
+   `Reads` / `ContentWrites` at slot granularity; a read set that was not there would have been added
+   by the first consumer that needed it, as a second breaking widening.
+2. **A slot access is compared at the slot against another slot access, and as an access of the node
+   against everything else.** Two writes to different slots of one node commute; a write and an access
+   of ONE slot are `Interference.SlotClash`, carrying the slots. A slot write of `n` collides with a
+   content write, a read or a structure write of `n`, and a slot read of `n` with a content write of
+   `n` (`LeftSlotsRightNode` / `RightSlotsLeftNode`). **A whole-node write stays the conservative
+   default**: it is a write of every slot, so it serialises against each. The rule is what keeps every
+   existing footprint sound without edit — a domain that declares no slot access gets the four-set
+   verdict it always got, byte for byte — and it is where the precision comes from: a consumer narrows
+   a write to a slot ONLY where it knows the op writes that slot and nothing else, and every write it
+   has not narrowed keeps refusing every slot. Proved sound at a slot store (`proofs/DagFold.fst`
+   section 17): different slots commute at every slot, one slot does not, a whole-node write is
+   refused against each slot.
+3. **One helper behind both readers.** `Footprint.slotClash` and `Footprint.slotsAgainstNode` compute
+   the slot clauses' sets, and `Ops.interference` and `Dag.conflicts` both read them, so arbitration
+   and the fold name the same slot by construction (the Phase 248 shape). `Dag.conflicts` reports
+   `MergeConflictShape.SlotClash slot` at the node — the slot rides the shape because the conflict's
+   address is the node — and the node-level slot collisions as `ConcurrentUpdate` at the node. A slot
+   clash is its own address space and is not deduplicated against the node-keyed shapes: a pair that
+   both touches a node whole and clashes on one of its slots reports both, because the slot is the
+   thing a repair has to look at.
+4. **Two writes of the same payload to one slot are still a `SlotClash`.** The footprint sees no
+   payload. The consumer's own classifier decides whether two identical writes are one intent
+   recorded twice, as it does today for identical whole-node writes; Core reports the clash and
+   decides nothing (GP6).
+5. **`KeyedWitness` is NOT widened with the key a keyed child sits under, and `Ops.footprintKeyed`
+   declares no slot write.** The shard asked for both so a keyed placement could be declared a write to
+   `(holder, key)` "where the op only places the keyed child". Measured against the tree, no skeleton
+   op does that: the only ways to write a keyed slot are `UpdateNode` of the holder and `InsertChild`
+   of a subtree carrying it, both of which rewrite the holder whole, and a pure script cannot say which
+   keyed position — or which field — a payload changed (`KeyedSlotFoldTests`, Phase 334's pin, now
+   with the slot cases beside it). A key in the witness would have had no op to serve, and a
+   `footprintKeyed` that narrowed an `UpdateNode` to its keyed slots would have declared two rewrites
+   of one holder independent — which they are not. A domain that places by key lowers its OWN op with
+   `Footprint.slotEdit holder key`, which needs no witness; the engine's keyed walk is unchanged. This
+   is the phase's premise finding, reported rather than built around.
+6. **The skeleton law families do not draw slot pairs; the domain-op family counts them.** No skeleton
+   op writes a slot, so `concurrencyLaws` and `keyedArbitrationLaws` have no slot pair to draw and
+   are not pretended to. `Conformance.footprintLawsAt` — the family at a domain's own ops, where slot
+   footprints live — gains a cell (a slot clash is named at the slot by the fold and by arbitration
+   alike) and two demands (the pairs independent ONLY because slots are compared at the slot, and the
+   pairs that clash on a slot), both vacuous BY DECLARATION for a footprint that declares no slot
+   access, so the family's verdict on such a domain is unchanged.
+
+**Consequences.** Breaking (source) on the open `0.34.0` draft, which already is: every full
+`Footprint` literal gains two fields, every exhaustive match on `Interference` three arms and on
+`MergeConflictShape` one. The record is on no wire. The consumer that motivated the phase can retire
+its hand-written field classes once it lowers its field edits to `slotEdit` and raises its pin; until
+it does, it sees exactly what it saw. Keyed domains stop halting on edits to different keys only for
+ops they lower by key themselves — the skeleton `UpdateNode` of a holder keeps halting at the holder,
+by construction, and the label on that halt is unchanged.
+
 
 ## 2026-10-02 — D105: a transparent case never carries what can be an object; at a float slot the §7 tokens are read back, not refused; a map's value is its key set; a field-less declaration is a marker type
 

@@ -259,7 +259,9 @@ let tests =
                         { Reads = Set.singleton "root"
                           StructureWrites = Set.empty
                           ContentWrites = Set.singleton "root"
-                          UnknownParentWrites = Set.empty }
+                          UnknownParentWrites = Set.empty
+                          SlotReads = Set.empty
+                          SlotWrites = Set.empty }
 
                     let results =
                         Conformance.footprintLawsAt keyedW everything keyedHash keyedGen 2494 100
