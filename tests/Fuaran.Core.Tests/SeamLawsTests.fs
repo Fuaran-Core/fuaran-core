@@ -42,8 +42,8 @@ let seamLawTests =
 
               Expect.equal
                   (List.length results)
-                  7
-                  "validation + replay + enumeration + round-trip + the three envelope laws reported"
+                  9
+                  "validation + replay + enumeration + round-trip + the three envelope laws + the widening relation + the typed fault reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -60,7 +60,11 @@ let seamLawTests =
           testCase "registryLaws certify findable + non-match + narrowing + default-deny dispatch (Phase 50)"
           <| fun _ ->
               let results = Conformance.registryLaws 4242 200
-              Expect.equal (List.length results) 4 "findable + non-match + narrowing + default-deny laws reported"
+
+              Expect.equal
+                  (List.length results)
+                  5
+                  "findable + non-match + narrowing + default-deny + space-relation laws reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

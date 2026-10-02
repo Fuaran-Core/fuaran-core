@@ -203,3 +203,69 @@ let tests =
                   match QueryCodec.decodeDeferredResult (QueryCodec.encodeDeferredResult d) with
                   | Ok d2 -> Expect.equal d2 d "deferred query result round-trip"
                   | Error e -> failtestf "decode failed for %A: %A" d e ]
+
+// ---- Phase 295: the widening lattice, a typed resolver fault, decode failures as decode failures ----
+
+let private floatQuery: Query =
+    { sampleQuery with
+        Id = "q-float"
+        Params =
+            [ { Name = "ratio"
+                Type = FloatType
+                Required = true } ] }
+
+let private emptyResult: QueryResult =
+    { sampleResult with
+        TotalRowCount = None
+        NextPageToken = None }
+
+[<Tests>]
+let convergenceTests =
+    testList
+        "Query.convergence (Phase 295)"
+        [ testCase "an int fills a float parameter and reaches the resolver as a float"
+          <| fun _ ->
+              Expect.equal (Query.validateParams floatQuery [ "ratio", Int 2 ]) (Ok()) "int widens into float"
+
+              match Query.validateParams sampleQuery [ "year", Float 2.0 ] with
+              | Error(ParamTypeMismatch("year", IntType, FloatType)) -> ()
+              | other -> failtestf "a float must not narrow to an int, got %A" other
+
+              let mutable seen = []
+
+              let r =
+                  Query.invokeWithArgs floatQuery [ "ratio", Int 2 ] (fun _ a ->
+                      seen <- a
+                      Ok(Ready emptyResult))
+
+              Expect.equal r (Ok(Ready emptyResult)) "dispatched"
+              Expect.equal seen [ "ratio", Float 2.0 ] "promoted to the declared type"
+
+          testCase "a resolver's typed fault reaches the caller by name"
+          <| fun _ ->
+              let run (f: Result<Deferred<QueryResult>, ResolveFault>) =
+                  Query.invokeWithArgs sampleQuery [ "year", Int 2026 ] (fun _ _ -> f)
+
+              Expect.equal (run (Error(ResolveFault.SourceMissing "sales"))) (Error(SourceNotResolved "sales")) "source"
+              Expect.equal (run (Error ResolveFault.TimedOut)) (Error Timeout) "timeout"
+
+              Expect.equal
+                  (run (Error(ResolveFault.Failed("busy", [ "year" ]))))
+                  (Error(ExecutionFailed("busy", [ "year" ])))
+                  "recoverable filled"
+
+          testCase "a decode failure is a decode failure, with a typed form beside it"
+          <| fun _ ->
+              let doc = """{"$type":"query","id":3}"""
+
+              match QueryCodec.decode doc with
+              | Error m -> Expect.equal m "expected string, got int" "the refusal's sentence, not an ExecutionFailed"
+              | Ok q -> failtestf "decoded %A" q
+
+              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient doc with
+              | Error e -> Expect.equal e.Path [ PathSegment.Key "id" ] "the path names the member"
+              | Ok q -> failtestf "decoded %A" q
+
+              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient "{" with
+              | Error e -> Expect.equal e.Code DecodeCode.InvalidJson "a parse failure is refused at the root"
+              | Ok q -> failtestf "decoded %A" q ]

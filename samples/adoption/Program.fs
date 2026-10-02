@@ -208,7 +208,7 @@ let fillCapability =
 
 /// Default deny is this registry's shape: only what is registered here can be dispatched.
 let capabilities =
-    Registry.register fillCapability Registry.empty
+    CapabilityRegistry.register fillCapability CapabilityRegistry.empty
     |> Result.defaultWith (fun e -> failwith (InvokeError.describe e))
 
 /// The host's body. It runs only for a call the registry accepted. A reading above 90 goes to a
@@ -249,7 +249,7 @@ let genCall (rng: ConfRng.T) : (string * (string * string) list) * ConfRng.T =
 let capabilitySeam: CapabilitySeamWitness<string> =
     { Registry = capabilities
       Body = fun args _ () -> fillBody args
-      Dispatch = Registry.dispatch capabilities // the host path: delegate to Core's dispatch
+      Dispatch = CapabilityRegistry.dispatch capabilities // the host path: delegate to Core's dispatch
       GenCall = genCall }
 
 /// The query: the notes under a section, by the section's id. Parameters are keyed by NAME.
@@ -385,7 +385,7 @@ let main _ =
     printfn "  its invocation key for 20 degrees: %s" (Capability.invocationKey fillCapability [ celsiusAddr, "20" ])
 
     let call id args =
-        Registry.dispatch capabilities id args (fun _ () -> fillBody args)
+        CapabilityRegistry.dispatch capabilities id args (fun _ () -> fillBody args)
         |> Result.mapError InvokeError.describe
         |> outcome
 

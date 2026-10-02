@@ -53,16 +53,15 @@ let tests =
               Expect.stringContains json "\"kind\":\"enum\"" "enum tagged"
               Expect.stringContains json "\"values\":[\"a\",\"b\"]" "enum values projected"
 
-          testCase "a repeat hole is non-required in the schema"
+          testCase "a bounded repeat hole is required in the schema, as strict apply demands it (Phase 295)"
           <| fun _ ->
               let repeatTree =
                   RNode.node "root" "doc" [ RNode.hole "r" "region" "rep" (RepeatHole(IntRange(0, 5))) ]
 
               let sg = Function.signature artw "r" repeatTree
               let json = Json.render (Function.toSchema sg)
-              Expect.stringContains json "\"kind\":\"repeat\",\"required\":false" "repeat is optional"
-              // a non-required hole is absent from the required list
-              Expect.stringContains json "\"required\":[]" "no required addresses" ]
+              Expect.stringContains json "\"kind\":\"repeat\",\"required\":true" "a bounded repeat is required"
+              Expect.stringContains json "\"required\":[\"root/r\"]" "and listed among the required addresses" ]
 
 // Phase 04 — standard JSON Schema projection: a saved artifact-function as a registerable tool.
 [<Tests>]

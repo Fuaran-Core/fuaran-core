@@ -1080,11 +1080,11 @@ let memoTests =
                     Effect = Effect.pureDeterministic }
 
               let reg =
-                  Registry.empty
-                  |> Registry.register (Capability.create "prod" prodSig BuildTime)
-                  |> Result.bind (Registry.register (Capability.create "cons" consSig BuildTime))
+                  CapabilityRegistry.empty
+                  |> CapabilityRegistry.register (Capability.create "prod" prodSig BuildTime)
+                  |> Result.bind (CapabilityRegistry.register (Capability.create "cons" consSig BuildTime))
                   |> function
-                      | Ok r -> r
+                      | Ok r -> CapabilityLookup.ofRegistry r
                       | Error e -> failtestf "registry build failed: %A" e
 
               let good =
@@ -1126,7 +1126,11 @@ let memoTests =
           testCase "capabilityPipelineLaws certify type-check + round-trip + node replay (Phase 35)"
           <| fun _ ->
               let results = Conformance.capabilityPipelineLaws 4242 200
-              Expect.equal (List.length results) 3 "type-check + round-trip + replay reported"
+
+              Expect.equal
+                  (List.length results)
+                  7
+                  "type-check + round-trip + replay + space relation + soundness + order + checked-first reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1140,6 +1144,28 @@ let memoTests =
 
           testCase "eval walks the DAG resolving FromNode edges; evalFrom reuses clean branches (Phase 62)"
           <| fun _ ->
+              let inc =
+                  Capability.create
+                      "inc"
+                      { Name = "inc"
+                        Holes =
+                          [ { Addr = "x"
+                              Name = "x"
+                              Kind = "value"
+                              Space = Some(IntRange(0, 1000))
+                              Slot = None
+                              Action = None
+                              Required = true } ]
+                        Effect = Effect.pureDeterministic }
+                      Server
+
+              let lookup =
+                  CapabilityRegistry.empty
+                  |> CapabilityRegistry.register inc
+                  |> function
+                      | Ok r -> CapabilityLookup.ofRegistry r
+                      | Error e -> failtestf "registry build failed: %A" e
+
               // s1 → a, s2 → b : a change to s1 leaves the s2/b branch clean.
               let p: CapabilityPipeline =
                   { Nodes =
@@ -1164,7 +1190,9 @@ let memoTests =
                                      | LiteralArg s -> int s))
                           )
 
-              match CapabilityPipeline.eval (bodyWith (Map.ofList [ "s1", 10; "s2", 20 ]) (ResizeArray())) p with
+              match
+                  CapabilityPipeline.eval lookup string (bodyWith (Map.ofList [ "s1", 10; "s2", 20 ]) (ResizeArray())) p
+              with
               | Error e -> failtestf "eval errored: %A" e
               | Ok prior ->
                   Expect.equal prior (Map.ofList [ "s1", 10; "s2", 20; "a", 11; "b", 21 ]) "full eval resolves edges"
@@ -1174,6 +1202,8 @@ let memoTests =
 
                   match
                       CapabilityPipeline.evalFrom
+                          lookup
+                          string
                           (bodyWith (Map.ofList [ "s1", 100; "s2", 20 ]) incrInvoked)
                           prior
                           (Set.ofList [ "s1" ])
@@ -1333,3 +1363,236 @@ let memoTests =
 
               Expect.equal manifest.Functions.Length 1 "a content pack is just typed partial-application declarations"
               Expect.equal manifest.Domain "music" "carries only metadata — domain tag, ids, addresses, version" ]
+
+// ---- Phase 295: the invocable seams converge ----
+
+let private intEntry (addr: string) (sp: ValueSpace) : SigEntry =
+    { Addr = addr
+      Name = addr
+      Kind = "value"
+      Space = Some sp
+      Slot = None
+      Action = None
+      Required = true }
+
+let private capOver (id: string) (holes: SigEntry list) : Capability =
+    Capability.create
+        id
+        { Name = id
+          Holes = holes
+          Effect = Effect.pureDeterministic }
+        Server
+
+[<Tests>]
+let convergenceTests =
+    testList
+        "Function.convergence (Phase 295)"
+        [ testCase "Space.subsumes compares bounds, widens int into float, and keeps trees apart"
+          <| fun _ ->
+              Expect.isFalse (Space.subsumes (IntRange(0, 10)) (IntRange(0, 1000))) "a wider int range does not fit"
+              Expect.isTrue (Space.subsumes (IntRange(0, 1000)) (IntRange(0, 10))) "a narrower one does"
+              Expect.isTrue (Space.subsumes (FloatRange(0.0, 10.0)) (IntRange(0, 5))) "int widens into float"
+              Expect.isFalse (Space.subsumes (IntRange(0, 10)) (FloatRange(0.0, 5.0))) "float never narrows to int"
+              Expect.isTrue (Space.subsumes (Enum [ "a"; "b" ]) (Enum [ "a" ])) "an enum subset fits"
+              Expect.isTrue (Space.subsumes (StringLen(1, 3)) (Enum [ "ab" ])) "a bounded enum fits a length"
+              Expect.isTrue (Space.subsumes AnyString (IntRange(0, 5))) "AnyString tops the scalars"
+              Expect.isFalse (Space.subsumes AnyString (SlotTree None)) "no scalar space admits a tree"
+              Expect.isTrue (Space.subsumes (SlotTree None) (SlotTree(Some "para"))) "an open slot admits any kind"
+              Expect.isFalse (Space.subsumes (SlotTree(Some "table")) (SlotTree(Some "para"))) "a kind is a kind"
+
+          testCase "a numeric argument is read strictly and has one canonical spelling"
+          <| fun _ ->
+              Expect.isFalse (Space.validate (IntRange(0, 10)) " 5") "leading white space refused"
+              Expect.isFalse (Space.validate (IntRange(0, 10)) "+5") "a + sign refused"
+              Expect.equal (Space.canonical (IntRange(0, 10)) "05") (Some "5") "leading zeros read, written short"
+              Expect.equal (Space.canonical (FloatRange(0.0, 10.0)) "1.50") (Some "1.5") "the canonical float layout"
+              Expect.isFalse (Space.validate (FloatRange(0.0, 10.0)) ".5") "a bare fraction refused"
+              Expect.isFalse (Space.validate (FloatRange(-1e300, 1e300)) "Infinity") "Infinity refused"
+
+              let c = capOver "k" [ intEntry "n" (IntRange(0, 10)) ]
+
+              Expect.equal
+                  (Capability.invocationKey c [ "n", "05" ])
+                  (Capability.invocationKey c [ "n", "5" ])
+                  "one value, one capture key"
+
+          testCase "a bounded repeat is Required, and strict apply and validateArgs both demand it"
+          <| fun _ ->
+              let tree =
+                  RNode.node "root" "doc" [ RNode.hole "r" "region" "rep" (RepeatHole(IntRange(0, 5))) ]
+
+              let sg = Function.signature artw "r" tree
+              Expect.isTrue (sg.Holes |> List.forall (fun h -> h.Required)) "the repeat is required"
+
+              match Function.apply artw Map.empty tree with
+              | Error(RequiredHolesUnbound [ _ ]) -> ()
+              | other -> failtestf "strict apply should demand the repeat, got %A" other
+
+              match Capability.validateArgs (Capability.create "rep" sg Server) [] with
+              | Error(RequiredArgsUnbound [ _ ]) -> ()
+              | other -> failtestf "validateArgs should demand the repeat, got %A" other
+
+          testCase "registration refuses a non-total capability, naming the hole"
+          <| fun _ ->
+              let unbounded =
+                  RNode.node "root" "doc" [ RNode.hole "r" "region" "rep" (RepeatHole AnyString) ]
+
+              let cap = Capability.create "u" (Function.signature artw "u" unbounded) Server
+
+              match CapabilityRegistry.register cap CapabilityRegistry.empty with
+              | Error(NonTotalCapability("u", [ _ ])) -> ()
+              | other -> failtestf "expected NonTotalCapability, got %A" other
+
+              match FunctionRegistry.register (FunctionRegistry.entry "doc" cap) FunctionRegistry.empty with
+              | Error(NonTotalCapability("u", _)) -> ()
+              | other -> failtestf "the function registry should refuse it too, got %A" other
+
+          testCase "compose checks totality on both parts, as composeAcross does"
+          <| fun _ ->
+              let outer = RNode.node "root" "doc" [ RNode.hole "s" "slot" "body" (SlotHole None) ]
+
+              let inner =
+                  RNode.node "ir" "para" [ RNode.hole "irr" "region" "rep" (RepeatHole AnyString) ]
+
+              let slotAddr =
+                  (Function.signature artw "o" outer).Holes |> List.head |> (fun h -> h.Addr)
+
+              match Function.compose artw slotAddr inner outer with
+              | Error(NonTotal _) -> ()
+              | other -> failtestf "expected NonTotal, got %A" other
+
+          testCase "a hand-built capability's determinism is its signature's"
+          <| fun _ ->
+              let sg =
+                  { Name = "clocked"
+                    Holes = []
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Effect.clock } }
+
+              let c =
+                  { Id = "clocked"
+                    Signature = sg
+                    Placement = Server }
+
+              Expect.equal c.Determinism Effect.clock "derived from the signature"
+              Expect.equal (Capability.determinismTag c) "clock" "and keyed by it"
+
+          testCase "the capability codec refuses an unknown hole kind; the space reader takes the descriptor spelling"
+          <| fun _ ->
+              let c =
+                  capOver
+                      "odd"
+                      [ { intEntry "n" (IntRange(0, 3)) with
+                            Kind = "int" } ]
+
+              match CapabilityCodec.decode (CapabilityCodec.encode c) with
+              | Error m -> Expect.stringContains m "unknown hole kind: int" "names the kind"
+              | Ok _ -> failtest "an unknown kind decoded"
+
+              Expect.equal
+                  (SpaceCodec.decoder (SpaceCodec.descriptorJson (StringLen(1, 4))))
+                  (Ok(StringLen(1, 4)))
+                  "the descriptor spelling reads back"
+
+              Expect.equal
+                  (SpaceCodec.decoder (SpaceCodec.toJson (StringLen(1, 4))))
+                  (Ok(StringLen(1, 4)))
+                  "the document spelling reads back"
+
+          testCase "a pack binding an address that is not a bindable hole is refused UnknownBoundAddr"
+          <| fun _ ->
+              let pf = ContentPack.pack "doc-fn.typo" (Set.ofList [ "h9" ]) (packBaseEntry ())
+
+              let manifest =
+                  { PackId = "p"
+                    Domain = "d"
+                    PackVersion = 1
+                    Functions = [ pf ] }
+
+              match ContentPack.load manifest (packBaseReg ()) with
+              | Error(UnknownBoundAddr("p", "doc-fn.typo", "h9", [ "h0"; "h1" ])) -> ()
+              | other -> failtestf "expected UnknownBoundAddr, got %A" other
+
+              match FunctionRegistry.partiallyApply "x" (Set.ofList [ "h0" ]) (packBaseEntry ()) with
+              | Ok e -> Expect.equal (e.Capability.Signature.Holes |> List.map (fun h -> h.Addr)) [ "h1" ] "narrowed"
+              | Error e -> failtestf "a bindable hole was refused: %A" e
+
+          testCase "a pipeline refuses a self-edge, a cycle and a forward edge by name, and eval type-checks first"
+          <| fun _ ->
+              let cons = capOver "cons" [ intEntry "x" (IntRange(0, 100)) ]
+
+              let lookup =
+                  FunctionRegistry.empty
+                  |> FunctionRegistry.register (FunctionRegistry.entry "n" cons)
+                  |> function
+                      | Ok r -> CapabilityLookup.ofFunctionRegistry r
+                      | Error e -> failtestf "register failed: %A" e
+
+              let check nodes =
+                  CapabilityPipeline.typeCheck lookup { Nodes = nodes }
+
+              Expect.equal
+                  (check [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ])
+                  (Error(PipelineCycle("a", [ "a" ])))
+                  "self-edge"
+
+              Expect.equal
+                  (check
+                      [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "b" ])
+                        Invoke("b", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ])
+                  (Error(PipelineCycle("a", [ "a"; "b" ])))
+                  "cycle"
+
+              Expect.equal
+                  (check
+                      [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "s" ])
+                        Source("s", "ref", IntRange(0, 100)) ])
+                  (Error(PipelineForwardEdge("a", "x", "s")))
+                  "forward edge"
+
+              Expect.equal
+                  (check [ Invoke("a", "cons", IntRange(0, 100), [ "x", Literal "500" ]) ])
+                  (Error(PipelineArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))))
+                  "an out-of-space literal carries the space and the value"
+
+              Expect.equal
+                  (check
+                      [ Source("s", "ref", IntRange(0, 1000))
+                        Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "s" ]) ])
+                  (Error(EdgeTypeMismatch("a", "x", "int", "int")))
+                  "a wider producer range does not feed a narrower argument"
+
+              let mutable ran = false
+
+              let body (_: PipelineNode) (_: (string * PipelineArg<int>) list) : Result<int, string> =
+                  ran <- true
+                  Ok 1
+
+              match
+                  CapabilityPipeline.eval
+                      lookup
+                      string
+                      body
+                      { Nodes = [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ] }
+              with
+              | Error(EvalIllTyped(PipelineCycle _)) when not ran -> ()
+              | other -> failtestf "expected EvalIllTyped before any body, got %A (ran %b)" other ran
+
+              let narrow =
+                  { Nodes =
+                      [ Source("s", "ref", IntRange(0, 100))
+                        Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "s" ]) ] }
+
+              let overflow (n: PipelineNode) (_: (string * PipelineArg<int>) list) : Result<int, string> =
+                  Ok(if CapabilityPipeline.nodeId n = "s" then 500 else 0)
+
+              match CapabilityPipeline.eval lookup string overflow narrow with
+              | Error(EvalArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))) -> ()
+              | other -> failtestf "expected EvalArgRefused, got %A" other
+
+          testCase "Deferred.settled keeps Pending apart from a failure that says pending"
+          <| fun _ ->
+              Expect.equal (Deferred.settled (Pending: Deferred<int>)) None "pending"
+              Expect.equal (Deferred.settled (Failed "pending": Deferred<int>)) (Some(Error "pending")) "failed"
+              Expect.equal (Deferred.settled (Ready 3)) (Some(Ok 3)) "ready" ]

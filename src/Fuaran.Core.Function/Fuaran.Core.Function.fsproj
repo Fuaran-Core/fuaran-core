@@ -7,7 +7,14 @@
     <Description>Fuaran.Core.Function — the artifact-function protocol (Phase 181): generic signature / apply / curry / compose over a domain-witness record, under the three laws — totality (bounded iteration only), hygiene (lexical hole-addressing, capture-avoiding), and a mandatory two-axis effect/determinism signature joined componentwise through composition. FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Effect.fs" />
+    <Compile Include="Space.fs" />
     <Compile Include="Function.fs" />
+    <Compile Include="Deferred.fs" />
+    <Compile Include="Capability.fs" />
+    <Compile Include="FunctionRegistry.fs" />
+    <Compile Include="ContentPack.fs" />
+    <Compile Include="CapabilityPipeline.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
