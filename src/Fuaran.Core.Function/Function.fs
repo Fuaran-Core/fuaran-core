@@ -33,8 +33,8 @@ type HoleKind =
     | ValueHole of ValueSpace
     /// A tree-typed slot, bound by a `SlotArg` whose kind tag equals the constraint when one is given.
     | SlotHole of kindConstraint: string option
-    /// A repeat whose count is a `ValueArg` in `countSpace`; an unbounded count space makes the
-    /// artifact non-total, so every application of it is refused `NonTotal`.
+    /// A repeat whose count is a `ValueArg` in `countSpace`; a space that is no count space
+    /// (`Space.isCount`) makes the artifact non-total, so every application of it is refused `NonTotal`.
     | RepeatHole of countSpace: ValueSpace
     /// A dispatch slot bound by `bindHandlers`, never by `apply`; `effect` is the widest effect a
     /// handler bound here may declare.
@@ -133,6 +133,36 @@ type Signature =
         Effect: EffectClass
     }
 
+/// Why a declaration is refused at the seams' admission gate (Phase 307). `Signature.validate`
+/// answers the first three over a signature's entries; `Function.validate` adds the fourth, which
+/// only the witness can see. The registries, the capability decoder and `Function.compose` all run
+/// the same check, so there is one gate and one vocabulary for what it refuses.
+type DeclarationFault =
+    /// The hole's space admits no value (`Space.wellFormed` answered `SpaceFault.Empty`).
+    | EmptySpace of addr: string * space: ValueSpace
+    /// The hole's space has a NaN or infinite bound (`SpaceFault.NonFinite`), which no JSON number
+    /// spells — so the fault carries the address alone: the space it names could not travel in it.
+    | NonFiniteBound of addr: string
+    /// Two holes share this address, so a binding keyed by address cannot say which one it fills;
+    /// the second occurrence in declaration order is the one named.
+    | DuplicateHoleAddr of addr: string
+    /// A hole lies beneath a slot hole: binding the slot replaces the subtree the hole sits in, so
+    /// no application can fill both. `node` is the id (`IdW.ToString`) of the node that declares
+    /// the slot — the check walks subtrees, whose holes the witness addresses relative to the
+    /// subtree it is handed, so a node id is the one name that means the same thing in every frame.
+    | HoleUnderSlot of node: string
+
+/// The admission refusal in words (Phase 307).
+module DeclarationFault =
+
+    /// One sentence naming the fault and, for a space, what the space says.
+    let describe (f: DeclarationFault) : string =
+        match f with
+        | EmptySpace(addr, space) -> "hole '" + addr + "' ranges over an empty space: " + Space.describe space
+        | NonFiniteBound addr -> "hole '" + addr + "' has a bound that is not a finite number"
+        | DuplicateHoleAddr addr -> "two holes share the address '" + addr + "'"
+        | HoleUnderSlot node -> "the slot declared at node '" + node + "' has a hole beneath it"
+
 /// An argument bound into a hole: a leaf value, or a tree (for slots / composition).
 type Arg<'Node> =
     /// A scalar for a value or repeat hole, checked against the hole's space before binding.
@@ -155,10 +185,19 @@ type ApplyError =
     | NotASlot of addr: string
     /// A slot's kind constraint `expected` refused a tree whose kind tag is `got`.
     | SlotKindMismatch of addr: string * expected: string * got: string
-    /// A repeat hole ranges over an unbounded count space; checked before any argument is read.
+    /// A repeat hole ranges over a space that is no count space (`Space.isCount`): unbounded,
+    /// empty, uncapped, or not an integer range. Checked before any argument is read.
     | NonTotal of addr: string
     /// The witness's `Bind` refused the binding; `reason` is its message, verbatim.
     | BindFailed of addr: string * reason: string
+    /// A strict application was handed a slot argument that still has open data holes (Phase 307):
+    /// `holes` are their addresses, as the witness enumerates them over the argument. A full
+    /// application yields a closed tree, so it refuses an open one rather than returning a result
+    /// with holes nobody bound. Partial application (`curry`) still accepts one.
+    | SlotArgOpen of addr: string * holes: string list
+    /// `compose` built a tree that is not a well-formed declaration (Phase 307) — an inner hole
+    /// landing on an address the outer already uses is the case it exists for.
+    | IllFormedResult of fault: DeclarationFault
 
 // ---- the behaviour axis: typed handler-table binding (Phase 318) ----
 
@@ -209,8 +248,8 @@ type ArtifactWitness<'Node, 'Id> =
         /// The domain's tree accessors; the protocol reads a slot argument's kind tag and walks
         /// subtrees through it.
         Tree: NodeWitness<'Node, 'Id>
-        /// The domain's id witness. No operation in `Function` reads it; it completes the record so
-        /// one value names the whole domain.
+        /// The domain's id witness. `Function.validate` reads it to name the node a `HoleUnderSlot`
+        /// fault is at (Phase 307); nothing else in `Function` does.
         IdW: IdWitness<'Id>
         /// Enumerate the declared holes of a tree, each with its absolute lexical address.
         Holes: 'Node -> HoleDecl list
@@ -227,6 +266,12 @@ type ArtifactWitness<'Node, 'Id> =
 /// `Hit` means an unchanged sub-function was served from the cache rather than re-applied; a `Miss`
 /// computed + stored a fresh result; a `Bypass` means a non-memoisable (effecting / non-deterministic)
 /// function was computed directly and never cached (the soundness guard — Fork 3).
+///
+/// **A cache is PER WITNESS (Phase 307).** The key is the content pre-image of the function and its
+/// arguments under the caller's `encode`, and it carries no tag for the witness that applied them:
+/// two witnesses over one node type whose `Bind` lowers the same binding differently would read
+/// each other's entries. Thread one cache through one witness's applications, as every caller in
+/// this package does.
 type MemoCache<'Node> =
     {
         /// The result trees, keyed by the full `(function, param-set)` pre-image, not a digest of it.
@@ -265,6 +310,33 @@ module Memo =
     let isMemoisable (e: EffectClass) : bool =
         e.Host = Pure && Set.isEmpty e.Determinism
 
+/// The admission check over a signature's entries (Phase 307).
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Signature =
+
+    /// The first reason the signature is not a well-formed declaration, in declaration order, or
+    /// `Ok ()`: an entry whose space `Space.wellFormed` refuses (`EmptySpace`, `NonFiniteBound`),
+    /// or an entry whose address an earlier entry already holds (`DuplicateHoleAddr`). Totality is
+    /// the registries' other admission check (`Function.isTotal`, refused `NonTotalCapability`);
+    /// the two together are the gate `CapabilityRegistry.register`, `FunctionRegistry.register`
+    /// and `CapabilityCodec`'s readers run, so a declaration a seam admits has distinct addresses
+    /// and spaces a value can lie in and JSON can spell — and `Function.toJsonSchema` over it has
+    /// distinct property keys and finite bounds.
+    let validate (sg: Signature) : Result<unit, DeclarationFault> =
+        let rec go (seen: Set<string>) =
+            function
+            | [] -> Ok()
+            | (e: SigEntry) :: rest ->
+                if seen.Contains e.Addr then
+                    Error(DuplicateHoleAddr e.Addr)
+                else
+                    match e.Space |> Option.map (fun sp -> sp, Space.wellFormed sp) with
+                    | Some(sp, Error SpaceFault.Empty) -> Error(EmptySpace(e.Addr, sp))
+                    | Some(_, Error SpaceFault.NonFinite) -> Error(NonFiniteBound e.Addr)
+                    | _ -> go (seen.Add e.Addr) rest
+
+        go Set.empty sg.Holes
+
 /// The generic artifact-function operations — `signature` / `apply` / `curry` /
 /// `compose` — over the witness, under the three laws. UI's parameterised fragment and
 /// Calc's parameterised model both express their `apply` through these.
@@ -279,11 +351,12 @@ module Function =
                 // Phase 229: a slot is entered WITH its value space — a wire tree of the constrained
                 // kind — so a capability over a slotted artifact is invocable at the scalar seam.
                 | SlotHole c -> Some(SlotTree c), c, None, true
-                // Phase 295: a BOUNDED repeat is required, because strict `apply` demands it — the
-                // signature and the artifact protocol answer one question the same way. An unbounded
-                // repeat is non-total: `apply` refuses it `NonTotal` whatever is bound, and
-                // `CapabilityRegistry.register` refuses a capability over one.
-                | RepeatHole s -> Some s, None, None, Space.isBounded s
+                // Phase 295: a TOTAL repeat is required, because strict `apply` demands it — the
+                // signature and the artifact protocol answer one question the same way. A repeat
+                // over anything but a count space (`Space.isCount`, Phase 307) is non-total: `apply`
+                // refuses it `NonTotal` whatever is bound, and `CapabilityRegistry.register` refuses
+                // a capability over one.
+                | RepeatHole s -> Some s, None, None, Space.isCount s
                 // An action hole is non-required on the *data* binding axis (no value/slot arg fills it);
                 // it is bound on the *behaviour* axis by `bindHandlers`, which enforces its own coverage.
                 | ActionHole e -> None, None, Some e, false
@@ -310,24 +383,78 @@ module Function =
         { sg with
             Holes = sg.Holes |> List.filter (fun e -> not (boundAddrs.Contains e.Addr)) }
 
-    /// Totality law: no repeat hole may range over an unbounded count space, and every entry is a
-    /// hole kind (`SigEntry.HoleKind`).
+    /// Totality law: every repeat hole ranges over a count space (`Space.isCount` — a capped,
+    /// non-empty, non-negative `IntRange`, Phase 307), and every entry is a hole kind
+    /// (`SigEntry.HoleKind`).
     let isTotal (sg: Signature) : bool =
         sg.Holes
         |> List.forall (fun e ->
             match e.HoleKind with
-            | Some(RepeatHole s) -> Space.isBounded s
+            | Some(RepeatHole s) -> Space.isCount s
             | Some _ -> true
             // An entry that projects to no hole kind — an unknown tag, or a tag without the payload
             // it needs, which only a hand-built entry can be — is not certified total (Phase 295).
             | None -> false)
+
+    /// The data holes of a tree — every declared hole but the action holes, which `bindHandlers`
+    /// fills on the behaviour axis.
+    let private dataHoles (w: ArtifactWitness<'Node, 'Id>) (node: 'Node) : HoleDecl list =
+        w.Holes node
+        |> List.filter (fun h ->
+            match h.Kind with
+            | ActionHole _ -> false
+            | _ -> true)
+
+    /// Is the tree CLOSED (Phase 307) — does it declare no data hole? An action hole does not open a
+    /// tree: it is bound on the behaviour axis, after application. Strict `apply` answers a closed
+    /// tree when every slot argument it was handed is closed (`SlotArgOpen` otherwise).
+    let isClosed (w: ArtifactWitness<'Node, 'Id>) (node: 'Node) : bool = List.isEmpty (dataHoles w node)
+
+    /// The number of slot holes among `hs`.
+    let private slotCount (hs: HoleDecl list) : int =
+        hs
+        |> List.filter (fun h ->
+            match h.Kind with
+            | SlotHole _ -> true
+            | _ -> false)
+        |> List.length
+
+    /// The first node, in preorder, that declares a slot hole and has a hole beneath it. The witness
+    /// enumerates the holes of any subtree it is handed, addressed relative to that subtree, so the
+    /// check COUNTS and never compares addresses or names (a name is inert by the hygiene law): a
+    /// node declares a slot of its own when its subtree holds more slots than its children's
+    /// subtrees do, and has a hole beneath it when its children's subtrees hold any hole at all.
+    let private holeUnderSlot (w: ArtifactWitness<'Node, 'Id>) (node: 'Node) : DeclarationFault option =
+        Tree.preorder w.Tree node
+        |> List.tryPick (fun n ->
+            let below = w.Tree.Children n |> List.map w.Holes
+
+            if
+                List.exists (List.isEmpty >> not) below
+                && slotCount (w.Holes n) > List.sumBy slotCount below
+            then
+                Some(HoleUnderSlot(w.IdW.ToString(w.Tree.Id n)))
+            else
+                None)
+
+    /// The admission check over an ARTIFACT (Phase 307): `Signature.validate` over its derived
+    /// signature, then the check only the witness can make — no hole lies beneath a slot hole
+    /// (`HoleUnderSlot`). `Ok ()` is a declaration whose holes have distinct addresses, spaces a
+    /// value can lie in, and no binding that another binding erases. `compose` runs it over the
+    /// tree it builds; a host runs it over an artifact before deriving the capability it registers.
+    let validate (w: ArtifactWitness<'Node, 'Id>) (node: 'Node) : Result<unit, DeclarationFault> =
+        Signature.validate (signature w "" node)
+        |> Result.bind (fun () ->
+            match holeUnderSlot w node with
+            | Some fault -> Error fault
+            | None -> Ok())
 
     /// First totality violation among a hole set, if any.
     let private guardTotal (holes: HoleDecl list) : ApplyError option =
         holes
         |> List.tryPick (fun h ->
             match h.Kind with
-            | RepeatHole s when not (Space.isBounded s) -> Some(NonTotal h.Addr)
+            | RepeatHole s when not (Space.isCount s) -> Some(NonTotal h.Addr)
             | _ -> None)
 
     /// Validate an argument against a hole kind before lowering it.
@@ -344,7 +471,7 @@ module Function =
             else
                 Error(ValueOutOfSpace(addr, space, s))
         | RepeatHole space, ValueArg s ->
-            if not (Space.isBounded space) then Error(NonTotal addr)
+            if not (Space.isCount space) then Error(NonTotal addr)
             elif Space.validate space s then Ok()
             else Error(ValueOutOfSpace(addr, space, s))
         | SlotHole constraintOpt, SlotArg node ->
@@ -369,12 +496,7 @@ module Function =
         // Action holes live on the *behaviour* axis (bound by `bindHandlers`), not the data axis —
         // exclude them here so the artifact stays apply-able and a strict apply does not demand a
         // value/slot arg for a dispatch slot. The tree itself remains pure regardless.
-        let holes =
-            w.Holes node
-            |> List.filter (fun h ->
-                match h.Kind with
-                | ActionHole _ -> false
-                | _ -> true)
+        let holes = dataHoles w node
 
         match guardTotal holes with
         | Some e -> Error e
@@ -409,10 +531,30 @@ module Function =
                                 | Ok cur' -> go cur' unbound rest
                                 | Error m -> Error(BindFailed(h.Addr, m))
 
-                go node [] holes
+                // Phase 307: a full application binds closed trees only — the first slot argument,
+                // in address order, that still has open data holes is refused before any binding.
+                let openSlot =
+                    if not strict then
+                        None
+                    else
+                        args
+                        |> Map.toList
+                        |> List.tryPick (fun (a, arg) ->
+                            match arg with
+                            | SlotArg sub ->
+                                match dataHoles w sub with
+                                | [] -> None
+                                | hs -> Some(SlotArgOpen(a, hs |> List.map (fun o -> o.Addr)))
+                            | ValueArg _ -> None)
+
+                match openSlot with
+                | Some e -> Error e
+                | None -> go node [] holes
 
     /// Apply the artifact-function to a full argument set — every declared hole must be
-    /// bound. Hygiene: args are keyed by absolute address.
+    /// bound, and every slot argument must be closed (`isClosed`; `SlotArgOpen` otherwise, Phase
+    /// 307), so an `Ok` result has no open data hole the arguments put there. Hygiene: args are
+    /// keyed by absolute address.
     let apply
         (w: ArtifactWitness<'Node, 'Id>)
         (args: Map<string, Arg<'Node>>)
@@ -437,8 +579,10 @@ module Function =
     /// Compose: wire `inner`'s tree into `outer`'s tree-typed slot at `slotAddr`. The
     /// slot's kind constraint (if any) is checked; the result's effect is the join. Totality is
     /// checked first, on both parts, exactly as `composeAcross` checks it (Phase 295): a part
-    /// carrying an unbounded repeat makes the composed function non-total, so the composition is
-    /// refused `NonTotal`, never built.
+    /// carrying a repeat over no count space makes the composed function non-total, so the
+    /// composition is refused `NonTotal`, never built. And the RESULT is checked (Phase 307): a
+    /// composed tree `validate` refuses — an inner hole on an address the outer already uses, which
+    /// would let one argument fill both — is refused `IllFormedResult`, never returned.
     let compose
         (w: ArtifactWitness<'Node, 'Id>)
         (slotAddr: string)
@@ -460,7 +604,10 @@ module Function =
                         Error(SlotKindMismatch(slotAddr, k, w.Tree.KindTag inner))
                     | _ ->
                         match w.Bind slotAddr (SlotArg inner) outer with
-                        | Ok n -> Ok n
+                        | Ok n ->
+                            match validate w n with
+                            | Ok() -> Ok n
+                            | Error fault -> Error(IllFormedResult fault)
                         | Error m -> Error(BindFailed(slotAddr, m))
                 | _ -> Error(NotASlot slotAddr)
 
@@ -825,7 +972,8 @@ module Function =
 
     /// Apply the artifact-function with a caller-supplied content-addressed memo (Phase 49 / 53). The
     /// memoisability gate keys on the **observed** effect (`observedEffect` — the widest effect actually
-    /// present over the whole subtree), NOT the declared root: a function whose root declares
+    /// present over the whole subtree, joined since Phase 307 with the observed effect of every
+    /// `SlotArg`, which the result contains), NOT the declared root: a function whose root declares
     /// `Pure`/`Deterministic` while a descendant leaks `Clock`/`Random`/`ReadsHost` is treated as
     /// effecting and bypassed, so the cache can never serve a stale result for an actually-impure
     /// function even when the root under-declares (Phase 53 soundness gate — the same walk `auditEffect`
@@ -851,7 +999,17 @@ module Function =
         (node: 'Node)
         (cache: MemoCache<'Node>)
         : Result<'Node * MemoCache<'Node>, ApplyError> =
-        if not (Memo.isMemoisable (observedEffect w node)) then
+        // Phase 307: the gate is the join over the function AND every tree argument — a slot
+        // argument is part of the result, so an effect it carries is the result's effect, exactly as
+        // it is once `applyMemoComposed` has composed it in.
+        let gate =
+            (observedEffect w node, args)
+            ||> Map.fold (fun acc _ arg ->
+                match arg with
+                | SlotArg sub -> Effect.join acc (observedEffect w sub)
+                | ValueArg _ -> acc)
+
+        if not (Memo.isMemoisable gate) then
             apply w args node
             |> Result.map (fun r ->
                 r,

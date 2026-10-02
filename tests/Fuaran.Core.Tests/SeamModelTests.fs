@@ -182,7 +182,13 @@ let private invokeErrors: InvokeError list =
       RequiredArgsUnbound [ "n"; "x" ]
       UninvocableArg "onDone"
       BodyFailed "station offline: no reading in the last 24 hours"
-      NonTotalCapability("expand", [ "expand/rows" ]) ]
+      NonTotalCapability("expand", [ "expand/rows" ])
+      // Phase 307 — the admission gate's refusal, one per fault, and the repeated argument.
+      IllFormedCapability("span", EmptySpace("span/n", IntRange(5, 1)))
+      IllFormedCapability("span", NonFiniteBound "span/x")
+      IllFormedCapability("span", DuplicateHoleAddr "span/n")
+      IllFormedCapability("span", HoleUnderSlot "body")
+      DuplicateArg "fmt-temp/celsius" ]
 
 let private queryErrors: QueryError list =
     [ NoSuchQuery("raw-dump", [ "readings"; "stations" ])
@@ -195,7 +201,8 @@ let private queryErrors: QueryError list =
       ExecutionFailed("archive shard for station offline is unreachable", [])
       ExecutionFailed("busy", [ "limit" ])
       Timeout
-      RequiredParamsNull [ "station" ] ]
+      RequiredParamsNull [ "station" ]
+      DuplicateParam "station" ]
     @ [ for expected in
             [ IntType
               FloatType

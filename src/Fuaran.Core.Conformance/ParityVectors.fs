@@ -203,6 +203,14 @@ let private exportCorpus: string list =
 // decimal column, and `Column.aggregate` over one. Each answer is ASCII by construction: decimal text
 // is ASCII, and a refusal is its class name.
 
+/// `Space.canonical` over the whole `int` range (Phase 307): the one spelling an integer argument
+/// is handed on as, or `refused`. The reader is the seam's invariant one, so a minus sign is `-`
+/// and nothing else, under every culture and on both pipelines.
+let private intCanon (s: string) : string =
+    match Space.canonical (IntRange(System.Int32.MinValue, System.Int32.MaxValue)) s with
+    | Some c -> c
+    | None -> "refused"
+
 /// `DecimalText.tryCanonical`'s answer: the canonical text, or `refused`.
 let private decCanon (s: string) : string =
     match DecimalText.tryCanonical s with
@@ -606,7 +614,17 @@ let vectors: (string * string) list =
       "decimalAggregate/sum-tenths-exact", decimalAggregate Sum (List.replicate 10 (Decimal "0.1"))
       "decimalAggregate/sum-past-float", Hash.sha256Hex (decimalAggregate Sum [ Decimal pastFloat; Decimal "0.5" ])
       "decimalAggregate/mean-past-float", decimalAggregate Mean [ Decimal pastFloat; Decimal "0.5" ]
-      "decimalAggregate/sum-not-decimal", decimalAggregate Sum [ Decimal "1"; Decimal "1e3" ] ]
+      "decimalAggregate/sum-not-decimal", decimalAggregate Sum [ Decimal "1"; Decimal "1e3" ]
+
+      // ---- Phase 307 — the integer reader at the invocable seams (`Space.canonical`). Appended, so
+      // every earlier row keeps its place. The five spellings a culture-dependent reader got wrong:
+      // `-5` is read everywhere, and U+2212, a leading space, a leading `+` and an exponent nowhere.
+      "space/int/ascii-minus", intCanon "-5"
+      "space/int/unicode-minus", intCanon "\u22125"
+      "space/int/leading-space", intCanon " 5"
+      "space/int/leading-plus", intCanon "+5"
+      "space/int/exponent", intCanon "1e999"
+      "space/int/leading-zero", intCanon "05" ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.33.0: additive
+# class since v0.34.0: additive
 doc	capability	sha256:22d8768348f6d73e7353a71ed275771f7f9381379346792430b8f23f305384f8	{"$type":"capability","determinism":"clock","id":"s","placement":{"$type":"buildTime"},"signature":{"effect":{"determinism":"clock","host":"pure"},"holes":[{"actionEffect":{"determinism":"clock","host":"pure"},"addr":"s","kind":"s","name":"s","required":true,"slotKind":"s","space":{"$type":"intRange","max":1,"min":1}}],"name":"s"}}
 doc	capability / DeterminismFactor.ClockFactor	sha256:22d8768348f6d73e7353a71ed275771f7f9381379346792430b8f23f305384f8	{"$type":"capability","determinism":"clock","id":"s","placement":{"$type":"buildTime"},"signature":{"effect":{"determinism":"clock","host":"pure"},"holes":[{"actionEffect":{"determinism":"clock","host":"pure"},"addr":"s","kind":"s","name":"s","required":true,"slotKind":"s","space":{"$type":"intRange","max":1,"min":1}}],"name":"s"}}
 doc	capability / DeterminismFactor.NetworkFactor	sha256:b5f0c4c13aa4e4d5a56a7298038416709f0d0dfb53b762093e48446f9acb4732	{"$type":"capability","determinism":"network","id":"s","placement":{"$type":"buildTime"},"signature":{"effect":{"determinism":"network","host":"pure"},"holes":[{"actionEffect":{"determinism":"network","host":"pure"},"addr":"s","kind":"s","name":"s","required":true,"slotKind":"s","space":{"$type":"intRange","max":1,"min":1}}],"name":"s"}}
@@ -44,9 +44,15 @@ doc	deferred / Deferred<String>.Pending	sha256:d4153f11108020d1acee7de988d8e650a
 doc	deferred / Deferred<String>.Ready	sha256:52b53c346cd2366412f91719f910ffbeb1f31034b675de6ae5146699971476df	{"$type":"ready","value":"s"}
 doc	invocation	sha256:2d0bf7e7ead29980804d4f08fe514f28f8e1b3fe9f058643e77efaf40425d756	{"$type":"invocation","args":[{"addr":"s","value":"s"}],"capabilityId":"s"}
 doc	invokeError	sha256:a00f5ff0b8f9179dcbad9ac66834fb669bbbabb207d72e12eb344583a1eb63d4	{"$type":"noSuchCapability","id":"s","known":["s"]}
+doc	invokeError / DeclarationFault.DuplicateHoleAddr	sha256:d786ab1845e36fad4446cf3f6409bab2bb3e3af851f2daf958a28f3060ae3fc5	{"$type":"illFormedCapability","fault":{"$type":"duplicateHoleAddr","addr":"s"},"id":"s"}
+doc	invokeError / DeclarationFault.EmptySpace	sha256:77c31aa666fde0171e5d6c6edba84c243a0e3e10ffdf540fb06f577fcf74cbfc	{"$type":"illFormedCapability","fault":{"$type":"emptySpace","addr":"s","space":{"$type":"intRange","max":1,"min":1}},"id":"s"}
+doc	invokeError / DeclarationFault.HoleUnderSlot	sha256:205bed4c94e971cc385ab66c239ad0b7e5ee233a7f5ffc4f329c17c9b085f66c	{"$type":"illFormedCapability","fault":{"$type":"holeUnderSlot","node":"s"},"id":"s"}
+doc	invokeError / DeclarationFault.NonFiniteBound	sha256:3a7c012b0c394b9f8fd8b731c7cc8c3b9fa3df8b76901585d2e4c84182b1f289	{"$type":"illFormedCapability","fault":{"$type":"nonFiniteBound","addr":"s"},"id":"s"}
 doc	invokeError / InvokeError.ArgOutOfSpace	sha256:8bea1f5e58b347b588e4f20e83c30b08efcc7dd5364772d8b00ede9693c88904	{"$type":"argOutOfSpace","addr":"s","got":"s","space":{"$type":"intRange","max":1,"min":1}}
 doc	invokeError / InvokeError.BodyFailed	sha256:9fd996b6d6be1b53565a72caf0cbb42d47410ed07215c5ddcd4e67aa5adfccb2	{"$type":"bodyFailed","reason":"s"}
+doc	invokeError / InvokeError.DuplicateArg	sha256:e7afbd2bef29f653dd045663dd1f017d8b55a0ba23df9da58fa56dda4be29377	{"$type":"duplicateArg","addr":"s"}
 doc	invokeError / InvokeError.DuplicateCapability	sha256:1f6cd76956fe0ab9454d8539ba53c16f7430bc96d1d3ab202c3dbe645d826dd3	{"$type":"duplicateCapability","id":"s"}
+doc	invokeError / InvokeError.IllFormedCapability	sha256:77c31aa666fde0171e5d6c6edba84c243a0e3e10ffdf540fb06f577fcf74cbfc	{"$type":"illFormedCapability","fault":{"$type":"emptySpace","addr":"s","space":{"$type":"intRange","max":1,"min":1}},"id":"s"}
 doc	invokeError / InvokeError.NoSuchCapability	sha256:a00f5ff0b8f9179dcbad9ac66834fb669bbbabb207d72e12eb344583a1eb63d4	{"$type":"noSuchCapability","id":"s","known":["s"]}
 doc	invokeError / InvokeError.NonTotalCapability	sha256:362f5b8c7a69c64bc4775fca1b4f6b3995e79ec7febb7eb0db767cf01ba1bf89	{"$type":"nonTotalCapability","addrs":["s"],"id":"s"}
 doc	invokeError / InvokeError.RequiredArgsUnbound	sha256:682ad35bd95fe0cc2ec554dd8dafc6f9daeb206c5176632e3802ece348eadf1e	{"$type":"requiredArgsUnbound","addrs":["s"]}

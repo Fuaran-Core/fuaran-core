@@ -269,3 +269,36 @@ let convergenceTests =
               match QueryCodec.decodeDetailedWith ReadPolicy.Lenient "{" with
               | Error e -> Expect.equal e.Code DecodeCode.InvalidJson "a parse failure is refused at the root"
               | Ok q -> failtestf "decoded %A" q ]
+
+// ---- Phase 307: a parameter bound twice ----
+
+[<Tests>]
+let duplicateParamTests =
+    testList
+        "Query duplicate parameters (Phase 307)"
+        [ testCase "a name bound twice is DuplicateParam at validateParams, validateParamsAll and decodeArgs"
+          <| fun _ ->
+              let args = [ "year", Int 2024; "year", Cell.Null ]
+
+              Expect.equal (Query.validateParams sampleQuery args) (Error(DuplicateParam "year")) "validateParams"
+
+              Expect.equal
+                  (Query.validateParamsAll sampleQuery args)
+                  (Error [ DuplicateParam "year" ])
+                  "validateParamsAll"
+
+              Expect.equal
+                  (QueryCodec.decodeArgs sampleQuery """{"year":2024,"year":2025}""")
+                  (Error [ DuplicateParam "year" ])
+                  "decodeArgs"
+
+              Expect.equal
+                  (Query.validateParams sampleQuery [ "year", Int 2024; "region", Str "UK" ])
+                  (Ok())
+                  "distinct names are accepted as before"
+
+          testCase "DuplicateParam round-trips through its wire document and reads as a refusal"
+          <| fun _ ->
+              let e = DuplicateParam "year"
+              Expect.equal (QueryCodec.decodeQueryError (QueryCodec.encodeQueryError e)) (Ok e) "round trip"
+              Expect.stringStarts (QueryError.describe e) "Refused: " "described" ]

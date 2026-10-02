@@ -414,6 +414,7 @@ type query_error =
 | ExecutionFailed of Prims.string * Prims.list<Prims.string>
 | Timeout
 | RequiredParamsNull of Prims.list<Prims.string>
+| DuplicateParam of Prims.string
 
 
 let uu___is_NoSuchQuery : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
@@ -572,6 +573,21 @@ let uu___is_RequiredParamsNull : query_error  ->  Prims.bool = (fun ( projectee 
 let __proj__RequiredParamsNull__item__names : query_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  query_error ) -> (match (projectee) with
 | RequiredParamsNull (names) -> begin
      names
+     end))
+
+
+let uu___is_DuplicateParam : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| DuplicateParam (name) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__DuplicateParam__item__name : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| DuplicateParam (name) -> begin
+     name
      end))
 
 
@@ -891,7 +907,26 @@ if ((p.p_required && (has_key p.p_name a)) && (not ((has_value p.p_name a)))) th
      end))
 
 
-let validate_params : query  ->  arguments  ->  outcome<unit, query_error> = (fun ( q  :  query ) ( a  :  arguments ) -> (match ((check_args q.q_params (param_names q.q_params) a)) with
+let rec repeated : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( seen  :  Prims.list<Prims.string> ) ( ks  :  Prims.list<Prims.string> ) -> (match (ks) with
+| [] -> begin
+     []
+     end
+| (k)::t -> begin
+      
+if (mem k seen) then begin
+     (k)::(repeated seen t)
+     end else begin
+     (repeated ((k)::seen) t)
+     end
+     end))
+
+
+let validate_params : query  ->  arguments  ->  outcome<unit, query_error> = (fun ( q  :  query ) ( a  :  arguments ) -> (match ((repeated [] (keys a))) with
+| (d)::uu___ -> begin
+     Error (DuplicateParam (d))
+     end
+| [] -> begin
+     (match ((check_args q.q_params (param_names q.q_params) a)) with
 | Error (e) -> begin
      Error (e)
      end
@@ -908,6 +943,7 @@ let validate_params : query  ->  arguments  ->  outcome<unit, query_error> = (fu
      end
 | u -> begin
      Error (RequiredParamsUnbound (u))
+     end)
      end)
      end))
 

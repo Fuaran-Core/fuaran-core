@@ -1,5 +1,76 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D111: the invocable seams have ONE admission gate — totality, then well-formedness — run at registration, at every reader and by `compose`; a repeat counts over a capped integer range; an argument names its hole once
+
+**Recorded by Phase 307. `Space.wellFormed` / `Space.isCount` / `Space.maxRepeatCount`, `Signature.validate`,
+`Function.validate` / `isClosed`, `DeclarationFault`, `CapabilityRegistry.register` and
+`FunctionRegistry.register` through `Capability.admissionFault`, `CapabilityCodec`'s readers,
+`Capability.validateArgs` / `validateArgsAll` and `Query.validateParams` / `validateParamsAll` /
+`QueryCodec.decodeArgs` through `Capability.repeatedAddrs`, `CapabilityPipeline.typeCheck` and
+`nodeInvocationKey`, `Function.applyMemo`; `proofs/Capability.fst` section 13 and `proofs/Query.fst`
+section 8; opens the `0.35.0` draft (STABILITY.md, "Phase 307").**
+
+**D111.1 — one gate, at every door.** Everything outside the seams' proved core trusted its declaration:
+a `RepeatHole(FloatRange(0, infinity))` was total, `IntRange(5, 1)`, a NaN bound and `Enum []` were
+"bounded", two holes at one address registered, and a declaration with an infinite bound was written by
+the codec as bytes its own reader refused. The fix is not a check per surface but ONE check run wherever a
+declaration enters: totality (`Function.isTotal`, refused `NonTotalCapability`) and then well-formedness
+(`Signature.validate`, refused `IllFormedCapability` with a typed `DeclarationFault`) at both registries;
+the same `Signature.validate` in the capability reader, so a document that decodes is one a registry could
+admit on well-formedness; and `Function.validate` — the signature check plus the one only the witness can
+make, no hole beneath a slot — over every tree `compose` builds (`IllFormedResult`). A host deriving a
+capability from an artifact runs `Function.validate` first; the gate does not run inside `signature`,
+which stays a total projection, because making it refuse would retype every caller for a check the
+registries already make. Rejected: refusing at `apply` too (it would be a second gate with a second
+vocabulary, and `apply`'s own guard is totality, which it keeps).
+
+**D111.2 — a count space is a capped, non-empty, non-negative `IntRange`; the cap is one million.** The
+totality criterion was "neither `AnyString` nor `SlotTree`", which admitted every float range, every
+string length and every enum as a repeat's count. A count is how many times a host expands a subtree, so
+the criterion is now `Space.isCount`: `IntRange(lo, hi)` with `0 <= lo <= hi <= Space.maxRepeatCount`, and
+`maxRepeatCount` is 1,000,000. The number is a stated policy, not a measurement: it bounds the work one
+application can demand at a size no current domain approaches, and it is a literal so a host can read
+it. A domain that needs more raises it in a decision of its own; one that is refused at registration
+learns at registration, not at the expansion. `Required` follows totality (D104), so a repeat over a
+space that is no count is no longer required, and the `toSchema` / `toJsonSchema` bytes of such a
+signature move with it.
+
+**D111.3 — the fault vocabulary names what a reader can act on, and carries what can travel.**
+`EmptySpace` carries the space (the reader sees why no value fits); `NonFiniteBound` carries the address
+ALONE, because the space it would carry has no JSON spelling and the fault is itself a wire document;
+`DuplicateHoleAddr` names the second occurrence; `HoleUnderSlot` names the NODE that declares the slot, by
+its id, because the witness addresses a hole relative to the subtree it is handed and the check walks
+subtrees — an address would mean different things at different nodes, and a hole's name is inert by the
+hygiene law and must stay so (the check counts kinds and never reads a name, which is what keeps
+`compose_rename` a theorem).
+
+**D111.4 — an argument names its hole once, at every seam.** `validateArgs` accepted `[a = x; a = y]`;
+the `Map.ofList` reading took the last, `Query`'s `Required` reading took any, and the capture key moved
+with the order of the list, so the proved determinism row carried `distinct (keys a)` as a hypothesis
+nothing enforced. Now the first repeated address is refused before any value is read — `DuplicateArg` at
+the capability seam, its reader and the pipeline's `typeCheck`, `DuplicateParam` at the query seam and
+its argument reader (a separate name, because the two unions share a namespace and the seams' vocabularies
+are already parallel: `UnknownArg` / `UnknownParam`) — and the hypothesis is a theorem about every list the
+seam accepts (`validate_args_distinct`, `validate_params_distinct`).
+
+**D111.5 — the smaller soundness fixes.** A strict application binds closed trees only (`SlotArgOpen`):
+an `Ok` used to carry open holes nobody bound. The memo gate joins the observed effect of every
+`SlotArg` with the function's, so `applyMemo` and `applyMemoComposed` now agree on a Clock-carrying slot
+argument (both bypass). A memo cache is PER WITNESS and documented so, rather than keyed by a witness
+tag — every caller threads one cache through one witness, and a tag would be a string a caller could get
+wrong. `nodeInvocationKey` leads its pre-image with the node kind, closing the `Source("source",
+"source", _)` / `Invoke("source", "source", _, [])` collision; every journalled pipeline key moves.
+`Capability.invoke` keeps an unwrapped body and documents the obligation (`capability-body-total`):
+catching every exception would also swallow the ones a host means to escape. A pre-229 slot entry with
+no space is invocable again, through `Function.slotSpaceOf`. The codecs gain guarded `tryEncode`s over
+`Canon.tryRender`; `encode` stays total and is exact over every declaration the gate admits.
+
+**What the shard asked for and this decision did not do.** It asked for the optional-field decoder,
+`slotKind` / `nextPageToken`, the `IntRange` culture fix and `evalFrom`'s type-check: Phases 310 and 295
+had shipped all four, and this phase pins them rather than redoing them. It classed the phase additive
+and said the key change would ride Phase 290's breaking draft: `0.34.0` was released the morning this
+phase was taken, and three unions widen, so it opens `0.35.0` as a breaking (source) draft.
+
 ## 2026-10-02 — D110: lanes are a writer partition carried beside the node map; the whole union orders by one drain with the key as a parameter, `(lane, seq, id)` by default; a convergence is a function of the head set
 
 **Recorded by Phase 311. `src/Fuaran.Core.OpStream.Dag/DagOpStream.fs` (the lane store, `totalOrderBy`,

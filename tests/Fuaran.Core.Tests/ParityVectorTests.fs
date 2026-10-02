@@ -235,7 +235,14 @@ let private expected: (string * string) list =
       "decimalAggregate/sum-tenths-exact", "m:1"
       "decimalAggregate/sum-past-float", "f71d1eb372ac8e9eb340d9d8f987246b49e50a95e06e2023170affd98d4aa403"
       "decimalAggregate/mean-past-float", "<overflow>"
-      "decimalAggregate/sum-not-decimal", "<outside-type>" ]
+      "decimalAggregate/sum-not-decimal", "<outside-type>"
+      // Phase 307 — the seam's integer reader.
+      "space/int/ascii-minus", "-5"
+      "space/int/unicode-minus", "refused"
+      "space/int/leading-space", "refused"
+      "space/int/leading-plus", "refused"
+      "space/int/exponent", "refused"
+      "space/int/leading-zero", "5" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the

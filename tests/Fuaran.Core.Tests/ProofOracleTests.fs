@@ -7420,18 +7420,27 @@ let private modelSpaceRender (s: ModelCap.value_space) : string =
     | ModelCap.AnyString -> "any"
     | ModelCap.SlotTree c -> sprintf "tree{%s}" (defaultArg (ofMOpt c) "*")
 
-/// The readers premise made concrete: the four host functions `Space.validate` reaches for,
-/// exactly as production calls them (Phase 229 added `kind_of`, production's `Space.slotKindOf`).
+/// The readers premise made concrete: the five host functions `Space.validate` and
+/// `Space.wellFormed` reach for, exactly as production calls them (Phase 229 added `kind_of`,
+/// production's `Space.slotKindOf`; Phase 307 `float_fault`, and restated `int_of` as production's
+/// own invariant reader — `Space.canonical` over the whole `int` range — where it was
+/// `Int32.TryParse` under the CURRENT culture, a reader production stopped using at Phase 295).
 let private readers: ModelCap.readers =
     { ModelCap.readers.int_of =
         fun s ->
-            match System.Int32.TryParse s with
-            | true, v -> FStar_Pervasives_Native.Some(bigint v)
-            | _ -> FStar_Pervasives_Native.None
+            match Space.canonical (IntRange(System.Int32.MinValue, System.Int32.MaxValue)) s with
+            | Some c -> FStar_Pervasives_Native.Some(bigint (System.Int32.Parse(c, inv)))
+            | None -> FStar_Pervasives_Native.None
       ModelCap.readers.float_in =
         fun lo hi s -> Space.validate (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) s
       ModelCap.readers.str_len = fun s -> bigint s.Length
-      ModelCap.readers.kind_of = fun s -> toMOpt (Space.slotKindOf s) }
+      ModelCap.readers.kind_of = fun s -> toMOpt (Space.slotKindOf s)
+      ModelCap.readers.float_fault =
+        fun lo hi ->
+            match Space.wellFormed (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) with
+            | Ok() -> FStar_Pervasives_Native.None
+            | Error SpaceFault.Empty -> FStar_Pervasives_Native.Some ModelCap.SEmpty
+            | Error SpaceFault.NonFinite -> FStar_Pervasives_Native.Some ModelCap.SNonFinite }
 
 /// The go-red: an int reader that reads nothing, so every int-ranged value is out of space to
 /// the model and in space to production.
@@ -7486,7 +7495,23 @@ let private modelWitness: ModelCap.witness<RNode> =
             | Ok r -> ModelCap.Ok r
             | Error m -> ModelCap.Error m
       ModelCap.witness.kind_tag = artw.Tree.KindTag
-      ModelCap.witness.preorder = fun n -> Tree.preorder artw.Tree n }
+      ModelCap.witness.preorder = fun n -> Tree.preorder artw.Tree n
+      ModelCap.witness.children = artw.Tree.Children
+      ModelCap.witness.node_id = fun n -> artw.IdW.ToString(artw.Tree.Id n) }
+
+let private prodFaultRender (f: DeclarationFault) : string =
+    match f with
+    | EmptySpace(a, s) -> sprintf "EmptySpace(%s;%s)" a (modelSpaceRender (spaceToModel s))
+    | NonFiniteBound a -> sprintf "NonFiniteBound(%s)" a
+    | DuplicateHoleAddr a -> sprintf "DuplicateHoleAddr(%s)" a
+    | HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
+
+let private modelFaultRender (f: ModelCap.decl_fault) : string =
+    match f with
+    | ModelCap.EmptySpace(a, s) -> sprintf "EmptySpace(%s;%s)" a (modelSpaceRender s)
+    | ModelCap.NonFiniteBound a -> sprintf "NonFiniteBound(%s)" a
+    | ModelCap.DuplicateHoleAddr a -> sprintf "DuplicateHoleAddr(%s)" a
+    | ModelCap.HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
 
 let private prodApplyErrRender (e: ApplyError) : string =
     match e with
@@ -7497,6 +7522,8 @@ let private prodApplyErrRender (e: ApplyError) : string =
     | SlotKindMismatch(a, e, g) -> sprintf "SlotKindMismatch(%s;%s;%s)" a e g
     | NonTotal a -> sprintf "NonTotal(%s)" a
     | BindFailed(a, m) -> sprintf "BindFailed(%s;%s)" a m
+    | SlotArgOpen(a, hs) -> sprintf "SlotArgOpen(%s;%s)" a (String.concat "," hs)
+    | IllFormedResult f -> sprintf "IllFormedResult(%s)" (prodFaultRender f)
 
 let private modelApplyErrRender (e: ModelCap.apply_error) : string =
     match e with
@@ -7507,6 +7534,8 @@ let private modelApplyErrRender (e: ModelCap.apply_error) : string =
     | ModelCap.SlotKindMismatch(a, e, g) -> sprintf "SlotKindMismatch(%s;%s;%s)" a e g
     | ModelCap.NonTotal a -> sprintf "NonTotal(%s)" a
     | ModelCap.BindFailed(a, m) -> sprintf "BindFailed(%s;%s)" a m
+    | ModelCap.SlotArgOpen(a, hs) -> sprintf "SlotArgOpen(%s;%s)" a (String.concat "," hs)
+    | ModelCap.IllFormedResult f -> sprintf "IllFormedResult(%s)" (modelFaultRender f)
 
 let private applyErrClass (e: ApplyError) : string =
     (prodApplyErrRender e).Substring(0, (prodApplyErrRender e).IndexOf '(')
@@ -7523,6 +7552,8 @@ let private prodInvokeErrRender (e: InvokeError) : string =
     | UninvocableArg a -> sprintf "UninvocableArg(%s)" a
     | BodyFailed m -> sprintf "BodyFailed(%s)" m
     | NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
+    | IllFormedCapability(id, f) -> sprintf "IllFormedCapability(%s;%s)" id (prodFaultRender f)
+    | DuplicateArg a -> sprintf "DuplicateArg(%s)" a
 
 let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     match e with
@@ -7534,6 +7565,8 @@ let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     | ModelCap.UninvocableArg a -> sprintf "UninvocableArg(%s)" a
     | ModelCap.NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
     | ModelCap.BodyFailed m -> sprintf "BodyFailed(%s)" m
+    | ModelCap.IllFormedCapability(id, f) -> sprintf "IllFormedCapability(%s;%s)" id (modelFaultRender f)
+    | ModelCap.DuplicateArg a -> sprintf "DuplicateArg(%s)" a
 
 let private invokeErrClass (e: InvokeError) : string =
     (prodInvokeErrRender e).Substring(0, (prodInvokeErrRender e).IndexOf '(')
@@ -7589,7 +7622,11 @@ let private effPool =
         Determinism = Set.ofList [ ClockFactor; RandomFactor; NetworkFactor ] } ]
 
 let private genSpace (r: ConfRng.T) : ValueSpace * ConfRng.T =
-    let roll, r1 = ConfRng.intBelow 5 r
+    // One draw in ten is one of the Phase 307 declarations below; the rest keep the original
+    // five-way split, so the well-formed shapes stay the bulk of the sample and the registries the
+    // capability differential builds stay populated.
+    let draw, r1 = ConfRng.intBelow 50 r
+    let roll = if draw < 45 then draw % 5 else draw - 40
     let lo, r2 = ConfRng.intBelow 5 r1
     let span, r3 = ConfRng.intBelow 5 r2
 
@@ -7598,7 +7635,25 @@ let private genSpace (r: ConfRng.T) : ValueSpace * ConfRng.T =
     | 1 -> FloatRange(float lo / 2.0, float (lo + span) / 2.0 + 0.5), r3
     | 2 -> StringLen(lo, lo + span), r3
     | 3 -> Enum [ "a"; "b" ], r3
-    | _ -> AnyString, r3
+    | 4 -> AnyString, r3
+    // Phase 307 — the declarations the admission gate refuses or ranks: a negative range, an
+    // empty one, a NaN or infinite bound, bounds past 2^53, an empty enum, a count past the cap.
+    | 5 -> IntRange(-(lo + 1), span), r3
+    | 6 ->
+        (match span with
+         | 0 -> IntRange(lo + 1, lo)
+         | 1 -> StringLen(lo + 1, lo)
+         | 2 -> Enum []
+         | _ -> FloatRange(float (lo + 1), float lo)),
+        r3
+    | 7 ->
+        (match span with
+         | 0 -> FloatRange(nan, 1.0)
+         | 1 -> FloatRange(0.0, infinity)
+         | _ -> FloatRange(-infinity, float lo)),
+        r3
+    | 8 -> FloatRange(-9007199254740993.0 * 4.0, 1e300), r3
+    | _ -> IntRange(lo, Space.maxRepeatCount + span), r3
 
 /// A value for a space — in space more often than not, and out of it (or unparseable) the rest.
 let private genValueFor (s: ValueSpace) (r: ConfRng.T) : string * ConfRng.T =
@@ -7607,9 +7662,13 @@ let private genValueFor (s: ValueSpace) (r: ConfRng.T) : string * ConfRng.T =
 
     match s with
     | IntRange(lo, hi) ->
-        (if roll < 6 then string (lo + k % (hi - lo + 1))
-         elif roll < 8 then string (hi + 1 + k)
-         else "x"),
+        (if roll < 6 && lo <= hi then
+             string (lo + k % (hi - lo + 1))
+         elif roll < 8 then
+             string (hi + 1 + k)
+         // Phase 307 — the spellings a culture-dependent reader got wrong (he-IL, fa-IR, sv-SE …).
+         else
+             List.item (k % 6) [ "x"; "-5"; "\u22125"; " 5"; "+5"; "1e999" ]),
         r2
     | FloatRange(lo, hi) ->
         (if roll < 6 then
@@ -7619,8 +7678,20 @@ let private genValueFor (s: ValueSpace) (r: ConfRng.T) : string * ConfRng.T =
          else
              "nan?"),
         r2
-    | StringLen(lo, hi) -> String.replicate (if roll < 6 then lo + k % (hi - lo + 1) else hi + 1 + k) "s", r2
-    | Enum xs -> (if roll < 7 then List.item (k % List.length xs) xs else "zz"), r2
+    | StringLen(lo, hi) ->
+        String.replicate
+            (if roll < 6 && lo <= hi then
+                 lo + k % (hi - lo + 1)
+             else
+                 max 0 (hi + 1 + k))
+            "s",
+        r2
+    | Enum xs ->
+        (if roll < 7 && not (List.isEmpty xs) then
+             List.item (k % List.length xs) xs
+         else
+             "zz"),
+        r2
     | AnyString -> sprintf "v%d" k, r2
     // Phase 229 — a tree space: a document of the constrained kind, one of another kind, or
     // something that is no tree at all (a scalar, then a kind-less object).
@@ -7662,10 +7733,22 @@ let private genArtifact (r: ConfRng.T) : RNode * ConfRng.T =
         rng <- r4
         let name = sprintf "x%d" (i % 2 + 1)
 
-        if roll < 6 then
+        if roll < 5 then
             children.Add
                 { RNode.hole (sprintf "h%d" i) "field" name hk with
                     Eff = e }
+        // Phase 307 — a hole whose id an earlier child already uses (two holes at one address),
+        // and a slot with a hole beneath it.
+        elif roll = 5 then
+            if i % 2 = 0 then
+                children.Add
+                    { RNode.hole "h1" "field" name hk with
+                        Eff = e }
+            else
+                children.Add
+                    { RNode.hole (sprintf "s%d" i) "region" name (SlotHole None) with
+                        Eff = e
+                        Children = [ RNode.hole (sprintf "u%d" i) "field" "under" (ValueHole AnyString) ] }
         elif roll < 8 then
             children.Add
                 { RNode.leaf (sprintf "l%d" i) "para" "v" with
@@ -7704,9 +7787,15 @@ let private genArgs (t: RNode) (r: ConfRng.T) : Map<string, Arg<RNode>> * ConfRn
                         let v, r' = genValueFor s rng
                         ValueArg v, r'
                 | SlotHole _ ->
-                    if roll = 5 then ValueArg "s", rng
-                    elif roll = 4 then SlotArg(RNode.leaf "in" "field" "z"), rng
-                    else SlotArg(RNode.leaf "in" "para" "z"), rng
+                    if roll = 5 then
+                        ValueArg "s", rng
+                    elif roll = 4 then
+                        SlotArg(RNode.leaf "in" "field" "z"), rng
+                    // Phase 307 — a slot argument that still has an open hole of its own.
+                    elif roll = 3 then
+                        SlotArg(RNode.node "in" "para" [ RNode.hole "inh" "field" "o" (ValueHole AnyString) ]), rng
+                    else
+                        SlotArg(RNode.leaf "in" "para" "z"), rng
                 | ActionHole _ -> ValueArg "act", rng
 
             rng <- r2
@@ -7798,7 +7887,13 @@ let private fnProbe
     let pCurry = Function.curry artw args t
     compare "curry" pCurry (ModelCap.curry rd mw margs t)
     let pComp = Function.compose artw slot inner t
-    compare "compose" pComp (ModelCap.compose mw slot inner t)
+    compare "compose" pComp (ModelCap.compose rd mw slot inner t)
+
+    // Phase 307 — the admission check over the artifact.
+    match Function.validate artw t, ModelCap.validate_decl rd mw t with
+    | Ok(), FStar_Pervasives_Native.None -> ()
+    | Error pf, FStar_Pervasives_Native.Some mf when prodFaultRender pf = modelFaultRender mf -> ()
+    | p, m -> diffs.Add(sprintf "%s: validate differs\n  prod %A\n  model %A" label p m)
 
     // the effect surfaces
     if
@@ -7839,6 +7934,19 @@ let private fnProbe
         [ cls pApply; cls pCurry; cls pComp ]
         |> List.choose id
         |> List.fold (fun s c -> Set.add c s) acc.FClasses }
+
+/// Run `f` under the named culture on this thread, restoring the culture after (Phase 307): the
+/// readers premise is a claim about functions of the STRING alone, and he-IL is a culture whose
+/// minus sign the pre-295 reader got wrong — so the differential runs there, not under whatever
+/// culture the host machine happens to have.
+let private underCulture (name: string) (f: unit -> 'T) : 'T =
+    let saved = System.Globalization.CultureInfo.CurrentCulture
+
+    try
+        System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo name
+        f ()
+    finally
+        System.Globalization.CultureInfo.CurrentCulture <- saved
 
 let private fnDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : FnTally =
     let mutable rng = ConfRng.ofSeed seed
@@ -7933,6 +8041,13 @@ let private genInvocation (sg: Signature) (r: ConfRng.T) : (string * string) lis
     if extra = 0 then
         args.Add("root/zz", "1")
 
+    // Phase 307 — one draw in ten repeats an address the list already binds.
+    let dup, r4 = ConfRng.intBelow 10 rng
+    rng <- r4
+
+    if dup = 0 && args.Count > 0 then
+        args.Add(fst args.[0], "again")
+
     List.ofSeq args, rng
 
 let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: ConfRng.T) : CapTally * ConfRng.T =
@@ -7954,7 +8069,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
         rng <- r4
         let cap = Capability.create id sg placement
 
-        match Registry.register cap preg, ModelCap.register (capToModel cap) mreg with
+        match CapabilityRegistry.register cap preg, ModelCap.register rd (capToModel cap) mreg with
         | Ok p', ModelCap.Ok m' ->
             preg <- p'
             mreg <- m'
@@ -8859,6 +8974,7 @@ let private prodQueryErrRender (e: QueryError) : string =
     | ExecutionFailed(detail, recoverable) -> sprintf "ExecutionFailed(%s;%s)" detail (String.concat "," recoverable)
     | Timeout -> "Timeout"
     | RequiredParamsNull names -> sprintf "RequiredParamsNull(%s)" (String.concat "," names)
+    | DuplicateParam name -> sprintf "DuplicateParam(%s)" name
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -8873,6 +8989,7 @@ let private modelQueryErrRender (e: ModelQuery.query_error) : string =
         sprintf "ExecutionFailed(%s;%s)" detail (String.concat "," recoverable)
     | ModelQuery.Timeout -> "Timeout"
     | ModelQuery.RequiredParamsNull names -> sprintf "RequiredParamsNull(%s)" (String.concat "," names)
+    | ModelQuery.DuplicateParam name -> sprintf "DuplicateParam(%s)" name
 
 let private queryErrClass (e: QueryError) : string =
     match e with
@@ -8885,6 +9002,7 @@ let private queryErrClass (e: QueryError) : string =
     | ExecutionFailed _ -> "ExecutionFailed"
     | Timeout -> "Timeout"
     | RequiredParamsNull _ -> "RequiredParamsNull"
+    | DuplicateParam _ -> "DuplicateParam"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with
@@ -15409,7 +15527,7 @@ let proofOracleTests =
           testCase
               "the function oracle agrees with Function.signature, apply, curry, compose and auditEffect over generated artifacts and argument sets"
           <| fun _ ->
-              let t = fnDifferential readers 1770 200
+              let t = underCulture "he-IL" (fun () -> fnDifferential readers 1770 200)
 
               match t.FDiffs with
               | d :: _ -> failtestf "the function oracle and production DISAGREE\n%s" d
@@ -15550,13 +15668,16 @@ let proofOracleTests =
           testCase
               "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations"
           <| fun _ ->
-              let t = capDifferential readers 1771 150
+              let t = underCulture "he-IL" (fun () -> capDifferential readers 1771 300)
 
               match t.CDiffs with
               | d :: _ -> failtestf "the capability oracle and production DISAGREE\n%s" d
               | [] ->
                   // Measured at 150 registries: registered 172, dupRefused 51, dispatched 33,
                   // noSuch 270, validated 45, refused 71, bodyFailed 12, refusedWithoutBody 341.
+                  // Phase 307 doubled the draw to 300: the gate now refuses a repeat over anything
+                  // but a capped integer range, and the draw reaches ill-formed declarations and
+                  // repeated arguments, so fewer registrations reach a body per registry built.
                   Expect.isGreaterThan
                       t.Registered
                       100
@@ -15604,7 +15725,10 @@ let proofOracleTests =
                           (Set.contains cls t.CClasses)
                           (sprintf "the sample reached a %s refusal (reached: %A)" cls t.CClasses)
 
-                  Expect.equal (capDifferential readers 1771 150) t "same seed => identical tally"
+                  Expect.equal
+                      (underCulture "he-IL" (fun () -> capDifferential readers 1771 300))
+                      t
+                      "same seed => identical tally"
 
           testCase
               "a capability oracle handed a BLIND int reader DISAGREES with Capability.validateArgs and Function.apply — the measurement can fail"
@@ -15761,7 +15885,7 @@ let proofOracleTests =
 
               // and the model says the same through the same theorems' clauses
               let mreg =
-                  match ModelCap.register (capToModel cap) ModelCap.empty with
+                  match ModelCap.register readers (capToModel cap) ModelCap.empty with
                   | ModelCap.Ok r -> r
                   | ModelCap.Error _ -> failtest "the model refused the registration"
 
@@ -16049,10 +16173,13 @@ let proofOracleTests =
                   (Ok())
                   "an OPTIONAL param bound to Null is still accepted — `Required` is what moved"
 
+              // Phase 307 — a name bound TWICE is refused before `Required` is asked: one name takes
+              // one cell (`DuplicateParam`, `validate_params_distinct`). This list was accepted
+              // here until then, while a resolver reading it as a map saw `Null`.
               Expect.equal
                   (Query.validateParams q [ "a", Cell.Null; "a", Str "x" ])
-                  (Ok())
-                  "a required name with SOME binding to a value is bound (`has_value`), whatever else binds it"
+                  (Error(DuplicateParam "a"))
+                  "a required name bound twice is refused as a repeat, whatever either binding says"
 
               let ran = ref false
 

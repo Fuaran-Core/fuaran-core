@@ -167,8 +167,8 @@ module CapabilityPipeline =
 
     /// Type-check the pipeline against a capability lookup (Phase 35; the lookup since Phase 295):
     /// node ids are unique; every `Invoke`'s capability resolves (default-deny); every arg is one the
-    /// capability takes, refused as `Capability.validateArgs` refuses it and wrapped
-    /// `PipelineArgRefused`; a `Literal` is in its hole's space; a `FromNode` edge names a declared
+    /// capability takes, once (`DuplicateArg`, Phase 307), refused as `Capability.validateArgs`
+    /// refuses it and wrapped `PipelineArgRefused`; a `Literal` is in its hole's space; a `FromNode` edge names a declared
     /// node that comes EARLIER in declaration order — a self-edge or an edge that closes a cycle is
     /// `PipelineCycle` naming the cycle, any other later node `PipelineForwardEdge` — and its
     /// producer's output space feeds the arg's space (`Space.subsumes`; an ill-typed edge is a named
@@ -253,7 +253,15 @@ module CapabilityPipeline =
                                     | None -> Some(PipelineArgRefused(nid, UninvocableArg addr))
                                     | Some argSpace -> edgeFault addr up argSpace
 
-                        match args |> List.tryPick argFault with
+                        // Phase 307: an address bound twice is `DuplicateArg`, as `validateArgs`
+                        // refuses it — checked first, at the second occurrence.
+                        let duplicate = Capability.repeatedAddrs args |> List.tryHead
+
+                        match
+                            duplicate
+                            |> Option.map (fun a -> PipelineArgRefused(nid, DuplicateArg a))
+                            |> Option.orElse (args |> List.tryPick argFault)
+                        with
                         | Some e -> Error e
                         | None ->
                             let bound = args |> List.map fst |> Set.ofList
@@ -282,9 +290,17 @@ module CapabilityPipeline =
     /// nodes share a pre-image only when they share every component, whatever `#` or `=` an id or
     /// a literal contains. (It joined `addr=L:value` on the empty string before, the collision
     /// `Query.invocationKey`'s `key_collision` finding named.)
+    ///
+    /// **The node KIND leads the hashed pre-image (Phase 307)**: `source` for a `Source`, `invoke`
+    /// for an `Invoke`. Without it `Source("source", "source", _)` and an argument-less
+    /// `Invoke("source", "source", _, [])` shared the pre-image `[source; source]` and the readable
+    /// prefix `source#source#`, so one key named two different computations. The pre-images now
+    /// differ in their first field whatever the ids say. Every key moves (a breaking change to the
+    /// journalled keys, on the `0.35.0` draft); the other hosts' twins gain the field at their next
+    /// raise.
     let nodeInvocationKey (n: PipelineNode) : string =
         match n with
-        | Source(id, dref, _) -> "source#" + id + "#" + Hash.fnv1a (Hash.canonicalFields [ id; dref ])
+        | Source(id, dref, _) -> "source#" + id + "#" + Hash.fnv1a (Hash.canonicalFields [ "source"; id; dref ])
         | Invoke(id, capId, _, args) ->
             let bindings =
                 args
@@ -299,7 +315,7 @@ module CapabilityPipeline =
             + "#"
             + id
             + "#"
-            + Hash.fnv1a (Hash.canonicalFields [ capId; id ] + bindings)
+            + Hash.fnv1a (Hash.canonicalFields [ "invoke"; capId; id ] + bindings)
 
     // ---- wire codec ----
 
@@ -317,6 +333,19 @@ module CapabilityPipeline =
                     { e with
                         Message = "unknown value-space: " + other }
                 | _ -> e)
+            // Phase 307: an output space the admission check refuses is refused on read.
+            |> Result.bind (fun sp ->
+                match Space.wellFormed sp with
+                | Ok() -> Ok sp
+                | Error fault ->
+                    Error(
+                        DecodeError.make
+                            DecodeCode.OutOfRange
+                            "a well-formed value space"
+                            (match fault with
+                             | SpaceFault.Empty -> "empty value-space: " + Space.describe sp
+                             | SpaceFault.NonFinite -> "value-space bound is not a finite number")
+                    ))
 
     /// Dispatch on `$type`; a miss keeps this codec's sentence `<what><tag>`.
     let private dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
@@ -381,9 +410,15 @@ module CapabilityPipeline =
 
         dispatch "unknown pipeline node: " [ "source", source; "invoke", invoke ]
 
-    /// Encode a pipeline to its canonical wire string.
+    /// Encode a pipeline to its canonical wire string. Total; a pipeline whose output spaces carry
+    /// a non-finite bound writes bytes `decode` refuses — `tryEncode` refuses it instead.
     let encode (p: CapabilityPipeline) : string =
         Canon.render (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
+
+    /// The GUARDED encode (Phase 307): `Canon.tryRender`, so a non-finite bound or an ill-formed
+    /// string is refused, naming it. `Ok` is exactly `encode`'s string.
+    let tryEncode (p: CapabilityPipeline) : Result<string, string> =
+        Canon.tryRender (JObj [ "nodes", JArr(p.Nodes |> List.map nodeToJ) ])
 
     /// Decode a pipeline from a wire string, answering a typed refusal (Phase 310): its code, the
     /// path to the value at fault, and [[decode]]'s sentence. A parse failure is refused at the root.

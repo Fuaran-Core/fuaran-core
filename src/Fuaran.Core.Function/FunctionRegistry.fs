@@ -86,16 +86,17 @@ module FunctionRegistry =
           ResultType = resultType }
 
     /// Register an entry — additive, no silent overwrite (a duplicate id is a named
-    /// `DuplicateCapability`, reusing the Capability registry's error vocabulary), and only a total
-    /// one (`NonTotalCapability`, as `CapabilityRegistry.register` refuses it — Phase 295). Maintains
-    /// both the id map and the result-type index.
+    /// `DuplicateCapability`, reusing the Capability registry's error vocabulary), and only a total,
+    /// well-formed one (`NonTotalCapability` / `IllFormedCapability`, through the one admission gate
+    /// `CapabilityRegistry.register` runs — Phases 295 and 307). Maintains both the id map and the
+    /// result-type index.
     let register (e: FunctionEntry) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
         let id = e.Capability.Id
 
         if Map.containsKey id r.Entries then
             Error(DuplicateCapability id)
         else
-            match Capability.totalityFault e.Capability with
+            match Capability.admissionFault e.Capability with
             | Some fault -> Error fault
             | None ->
                 let ids =

@@ -139,6 +139,12 @@ type QueryError =
     /// The required params the args bind only to `Null` — present, but bound to no value (Phase 226).
     /// Distinct from `RequiredParamsUnbound` (left out), so a caller can tell the two apart.
     | RequiredParamsNull of names: string list
+    /// An invocation binds this parameter twice (Phase 307) — the query seam's `DuplicateArg`.
+    /// Refused at the second binding: one name takes one cell, and with two the `Map.ofList`
+    /// reading and the "some binding has a value" reading of `Required` answered differently (a
+    /// required `a` bound `[a = 1; a = Null]` was accepted while a resolver reading the map saw
+    /// `Null`), and the capture key depended on the order of the list.
+    | DuplicateParam of name: string
 
 /// A resolver's typed failure (Phase 295) — what `Query.invokeWithArgs`'s resolver answers when the
 /// fetch cannot complete, so the refusals the resolver alone can know of reach the caller as the
@@ -218,6 +224,10 @@ module QueryError =
             + "."
         | Timeout -> "Refused: the query timed out."
         | RequiredParamsNull names -> "Refused: required parameters bound to no value: " + quoteAll names + "."
+        | DuplicateParam name ->
+            "Refused: parameter '"
+            + name
+            + "' is given more than once. Give each parameter once."
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Query.validateParamsAll`'s answer.
@@ -289,7 +299,9 @@ module Query =
         q.Id + "#" + Hash.fnv1a canonical
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
-    /// fetch: every arg must address a declared param and its cell type must fill the param's type —
+    /// fetch: every arg must address a declared param, once (`DuplicateParam`, Phase 307 — so the
+    /// list `invocationKey` keys has distinct names, the hypothesis of its proved determinism), and
+    /// its cell type must fill the param's type —
     /// `ColumnType.widens`, Phase 295 — or be `Null`;
     /// every required param must be bound (`RequiredParamsUnbound` otherwise); and every required
     /// param must be bound to a VALUE — one whose bindings are all `Null` is refused as
@@ -312,7 +324,10 @@ module Query =
                     | Some t when fills p.Type t -> checkArgs rest
                     | Some t -> Error(ParamTypeMismatch(name, p.Type, t))
 
-        checkArgs args
+        // Phase 307: the first repeated name, at its second occurrence, before any cell is read.
+        match Capability.repeatedAddrs args with
+        | dup :: _ -> Error(DuplicateParam dup)
+        | [] -> checkArgs args
         |> Result.bind (fun () ->
             let unbound =
                 q.Params
@@ -388,7 +403,11 @@ module Query =
                 | Some t when fills p.Type t -> None
                 | Some t -> Some(ParamTypeMismatch(name, p.Type, t))
 
-        let faults = args |> List.choose argFault
+        // Every repeated name first (Phase 307), as `validateParams` checks it first; then one
+        // refusal per argument, in order.
+        let faults =
+            (Capability.repeatedAddrs args |> List.map DuplicateParam)
+            @ (args |> List.choose argFault)
 
         let unbound =
             q.Params
@@ -776,6 +795,7 @@ module QueryCodec =
             Canon.typed "executionFailed" [ "detail", JStr detail; "recoverable", strs recoverable ]
         | Timeout -> Canon.typed "timeout" []
         | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
+        | DuplicateParam name -> Canon.typed "duplicateParam" [ "name", JStr name ]
 
     /// `queryErrorJson` as canonical JSON text — the wire form; `QueryError.describe` is the
     /// sentence a model reads.
@@ -803,7 +823,8 @@ module QueryCodec =
               "sourceNotResolved", str "ref" |> Decoder.map SourceNotResolved
               "executionFailed", both (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
               "timeout", Decoder.succeed Timeout
-              "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull ]
+              "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull
+              "duplicateParam", str "name" |> Decoder.map DuplicateParam ]
 
         // The dispatch's own miss keeps this codec's sentence.
         fun el ->
@@ -880,12 +901,17 @@ module QueryCodec =
         | JObj fields ->
             let declared = q.Params |> List.map (fun p -> p.Name)
 
+            // A JSON object may repeat a member; a repeated parameter is `DuplicateParam` (Phase
+            // 307), at its second occurrence, exactly as `validateParams` refuses it.
             let decoded =
                 fields
-                |> List.map (fun (name, v) ->
-                    match q.Params |> List.tryFind (fun p -> p.Name = name) with
-                    | None -> Error(UnknownParam(name, declared))
-                    | Some p -> argCell name p.Type v)
+                |> List.mapi (fun i (name, v) ->
+                    if fields |> List.take i |> List.exists (fun (n, _) -> n = name) then
+                        Error(DuplicateParam name)
+                    else
+                        match q.Params |> List.tryFind (fun p -> p.Name = name) with
+                        | None -> Error(UnknownParam(name, declared))
+                        | Some p -> argCell name p.Type v)
 
             match
                 decoded

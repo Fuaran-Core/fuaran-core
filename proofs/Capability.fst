@@ -354,18 +354,29 @@ type value_space =
   | AnyString  : value_space
   | SlotTree   : option string -> value_space
 
-(* The readers premise: the four host functions `Space.validate` reaches for.
-   `int_of`   — F#: `System.Int32.TryParse`, as an option.
-   `float_in` — F#: `System.Double.TryParse` (invariant, `NumberStyles.Float`) of the value, then
-                `lo <= v && v <= hi` against the two carriers' parsed floats.
-   `str_len`  — F#: `String.Length`.
-   `kind_of`  — F#: `Space.slotKindOf` (Phase 229): the `"kind"` tag of a wire document whose top
-                level is a kind-tagged object, `None` for anything else. *)
+(* F#: `SpaceFault` (Phase 307) — why a space is not well-formed. *)
+type space_fault =
+  | SEmpty
+  | SNonFinite
+
+(* The readers premise: the five host functions `Space.validate` and `Space.wellFormed` reach for.
+   `int_of`      — F#: `Space.readInt` — since Phase 295 an optional `-` and decimal digits read
+                   under the INVARIANT culture (`Json.readInt32`), no `+`, no white space, no
+                   culture's own minus sign. A function of the string ALONE: the same answer under
+                   every culture, which the bridge holds by running under he-IL (Phase 307).
+   `float_in`    — F#: `Space.readFloat` (the invariant JSON number grammar, finite) of the value,
+                   then `lo <= v && v <= hi` against the two carriers' parsed floats.
+   `str_len`     — F#: `String.Length`.
+   `kind_of`     — F#: `Space.slotKindOf` (Phase 229): the `"kind"` tag of a wire document whose top
+                   level is a kind-tagged object, `None` for anything else.
+   `float_fault` — F#: `Space.wellFormed` over `FloatRange(lo, hi)` (Phase 307): `SNonFinite` when
+                   either carrier is NaN or infinite, else `SEmpty` when `lo > hi`, else nothing. *)
 noeq type readers = {
-  int_of:   string -> option int;
-  float_in: string -> string -> string -> bool;
-  str_len:  string -> nat;
-  kind_of:  string -> option string
+  int_of:      string -> option int;
+  float_in:    string -> string -> string -> bool;
+  str_len:     string -> nat;
+  kind_of:     string -> option string;
+  float_fault: string -> string -> option space_fault
 }
 
 (* F#: `Space.validate`. *)
@@ -386,12 +397,26 @@ let validate (rd:readers) (space:value_space) (s:string) : Tot bool =
                   | None -> true
                   | Some kc -> k = kc))
 
-(* F#: `Space.isBounded` — the totality criterion for repeats. *)
-let is_bounded (space:value_space) : Tot bool =
+(* F#: `Space.maxRepeatCount` (Phase 307) — the declared cap a count space sits under. *)
+let max_repeat_count : int = 1000000
+
+(* F#: `Space.isCount` (Phase 307) — the totality criterion for repeats: a capped, non-empty,
+   non-negative `IntRange`. It replaced `isBounded` ("neither `AnyString` nor `SlotTree`"), under
+   which a repeat over `FloatRange(0, infinity)` was total. *)
+let is_count (space:value_space) : Tot bool =
   match space with
-  | AnyString -> false
-  | SlotTree _ -> false
-  | _ -> true
+  | IntRange lo hi -> 0 <= lo && lo <= hi && hi <= max_repeat_count
+  | _ -> false
+
+(* F#: `Space.wellFormed` (Phase 307). The float case is the readers premise's: the model has no
+   float, and its carriers are opaque. *)
+let space_wf (rd:readers) (space:value_space) : Tot (option space_fault) =
+  match space with
+  | IntRange lo hi -> if lo > hi then Some SEmpty else None
+  | FloatRange lo hi -> rd.float_fault lo hi
+  | StringLen lo hi -> if lo > hi || hi < 0 then Some SEmpty else None
+  | Enum [] -> Some SEmpty
+  | _ -> None
 
 (* ======================================================================================
    3. Holes, the signature and the two error vocabularies.
@@ -426,6 +451,13 @@ type arg (node:Type) =
   | ValueArg : string -> arg node
   | SlotArg  : node -> arg node
 
+(* F#: `DeclarationFault` (Phase 307) — the admission gate's vocabulary. *)
+type decl_fault =
+  | EmptySpace        : addr:string -> space:value_space -> decl_fault
+  | NonFiniteBound    : addr:string -> decl_fault
+  | DuplicateHoleAddr : addr:string -> decl_fault
+  | HoleUnderSlot     : node:string -> decl_fault
+
 (* F#: `ApplyError`. *)
 type apply_error =
   | UnknownHoleAddr     : addr:string -> declared:list string -> apply_error
@@ -435,6 +467,8 @@ type apply_error =
   | SlotKindMismatch    : addr:string -> expected:string -> got:string -> apply_error
   | NonTotal            : addr:string -> apply_error
   | BindFailed          : addr:string -> reason:string -> apply_error
+  | SlotArgOpen         : addr:string -> holes:list string -> apply_error
+  | IllFormedResult     : fault:decl_fault -> apply_error
 
 (* F#: `InvokeError`. *)
 type invoke_error =
@@ -446,6 +480,8 @@ type invoke_error =
   | UninvocableArg     : addr:string -> invoke_error
   | BodyFailed         : reason:string -> invoke_error
   | NonTotalCapability : id:string -> addrs:list string -> invoke_error
+  | IllFormedCapability: id:string -> fault:decl_fault -> invoke_error
+  | DuplicateArg       : addr:string -> invoke_error
 
 (* F#: `holes |> List.tryFind (fun h -> h.Addr = addr)` on declared holes. *)
 let rec find_hole (k:string) (holes:list hole_decl) : Tot (option hole_decl) =
@@ -487,14 +523,17 @@ let rec excluding (bound:list string) (holes:list sig_entry) : Tot (list sig_ent
    ====================================================================================== *)
 
 (* F#: the fields of `ArtifactWitness` the algebra reads (`Holes`, `Effect`, `Bind`), the
-   `NodeWitness.KindTag` under `Tree`, and `Tree.preorder w.Tree` — the one derived walk
-   `observedEffect` makes. `IdW` is never read by any function modelled here. *)
+   `NodeWitness.KindTag` and `Children` under `Tree`, `Tree.preorder w.Tree` — the one derived walk
+   `observedEffect` and `validate` make — and, since Phase 307, `IdW.ToString (Tree.Id n)`, the
+   name `validate` gives the node a `HoleUnderSlot` is at. *)
 noeq type witness (node:Type) = {
   holes:     node -> list hole_decl;
   eff:       node -> effect_class;
   bind_hole: string -> arg node -> node -> outcome node string;
   kind_tag:  node -> string;
-  preorder:  node -> list node
+  preorder:  node -> list node;
+  children:  node -> list node;
+  node_id:   node -> string
 }
 
 (* F#: `Function.signature`'s local `entry`. *)
@@ -507,9 +546,10 @@ let entry_of (h:hole_decl) : Tot sig_entry =
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot";
       s_space = Some (SlotTree c); s_slot = c; s_action = None; s_required = true }
   | RepeatHole s ->
-    (* Phase 295: a BOUNDED repeat is required, as strict `bind_args` demands it. *)
+    (* Phase 295: a TOTAL repeat is required, as strict `bind_args` demands it (Phase 307: a
+       repeat over a count space). *)
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat";
-      s_space = Some s; s_slot = None; s_action = None; s_required = is_bounded s }
+      s_space = Some s; s_slot = None; s_action = None; s_required = is_count s }
   | ActionHole e ->
     { s_addr = h.h_addr; s_name = h.h_name; s_kind = "action";
       s_space = None; s_slot = None; s_action = Some e; s_required = false }
@@ -529,17 +569,74 @@ let entry_total (e:sig_entry) : Tot bool =
   match e.s_kind, e.s_space, e.s_action with
   | "value", Some _, _ -> true
   | "slot", _, _ -> true
-  | "repeat", Some s, _ -> is_bounded s
+  | "repeat", Some s, _ -> is_count s
   | "action", _, Some _ -> true
   | _ -> false
 
 (* F#: `Function.isTotal`. *)
 let is_total (sg:signature) : Tot bool = for_all entry_total sg.sg_holes
 
+(* F#: `Signature.validate`'s per-entry space check — the fault `Space.wellFormed` gives the entry's
+   space, by address. *)
+let entry_space_fault (rd:readers) (e:sig_entry) : Tot (option decl_fault) =
+  match e.s_space with
+  | None -> None
+  | Some sp ->
+    (match space_wf rd sp with
+     | Some SEmpty -> Some (EmptySpace e.s_addr sp)
+     | Some SNonFinite -> Some (NonFiniteBound e.s_addr)
+     | None -> None)
+
+(* F#: `Signature.validate` (Phase 307) — the first fault in declaration order: an address an
+   earlier entry holds, or a space `Space.wellFormed` refuses. *)
+let rec validate_entries (rd:readers) (seen:list string) (holes:list sig_entry)
+  : Tot (option decl_fault) (decreases holes) =
+  match holes with
+  | [] -> None
+  | e :: rest ->
+    if mem e.s_addr seen then Some (DuplicateHoleAddr e.s_addr)
+    else
+      (match entry_space_fault rd e with
+       | Some f -> Some f
+       | None -> validate_entries rd (e.s_addr :: seen) rest)
+
+let validate_signature (rd:readers) (sg:signature) : Tot (option decl_fault) =
+  validate_entries rd [] sg.sg_holes
+
+(* F#: `holeUnderSlot`'s count — the slot holes among a hole list. *)
+let rec slot_count (hs:list hole_decl) : Tot nat =
+  match hs with
+  | [] -> 0
+  | h :: t -> (if SlotHole? h.h_kind then 1 else 0) + slot_count t
+
+let rec sum_slots (#node:Type) (w:witness node) (cs:list node) : Tot nat =
+  match cs with
+  | [] -> 0
+  | c :: t -> slot_count (w.holes c) + sum_slots w t
+
+let rec any_holes (#node:Type) (w:witness node) (cs:list node) : Tot bool =
+  match cs with
+  | [] -> false
+  | c :: t -> Cons? (w.holes c) || any_holes w t
+
+(* F#: `holeUnderSlot`'s per-node test — the node declares a slot of its own (its subtree holds
+   more slots than its children's subtrees do) and its children's subtrees hold a hole. *)
+let slot_over_holes (#node:Type) (w:witness node) (n:node) : Tot (option decl_fault) =
+  let cs = w.children n in
+  if any_holes w cs && slot_count (w.holes n) > sum_slots w cs then Some (HoleUnderSlot (w.node_id n))
+  else None
+
+(* F#: `Function.validate` (Phase 307) — `Signature.validate` over the derived signature, then the
+   first node in preorder that declares a slot over holes. *)
+let validate_decl (#node:Type) (rd:readers) (w:witness node) (n:node) : Tot (option decl_fault) =
+  match validate_signature rd (signature_of w "" n) with
+  | Some f -> Some f
+  | None -> try_pick (slot_over_holes w) (w.preorder n)
+
 (* F#: `guardTotal`'s per-hole pick. *)
 let non_total (h:hole_decl) : Tot (option apply_error) =
   match h.h_kind with
-  | RepeatHole s -> if not (is_bounded s) then Some (NonTotal h.h_addr) else None
+  | RepeatHole s -> if not (is_count s) then Some (NonTotal h.h_addr) else None
   | _ -> None
 
 (* F#: `guardTotal`. *)
@@ -552,7 +649,7 @@ let validate_arg (#node:Type) (rd:readers) (w:witness node) (addr:string) (k:hol
   | ValueHole space, ValueArg s ->
     if validate rd space s then Ok () else Error (ValueOutOfSpace addr space s)
   | RepeatHole space, ValueArg s ->
-    if not (is_bounded space) then Error (NonTotal addr)
+    if not (is_count space) then Error (NonTotal addr)
     else if validate rd space s then Ok ()
     else Error (ValueOutOfSpace addr space s)
   | SlotHole c, SlotArg inner ->
@@ -596,6 +693,16 @@ let rec bind_walk (#node:Type) (rd:readers) (w:witness node) (strict:bool) (a:ar
         | Ok cur' -> bind_walk rd w strict a cur' unbound rest
         | Error m -> Error (BindFailed h.h_addr m)
 
+(* F#: `bindArgs`'s strict pre-pass (Phase 307) — the first slot argument, in key order, whose tree
+   still has open data holes. *)
+let open_slot (#node:Type) (w:witness node) (b:(string & arg node)) : Tot (option apply_error) =
+  match b with
+  | (k, SlotArg sub) ->
+    (match data_holes w sub with
+     | [] -> None
+     | hs -> Some (SlotArgOpen k (map addr_of hs)))
+  | (_, ValueArg _) -> None
+
 (* F#: `bindArgs`. *)
 let bind_args (#node:Type) (rd:readers) (w:witness node) (strict:bool) (a:args node) (n:node)
   : Tot (outcome node apply_error) =
@@ -606,7 +713,10 @@ let bind_args (#node:Type) (rd:readers) (w:witness node) (strict:bool) (a:args n
     let declared = map addr_of holes in
     match first_unknown declared (keys a) with
     | Some unknown -> Error (UnknownHoleAddr unknown declared)
-    | None -> bind_walk rd w strict a n [] holes
+    | None ->
+      match (if strict then try_pick (open_slot w) a else None) with
+      | Some e -> Error e
+      | None -> bind_walk rd w strict a n [] holes
 
 (* F#: `Function.apply`. *)
 let apply (#node:Type) (rd:readers) (w:witness node) (a:args node) (n:node) : Tot (outcome node apply_error) =
@@ -620,15 +730,18 @@ let curry (#node:Type) (rd:readers) (w:witness node) (a:args node) (n:node) : To
 let composed_effect (#node:Type) (w:witness node) (inner outer:node) : Tot effect_class =
   join (w.eff outer) (w.eff inner)
 
-(* F#: `compose`'s tail — the one `Bind` it makes, at the slot's address. *)
-let wire (#node:Type) (w:witness node) (slot_addr:string) (inner outer:node) : Tot (outcome node apply_error) =
+(* F#: `compose`'s tail — the one `Bind` it makes, at the slot's address, and since Phase 307 the
+   check over the tree it built (`IllFormedResult`). *)
+let wire (#node:Type) (rd:readers) (w:witness node) (slot_addr:string) (inner outer:node) : Tot (outcome node apply_error) =
   match w.bind_hole slot_addr (SlotArg inner) outer with
-  | Ok n -> Ok n
+  | Ok n -> (match validate_decl rd w n with
+             | None -> Ok n
+             | Some f -> Error (IllFormedResult f))
   | Error m -> Error (BindFailed slot_addr m)
 
 (* F#: `Function.compose` — since Phase 295 it checks totality first, on both parts, as
    `composeAcross` does: the outer's holes, then the inner's. *)
-let compose (#node:Type) (w:witness node) (slot_addr:string) (inner outer:node) : Tot (outcome node apply_error) =
+let compose (#node:Type) (rd:readers) (w:witness node) (slot_addr:string) (inner outer:node) : Tot (outcome node apply_error) =
   let holes = w.holes outer in
   match guard_total holes with
   | Some e -> Error e
@@ -642,8 +755,8 @@ let compose (#node:Type) (w:witness node) (slot_addr:string) (inner outer:node) 
     match h.h_kind with
     | SlotHole c ->
       (match c with
-       | Some kt -> if w.kind_tag inner <> kt then Error (SlotKindMismatch slot_addr kt (w.kind_tag inner)) else wire w slot_addr inner outer
-       | None -> wire w slot_addr inner outer)
+       | Some kt -> if w.kind_tag inner <> kt then Error (SlotKindMismatch slot_addr kt (w.kind_tag inner)) else wire rd w slot_addr inner outer
+       | None -> wire rd w slot_addr inner outer)
     | _ -> Error (NotASlot slot_addr)
 
 (* F#: `Function.observedEffect` — the join over the preorder walk, `pureDeterministic` the identity. *)
@@ -712,6 +825,19 @@ let capture_covers_exercised (c:capability) (host:host_effect) (exercised:determ
 (* F#: `(string * string) list` — a typed invocation's args, addr → value. *)
 type invocation = list (string & string)
 
+(* F#: `Capability.argSpace` (Phase 307) — `Function.slotSpaceOf`: an entry's own space, or for a
+   slot entry built by hand before Phase 229 (spaceless) the tree space of its constraint. *)
+let arg_space (e:sig_entry) : Tot (option value_space) =
+  match e.s_kind, e.s_space with
+  | "slot", None -> Some (SlotTree e.s_slot)
+  | _, sp -> sp
+
+(* F#: `Capability.repeatedAddrs` — every key the list binds again, at each repeat, in order. *)
+let rec repeated (seen:list string) (ks:list string) : Tot (list string) (decreases ks) =
+  match ks with
+  | [] -> []
+  | k :: t -> if mem k seen then k :: repeated seen t else repeated (k :: seen) t
+
 (* F#: `validateArgs`'s local `checkArgs` — step 1, in the caller's arg order. *)
 let rec check_args (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation)
   : Tot (outcome unit invoke_error) (decreases a) =
@@ -721,7 +847,7 @@ let rec check_args (rd:readers) (holes:list sig_entry) (declared:list string) (a
     match find_entry addr holes with
     | None -> Error (UnknownArg addr declared)
     | Some h ->
-      match h.s_space with
+      match arg_space h with
       | None -> Error (UninvocableArg addr)
       | Some space ->
         if SlotTree? space && None? (rd.kind_of value) then Error (UninvocableArg addr)
@@ -740,6 +866,9 @@ let rec unbound_required (holes:list sig_entry) (a:invocation) : Tot (list strin
 let validate_args (rd:readers) (c:capability) (a:invocation) : Tot (outcome unit invoke_error) =
   let holes = c.c_signature.sg_holes in
   let declared = entry_addrs holes in
+  match repeated [] (keys a) with
+  | d :: _ -> Error (DuplicateArg d)
+  | [] ->
   match check_args rd holes declared a with
   | Error e -> Error e
   | Ok () ->
@@ -793,13 +922,17 @@ let rec non_total_addrs (holes:list sig_entry) : Tot (list string) =
   | e :: t -> if entry_total e then non_total_addrs t else e.s_addr :: non_total_addrs t
 
 (* F#: `CapabilityRegistry.register` — additive, no silent overwrite, and (Phase 295) only a total
-   capability: a non-total one is refused `NonTotalCapability`, naming its non-total entries. *)
-let register (c:capability) (r:registry) : Tot (outcome registry invoke_error) =
+   capability: a non-total one is refused `NonTotalCapability`, naming its non-total entries; and
+   (Phase 307) only a well-formed one: `IllFormedCapability` with `Signature.validate`'s fault. *)
+let register (rd:readers) (c:capability) (r:registry) : Tot (outcome registry invoke_error) =
   match find_cap c.c_id r.capabilities with
   | Some _ -> Error (DuplicateCapability c.c_id)
   | None ->
-    if is_total c.c_signature then Ok { capabilities = c :: r.capabilities }
-    else Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes))
+    if not (is_total c.c_signature) then Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes))
+    else
+      match validate_signature rd c.c_signature with
+      | Some f -> Error (IllFormedCapability c.c_id f)
+      | None -> Ok { capabilities = c :: r.capabilities }
 
 (* F#: `Registry.tryFind`. *)
 let try_find_cap (id:string) (r:registry) : Tot (option capability) = find_cap id r.capabilities
@@ -848,14 +981,14 @@ let rec check_args_shape (rd:readers) (holes:list sig_entry) (declared:list stri
       (match find_entry addr holes with
        | None -> ()
        | Some h ->
-         (match h.s_space with
+         (match arg_space h with
           | None -> ()
           | Some space -> if validate rd space value then check_args_shape rd holes declared rest else ()))
 
 let validate_args_shape (rd:readers) (c:capability) (a:invocation)
   : Lemma (ensures (match validate_args rd c a with
                     | Ok () -> True
-                    | Error e -> UnknownArg? e \/ UninvocableArg? e \/ ArgOutOfSpace? e \/ RequiredArgsUnbound? e))
+                    | Error e -> DuplicateArg? e \/ UnknownArg? e \/ UninvocableArg? e \/ ArgOutOfSpace? e \/ RequiredArgsUnbound? e))
   = check_args_shape rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
 
 let invoke_never_registry_refusal (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> deferred v)
@@ -943,7 +1076,7 @@ let rec check_args_ok_declared (rd:readers) (holes:list sig_entry) (declared:lis
       (match find_entry addr holes with
        | None -> ()
        | Some h ->
-         (match h.s_space with
+         (match arg_space h with
           | None -> ()
           | Some space -> if validate rd space value then check_args_ok_declared rd holes declared rest else ()))
 
@@ -962,7 +1095,7 @@ let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list s
                     | Error (UnknownArg addr d) -> None? (find_entry addr holes) /\ d == declared
                     | Error (UninvocableArg addr) ->
                       (match find_entry addr holes with
-                       | Some h -> (match h.s_space with
+                       | Some h -> (match arg_space h with
                                     | None -> True
                                     | Some sp -> SlotTree? sp)
                        | None -> False)
@@ -974,7 +1107,7 @@ let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list s
       (match find_entry addr holes with
        | None -> ()
        | Some h ->
-         (match h.s_space with
+         (match arg_space h with
           | None -> ()
           | Some space -> if validate rd space value then refusal_is_truthful rd holes declared rest else ()))
 
@@ -984,7 +1117,7 @@ let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list s
    `Function.signature` made of every slot hole; since then it makes none (`slot_entry_shape`), so
    this now characterises only a hand-built entry. *)
 let rec check_args_hits_uninvocable (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation) (h:sig_entry)
-  : Lemma (requires has_key h.s_addr a /\ find_entry h.s_addr holes == Some h /\ None? h.s_space)
+  : Lemma (requires has_key h.s_addr a /\ find_entry h.s_addr holes == Some h /\ None? (arg_space h))
           (ensures Error? (check_args rd holes declared a))
           (decreases a)
   = match a with
@@ -995,7 +1128,7 @@ let rec check_args_hits_uninvocable (rd:readers) (holes:list sig_entry) (declare
         (match find_entry addr holes with
          | None -> ()
          | Some e ->
-           (match e.s_space with
+           (match arg_space e with
             | None -> ()
             | Some space -> if validate rd space value then check_args_hits_uninvocable rd holes declared rest h else ()))
 
@@ -1015,7 +1148,7 @@ let rec unbound_required_memp (holes:list sig_entry) (a:invocation) (h:sig_entry
     | x :: t -> if x.s_required && not (has_key x.s_addr a) then () else unbound_required_memp t a h
 
 let spaceless_required_uninvocable (rd:readers) (c:capability) (a:invocation) (h:sig_entry)
-  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\ h.s_required /\ None? h.s_space)
+  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\ h.s_required /\ None? (arg_space h))
           (ensures Error? (validate_args rd c a))
   = let holes = c.c_signature.sg_holes in
     if has_key h.s_addr a then check_args_hits_uninvocable rd holes (entry_addrs holes) a h
@@ -1045,7 +1178,7 @@ let rec args_in_space (rd:readers) (holes:list sig_entry) (a:invocation) : Tot b
   | [] -> true
   | (addr, value) :: rest ->
     (match find_entry addr holes with
-     | Some h -> (match h.s_space with
+     | Some h -> (match arg_space h with
                   | Some sp -> validate rd sp value
                   | None -> false)
      | None -> false) && args_in_space rd holes rest
@@ -1061,7 +1194,8 @@ let rec check_args_in_space_ok (rd:readers) (holes:list sig_entry) (declared:lis
 (* COMPLETENESS — the converse of `validate_args_sound`: an argument set every member of which
    lies in its entry's space, binding every required entry, is accepted. *)
 let validate_args_complete (rd:readers) (c:capability) (a:invocation)
-  : Lemma (requires args_in_space rd c.c_signature.sg_holes a /\ unbound_required c.c_signature.sg_holes a == [])
+  : Lemma (requires repeated [] (keys a) == [] /\ args_in_space rd c.c_signature.sg_holes a /\
+                    unbound_required c.c_signature.sg_holes a == [])
           (ensures validate_args rd c a == Ok ())
   = check_args_in_space_ok rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
 
@@ -1074,6 +1208,7 @@ let slot_hole_invocable_in_space (rd:readers) (c:capability) (a:invocation) (h:s
                     h.s_space == Some (SlotTree h.s_slot) /\
                     Some? (rd.kind_of v) /\
                     (None? h.s_slot \/ h.s_slot == rd.kind_of v) /\
+                    repeated [] (keys ((h.s_addr, v) :: a)) == [] /\
                     args_in_space rd c.c_signature.sg_holes a /\
                     unbound_required c.c_signature.sg_holes ((h.s_addr, v) :: a) == [])
           (ensures validate_args rd c ((h.s_addr, v) :: a) == Ok ())
@@ -1133,22 +1268,23 @@ let registered_dispatches (#v:Type) (rd:readers) (r:registry) (id:string) (a:inv
   = find_cap_mem id r.capabilities; find_cap_id id r.capabilities
 
 (* `register` refuses a held id and extends by exactly one entry otherwise. *)
-let register_refuses_duplicate (c:capability) (r:registry)
+let register_refuses_duplicate (rd:readers) (c:capability) (r:registry)
   : Lemma (requires mem c.c_id (ids (enumerate r)))
-          (ensures register c r == Error (DuplicateCapability c.c_id))
+          (ensures register rd c r == Error (DuplicateCapability c.c_id))
   = find_cap_mem c.c_id r.capabilities
 
-let register_extends (c:capability) (r:registry)
-  : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature)
-          (ensures register c r == Ok { capabilities = c :: r.capabilities } /\
+let register_extends (rd:readers) (c:capability) (r:registry)
+  : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature /\
+                    None? (validate_signature rd c.c_signature))
+          (ensures register rd c r == Ok { capabilities = c :: r.capabilities } /\
                    (forall (id:string). mem id (ids (c :: r.capabilities)) <==> (id = c.c_id \/ mem id (ids (enumerate r)))))
   = find_cap_mem c.c_id r.capabilities
 
 (* A registry built by `register` holds distinct ids — the invariant `empty` starts and every
    accepted registration keeps, so `find_cap` is a function of the id and the enumeration never
    shows one id twice. *)
-let register_keeps_distinct (c:capability) (r r':registry)
-  : Lemma (requires distinct (ids (enumerate r)) /\ register c r == Ok r')
+let register_keeps_distinct (rd:readers) (c:capability) (r r':registry)
+  : Lemma (requires distinct (ids (enumerate r)) /\ register rd c r == Ok r')
           (ensures distinct (ids (enumerate r')))
   = find_cap_mem c.c_id r.capabilities
 
@@ -1165,15 +1301,30 @@ let rec non_total_addrs_empty (holes:list sig_entry)
    signature is not total as `NonTotalCapability`, naming a non-empty list of its entries; so every
    capability a registry built by `register` holds is total, and `dispatch` never reaches a body over
    an unbounded repeat. *)
-let register_refuses_non_total (c:capability) (r:registry)
+let register_refuses_non_total (rd:readers) (c:capability) (r:registry)
   : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ not (is_total c.c_signature))
-          (ensures register c r == Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes)) /\
+          (ensures register rd c r == Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes)) /\
                    Cons? (non_total_addrs c.c_signature.sg_holes))
   = find_cap_mem c.c_id r.capabilities; non_total_addrs_empty c.c_signature.sg_holes
 
-let register_admits_total (c:capability) (r r':registry)
-  : Lemma (requires register c r == Ok r')
+let register_admits_total (rd:readers) (c:capability) (r r':registry)
+  : Lemma (requires register rd c r == Ok r')
           (ensures is_total c.c_signature)
+  = ()
+
+(* Phase 307 — a registry admits only WELL-FORMED capabilities: a fresh, total capability whose
+   signature `Signature.validate` refuses is `IllFormedCapability` with exactly that fault, and
+   every capability `register` admits has a signature it accepts — distinct addresses, and spaces
+   that admit a value and have finite bounds. *)
+let register_refuses_ill_formed (rd:readers) (c:capability) (r:registry)
+  : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature /\
+                    Some? (validate_signature rd c.c_signature))
+          (ensures register rd c r == Error (IllFormedCapability c.c_id (Some?.v (validate_signature rd c.c_signature))))
+  = find_cap_mem c.c_id r.capabilities
+
+let register_admits_well_formed (rd:readers) (c:capability) (r r':registry)
+  : Lemma (requires register rd c r == Ok r')
+          (ensures None? (validate_signature rd c.c_signature))
   = ()
 
 (* ======================================================================================
@@ -1183,7 +1334,7 @@ let register_admits_total (c:capability) (r r':registry)
 (* The per-hole reading of `isTotal` on the declaration side. *)
 let hole_total (h:hole_decl) : Tot bool =
   match h.h_kind with
-  | RepeatHole s -> is_bounded s
+  | RepeatHole s -> is_count s
   | _ -> true
 
 (* `guardTotal` fires exactly when some hole is an unbounded repeat, and what it fires is
@@ -1295,10 +1446,60 @@ let rec find_rename (f:string -> string) (slot_addr:string) (holes:list hole_dec
     | [] -> ()
     | h :: rest -> if h.h_addr = slot_addr then () else find_rename f slot_addr rest
 
-let compose_rename (#node:Type) (w:witness node) (f:string -> string) (slot_addr:string) (inner n:node)
-  : Lemma (compose (renamed f w) slot_addr inner n == compose w slot_addr inner n)
+(* Phase 307 — the admission check never reads a name either: `Signature.validate` reads addresses
+   and spaces, and the slot test counts kinds. *)
+let rec validate_entries_rename (rd:readers) (f:string -> string) (seen:list string) (holes:list hole_decl)
+  : Lemma (ensures validate_entries rd seen (map entry_of (map (rename f) holes)) ==
+                   validate_entries rd seen (map entry_of holes))
+          (decreases holes)
+  = match holes with
+    | [] -> ()
+    | h :: rest -> validate_entries_rename rd f (h.h_addr :: seen) rest
+
+let rec slot_count_rename (f:string -> string) (hs:list hole_decl)
+  : Lemma (slot_count (map (rename f) hs) == slot_count hs)
+  = match hs with
+    | [] -> ()
+    | _ :: t -> slot_count_rename f t
+
+let rec sum_slots_rename (#node:Type) (w:witness node) (f:string -> string) (cs:list node)
+  : Lemma (sum_slots (renamed f w) cs == sum_slots w cs /\ any_holes (renamed f w) cs == any_holes w cs)
+  = match cs with
+    | [] -> ()
+    | c :: t -> slot_count_rename f (w.holes c); sum_slots_rename w f t
+
+let rec pick_slot_rename (#node:Type) (w:witness node) (f:string -> string) (l:list node)
+  : Lemma (ensures try_pick (slot_over_holes (renamed f w)) l == try_pick (slot_over_holes w) l)
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | m :: t ->
+      slot_count_rename f (w.holes m); sum_slots_rename w f (w.children m);
+      pick_slot_rename w f t
+
+let validate_decl_rename (#node:Type) (rd:readers) (w:witness node) (f:string -> string) (n:node)
+  : Lemma (validate_decl rd (renamed f w) n == validate_decl rd w n)
+  = validate_entries_rename rd f [] (w.holes n); pick_slot_rename w f (w.preorder n)
+
+let compose_rename (#node:Type) (rd:readers) (w:witness node) (f:string -> string) (slot_addr:string) (inner n:node)
+  : Lemma (compose rd (renamed f w) slot_addr inner n == compose rd w slot_addr inner n)
   = guard_rename f (w.holes n); guard_rename f (w.holes inner);
-    find_rename f slot_addr (w.holes n); addrs_rename f (w.holes n)
+    find_rename f slot_addr (w.holes n); addrs_rename f (w.holes n);
+    (match w.bind_hole slot_addr (SlotArg inner) n with
+     | Ok m -> validate_decl_rename rd w f m
+     | Error _ -> ())
+
+(* The strict pre-pass reads the open holes' ADDRESSES, which a renaming keeps. *)
+let rec open_slot_rename (#node:Type) (w:witness node) (f:string -> string) (a:args node)
+  : Lemma (ensures try_pick (open_slot (renamed f w)) a == try_pick (open_slot w) a)
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (k, x) :: t ->
+      (match x with
+       | SlotArg sub -> filter_rename f (w.holes sub); addrs_rename f (filter is_data (w.holes sub))
+       | ValueArg _ -> ());
+      open_slot_rename w f t
 
 (* THE FIFTH THEOREM, part one. F#: hole names are inert to `apply`, `curry` and `compose` —
    every clause keys on `Addr`, and a bare `Name` selects nothing. *)
@@ -1306,13 +1507,14 @@ let hygiene_law (#node:Type) (rd:readers) (w:witness node) (f:string -> string) 
                 (slot_addr:string) (inner n:node)
   : Lemma (ensures apply rd (renamed f w) a n == apply rd w a n /\
                    curry rd (renamed f w) a n == curry rd w a n /\
-                   compose (renamed f w) slot_addr inner n == compose w slot_addr inner n)
+                   compose rd (renamed f w) slot_addr inner n == compose rd w slot_addr inner n)
   = filter_rename f (w.holes n);
     guard_rename f (data_holes w n);
     addrs_rename f (data_holes w n);
+    open_slot_rename w f a;
     walk_rename rd w f true a n [] (data_holes w n);
     walk_rename rd w f false a n [] (data_holes w n);
-    compose_rename w f slot_addr inner n
+    compose_rename rd w f slot_addr inner n
 
 (* THE FIFTH THEOREM, part two. An argument at an address no data hole declares is refused as
    `UnknownHoleAddr`, naming the address and the declared set, before any binding — the result is
@@ -1769,6 +1971,414 @@ let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
   FStar.Classical.forall_intro aux
 
 (* ======================================================================================
+   13. THE ADMISSION GATE'S FACTS (Phase 307) — the hypotheses three proved rows rested on are
+       facts the seam enforces: an accepted argument list has distinct addresses, the capture key
+       is a function of the bindings alone, and over distinct hole addresses an accepted
+       invocation reaches `apply` without the three refusals a well-formed declaration rules out.
+   ====================================================================================== *)
+
+(* `repeated` finds nothing exactly over a list with distinct members none of which was seen. *)
+let rec repeated_none (seen:list string) (ks:list string)
+  : Lemma (requires repeated seen ks == [])
+          (ensures distinct ks /\ (forall (k:string). mem k ks ==> not (mem k seen)))
+          (decreases ks)
+  = match ks with
+    | [] -> ()
+    | k :: t -> repeated_none (k :: seen) t
+
+(* F#: `validateArgs` refuses a repeated address (`DuplicateArg`), so an ACCEPTED argument list has
+   distinct addresses — the hypothesis `invocation_key_deterministic` below needs, made a fact of
+   every list the seam accepts. *)
+let validate_args_distinct (rd:readers) (c:capability) (a:invocation)
+  : Lemma (requires validate_args rd c a == Ok ())
+          (ensures distinct (keys a))
+  = match repeated [] (keys a) with
+    | [] -> repeated_none [] (keys a)
+    | _ -> ()
+
+(* The comparator premise, as `Query.fst` states it: `k_addr_le` is a total order — true of the
+   ordinal order production sorts by. *)
+let total_order (le:string -> string -> bool) : Tot prop =
+  (forall (x y:string). le x y \/ le y x) /\
+  (forall (x y:string). (le x y /\ le y x) ==> x == y) /\
+  (forall (x y z:string). (le x y /\ le y z) ==> le x z)
+
+(* F#: the result of `List.sortBy fst` is ordered by address. *)
+let rec sorted_b (le:string -> string -> bool) (l:invocation) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: tl ->
+    (match tl with
+     | [] -> true
+     | y :: _ -> le (fst x) (fst y) && sorted_b le tl)
+
+let rec insert_keys_b (kr:key_renderers) (x:(string & string)) (l:invocation) (n:string)
+  : Lemma (mem n (keys (insert_binding kr x l)) = (n = fst x || mem n (keys l)))
+  = match l with
+    | [] -> ()
+    | _ :: t -> insert_keys_b kr x t n
+
+let rec insert_distinct_b (kr:key_renderers) (x:(string & string)) (l:invocation)
+  : Lemma (requires distinct (keys l) /\ not (mem (fst x) (keys l)))
+          (ensures distinct (keys (insert_binding kr x l)))
+  = match l with
+    | [] -> ()
+    | y :: t ->
+      if kr.k_addr_le (fst x) (fst y) then ()
+      else (insert_distinct_b kr x t; insert_keys_b kr x t (fst y))
+
+let rec sort_keys_b (kr:key_renderers) (l:invocation) (n:string)
+  : Lemma (mem n (keys (sort_bindings kr l)) = mem n (keys l))
+  = match l with
+    | [] -> ()
+    | x :: t -> sort_keys_b kr t n; insert_keys_b kr x (sort_bindings kr t) n
+
+let rec sort_distinct_b (kr:key_renderers) (l:invocation)
+  : Lemma (requires distinct (keys l))
+          (ensures distinct (keys (sort_bindings kr l)))
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      sort_distinct_b kr t;
+      sort_keys_b kr t (fst x);
+      insert_distinct_b kr x (sort_bindings kr t)
+
+let rec insert_sorted_b (kr:key_renderers) (x:(string & string)) (l:invocation)
+  : Lemma (requires total_order kr.k_addr_le /\ sorted_b kr.k_addr_le l)
+          (ensures sorted_b kr.k_addr_le (insert_binding kr x l))
+  = match l with
+    | [] -> ()
+    | y :: t ->
+      if kr.k_addr_le (fst x) (fst y) then ()
+      else insert_sorted_b kr x t
+
+let rec sort_sorted_b (kr:key_renderers) (l:invocation)
+  : Lemma (requires total_order kr.k_addr_le)
+          (ensures sorted_b kr.k_addr_le (sort_bindings kr l))
+  = match l with
+    | [] -> ()
+    | x :: t -> sort_sorted_b kr t; insert_sorted_b kr x (sort_bindings kr t)
+
+let rec sorted_head_le_b (le:string -> string -> bool) (x:(string & string)) (t:invocation) (y:(string & string))
+  : Lemma (requires total_order le /\ sorted_b le (x :: t) /\ mem_binding y t)
+          (ensures le (fst x) (fst y))
+          (decreases t)
+  = match t with
+    | [] -> ()
+    | h :: t' -> if y = h then () else sorted_head_le_b le h t' y
+
+let rec mem_binding_key (x:(string & string)) (l:invocation)
+  : Lemma (requires mem_binding x l)
+          (ensures mem (fst x) (keys l))
+  = match l with
+    | [] -> ()
+    | y :: t -> if x = y then () else mem_binding_key x t
+
+(* Two argument lists bind the same addresses to the same values. *)
+let same_bindings_b (a a':invocation) : Tot prop =
+  forall (x:(string & string)). mem_binding x a = mem_binding x a'
+
+(* An address-sorted list with distinct addresses is determined by its bindings. *)
+let rec sorted_unique_b (le:string -> string -> bool) (s1 s2:invocation)
+  : Lemma (requires total_order le /\ sorted_b le s1 /\ sorted_b le s2 /\
+                    distinct (keys s1) /\ distinct (keys s2) /\ same_bindings_b s1 s2)
+          (ensures s1 == s2)
+          (decreases s1)
+  = match s1, s2 with
+    | [], [] -> ()
+    | [], h :: _ -> assert (mem_binding h s1 = mem_binding h s2)
+    | h :: _, [] -> assert (mem_binding h s1 = mem_binding h s2)
+    | h1 :: t1, h2 :: t2 ->
+      assert (mem_binding h1 s1 = mem_binding h1 s2);
+      assert (mem_binding h2 s1 = mem_binding h2 s2);
+      if h1 = h2 then begin
+        let aux (x:(string & string)) : Lemma (mem_binding x t1 = mem_binding x t2) =
+          assert (mem_binding x s1 = mem_binding x s2);
+          if x = h1 then begin
+            (if mem_binding x t1 then mem_binding_key x t1 else ());
+            (if mem_binding x t2 then mem_binding_key x t2 else ())
+          end else ()
+        in
+        FStar.Classical.forall_intro aux;
+        sorted_unique_b le t1 t2
+      end else begin
+        sorted_head_le_b le h2 t2 h1;
+        sorted_head_le_b le h1 t1 h2;
+        mem_binding_key h1 t2
+      end
+
+(* `spell` keeps the address, so it commutes with the address sort. *)
+let spell_addr (kr:key_renderers) (c:capability) (b:(string & string))
+  : Lemma (fst (spell kr c b) == fst b)
+  = let (a, v) = b in
+    match find_entry a c.c_signature.sg_holes with
+    | Some e ->
+      (match e.s_space with
+       | Some sp -> (match kr.k_canonical sp v with Some _ -> () | None -> ())
+       | None -> ())
+    | None -> ()
+
+let rec insert_map_spell (kr:key_renderers) (c:capability) (x:(string & string)) (l:invocation)
+  : Lemma (insert_binding kr (spell kr c x) (map (spell kr c) l) == map (spell kr c) (insert_binding kr x l))
+  = match l with
+    | [] -> ()
+    | y :: t -> spell_addr kr c x; spell_addr kr c y; insert_map_spell kr c x t
+
+let rec sort_map_spell (kr:key_renderers) (c:capability) (l:invocation)
+  : Lemma (sort_bindings kr (map (spell kr c) l) == map (spell kr c) (sort_bindings kr l))
+  = match l with
+    | [] -> ()
+    | x :: t -> sort_map_spell kr c t; insert_map_spell kr c x (sort_bindings kr t)
+
+(* THE EIGHTH THEOREM (Phase 307; `Query.fst`'s fourth, ported). F#: `Capability.invocationKey`.
+   Two argument lists binding the same distinct addresses to the same values, in any order, key
+   identically — the key is a function of the capability and the BINDINGS, never of the order the
+   caller wrote them in. *)
+let invocation_key_deterministic (kr:key_renderers) (c:capability) (a a':invocation)
+  : Lemma (requires total_order kr.k_addr_le /\ distinct (keys a) /\ distinct (keys a') /\ same_bindings_b a a')
+          (ensures invocation_key kr c a == invocation_key kr c a')
+  = let aux (x:(string & string)) : Lemma (mem_binding x (sort_bindings kr a) = mem_binding x (sort_bindings kr a')) =
+      sort_bindings_mem kr a x; sort_bindings_mem kr a' x;
+      assert (mem_binding x a = mem_binding x a')
+    in
+    FStar.Classical.forall_intro aux;
+    sort_sorted_b kr a; sort_sorted_b kr a';
+    sort_distinct_b kr a; sort_distinct_b kr a';
+    sorted_unique_b kr.k_addr_le (sort_bindings kr a) (sort_bindings kr a');
+    sort_map_spell kr c a; sort_map_spell kr c a'
+
+(* ... and the hypothesis is the seam's: two ACCEPTED invocations of one capability with the same
+   bindings key identically. Before Phase 307 `validateArgs` accepted a repeated address, and the
+   key of `[a = x; a = y]` differed from the key of `[a = y; a = x]`. *)
+let accepted_invocation_key_deterministic (rd:readers) (kr:key_renderers) (c:capability) (a a':invocation)
+  : Lemma (requires total_order kr.k_addr_le /\ validate_args rd c a == Ok () /\
+                    validate_args rd c a' == Ok () /\ same_bindings_b a a')
+          (ensures invocation_key kr c a == invocation_key kr c a')
+  = validate_args_distinct rd c a; validate_args_distinct rd c a';
+    invocation_key_deterministic kr c a a'
+
+(* ---- wf_holes: distinct addresses, and an accepted invocation reaches `apply` cleanly ---- *)
+
+(* An invocation as `apply`'s arguments: a value at a slot entry is the tree `tree` reads it as
+   (F#: what a host does between the two seams — decode a tree argument into its node), every other
+   value stays a scalar. *)
+let lift (#node:Type) (tree:string -> node) (holes:list sig_entry) (b:(string & string)) : Tot (string & arg node) =
+  let (k, v) = b in
+  match find_entry k holes with
+  | Some e -> if e.s_kind = "slot" then (k, SlotArg (tree v)) else (k, ValueArg v)
+  | None -> (k, ValueArg v)
+
+let lifted (#node:Type) (tree:string -> node) (holes:list sig_entry) (a:invocation) : Tot (args node) =
+  map (lift tree holes) a
+
+let rec keys_lifted (#node:Type) (tree:string -> node) (holes:list sig_entry) (a:invocation)
+  : Lemma (keys (lifted tree holes a) == keys a)
+  = match a with
+    | [] -> ()
+    | _ :: t -> keys_lifted tree holes t
+
+let rec assoc_lifted (#node:Type) (tree:string -> node) (holes:list sig_entry) (k:string) (a:invocation)
+  : Lemma (assoc k (lifted tree holes a) ==
+           (match assoc k a with
+            | Some v -> Some (snd (lift tree holes (k, v)))
+            | None -> None))
+  = match a with
+    | [] -> ()
+    | (k', _) :: t -> if k = k' then () else assoc_lifted tree holes k t
+
+let rec has_key_assoc (k:string) (a:invocation)
+  : Lemma (has_key k a ==> Some? (assoc k a))
+  = match a with
+    | [] -> ()
+    | _ :: t -> has_key_assoc k t
+
+(* `find_entry` over a derived signature is `find_hole` over the holes, through `entry_of`. *)
+let rec find_entry_map (k:string) (hs:list hole_decl)
+  : Lemma (find_entry k (map entry_of hs) ==
+           (match find_hole k hs with
+            | Some h -> Some (entry_of h)
+            | None -> None))
+  = match hs with
+    | [] -> ()
+    | _ :: t -> find_entry_map k t
+
+let rec memp_addr (h:hole_decl) (hs:list hole_decl)
+  : Lemma (memp h hs ==> mem h.h_addr (map addr_of hs))
+  = match hs with
+    | [] -> ()
+    | _ :: t -> memp_addr h t
+
+(* Over distinct addresses a member is the one hole its address finds. *)
+let rec distinct_find (h:hole_decl) (hs:list hole_decl)
+  : Lemma ((memp h hs /\ distinct (map addr_of hs)) ==> find_hole h.h_addr hs == Some h)
+  = match hs with
+    | [] -> ()
+    | _ :: t -> memp_addr h t; distinct_find h t
+
+let rec memp_filter_data (h:hole_decl) (hs:list hole_decl)
+  : Lemma (memp h (filter is_data hs) ==> memp h hs /\ is_data h)
+  = match hs with
+    | [] -> ()
+    | _ :: t -> memp_filter_data h t
+
+let rec mem_filter_data_addr (k:string) (hs:list hole_decl)
+  : Lemma (mem k (map addr_of (filter is_data hs)) ==> mem k (map addr_of hs))
+  = match hs with
+    | [] -> ()
+    | _ :: t -> mem_filter_data_addr k t
+
+(* Distinct addresses survive dropping the action holes — so `toJsonSchema`'s property keys, which
+   are the data holes' addresses, are distinct. *)
+let rec distinct_data (hs:list hole_decl)
+  : Lemma (distinct (map addr_of hs) ==> distinct (map addr_of (filter is_data hs)))
+  = match hs with
+    | [] -> ()
+    | h :: t -> mem_filter_data_addr h.h_addr t; distinct_data t
+
+let rec for_all_memp (p:hole_decl -> bool) (h:hole_decl) (hs:list hole_decl)
+  : Lemma ((for_all p hs /\ memp h hs) ==> p h)
+  = match hs with
+    | [] -> ()
+    | _ :: t -> for_all_memp p h t
+
+(* A total data hole is a required entry. *)
+let data_required (h:hole_decl)
+  : Lemma ((hole_total h /\ is_data h) ==> (entry_of h).s_required)
+  = ()
+
+let rec required_bound (hs:list hole_decl) (a:invocation) (h:hole_decl)
+  : Lemma ((unbound_required (map entry_of hs) a == [] /\ memp h hs /\ (entry_of h).s_required) ==>
+           has_key h.h_addr a)
+  = match hs with
+    | [] -> ()
+    | _ :: t -> required_bound t a h
+
+(* Every argument addresses an entry that takes a value. *)
+let rec all_spaced (holes:list sig_entry) (ks:list string) : Tot bool =
+  match ks with
+  | [] -> true
+  | k :: t ->
+    (match find_entry k holes with
+     | Some e -> Some? (arg_space e)
+     | None -> false) && all_spaced holes t
+
+let rec check_args_ok_spaced (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation)
+  : Lemma (requires check_args rd holes declared a == Ok ())
+          (ensures all_spaced holes (keys a))
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (addr, value) :: rest ->
+      (match find_entry addr holes with
+       | None -> ()
+       | Some h ->
+         (match arg_space h with
+          | None -> ()
+          | Some space -> if validate rd space value then check_args_ok_spaced rd holes declared rest else ()))
+
+(* An address whose entry takes a value is a DATA hole's — an action entry takes none. *)
+let rec spaced_data (k:string) (hs:list hole_decl)
+  : Lemma ((match find_entry k (map entry_of hs) with
+            | Some e -> Some? (arg_space e)
+            | None -> false) ==> mem k (map addr_of (filter is_data hs)))
+  = match hs with
+    | [] -> ()
+    | _ :: t -> spaced_data k t
+
+let rec first_unknown_spaced (hs:list hole_decl) (ks:list string)
+  : Lemma (all_spaced (map entry_of hs) ks ==> first_unknown (map addr_of (filter is_data hs)) ks == None)
+  = match ks with
+    | [] -> ()
+    | k :: t -> spaced_data k hs; first_unknown_spaced hs t
+
+(* The walk, over holes each of which is the one hole its address finds, is data, and is bound:
+   it never refuses `NotASlot` (the lifted argument has the hole's own shape), never
+   `RequiredHolesUnbound` (nothing is left unbound) and never `UnknownHoleAddr` (it makes none). *)
+let rec walk_wf (#node:Type) (rd:readers) (w:witness node) (tree:string -> node) (all:list hole_decl)
+                (a:invocation) (strict:bool) (cur:node) (holes:list hole_decl)
+  : Lemma (requires forall (h:hole_decl). memp h holes ==>
+                      (find_hole h.h_addr all == Some h /\ is_data h /\ has_key h.h_addr a))
+          (ensures (match bind_walk rd w strict (lifted tree (map entry_of all) a) cur [] holes with
+                    | Error (NotASlot _) -> False
+                    | Error (RequiredHolesUnbound _) -> False
+                    | Error (UnknownHoleAddr _ _) -> False
+                    | _ -> True))
+          (decreases holes)
+  = match holes with
+    | [] -> ()
+    | h :: rest ->
+      has_key_assoc h.h_addr a;
+      assoc_lifted tree (map entry_of all) h.h_addr a;
+      find_entry_map h.h_addr all;
+      let x = Some?.v (assoc h.h_addr (lifted tree (map entry_of all) a)) in
+      (match validate_arg rd w h.h_addr h.h_kind x with
+       | Error _ -> ()
+       | Ok () ->
+         (match w.bind_hole h.h_addr x cur with
+          | Ok cur' -> walk_wf rd w tree all a strict cur' rest
+          | Error _ -> ()))
+
+(* The strict pre-pass refuses only as `SlotArgOpen`. *)
+let rec open_slot_shape (#node:Type) (w:witness node) (l:args node)
+  : Lemma (match try_pick (open_slot w) l with
+           | Some e -> SlotArgOpen? e
+           | None -> True)
+  = match l with
+    | [] -> ()
+    | (_, x) :: t ->
+      (match x with
+       | SlotArg sub -> (match data_holes w sub with [] -> open_slot_shape w t | _ -> ())
+       | ValueArg _ -> open_slot_shape w t)
+
+(* THE NINTH THEOREM (Phase 307), `wf_holes`. Over an artifact whose holes have DISTINCT addresses
+   — what `Signature.validate` enforces at every admission (`DuplicateHoleAddr`) — the standard
+   JSON Schema's property keys (the data holes' addresses) are distinct, and an invocation the
+   capability seam ACCEPTS, lifted to `apply`'s arguments, never meets `NotASlot`,
+   `RequiredHolesUnbound` or `UnknownHoleAddr` there: the two seams agree on which arguments an
+   artifact takes. What `apply` may still answer is about the VALUES and the witness —
+   `ValueOutOfSpace`, `SlotKindMismatch`, `NonTotal`, `SlotArgOpen`, `BindFailed` — and that a
+   hole beneath a slot (`HoleUnderSlot`) surfaces as the witness's `BindFailed` is the witness
+   contract's, which this model leaves abstract. *)
+let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:placement)
+             (tree:string -> node) (a:invocation) (n:node)
+  : Lemma (requires distinct (map addr_of (w.holes n)) /\
+                    validate_args rd (create id (signature_of w name n) p) a == Ok ())
+          (ensures distinct (map addr_of (data_holes w n)) /\
+                   (match apply rd w (lifted tree (signature_of w name n).sg_holes a) n with
+                    | Error (NotASlot _) -> False
+                    | Error (RequiredHolesUnbound _) -> False
+                    | Error (UnknownHoleAddr _ _) -> False
+                    | _ -> True))
+  = let all = w.holes n in
+    let entries = map entry_of all in
+    let dh = data_holes w n in
+    let la = lifted tree entries a in
+    distinct_data all;
+    assert (repeated [] (keys a) == []);
+    assert (check_args rd entries (entry_addrs entries) a == Ok ());
+    assert (unbound_required entries a == []);
+    check_args_ok_spaced rd entries (entry_addrs entries) a;
+    first_unknown_spaced all (keys a);
+    keys_lifted tree entries a;
+    assert (first_unknown (map addr_of dh) (keys la) == None);
+    guard_total_shape dh;
+    (match guard_total dh with
+     | Some _ -> ()
+     | None ->
+       let aux (h:hole_decl)
+         : Lemma (memp h dh ==> (find_hole h.h_addr all == Some h /\ is_data h /\ has_key h.h_addr a)) =
+         memp_filter_data h all; distinct_find h all; for_all_memp hole_total h dh;
+         data_required h; required_bound all a h
+       in
+       FStar.Classical.forall_intro aux;
+       walk_wf rd w tree all a true n dh;
+       open_slot_shape w la;
+       assert (apply rd w la n ==
+               (match try_pick (open_slot w) la with
+                | Some e -> Error e
+                | None -> bind_walk rd w true la n [] dh)))
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -1807,6 +2417,22 @@ let twins : list twin = [
   { tname = "an-entry-of-no-hole-kind-is-not-total";
     tholds = (fun () ->
       entry_total ({ s_addr = "x"; s_name = "x"; s_kind = "int"; s_space = Some AnyString; s_slot = None;
-                     s_action = None; s_required = true }) = false) } ]
+                     s_action = None; s_required = true }) = false) };
+  (* Phase 307 — the count space, the duplicate scan and the admission check. *)
+  { tname = "a-repeat-over-a-float-range-is-not-required";
+    tholds = (fun () ->
+      (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange "0" "1") })).s_required = false) };
+  { tname = "a-repeat-past-the-cap-is-not-a-count";
+    tholds = (fun () -> is_count (IntRange 0 1000001) = false && is_count (IntRange 0 1000000) = true) };
+  { tname = "repeated-names-each-repeat-in-order";
+    tholds = (fun () -> repeated [] ["a"; "b"; "a"; "b"; "a"] = ["a"; "b"; "a"]) };
+  { tname = "a-second-address-is-the-duplicate";
+    tholds = (fun () ->
+      validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+                          kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) }) []
+        [ { s_addr = "a"; s_name = "a"; s_kind = "value"; s_space = Some (IntRange 0 1); s_slot = None;
+            s_action = None; s_required = true };
+          { s_addr = "a"; s_name = "b"; s_kind = "value"; s_space = Some (IntRange 5 1); s_slot = None;
+            s_action = None; s_required = true } ] = Some (DuplicateHoleAddr "a")) } ]
 
 let _ = assert_norm (twins_hold twins == true)

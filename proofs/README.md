@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 267 claims — 191 proved across 27 models, 45 tested, 29 assumed (6 `domain-obligation`, 19 `model-bridge`, 4 `premise`), 2 policy.
+**The ladder, counted:** 271 claims — 194 proved across 27 models, 45 tested, 30 assumed (6 `domain-obligation`, 19 `model-bridge`, 5 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -650,7 +650,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 29 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 30 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -670,7 +670,7 @@ place together with the contract it implies.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 4 rows.
+  on. 5 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -715,6 +715,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `canon-unit-spelling` | `model-bridge` | `permanent` |
 | `column-int-layouts` | `model-bridge` | `permanent` |
 | `column-codec-abstractions` | `model-bridge` | `permanent` |
+| `capability-body-total` | `premise` | — |
 | `propagation-ops-model-bridge` | `model-bridge` | `unscheduled` |
 | `propagation-evaluator-total` | `premise` | — |
 
@@ -953,7 +954,7 @@ models' (the apply-engine theorems recurse through `Batch`), not a sampled famil
 | `Fuaran.Core.AiSurface` | 21 | 0 | 9 | 2 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
 | `Fuaran.Core.Conformance` | 129 | 1 | 82 | 2 | 6 | 0 | 1 | 37 |
-| `Fuaran.Core.Function` | 105 | 12 | 35 | 5 | 1 | 5 | 0 | 47 |
+| `Fuaran.Core.Function` | 114 | 20 | 34 | 5 | 1 | 5 | 0 | 49 |
 | `Fuaran.Core.Idl` | 61 | 0 | 0 | 1 | 1 | 0 | 0 | 59 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
@@ -967,7 +968,7 @@ models' (the apply-engine theorems recurse through `Batch`), not a sampled famil
 | `Fuaran.Core.Tree` | 57 | 7 | 5 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Validator` | 34 | 0 | 12 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 984 | 109 | 264 | 29 | 15 | 5 | 9 | 553 |
+| **Total** | 993 | 117 | 263 | 29 | 15 | 5 | 9 | 555 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -5114,6 +5115,34 @@ symbols, `=`, `#`, empty values), and round-trips `Hash.canonicalFields` through
 written decoder, with a bare separator as the go-red. The module's cost moved from 6-8s to about
 18s on a loaded machine (see `modules.json`).
 
+### What Phase 307 added here: one admission gate, and three hypotheses made facts
+
+Everything outside the seam's proved core trusted its declarations, and the model said so by
+modelling none of the checks. Section 2 now models a COUNT space (`is_count`: a capped, non-empty,
+non-negative integer range, where `is_bounded` let a repeat over `FloatRange(0, infinity)` count) and
+well-formedness (`space_wf`, a float range's half through the readers' new `float_fault`); section 4
+the gate itself — `validate_signature` (an empty or non-finite space, two holes at one address) and
+`validate_decl`, which adds the one check only the witness can make, a slot declared over holes,
+counted rather than named so the hygiene law survives it (`validate_decl_rename`, cited by
+`compose_rename`). `register` runs it after totality (`register_refuses_ill_formed`,
+`register_admits_well_formed`); `compose` runs it over the tree it builds (`IllFormedResult`); a
+strict application refuses an open slot argument first (`SlotArgOpen`); `validate_args` refuses a
+repeated address first (`DuplicateArg`); and a pre-229 spaceless slot entry is checked against the
+tree space of its constraint (`arg_space`).
+
+Section 13 states what that buys. `validate_args_distinct`: an accepted argument list has distinct
+addresses — the hypothesis `invocation_key_deterministic` (ported from `Query.fst`, through
+`sort_map_spell`: the canonical spelling keeps the address, so it commutes with the sort) needs, so
+`accepted_invocation_key_deterministic` carries none. And `wf_holes`: over an artifact whose holes
+have distinct addresses, the data holes' addresses — `toJsonSchema`'s property keys — are distinct,
+and an invocation the capability seam accepts, lifted to `apply`'s arguments, never meets
+`NotASlot`, `RequiredHolesUnbound` or `UnknownHoleAddr` there. `Query.fst` closes its own
+determinism hypothesis the same way (`validate_params_distinct`). The readers premise is restated: the
+integer reader is production's invariant one since Phase 295, and the differential runs under he-IL.
+The differential draws the declarations the gate refuses — negative, empty, NaN, infinite and
+past-2^53 bounds, a count past the cap, duplicate addresses, a hole under a slot, an open slot
+argument, a repeated argument — and compares `Function.validate` with `validate_decl`.
+
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The six theorems above plus the characterisations
@@ -5137,8 +5166,9 @@ written decoder, with a bare separator as the go-red. The module's cost moved fr
    all inputs.
 3. **Assumed, and stated as such.**
    - **The readers premise** (`capability-scalar-readers-abstract`, a `model-bridge`, permanent).
-     The three host functions behind `Space.validate` are parameters; a float range's bounds cross
-     as opaque carriers. Every validation theorem is about the envelope — which entry a value is
+     The five host functions behind `Space.validate` and `Space.wellFormed` are parameters, each a
+     function of the string alone (Phase 307 restated it); a float range's bounds cross as opaque
+     carriers. Every validation theorem is about the envelope — which entry a value is
      checked against, which refusal names it, that the body waits on the answer — and nothing
      about the two numeral grammars, which is theorem 4's cost and not this theorem's.
    - **The key renderers premise** (`capability-key-renderers-abstract`, a `model-bridge`,
@@ -5150,6 +5180,9 @@ written decoder, with a bare separator as the go-red. The module's cost moved fr
    - **The witness**, which is the standing `lawful-abstract-witness` obligation and not a second
      row: nothing here says what a domain's `Bind` does, and `compositionLaws` /
      `functionVerifyLaws` are where a domain's `Bind` is sampled.
+   - **The total-body premise** (`capability-body-total`, a `premise`; Phase 307). The model's body
+     is `Tot`; production's may throw, and `Capability.invoke` propagates the exception rather than
+     catching it. Every theorem about `invoke` is about bodies that return.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
 ## Theorem 11 — incremental evaluation agrees with full evaluation (Phase 186)

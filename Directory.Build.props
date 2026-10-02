@@ -327,7 +327,12 @@
          Gen.typescriptValue, and Phase 248 retypes ArbitrationRejection.Conflicts. Pre-1.0 a
          breaking change is a MINOR bump, and this slot already is one over 0.33.0, so it keeps its
          number. See STABILITY.md "0.34.0 — DRAFT". -->
-    <Version>0.34.0</Version>
+    <!-- 0.35.0 (2026-10-02): a draft slot opened over the tagged 0.34.0 by Phase 307, BREAKING
+         (source) from its first entry: `InvokeError`, `ApplyError` and `QueryError` each gain cases
+         (union widening), and `CapabilityPipeline.nodeInvocationKey` puts the node kind in its
+         pre-image, so every journalled pipeline key moves. Pre-1.0 a breaking change is a MINOR
+         bump. See STABILITY.md "0.35.0 — DRAFT". -->
+    <Version>0.35.0</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

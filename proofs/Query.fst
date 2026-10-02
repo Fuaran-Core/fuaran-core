@@ -192,6 +192,7 @@ type query_error =
   | ExecutionFailed       : detail:string -> recoverable:list string -> query_error
   | Timeout               : query_error
   | RequiredParamsNull    : names:list string -> query_error
+  | DuplicateParam        : name:string -> query_error
 
 (* F#: `(string * Cell) list` — a typed invocation's args, name → bound cell. *)
 type arguments = list (string & cell)
@@ -381,8 +382,18 @@ let rec null_required (ps:list query_param) (a:arguments) : Tot (list string) =
       p.p_name :: null_required t a
     else null_required t a
 
-(* F#: `Query.validateParams`. *)
+(* F#: `Capability.repeatedAddrs` — every name the list binds again, at each repeat, in order. *)
+let rec repeated (seen:list string) (ks:list string) : Tot (list string) (decreases ks) =
+  match ks with
+  | [] -> []
+  | k :: t -> if mem k seen then k :: repeated seen t else repeated (k :: seen) t
+
+(* F#: `Query.validateParams` — since Phase 307 a repeated name is refused first
+   (`DuplicateParam`), before any cell is read. *)
 let validate_params (q:query) (a:arguments) : Tot (outcome unit query_error) =
+  match repeated [] (keys a) with
+  | d :: _ -> Error (DuplicateParam d)
+  | [] ->
   match check_args q.q_params (param_names q.q_params) a with
   | Error e -> Error e
   | Ok () ->
@@ -494,8 +505,8 @@ let rec check_args_shape (ps:list query_param) (declared:list string) (a:argumen
 let validate_params_shape (q:query) (a:arguments)
   : Lemma (ensures (match validate_params q a with
                     | Ok () -> True
-                    | Error e -> UnknownParam? e \/ ParamTypeMismatch? e \/ RequiredParamsUnbound? e \/
-                                 RequiredParamsNull? e))
+                    | Error e -> DuplicateParam? e \/ UnknownParam? e \/ ParamTypeMismatch? e \/
+                                 RequiredParamsUnbound? e \/ RequiredParamsNull? e))
   = check_args_shape q.q_params (param_names q.q_params) a
 
 (* `invoke` never produces the registry's two refusals: the classes are disjoint. *)
@@ -591,8 +602,8 @@ let rec check_args_exact (ps:list query_param) (declared:list string) (a:argumen
    the declaration, no required name is left unbound, and (Phase 226) none is bound only to `Null`. *)
 let validate_params_exact (q:query) (a:arguments)
   : Lemma (validate_params q a == Ok () <==>
-           (all_well_typed q.q_params a /\ unbound_required q.q_params a == [] /\
-            null_required q.q_params a == []))
+           (repeated [] (keys a) == [] /\ all_well_typed q.q_params a /\
+            unbound_required q.q_params a == [] /\ null_required q.q_params a == []))
   = check_args_exact q.q_params (param_names q.q_params) a
 
 (* What a REFUSAL guarantees: an `UnknownParam` names a bound name no param declares, and lists
@@ -854,6 +865,34 @@ let invocation_key_deterministic (rn:renderers) (q q':query) (a a':arguments)
     sort_sorted rn a; sort_sorted rn a';
     sort_distinct rn a; sort_distinct rn a';
     sorted_unique rn.name_le (sort_args rn a) (sort_args rn a')
+
+(* Phase 307 — `repeated` finds nothing exactly over a list with distinct members none seen. *)
+let rec repeated_none (seen:list string) (ks:list string)
+  : Lemma (requires repeated seen ks == [])
+          (ensures distinct ks /\ (forall (k:string). mem k ks ==> not (mem k seen)))
+          (decreases ks)
+  = match ks with
+    | [] -> ()
+    | k :: t -> repeated_none (k :: seen) t
+
+(* Phase 307 — the hypothesis is a fact. F#: `validateParams` refuses a repeated name
+   (`DuplicateParam`), so an ACCEPTED argument list has distinct names, and two accepted lists
+   binding the same names to the same cells key identically, in any order. Before Phase 307 the
+   theorem above carried `distinct (keys a)` as a premise nothing enforced: `[a = 1; a = Null]` was
+   accepted for a required `a`, and its key depended on the order of the list. *)
+let validate_params_distinct (q:query) (a:arguments)
+  : Lemma (requires validate_params q a == Ok ())
+          (ensures distinct (keys a))
+  = match repeated [] (keys a) with
+    | [] -> repeated_none [] (keys a)
+    | _ -> ()
+
+let accepted_invocation_key_deterministic (rn:renderers) (q:query) (a a':arguments)
+  : Lemma (requires total_order rn.name_le /\ validate_params q a == Ok () /\
+                    validate_params q a' == Ok () /\ same_bindings a a')
+          (ensures invocation_key rn q a == invocation_key rn q a')
+  = validate_params_distinct q a; validate_params_distinct q a';
+    invocation_key_deterministic rn q q a a'
 
 (* The id-only half on its own, with no premise at all. *)
 let invocation_key_id_only (rn:renderers) (q q':query) (a:arguments)
@@ -1118,7 +1157,7 @@ let rec required_steps_iff (ps:list query_param) (a:arguments)
    `p_required` through `has_value`. *)
 let required_is_non_null (q:query) (a:arguments)
   : Lemma (validate_params q a == Ok () <==>
-           (all_well_typed q.q_params a /\ required_valued q.q_params a))
+           (repeated [] (keys a) == [] /\ all_well_typed q.q_params a /\ required_valued q.q_params a))
   = validate_params_exact q a;
     required_steps_iff q.q_params a
 
@@ -1148,13 +1187,17 @@ let rec null_nulls (ps sub:list query_param)
 (* The all-`Null` argument set, BUILT from the declaration: it passes step 1 (every name is
    declared, and `Null` is type-agnostic absence) and step 2 (every name is present), and step 3
    refuses it as `RequiredParamsNull`, naming EVERY required param in declaration order — so it is
-   accepted only by a declaration that requires nothing. *)
+   accepted only by a declaration that requires nothing. Since Phase 307 it is stated over a
+   declaration whose parameter names are distinct: over a repeated name the built set binds that
+   name twice, and step 0 refuses it `DuplicateParam` first. *)
 let all_null_refusal_exact (q:query)
-  : Lemma (validate_params q (nulls_of q.q_params) ==
+  : Lemma (requires repeated [] (param_names q.q_params) == [])
+          (ensures validate_params q (nulls_of q.q_params) ==
            (match required_names q.q_params with
             | [] -> Ok ()
             | n -> Error (RequiredParamsNull n)))
-  = all_in_refl (param_names q.q_params);
+  = nulls_keys q.q_params;
+    all_in_refl (param_names q.q_params);
     nulls_well_typed q.q_params q.q_params;
     check_args_exact q.q_params (param_names q.q_params) (nulls_of q.q_params);
     nulls_keys q.q_params;

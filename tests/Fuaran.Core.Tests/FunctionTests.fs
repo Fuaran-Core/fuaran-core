@@ -1596,3 +1596,307 @@ let convergenceTests =
               Expect.equal (Deferred.settled (Pending: Deferred<int>)) None "pending"
               Expect.equal (Deferred.settled (Failed "pending": Deferred<int>)) (Some(Error "pending")) "failed"
               Expect.equal (Deferred.settled (Ready 3)) (Some(Ok 3)) "ready" ]
+
+// ---- Phase 307: validated declarations on the invocable seams ----
+
+let private entry307 addr kind space : SigEntry =
+    { Addr = addr
+      Name = addr
+      Kind = kind
+      Space = space
+      Slot = None
+      Action = None
+      Required = true }
+
+let private sig307 holes : Signature =
+    { Name = "f"
+      Holes = holes
+      Effect = Effect.pureDeterministic }
+
+let private register307 (holes: SigEntry list) : Result<unit, InvokeError> =
+    CapabilityRegistry.register (Capability.create "c" (sig307 holes) Server) CapabilityRegistry.empty
+    |> Result.map ignore
+
+let private registerFn307 (holes: SigEntry list) : Result<unit, InvokeError> =
+    FunctionRegistry.register
+        (FunctionRegistry.entry "t" (Capability.create "c" (sig307 holes) Server))
+        FunctionRegistry.empty
+    |> Result.map ignore
+
+/// The value-hole and repeat-hole declarations the probes built, each with the refusal both
+/// registries must give it.
+let private probes307: (string * SigEntry list * InvokeError) list =
+    [ "an infinite count", [ entry307 "r" "repeat" (Some(FloatRange(0.0, infinity))) ], NonTotalCapability("c", [ "r" ])
+      "a count past the cap",
+      [ entry307 "r" "repeat" (Some(IntRange(0, Space.maxRepeatCount + 1))) ],
+      NonTotalCapability("c", [ "r" ])
+      "a negative count", [ entry307 "r" "repeat" (Some(IntRange(-1, 3))) ], NonTotalCapability("c", [ "r" ])
+      "an empty int range",
+      [ entry307 "n" "value" (Some(IntRange(5, 1))) ],
+      IllFormedCapability("c", EmptySpace("n", IntRange(5, 1)))
+      "an empty enum", [ entry307 "e" "value" (Some(Enum [])) ], IllFormedCapability("c", EmptySpace("e", Enum []))
+      "an empty string length",
+      [ entry307 "s" "value" (Some(StringLen(0, -1))) ],
+      IllFormedCapability("c", EmptySpace("s", StringLen(0, -1)))
+      "a NaN bound", [ entry307 "x" "value" (Some(FloatRange(nan, 1.0))) ], IllFormedCapability("c", NonFiniteBound "x")
+      "an infinite bound",
+      [ entry307 "x" "value" (Some(FloatRange(-infinity, 1.0))) ],
+      IllFormedCapability("c", NonFiniteBound "x")
+      "two holes at one address",
+      [ entry307 "a" "value" (Some AnyString); entry307 "a" "value" (Some AnyString) ],
+      IllFormedCapability("c", DuplicateHoleAddr "a") ]
+
+/// A capability over one integer hole, for the reader and duplicate checks.
+let private intCap307 =
+    Capability.create "n" (sig307 [ entry307 "n" "value" (Some(IntRange(-10, 10))) ]) Server
+
+[<Tests>]
+let validatedDeclarationTests =
+    testList
+        "Validated declarations (Phase 307)"
+        [ testCase "every probe declaration is refused at registration, by both registries, with a typed reason"
+          <| fun _ ->
+              for name, holes, expected in probes307 do
+                  Expect.equal (register307 holes) (Error expected) (name + ": CapabilityRegistry")
+                  Expect.equal (registerFn307 holes) (Error expected) (name + ": FunctionRegistry")
+
+          testCase "a declaration fault reads as a sentence naming what is wrong"
+          <| fun _ ->
+              Expect.stringContains
+                  (DeclarationFault.describe (EmptySpace("n", IntRange(5, 1))))
+                  "an integer from 5 to 1"
+                  "an empty space names its bounds"
+
+              Expect.stringContains (DeclarationFault.describe (DuplicateHoleAddr "a")) "'a'" "the address"
+              Expect.stringContains (DeclarationFault.describe (HoleUnderSlot "s")) "'s'" "the slot's node"
+
+              Expect.stringStarts
+                  (InvokeError.describe (IllFormedCapability("c", NonFiniteBound "x")))
+                  "Refused: the tool 'c' cannot be registered"
+                  "inside the registration refusal"
+
+          testCase "Space.wellFormed and Space.isCount say what a space and a count are"
+          <| fun _ ->
+              Expect.equal (Space.wellFormed (IntRange(1, 1))) (Ok()) "a one-value range"
+              Expect.equal (Space.wellFormed (IntRange(2, 1))) (Error SpaceFault.Empty) "an empty range"
+              Expect.equal (Space.wellFormed (FloatRange(1.0, nan))) (Error SpaceFault.NonFinite) "NaN"
+              Expect.equal (Space.wellFormed (FloatRange(2.0, 1.0))) (Error SpaceFault.Empty) "an empty float range"
+              Expect.equal (Space.wellFormed (FloatRange(-1e300, 9.0e15 * 4.0))) (Ok()) "bounds past 2^53"
+              Expect.equal (Space.wellFormed AnyString) (Ok()) "any string"
+              Expect.isTrue (Space.isCount (IntRange(0, Space.maxRepeatCount))) "the cap is a count"
+              Expect.isFalse (Space.isCount (IntRange(0, Space.maxRepeatCount + 1))) "past the cap is not"
+              Expect.isFalse (Space.isCount (FloatRange(0.0, 3.0))) "a float range is no count"
+              Expect.isFalse (Space.isCount (IntRange(3, 2))) "an empty range counts nothing"
+
+          testCase "a repeat over no count space is non-total, not required, and refused by apply"
+          <| fun _ ->
+              let art =
+                  RNode.node "root" "doc" [ RNode.hole "r" "field" "rows" (RepeatHole(FloatRange(0.0, infinity))) ]
+
+              let sg = Function.signature artw "f" art
+              Expect.isFalse (Function.isTotal sg) "not total"
+              Expect.isFalse (sg.Holes |> List.forall (fun h -> h.Required)) "and not required"
+
+              Expect.equal
+                  (Function.apply artw (Map.ofList [ "root/r", ValueArg "1e300" ]) art)
+                  (Error(NonTotal "root/r"))
+                  "apply refuses it before reading the count"
+
+          testCase "a hole beneath a slot is refused, naming the slot's node"
+          <| fun _ ->
+              let nested =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ { RNode.hole "s" "region" "body" (SlotHole None) with
+                            Children = [ RNode.hole "u" "field" "under" (ValueHole AnyString) ] } ]
+
+              Expect.equal (Function.validate artw nested) (Error(HoleUnderSlot "s")) "the nested hole"
+              Expect.equal (Function.validate artw (template ())) (Ok()) "the template is well-formed"
+
+          testCase "compose refuses a result whose inner hole captures an outer address"
+          <| fun _ ->
+              // The inner tree's hole has the id of an outer hole beside the slot, so after
+              // composition two holes share one address — one argument would fill both.
+              let inner =
+                  RNode.node "body" "para" [ RNode.hole "t" "field" "title" (ValueHole AnyString) ]
+
+              match Function.compose artw "tpl/s" inner (template ()) with
+              | Error(IllFormedResult(DuplicateHoleAddr _)) -> ()
+              | other -> failtestf "expected IllFormedResult(DuplicateHoleAddr _), got %A" other
+
+          testCase "every registrable capability's JSON Schema renders as valid canonical JSON"
+          <| fun _ ->
+              let finite = FloatRange(-1e300, 1e300)
+
+              let sg =
+                  sig307
+                      [ entry307 "x" "value" (Some finite)
+                        entry307 "n" "value" (Some(IntRange(-5, 5))) ]
+
+              Expect.isOk (register307 sg.Holes) "it registers"
+              Expect.isOk (Canon.tryRender (Function.toJsonSchema sg)) "and its schema renders"
+
+              let cap = Capability.create "c" sg Server
+              Expect.equal (CapabilityCodec.tryEncode cap) (Ok(CapabilityCodec.encode cap)) "tryEncode is encode"
+
+              let bad =
+                  Capability.create "c" (sig307 [ entry307 "x" "value" (Some(FloatRange(0.0, infinity))) ]) Server
+
+              Expect.isError (CapabilityCodec.tryEncode bad) "a non-finite bound is refused by the guarded encode"
+
+          testCase "the integer reader is the same under every culture; U+2212 is refused everywhere"
+          <| fun _ ->
+              let saved = System.Globalization.CultureInfo.CurrentCulture
+
+              try
+                  for culture in [ "en-US"; "he-IL"; "fa-IR"; "ar-SA"; "sv-SE"; "nb-NO"; "fi-FI" ] do
+                      System.Globalization.CultureInfo.CurrentCulture <- System.Globalization.CultureInfo culture
+                      Expect.equal (Capability.validateArgs intCap307 [ "n", "-5" ]) (Ok()) (culture + ": -5")
+
+                      Expect.isError
+                          (Capability.validateArgs intCap307 [ "n", "\u22125" ])
+                          (culture + ": U+2212 is refused")
+
+                      Expect.equal
+                          (Capability.typeArgs intCap307 [ "n", "-05" ])
+                          (Ok [ "n", IntValue -5 ])
+                          (culture + ": the value handed on is the integer")
+              finally
+                  System.Globalization.CultureInfo.CurrentCulture <- saved
+
+          testCase "an address bound twice is DuplicateArg at every seam that reads an argument list"
+          <| fun _ ->
+              let args = [ "n", "1"; "n", "2" ]
+              Expect.equal (Capability.validateArgs intCap307 args) (Error(DuplicateArg "n")) "validateArgs"
+              Expect.equal (Capability.validateArgsAll intCap307 args) (Error [ DuplicateArg "n" ]) "validateArgsAll"
+
+              Expect.isError
+                  (CapabilityCodec.decodeInvocation (CapabilityCodec.encodeInvocation "n" args))
+                  "decodeInvocation"
+
+              let lookup =
+                  CapabilityLookup.ofRegistry (
+                      match CapabilityRegistry.register intCap307 CapabilityRegistry.empty with
+                      | Ok r -> r
+                      | Error e -> failtestf "register: %A" e
+                  )
+
+              let p =
+                  { Nodes = [ Invoke("i", "n", IntRange(-10, 10), [ "n", Literal "1"; "n", Literal "2" ]) ] }
+
+              Expect.equal
+                  (CapabilityPipeline.typeCheck lookup p)
+                  (Error(PipelineArgRefused("i", DuplicateArg "n")))
+                  "typeCheck"
+
+          testCase "a pre-229 spaceless slot entry is invocable like a derived one"
+          <| fun _ ->
+              let slot =
+                  { entry307 "s" "slot" None with
+                      Slot = Some "para" }
+
+              let c = Capability.create "c" (sig307 [ slot ]) Server
+              Expect.equal (Capability.validateArgs c [ "s", """{"kind":"para"}""" ]) (Ok()) "a tree of its kind"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "s", """{"kind":"heading"}""" ])
+                  (Error(ArgOutOfSpace("s", SlotTree(Some "para"), """{"kind":"heading"}""")))
+                  "a tree of another kind"
+
+          testCase "the capability decoder checks its $type and refuses an ill-formed signature"
+          <| fun _ ->
+              let good =
+                  Capability.create "c" (sig307 [ entry307 "n" "value" (Some(IntRange(0, 3))) ]) Server
+
+              let text = CapabilityCodec.encode good
+              Expect.equal (CapabilityCodec.decode text) (Ok good) "round trip"
+
+              Expect.isError
+                  (CapabilityCodec.decode (text.Replace("\"$type\":\"capability\"", "\"$type\":\"invocation\"")))
+                  "another document type"
+
+              Expect.isError (CapabilityCodec.decode (text.Replace("\"$type\":\"capability\",", ""))) "no document type"
+
+              let empty = text.Replace("\"max\":3,\"min\":0", "\"max\":0,\"min\":3")
+              Expect.notEqual empty text "the probe edited the bounds"
+              Expect.isError (CapabilityCodec.decode empty) "an empty range is refused on read"
+
+          testCase "strict apply refuses an open slot argument; curry accepts it"
+          <| fun _ ->
+              let openTree =
+                  RNode.node "in" "para" [ RNode.hole "o" "field" "o" (ValueHole AnyString) ]
+
+              let args =
+                  Map.ofList [ "tpl/t", ValueArg "x"; "tpl/c", ValueArg "3"; "tpl/s", SlotArg openTree ]
+
+              Expect.equal (Function.apply artw args (template ())) (Error(SlotArgOpen("tpl/s", [ "in/o" ]))) "apply"
+
+              Expect.isOk (Function.curry artw args (template ())) "curry"
+              Expect.isTrue (Function.isClosed artw (RNode.leaf "in" "para" "z")) "a leaf is closed"
+              Expect.isFalse (Function.isClosed artw openTree) "a tree with a hole is open"
+
+          testCase "applyMemo and applyMemoComposed agree on the Clock-slot probe: both bypass"
+          <| fun _ ->
+              let clockLeaf =
+                  { RNode.leaf "in" "para" "now" with
+                      Eff =
+                          { Host = Pure
+                            Determinism = Effect.clock } }
+
+              let outerArgs = Map.ofList [ "tpl/t", ValueArg "x"; "tpl/c", ValueArg "3" ]
+              let direct = Map.add "tpl/s" (SlotArg clockLeaf) outerArgs
+
+              match Function.applyMemo artw encNode direct (template ()) Memo.empty with
+              | Ok(_, c) ->
+                  Expect.equal (c.Bypasses, c.Misses, c.Hits) (1, 0, 0) "applyMemo bypasses an effecting slot argument"
+              | Error e -> failtestf "applyMemo: %A" e
+
+              match
+                  Function.applyMemoComposed
+                      artw
+                      encNode
+                      [ "tpl/s", clockLeaf, Map.empty ]
+                      outerArgs
+                      (template ())
+                      Memo.empty
+              with
+              | Ok(_, c) -> Expect.equal c.Hits 0 "applyMemoComposed serves nothing from the cache either"
+              | Error e -> failtestf "applyMemoComposed: %A" e
+
+          testCase "the node kind leads the pipeline key: a Source and an Invoke never share one"
+          <| fun _ ->
+              let s = Source("source", "source", AnyString)
+              let i = Invoke("source", "source", AnyString, [])
+              Expect.notEqual (CapabilityPipeline.nodeInvocationKey s) (CapabilityPipeline.nodeInvocationKey i) "apart"
+
+          testCase "evalFrom refuses a reordered pipeline exactly as eval does"
+          <| fun _ ->
+              let up = Capability.create "up" (sig307 []) Server
+
+              let down =
+                  Capability.create "down" (sig307 [ entry307 "x" "value" (Some AnyString) ]) Server
+
+              let lookup =
+                  [ up; down ]
+                  |> List.fold
+                      (fun r c ->
+                          match CapabilityRegistry.register c r with
+                          | Ok r' -> r'
+                          | Error e -> failtestf "register: %A" e)
+                      CapabilityRegistry.empty
+                  |> CapabilityLookup.ofRegistry
+
+              let reordered =
+                  { Nodes =
+                      [ Invoke("b", "down", AnyString, [ "x", FromNode "a" ])
+                        Invoke("a", "up", AnyString, []) ] }
+
+              let body _ _ = Ok "v"
+              let e1 = CapabilityPipeline.eval lookup id body reordered
+
+              let e2 =
+                  CapabilityPipeline.evalFrom lookup id body Map.empty (Set.ofList [ "a" ]) reordered
+
+              Expect.isError e1 "eval refuses"
+              Expect.equal e2 e1 "evalFrom refuses with the same reason" ]

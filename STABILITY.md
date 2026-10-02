@@ -2391,6 +2391,70 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.35.0 — DRAFT
+
+**Slot class: breaking (source).** Opened over the tagged `0.34.0` by Phase 307, whose first edit widens
+three closed unions. Each entry below names its own class and the edit a consumer makes; the wire classes
+are recorded per entry. Pre-1.0 a breaking change is a minor bump, which this slot is over `0.34.0`.
+
+### Validated declarations on the invocable seams: one admission gate, a capped count, one binding per address (Phase 307, DECISIONS.md D111) — BREAKING (source): `InvokeError`, `ApplyError` and `QueryError` widened; BREAKING (behavioural): new refusals, a stricter reader, every `nodeInvocationKey` moves; the wire `additive`
+
+**What moved, for a consumer.**
+
+- **Union widening (source).** `InvokeError` gains `IllFormedCapability of id * DeclarationFault` and
+  `DuplicateArg of addr`; `ApplyError` gains `SlotArgOpen of addr * holes` and `IllFormedResult of
+  DeclarationFault`; `QueryError` gains `DuplicateParam of name`. Each is appended, so every earlier case
+  keeps its tag; an exhaustive `match` on any of the three adds the arms (`InvokeError.describe` /
+  `QueryError.describe` give the sentence, the codecs the document).
+- **New, additive.** `SpaceFault` and `Space.wellFormed`, `Space.isCount`, `Space.maxRepeatCount`
+  (1,000,000); `DeclarationFault` with `DeclarationFault.describe`; `Signature.validate`;
+  `Function.validate` and `Function.isClosed`; `Capability.repeatedAddrs`; `CapabilityCodec.tryEncode` and
+  `CapabilityPipeline.tryEncode` over `Canon.tryRender`.
+- **Registration refuses more (behavioural).** Both registries run one gate (`Capability.admissionFault`):
+  totality, where a repeat now counts only over a capped, non-empty, non-negative `IntRange`
+  (`Space.isCount` — it was "neither `AnyString` nor `SlotTree`", so `RepeatHole(FloatRange(0,
+  infinity))` was total), then `Signature.validate`: an empty range or `Enum []` is `EmptySpace`, a NaN or
+  infinite bound `NonFiniteBound`, two holes at one address `DuplicateHoleAddr`. A repeat over a space
+  that is no count space is no longer `Required` (D104 ties the two), so the `toSchema` / `toJsonSchema`
+  bytes of such a signature move — `toSchema`'s is the `ContentPack.signatureFingerprint` pre-image, so a
+  pack pinned against such a signature fails its version check, which is the check working: that
+  signature can no longer be registered.
+- **The reader is stricter (behavioural).** `CapabilityCodec`'s declaration reader refuses a document
+  whose `"$type"` is absent or not `capability`, and a signature `Signature.validate` refuses;
+  `decodeInvocation` refuses an address given twice; `CapabilityPipeline.decode` refuses an output space
+  `Space.wellFormed` refuses.
+- **An argument names its hole once (behavioural).** `Capability.validateArgs` / `validateArgsAll` refuse a
+  repeated address `DuplicateArg`, first, before any value is read; `CapabilityPipeline.typeCheck` the
+  same, wrapped `PipelineArgRefused`; `Query.validateParams` / `validateParamsAll` / `QueryCodec.decodeArgs`
+  refuse a repeated name `DuplicateParam`. `[a = Null; a = 1]` for a required `a` was ACCEPTED and is now
+  refused.
+- **Applications (behavioural).** A strict `apply` refuses a slot argument that still has open data holes
+  (`SlotArgOpen`, before any binding; `curry` still takes one). `compose` refuses a result
+  `Function.validate` refuses (`IllFormedResult` — an inner hole landing on an outer address is the case).
+  `applyMemo` gates on the join of the function's observed effect and every `SlotArg`'s, so an effecting
+  slot argument bypasses the cache where it was served from it. A pre-229 slot entry with no space is
+  invocable again (through `Function.slotSpaceOf`).
+- **Every `CapabilityPipeline.nodeInvocationKey` moves (behavioural, journalled keys).** The node kind
+  leads the hashed pre-image (`source` / `invoke`), closing the `Source("source", "source", _)` /
+  `Invoke("source", "source", _, [])` collision. A capture journalled under a `0.34.0` key replays as a
+  miss; re-journal. The other hosts' twins gain the field at their next raise.
+- **The wire: `additive`.** Seven documents added (`illFormedCapability` with its four faults,
+  `duplicateArg`, `duplicateParam`); no emitted byte of an existing document moves
+  (`api/wire/Fuaran.Core.Function.txt`, `api/wire/Fuaran.Core.Query.txt`).
+
+**What is proved, and what was found already done.** `proofs/Capability.fst` models the gate clause for
+clause (`is_count`, `space_wf`, `validate_signature`, `validate_decl`, `DuplicateArg`, `SlotArgOpen`,
+`IllFormedResult`) and proves `wf_holes` (distinct addresses ⇒ the data holes' keys are distinct and an
+accepted invocation never meets `NotASlot`, `RequiredHolesUnbound` or `UnknownHoleAddr` in `apply`),
+`invocation_key_deterministic` ported from `Query.fst` and closed by `validate_args_distinct`, and
+`register_refuses_ill_formed`; `proofs/Query.fst` closes its own determinism hypothesis
+(`validate_params_distinct`). The readers premise is restated: the integer reader is production's invariant
+one (Phase 295), and the differential runs under he-IL. Four tasks of the shard had landed before it was
+taken — the culture-invariant `IntRange` reader and the canonical value handed on (Phase 295), `evalFrom`'s
+type-check (Phase 295), and the optional-field decoder for `slotKind` and `nextPageToken` (Phase 310); they
+are pinned by tests here rather than redone. `ParityVectors` pins the integer reader on `-5`, U+2212 `5`,
+` 5`, `+5`, `1e999` and `05` on both pipelines.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

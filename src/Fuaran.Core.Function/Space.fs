@@ -1,7 +1,8 @@
 namespace Fuaran.Core
 
 /// The value domain a hole ranges over (value-space projection is the type system
-/// for holes). `AnyString` and `SlotTree` are the *unbounded* spaces.
+/// for holes). `AnyString` and `SlotTree` are the *unbounded* spaces; only a capped `IntRange` is a
+/// count space a repeat may range over (`Space.isCount`, Phase 307).
 ///
 /// `SlotTree` (Phase 229) is the value space of a tree-typed slot at the scalar invocation seam:
 /// a wire document — a `"kind"`-tagged JSON object, carried as the argument string — whose kind
@@ -25,8 +26,20 @@ type ValueSpace =
     /// admitted by no scalar space.
     | SlotTree of kindConstraint: string option
 
+/// Why a value space is not well-formed (Phase 307) — the two ways a declared space can fail to
+/// mean anything an argument could satisfy or a codec could write back.
+[<RequireQualifiedAccess>]
+type SpaceFault =
+    /// The space admits no value: an `IntRange`, `FloatRange` or `StringLen` whose `lo` exceeds its
+    /// `hi` (a `StringLen` whose `hi` is negative), or an `Enum` with no member.
+    | Empty
+    /// A `FloatRange` bound is NaN or infinite: no JSON number spells it, so no codec can write the
+    /// declaration back, and an infinite bound makes the space unbounded in fact.
+    | NonFinite
+
 /// The value-space operations: the seam's culture-invariant readers, the one canonical spelling of
-/// a value, membership, the sub-space relation, and the space in words for a refusal.
+/// a value, membership, the sub-space relation, well-formedness, and the space in words for a
+/// refusal.
 module Space =
 
     /// The kind tag of a tree argument (Phase 229): `Some kind` when the string is a well-formed
@@ -160,13 +173,42 @@ module Space =
         | SlotTree(Some rk), SlotTree(Some ak) -> rk = ak
         | _ -> false
 
-    /// A space is bounded unless it is `AnyString` or `SlotTree` — the totality criterion for
-    /// repeats (a tree space is no count space, so a repeat over one is refused as non-total).
-    let internal isBounded (space: ValueSpace) : bool =
+    /// The largest count a repeat hole may range over (Phase 307): the declared cap a count space
+    /// must sit under. A repeat's count is how many times a host expands the repeated subtree, so a
+    /// count space is a promise about the work one application can demand; one million is the
+    /// number this package states (DECISIONS D111), and a space above it is refused as non-total
+    /// rather than handed to a host to discover.
+    [<Literal>]
+    let maxRepeatCount = 1000000
+
+    /// Is the space a COUNT space (Phase 307) — the totality criterion for repeats: an `IntRange`
+    /// with `0 <= lo <= hi <= maxRepeatCount`. Every other space is refused as a repeat's count:
+    /// `AnyString` and `SlotTree` are unbounded, an empty range counts nothing, and a `FloatRange`,
+    /// `StringLen` or `Enum` is no count at all. Until Phase 307 the criterion was "neither
+    /// `AnyString` nor `SlotTree`", under which `RepeatHole(FloatRange(0, infinity))` was total.
+    let isCount (space: ValueSpace) : bool =
         match space with
-        | AnyString
-        | SlotTree _ -> false
-        | _ -> true
+        | IntRange(lo, hi) -> 0 <= lo && lo <= hi && hi <= maxRepeatCount
+        | _ -> false
+
+    /// Is the space WELL-FORMED (Phase 307): does it admit at least one value, and can every codec
+    /// write it back? `Error SpaceFault.NonFinite` for a `FloatRange` with a NaN or infinite bound
+    /// (looked for first, since NaN compares false against everything); `Error SpaceFault.Empty`
+    /// for a range whose `lo` exceeds its `hi`, a `StringLen` whose `hi` is negative, or `Enum []`.
+    /// `AnyString` and every `SlotTree` are well-formed. The one space check `Signature.validate`,
+    /// the registries and the decoders run, so a declaration a seam admits has a space a value can
+    /// lie in and a bound JSON can spell.
+    let wellFormed (space: ValueSpace) : Result<unit, SpaceFault> =
+        let finite (f: float) =
+            not (System.Double.IsNaN f || System.Double.IsInfinity f)
+
+        match space with
+        | FloatRange(lo, hi) when not (finite lo && finite hi) -> Error SpaceFault.NonFinite
+        | IntRange(lo, hi) when lo > hi -> Error SpaceFault.Empty
+        | FloatRange(lo, hi) when lo > hi -> Error SpaceFault.Empty
+        | StringLen(lo, hi) when lo > hi || hi < 0 -> Error SpaceFault.Empty
+        | Enum [] -> Error SpaceFault.Empty
+        | _ -> Ok()
 
     /// Values in single quotes, comma-separated — how a refusal names a closed set.
     let internal quoteAll (xs: string list) : string =

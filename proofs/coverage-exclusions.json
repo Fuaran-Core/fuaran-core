@@ -691,15 +691,14 @@
       "members": [
         "Function.applyMemoComposed",
         "Function.bindHandlers",
-        "Function.compose",
         "Function.composedEffect",
+        "Function.isClosed",
         "Function.isTotal",
         "Function.signatureExcluding",
-        "Function.toJsonSchema",
         "Function.toSchema"
       ],
       "class": "measured-elsewhere",
-      "reason": "Function-algebra operations beside the rostered composition and memo laws: composed memo, handler binding, plain composition, totality, signature projections and schema export.",
+      "reason": "Function-algebra operations beside the rostered composition and memo laws: composed memo, handler binding, totality, the closed-tree predicate strict `apply` refuses an open slot argument by (Phase 307), and signature projections. `compose` and `toJsonSchema` left this entry for the ladder at Phase 307 (`capability-register-well-formed`, `capability-wf-holes`).",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {
@@ -732,6 +731,24 @@
       "class": "measured-elsewhere",
       "reason": "The typed reading behind `SigEntry.HoleKind`; the totality check dispatches on it, and the function tests call `isTotal`.",
       "through": "Function.isTotal",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "DeclarationFault.describe"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Renders an admission-gate fault for a reader inside `InvokeError.describe`'s sentence (Phase 307); example-tested with the other refusals.",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.tryEncode",
+        "CapabilityPipeline.tryEncode"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The guarded encodes (Phase 307): `Canon.tryRender` over the document `encode` renders, so `Ok` is exactly `encode`'s string and a non-finite bound is refused; the function tests assert both halves.",
+      "through": "Canon.tryRender",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {

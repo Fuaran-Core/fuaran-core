@@ -2318,7 +2318,7 @@
     {
       "id": "capability-differential",
       "level": "tested",
-      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, an accepted `Deferred` ENVELOPE rendered case for case (Phase 210: the draw reaches a settling, a pending and a failing body, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Since Phase 225 the capture key too: the extracted `invocation_key` agrees with `Capability.invocationKey` byte for byte over invocations drawn from an adversarial alphabet (both symbols of the key encoding, `=`, `#`, empty values), in the escaper case. Agreement is over the pools drawn, never over all inputs.",
+      "claim": "The extracted seam model agrees with the shipped `Function.signature`, `isTotal`, `signatureExcluding`, `apply`, `curry`, `compose`, `composedEffect`, `observedEffect` and `auditEffect` over generated artifacts (`Reference.artw`, the model's node type instantiated at `RNode` so trees cross untranslated) and argument sets, and with `Registry.register`, `enumerate`, `tryFind` and `dispatch` and `Capability.validateArgs` over generated registries and typed invocations — the verdict, an accepted tree or value, an accepted `Deferred` ENVELOPE rendered case for case (Phase 210: the draw reaches a settling, a pending and a failing body, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the effect surfaces, and, per dispatch, an instrumented body on each side that must have run on both or on neither and never past a refusal that is not its own. The go-red blinds the model's int reader and requires it to lose on the space check, on the seam and on the algebra. Since Phase 225 the capture key too: the extracted `invocation_key` agrees with `Capability.invocationKey` byte for byte over invocations drawn from an adversarial alphabet (both symbols of the key encoding, `=`, `#`, empty values), in the escaper case. Since Phase 307 the admission gate too — `Function.validate` against `validate_decl`, registration refusing `IllFormedCapability`, `DuplicateArg`, a strict application refusing `SlotArgOpen` and `compose` refusing `IllFormedResult` — over a draw that reaches negative, empty, NaN, infinite and past-2^53 bounds, a count past the cap, duplicate hole addresses, a hole beneath a slot, an open slot argument, a repeated argument address and the five culture-sensitive integer spellings, with both differentials run under he-IL. Agreement is over the pools drawn, never over all inputs.",
       "phase": "fuaran-core#177",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -2343,12 +2343,12 @@
     {
       "id": "capability-scalar-readers-abstract",
       "level": "assumed",
-      "claim": "THE READERS PREMISE. `Space.validate` reaches for three host functions — `System.Int32.TryParse`, `System.Double.TryParse` against a float range, and `String.Length` — and the model takes them as a `readers` record: the five-constructor space vocabulary and the clause structure of `validate` are modelled, the lexical parsers behind two of the constructors are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format) that the float reader compares against. Every theorem about validation is therefore about the ENVELOPE — which entry a value is checked against, which refusal names it, that the body waits on the answer — and nothing about whether \"12\" is in `[0, 10]`. The differential instantiates the readers at production's own three calls, so the envelope is compared and the parsers are exercised, not modelled. Permanent: modelling `Int32.TryParse` and `Double.TryParse` is a lexical model of two numeral grammars, which is theorem 4's cost and not this theorem's. The witness (`Holes` / `Effect` / `Bind` / `KindTag` / `preorder`) is the model's other parameter and is the standing `lawful-abstract-witness` obligation, not a second row here.",
+      "claim": "THE READERS PREMISE, restated by Phase 307. `Space.validate` and `Space.wellFormed` reach for five host functions — `Space.readInt` (since Phase 295 an optional `-` and decimal digits under the INVARIANT culture, `Json.readInt32`, no `+`, no white space, no culture's own minus sign — it was `System.Int32.TryParse` under the CURRENT culture, which refused plain `-5` under fa-IR, ar-SA and he-IL and accepted U+2212 under sv-SE, nb-NO and fi-FI), `Space.readFloat` against a float range, `String.Length`, `Space.slotKindOf`, and `Space.wellFormed`'s float case (`float_fault`: a NaN or infinite carrier, else an empty range) — and the model takes them as a `readers` record: the space vocabulary, the clause structure of `validate`, `space_wf` and `is_count` are modelled, the lexical parsers are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format). The premise the theorems spend is that each reader is a function of the STRING alone — which production now honours, and the differential holds by running under he-IL, a culture the pre-295 reader got wrong. Every theorem about validation is therefore about the ENVELOPE — which entry a value is checked against, which refusal names it, that the body waits on the answer — and nothing about whether \"12\" is in `[0, 10]`. The differential instantiates the readers at production's own calls (`int_of` through `Space.canonical`), so the envelope is compared and the parsers are exercised, not modelled; `ParityVectors` pins the reader's answer on `-5`, U+2212 `5`, ` 5`, `+5` and `1e999` on both pipelines. Permanent: modelling the two numeral grammars is a lexical model, which is theorem 4's cost and not this theorem's. The witness (`Holes` / `Effect` / `Bind` / `KindTag` / `Children` / `preorder` / the node id) is the model's other parameter and is the standing `lawful-abstract-witness` obligation, not a second row here.",
       "phase": "fuaran-core#177",
       "class": "model-bridge",
       "closes": "permanent",
       "evidence": {
-        "assumption": "the three scalar readers behind Space.validate are host functions the model takes as parameters; a float range's bounds are opaque carriers"
+        "assumption": "the five readers behind Space.validate and Space.wellFormed are host functions of the string alone the model takes as parameters; a float range's bounds are opaque carriers"
       }
     },
     {
@@ -2601,7 +2601,7 @@
     {
       "id": "query-invocation-key-deterministic",
       "level": "proved",
-      "claim": "The Phase 27 capture key reads the declaration through its `Id` ALONE and the arguments through their name-sorted canonical form alone: two declarations sharing an id — whatever else they declare — and two argument lists binding the same DISTINCT names to the same cells in ANY order key identically, under any hash and any int and float renderer, given only that the name comparator is a total order. The order half rests on `sorted_unique`: two name-sorted lists with distinct names holding the same bindings are the same list. The id half needs no premise at all (`invocation_key_id_only`). That the key reads no resolver answer and no clock is NOT a lemma here and is not dressed as one: `invocationKey` is handed neither, so in a pure total function that independence is the function's type. Distinct names are a real hypothesis and not a convenience — `List.sortBy` is stable, so two bindings under ONE name keep the caller's order and the key moves with it.",
+      "claim": "The Phase 27 capture key reads the declaration through its `Id` ALONE and the arguments through their name-sorted canonical form alone: two declarations sharing an id — whatever else they declare — and two argument lists binding the same DISTINCT names to the same cells in ANY order key identically, under any hash and any int and float renderer, given only that the name comparator is a total order. The order half rests on `sorted_unique`: two name-sorted lists with distinct names holding the same bindings are the same list. The id half needs no premise at all (`invocation_key_id_only`). That the key reads no resolver answer and no clock is NOT a lemma here and is not dressed as one: `invocationKey` is handed neither, so in a pure total function that independence is the function's type. Distinct names are a real hypothesis and not a convenience — `List.sortBy` is stable, so two bindings under ONE name keep the caller's order and the key moves with it. Since Phase 307 it is a FACT of every list the seam accepts: `validateParams` refuses a repeated name as `DuplicateParam` before any cell is read (`validate_params_distinct`), so two accepted lists with the same bindings key identically with no hypothesis left (`accepted_invocation_key_deterministic`).",
       "phase": "fuaran-core#187",
       "evidence": {
         "theorem": "invocation_key_deterministic",
@@ -3386,6 +3386,68 @@
           "CapabilityRegistry.register",
           "Function.signature"
         ]
+      }
+    },
+    {
+      "id": "capability-wf-holes",
+      "level": "proved",
+      "claim": "Phase 307, `wf_holes`: over an artifact whose holes have DISTINCT addresses — what `Signature.validate` enforces at every admission (`DuplicateHoleAddr`) — the data holes' addresses are distinct, so `Function.toJsonSchema`'s property keys are, and an invocation `Capability.validateArgs` ACCEPTS over the derived signature, lifted to `apply`'s arguments (a slot's value decoded into a tree, every other value a scalar), never meets `NotASlot`, `RequiredHolesUnbound` or `UnknownHoleAddr` in `Function.apply`: the capability seam and the artifact protocol agree on which arguments an artifact takes. Before Phase 307 two holes at one address were accepted by `validateArgs` and refused `NotASlot` by `apply`. What `apply` may still answer concerns the VALUES and the witness (`ValueOutOfSpace`, `SlotKindMismatch`, `NonTotal`, `SlotArgOpen`, `BindFailed`); that a hole beneath a slot surfaces as the witness's `BindFailed` is the witness contract's, which is why `Function.validate` refuses it (`HoleUnderSlot`) rather than this theorem ruling it out. The walk lemma is `walk_wf`.",
+      "phase": "fuaran-core#307",
+      "evidence": {
+        "theorem": "wf_holes",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Capability.validateArgs",
+          "Function.apply",
+          "Function.toJsonSchema",
+          "Signature.validate"
+        ]
+      }
+    },
+    {
+      "id": "capability-invocation-key-deterministic",
+      "level": "proved",
+      "claim": "Phase 307, `Query.fst`'s determinism theorem ported: `Capability.invocationKey` is a function of the capability and the BINDINGS — two argument lists binding the same distinct addresses to the same values, in any order, key identically (`invocation_key_deterministic`, over `sorted_unique_b` and the fact that the canonical spelling keeps the address and so commutes with the address sort, `sort_map_spell`), given only that the address comparator is a total order. The distinctness hypothesis is the seam's own: `validateArgs` refuses a repeated address as `DuplicateArg` before any value is read (`validate_args_distinct`), so two ACCEPTED invocations with the same bindings key identically with no hypothesis left (`accepted_invocation_key_deterministic`). Before Phase 307 `[a = x; a = y]` and `[a = y; a = x]` were both accepted and keyed apart.",
+      "phase": "fuaran-core#307",
+      "evidence": {
+        "theorem": "accepted_invocation_key_deterministic",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Capability.invocationKey",
+          "Capability.repeatedAddrs",
+          "Capability.validateArgs"
+        ]
+      }
+    },
+    {
+      "id": "capability-register-well-formed",
+      "level": "proved",
+      "claim": "Phase 307: a registry admits only WELL-FORMED capabilities. After the totality check, `CapabilityRegistry.register` refuses a fresh, total capability whose signature `Signature.validate` refuses as `IllFormedCapability` carrying exactly that fault (`register_refuses_ill_formed`), and every capability it admits has a signature the check accepts (`register_admits_well_formed`): distinct addresses, and spaces that admit a value (`EmptySpace` otherwise) with finite bounds (`NonFiniteBound` otherwise). The check reads addresses and spaces and never a name, so the hygiene law survives it, and `compose`, which now runs `Function.validate` over the tree it builds (`IllFormedResult`), is still name-blind (`compose_rename`, through `validate_decl_rename`). Totality reads a repeat's count through `is_count` — a capped, non-empty, non-negative integer range — where it read `is_bounded`, under which a repeat over `FloatRange(0, infinity)` was total.",
+      "phase": "fuaran-core#307",
+      "evidence": {
+        "theorem": "register_refuses_ill_formed",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.register",
+          "Function.compose",
+          "Function.validate",
+          "Signature.validate",
+          "Space.isCount",
+          "Space.wellFormed"
+        ]
+      }
+    },
+    {
+      "id": "capability-body-total",
+      "level": "assumed",
+      "claim": "THE TOTAL-BODY PREMISE (Phase 307). The model's host body is `unit -> deferred v`, a TOTAL function, and every theorem about `invoke` and `dispatch` spends that: the three outcomes, validation before invocation, `invoke_never_ok_failed`. Production's body is an F# closure that may throw, and `Capability.invoke` does not wrap it — an exception propagates to the caller unconverted, because catching every exception would also swallow the ones a host means to escape (cancellation, its own fatal faults). So the theorems are about bodies that RETURN, which is the obligation `Capability.invoke`'s documentation states: report failure by answering `Failed reason`, which the seam turns into `BodyFailed reason`. Nothing samples a throwing body; the obligation is the host's.",
+      "phase": "fuaran-core#307",
+      "class": "premise",
+      "evidence": {
+        "assumption": "a capability's host body returns a Deferred rather than throwing; the seam propagates an exception unconverted"
       }
     },
     {

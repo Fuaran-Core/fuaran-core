@@ -78,6 +78,14 @@ type InvokeError =
     /// repeat holes it names range over an unbounded count space, or an entry projects to no hole
     /// kind. Declared last, so every earlier case keeps its tag.
     | NonTotalCapability of id: string * addrs: string list
+    /// A registration refused because the capability's signature is not a well-formed declaration
+    /// (Phase 307): `Signature.validate`'s first fault — an empty or non-finite space, or two holes
+    /// at one address.
+    | IllFormedCapability of id: string * fault: DeclarationFault
+    /// An invocation binds this address twice (Phase 307). Refused before anything else is read of
+    /// the second binding: one address takes one value, so which one was meant is not a question
+    /// the seam answers, and a capture key over the list would depend on its order.
+    | DuplicateArg of addr: string
 
 /// What a model reads when an invocation is refused (Phase 251). The union names the failure and
 /// carries the alternatives in its fields; `describe` turns a case into one plain sentence that
@@ -130,6 +138,16 @@ module InvokeError =
             + "' cannot be registered, because it is not total: "
             + Space.quoteAll addrs
             + " must each be a repeat over a bounded count, or a declared hole."
+        | IllFormedCapability(id, fault) ->
+            "Refused: the tool '"
+            + id
+            + "' cannot be registered, because its declaration is ill-formed: "
+            + DeclarationFault.describe fault
+            + "."
+        | DuplicateArg addr ->
+            "Refused: argument '"
+            + addr
+            + "' is given more than once. Give each argument once."
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Capability.validateArgsAll`'s answer, so a call with two bad arguments is answered once.
@@ -177,6 +195,36 @@ module Capability =
         | [] -> None
         | addrs -> Some(NonTotalCapability(c.Id, addrs))
 
+    /// THE admission gate both registries run (Phase 307): totality first (`NonTotalCapability`),
+    /// then well-formedness (`Signature.validate`, refused `IllFormedCapability`). `None` admits.
+    let internal admissionFault (c: Capability) : InvokeError option =
+        match totalityFault c with
+        | Some e -> Some e
+        | None ->
+            match Signature.validate c.Signature with
+            | Ok() -> None
+            | Error fault -> Some(IllFormedCapability(c.Id, fault))
+
+    /// The space an argument for this entry is checked against: its own, or — for a slot entry built
+    /// by hand before Phase 229, which carries none — the `SlotTree` of its constraint, so the
+    /// spaceless slot is invocable exactly as a derived one is (Phase 307). An action entry has none.
+    let private argSpace (h: SigEntry) : ValueSpace option = Function.slotSpaceOf h
+
+    /// Every address an argument list binds more than once, at each repeat, in list order (Phase
+    /// 307) — empty exactly when the addresses are distinct. The one duplicate check both seams and
+    /// the pipeline run (`DuplicateArg`, `DuplicateParam`).
+    let repeatedAddrs (args: (string * 'v) list) : string list =
+        args
+        |> List.fold
+            (fun (seen: Set<string>, acc) (addr, _) ->
+                if seen.Contains addr then
+                    seen, addr :: acc
+                else
+                    seen.Add addr, acc)
+            (Set.empty, [])
+        |> snd
+        |> List.rev
+
     /// The Phase 27 determinism label this capability keys its captures on (`"deterministic"` /
     /// `"clock"` / `"random"` / `"network"`).
     let determinismTag (c: Capability) : string = Effect.determinismTag c.Determinism
@@ -214,8 +262,9 @@ module Capability =
         c.Id + "#" + Hash.fnv1a canonical
 
     /// Validate typed `args` (addr → string value) against the capability's signature *before*
-    /// dispatch: every arg must address a declared data hole and lie in its space; every required
-    /// hole must be bound. A slot hole is invocable since Phase 229: its space is `SlotTree`, so its
+    /// dispatch: every arg must address a declared data hole, once (`DuplicateArg` otherwise, Phase
+    /// 307 — so the argument list `invocationKey` keys is one with distinct addresses, the hypothesis
+    /// its determinism rests on), and lie in its space; every required hole must be bound. A slot hole is invocable since Phase 229: its space is `SlotTree`, so its
     /// argument is a wire document (a `"kind"`-tagged object) whose kind satisfies the constraint —
     /// a tree of the wrong kind is `ArgOutOfSpace` naming the addr and the `SlotTree` constraint,
     /// and an argument that is no tree at all (a scalar, a malformed document) is `UninvocableArg`.
@@ -229,6 +278,8 @@ module Capability =
         let declared = holes |> List.map (fun h -> h.Addr)
         let argMap = Map.ofList args
 
+        // 0. every address is bound once (Phase 307): the first repeated address, at its second
+        //    occurrence, is `DuplicateArg`, before any value is read.
         // 1. every arg addresses a declared hole, and that hole takes a scalar value in-space.
         let rec checkArgs =
             function
@@ -237,7 +288,7 @@ module Capability =
                 match holes |> List.tryFind (fun h -> h.Addr = addr) with
                 | None -> Error(UnknownArg(addr, declared))
                 | Some h ->
-                    match h.Space with
+                    match argSpace h with
                     | None -> Error(UninvocableArg addr) // a spaceless (action) hole
                     | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Error(UninvocableArg addr) // no tree
                     | Some space ->
@@ -246,7 +297,9 @@ module Capability =
                         else
                             Error(ArgOutOfSpace(addr, space, value))
 
-        checkArgs args
+        match repeatedAddrs args with
+        | dup :: _ -> Error(DuplicateArg dup)
+        | [] -> checkArgs args
         |> Result.bind (fun () ->
             // 2. every required hole is bound.
             let unbound =
@@ -263,6 +316,13 @@ module Capability =
     /// re-evaluate freely; for a non-`Deterministic` capability the caller journals the realized
     /// value via `OpStream.captureEffect` keyed by `invocationKey` + `determinismTag` (Phase 27),
     /// so the invocation replays exactly. A body failure is a named `BodyFailed`, never a throw.
+    ///
+    /// **The body must be TOTAL (Phase 307).** The seam does not wrap it: a body that throws
+    /// propagates the exception to the caller, unconverted, because catching every exception would
+    /// also catch the ones a host means to escape (cancellation, its own fatal faults). A body
+    /// reports failure by answering `Failed reason`, which is `BodyFailed reason` here. The proved
+    /// model's body is `Tot`, and this obligation is the assumption that ties the two
+    /// (`proofs.json`, `capability-body-total`).
     ///
     /// Since Phase 210 the body answers in the `Deferred` envelope declared above — a body placed on
     /// a `Server` or in a `ClientIsland` cannot settle synchronously, and `Deferred` was put in this
@@ -292,7 +352,7 @@ module Capability =
         match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = addr) with
         | None -> Some(UnknownArg(addr, declared))
         | Some h ->
-            match h.Space with
+            match argSpace h with
             | None -> Some(UninvocableArg addr)
             | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Some(UninvocableArg addr)
             | Some space ->
@@ -301,8 +361,9 @@ module Capability =
                 else
                     Some(ArgOutOfSpace(addr, space, value))
 
-    /// Validate as `validateArgs` does, but answer with EVERY refusal rather than the first: one
-    /// per refused argument, in argument order, then `RequiredArgsUnbound` naming every required
+    /// Validate as `validateArgs` does, but answer with EVERY refusal rather than the first: a
+    /// `DuplicateArg` per repeated address (Phase 307), then one per refused argument, in argument
+    /// order, then `RequiredArgsUnbound` naming every required
     /// hole left out. So a call with two bad arguments is refused naming both, and a model needs one
     /// round trip, not two. The first-failure form is kept, and the two agree by construction of
     /// their order: the head of this list is exactly `validateArgs`'s refusal, and `Ok ()` here is
@@ -311,7 +372,12 @@ module Capability =
         let holes = c.Signature.Holes
         let declared = holes |> List.map (fun h -> h.Addr)
         let argMap = Map.ofList args
-        let faults = args |> List.choose (argFault c declared)
+
+        // Every repeated address first (Phase 307), as `validateArgs` checks it first; then one
+        // refusal per argument, in order.
+        let faults =
+            (repeatedAddrs args |> List.map DuplicateArg)
+            @ (args |> List.choose (argFault c declared))
 
         let unbound =
             holes
@@ -353,7 +419,8 @@ module Capability =
                 | (addr, value) :: rest ->
                     let space =
                         c.Signature.Holes
-                        |> List.tryPick (fun h -> if h.Addr = addr then h.Space else None)
+                        |> List.tryFind (fun h -> h.Addr = addr)
+                        |> Option.bind argSpace
 
                     match typedValue space value with
                     | Some v -> go ((addr, v) :: acc) rest
@@ -400,13 +467,15 @@ module CapabilityRegistry =
     let empty: CapabilityRegistry = { Capabilities = Map.empty }
 
     /// Register a capability — additive, no silent overwrite (a duplicate id is a named error), and
-    /// only a TOTAL one (Phase 295): a capability whose signature carries a repeat over an unbounded
-    /// count is refused `NonTotalCapability`, naming the holes, rather than dispatched.
+    /// only a TOTAL one (Phase 295): a capability whose signature carries a repeat over no count
+    /// space is refused `NonTotalCapability`, naming the holes, rather than dispatched. And only a
+    /// WELL-FORMED one (Phase 307): a signature `Signature.validate` refuses — an empty or
+    /// non-finite space, two holes at one address — is `IllFormedCapability`.
     let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
         if Map.containsKey c.Id r.Capabilities then
             Error(DuplicateCapability c.Id)
         else
-            match Capability.totalityFault c with
+            match Capability.admissionFault c with
             | Some e -> Error e
             | None ->
                 Ok
@@ -604,14 +673,29 @@ module CapabilityCodec =
             Decoder.field "effect" EffectCodec.decoder el
             |> Result.bind (fun eff ->
                 Decoder.field "holes" (Decoder.list entryOf) el
-                |> Result.map (fun holes ->
-                    { Name = name
-                      Holes = holes
-                      Effect = eff })))
+                |> Result.bind (fun holes ->
+                    let sg =
+                        { Name = name
+                          Holes = holes
+                          Effect = eff }
+
+                    // Phase 307: the reader runs the admission check the registries run, so a
+                    // declaration that decodes is one a registry could admit on well-formedness.
+                    match Signature.validate sg with
+                    | Ok() -> Ok sg
+                    | Error fault ->
+                        Error(
+                            DecodeError.under
+                                (PathSegment.Key "holes")
+                                (DecodeError.make
+                                    DecodeCode.OutOfRange
+                                    "a well-formed declaration"
+                                    ("ill-formed signature: " + DeclarationFault.describe fault))
+                        ))))
 
     /// Read a signature object (`name`, `effect`, `holes`) leniently, refusing a hole-kind tag
-    /// outside `HoleKind.tags`; a slot entry written without its space gets `SlotTree` of its
-    /// constraint back.
+    /// outside `HoleKind.tags` and a signature `Signature.validate` refuses (Phase 307); a slot
+    /// entry written without its space gets `SlotTree` of its constraint back.
     let signatureOf (el: JVal) : Result<Signature, string> =
         Decoder.describing signatureOfDetailed el
 
@@ -654,11 +738,21 @@ module CapabilityCodec =
               "determinism", JStr(Effect.determinismTag c.Determinism)
               "placement", placementJson c.Placement ]
 
-    /// `encodeJson` rendered canonically: one capability always renders to the same string.
+    /// `encodeJson` rendered canonically: one capability always renders to the same string. Total;
+    /// over a declaration the admission gate accepts it is exactly `tryEncode`'s `Ok`, and over one
+    /// with a non-finite bound it writes bytes no reader takes back — use `tryEncode` for a
+    /// declaration nothing has validated.
     let encode (c: Capability) : string = Canon.render (encodeJson c)
 
+    /// The GUARDED encode (Phase 307): `Canon.tryRender` of `encodeJson`, so a declaration with a
+    /// non-finite bound or an ill-formed string is refused, naming it, rather than written as bytes
+    /// the decoder would refuse. `Ok` is exactly `encode`'s string.
+    let tryEncode (c: Capability) : Result<string, string> = Canon.tryRender (encodeJson c)
+
     let private decodeJsonDetailed (el: JVal) : Result<Capability, DecodeError> =
-        Decoder.field "id" Decoder.str el
+        // Phase 307: a capability document says so — its `"$type"` is `capability`.
+        Decoder.field "$type" (tagged "not a capability declaration: " [ "capability", () ]) el
+        |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
             Decoder.field "signature" signatureOfDetailed el
             |> Result.bind (fun sg ->
@@ -720,11 +814,36 @@ module CapabilityCodec =
         let arg =
             both (Decoder.field "addr" Decoder.str) (Decoder.field "value" Decoder.str) (fun addr v -> addr, v)
 
+        // Phase 307: one address, one argument — a repeated address is refused here as it is by
+        // `validateArgs` (`DuplicateArg`), at the second occurrence.
+        let distinctArgs (args: (string * string) list) : Result<(string * string) list, DecodeError> =
+            let rec go (seen: Set<string>) (i: int) =
+                function
+                | [] -> Ok args
+                | (addr: string, _) :: rest ->
+                    if seen.Contains addr then
+                        Error(
+                            DecodeError.under
+                                (PathSegment.Key "args")
+                                (DecodeError.under
+                                    (PathSegment.Index i)
+                                    (DecodeError.make
+                                        DecodeCode.OutOfRange
+                                        "each address once"
+                                        ("argument '" + addr + "' is given more than once")))
+                        )
+                    else
+                        go (seen.Add addr) (i + 1) rest
+
+            go Set.empty 0 args
+
         both (Decoder.field "capabilityId" Decoder.str) (Decoder.field "args" (Decoder.list arg)) (fun cid args ->
             cid, args)
+        |> Decoder.andThen (fun (cid, args) -> distinctArgs args |> Result.map (fun a -> cid, a))
 
     /// Read an invocation back as `(capabilityId, args)` in wire order, leniently; argument values are
-    /// read as strings and checked against nothing until `validateArgs`.
+    /// read as strings and checked against nothing until `validateArgs`, but an address given twice
+    /// is refused (Phase 307).
     let decodeInvocation (s: string) : Result<string * (string * string) list, string> =
         Decode.parse s |> Result.bind (Decoder.describing invocationOf)
 
@@ -771,6 +890,24 @@ module CapabilityCodec =
 
     let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
 
+    /// A declaration fault as a wire document (Phase 307), `"$type"`-tagged.
+    let internal faultJson (f: DeclarationFault) : JVal =
+        match f with
+        | EmptySpace(addr, space) -> Canon.typed "emptySpace" [ "addr", JStr addr; "space", SpaceCodec.toJson space ]
+        | NonFiniteBound addr -> Canon.typed "nonFiniteBound" [ "addr", JStr addr ]
+        | DuplicateHoleAddr addr -> Canon.typed "duplicateHoleAddr" [ "addr", JStr addr ]
+        | HoleUnderSlot node -> Canon.typed "holeUnderSlot" [ "node", JStr node ]
+
+    let private faultOf: Decoder<DeclarationFault> =
+        let str name = Decoder.field name Decoder.str
+
+        dispatch
+            "unknown declaration fault: "
+            [ "emptySpace", both (str "addr") (Decoder.field "space" SpaceCodec.decoder) (fun a sp -> EmptySpace(a, sp))
+              "nonFiniteBound", str "addr" |> Decoder.map NonFiniteBound
+              "duplicateHoleAddr", str "addr" |> Decoder.map DuplicateHoleAddr
+              "holeUnderSlot", str "node" |> Decoder.map HoleUnderSlot ]
+
     /// Encode an `InvokeError` to a `JVal` (`"$type"` is the case: `noSuchCapability`, `argOutOfSpace`, …).
     let invokeErrorJson (e: InvokeError) : JVal =
         match e with
@@ -783,6 +920,9 @@ module CapabilityCodec =
         | UninvocableArg addr -> Canon.typed "uninvocableArg" [ "addr", JStr addr ]
         | BodyFailed reason -> Canon.typed "bodyFailed" [ "reason", JStr reason ]
         | NonTotalCapability(id, addrs) -> Canon.typed "nonTotalCapability" [ "id", JStr id; "addrs", strs addrs ]
+        | IllFormedCapability(id, fault) ->
+            Canon.typed "illFormedCapability" [ "id", JStr id; "fault", faultJson fault ]
+        | DuplicateArg addr -> Canon.typed "duplicateArg" [ "addr", JStr addr ]
 
     /// `invokeErrorJson` rendered canonically; `decodeInvokeError` reads it back to the same value.
     let encodeInvokeError (e: InvokeError) : string = Canon.render (invokeErrorJson e)
@@ -809,7 +949,10 @@ module CapabilityCodec =
                   "uninvocableArg", str "addr" |> Decoder.map UninvocableArg
                   "bodyFailed", str "reason" |> Decoder.map BodyFailed
                   "nonTotalCapability",
-                  both (str "id") (strList "addrs") (fun id addrs -> NonTotalCapability(id, addrs)) ]
+                  both (str "id") (strList "addrs") (fun id addrs -> NonTotalCapability(id, addrs))
+                  "illFormedCapability",
+                  both (str "id") (Decoder.field "fault" faultOf) (fun id f -> IllFormedCapability(id, f))
+                  "duplicateArg", str "addr" |> Decoder.map DuplicateArg ]
 
         Decoder.describing invokeError el
 
