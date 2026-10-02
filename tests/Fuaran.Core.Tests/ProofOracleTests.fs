@@ -2255,13 +2255,30 @@ let private tamperedPlanOp (op: PlanOp) : PlanOp =
     | SetShipped i -> Retitle(i, "tampered")
     | AddDep(i, d) -> AddDep(i, d + "!")
 
-/// A production `Dag.T` as the model reads it — `Map.toList`'s own order, which is the order
-/// `Dag.firstBreak` walks; the map KEY beside the node, because production compares the key and
-/// never the node's own `Id` field; and the actor as the string `Actor.encode` produces, which is
-/// the only thing the hash pre-image ever sees of it.
+/// The order `Dag.firstBreak` walks a DAG since Phase 311: the whole DAG's drain (parents first,
+/// the smallest key among the ready nodes), then every node on or below a cycle in key order. Read
+/// off production rather than re-derived: `totalOrderBy` at a constant key is that drain, and where
+/// a cycle leaves nodes unplaced the drain of the rest — which no unplaced node is a parent of — is
+/// the placed prefix.
+let private firstBreakWalk (dag: Dag.T<'Op>) : string list =
+    match Dag.totalOrderBy (fun _ -> 0) dag with
+    | Ok order -> order
+    | Error(Dag.TotalOrderFault.Cyclic unplaced) ->
+        let rest: Dag.T<'Op> =
+            { Nodes = dag.Nodes |> Map.filter (fun k _ -> not (List.contains k unplaced)) }
+
+        (match Dag.totalOrderBy (fun _ -> 0) rest with
+         | Ok order -> order
+         | Error _ -> [])
+        @ unplaced
+
+/// A production `Dag.T` as the model reads it — in the order `Dag.firstBreak` walks
+/// (`firstBreakWalk`; `Map.toList`'s id order until Phase 311); the map KEY beside the node,
+/// because production compares the key and never the node's own `Id` field; and the actor as the
+/// string `Actor.encode` produces, which is the only thing the hash pre-image ever sees of it.
 let private toChainEntries (dag: Dag.T<'Op>) : Chain.entry<'Op> list =
-    dag.Nodes
-    |> Map.toList
+    firstBreakWalk dag
+    |> List.map (fun k -> k, dag.Nodes.[k])
     |> List.map (fun (k, n) ->
         { Chain.ekey = k
           Chain.enode =
@@ -2466,12 +2483,38 @@ let private dagDifferential
         if compare "none" dag = DagIntact then
             t <- { t with Intact = t.Intact + 1 }
 
-        for (what, tampered) in dagTampers otherOp dag do
+        let singles = dagTampers otherOp dag
+
+        for (what, tampered) in singles do
             let p = compare what tampered
             t <- { t with Tampers = t.Tampers + 1 }
 
             if p <> DagIntact then
                 t <- { t with Detected = t.Detected + 1 }
+
+        // Phase 311: TWO tampers at once, so the walkers must agree on WHICH break comes first —
+        // production names the earliest in its walk, and the model is handed that walk.
+        let changedKey (d: Dag.T<'Op>) =
+            d.Nodes
+            |> Map.toList
+            |> List.tryFind (fun (k, n) ->
+                match Map.tryFind k dag.Nodes with
+                | Some o -> o.Parents <> n.Parents || o.Actor <> n.Actor || w.Encode o.Op <> w.Encode n.Op
+                | None -> true)
+            |> Option.map fst
+
+        for ((w1, d1), (w2, d2)) in List.pairwise singles do
+            match changedKey d1, changedKey d2 with
+            | Some k1, Some k2 when k1 <> k2 && d1.Nodes.ContainsKey k1 && d2.Nodes.ContainsKey k2 ->
+                let both: Dag.T<'Op> =
+                    { Nodes = dag.Nodes |> Map.add k1 d1.Nodes.[k1] |> Map.add k2 d2.Nodes.[k2] }
+
+                let p = compare (w1 + " and " + w2) both
+                t <- { t with Tampers = t.Tampers + 1 }
+
+                if p <> DagIntact then
+                    t <- { t with Detected = t.Detected + 1 }
+            | _ -> ()
 
     t
 

@@ -3938,6 +3938,58 @@ for a removal or a move sees the parent in it now.
 and `PropagationError` gains no case. The behaviour change is a superset: every id the old functions
 named is still named.
 
+### Lanes and a whole-DAG total order, with the multi-parent primitives (Phase 311, DECISIONS.md D109) — ADDITIVE: new types and functions beside unchanged ones; `firstBreak` names the earliest of several breaks
+
+Everything below is new in `Fuaran.Core.OpStream.Dag` unless named otherwise; no existing type gains a
+case or a field, and no existing function is retyped.
+
+- **Multi-parent primitives.** `Dag.appendOn hashFn w actor op parents dag` — a node over any number of
+  parents (`[]` genesis); `append p` (non-empty `p`) and `merge l r` are now written over it, byte for
+  byte. `Dag.mergeAll` — `appendOn` over the heads deduplicated and sorted, so the convergence of a head
+  set (its id and its stored parents) is a function of the set. `Dag.nodeId` — the content id, public.
+  `Dag.mergeWith hashFn w actor script left right` — a merge whose reconciliation is a script: the merge
+  node carries the first op, a chain the rest; the recorded ids are returned (an empty script records
+  nothing). `Dag.commonBase` / `Reach.commonBase` — the N-way base (`mergeBase`'s rule over every head at
+  once, order-free). `Dag.conflictsOfNodes` / `conflictsOfHeads` — the merge-conflict report with nodes
+  where ops were (`MergeConflict<DagNode<'Op>>`; the Phase 340 `SlotClash` shape is carried unchanged).
+- **The whole-DAG order.** `Dag.totalOrderBy key dag` — the Kahn drain over every node, the frontier
+  taken smallest `(key node, id)` first; `TotalOrderFault.Cyclic unplaced`. `Dag.ranks` — the Lamport
+  depth. `Dag.replayAllBy key w state0 dag` — `ReplayAllFault` (`Cyclic`, `Rejected`).
+- **The lane store.** `Dag.Loaded<'Op> = { Dag; LaneOf }`; `Dag.loadLanes` (one text per lane, any
+  order; `LaneLoadFault`: `DuplicateLane`, `Unparseable`, `Collision`), `lanesToJsonl` /
+  `tryLanesToJsonl`, `verifyLanes` (`LaneBreak = { Lane; Break }`), `laneCollisions` (a lane holding two
+  incomparable nodes, with its tips), `disjointRoots` (heads sharing no history, with their roots),
+  `appendOnLane`, `laneKey` (the default key, `(lane, seq, id)`), `totalOrder`, `replayAll`.
+- **Parity with the linear stream.** `Dag.rehashWith fromHash toHash w dag` / `rehashLanes` — verify
+  under `fromHash` (`RehashFault.Unverified`), re-mint in topological order, return the old-to-new id map
+  (`RehashFault.Cyclic`, `Collision`). `OpStream.attestationSubject` / `attestHeadAs` /
+  `verifyAttestationAs` and `Dag.attestHead` / `Dag.verifyAttestation` — an attestation bound to the
+  party that makes it (`DagAttestFault.UnknownNode`). `Dag.prunable reach roots` — the nodes no retained
+  root needs, named and never removed. `Dag.appendIf` — compare-and-append over the head set
+  (`DagAppendIfRejection`: `StaleHeads`, `Fault`, `Domain`), with nothing replayed.
+- **`Dag.firstBreak` scans topologically.** The whole DAG's drain, then any node on or below a cycle in
+  id order — where it scanned `Map.toList`. Which nodes are faulty and `verifyDag`'s verdict are
+  unchanged; where a DAG holds SEVERAL faults, the one named is now the earliest in its history, and
+  `fromJsonlVerified`'s message names that node. `verifyLanes` reads it.
+- **`Conformance.laneLaws`** (new family, `Guarded [ "lane shape" ]`): load ≡ union, order determinism
+  under lane permutation, a linear extension at any key, collision refusal, `mergeAll` ≡ folded binary
+  merges, one common base, the `rehashWith` round trip, `verifyLanes` naming the lane, retention.
+- **Proofs**: `append_on_is_merge_all` and `merge_all_set_determined` (`proofs/Chain.fst` section 5b);
+  `by_key_total`, `total_order_by_is_a_linear_extension`, `total_order_by_total_on_acyclic` and
+  `total_order_by_deterministic` (`proofs/DagFold.fst` section 13.13). `proofs.json` adds four rows and
+  restates `dangling-parent-policy` (which node production names is order-invariant, and not modelled).
+
+**What a consumer does.** Nothing is required. A store that loads lane files its own way can load them
+with `loadLanes` and order them with `totalOrderBy` at its own key; a consumer that recomputed the
+content id of an N-parent node calls `nodeId` or builds the node with `appendOn` / `mergeAll`; one that
+built N−1 binary merges to converge N heads can write one `mergeAll` node (a different id from its old
+merges, the same history beneath it). A consumer that matched `fromJsonlVerified`'s error text against a
+specific node of a DAG with more than one fault reads the earliest one now.
+
+**Class: additive** — the three baselines gain members only (`api/Fuaran.Core.OpStream.Dag.txt`,
+`api/Fuaran.Core.OpStream.txt`, `api/Fuaran.Core.Conformance.txt`). The one behaviour change is
+`firstBreak`'s choice among several breaks; its verdict and every single-fault answer are unchanged.
+
 ## 0.33.0 — released 2026-10-01 as `v0.33.0`
 
 **Release record — the receiving gate (Phase 276): GREEN, both legs, against the candidate.**

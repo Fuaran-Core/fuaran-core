@@ -95,7 +95,7 @@ let private rankLaneSort (loaded: Dag.Loaded<'Op>) : string list =
     |> List.map fst
     |> List.sortBy (fun id -> ranks.[id], loaded.LaneOf.[id], id)
 
-/// A downstream modelling session's order: a Kahn drain taking the smallest (domain rank, id) each
+/// A downstream session's order by a domain rank: a Kahn drain taking the smallest (domain rank, id) each
 /// step, the ready list re-sorted after every push.
 let private domainRankDrain (rankOf: 'Op -> int) (dag: Dag.T<'Op>) : string list =
     let parentsIn (n: DagNode<'Op>) =
@@ -163,7 +163,7 @@ let private fixtureStore () : Dag.Loaded<CounterOp> =
     write "beta" (Inc 9) (tip "beta")
     store
 
-// ---- a modelling-shaped domain for the replay-order case (the "kill that folds first") ----
+// ---- a fork-and-kill domain for the replay-order case (the "kill that folds first") ----
 
 type ModelOp =
     | Seed
@@ -412,7 +412,7 @@ let tests =
                         (rankLaneSort loaded)
                         "app"
 
-                    // the modelling session: (domain rank, id), a drain
+                    // the session with a domain rank: (domain rank, id), a drain
                     let opRank (op: CounterOp) =
                         match op with
                         | Inc _ -> 0
@@ -421,7 +421,7 @@ let tests =
                     Expect.equal
                         (Dag.totalOrderBy (fun (n: DagNode<CounterOp>) -> opRank n.Op) dag |> ok)
                         (domainRankDrain opRank dag)
-                        "modelling"
+                        "domain rank"
 
                 testCase "ranks are the Lamport depth"
                 <| fun _ ->
@@ -760,37 +760,40 @@ let tests =
                         Dag.appendIf h sw [] x (Inc 1) 0 Dag.empty |> ok |> (fun (s, i, d) -> (s, i), d)
 
                     Expect.equal (fst g0) 1 "genesis on an empty DAG"
-                    Expect.equal (Dag.heads e) [ snd g0 ] "one node" ]
+                    Expect.equal (Dag.heads e) [ snd g0 ] "one node" ] ]
 
-          testList
-              "Conformance.laneLaws"
-              [ testCase "laneLaws certify the reference stream witness green"
-                <| fun _ ->
-                    let results =
-                        Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen h 311 100
+/// The `Conformance.laneLaws` cases — the suite `proofs.json`'s Phase 311 tested row cites.
+[<Tests>]
+let laneLawTests =
+    testList
+        "Conformance.laneLaws"
+        [ testCase "laneLaws certify the reference stream witness green"
+          <| fun _ ->
+              let results =
+                  Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen h 311 100
 
-                    Expect.equal (List.length results) 10 "nine laws and the lane-shape guard"
+              Expect.equal (List.length results) 10 "nine laws and the lane-shape guard"
 
-                    for r in results do
-                        Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+              for r in results do
+                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
 
-                testCase "laneLaws under SHA-256 certify green too"
-                <| fun _ ->
-                    let results =
-                        Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.sha256Hash 3110 60
+          testCase "laneLaws under SHA-256 certify green too"
+          <| fun _ ->
+              let results =
+                  Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.sha256Hash 3110 60
 
-                    for r in results do
-                        Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+              for r in results do
+                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
 
-                testCase "a hash that answers one id reds the lane-shape guard rather than reading green"
-                <| fun _ ->
-                    let oneId: HashFn = fun _ _ -> "one"
+          testCase "a hash that answers one id reds the lane-shape guard rather than reading green"
+          <| fun _ ->
+              let oneId: HashFn = fun _ _ -> "one"
 
-                    let results =
-                        Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen oneId 4311 40
+              let results =
+                  Conformance.laneLaws ConformanceTests.sw ConformanceTests.streamGen oneId 4311 40
 
-                    let guard =
-                        results
-                        |> List.find (fun r -> r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.laneLaws"))
+              let guard =
+                  results
+                  |> List.find (fun r -> r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.laneLaws"))
 
-                    Expect.isFalse guard.Passed "the lane-shape guard is red" ] ]
+              Expect.isFalse guard.Passed "the lane-shape guard is red" ]

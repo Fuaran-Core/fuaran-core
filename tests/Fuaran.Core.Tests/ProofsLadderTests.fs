@@ -782,6 +782,9 @@ let private realCases () =
     // Phase 304: the old-document evolution differential, evidenced by the hosts that decode old
     // documents rather than by the oracle.
     |> Set.union (caseNames IdlStabilityClassTests.evolutionDifferential |> Set.ofList)
+    // Phase 311: the lane store's tested row, evidenced by `Conformance.laneLaws`, whose cases live in
+    // `LaneTests`.
+    |> Set.union (caseNames LaneTests.laneLawTests |> Set.ofList)
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.

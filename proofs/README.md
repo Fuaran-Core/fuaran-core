@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 263 claims — 188 proved across 27 models, 44 tested, 29 assumed (6 `domain-obligation`, 19 `model-bridge`, 4 `premise`), 2 policy.
+**The ladder, counted:** 267 claims — 191 proved across 27 models, 45 tested, 29 assumed (6 `domain-obligation`, 19 `model-bridge`, 4 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -219,9 +219,10 @@ and a theorem about "the drain" that did not say which would be a theorem about 
 `drain_policies_agree` proves the two are the same function on a set with no dangling parent — so
 the fold path pays nothing for the refusing one's existence — and `drain_refusal_characterised`
 proves the refusal fires exactly when a parent lies outside. The refusal names the SMALLEST such id
-rather than the first in the work list, which is not a liberty: `firstBreak` scans `Map.toList`, in
-id order, and its docstring says so, so the refusal is order-invariant on both sides and
-`drain_deterministic` covers it. What the model does NOT carry is the refusal's diagnostic payload
+rather than the first in the work list, which is not a liberty: it makes the refusal order-invariant,
+and `drain_deterministic` covers it. `firstBreak` is order-invariant too — it scanned `Map.toList`,
+in id order, until Phase 311, and scans the whole DAG's drain since, naming the EARLIEST faulty
+node — and which node production names among several is not modelled. What the model does NOT carry is the refusal's diagnostic payload
 — `firstBreak` reports the missing parent beside the node, and the node determines the parent, so
 the model names the node and stops there.
 
