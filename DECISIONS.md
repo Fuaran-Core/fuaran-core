@@ -84,12 +84,15 @@ alone would break the extraction differential against the model that proves reco
 applyable script at a well-formed tree, `normalize_idempotent` and `normalize_never_longer`
 unconditionally, with the three uniqueness-dependent rows (move/move, reorder/reorder,
 rewrite/remove) proved extensionally through `Preservation`'s per-node views and `TreeDiff.tree_ext`,
-and the reason the law is conditional pinned as `cancellation_can_admit_a_refused_script`. The other
-two theorems — the content-aware run theorem and `merged_applies_and_order_free` — each need an
-induction restated over a model this repository does not yet have; their bridges ship now
-(`ContentDiffTests`), the pre-fix counterexample is proved, and the claims stay on the README's
-not-claimed list rather than becoming assumed rows (a not-claimed item is the absence of a row) until
-the re-open reaches them.
+and the reason the law is conditional pinned as `cancellation_can_admit_a_refused_script`.
+`merged_applies_and_order_free` is PROVED too (`Arbitrate.fst` section 11): at a well-formed base the
+merged script applies and every order of the accepted set reaches the same tree, read off
+`DagFold.replay_perm` at `Skeleton`'s instantiation with the accepted scripts as lanes — and the `wf
+base` hypothesis is exactly what D103.4's refusal makes true of every base production arbitrates. The
+one theorem still open is the content-aware run theorem, which needs section 10's reconstruction
+induction restated over `to_ops_contained_with`; its bridge ships now (`ContentDiffTests`), the
+pre-fix counterexample is proved, and the claim stays on the README's not-claimed list rather than
+becoming an assumed row (a not-claimed item is the absence of a row) until the re-open reaches it.
 
 ## 2026-10-01 — D102: a ladder row states what it is true OF, and a premise production violates is either a refusal or a row that says so
 

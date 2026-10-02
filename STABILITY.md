@@ -2430,7 +2430,11 @@ regenerated). Rides the draft.** The ruling behind each change is DECISIONS D103
   `Tree.wellFormed` rejects**: `Accepted = []`, `MergedScript = []`, every proposal in pinned order
   `Inapplicable(0, DuplicateId d)` with `d` the first repeated id. A NEW refusal where the pair used to be
   arbitrated — and, on such a base, arbitrated unsoundly (two accepted scripts whose orders disagreed).
-  `arbitrateWith` is unchanged: a domain composing it checks its own base.
+  `arbitrateWith` is unchanged: a domain composing it checks its own base. What the guard protects is
+  now PROVED on the other side of it (`proofs/Arbitrate.fst` section 11, added when the phase was
+  re-opened to finish): at a well-formed base the `MergedScript` applies and the accepted scripts reach
+  the same tree in every order (`merged_applies_and_order_free`; `arbitration-merged-order-free` in
+  `proofs.json`).
 - **New: `Tree.Index.buildWith encode` / `isFreshForWith encode`** — the content-aware stamp. The plain
   `isFreshFor` stays as it was and its doc now says what it cannot see: a content-only `UpdateNode`.
 - **Not changed, by ruling (D103):** `validateUpdate`'s containment check, and the structural diff's

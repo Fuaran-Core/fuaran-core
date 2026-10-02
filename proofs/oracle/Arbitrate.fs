@@ -357,6 +357,15 @@ let mx_3 : proposal = {pid = (Prims.parse_int "3"); holder = "three"; script = (
 
 let mx_1_last : proposal = {pid = (Prims.parse_int "4"); holder = "one"; script = mx_both}
 
+
+let rec scripts_of : Prims.list<proposal>  ->  Prims.list<Prims.list<TreeOps.op>> = (fun ( ps  :  Prims.list<proposal> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| (p)::r -> begin
+     (p.script)::(scripts_of r)
+     end))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 

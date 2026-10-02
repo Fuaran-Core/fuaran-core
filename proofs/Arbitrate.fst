@@ -698,6 +698,176 @@ let maximal_is_not_maximum ()
     assert_norm ((arbitrate mx_base [mx_1_last; mx_2; mx_3]).accepted == [mx_2; mx_3])
 
 (* ======================================================================================
+   11. THEOREM 4 — the merged script APPLIES at a well-formed base, and the accepted set
+       reaches the same tree under every order (Phase 305).
+
+       `arbitrate`'s doc comment: "by footprint soundness its scripts apply confluently in ANY
+       order". Section 5's `accepted_pair_commutes` is the PAIR; this is the N-script statement
+       the comment makes, and it is read off `DagFold.replay_perm` at `Skeleton`'s
+       instantiation rather than proved again: the accepted scripts are the fold's LANES, the
+       pairwise independence theorem 1 proves is an EMPTY conflict sweep over them
+       (`all_conflicts_nil`), every lane applies at the base (`accepted_all_applicable`), the
+       domain hypothesis is `TreeOps.op_independence_diamond`, and at a well-formed base the
+       guarded `wapply` the composite folds IS `apply` (`replay_wapply_is_apply_all`, because
+       every accepted step keeps `wf` — `Preservation.apply_preserves_wf`, cited rather than
+       opened). So the fold's replay of the concatenation is `apply_all` of `merged`.
+
+       WHY `wf base` IS THE RIGHT HYPOTHESIS AND NOT A GAP. Below it the pair diamond is not
+       available (`TreeOps.wstep` is stated at `wf`), and since Phase 305 production does not
+       arbitrate there at all: `Arbitration.arbitrate` checks `Tree.wellFormed` on the base
+       first and refuses every proposal as `Inapplicable(0, DuplicateId d)` (DECISIONS.md
+       D103.4). The hypothesis is therefore a property of every base the shipped function lets
+       through, which is D102's first form, and the model keeps the pre-305 clause-for-clause
+       shape it has always had — the refusal is a production guard in front of the function
+       this module models, not a change to it.
+   ====================================================================================== *)
+
+(* The accepted scripts as the fold's lanes. *)
+let rec scripts_of (ps:list proposal) : Tot (list (list op)) =
+  match ps with
+  | [] -> []
+  | p :: r -> p.script :: scripts_of r
+
+(* `merged` IS the concatenation of the lanes. *)
+let rec collect_is_concat (ps:list proposal)
+  : Lemma (ensures collect_scripts ps == concat (scripts_of ps))
+  = match ps with
+    | [] -> ()
+    | _ :: r -> collect_is_concat r
+
+(* From a well-formed tree the guarded replay is `apply_all`: an accepted step keeps `wf`, so
+   neither of `wapply`'s guards ever fires. *)
+let rec replay_wapply_is_apply_all (os:list op) (t:tree)
+  : Lemma (requires wf t) (ensures replay wapply os t == apply_all os t) (decreases os)
+  = match os with
+    | [] -> ()
+    | o :: r ->
+      Preservation.apply_preserves_wf o t;
+      (match apply o t with
+       | Ok t' -> replay_wapply_is_apply_all r t'
+       | Error _ -> ())
+
+(* ---- pairwise independence of the proposals is an empty conflict sweep over their scripts ---- *)
+
+(* Independence of a script's union footprint descends to each of its ops. *)
+let rec fp_all_independent_mem (x:list op) (fb:footprint) (a:op)
+  : Lemma (requires independent (fp_all x) fb /\ mem a x) (ensures independent (op_fp a) fb)
+  = match x with
+    | [] -> ()
+    | o :: r ->
+      independent_union_left (op_fp o) (fp_all r) fb;
+      if o = a then () else fp_all_independent_mem r fb a
+
+let rec conflicts_with_nil (a:op) (y:list op)
+  : Lemma (requires forall (b:op). mem b y ==> independent (op_fp a) (op_fp b))
+          (ensures conflicts_with op_fp a y == [])
+  = match y with
+    | [] -> ()
+    | b :: t -> pair_conflicts_nil_iff op_fp a b; conflicts_with_nil a t
+
+let rec conflicts_nil_of_independent (x y:list op)
+  : Lemma (requires independent (fp_all x) (fp_all y)) (ensures conflicts op_fp x y == [])
+  = match x with
+    | [] -> ()
+    | a :: t ->
+      independent_union_left (op_fp a) (fp_all t) (fp_all y);
+      let aux (b:op) : Lemma (mem b y ==> independent (op_fp a) (op_fp b)) =
+        if mem b y then begin
+          independent_sym (op_fp a) (fp_all y);
+          fp_all_independent_mem y (op_fp a) b;
+          independent_sym (op_fp b) (op_fp a)
+        end
+        else ()
+      in
+      FStar.Classical.forall_intro aux;
+      conflicts_with_nil a y;
+      conflicts_nil_of_independent t y
+
+let rec lane_conflicts_nil (d:list op) (rest:list proposal)
+  : Lemma (requires all_independent (fp_all d) rest)
+          (ensures lane_conflicts op_fp d (scripts_of rest) == [])
+  = match rest with
+    | [] -> ()
+    | p :: r -> conflicts_nil_of_independent d p.script; lane_conflicts_nil d r
+
+let rec all_conflicts_nil (ps:list proposal)
+  : Lemma (requires pairwise_independent ps) (ensures all_conflicts op_fp (scripts_of ps) == [])
+  = match ps with
+    | [] -> ()
+    | p :: r -> lane_conflicts_nil p.script r; all_conflicts_nil r
+
+(* ---- every accepted lane applies at the base, as the fold reads it ---- *)
+
+let rec lanes_apply_of_applicable (base:tree) (ps:list proposal)
+  : Lemma (requires wf base /\ all_applicable base ps)
+          (ensures lanes_apply wapply (scripts_of ps) base)
+  = match ps with
+    | [] -> ()
+    | p :: r ->
+      can_script_is_apply_all 0 p.script base;
+      replay_wapply_is_apply_all p.script base;
+      lanes_apply_of_applicable base r
+
+(* ---- the concatenation of a conflict-free, applying lane set applies ---- *)
+
+let app_nil_both (#a:Type) (l m:list a)
+  : Lemma (requires app l m == []) (ensures l == [] /\ m == [])
+  = match l with
+    | [] -> ()
+    | _ :: _ -> ()
+
+let rec concat_applies (ls:list (list op)) (s:tree)
+  : Lemma (requires independence_diamond op_fp wapply /\
+                    all_conflicts op_fp ls == [] /\ lanes_apply wapply ls s)
+          (ensures Ok? (replay wapply (concat ls) s)) (decreases ls)
+  = match ls with
+    | [] -> ()
+    | d :: rest ->
+      app_nil_both (lane_conflicts op_fp d rest) (all_conflicts op_fp rest);
+      (match replay wapply d s with
+       | Ok s1 ->
+         lanes_apply_after wapply op_fp d rest s s1;
+         concat_applies rest s1;
+         replay_app wapply d (concat rest) s
+       | Error _ -> ())
+
+(* ---- a permutation of the proposals is a permutation of their scripts ---- *)
+
+[@@ noextract_to "FSharp"]  (* proof-only, as `DagFold.perm` is *)
+let rec perm_scripts (l1 l2:list proposal) (p:perm proposal l1 l2)
+  : Tot (perm (list op) (scripts_of l1) (scripts_of l2)) (decreases p)
+  = match p with
+    | PNil -> PNil
+    | PSkip x m1 m2 p' -> PSkip x.script (scripts_of m1) (scripts_of m2) (perm_scripts m1 m2 p')
+    | PSwap x y l -> PSwap x.script y.script (scripts_of l)
+    | PTrans m1 m2 m3 p12 p23 ->
+      PTrans (scripts_of m1) (scripts_of m2) (scripts_of m3)
+             (perm_scripts m1 m2 p12) (perm_scripts m2 m3 p23)
+
+(* THEOREM 4. At a well-formed base the merged script applies, and applying the accepted
+   proposals' scripts in ANY order reaches the tree it reaches — so no order of the accepted
+   set is refused, and none reaches a different tree. *)
+let merged_applies_and_order_free (base:tree) (ps:list proposal)
+                                  (order:list proposal) (p:perm proposal (arbitrate base ps).accepted order)
+  : Lemma (requires wf base)
+          (ensures (let a = arbitrate base ps in
+                    a.merged == collect_scripts a.accepted /\
+                    Ok? (apply_all a.merged base) /\
+                    apply_all (collect_scripts order) base == apply_all a.merged base))
+  = let a = arbitrate base ps in
+    accepted_pairwise_independent base ps;
+    accepted_all_applicable base ps;
+    op_independence_diamond ();
+    all_conflicts_nil a.accepted;
+    lanes_apply_of_applicable base a.accepted;
+    concat_applies (scripts_of a.accepted) base;
+    replay_perm wapply op_fp (scripts_of a.accepted) (scripts_of order) (perm_scripts a.accepted order p) base;
+    collect_is_concat a.accepted;
+    collect_is_concat order;
+    replay_wapply_is_apply_all (concat (scripts_of a.accepted)) base;
+    replay_wapply_is_apply_all (concat (scripts_of order)) base
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing

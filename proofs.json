@@ -655,10 +655,21 @@
     {
       "id": "arbitration-accepted-pairwise-independent",
       "level": "proved",
-      "claim": "`Arbitration.arbitrate`'s accepted set is pairwise `Ops.independent`, for every base tree and every proposal list — duplicates, inapplicable scripts and all; the theorem carries no hypothesis. Pairwise is POSITIONAL (every member against every later one, which with `independent`'s symmetry is the whole relation), because a proposal need not be independent of itself and a list may carry one value twice. `accepted_pair_commutes` is what that buys: any two accepted proposals, read as the single ops `Batch a.script` and `Batch b.script`, both apply at the base, and at a well-formed base each applies after the other and the two orders reach the same tree — `tree-independence-diamond` reaching the accepted set, which is the doc comment's \"by footprint soundness, confluent in any order\" for a pair. The N-script any-order claim is `skeleton-fold-confluence`'s, whose hypothesis this discharges; it is sampled end to end by `arbitrationLaws`' confluence law and is not restated here.",
+      "claim": "`Arbitration.arbitrate`'s accepted set is pairwise `Ops.independent`, for every base tree and every proposal list — duplicates, inapplicable scripts and all; the theorem carries no hypothesis. Pairwise is POSITIONAL (every member against every later one, which with `independent`'s symmetry is the whole relation), because a proposal need not be independent of itself and a list may carry one value twice. `accepted_pair_commutes` is what that buys: any two accepted proposals, read as the single ops `Batch a.script` and `Batch b.script`, both apply at the base, and at a well-formed base each applies after the other and the two orders reach the same tree — `tree-independence-diamond` reaching the accepted set, which is the doc comment's \"by footprint soundness, confluent in any order\" for a pair. The N-script any-order claim is `skeleton-fold-confluence`'s, whose hypothesis this discharges; it is sampled end to end by `arbitrationLaws`' confluence law, and since Phase 305 it is restated at the accepted set as `arbitration-merged-order-free`.",
       "phase": "fuaran-core#157",
       "evidence": {
         "theorem": "accepted_pairwise_independent",
+        "model": "proofs/Arbitrate.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "arbitration-merged-order-free",
+      "level": "proved",
+      "claim": "At a well-formed base, `Arbitration.arbitrate`'s `MergedScript` — the accepted scripts concatenated in pinned order — APPLIES, and applying the accepted proposals' scripts in ANY order reaches the same tree: no order of the accepted set is refused and none reaches a different tree, which is the doc comment's \"by footprint soundness its scripts apply confluently in ANY order\" for N scripts rather than for a pair (`arbitration-accepted-pairwise-independent` is the pair). Read off `DagFold.replay_perm` at `Skeleton`'s instantiation rather than proved again: the accepted scripts are the fold's lanes, theorem 1's pairwise independence is an empty conflict sweep over them (`all_conflicts_nil`, through `independent_union_left` — independence of a script's union footprint descends to every op), every lane applies at the base (`accepted_all_applicable`), the domain hypothesis is `op_independence_diamond`, and at a well-formed base the guarded `wapply` the composite folds IS `apply` because every accepted step keeps `wf` (`replay_wapply_is_apply_all`, citing `Preservation.apply_preserves_wf`). The hypothesis is a property of every base the shipped function lets through (D102's first form): since Phase 305 `arbitrate` refuses a base `Tree.wellFormed` rejects before arbitrating anything (D103.4), so below `wf` the merged script is empty; the model keeps its clause-for-clause shape and the refusal is the production guard in front of it.",
+      "phase": "fuaran-core#305",
+      "evidence": {
+        "theorem": "merged_applies_and_order_free",
         "model": "proofs/Arbitrate.fst",
         "prover": "proofs/fstar-pin.json"
       }

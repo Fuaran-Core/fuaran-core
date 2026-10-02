@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 245 claims — 175 proved across 25 models, 41 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 246 claims — 176 proved across 25 models, 41 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -5615,7 +5615,25 @@ Three theorems, over any base tree and any proposal list:
   and the two orders reach the same tree — theorem 2's `tree_independence_diamond`, reaching the
   accepted set. That is "by footprint soundness, confluent in any order" for a pair, as a theorem.
   The N-script statement is theorem 2's `skeleton_fold_confluence`, whose hypothesis this
-  discharges; it is not restated.
+  discharges — and since Phase 305 it is restated at the accepted set, below.
+- **`merged_applies_and_order_free`** (Phase 305, section 11). At a WELL-FORMED base the
+  `MergedScript` — the accepted scripts concatenated in pinned order — applies, and applying the
+  accepted proposals' scripts in ANY order reaches the tree it reaches: no order of the accepted
+  set is refused and none reaches a different tree. It is read off `DagFold.replay_perm` at
+  `Skeleton`'s instantiation rather than proved again: the accepted scripts are the fold's lanes;
+  theorem 1's pairwise independence is an EMPTY conflict sweep over them (`all_conflicts_nil` —
+  independence of a script's union footprint descends to each op, `independent_union_left`, and
+  an independent op pair has no `pair_conflicts`); every lane applies at the base
+  (`accepted_all_applicable`); the domain hypothesis is `op_independence_diamond`; and at a
+  well-formed base the guarded `wapply` the composite folds IS `apply`, because every accepted
+  step keeps `wf` (`replay_wapply_is_apply_all`, citing `Preservation.apply_preserves_wf` — the
+  one citation outside `DagFold` and `TreeOps` this module makes). Why `wf base` is the right
+  hypothesis and not a gap: below it the pair diamond is not available, and since Phase 305
+  production does not arbitrate there at all — `Arbitration.arbitrate` refuses a base
+  `Tree.wellFormed` rejects as `Inapplicable(0, DuplicateId d)` for every proposal (D103.4) — so
+  the hypothesis is a property of every base the shipped function lets through (D102's first
+  form). The model keeps its clause-for-clause shape; the refusal is a production guard in front
+  of the function it models.
 - **`accepted_maximal`.** Every rejection is JUSTIFIED (`all_justified`), so nothing rejected could
   be added. An `Inapplicable (i, e)` is exactly the dry run's failing index and envelope. A
   `Conflicts ids` names a script that DOES apply, is NOT independent of the final accepted set, and
@@ -5688,8 +5706,9 @@ rejected, or one displacing the other — are listed in arrival order, and the t
   conservative footprint is the theorem's shape"): a "maybe" is a conflict, so `Conflicts` means
   "not provably coexistent", never "wrong". Maximality is maximality with respect to
   `Ops.independent`, not with respect to what would in fact commute.
-- **The N-script any-order statement,** which is theorem 2's and is sampled end to end by
-  `arbitrationLaws`' confluence law; `accepted_pair_commutes` is the pair.
+- _(**The N-script any-order statement** was listed here as theorem 2's, sampled end to end by
+  `arbitrationLaws`' confluence law with `accepted_pair_commutes` as the pair, and is DONE at the
+  accepted set — `merged_applies_and_order_free`, Phase 305, above.)_
 - **`applyContained`.** `arbitrate` dry-runs with `Ops.canApplyAll`, which consults no container
   capability (theorem 5's `container-sequence-gap`), and so does the model.
 
@@ -5734,12 +5753,14 @@ refused.
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The three theorems above plus `accepted_pair_commutes`,
+   `merged_applies_and_order_free` (Phase 305, with `all_conflicts_nil`, `lanes_apply_of_applicable`,
+   `concat_applies` and `replay_wapply_is_apply_all` under it),
    `accepted_all_applicable`, `can_script_is_apply_all`, the citation's soundness and completeness
    (`conflict_cites_an_accepted_interferer`, `every_interferer_is_cited`, `interfering_nil_iff`,
    `justified_mem`), the partition count (`arbitrate_is_total`), `pin_sorted`, `insert_comm`, and
    the two witnesses (`duplicate_ids_break_invariance`, `maximal_is_not_maximum`). F\* 2026.09.06,
    Z3 4.13.3, every query 3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no
-   `admit`. Opens `DagFold` and `TreeOps`.
+   `admit`. Opens `DagFold` and `TreeOps`; since Phase 305 cites `Preservation.apply_preserves_wf`.
 2. **Differentially tested.** The extracted model agrees with `Arbitration.arbitrate` over the
    pools above, with the model that accepts a conflicting pair required to lose. Agreement is over
    those pools, never over all inputs. That the shipped `duplicateIds` decides the theorem's
