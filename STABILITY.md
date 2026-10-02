@@ -2391,13 +2391,28 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.34.0 — DRAFT
+## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
-**Slot class: breaking (source).** Opened as an additive slot over the tagged `0.33.0` and reclassed
+**Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the
+candidate was packed from commit `c6307c3` (the 17 packable projects, version `0.34.0`, into a folder)
+and the downstream host's Fable gate was run against it in its cut-time mode
+(`tests/core-fable/core-fable.ps1 -CoreVersion 0.34.0 -CoreFeed <folder>`). That run FAILED twice over.
+In this repository: `Idl.SourceLit`'s two surrogate predicates (Phase 292) compared against unpaired-
+surrogate char literals, which Fable cannot write into its output, so the compile of `Fuaran.Core.Idl`
+stopped outright; the same class `0054692` fixed in the Wire fuzz alphabet at `0.33.0`, found the same
+way. Fixed in `218b02f`: the predicates compare code-unit values, and `SourceLiteralTests` now refuses
+any code line under `src/` that spells a surrogate escape (it named both lines on the pre-fix tree). In
+the host: its smoke program had not followed this slot's breaking edits (qualified union cases, the
+`Registry` rename, the widened `Annotations` and `Footprint`); the host adapted it to compile against
+both Core lines (`4fc5e4c`). The candidate was re-packed from `218b02f` and the re-run passed: compile
+leg green over 15 Fuaran.Core packages, value leg 393/393 byte-identical on both pipelines; the host's
+pinned run stayed green. The release commit differs from `218b02f` only in this file.
+
+**Class: breaking (source).** Opened as an additive slot over the tagged `0.33.0` and reclassed
 breaking before any tag, when Phase 252 widened `HostedCodec` (two fields) and retyped `Gen.fsharpValue`
 and `Gen.typescriptValue`, and Phase 248 retyped `ArbitrationRejection.Conflicts`. Each entry below names
 its own class and the edit a consumer makes; the wire classes are recorded per entry. Pre-1.0 a breaking
-change is a minor bump, which this slot already is over `0.33.0`, so the number does not move.
+change is a minor bump, which this release is over `0.33.0`.
 
 **Phase 340 — a footprint names the slot it writes: `Footprint` gains `SlotReads` and `SlotWrites`,
 `Ops.interference` three clauses, `MergeConflictShape` a `SlotClash` carrying the slot, and
