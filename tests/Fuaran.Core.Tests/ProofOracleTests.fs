@@ -5365,8 +5365,10 @@ let private removesFirst (ops: SkeletonOp<RNode, string> list) =
 /// Phase 167 — the go-red for `diff_reconstructs`' HYPOTHESIS. `diffKindOf` keys a node's content
 /// to its id, which since Phase 167 is the theorem's own `kinds_agree` precondition and not merely
 /// a property of this generator. This is a SECOND function of the same id: a shared id then names a
-/// different kind in each tree, which is the one shape no skeleton script can express, because no
-/// operation in the alphabet edits a node. `TreeDiff.kinds_agree_is_necessary` pins that
+/// different kind in each tree, which is the one shape no STRUCTURAL diff script expresses — not
+/// because no operation edits a node (`UpdateNode` has since Phase 250) but because `Diff.toOps`
+/// reads no content and so never emits one; the content-aware `Diff.toOpsWith` does (Phase 305,
+/// `ContentDiffTests`). `TreeDiff.kinds_agree_is_necessary` pins that
 /// counterexample in the model; the test below measures it on the shipped engine. The root is left
 /// at "doc" in both trees deliberately — a pair whose ROOTS disagree would fail to reconstruct
 /// without ever reaching a shared child, which would measure the wrong thing.
@@ -13754,7 +13756,8 @@ let proofOracleTests =
               // drawn by a second function of the id.
               //
               // PRODUCTION ONLY — no model is in the loop. What is measured is that the SHIPPED
-              // engine cannot express the change, not that the model agrees with it about anything;
+              // structural diff cannot express the change (the content-aware `Diff.toOpsWith` can,
+              // Phase 305), not that the model agrees with it about anything;
               // the model's own counterexample is `TreeDiff.kinds_agree_is_necessary`, proved.
               let mutable r = ConfRng.ofSeed 1410
               let mutable shared = 0

@@ -220,7 +220,7 @@ let invert_leaf : TreeOps.leaf_op  ->  TreeOps.tree  ->  DagFold.outcome<TreeOps
 | TreeOps.UpdateNode (n) -> begin
      (match ((TreeOps.find_in (TreeOps.tid_of n) pre)) with
 | FStar_Pervasives_Native.Some (old) -> begin
-     DagFold.Ok (TreeOps.UpdateNode (old))
+     DagFold.Ok (TreeOps.UpdateNode (TreeOps.TNode ((TreeOps.tid_of old), (TreeOps.kind_of old), [])))
      end
 | FStar_Pervasives_Native.None -> begin
      DagFold.Error (TreeOps.UnknownNode ((TreeOps.tid_of n), (TreeOps.ids pre)))

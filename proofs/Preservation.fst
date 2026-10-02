@@ -740,11 +740,12 @@ let invert_leaf (o:leaf_op) (pre:tree) : Tot (outcome op rejection) =
        (match find_in p pre with
         | Some pn -> Ok (ReorderChildren p (order_in pn))
         | None -> Error (UnknownNode p (ids pre)))
-     (* F#: `UpdateNode(Tree.tryFind (w.Id node) pre |> Option.get)` (Phase 250) — the pre-state
-        node itself, whose content the undo restores and whose children it does not read. *)
+     (* F#: `UpdateNode(w.ReplaceChildren (Tree.tryFind (w.Id node) pre |> Option.get) [])` (Phase
+        305; the whole pre-state node until then) — the pre-state node's CONTENT as a childless
+        shell, since the undo restores the content and never reads the payload's children. *)
      | UpdateNode n ->
        (match find_in (tid_of n) pre with
-        | Some old -> Ok (UpdateNode old)
+        | Some old -> Ok (UpdateNode (TNode (tid_of old) (kind_of old) []))
         | None -> Error (UnknownNode (tid_of n) (ids pre))))
 
 (* ---- small facts about the child-list edits ---- *)
@@ -1228,10 +1229,14 @@ let arrange_same_multiset (ord:list string) (cs:list tree)
    halves at once — the inverse is ACCEPTED at the result (nothing about it can be refused there)
    and applying it RESTORES the input exactly.
 
-   The alphabet is the four non-`Batch` operations, which is the alphabet `Skeleton.fst`'s
-   composite theorem already takes and for the same reason: a `Batch`'s inverse is its members'
-   inverses in reverse order, each derived against the state that member saw, so the lift is the
-   one `DagFold.replay_diamond` performs at lane granularity rather than a new idea. *)
+   The alphabet is the five non-`Batch` operations (`leaf_op`; "four" until Phase 305, a count
+   Phase 250's `UpdateNode` had already overtaken — the arm below was always there), which is the
+   alphabet `Skeleton.fst`'s composite theorem already takes and for the same reason: a `Batch`'s
+   inverse is its members' inverses in reverse order, each derived against the state that member
+   saw, so the lift is the one `DagFold.replay_diamond` performs at lane granularity rather than
+   a new idea. The lift itself — `invert_applicable` over `Batch`, and over a SCRIPT, which is
+   what `Ops.invertAll` (Phase 305) returns — is not yet stated here; it stays on the README's
+   not-claimed list, and `Conformance.opAlgebra` and the `invertAll` differential sample it. *)
 (* The four cases are four independent arguments in one query, and the theorem sits at the top of
    the whole module's context. Measured on the pinned prover it proves 78 goals; at the leg's
    default budget it is close enough to the ceiling that a different seed under `--quake 3` can

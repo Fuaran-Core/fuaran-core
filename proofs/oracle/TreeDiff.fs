@@ -623,6 +623,15 @@ let kind_before : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("
 
 let kind_after : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("x", "para", []))::[])
 
+
+let pre_fix_before : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("p", "para", []))::[])
+
+
+let pre_fix_after : TreeOps.tree = TreeOps.TNode ("root", "doc", (TreeOps.TNode ("p", "section", (TreeOps.TNode ("q", "para", []))::[]))::[])
+
+
+let pre_fix_ch : TreeOps.tree  ->  Prims.bool = (fun ( t  :  TreeOps.tree ) -> (Prims.op_Less_Greater (TreeOps.kind_of t) "para"))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 

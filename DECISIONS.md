@@ -1,5 +1,90 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D103: a content-changing survivor is rewritten before the children it gains and after the children it loses; a contained undo is closed only from a contained pre-state; arbitration refuses a malformed base instead of arbitrating it
+
+**Recorded by Phase 305. `src/Fuaran.Core.Ops/Ops.fs` (`Diff`, `normalize`, `invert`, `invertAll`),
+`src/Fuaran.Core.Ops/Arbitration.fs`, `src/Fuaran.Core.Tree/Tree.fs` (`Index.buildWith` /
+`isFreshForWith`), `proofs/TreeDiff.fst` section 12, `proofs/Preservation.fst`, `proofs.json`
+(`diff-applicable-contained`); rides the `0.34.0` draft (STABILITY.md, "Phase 305").**
+
+**The finding.** `Diff.toOpsContained` checks `after` — no node `canHold` refuses may hold children —
+and emits a script that runs against `before`. The structural diff carries no content, so a survivor
+keeps `before`'s kind at every step: on `before = root(p:para)`, `after = root(p:section(q:para))`,
+`canHold = kind <> "para"` it returns `Ok [InsertChild(p, q)]` and `Ops.applyAllWith` refuses the one
+step with `NotAContainer(p, para)`. Over independent pairs with kinds drawn freely the second-pass review
+measured 41% of accepted scripts refused; `ContentDiffTests`' bridge, over its own generator, measures
+469 of 1,540. The proved row `diff-applicable-contained` said such a script "cannot be refused for
+containment at any step": the theorem is about the ADDRESSES the script carries, resolved in `after`,
+and the sentence was a gloss the theorem does not support. The row is reworded; the pair is pinned in
+the model as `TreeDiff.contained_script_refused_at_before_kinds`, so the false claim cannot be re-proved
+by accident.
+
+**D103.1 — the placement rule.** The content-aware forms (`toOpsWith`, `toOpsContainedWith`,
+`toOpsGrammarWith`) emit an `UpdateNode` for every survivor whose own content the caller's encoder
+reads differently over the two SHELLS (`ReplaceChildren n []`, so a change in the children alone is
+never a rewrite), and place them in two blocks around the four structural passes: **a rewrite whose
+new node `canHold` accepts goes FIRST**, before any insert or move, because that node is the parent of
+the inserts and moves under it and `validateInsert` / `validateMove` read the kind the tree holds at
+that step; **every other rewrite goes LAST**, after the reorders, because a node becoming a leaf may be
+rewritten only once its children have left, and they leave in the moves and the removals (a childful
+leaf in `after` is refused up front). An `UpdateNode` keeps the children the tree holds, so it is inert
+to the structural blocks wherever it sits; the two sites are where the containment check is satisfied.
+Measured: the content-aware script is refused on 0 of 1,540 pairs and lands on `after` content
+included on every one; appending every rewrite LAST instead is refused on the same 469 pairs the
+structural script is (the bridge's falsifier), because the leaf-turned-container is what refuses.
+
+**Why `With encode` and not `'Node : equality`.** The witness has no content accessor and demands no
+equality of `'Node`; a diff that compared nodes would add a constraint every caller with a function in
+its node type cannot meet. The encoder is the parameter `Tree.encodeHash`, `Tree.Index.buildWith` and
+every content-reading seam already take, with the same injectivity precondition. The structural forms
+are unchanged in output: `TreeDiff.fst` models them clause for clause and its 2,000 lines of
+reconstruction proof are about THAT emission, which the structural-part bridge holds the new forms to.
+
+**D103.2 — the contained undo is closed only from a contained pre-state, and that is a theorem's
+shape, not a defect.** The phase asked that "a contained remove on a violating pre-state undoes".
+It cannot: the inverse of `RemoveNode q` under `p:para` is `InsertChild(p, q)`, and `validateInsert`'s
+`canHold p` is the containment guarantee itself (`contained_preserves`) — any engine that accepted it
+would admit a leaf gaining a child. The same holds of an update that REPAIRS a violation (`p:para(q)`
+rewritten to `p:section(q)`): its inverse re-creates the violation and is refused under any rule that
+keeps the invariant. So there is no `invertContained`; the round-trip law for the contained engine is
+stated **conditional on a contained pre-state** (every node with children satisfies `canHold`), which
+is `Preservation.fst`'s standing shape for every contained theorem, and `Ops.invert` / `invertAll`
+stay the plain engine's inverses. A domain that needs to undo on a legacy violating tree undoes
+through `Ops.applyAll`, which is what its forward edit on that tree used.
+
+**D103.3 — `validateUpdate`'s containment check is KEPT as it is, and the ruling says why.** The
+phase offered relaxing it to "only when the kind changes". That rule assumes `canHold` is a function of
+the kind, which the predicate's contract does not say; the honest relaxation is "refuse only a rewrite
+that takes a childful node from `canHold`-accepted to refused", which keeps `contained_preserves` and
+stops blaming an already-violating node for a rewrite that does not worsen it. It is not taken here
+because it moves the modelled `apply_contained` arm, its refusal characterisation and
+`contained_preserves` in `Preservation.fst` together, and a rule whose proof is a successor's is not
+shipped ahead of the proof under `debt: forbidden`. What it would buy is bounded: a no-op or
+content-only rewrite of a node that already violates. The successor that takes D103.2's conditional
+theorem takes this with it.
+
+**D103.4 — arbitration refuses a malformed base.** `arbitrate`, `arbitrateContained`,
+`arbitrateGrammar` and `arbitrateReferenced` check `Tree.wellFormed` on the base first; a repeated id
+`d` makes every proposal `Inapplicable(0, DuplicateId d)` in pinned order, with nothing accepted and
+nothing merged. The shape is the existing envelope rather than a new `ArbitrationRejection` case (a
+case addition breaks every exhaustive match, which is the class this draft does not take for a
+refusal the base owns); index 0 says no op was offered. `arbitrateWith` takes no witness and is
+unchanged — a keyed domain checks `Tree.wellFormedKeyed` before composing it. The confluence the
+accepted set promises (`TreeOps.tree_independence_diamond`) is stated at `wf`; below it the promise was
+empty and the function ran anyway.
+
+**D103.5 — what stays open, and why it is not debt.** (a) The redundant trailing `ReorderChildren`
+after appends: dropping it changes the modelled pass 4 and needs the order-prediction lemma (after
+passes 1–3 a parent holds its kept survivors in `before` order, then the inserted shells, then the
+moved-in survivors, each in `after` order) inside section 10's induction; dropping it in production
+alone would break the extraction differential against the model that proves reconstruction. (b) The
+four theorems — the content-aware run theorem, `Normalize.fst`, `merged_applies_and_order_free`, the
+`Batch` lift of `invert_applicable` — each need a model this repository does not yet have or an
+induction restated over it; their bridges ship now (`ContentDiffTests`), the pre-fix counterexample
+is proved, and the claims stay on the README's not-claimed list rather than becoming assumed rows (a
+not-claimed item is the absence of a row). Each is a `deferred` entry on the phase with the reason
+above, for the successor to carry.
+
 ## 2026-10-01 — D102: a ladder row states what it is true OF, and a premise production violates is either a refusal or a row that says so
 
 **Recorded by Phase 309. `proofs/`, `proofs.json`, the proof leg's kit (`proofs/kit/check-proof-leg.ps1`)

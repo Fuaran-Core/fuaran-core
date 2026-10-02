@@ -2389,6 +2389,50 @@ and `Gen.typescriptValue`, and Phase 248 retyped `ArbitrationRejection.Conflicts
 its own class and the edit a consumer makes; the wire classes are recorded per entry. Pre-1.0 a breaking
 change is a minor bump, which this slot already is over `0.33.0`, so the number does not move.
 
+**Phase 305 — a content-aware `Diff`, a linear `normalize`, a closed undo script, arbitration that
+refuses a malformed base, and a freshness stamp that sees a content edit. Class: `additive` (six new
+members across `Fuaran.Core.Ops` and `Fuaran.Core.Tree`, no member moved or retyped; both baselines
+regenerated). Rides the draft.** The ruling behind each change is DECISIONS D103.
+
+- **New: `Diff.toOpsWith encode`, `Diff.toOpsContainedWith canHold encode`, `Diff.toOpsGrammarWith`.**
+  The content-aware forms emit an `UpdateNode` for every survivor whose own content the caller's
+  encoder reads differently over the two nodes' shells, placed by D103's rule (a rewrite whose new node
+  `canHold` accepts first, every other one last), so the script applies under `Ops.applyAllWith canHold`
+  and lands on `after` content included. **The structural `toOps` / `toOpsContained` / `toOpsGrammar`
+  emit exactly the script they emitted before** (the `ContentDiffTests` structural-part bridge holds the
+  two families to the same four blocks), and now read `Tree.Index` for their maps.
+- **The footprint of a content-changing diff script gains writes.** Each `UpdateNode` carries a content
+  write and an unknown-parent write (Phase 250's footprint, unchanged), so a content-aware diff script
+  is now dependent, under `Ops.independent` and in arbitration, on every concurrent structural write —
+  where the structural script of the same pair, carrying no rewrite, was not. That is the point (a
+  content edit the footprint could not see was a silent conflict), and it is additive: no existing
+  script's footprint moves.
+- **`Ops.normalize` is one left fold with an output stack, and learns three `UpdateNode` classes**
+  (`UpdateNode a; UpdateNode a` → the last; `InsertChild(p, n); UpdateNode n'` → one insert with `n'`'s
+  content over `n`'s children; `UpdateNode n; RemoveNode n` → the remove). A normalised script can
+  therefore be SHORTER than before on a script carrying those pairs, and a collapse that newly adjoins
+  two collapsible ops is now caught in the one pass; both are inside the defining law
+  (`applyAll (normalize s) = applyAll s` for an applyable `s`), which `Conformance.normalizeLaws` and the
+  biased differential certify. The pre-fix form overflowed the stack at about 2,000 flat ops; the new one
+  normalises 100,000 in a scale test.
+- **New: `Ops.invertAll w idw ops pre`** — the script-level inverse, `Result<SkeletonOp list, int *
+  Rejection>`, with the law `applyAll (invertAll s pre) (applyAll s pre) = pre` and `applyAll`'s indexed
+  refusal. **`Ops.invert (UpdateNode old)` now carries the pre-state content as a SHELL**
+  (`ReplaceChildren old []`): the inverse never read the payload's children, and an undo stack held a copy
+  of the whole subtree per edit. A consumer that compared an inverse payload's children sees them empty;
+  the inverse's effect is unchanged (the model's `invert_leaf` arm and `invert_applicable` moved with it).
+- **`Arbitration.arbitrate` and its contained / grammar / referenced forms refuse a base
+  `Tree.wellFormed` rejects**: `Accepted = []`, `MergedScript = []`, every proposal in pinned order
+  `Inapplicable(0, DuplicateId d)` with `d` the first repeated id. A NEW refusal where the pair used to be
+  arbitrated — and, on such a base, arbitrated unsoundly (two accepted scripts whose orders disagreed).
+  `arbitrateWith` is unchanged: a domain composing it checks its own base.
+- **New: `Tree.Index.buildWith encode` / `isFreshForWith encode`** — the content-aware stamp. The plain
+  `isFreshFor` stays as it was and its doc now says what it cannot see: a content-only `UpdateNode`.
+- **Not changed, by ruling (D103):** `validateUpdate`'s containment check, and the structural diff's
+  redundant trailing `ReorderChildren`; the four theorems the phase named are deferred to a successor
+  with the counterexample for the pre-fix rule (`TreeDiff.contained_script_refused_at_before_kinds`) and
+  the `diff-applicable-contained` row reworded now. Wire classes: none — nothing on the wire moved.
+
 **Phase 331 — `tests/Fuaran.Core.Tests/ConformanceTests.fs` is split along the conformance kit's topic
 files. Class: `additive`, and the whole of it is tests: no package's public surface moves (the seventeen
 surface baselines read, none moved).** Phase 297 split the kit's source into topic files and deferred the

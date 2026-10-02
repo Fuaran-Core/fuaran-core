@@ -32,9 +32,14 @@
      - `diff_contained_diff` / `diff_contained_locates` / `diff_contained_at_total_is_plain` /
        `diff_applicable_contained` — the container-aware mirror, and the last is the one the
        phase's fourth task asks for: every parent address an emitted operation carries resolves, in
-       `after`, to a node that HOLDS the addressed child and that `canHold` accepts. So a script
-       `toOpsContained` returns cannot be refused for containment at any step, and the typed
-       `TargetNotAContainer` is the exact price of that guarantee.
+       `after`, to a node that HOLDS the addressed child and that `canHold` accepts. That is a
+       statement about the ADDRESSES, in `after`; it is NOT "the script cannot be refused for
+       containment at any step", which this header claimed until Phase 305 and which is FALSE —
+       the script runs against `before`'s kinds, and the structural diff carries no content, so a
+       survivor that is a leaf in `before` and a container in `after` refuses the inserts under it
+       (section 12, `contained_script_refused_at_before_kinds`, the exact pair the second-pass
+       review measured at 41% of drawn pairs). The content-aware `Diff.toOpsContainedWith` is the
+       form that applies under the predicate it checked; its run theorem is a successor's.
 
      - the POSITIONAL facts (section 9, Phase 162), over `TreeOps.preorder_parent_first`: an
        insert's parent precedes its own node in `after`'s preorder — the source comment's
@@ -2056,7 +2061,11 @@ let diff_applicable (b a:tree)
     diff_run b a
 
 (* the one premise reconstruction needs beyond the diff own: a shared id names the same KIND in
-   both trees, since no skeleton operation edits a node *)
+   both trees. Until Phase 305 this read "since no skeleton operation edits a node", which has been
+   false since Phase 250's `UpdateNode`: the premise is needed because the STRUCTURAL diff emits no
+   `UpdateNode` — it has no content accessor to see a change with — so a survivor keeps `before`'s
+   kind whatever `after` says. `Diff.toOpsContainedWith encode` emits the rewrite, and the premise
+   is what its run theorem drops; see section 12. *)
 let kinds_agree (b a:tree) : prop =
   forall (q:string). mem q (ids a) /\ mem q (ids b) ==> kind_at q b == kind_at q a
 
@@ -2108,8 +2117,10 @@ let reconstruction_is_not_vacuous ()
 (* ---- and the hypothesis is NECESSARY, not a convenience: the unrestricted form is FALSE ----
 
    A pair of well-formed trees sharing a root id, differing ONLY in the kind one shared id
-   carries. `toOps` emits the EMPTY script — there is nothing for it to emit, because no
-   skeleton operation edits a node — so the script is applicable at every step (vacuously) and
+   carries. `toOps` emits the EMPTY script — there is nothing for it to emit, because the
+   structural diff reads no content and so emits no `UpdateNode` (Phase 305; "no skeleton
+   operation edits a node" until then, false since Phase 250) — so the script is applicable at
+   every step (vacuously) and
    lands on `before`, which is not `after`. Every hypothesis of `diff_reconstructs` except
    `kinds_agree` holds here, so this is the exact counterexample to dropping it. It is also why
    `diff_applicable` is the STRONGER of the two theorems in one sense: applicability survives
@@ -2135,6 +2146,46 @@ let kinds_agree_is_necessary ()
     assert_norm (mem "x" (ids kind_before));
     assert_norm (mem "x" (ids kind_after));
     assert_norm (kind_at "x" kind_before =!= kind_at "x" kind_after)
+
+(* ======================================================================================
+   12. THE PRE-FIX RULE'S COUNTEREXAMPLE (Phase 305) — a contained script IS refused for
+       containment, at the step `diff_applicable_contained` cannot see.
+
+      `diff_applicable_contained` (section 8) says every parent address a contained script
+      carries resolves in `after` to a node `canHold` accepts. The script runs against `before`.
+      Take `before = root(p:para)`, `after = root(p:section(q:para))` and `ch = kind <> "para"`:
+      `after` nests nothing under a leaf, so `to_ops_contained` answers `Ok [InsertChild p q]`,
+      and `apply_contained_all` refuses that one step with `NotAContainer p "para"`, because the
+      `p` it finds is `before`'s. Nothing in the diff is wrong about `after`; what is wrong is the
+      sentence this module's header carried until Phase 305 — "cannot be refused for containment
+      at any step" — which this lemma pins as false, so it is not re-proved. The repair is
+      production's content-aware `Diff.toOpsContainedWith`, which emits `UpdateNode p` FIRST
+      (DECISIONS D103) so the insert meets a section; its run theorem —
+      `wf b /\ wf a /\ child_blind ch ==> to_ops_contained_with ch b a = Ok s ==>
+      apply_contained_all ch s b == Ok a` — needs the content-aware model and the section-10
+      induction restated over six blocks, and is the successor's; until it lands the claim stays
+      on the README's not-claimed list and the content-aware bridge in `ContentDiffTests.fs`
+      samples it over drawn kinds and a drawn predicate.
+   ====================================================================================== *)
+
+let pre_fix_before : tree = TNode "root" "doc" [ TNode "p" "para" [] ]
+
+let pre_fix_after : tree = TNode "root" "doc" [ TNode "p" "section" [ TNode "q" "para" [] ] ]
+
+let pre_fix_ch (t:tree) : bool = kind_of t <> "para"
+
+let contained_script_refused_at_before_kinds ()
+  : Lemma (ensures wf pre_fix_before /\ wf pre_fix_after /\
+                   to_ops_contained pre_fix_ch pre_fix_before pre_fix_after
+                     == Ok [ InsertChild "p" (TNode "q" "para" []) ] /\
+                   apply_contained_all pre_fix_ch [ InsertChild "p" (TNode "q" "para" []) ] pre_fix_before
+                     == Error (NotAContainer "p" "para"))
+  = assert_norm (wf pre_fix_before);
+    assert_norm (wf pre_fix_after);
+    assert_norm (to_ops_contained pre_fix_ch pre_fix_before pre_fix_after
+                   == Ok [ InsertChild "p" (TNode "q" "para" []) ]);
+    assert_norm (apply_contained_all pre_fix_ch [ InsertChild "p" (TNode "q" "para" []) ] pre_fix_before
+                   == Error (NotAContainer "p" "para"))
 
 (* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
