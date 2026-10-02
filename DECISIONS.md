@@ -1,5 +1,67 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D106: a stability class is a fact about what an OLD document does under the NEW vocabulary, never about the emitter alone
+
+**Recorded by Phase 304. `src/Fuaran.Core.Idl.Codegen/Diff.fs` (`classifyFieldAdd`, the
+`FieldOptionalityChanged` rule and its descriptor rows), `Emit/TypeScript.fs` (`dInt`),
+`docs/idl-stability-classes.md`, `proofs/WireVersioning.fst` (section 8), `proofs.json`
+(`evolution-field-additive-monotone`, `evolution-old-document-differential`),
+`tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs`, `IdlThreeHostTests.fs`; rides the `0.34.0` draft
+(STABILITY.md, "Phase 304").**
+
+**D106.1 — the grading rule.** The table defines its classes by what happens to documents: `additive`
+keeps every previously-valid document valid; `breaking-wire` is a document that was valid and is not,
+or whose bytes moved. The classifier nevertheless graded two rows by what an EMITTER does, and got
+both backwards: a required field added, and a field tightened to `required`, were `breaking-for-emitters`
+(a minor) "because old documents still decode"; `required` loosened to anything was `breaking-wire` (a
+major) "because a consumer that relied on presence now faces absence". Decoded, the first claim is
+false — every old document lacks the member and the decoder refuses it, with or without an authoring
+default, which fills on construction and never on decode — and the second describes NEW documents in
+OLD consumers, which is host lag. The rule from here: **a row's class is read off what an old document
+does under the new vocabulary — refused, decoded to a different value, re-encoded to different bytes,
+or unchanged.** What emitters must do is reported beside it (`BreaksEmitters`), and what consumers'
+source must do on the F# axis; neither decides the class.
+
+**D106.2 — the rows it moves.** A required field added, `optional` → `required` and `omitDefault` →
+`required` are `breaking-wire`: the major moves and an old consumer is `Foreign`, where the minor let a
+`Behind` consumer tolerate a profile under which every stored document of the kind is refused.
+`required` → `optional` is `additive`: every old document carries the member, decodes to the same
+value and re-encodes byte-identically, and every old emitter writes it. **The consumer-presence
+argument is recorded, not dismissed:** a consumer that relied on presence meets absence only in a
+document a NEW emitter writes, and a decoder that predates the change refuses that document — host
+lag, exactly as for a new enum case, which is what the minor's `Behind` already means; on the F# axis
+the member becomes an `option`, which `full-literal-construction` carries.
+
+**D106.3 — `required` → `omitDefault` stays `breaking-wire`, and the precedent is the moved identity
+default.** The decoder reads a member sitting on the default and the encoder then omits it, so every
+stored document carrying the default value re-encodes to different bytes. That is the argument the
+`omitDefault` → `omitDefault` (default moved) row already rests on — omit-at-default is wire-visible —
+and a hash-chained store re-encoding such a document would not reproduce it. The phase
+expected every loosening to be "not a major"; for this one the table's own definition says otherwise,
+and the table wins.
+
+**D106.4 — int → float is `additive` by the same test**, which Phase 252 ruled and 293 carried into
+the descriptor table: old documents decode and re-encode byte-identically under the widened
+vocabulary. Phase 304 moves nothing there; the evolution differential holds it.
+
+**D106.5 — held three ways.** (i) `field_additive_monotone` (`proofs/WireVersioning.fst` §8): every
+field-add row kept off the major leaves every document that does not carry the added member decoding
+identically through the tolerant seam. Its hypothesis is "not retired" rather than "`Additive`"
+because `breaking-for-emitters` and `host-surface-only` also promise old documents untouched — a
+statement exempting them would have been true of the old rule by construction. Stated so, it failed on
+the pre-304 rule (a prover run with that rule restored fails at `c <> required_chars`;
+`pre_304_rule_breaks_field_additive_monotone` is the witness in the model). (ii) The evolution
+differential decodes a corpus of old documents under seven perturbed vocabularies through the
+interpreter and the generated TypeScript decoder and asserts the class predicts both. (iii) The
+section-7 row is restated over the corrected class (`required_field_addition_is_foreign_not_behind`).
+
+**D106.6 — the int range is the interpreter's on every host.** The narrowing case found the generated
+TypeScript `dInt` reading any integral number, where the interpreter's and the compiled F# host's int
+is 32-bit: an old document carrying 2^31 at a slot narrowed to `int` decoded on one host only. The
+three-way differential never reached it, because an authored `VInt` cannot exceed the range. `dInt` now
+refuses outside [-2^31, 2^31 - 1], and a block of the three-way differential plants 2^31, -2^31 - 1 and
+2^53 at the first int slot of drawn nodes in every certification vocabulary and requires all three
+hosts to refuse, beside an in-range control all three accept.
 ## 2026-10-02 — D105: a transparent case never carries what can be an object; at a float slot the §7 tokens are read back, not refused; a map's value is its key set; a field-less declaration is a marker type
 
 **Recorded by Phase 303. `src/Fuaran.Core.Idl/Idl.fs` (`Decode`, `FloatToken`), `Artifact.fs`,

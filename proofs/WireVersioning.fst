@@ -45,6 +45,17 @@
    half, that the tag delta alone cannot decide the row, because both halves are needed to state
    the policy correctly.
 
+   AND SECTION 7 GRADED A ROW WRONG, which section 8 found (Phase 304). Section 7 proved the
+   required-field row's BUMP — a minor, an old consumer `Behind` — on the justification that every
+   document valid under the old contract is still valid, and nothing in the module decoded an old
+   document under the new vocabulary to check it, because theorem 2 fixes one known-decoder for
+   both revisions and so cannot see a field arrive. Section 8 makes the known-decoder a function
+   of the vocabulary and states `field_additive_monotone`: every field-add row the classifier keeps
+   off the major leaves every old document decoding identically. Stated honestly it was FALSE of
+   the shipped rule — a required field added kept the minor while every old document was refused
+   — and the correction is the rule's, not the theorem's: `classify_field_add` answers
+   `BreakingWire` for a required field, and the section-7 row is restated over that class.
+
    WHY THE TAG TYPE IS `list ch` AND NOT A PARAMETER. Set algebra over tags does not care what a
    tag is, so the classification half would be happier parametric — but `additive_monotone` and
    `preserve_exact` JOIN that half to the decode half, where a tag is a value read by name out of
@@ -583,13 +594,15 @@ let host_only_chars : list ch =
 (* F#: `Diff.classifyFieldAdd`, clause for clause, keeping only the severity — the rationale and
    citation it also returns are prose for a report and decide nothing.
 
-   `required` is `BreakingForEmitters` and NOT `BreakingWire`: every existing document still
-   decodes, so the wire evolution is additive and the consumer is `Behind`; what breaks is the
-   EMITTER, which the verdict carries on its own axis because a minor cannot express it. That
-   split is the row an author gets wrong here in the same way a rename is the row they get wrong
-   in section 5. *)
+   `required` is `BreakingWire` (Phase 304). Until that phase it was `BreakingForEmitters`, on the
+   argument that every existing document still decodes, so the evolution is additive and only the
+   EMITTER breaks. The argument was false, and section 8 is where the model says so: every
+   document written under the old contract lacks the added member, and the decoder refuses a
+   document missing a required one. A class is a fact about what an old document does under the
+   new vocabulary, so a required field added RETIRES, the major moves, and an old consumer is
+   `Foreign` — it refuses the profile rather than tolerating it and then refusing every document. *)
 let classify_field_add (opt_class: list ch) : Tot severity =
-  if opt_class = required_chars then SBreakingForEmitters
+  if opt_class = required_chars then SBreakingWire
   else if opt_class = host_only_chars then SHostSurfaceOnly
   else SAdditive
 
@@ -638,23 +651,25 @@ let optional_field_addition_bumps_the_minor
                     (bump base_profile ev).minor == base_profile.minor + 1 /\
                     Behind? (negotiate consumer (bump base_profile ev)))) = ()
 
-(* The REQUIRED-field row, which reads as a contradiction until you ask whose profile it is. It
-   bumps the same minor: every document valid under the old contract is still valid, so the wire
-   evolution is additive and an old CONSUMER is `Behind` rather than `Foreign`. What moved is the
-   obligation on EMITTERS, and the verdict carries that on `BreaksEmitters` — a boolean beside the
-   profile rather than folded into it, because a major would tell every consumer to refuse
-   documents that decode perfectly. Stated here so that a reader cannot conclude from theorem 5
-   that "additive minor" means "nothing to do". *)
-let required_field_addition_is_behind_not_foreign
+(* The REQUIRED-field row, restated over the corrected class (Phase 304). This lemma used to be
+   `required_field_addition_is_behind_not_foreign`: the row bumped the minor on the argument that
+   "every document valid under the old contract is still valid", so an old consumer was `Behind`
+   and tolerated. That premise is exactly what section 8 refutes — not one old document of the
+   kind decodes under the new vocabulary — and a `Behind` consumer that tolerates a profile under
+   which every stored document is refused has been told the opposite of the truth. Over the
+   corrected class the row RETIRES its subject: the verdict is `Breaking`, the major moves and the
+   minor resets, and a consumer on the old major is `Foreign` — it refuses the profile up front,
+   which is the only honest answer when its documents are not readable under it. *)
+let required_field_addition_is_foreign_not_behind
   (subj: list ch) (base_profile: profile) (consumer: profile)
   : Lemma (requires consumer.name == base_profile.name /\
                     consumer.major == base_profile.major /\
-                    consumer.minor == base_profile.minor /\
-                    base_profile.minor < max_counter)
+                    base_profile.major < max_counter)
           (ensures (let ev = evolution_of [(classify_field_add required_chars, subj)] in
-                    ev == Additive [subj] /\
-                    (bump base_profile ev).major == base_profile.major /\
-                    Behind? (negotiate consumer (bump base_profile ev)))) = ()
+                    ev == Breaking [subj] [] /\
+                    (bump base_profile ev).major == base_profile.major + 1 /\
+                    (bump base_profile ev).minor == 0 /\
+                    Foreign? (negotiate consumer (bump base_profile ev)))) = ()
 
 (* And the HOST-ONLY row, which is the one that genuinely moves nothing — WIRE_FORMAT §9's
    wire-omitted fields are on no document in either direction, so no profile can honestly move.
@@ -692,6 +707,165 @@ let ignoring_optionality_moves_a_profile_that_must_not (subj: list ch) (base_pro
                      == base_profile.minor + 1) = ()
 
 (* ======================================================================================
+   8. THE FIELD-LEVEL ROW, DECODED (Phase 304).
+
+      F#: `Idl.Decode.decodeFields` in `src/Fuaran.Core.Idl/Idl.fs` — the presence rule a
+      vocabulary's decoder applies to an object's members — and `Diff.classifyFieldAdd`, already
+      modelled above.
+
+      Theorem 2 fixes ONE `decode_known` for both revisions, so it can see a kind arrive and
+      nothing else: a field added to a kind the old vocabulary already had changes no tag, and a
+      theorem whose decoder is the same function on both sides cannot observe it. Section 7 then
+      classified the field-add rows by their bump and never asked what an old document DOES — so
+      the required row stood on "every document valid under the old contract is still valid",
+      which nothing checked and which is false.
+
+      Here `decode_known` becomes a FUNCTION OF THE VOCABULARY — `decode_known_in v` — and is
+      handed to the seam exactly where theorem 2 handed it a fixed decoder. The vocabulary is the
+      kind's field declarations as the classifier reads them, name and optionality class; the
+      decode is the presence rule, clause for clause: a host-only field is never read, an absent
+      member of a required field is refused, every other member is read when present. What a
+      present member's own type decodes to is the same function on both sides of a field ADDITION
+      — the addition does not retype the fields that were already there — so the model reads the
+      member verbatim and the theorem quantifies over every value it carries.
+
+      THE STATEMENT, and why it is phrased as it is. `field_additive_monotone` says: for every
+      field-add row the classifier keeps OFF the major — `Additive` and `BreakingForEmitters`,
+      which bump the minor and tell a consumer it is `Behind`, and `HostSurfaceOnly`, which bumps
+      nothing — every document that does not carry the added member decodes under the new
+      vocabulary exactly as it did under the old, through the tolerant seam itself. The hypothesis
+      is `not (retires ...)` rather than `SAdditive?` because each of those three classes promises
+      that old documents are untouched; a statement that exempted `BreakingForEmitters` would be
+      true of the old rule by construction and would measure nothing. Stated that way it FAILS on
+      the pre-304 rule — which answered `BreakingForEmitters` for a required field, kept it off the
+      major, and refused every old document — and that failure is the go-red that forced the
+      correction (`pre_304_rule_breaks_field_additive_monotone` below exhibits it; a prover run
+      with the old rule restored refutes the theorem itself).
+
+      WHY "DOES NOT CARRY THE ADDED MEMBER". Production tolerates a member its vocabulary does not
+      declare, so a document carrying a stray `caption` decodes under the old vocabulary and, once
+      `caption` is declared, decodes to something with a caption in it. That document was not
+      written under the old contract — an emitter writes declared members and the reserved
+      envelope members, and an addition is neither — so the hypothesis names the documents the
+      contract is about rather than assuming them away. It is the only hypothesis.
+   ====================================================================================== *)
+
+(* F#: `l @ m`. Defined here rather than taken from `FStar.List.Tot`, for the reason `DagFold.fst`
+   gives: the extracted oracle carries no library it does not need. *)
+let rec app (#a: Type) (l m: list a) : Tot (list a) =
+  match l with
+  | [] -> m
+  | h :: t -> h :: app t m
+
+(* A field declaration as the classifier reads one: the member's wire name and its optionality
+   class, both in the model's character alphabet. *)
+type field_decl = list ch & list ch
+
+(* F#: the decoder's `field name jfields` — the first member of that name, if any. *)
+let rec member_of (#num #flt: eqtype) (k: list ch) (ms: list (list ch & jval num flt))
+  : Tot (option (jval num flt)) (decreases ms) =
+  match ms with
+  | [] -> None
+  | (k', v) :: t -> if k' = k then Some v else member_of k t
+
+(* F#: `Idl.Decode.decodeFields`, at the presence rule, in production's order: a host-only field
+   is skipped, an absent member of a required field is the refusal, and every other field is read
+   when present and skipped when absent. The result is the members read off the wire, in
+   declaration order — which is what re-encoding is a function of. An omit-at-default field's
+   restored default is not a wire member and is not listed: the encoder omits it again. *)
+let rec decode_fields (#num #flt: eqtype) (vocab: list field_decl) (ms: list (list ch & jval num flt))
+  : Tot (outcome (list (list ch & jval num flt))) (decreases vocab) =
+  match vocab with
+  | [] -> Ok []
+  | (n, c) :: rest ->
+    if c = host_only_chars then decode_fields rest ms
+    else
+      (match member_of n ms with
+       | None -> if c = required_chars then Error "required field is absent" else decode_fields rest ms
+       | Some v ->
+         (match decode_fields rest ms with
+          | Ok r -> Ok ((n, v) :: r)
+          | Error e -> Error e))
+
+(* The known-decoder, as a function of the vocabulary: the presence rule over an object's members,
+   and a refusal for anything that is not an object. *)
+let decode_known_in (#num #flt: eqtype) (vocab: list field_decl) (el: jval num flt)
+  : Tot (outcome (list (list ch & jval num flt))) =
+  match el with
+  | JObj ms -> decode_fields vocab ms
+  | _ -> Error "expected an object"
+
+(* Does the document carry a member of this name? *)
+let carries (#num #flt: eqtype) (k: list ch) (el: jval num flt) : Tot bool =
+  match el with
+  | JObj ms -> Some? (member_of k ms)
+  | _ -> false
+
+(* The induction the theorem stands on: a field appended to the vocabulary whose member the
+   document does not carry, and which is not required, changes nothing — the same members read,
+   the same refusal if an earlier field refuses. *)
+[@@ noextract_to "FSharp"]
+let rec decode_fields_append_absent
+  (#num #flt: eqtype) (vs: list field_decl) (f c: list ch) (ms: list (list ch & jval num flt))
+  : Lemma (requires None? (member_of f ms) /\ c <> required_chars)
+          (ensures decode_fields (app vs [(f, c)]) ms == decode_fields vs ms) (decreases vs) =
+  match vs with
+  | [] -> ()
+  | _ :: t -> decode_fields_append_absent t f c ms
+
+(* ---- THEOREM 6 (the field-add rows, as a claim about DECODING): `field_additive_monotone` ----
+
+   Every field-add row the classifier keeps off the major leaves every document that does not
+   carry the added member decoding, through the tolerant seam, exactly as it did: the same
+   `Known` with the same members, the same preserved `Unknown`, the same error. Quantified over
+   every old vocabulary, every added name and class, every consumer vocabulary of kind tags,
+   every discriminator reader and every required-profile reader. On the corrected rule the
+   required class is excluded by its verdict, which is the whole content of the correction; on the
+   pre-304 rule the hypothesis admits it and the conclusion is false. *)
+let field_additive_monotone
+  (#num #flt: eqtype)
+  (old: list field_decl) (f c: list ch)
+  (tags: list (list ch))
+  (tag_of: jval num flt -> outcome (list ch))
+  (read_required: jval num flt -> option profile)
+  (el: jval num flt)
+  : Lemma (requires not (retires (classify_field_add c)) /\ not (carries f el))
+          (ensures decode_tolerant tag_of (known_in tags) (decode_known_in (app old [(f, c)])) read_required el
+                   == decode_tolerant tag_of (known_in tags) (decode_known_in old) read_required el) =
+  (match el with
+   | JObj ms -> decode_fields_append_absent old f c ms
+   | _ -> ());
+  assert (decode_known_in (app old [(f, c)]) el == decode_known_in old el)
+
+(* The pre-304 rule, kept as the instrument the theorem must lose with: `classify_field_add` as it
+   stood, answering `BreakingForEmitters` — a minor — for a required field. *)
+let classify_field_add_pre_304 (opt_class: list ch) : Tot severity =
+  if opt_class = required_chars then SBreakingForEmitters
+  else if opt_class = host_only_chars then SHostSurfaceOnly
+  else SAdditive
+
+(* And the go-red, exhibited: under the old rule a required field added is kept off the major,
+   the document carries no such member, it decoded under the old vocabulary — and the new one
+   refuses it. That is `field_additive_monotone`'s hypothesis holding and its conclusion failing,
+   on the smallest witness there is: an empty kind, an empty document, one required field. *)
+[@@ noextract_to "FSharp"]
+let pre_304_rule_breaks_field_additive_monotone ()
+  : Lemma (ensures (let f : list ch = [CPlain "c"] in
+                    let el : jval int int = JObj [] in
+                    not (retires (classify_field_add_pre_304 required_chars)) /\
+                    not (carries f el) /\
+                    Ok? (decode_known_in [] el) /\
+                    Error? (decode_known_in (app [] [(f, required_chars)]) el))) = ()
+
+(* The rows that ARE kept off the major, on the corrected rule, are exactly the ones whose old
+   documents survive: the optional class (and omit-at-default, and any class the artifact grows,
+   which fall to the same arm) and the host-only class. Stated so the theorem is visibly not
+   vacuous — its hypothesis is inhabited by the two classes a vocabulary author actually adds. *)
+let field_additive_monotone_is_inhabited (c: list ch)
+  : Lemma (requires c <> required_chars)
+          (ensures not (retires (classify_field_add c))) = ()
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -720,7 +894,15 @@ let twins : list twin = [
       = Breaking [ [ CPlain "b" ] ] [ [ CPlain "c" ] ]) };
   { tname = "classify-an-addition-is-additive";
     tholds = (fun () -> classify [ [ CPlain "a" ] ] [ [ CPlain "a" ]; [ CPlain "c" ] ] = Additive [ [ CPlain "c" ] ]) };
-  { tname = "a-required-field-breaks-emitters";
-    tholds = (fun () -> classify_field_add required_chars = SBreakingForEmitters) } ]
+  { tname = "a-required-field-breaks-the-wire";
+    tholds = (fun () -> classify_field_add required_chars = SBreakingWire) };
+  { tname = "an-old-document-is-refused-under-an-added-required-field";
+    tholds = (fun () ->
+      decode_known_in #int #int [ ([ CPlain "c" ], required_chars) ] (JObj [])
+      = Error "required field is absent") };
+  { tname = "an-old-document-is-unchanged-under-an-added-optional-field";
+    tholds = (fun () ->
+      decode_known_in #int #int [ ([ CPlain "c" ], [ CPlain "o" ]) ] (JObj [ ([ CPlain "b" ], JInt 1) ])
+      = Ok []) } ]
 
 let _ = assert_norm (twins_hold twins == true)

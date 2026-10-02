@@ -628,9 +628,15 @@ module Diff =
         /// Every previously-valid document stays valid and every
         /// previously-conformant emitter stays conformant.
         | Additive
-        /// Old documents still decode, but an emitter written against the old
-        /// contract now produces one that does not — the 0.2.0 /
-        /// orchestration-0.1.3 lesson. Minor on paper, a break in practice.
+        /// Every old document still decodes, to the same value and the same bytes,
+        /// but host code written against the old contract now emits a different
+        /// document (or stops compiling) — an authoring default removed or moved.
+        /// Minor on paper, a break in practice.
+        ///
+        /// NOT the class of a required field arriving, or of a field becoming
+        /// required (Phase 304): there the old documents themselves are refused,
+        /// which is `BreakingWire`. A class is a fact about what an old document
+        /// does under the new vocabulary, never about the emitter alone.
         | BreakingForEmitters
         /// A `/v2/` major wire event (`VOCABULARY.md` §4.2): a document that was
         /// valid is not, or its bytes moved.
@@ -661,16 +667,23 @@ module Diff =
           Citation: string }
 
     /// A field added to an existing owner. The optionality class decides
-    /// everything: `required` is the one that breaks emitters, and it is the one
-    /// most likely to be declared additive by hand.
+    /// everything, and the class is a fact about what an OLD document does under
+    /// the new vocabulary (Phase 304): `required` is the one every stored document
+    /// of the owner fails, and it is the one most likely to be declared additive by
+    /// hand.
     let private classifyFieldAdd (owner: Owner) (f: FieldSnap) =
         match f.OptClass with
         | "required" ->
-            BreakingForEmitters,
+            // Phase 304 — this row was `BreakingForEmitters` (a minor) on the claim that
+            // old documents still decode. They do not: the decoder refuses a document
+            // missing a required member ("required field '<name>' is absent"), and an
+            // authoring default never fills on decode. A minor would let a `Behind`
+            // consumer tolerate the profile and then refuse every stored document.
+            BreakingWire,
             sprintf
-                "a REQUIRED field added to %s — an emitter built against the previous contract omits it and now produces an invalid document. Additive for DECODERS, breaking for emitters; do not declare this `additive`."
+                "a REQUIRED field added to %s — every document written under the previous contract lacks it, and the decoder refuses a document missing a required member (an authoring default is applied by the smart constructors, never on decode). Old documents stop decoding, so this is a `/v2/` event, not a minor; declare an optional or omit-at-default field if old documents must survive."
                 owner.Describe,
-            "STABILITY.md wire-format section; the 0.2.0 / orchestration-0.1.3 required-field lesson"
+            "docs/idl-stability-classes.md (a class is what an old document does under the new vocabulary, Phase 304); Idl.Decode (a required member absent is refused)"
         | "hostOnly" ->
             HostSurfaceOnly,
             sprintf
@@ -1617,7 +1630,10 @@ module Diff =
               (function
               | FieldAdded(o, f) -> sprintf "field added: %s.%s : %s (%s)" o.Describe f.Name f.Label f.OptClass
               | c -> misapplied "FieldAdded" c)
-              [ row "a **required** field added" "`breaking-for-emitters`" "`full-literal-construction`"
+              [ row
+                    "a **required** field added — every old document lacks it and is refused"
+                    "`breaking-wire`"
+                    "`full-literal-construction`"
                 row "an **optional** field added" "`additive`" "`full-literal-construction`"
                 row "a **host-only** field added" "`host-surface-only`" "`full-literal-construction`" ]
 
@@ -1733,25 +1749,49 @@ module Diff =
                   let d = owner.Describe
 
                   (match b.OptClass, a.OptClass with
+                   // Phase 304 — tightening was `BreakingForEmitters` (a minor) and loosening
+                   // `BreakingWire` (a major): the inverse of what old documents do. A class is a
+                   // fact about an old document under the new vocabulary, never about the emitter
+                   // alone.
                    | "optional", "required"
                    | "omitDefault", "required" ->
-                       BreakingForEmitters,
-                       sprintf
-                           "field `%s` on %s became REQUIRED (%s → %s) — an emitter that legitimately omitted it now produces an invalid document."
-                           n
-                           d
-                           b.Opt
-                           a.Opt,
-                       "the 0.2.0 / orchestration-0.1.3 required-field lesson"
-                   | "required", _ ->
                        BreakingWire,
                        sprintf
-                           "field `%s` on %s stopped being required (%s → %s) — old documents stay valid, but a consumer that relied on presence now faces absence, and the absence is not distinguishable from an old emitter's."
+                           "field `%s` on %s became REQUIRED (%s → %s) — every stored document that omitted it (absent, or sitting on its default) is now refused by the decoder, and every emitter that legitimately omitted it produces a refused document. Old documents stop decoding: a `/v2/` event."
                            n
                            d
                            b.Opt
                            a.Opt,
-                       "STABILITY.md wire-format section"
+                       "docs/idl-stability-classes.md (a class is what an old document does, Phase 304); Idl.Decode (a required member absent is refused)"
+                   | "required", "optional" ->
+                       // Loosening. Every old document carries the member, decodes to the same
+                       // value and re-encodes to the same bytes; every old emitter writes it, so
+                       // stays conformant — the table's definition of additive. The consumer that
+                       // relied on presence meets absence only in a document a NEW emitter writes,
+                       // which is host lag (a decoder that predates the change refuses it), exactly
+                       // as for a new enum case; on the F# axis the member becomes an `option`, which
+                       // `full-literal-construction` carries.
+                       Additive,
+                       sprintf
+                           "field `%s` on %s stopped being required (%s → %s) — every existing document carries it, decodes to the same value and re-encodes byte-identically, and every previously-conformant emitter (which always writes it) stays conformant. The cost is host lag: a consumer that relied on presence meets absence only in documents a NEW emitter writes, and a decoder that predates the change refuses those — as for a new enum case."
+                           n
+                           d
+                           b.Opt
+                           a.Opt,
+                       "docs/idl-stability-classes.md (loosening, Phase 304); VOCABULARY.md §4.3 (host-lag)"
+                   | "required", "omitDefault" ->
+                       // Loosening to omit-at-default is NOT additive: the decoder reads a member
+                       // sitting on the default and the encoder then omits it, so every stored
+                       // document carrying the default value changes bytes on re-encode — the
+                       // argument the moved-identity-default row already rests on.
+                       BreakingWire,
+                       sprintf
+                           "field `%s` on %s stopped being required and became omit-at-default (%s → %s) — every old document still decodes to the same value, but one carrying the default re-encodes WITHOUT the member, so its bytes move: omit-at-default is wire-visible. A hash-chained store re-encoding an old document would not reproduce it."
+                           n
+                           d
+                           b.Opt
+                           a.Opt,
+                       "Idl.Optionality.OmitDefault (omit-at-default is wire-visible); docs/idl-stability-classes.md (Phase 304)"
                    | "omitDefault", "omitDefault" ->
                        BreakingWire,
                        sprintf
@@ -1796,16 +1836,18 @@ module Diff =
               | FieldOptionalityChanged(o, n, b, a) ->
                   sprintf "field optionality changed: %s.%s : %s -> %s" o.Describe n b.Opt a.Opt
               | c -> misapplied "FieldOptionalityChanged" c)
-              // The document used to say `breaking-wire` for every required <-> omitDefault
-              // move (Phase 293 corrected it to what the classifier decides): becoming required
-              // is the emitter break, the other direction and a moved identity default are wire.
+              // Each row names what an OLD document does under the new vocabulary (Phase 304):
+              // tightening to `required` refuses the documents that omitted the member; loosening
+              // to `optional` leaves every one decoding and re-encoding identically; loosening to
+              // `omitDefault`, like a moved identity default, moves the bytes of every document
+              // sitting on the default.
               [ row
                     "a field's optionality moved **into or out of** `optional`"
-                    "`breaking-for-emitters` when it became required, else `breaking-wire`"
+                    "`breaking-wire` when it became required (old documents that omitted it are refused); `additive` when `required` became `optional` (every old document carries it and re-encodes identically; the consumer that relied on presence meets absence only from a new emitter — host lag); `breaking-wire` between `optional` and `omitDefault` (absence changes meaning, or a default-valued member stops re-encoding)"
                     "`full-literal-construction`"
                 row
                     "a field's optionality moved **between** `required` and `omitDefault`, or its identity default moved"
-                    "`breaking-for-emitters` when it became required (an emitter that omitted it now produces an invalid document); `breaking-wire` otherwise (omit-at-default is wire-visible)"
+                    "`breaking-wire` — becoming required refuses the old documents that omitted it; becoming omit-at-default, or moving the default, re-encodes every old document sitting on the default without the member (omit-at-default is wire-visible)"
                     "`full-literal-construction` on a kind field with no authoring default — `mk<Kind>` takes a parameter for every required field, so the parameter leaves or arrives — else `no-generated-shape-change`"
                 row
                     "a field crossed the **host-only** boundary"

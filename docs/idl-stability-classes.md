@@ -23,10 +23,14 @@ tell a consumer it repins without source changes, in exactly the cases where it 
 
 Reported per changed member with the rule it cites (`STABILITY.md`, `VOCABULARY.md` §4).
 
+**A class is a fact about what an OLD document does under the NEW vocabulary** (Phase 304) — whether
+it still decodes, to the same value, and re-encodes to the same bytes — and never a fact about the
+emitter alone. Each row's rationale names what the old documents do.
+
 | Severity | Meaning |
 |---|---|
 | `additive` | every previously-valid document stays valid and every previously-conformant emitter stays conformant |
-| `breaking-for-emitters` | old documents still decode, and an emitter written against the old contract now produces one that does not — a minor on paper, a break in practice |
+| `breaking-for-emitters` | every old document still decodes, to the same value and the same bytes, and host code written against the old contract now emits a different document (an authoring default removed or moved) — a minor on paper, a break in practice. **Never** the class of a change that makes an old document fail to decode: that is `breaking-wire` (Phase 304) |
 | `breaking-wire` | a `/v2/` major event: a document that was valid is not, or its bytes moved |
 | `host-surface-only` | not observable on the wire at all — a generated-declaration change |
 | `undecided` | the change crosses an **erased** slot (`hosted` / `json` / `opaque`) whose admitted values the artifact deliberately does not state, so the artifact cannot decide it |
@@ -79,15 +83,15 @@ point.
 | an enum case's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `EnumCaseAnnotationsChanged` |
 | a record added | `additive` | `no-generated-shape-change` | `RecordAdded` |
 | a record removed | `breaking-wire` | `type-name-reference` | `RecordRemoved` |
-| a **required** field added | `breaking-for-emitters` | `full-literal-construction` | `FieldAdded` |
+| a **required** field added — every old document lacks it and is refused | `breaking-wire` | `full-literal-construction` | `FieldAdded` |
 | an **optional** field added | `additive` | `full-literal-construction` | `FieldAdded` |
 | a **host-only** field added | `host-surface-only` | `full-literal-construction` | `FieldAdded` |
 | a field removed | `breaking-wire`; `host-surface-only` for a host-only field | `full-literal-construction` | `FieldRemoved` |
 | a field's type moved | `breaking-wire` | `full-literal-construction` | `FieldTypeChanged` |
 | a field's type **widened from `int` to `float`** (anywhere in it — a list element, a map value, a union argument) | `additive` | `full-literal-construction` | `FieldTypeChanged` |
 | a field's type moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth — a list element, a map value, a union argument | `undecided` | `generated-shape-unreadable` | `FieldTypeChanged` |
-| a field's optionality moved **into or out of** `optional` | `breaking-for-emitters` when it became required, else `breaking-wire` | `full-literal-construction` | `FieldOptionalityChanged` |
-| a field's optionality moved **between** `required` and `omitDefault`, or its identity default moved | `breaking-for-emitters` when it became required (an emitter that omitted it now produces an invalid document); `breaking-wire` otherwise (omit-at-default is wire-visible) | `full-literal-construction` on a kind field with no authoring default — `mk<Kind>` takes a parameter for every required field, so the parameter leaves or arrives — else `no-generated-shape-change` | `FieldOptionalityChanged` |
+| a field's optionality moved **into or out of** `optional` | `breaking-wire` when it became required (old documents that omitted it are refused); `additive` when `required` became `optional` (every old document carries it and re-encodes identically; the consumer that relied on presence meets absence only from a new emitter — host lag); `breaking-wire` between `optional` and `omitDefault` (absence changes meaning, or a default-valued member stops re-encoding) | `full-literal-construction` | `FieldOptionalityChanged` |
+| a field's optionality moved **between** `required` and `omitDefault`, or its identity default moved | `breaking-wire` — becoming required refuses the old documents that omitted it; becoming omit-at-default, or moving the default, re-encodes every old document sitting on the default without the member (omit-at-default is wire-visible) | `full-literal-construction` on a kind field with no authoring default — `mk<Kind>` takes a parameter for every required field, so the parameter leaves or arrives — else `no-generated-shape-change` | `FieldOptionalityChanged` |
 | a field crossed the **host-only** boundary | `breaking-wire` | `full-literal-construction` when it crossed `optional` too, else `no-generated-shape-change` | `FieldOptionalityChanged` |
 | a `fn` slot's `hostSurface` block moved | `host-surface-only` | `full-literal-construction` when its `fsharp` signature moved, else `no-generated-shape-change` | `FieldHostSurfaceChanged` |
 | a **hosted** slot's `hostSurface` block moved — its host type, its `encode` or its `decode` | `undecided` | `full-literal-construction` when its `fsharp` type moved, else `no-generated-shape-change` | `FieldHostSurfaceChanged` |
@@ -106,7 +110,7 @@ corrected once is corrected everywhere it is read, and a row this document shows
 something the code does not decide. Three rows read differently from the hand-copied table that
 preceded it, and in each the code was right and the copy had drifted: a union's type parameters
 moving is `host-surface-only` (the wire carries no type arguments), an `omitDefault` field becoming
-`required` is `breaking-for-emitters` (the emitter that omitted it is the one that breaks), and a
+`required` was `breaking-for-emitters` (Phase 304 corrected that: see below), and a
 type change across an erased slot is `undecided` at ANY depth — the rule used to test the
 top-level tag alone, so a `list` of `hosted` values reported `breaking-wire` where this document
 said undecided. Two consequence rows are new rather than corrected: an authoring default added to
@@ -124,7 +128,9 @@ which emits none.
   literal, and a whole float renders as the same digits, so every document the old vocabulary
   admitted decodes and re-encodes byte-identically under the new one, and every emitter that
   conformed (writing integers) still conforms. That is this table's definition of `additive`, not of
-  `breaking-for-emitters`, whose defining case is an old emitter's output becoming invalid. The cost
+  `breaking-for-emitters`, whose defining case is host code emitting differently over unchanged old
+  documents (since Phase 304; it read "an old emitter's output becoming invalid", which is a wire
+  break when the old documents themselves stop decoding). The cost
   is the one a new enum case has: host lag — a decoder that predates the widening refuses `2.5` —
   and the report says so. The rule used to read "a value that decoded no longer does", which is
   false for this one change. The narrowing (`float` to `int`) and every other retype stay
@@ -137,6 +143,34 @@ which emits none.
   human runs. A `fn` slot's block stays `host-surface-only`: a closure is the fixed sentinel on the
   wire whatever its signature says. On the F# axis both are decided rather than reported unreadable —
   the block states the host type outright, so the generated field moves exactly when `fsharp` does.
+
+**Graded by what old documents do (Phase 304).** The classifier used to grade tightening as a minor
+and loosening as a major — the inverse of this table's own definitions — because it asked what an
+EMITTER does rather than what a stored document does:
+
+- **A required field added, and any tightening to `required`, is `breaking-wire`.** Every document
+  written under the previous vocabulary that omitted the member — all of them, for an added field —
+  is refused by the decoder (`required field '<name>' is absent`), and an authoring default never
+  fills on decode. As a minor it let a `Behind` consumer tolerate the profile and then refuse every
+  stored document of the kind: the `/v2/` event published as a minor.
+- **`required` to `optional` is `additive`.** Every old document carries the member, decodes to the
+  same value and re-encodes byte-identically; every old emitter writes it, so stays conformant. The
+  consumer that relied on presence meets absence only in a document a NEW emitter writes, and a
+  decoder that predates the change refuses that document — host lag, as for a new enum case, which
+  the minor's `Behind` already means. On the F# axis the member becomes an `option`
+  (`full-literal-construction`).
+- **`required` to `omitDefault` stays `breaking-wire`.** The decoder reads a member sitting on the
+  default and the encoder then omits it, so every stored document carrying the default value
+  re-encodes to different bytes — the argument the moved-identity-default row already rests on.
+- **Int to float is `additive`** (Phase 252, below), and is the same test passed: old documents
+  decode and re-encode byte-identically under the widened vocabulary.
+
+The evolution differential in `tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs` holds the rows to
+that definition: it decodes sampled old documents under each perturbed vocabulary — an optional or a
+required field added, a field tightened, loosened, widened or narrowed — through the interpreter and
+the generated TypeScript decoder, and asserts that the class predicts what both do. The proof leg
+states the same thing as a theorem (`field_additive_monotone` in `proofs/WireVersioning.fst`): every
+field-add row the classifier keeps off the major leaves every old document decoding identically.
 
 ## The verdict class, and what a gate does with it
 
@@ -165,10 +199,12 @@ stops being read.
 - a `breaking-wire` row **retires** a member, so the major moves and the minor resets — an older
   consumer negotiating the profile becomes `Foreign` and must refuse rather than mis-decode;
 - `additive` and `breaking-for-emitters` rows **introduce** members, so the minor moves. The second
-  reads oddly until you ask whose profile it is: every existing document still decodes, so a
-  consumer is `Behind` and tolerates by the must-ignore-but-preserve rule, and the minor is the
-  honest answer to *that* question. What it cannot carry is that emitters need a coordinated bump,
-  which is why the verdict reports that separately instead of calling the format broken;
+  reads oddly until you ask whose profile it is: every existing document still decodes, to the same
+  bytes, so a consumer is `Behind` and tolerates by the must-ignore-but-preserve rule, and the minor
+  is the honest answer to *that* question. What it cannot carry is that emitters need a coordinated
+  bump, which is why the verdict reports that separately instead of calling the format broken. A row
+  under which an old document stops decoding is never one of these: a required field added is
+  `breaking-wire` and moves the major (Phase 304);
 - `host-surface-only` rows move no profile at all;
 - an **undecided** verdict yields **no profile**. Not the base profile unchanged, and not a minor:
   either would hand a caller a number to publish for a revision whose class nobody has established.

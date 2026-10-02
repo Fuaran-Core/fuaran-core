@@ -337,7 +337,7 @@ let host_only_chars : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("h"))::(Wire
 
 let classify_field_add : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) ->  
 if (Prims.op_Equals opt_class required_chars) then begin
-     SBreakingForEmitters
+     SBreakingWire
      end else begin
       
 if (Prims.op_Equals opt_class host_only_chars) then begin
@@ -391,6 +391,100 @@ let evolution_of : Prims.list<(severity * Prims.list<WireCanon.ch>)>  ->  evolut
 
 let classify_field_add_ignoring_optionality : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) -> SAdditive)
 
+
+let rec app = (fun ( l  :  Prims.list<'a> ) ( m  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     m
+     end
+| (h)::t -> begin
+     (h)::(app t m)
+     end))
+
+
+type field_decl = (Prims.list<WireCanon.ch> * Prims.list<WireCanon.ch>)
+
+
+let rec member_of = (fun ( k  :  Prims.list<WireCanon.ch> ) ( ms  :  Prims.list<(Prims.list<WireCanon.ch> * WireCanon.jval<'num, 'flt>)> ) -> (match (ms) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k', v))::t -> begin
+      
+if (Prims.op_Equals k' k) then begin
+     FStar_Pervasives_Native.Some (v)
+     end else begin
+     (member_of k t)
+     end
+     end))
+
+
+let rec decode_fields = (fun ( vocab  :  Prims.list<field_decl> ) ( ms  :  Prims.list<(Prims.list<WireCanon.ch> * WireCanon.jval<'num, 'flt>)> ) -> (match (vocab) with
+| [] -> begin
+     WireCanon.Ok ([])
+     end
+| ((n, c))::rest -> begin
+      
+if (Prims.op_Equals c host_only_chars) then begin
+     (decode_fields rest ms)
+     end else begin
+     (match ((member_of n ms)) with
+| FStar_Pervasives_Native.None -> begin
+      
+if (Prims.op_Equals c required_chars) then begin
+     WireCanon.Error ("required field is absent")
+     end else begin
+     (decode_fields rest ms)
+     end
+     end
+| FStar_Pervasives_Native.Some (v) -> begin
+     (match ((decode_fields rest ms)) with
+| WireCanon.Ok (r) -> begin
+     WireCanon.Ok ((((n), (v)))::r)
+     end
+| WireCanon.Error (e) -> begin
+     WireCanon.Error (e)
+     end)
+     end)
+     end
+     end))
+
+
+let decode_known_in = (fun ( vocab  :  Prims.list<field_decl> ) ( el  :  WireCanon.jval<'num, 'flt> ) -> (match (el) with
+| WireCanon.JObj (ms) -> begin
+     (decode_fields vocab ms)
+     end
+| uu___ -> begin
+     WireCanon.Error ("expected an object")
+     end))
+
+
+let carries = (fun ( k  :  Prims.list<WireCanon.ch> ) ( el  :  WireCanon.jval<'num, 'flt> ) -> (match (el) with
+| WireCanon.JObj (ms) -> begin
+     (match ((member_of k ms)) with
+| FStar_Pervasives_Native.Some (v) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let classify_field_add_pre_304 : Prims.list<WireCanon.ch>  ->  severity = (fun ( opt_class  :  Prims.list<WireCanon.ch> ) ->  
+if (Prims.op_Equals opt_class required_chars) then begin
+     SBreakingForEmitters
+     end else begin
+      
+if (Prims.op_Equals opt_class host_only_chars) then begin
+     SHostSurfaceOnly
+     end else begin
+     SAdditive
+     end
+     end)
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -415,7 +509,7 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "classify-a-removal-is-breaking"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("b"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Breaking (((WireCanon.CPlain ("b"))::[])::[], ((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "classify-an-addition-is-additive"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Additive (((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "a-required-field-breaks-emitters"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify_field_add required_chars) SBreakingForEmitters))})::[]
+let twins : Prims.list<twin> = ({tname = "classify-a-removal-is-breaking"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("b"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Breaking (((WireCanon.CPlain ("b"))::[])::[], ((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "classify-an-addition-is-additive"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify (((WireCanon.CPlain ("a"))::[])::[]) (((WireCanon.CPlain ("a"))::[])::((WireCanon.CPlain ("c"))::[])::[])) (Additive (((WireCanon.CPlain ("c"))::[])::[]))))})::({tname = "a-required-field-breaks-the-wire"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (classify_field_add required_chars) SBreakingWire))})::({tname = "an-old-document-is-refused-under-an-added-required-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_known_in (((((WireCanon.CPlain ("c"))::[]), (required_chars)))::[]) (WireCanon.JObj ([]))) (WireCanon.Error ("required field is absent"))))})::({tname = "an-old-document-is-unchanged-under-an-added-optional-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (decode_known_in (((((WireCanon.CPlain ("c"))::[]), ((WireCanon.CPlain ("o"))::[])))::[]) (WireCanon.JObj (((((WireCanon.CPlain ("b"))::[]), (WireCanon.JInt ((Prims.parse_int "1")))))::[]))) (WireCanon.Ok ([]))))})::[]
 
 
 

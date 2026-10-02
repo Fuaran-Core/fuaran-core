@@ -750,7 +750,9 @@ module internal TypeScript =
         + """
 const dObj = (j) => (j !== null && typeof j === 'object' && !Array.isArray(j)) ? j : dFail('expected an object');
 const dStr = (j) => (typeof j === 'string') ? j : dFail('expected a string');
-const dInt = (j) => (typeof j === 'number' && Number.isInteger(j)) ? j : dFail('expected an int');
+// An int slot is the interpreter's 32-bit int: an integral number outside it is refused here as
+// the interpreter and the compiled F# host refuse it (Phase 304), never read as a wider value.
+const dInt = (j) => (typeof j === 'number' && Number.isInteger(j) && j >= -2147483648 && j <= 2147483647) ? j : dFail('expected an int');
 // §7 — a float slot also accepts the three quoted non-finite sentinels `encFloat` emits
 // (§5), and decodes them to the NUMBER, never the string. `dInt` above is not widened:
 // §7 stops at the float slot.

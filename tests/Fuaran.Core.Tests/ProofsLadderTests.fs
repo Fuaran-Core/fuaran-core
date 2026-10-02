@@ -779,6 +779,9 @@ let private realCases () =
     |> Set.union (caseNames CheckpointTests.checkpointLawTests |> Set.ofList)
     |> Set.union (caseNames ProofOracleCompactedTests.compactedOracleTests |> Set.ofList)
     |> Set.union (caseNames ProofOracleCompactedTests.captureOracleTests |> Set.ofList)
+    // Phase 304: the old-document evolution differential, evidenced by the hosts that decode old
+    // documents rather than by the oracle.
+    |> Set.union (caseNames IdlStabilityClassTests.evolutionDifferential |> Set.ofList)
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.

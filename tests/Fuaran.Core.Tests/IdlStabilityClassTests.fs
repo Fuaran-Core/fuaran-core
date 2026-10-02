@@ -324,9 +324,18 @@ let tests =
           // The F# consequence table — the rows where the two axes disagree.
           // -----------------------------------------------------------------
 
-          testCase "a REQUIRED field added: breaking for emitters AND a construction break" (fun _ ->
+          testCase "a REQUIRED field added: breaking the WIRE AND a construction break" (fun _ ->
+              // Phase 304 — this row read "breaking for emitters" (a minor) until the old
+              // documents were decoded under the new vocabulary: every one lacks the member and
+              // the decoder refuses it. The class is what an old document does, so it is a wire
+              // break, not an emitter break.
               let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
-              Expect.isTrue v.BreaksEmitters "the wire axis reports the emitter break"
+
+              Expect.isTrue
+                  (v.Changes |> List.exists (fun c -> c.Severity = Diff.BreakingWire))
+                  "the wire axis reports the wire break"
+
+              Expect.isFalse v.BreaksEmitters "and no row is merely an emitter break"
 
               Expect.contains
                   v.FSharpConsequences
@@ -435,12 +444,26 @@ let tests =
               | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@2.0" "a /vN/ boundary"
               | Diff.Bump.Undecided _ -> failtest "a wire break was reported undecided")
 
+          testCase "a REQUIRED field added bumps the MAJOR: a Behind consumer must not tolerate it" (fun _ ->
+              // Phase 304. Until this phase the row rode the minor, and a consumer
+              // negotiating `Behind` tolerated a profile under which every stored document
+              // of the kind is refused — the `/v2/` event published as a minor.
+              let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
+
+              match Diff.bumpProfile { Name = "core"; Major = 1; Minor = 3 } v with
+              | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@2.0" "a /vN/ boundary"
+              | Diff.Bump.Undecided _ -> failtest "reported undecided"
+
+              Expect.equal (Diff.verdictClass v |> Diff.classLabel) "breaking" "the gate class is breaking")
+
           testCase "an emitter break rides the MINOR, and says so separately" (fun _ ->
               // The minor is the honest answer to the question the profile asks —
-              // every existing document still decodes, so a consumer is `Behind`,
-              // not `Foreign`. What it cannot carry is the emitter obligation, which
-              // is why that travels as its own field rather than as a major bump.
-              let v = verdict Fixtures.baseIdl Fixtures.requiredFieldAdded
+              // every existing document still decodes, to the same value and bytes, so a
+              // consumer is `Behind`, not `Foreign`. What it cannot carry is the emitter
+              // obligation, which is why that travels as its own field rather than as a
+              // major bump. Since Phase 304 the case is an authoring default removed — host
+              // code that relied on it now emits differently — and no longer a required field.
+              let v = verdict Fixtures.defaultOnRequired Fixtures.baseIdl
 
               match Diff.bumpProfile Versioning.Profile.coreV1 v with
               | Diff.Bump.Bumped p -> Expect.equal (Versioning.Profile.render p) "core@1.1" "minor"
@@ -806,3 +829,265 @@ let tests =
 
               for c in Diff.allConsequences do
                   Expect.stringContains out (Diff.consequenceLabel c) "the table names every class") ]
+
+// ---------------------------------------------------------------------------
+// Phase 304 — the evolution differential: the class predicts what an OLD document does.
+//
+// A class is a fact about old documents under the new vocabulary, never about the emitter
+// alone. Until this phase nothing decoded an old document under the new vocabulary — the
+// evolution leg compared the classifier with the model only — and the classifier graded a
+// required field added as a minor while every stored document of the kind was refused.
+//
+// Here a corpus of OLD documents (sampled under the old vocabulary, plus three planted ones
+// that reach the edges the perturbations turn on) is decoded under each perturbed vocabulary
+// by the interpreter and by the generated TypeScript decoder. The prediction read off the
+// verdict: a row that is not `breaking-wire` keeps EVERY old document decoding and
+// re-encoding to its own bytes on both hosts; a `breaking-wire` row refuses or moves at
+// least one of them, and the two hosts agree document by document. The go-red is the
+// pre-304 rule's claim — "old documents still decode" for a required field added — which
+// the corpus refutes outright.
+// ---------------------------------------------------------------------------
+
+module private Evolution304 =
+
+    /// The old vocabulary: the shared revision's `Note`, plus an `int` slot to widen and a
+    /// `float` slot to narrow.
+    let oldIdl: Idl =
+        let n = Fixtures.baseIdl.Kinds.Head
+
+        { Fixtures.baseIdl with
+            Kinds =
+                [ { n with
+                      Fields =
+                          n.Fields
+                          @ [ Fixtures.fld "count" TInt Required; Fixtures.fld "ratio" TFloat Required ] } ] }
+
+    let private noteWith (f: IdlField list -> IdlField list) : Idl =
+        { oldIdl with
+            Kinds =
+                [ { oldIdl.Kinds.Head with
+                      Fields = f oldIdl.Kinds.Head.Fields } ] }
+
+    let private retype name (g: IdlField -> IdlField) =
+        noteWith (List.map (fun (x: IdlField) -> if x.Name = name then g x else x))
+
+    /// The six perturbation families of Phase 304, the loosening split by the class it lands
+    /// in. Each carries the severity the table promises, so a classifier that drifts from the
+    /// table fails here before the hosts are asked.
+    let perturbations: (string * Idl * Diff.Severity) list =
+        [ "added optional", noteWith (fun fs -> fs @ [ Fixtures.fld "caption" TStr Optional ]), Diff.Additive
+          "added required", noteWith (fun fs -> fs @ [ Fixtures.fld "caption" TStr Required ]), Diff.BreakingWire
+          "tightened optional to required", retype "loudness" (fun x -> { x with Opt = Required }), Diff.BreakingWire
+          "loosened required to optional", retype "body" (fun x -> { x with Opt = Optional }), Diff.Additive
+          "loosened required to omitDefault",
+          retype "body" (fun x -> { x with Opt = OmitDefault(VStr "") }),
+          Diff.BreakingWire
+          "widened int to float", retype "count" (fun x -> { x with Type = TFloat }), Diff.Additive
+          "narrowed float to int", retype "ratio" (fun x -> { x with Type = TInt }), Diff.BreakingWire ]
+
+    /// The old documents, as bytes. The planted three reach what a sampler may miss: an
+    /// absent optional member (tightening), a member on the omit-at-default value (loosening
+    /// to `omitDefault`) and a fractional float (narrowing).
+    let corpus: string list =
+        let planted =
+            [ VNode("p1", "Note", [ "body", VStr "x"; "count", VInt 3; "ratio", VFloat 1.0 ])
+              VNode(
+                  "p2",
+                  "Note",
+                  [ "body", VStr ""
+                    "loudness", VEnum "Loud"
+                    "count", VInt 0
+                    "ratio", VFloat 0.0 ]
+              )
+              VNode("p3", "Note", [ "body", VStr "y"; "count", VInt -7; "ratio", VFloat 2.5 ]) ]
+
+        planted @ Sample.sampleNodes oldIdl [ "Note" ] 304 200
+        |> List.map (fun v ->
+            match Encode.encode oldIdl v with
+            | Ok b -> b
+            | Error m -> failtestf "the old vocabulary refused its own document %A: %s" v m)
+        |> List.distinct
+
+    /// What one host did to one old document: refused it, or re-encoded it to these bytes.
+    type Outcome =
+        | Refused
+        | Reencoded of string
+
+    let interpreter (idl: Idl) (bytes: string) : Outcome =
+        match Decode.decode idl bytes with
+        | Error _ -> Refused
+        | Ok v ->
+            match Encode.encode idl v with
+            | Ok again -> Reencoded again
+            | Error m -> failtestf "the interpreter decoded %s and could not re-encode it: %s" bytes m
+
+    let private runNode (script: string) : string option =
+        let tmp =
+            Path.Combine(Path.GetTempPath(), sprintf "fuaran-evolution-%s.mjs" (Guid.NewGuid().ToString "N"))
+
+        File.WriteAllText(tmp, script)
+
+        try
+            match
+                (try
+                    Some(Process.Start(ChildProcess.redirected "node" ("\"" + tmp + "\"")))
+                 with _ ->
+                     None)
+            with
+            | None -> None
+            | Some p ->
+                let out = p.StandardOutput.ReadToEnd()
+                let err = p.StandardError.ReadToEnd()
+                p.WaitForExit()
+
+                if p.ExitCode <> 0 then
+                    failtestf "node failed running the evolution harness: %s" err
+
+                Some out
+        finally
+            try
+                File.Delete tmp
+            with _ ->
+                ()
+
+    /// The generated TypeScript decoder of the NEW vocabulary over every old document; `None`
+    /// when node is not on PATH.
+    let typescript (idl: Idl) (docs: string list) : Outcome list option =
+        let tsModule =
+            match Gen.typescriptModule idl (idl.Kinds |> List.map _.Tag) with
+            | Ok src -> src
+            | Error e -> failtestf "TypeScript codegen refused: %s" (CodegenError.describe e)
+
+        let harness =
+            tsModule
+            + "\nconst __docs = [\n"
+            + (docs
+               |> List.map (fun d -> "  " + Canon.render (JStr d) + ",")
+               |> String.concat "\n")
+            + "\n];\n"
+            + "for (const d of __docs) {\n"
+            + "  const r = decodeNode(d);\n"
+            + "  if (!r.ok) { console.log(JSON.stringify({ refused: true })); continue; }\n"
+            + "  let re; try { re = encodeNode(r.value); } catch (e) { re = 'THREW: ' + (e && e.message ? e.message : String(e)); }\n"
+            + "  console.log(JSON.stringify({ re }));\n"
+            + "}\n"
+
+        runNode harness
+        |> Option.map (fun out ->
+            out.Replace("\r\n", "\n").Split('\n')
+            |> Array.filter (fun l -> l <> "")
+            |> Array.map (fun line ->
+                use doc = Text.Json.JsonDocument.Parse line
+
+                match doc.RootElement.TryGetProperty "refused" with
+                | true, _ -> Refused
+                | _ -> Reencoded(doc.RootElement.GetProperty("re").GetString()))
+            |> List.ofArray)
+
+    /// Does one host's run keep every old document as it was?
+    let survives (docs: string list) (outcomes: Outcome list) =
+        List.forall2 (fun d o -> o = Reencoded d) docs outcomes
+
+[<Tests>]
+let evolutionDifferential =
+    testList
+        "Phase 304 — the class predicts what an OLD document does under the new vocabulary"
+        [ testCase "the corpus reaches the edges the perturbations turn on" (fun _ ->
+              let docs = Evolution304.corpus
+              Expect.isGreaterThan docs.Length 50 "a corpus of old documents, not a handful"
+
+              Expect.exists
+                  docs
+                  (fun d -> not (d.Contains "\"loudness\""))
+                  "an old document omitting the optional member (what tightening refuses)"
+
+              Expect.exists docs (fun d -> d.Contains "\"body\":\"\"") "one sitting on the omit-at-default value"
+              Expect.exists docs (fun d -> d.Contains "2.5") "and one carrying a fractional float")
+
+          for (name, newIdl, promised) in Evolution304.perturbations do
+              testCase
+                  (sprintf "%s: the verdict predicts what the interpreter and the TypeScript decoder do" name)
+                  (fun _ ->
+                      let v =
+                          match Diff.classifyDiff Evolution304.oldIdl newIdl with
+                          | Ok v -> v
+                          | Error e -> failtestf "classifyDiff: %s" e
+
+                      let severity =
+                          match v.Changes with
+                          | [ one ] -> one.Severity
+                          | rows -> failtestf "the perturbation moved %d rows, not one: %A" rows.Length rows
+
+                      Expect.equal severity promised "the classifier grades the row as the table defines it"
+
+                      let docs = Evolution304.corpus
+                      let interp = docs |> List.map (Evolution304.interpreter newIdl)
+                      let predicted = severity <> Diff.BreakingWire
+
+                      Expect.equal
+                          (Evolution304.survives docs interp)
+                          predicted
+                          (if predicted then
+                               "a non-major class: every old document decodes under the interpreter and re-encodes to its own bytes"
+                           else
+                               "a major class: at least one old document is refused or re-encodes to different bytes under the interpreter")
+
+                      match Evolution304.typescript newIdl docs with
+                      | None ->
+                          skiptest "node not on PATH — the TypeScript leg of the evolution differential cannot run"
+                      | Some ts ->
+                          Expect.equal ts.Length docs.Length "the TypeScript decoder answered for every old document"
+
+                          Expect.equal
+                              (Evolution304.survives docs ts)
+                              predicted
+                              "and the generated TypeScript decoder does what the class predicts"
+
+                          List.zip3 docs interp ts
+                          |> List.iter (fun (d, i, t) ->
+                              Expect.equal t i (sprintf "the two hosts agree on old document %s" d)))
+
+          testCase "pin: an integral number outside the int range is refused at an int slot on every host" (fun _ ->
+              // Found by the narrowing case above: the generated TypeScript `dInt` read any integral
+              // number, where the interpreter's int is 32-bit. The compiled F# host's `dInt` matches
+              // `JInt` only, and the parser reads 2147483648 as no `JInt`, so it refuses as the
+              // interpreter does.
+              let control =
+                  match
+                      Encode.encode
+                          Evolution304.oldIdl
+                          (VNode("p", "Note", [ "body", VStr "x"; "count", VInt 3; "ratio", VFloat 1.0 ]))
+                  with
+                  | Ok b -> b
+                  | Error m -> failtestf "the control did not encode: %s" m
+
+              Expect.stringContains control "\"count\":3" "the control carries the int slot"
+              let wide = control.Replace("\"count\":3", "\"count\":2147483648")
+
+              Expect.equal
+                  (Evolution304.interpreter Evolution304.oldIdl wide)
+                  Evolution304.Refused
+                  "the interpreter refuses it"
+
+              match Json.parse "2147483648" with
+              | Ok(JInt _) ->
+                  failtest "the parser read 2^31 as an int, so the compiled host's JInt arm would accept it"
+              | _ -> ()
+
+              match Evolution304.typescript Evolution304.oldIdl [ control; wide ] with
+              | None -> skiptest "node not on PATH"
+              | Some [ c; w ] ->
+                  Expect.equal c (Evolution304.Reencoded control) "TypeScript accepts the in-range control"
+                  Expect.equal w Evolution304.Refused "and refuses 2^31, as the interpreter does"
+              | Some other -> failtestf "TypeScript answered %d documents for two" other.Length)
+          testCase "go-red: the pre-304 rule's claim for a required field added is refuted by the corpus" (fun _ ->
+              // The rule this phase corrected said "Additive for DECODERS, breaking for emitters":
+              // a minor, on the claim that old documents still decode. Decoded, not one does.
+              let _, added, _ =
+                  Evolution304.perturbations |> List.find (fun (n, _, _) -> n = "added required")
+
+              let interp = Evolution304.corpus |> List.map (Evolution304.interpreter added)
+
+              Expect.isTrue
+                  (interp |> List.forall (fun o -> o = Evolution304.Refused))
+                  "EVERY old document is refused — the minor this row used to publish orphaned them all") ]
