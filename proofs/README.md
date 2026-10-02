@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 248 claims — 177 proved across 25 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 249 claims — 178 proved across 25 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -4037,6 +4037,23 @@ The intermediate-tree lemmas the induction needs — a per-node view (`kids_at` 
 paragraph this section replaced predicted for them before they were taken. `TreeDiff.fst` now
 `open`s `Preservation` for them, and the two module name spaces are collision-free in both
 directions.
+
+**The order the three passes leave, exactly (Phase 305).** The four invariants above are about
+MEMBERSHIP, because pass 4 used to restate every changed parent's order and so no earlier pass had
+to be exact about it. Phase 305 drops the reorder that trailed every append — a parent whose
+after-order is the order passes 1–3 already left it in gets none — and that makes the order
+load-bearing. `diff_settles_order` is the lemma: after the first three blocks a parent of `after`
+holds its kept survivors in `before`'s order, then the inserted shells, then the moved-in survivors,
+the last two each in `after`'s order (`settled_order`, which production's step 4 computes clause for
+clause). It is proved by three exact-order invariants, `ord1`/`ord2`/`ord3`, carried BESIDE the
+membership ones through the same `_run` lemmas — each a `keep` over one of the two trees' child
+lists under a predicate naming the pass's worklist, with one order lemma per step reading the
+per-node view and a short list algebra (`keep_split_at` is the one that matters: widening a filter by
+the id just placed APPENDS it, because every id after it in the child list is still on the worklist —
+`kids_precede` carries child order into preorder for pass 1, and pass 2's own child-list walk gives
+it for free). `inv4` gained a disjunct (a listed parent holds the predicted order OR `after`'s), which
+is what lets `reorders_run` skip a settled parent, and the two theorems read off its conclusion as
+before. The order invariants are `opaque_to_smt`, revealed only where a body is used.
 
 **The hypothesis, and why it is not a strengthening of what the deferrals asked for.**
 `diff_reconstructs` requires `kinds_agree b a` — a node id the two trees share names the same kind

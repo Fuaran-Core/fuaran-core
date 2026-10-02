@@ -101,4 +101,72 @@ let tests =
 
               match Diff.toOpsContained canHold nodew idw before after with
               | Error(Diff.TargetNotAContainer("a1", "para")) -> ()
-              | other -> failtestf "expected TargetNotAContainer at a1, got %A" other ]
+              | other -> failtestf "expected TargetNotAContainer at a1, got %A" other
+
+          // ---- the settled-order drop (Phase 305, 305.t1): steps 1-3 leave a parent holding its
+          // kept survivors in before-order, then the inserted shells, then the moved-in survivors,
+          // the last two in after-order; a parent whose after-order IS that order gets no reorder.
+          // The model is `TreeDiff.fst`'s `settled_order`; the proof is `diff_settles_order`.
+
+          testCase "an append emits no trailing ReorderChildren"
+          <| fun _ ->
+              let before = sample ()
+              let after = applyAllOk [ InsertChild("a", RNode.leaf "a3" "para" "w") ] before
+              let d = diffOk before after
+              Expect.equal d [ InsertChild("a", RNode.leaf "a3" "para" "w") ] "one insert, no reorder"
+              Expect.equal (applyAllOk d before) after "and it still reconstructs"
+
+          testCase "a move-in at the end emits no trailing ReorderChildren"
+          <| fun _ ->
+              let before = sample ()
+              let after = applyAllOk [ MoveNode("b1", "a") ] before
+              let d = diffOk before after
+              Expect.equal d [ MoveNode("b1", "a") ] "one move, no reorder"
+              Expect.equal (applyAllOk d before) after "and it still reconstructs"
+
+          testCase "kept survivors, then shells, then moved-in survivors is the settled order"
+          <| fun _ ->
+              // a: [a1; a2] -> [a1; a3 (new); b1 (moved in)] with a2 removed — three steps, no reorder
+              let before = sample ()
+
+              let after =
+                  applyAllOk
+                      [ InsertChild("a", RNode.leaf "a3" "para" "w")
+                        MoveNode("b1", "a")
+                        RemoveNode "a2" ]
+                      before
+
+              let d = diffOk before after
+
+              Expect.isFalse
+                  (d
+                   |> List.exists (function
+                       | ReorderChildren _ -> true
+                       | _ -> false))
+                  "the settled order is after's order, so nothing restates it"
+
+              Expect.equal (applyAllOk d before) after "and it still reconstructs"
+
+          testCase "an insert anywhere but the end still emits the reorder"
+          <| fun _ ->
+              let before = sample ()
+
+              let after =
+                  applyAllOk
+                      [ InsertChild("a", RNode.leaf "a0" "para" "w")
+                        ReorderChildren("a", [ "a0"; "a1"; "a2" ]) ]
+                      before
+
+              let d = diffOk before after
+
+              Expect.isTrue
+                  (d |> List.exists ((=) (ReorderChildren("a", [ "a0"; "a1"; "a2" ]))))
+                  "the shell lands last, so after's order needs stating"
+
+              Expect.equal (applyAllOk d before) after "and it still reconstructs"
+
+          testCase "a pure permutation still emits exactly one reorder"
+          <| fun _ ->
+              let before = sample ()
+              let after = applyAllOk [ ReorderChildren("a", [ "a2"; "a1" ]) ] before
+              Expect.equal (diffOk before after) [ ReorderChildren("a", [ "a2"; "a1" ]) ] "one reorder" ]

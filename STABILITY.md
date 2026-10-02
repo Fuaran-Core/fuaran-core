@@ -2439,11 +2439,25 @@ regenerated). Rides the draft.** The ruling behind each change is DECISIONS D103
   `proofs.json`).
 - **New: `Tree.Index.buildWith encode` / `isFreshForWith encode`** — the content-aware stamp. The plain
   `isFreshFor` stays as it was and its doc now says what it cannot see: a content-only `UpdateNode`.
-- **Not changed, by ruling (D103):** `validateUpdate`'s containment check, and the structural diff's
-  redundant trailing `ReorderChildren`; the `Batch` and script lifts of `invert_applicable` are proved
-  (`Preservation.fst` section 15), the other three theorems the phase named are deferred
-  with the counterexample for the pre-fix rule (`TreeDiff.contained_script_refused_at_before_kinds`) and
-  the `diff-applicable-contained` row reworded now. Wire classes: none — nothing on the wire moved.
+- **`Diff.toOps` and every form over it emit NO `ReorderChildren` for a parent the three structural
+  steps already leave in `after`'s order** (the last clause of the phase's first task, landed when the
+  phase was re-opened to finish). Steps 1-3 leave a parent holding its kept survivors in before-order,
+  then the inserted shells, then the moved-in survivors, the last two each in after-order; a parent
+  whose after-order IS that order — an append, a move-in at the end, a removal, any mix of them that
+  keeps the survivors' relative order — used to get a trailing reorder restating it, and now gets none.
+  A pure permutation, or an insert or move-in anywhere but the end, still emits exactly the reorder it
+  did. The script is a DERIVED artefact and every law over it holds as before (`diffLaws`, the
+  `Proofs.Oracle` differentials, `diff_applicable` / `diff_reconstructs` re-proved over the changed
+  pass); what moves is which script a reader comparing diffs byte for byte sees — strictly fewer ops,
+  never more. The order-prediction lemma behind it is `TreeDiff.diff_settles_order`
+  (`diff-settled-order` in `proofs.json`), proved by exact-order invariants carried beside section 10's
+  membership invariants through the three passes.
+- **Not changed, by ruling (D103):** `validateUpdate`'s containment check; the `Batch` and script lifts
+  of `invert_applicable` are proved (`Preservation.fst` section 15), as are the other three theorems
+  the phase named (`Normalize.fst`, `merged_applies_and_order_free`, `diff_applicable_contained_run`,
+  each added when the phase was re-opened to finish), with the counterexample for the pre-fix rule
+  (`TreeDiff.contained_script_refused_at_before_kinds`) and the `diff-applicable-contained` row
+  reworded. Wire classes: none — nothing on the wire moved.
 
 **Phase 331 — `tests/Fuaran.Core.Tests/ConformanceTests.fs` is split along the conformance kit's topic
 files. Class: `additive`, and the whole of it is tests: no package's public surface moves (the seventeen
