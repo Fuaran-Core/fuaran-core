@@ -1011,6 +1011,41 @@ module OpStream =
     let verifyAttestation (sink: IAttestationSink) (attestation: Attestation) (records: OpRecord<'Op> list) : bool =
         OpStreamCapture.verifyAttestation sink attestation records
 
+    /// What an attestation BY A PARTY signs (Phase 311): `hashFn head ("attest|" + Actor.encode
+    /// party)` — the head bound to the identity of the party vouching for it, so one party's signature
+    /// over a head is not another's, and a store several writers attest (one lane each) says WHO
+    /// attested which head. The `attest|` prefix keeps the pre-image apart from a lane DAG node's
+    /// (`Actor.encode actor + "|" + …`, which opens with `{`), so a subject is never a node id by the
+    /// spelling of its pre-image. The sink signs and verifies this string exactly as it signs a bare
+    /// head; `KeyId` still names the key, the party names who vouches. The bodies are here, not in
+    /// `Capture.fs`: they are compositions of `head` and the sink, and carry no state of their own.
+    let attestationSubject (hashFn: HashFn) (party: Actor) (head: string) : string =
+        hashFn head ("attest|" + Actor.encode party)
+
+    /// `attestHead` by a named party (Phase 311): signs `attestationSubject hashFn party (head
+    /// records)`. `None` from the no-op sink.
+    let attestHeadAs
+        (sink: IAttestationSink)
+        (hashFn: HashFn)
+        (party: Actor)
+        (records: OpRecord<'Op> list)
+        : Attestation option =
+        sink.Sign(attestationSubject hashFn party (head records))
+
+    /// `verifyAttestation` for a party's attestation (Phase 311): `true` only when the attestation
+    /// names the subject this party's attestation of the chain's current head signs AND the sink
+    /// accepts it there — so an attestation made by another party, or over another head, is refused
+    /// before the sink is asked.
+    let verifyAttestationAs
+        (sink: IAttestationSink)
+        (hashFn: HashFn)
+        (party: Actor)
+        (attestation: Attestation)
+        (records: OpRecord<'Op> list)
+        : bool =
+        let subject = attestationSubject hashFn party (head records)
+        attestation.Head = subject && sink.Verify attestation subject
+
     // ---- compare-and-append / optimistic concurrency (Phase 79) (bodies in Chain.fs) ----
 
     /// `appendIf` under an explicit `StreamConfig` (Phase 296) — the head an empty stream is compared

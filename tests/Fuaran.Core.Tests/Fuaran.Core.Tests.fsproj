@@ -54,6 +54,7 @@
     <Compile Include="DagTests.fs" />
     <Compile Include="ReachTests.fs" />
     <Compile Include="CheckpointTests.fs" />
+    <Compile Include="LaneTests.fs" />
     <Compile Include="ProvenanceTests.fs" />
     <Compile Include="ColumnTests.fs" />
     <Compile Include="QueryTests.fs" />
