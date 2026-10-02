@@ -136,15 +136,29 @@ let rec inter_nil_iff (#a:eqtype) (l m:list a)
     | [] -> ()
     | h :: t -> inter_nil_iff t m
 
+(* A list whose every member is a member of an empty list is empty (Phase 340) — how emptiness
+   descends from a union's clause to each side's. *)
+let nil_of_sub (#a:eqtype) (l m:list a)
+  : Lemma (requires is_empty m /\ (forall (x:a). mem x l ==> mem x m)) (ensures is_empty l)
+  = match l with
+    | [] -> ()
+    | h :: _ -> assert (mem h l)
+
 (* ======================================================================================
    1. Footprints and independence (F#: `Footprint`, `Ops.independent` in Ops.fs).
    ====================================================================================== *)
+
+(* A slot is a (node, slot-name) pair (Phase 340): a named field of the node, or the key a keyed
+   child sits under. F#: `string * string`. *)
+type slot = string & string
 
 type footprint = {
   reads                 : list string;
   structure_writes      : list string;
   content_writes        : list string;
-  unknown_parent_writes : list string
+  unknown_parent_writes : list string;
+  slot_reads            : list slot;
+  slot_writes           : list slot
 }
 
 (* F#: `hasStructural` inside `Ops.independent`, and `writesStructure` beside `Dag.conflicts`
@@ -152,23 +166,65 @@ type footprint = {
 let writes_structure (f:footprint) : Tot bool =
   not (is_empty f.structure_writes) || not (is_empty f.unknown_parent_writes)
 
-(* F#: `Ops.independent`, clause for clause. *)
+(* F#: `Footprint.slotNodes` — the slots read as the nodes they belong to. *)
+let rec nodes (l:list slot) : Tot (list string) =
+  match l with
+  | [] -> []
+  | (n, _) :: t -> n :: nodes t
+
+let rec mem_nodes (n:string) (l:list slot)
+  : Lemma (ensures mem n (nodes l) <==> (exists (s:string). mem (n, s) l)) [SMTPat (mem n (nodes l))]
+  = match l with
+    | [] -> ()
+    | (m, s) :: t ->
+      mem_nodes n t;
+      if n = m then assert (mem (n, s) l) else ()
+
+let rec nodes_app (l m:list slot)
+  : Lemma (ensures nodes (app l m) == app (nodes l) (nodes m)) [SMTPat (nodes (app l m))]
+  = match l with
+    | [] -> ()
+    | _ :: t -> nodes_app t m
+
+(* F#: `Footprint.slotClash` — the slots both write, and the slots one writes and the other reads,
+   either way round. The set `Interference.SlotClash` carries and `Dag.conflicts` tags `SlotClash`. *)
+let slot_clash (a b:footprint) : Tot (list slot) =
+  union (inter a.slot_writes b.slot_writes)
+        (union (inter a.slot_writes b.slot_reads)
+               (inter a.slot_reads b.slot_writes))
+
+(* F#: `Footprint.slotsAgainstNode a b` — the nodes `a` accesses through a slot that `b` touches
+   WHOLE: a slot write of `n` against `b`'s content write, read or structure write of `n`, and a
+   slot read of `n` against `b`'s content write of `n`. A whole-node write is a write of every slot. *)
+let slots_against_node (a b:footprint) : Tot (list string) =
+  union (inter (nodes a.slot_writes) (union b.content_writes (union b.reads b.structure_writes)))
+        (inter (nodes a.slot_reads) b.content_writes)
+
+(* F#: `Ops.independent`, clause for clause. The slot clauses (Phase 340): no slot one side writes
+   and the other accesses, and no node one side reaches through a slot that the other touches
+   whole. Two writes to DIFFERENT slots of one node fail no clause. *)
 let independent (a b:footprint) : Tot bool =
   disjoint a.content_writes b.content_writes &&
   disjoint a.content_writes b.reads &&
   disjoint b.content_writes a.reads &&
   disjoint a.structure_writes b.structure_writes &&
   not (not (is_empty a.unknown_parent_writes) && writes_structure b) &&
-  not (not (is_empty b.unknown_parent_writes) && writes_structure a)
+  not (not (is_empty b.unknown_parent_writes) && writes_structure a) &&
+  is_empty (slot_clash a b) &&
+  is_empty (slots_against_node a b) &&
+  is_empty (slots_against_node b a)
 
 (* ======================================================================================
    2. Merge conflicts (F#: `MergeConflictShape`, `MergeConflict<'Op>`, `Dag.conflicts`).
    ====================================================================================== *)
 
+(* F#: `MergeConflictShape`. `SlotClash` carries the slot name (Phase 340) because the conflict's
+   `address` is the node. *)
 type shape =
   | ConcurrentUpdate
   | InsertPositionClash
   | MoveVsRemove
+  | SlotClash of string
 
 type conflict (op:eqtype) = {
   left    : op;
@@ -201,17 +257,33 @@ let rec tag (#op:eqtype) (a b:op) (s:shape) (addrs:list string) : Tot (list (con
   | [] -> []
   | x :: t -> { left = a; right = b; address = x; shape = s } :: tag a b s t
 
+(* F#: `for (node, slot) in slotClash do yield { …; Address = node; Shape = SlotClash slot }`
+   (Phase 340) — the slot is the address space, so the node is the conflict's address and the
+   slot rides the shape. *)
+let rec tag_slots (#op:eqtype) (a b:op) (slots:list slot) : Tot (list (conflict op)) =
+  match slots with
+  | [] -> []
+  | (n, s) :: t -> { left = a; right = b; address = n; shape = SlotClash s } :: tag_slots a b t
+
+(* F#: `concurrent` in `Dag.conflicts` since Phase 340 — the content overlaps, and a slot access
+   of a node the other side touches whole, both ways. *)
+let concurrent_or_slots (fa fb:footprint) : Tot (list string) =
+  union (concurrent fa fb) (union (slots_against_node fa fb) (slots_against_node fb fa))
+
 (* F#: the body of `Dag.conflicts` for ONE op pair — one shape per shared address by priority
-   (content > position > move/remove). *)
+   (content > position > move/remove), and beside them one `SlotClash` per clashing slot, which is
+   its own address space and is not deduplicated against the node-keyed shapes. *)
 let pair_conflicts (#op:eqtype) (fp:op -> footprint) (a b:op) : Tot (list (conflict op)) =
   let fa = fp a in
   let fb = fp b in
-  let c1 = concurrent fa fb in
+  let c1 = concurrent_or_slots fa fb in
   let c2 = diff (insert_clash fa fb) c1 in
   let c3 = diff (diff (move_remove fa fb) c1) c2 in
+  let c4 = slot_clash fa fb in
   app (tag a b ConcurrentUpdate c1)
       (app (tag a b InsertPositionClash c2)
-           (tag a b MoveVsRemove c3))
+           (app (tag a b MoveVsRemove c3)
+                (tag_slots a b c4)))
 
 (* F#: the inner `for b in deltaB` of `Dag.conflicts`. *)
 let rec conflicts_with (#op:eqtype) (fp:op -> footprint) (a:op) (db:list op)
@@ -420,6 +492,12 @@ let diff_nil_r (#a:eqtype) (l:list a)
   = let rec go (l:list a) : Lemma (ensures diff l [] == l) = match l with [] -> () | _ :: t -> go t in
     go l
 
+let rec tag_slots_nil_iff (#op:eqtype) (a b:op) (slots:list slot)
+  : Lemma (ensures is_empty (tag_slots a b slots) == is_empty slots) [SMTPat (is_empty (tag_slots a b slots))]
+  = match slots with
+    | [] -> ()
+    | _ :: t -> tag_slots_nil_iff a b t
+
 let pair_conflicts_nil_iff (#op:eqtype) (fp:op -> footprint) (a b:op)
   : Lemma (ensures is_empty (pair_conflicts fp a b) == independent (fp a) (fp b))
   = let fa = fp a in
@@ -433,9 +511,15 @@ let pair_conflicts_nil_iff (#op:eqtype) (fp:op -> footprint) (a b:op)
             (disjoint fa.content_writes fb.content_writes &&
              disjoint fa.content_writes fb.reads &&
              disjoint fb.content_writes fa.reads));
-    if is_empty (concurrent fa fb) then begin
+    (* … and `c1` is empty exactly when the content clauses AND the two slot-against-node clauses
+       hold (Phase 340): `app_nil_iff` splits the union. *)
+    assert (is_empty (concurrent_or_slots fa fb) ==
+            (is_empty (concurrent fa fb) &&
+             is_empty (slots_against_node fa fb) &&
+             is_empty (slots_against_node fb fa)));
+    if is_empty (concurrent_or_slots fa fb) then begin
       (* c1 = [] so c2 = insert_clash, c3 = move_remove — the differences drop away. *)
-      assert (concurrent fa fb == []);
+      assert (concurrent_or_slots fa fb == []);
       assert (diff (insert_clash fa fb) [] == insert_clash fa fb);
       if is_empty (insert_clash fa fb) then
         assert (diff (diff (move_remove fa fb) []) [] == move_remove fa fb)
@@ -517,6 +601,41 @@ let move_remove_sym (fa fb:footprint) (x:string)
   : Lemma (ensures mem x (move_remove fa fb) == mem x (move_remove fb fa))
           [SMTPat (mem x (move_remove fa fb))]
   = ()
+
+(* Phase 340 — the two slot classes are symmetric too: the clash by its three-way union, the
+   node-level class because `concurrent_or_slots` carries both directions. *)
+let slot_clash_sym (fa fb:footprint) (x:slot)
+  : Lemma (ensures mem x (slot_clash fa fb) == mem x (slot_clash fb fa))
+          [SMTPat (mem x (slot_clash fa fb))]
+  = ()
+
+(* … and so is its emptiness, which is the clause `independent` reads (`TreeOps.independent_sym`
+   consumes this). *)
+let slot_clash_nil_sym (fa fb:footprint)
+  : Lemma (ensures is_empty (slot_clash fa fb) == is_empty (slot_clash fb fa))
+  = (match slot_clash fa fb with
+     | [] -> ()
+     | h :: _ -> assert (mem h (slot_clash fa fb)));
+    (match slot_clash fb fa with
+     | [] -> ()
+     | h :: _ -> assert (mem h (slot_clash fb fa)))
+
+let concurrent_or_slots_sym (fa fb:footprint) (x:string)
+  : Lemma (ensures mem x (concurrent_or_slots fa fb) == mem x (concurrent_or_slots fb fa))
+          [SMTPat (mem x (concurrent_or_slots fa fb))]
+  = ()
+
+(* Canonical membership in a slot-tagged list: the shape names the slot, the address the node. *)
+let rec mem_u_tag_slots (#op:eqtype) (c:conflict op) (a b:op) (slots:list slot)
+  : Lemma (ensures mem_u c (tag_slots a b slots) ==
+                   ((match c.shape with
+                     | SlotClash s -> mem (c.address, s) slots
+                     | _ -> false) &&
+                    ((c.left = a && c.right = b) || (c.left = b && c.right = a))))
+          [SMTPat (mem_u c (tag_slots a b slots))]
+  = match slots with
+    | [] -> ()
+    | _ :: t -> mem_u_tag_slots c a b t
 
 let pair_conflicts_sym (#op:eqtype) (fp:op -> footprint) (a b:op) (c:conflict op)
   : Lemma (ensures mem_u c (pair_conflicts fp a b) == mem_u c (pair_conflicts fp b a))
@@ -4403,6 +4522,68 @@ let append_never_replaces (#op:eqtype) (same:node op -> node op -> bool) (n:node
       if mem n.nid (ids_of d.nodes) then lookup_of_mem_ids d.nodes n.nid else ()
 
 (* ======================================================================================
+   17. Two writes to different slots of one node commute (Phase 340).
+
+   The slot clauses of `independent` say a pair of slot writes is independent exactly when the
+   slots differ. This section says that verdict is SOUND against a model of what a slot write
+   does, so the precision the clauses buy is not bought with a lie. The state is a store of
+   (slot, value) bindings, latest first (F#: a domain whose node holds named fields, or a keyed
+   holder); a write binds its slot; a read finds the latest binding. Two writes to different
+   slots reach stores that agree at EVERY slot whichever order they are made in — commutation up
+   to lookup, which is all a reader of the store can observe — and two writes to ONE slot with
+   different values do not: the last writer wins, the orders disagree at that slot, and the
+   footprint refuses the pair (`SlotClash`). A whole-node write of the slot's node is refused
+   against every slot write of it — the conservative default a four-set footprint keeps.
+   ====================================================================================== *)
+
+type slot_store = list (slot & string)
+
+let rec lookup_slot (st:slot_store) (k:slot) : Tot (option string) =
+  match st with
+  | [] -> None
+  | (k', v) :: t -> if k = k' then Some v else lookup_slot t k
+
+(* F#: a domain op `write (node, slot) value`, lowered with `Footprint.slotEdit`. *)
+let write_slot (k:slot) (v:string) (st:slot_store) : Tot slot_store = (k, v) :: st
+
+(* F#: `Footprint.slotEdit node slot`. *)
+let slot_write_fp (k:slot) : Tot footprint =
+  { reads = []; structure_writes = []; content_writes = []; unknown_parent_writes = [];
+    slot_reads = [k]; slot_writes = [k] }
+
+(* F#: `Footprint.contentEdit node`. *)
+let whole_node_write_fp (n:string) : Tot footprint =
+  { reads = [n]; structure_writes = []; content_writes = [n]; unknown_parent_writes = [];
+    slot_reads = []; slot_writes = [] }
+
+(* THEOREM. Two slot writes are independent exactly when their slots differ. *)
+let slot_writes_independent_iff (k1 k2:slot)
+  : Lemma (ensures independent (slot_write_fp k1) (slot_write_fp k2) == (k1 <> k2))
+  = ()
+
+(* THEOREM. Writes to different slots commute at every slot of the store. *)
+let slot_writes_commute (k1 k2:slot) (v1 v2:string) (st:slot_store) (q:slot)
+  : Lemma (requires k1 <> k2)
+          (ensures lookup_slot (write_slot k1 v1 (write_slot k2 v2 st)) q ==
+                   lookup_slot (write_slot k2 v2 (write_slot k1 v1 st)) q)
+  = ()
+
+(* … and two writes to ONE slot with different values do not: the orders disagree at that slot,
+   and the footprint refuses the pair. *)
+let same_slot_writes_disagree (k:slot) (v1 v2:string) (st:slot_store)
+  : Lemma (requires v1 <> v2)
+          (ensures not (independent (slot_write_fp k) (slot_write_fp k)) /\
+                   ~(lookup_slot (write_slot k v1 (write_slot k v2 st)) k ==
+                     lookup_slot (write_slot k v2 (write_slot k v1 st)) k))
+  = ()
+
+(* A whole-node write is a write of every slot: refused against each, from either side. *)
+let whole_node_refuses_every_slot (n s:string)
+  : Lemma (ensures not (independent (whole_node_write_fp n) (slot_write_fp (n, s))) /\
+                   not (independent (slot_write_fp (n, s)) (whole_node_write_fp n)))
+  = ()
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -4419,6 +4600,13 @@ let append_never_replaces (#op:eqtype) (same:node op -> node op -> bool) (n:node
    ====================================================================================== *)
 
 noeq type twin = { tname : string; tholds : unit -> bool }
+
+(* Every conflict in a report is `c`, up to the Left/Right swap — the other half of "one
+   conflict, read canonically" beside `mem_u`. *)
+let rec all_ueq (#op:eqtype) (c:conflict op) (cs:list (conflict op)) : Tot bool =
+  match cs with
+  | [] -> true
+  | d :: t -> ueq c d && all_ueq c t
 
 let rec twins_hold (l:list twin) : Tot bool =
   match l with
@@ -4442,15 +4630,35 @@ let twins : list twin = [
   { tname = "independent-disjoint-footprints";
     tholds = (fun () ->
       independent
-        ({ reads = [ "p" ]; structure_writes = [ "p" ]; content_writes = [ "n" ]; unknown_parent_writes = [] })
-        ({ reads = [ "q" ]; structure_writes = [ "q" ]; content_writes = [ "m" ]; unknown_parent_writes = [] })
+        ({ reads = [ "p" ]; structure_writes = [ "p" ]; content_writes = [ "n" ]; unknown_parent_writes = []; slot_reads = []; slot_writes = [] })
+        ({ reads = [ "q" ]; structure_writes = [ "q" ]; content_writes = [ "m" ]; unknown_parent_writes = []; slot_reads = []; slot_writes = [] })
       = true) };
   { tname = "dependent-shared-structure-write";
     tholds = (fun () ->
       independent
-        ({ reads = []; structure_writes = [ "p" ]; content_writes = []; unknown_parent_writes = [] })
-        ({ reads = []; structure_writes = [ "p" ]; content_writes = []; unknown_parent_writes = [] })
+        ({ reads = []; structure_writes = [ "p" ]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = [] })
+        ({ reads = []; structure_writes = [ "p" ]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = [] })
       = false) };
+  { tname = "independent-different-slots";
+    tholds = (fun () -> independent (slot_write_fp ("n", "tier")) (slot_write_fp ("n", "thinking")) = true) };
+  { tname = "dependent-same-slot";
+    tholds = (fun () -> independent (slot_write_fp ("n", "tier")) (slot_write_fp ("n", "tier")) = false) };
+  { tname = "whole-node-write-refuses-a-slot";
+    tholds = (fun () -> independent (whole_node_write_fp "n") (slot_write_fp ("n", "tier")) = false) };
+  (* Read canonically, as every conflict report is (section 4): the model's `slot_clash` is a
+     membership union, so the one clashing slot is listed once per clause it fails, where
+     production's set carries it once. The report is one conflict up to `ueq`, and nothing else. *)
+  { tname = "slot-clash-is-tagged-at-the-slot";
+    tholds = (fun () ->
+      let expected = { left = ("n", "tier"); right = ("n", "tier"); address = "n"; shape = SlotClash "tier" } in
+      let cs = pair_conflicts slot_write_fp ("n", "tier") ("n", "tier") in
+      mem_u expected cs && all_ueq expected cs) };
+  { tname = "different-slots-fold-clean";
+    tholds = (fun () -> pair_conflicts slot_write_fp ("n", "tier") ("n", "thinking") = []) };
+  { tname = "slot-writes-commute-at-every-slot";
+    tholds = (fun () ->
+      lookup_slot (write_slot ("n", "tier") "t2" (write_slot ("n", "thinking") "high" [])) ("n", "thinking")
+      = lookup_slot (write_slot ("n", "thinking") "high" (write_slot ("n", "tier") "t2" [])) ("n", "thinking")) };
   { tname = "drain-orders-a-diamond-by-the-tie-break";
     tholds = (fun () -> drain_order twin_lt twin_fuel twin_dag.nodes = [ "a"; "b"; "c"; "m" ]) };
   { tname = "drain-refuses-a-dangling-parent";

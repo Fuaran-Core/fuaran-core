@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 249 claims — 178 proved across 25 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
+**The ladder, counted:** 253 claims — 182 proved across 26 models, 42 tested, 27 assumed (6 `domain-obligation`, 18 `model-bridge`, 3 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -343,6 +343,44 @@ history whose branches do not commute has no order-free replay for a script to e
 `ReconcileShapeTests.fs` pins a witness. The `reconcile-differential` row runs the extracted
 partition beside production over the four shapes, and the extracted checked fold beside `foldOnce`
 over a rejecting-lane pool.
+### A footprint names the slot it writes (Phase 340)
+
+The four address sets are node-granular, so a write to PART of a node was a write to the node and two
+ops touching different fields of one node were refused — a halt on a pair that commutes. The record
+now carries two more sets, `slot_reads` and `slot_writes`, over `(node, slot)` pairs (F#: `SlotReads`
+/ `SlotWrites`, `Footprint.slotEdit` / `readingSlot`), and `independent` three more clauses: no slot
+one side writes and the other accesses (`slot_clash`, F#: `Footprint.slotClash` behind
+`Interference.SlotClash`), and no node one side reaches through a slot that the other touches whole
+(`slots_against_node`, both ways — a whole-node write is a write of every slot, which is the
+conservative default a four-set footprint keeps). `pair_conflicts` reads the same three sets: the
+node-level class joins `concurrent` (`concurrent_or_slots`, reported `ConcurrentUpdate` at the node),
+and each clashing slot is tagged `SlotClash s` at its node by `tag_slots` — its own address space, so
+it is not deduplicated against the node-keyed shapes. `pair_conflicts_nil_iff` (the fold fires iff the
+pair is not independent) and the halt report's arrival-order invariance (`pair_conflicts_sym` through
+`slot_clash_sym`, `concurrent_or_slots_sym` and `mem_u_tag_slots`) are re-proved over six sets, and
+the fold theorems above are untouched: they consume `independent` abstractly.
+
+Section 17 is the soundness the clauses rest on, at the smallest state that HAS slots: a store of
+`(slot, value)` bindings, latest first, where a write binds its slot and a read finds the latest
+binding. `slot_writes_independent_iff` — two slot writes are independent exactly when their slots
+differ; `slot_writes_commute` — writes to different slots reach stores that agree at EVERY slot in
+either order (commutation up to lookup, which is all a reader of the store can observe; the two
+stores are not list-equal, and the theorem does not say they are); `same_slot_writes_disagree` — two
+writes to one slot with different values disagree at that slot, and the footprint refuses the pair;
+`whole_node_refuses_every_slot` — a content write of the node is refused against each of its slots,
+from either side. `TreeOps.fst` re-verifies over the widened record (`independent_sym` through
+`slot_clash_nil_sym`; `independent_union_left` through `nil_of_sub`, membership descending from a
+union's clause to each side's), and so does `Arbitrate.fst`'s `accepted_pairwise_independent`. Six
+twins sample the slot clauses at the extracted model (`independent-different-slots`,
+`dependent-same-slot`, `whole-node-write-refuses-a-slot`, `slot-clash-is-tagged-at-the-slot`,
+`different-slots-fold-clean`, `slot-writes-commute-at-every-slot`).
+
+What is NOT in the model, and why: no skeleton op writes a slot. `TreeOps.op_fp` leaves both sets
+empty for every operation, because an `UpdateNode` rewrites its target whole and a pure script cannot
+say which part of a payload changed — so `Ops.footprint` and `Ops.footprintKeyed` never narrow to a
+slot, a domain that declares no slot access gets the four-set verdict it always got, and the slot
+clauses are exercised by a DOMAIN's own lowering (`Conformance.footprintLawsAt` counts the pairs only
+the slot granularity frees, vacuous by declaration where none is declared).
 ## What the corpus covers
 
 The differential host draws lane sets from three pools and compares, per lane set and per sampled

@@ -809,7 +809,18 @@ module Artifact =
             // A whole-valued float renders with no `.` and no exponent, so the parser
             // hands it back as `JInt`. `Decoder.float` reads both, or this would refuse
             // every `VFloat 1.0` the projection itself wrote.
-            | "float" -> value "float value has no numeric 'value'" Decoder.float |> Result.map VFloat
+            //
+            // Phase 303 — and a NON-FINITE float renders as WIRE_FORMAT §7's quoted token
+            // (`Canon` spells a non-finite `JFloat` as the string `"NaN"`), so the reader takes
+            // the three tokens back at this one value tag, or `render` would write an
+            // `idl.json` carrying a `VFloat nan` default that its own `parse` refuses.
+            | "float" ->
+                let sentinelOrNumber: Decoder<float> =
+                    function
+                    | JStr(FloatToken.NonFinite f) -> Ok f
+                    | j -> Decoder.float j
+
+                value "float value has no numeric 'value'" sentinelOrNumber |> Result.map VFloat
             | "enum" -> strAt "case" v |> Result.map VEnum
             | "json" -> need "value" "json value has no 'value'" Decoder.json v |> Result.map VJson
             | "list" -> arrAt "items" readValue v |> Result.map VList

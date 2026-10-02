@@ -80,8 +80,9 @@ type DagBreak =
 
 /// The *shape* of a merge interference (Phase 64) — the closed enumeration (GP5) of how two ops,
 /// one from each of two branch deltas, target the same address and would collide under `apply`.
-/// The three shapes partition the negation of the Phase-78 independence predicate over its four
-/// `Ops.Footprint` address kinds, so a pair is tagged iff `Ops.independent` would reject it:
+/// The shapes partition the negation of the Phase-78 independence predicate over the
+/// `Ops.Footprint` address kinds (four of nodes; two of slots since Phase 340), so a pair is tagged
+/// iff `Ops.independent` would reject it:
 ///
 ///   - `ConcurrentUpdate` — both branches touch the *same node's content*: a content-write on one
 ///     side overlapping the other's content-write or read (two inserts of one id, an insert + a
@@ -92,11 +93,19 @@ type DagBreak =
 ///     pure script cannot name (`Footprint.UnknownParentWrites`) while the other makes any structural
 ///     write: conservatively a collision, keyed by the removed/moved id. THE pinned over-approximation
 ///     inherited from `Ops.independent` — see STABILITY.md "Op-script footprint + independence".
+///   - `SlotClash of slot` (Phase 340) — both branches access the *same slot* of the node at `Address`
+///     and at least one writes it: `Footprint.slotClash`, the set `Ops.interference` reports as
+///     `Interference.SlotClash`, so the fold and arbitration name the slot in one vocabulary. The
+///     shape carries the slot name because `Address` is the node. A branch that touches the node
+///     WHOLE while the other writes one of its slots is a `ConcurrentUpdate` at the node — a
+///     whole-node write is a write of every slot — and two writes to DIFFERENT slots of one node are
+///     no conflict at all.
 [<RequireQualifiedAccess>]
 type MergeConflictShape =
     | ConcurrentUpdate
     | InsertPositionClash
     | MoveVsRemove
+    | SlotClash of slot: string
 
 /// One enumerated merge interference (Phase 64): the two ops (`Left` from delta A, `Right` from
 /// delta B) that both target `Address`, and the `Shape` of their collision. Detection only —
@@ -956,13 +965,19 @@ module Dag =
               for b in deltaB do
                   let fb = footprintOf b
 
-                  // The three overlap classes — each the strict negation of one Ops.independent clause,
+                  // The four overlap classes — each the strict negation of one Ops.independent clause,
                   // so their union is non-empty iff the pair is NOT independent.
-                  //  (1) concurrent-update: a content-write overlapping the other's content-write or read.
+                  //  (1) concurrent-update: a content-write overlapping the other's content-write or read
+                  //      — and, since Phase 340, a slot access of a node the other side touches whole
+                  //      (`Footprint.slotsAgainstNode`, both ways: a whole-node write is a write of every
+                  //      slot, so the pair collides at the NODE).
                   let concurrent =
-                      Set.union
-                          (Set.intersect fa.ContentWrites fb.ContentWrites)
-                          (Set.union (Set.intersect fa.ContentWrites fb.Reads) (Set.intersect fb.ContentWrites fa.Reads))
+                      Set.unionMany
+                          [ Set.intersect fa.ContentWrites fb.ContentWrites
+                            Set.intersect fa.ContentWrites fb.Reads
+                            Set.intersect fb.ContentWrites fa.Reads
+                            Footprint.slotsAgainstNode fa fb
+                            Footprint.slotsAgainstNode fb fa ]
                   //  (2) insert-position clash: a shared NAMED structural parent.
                   let insertClash = Set.intersect fa.StructureWrites fb.StructureWrites
                   //  (3) move-vs-remove: a remove/move (unknown source parent) racing the other side's
@@ -977,6 +992,11 @@ module Dag =
                                fb.UnknownParentWrites
                            else
                                Set.empty)
+
+                  //  (4) slot clash (Phase 340): a slot one side writes and the other accesses — the
+                  //      SLOT, not the node, is the address, so it is reported beside the node-keyed
+                  //      shapes rather than deduplicated against them.
+                  let slotClash = Footprint.slotClash fa fb
 
                   // One shape per shared address by priority (content > position > move/remove), so an
                   // address the pair collides on is reported once, tagged with its most specific shape.
@@ -1003,7 +1023,14 @@ module Dag =
                           { Left = a
                             Right = b
                             Address = addr
-                            Shape = MergeConflictShape.MoveVsRemove } ]
+                            Shape = MergeConflictShape.MoveVsRemove }
+
+                  for (node, slot) in slotClash do
+                      yield
+                          { Left = a
+                            Right = b
+                            Address = node
+                            Shape = MergeConflictShape.SlotClash slot } ]
 
     // ---- branch reconciliation (Phase 83; the delta rule Phase 300) ----
     // The mechanical FOLD half of a merge. Given the DAG, a base, and the heads: when the lanes'

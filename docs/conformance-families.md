@@ -79,7 +79,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.capabilityLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `CapabilitySeamWitness` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.capabilityLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `CapabilitySeamWitness` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.capabilityPipelineIncrementalLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `guarded-reached` | `none` |
-| `Conformance.capabilityPipelineLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `built` |
+| `Conformance.capabilityPipelineLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1400 | `unconditional` | `built` |
 | `Conformance.capabilityPipelineLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `CapabilityPipelineWitness` | — | 800 | `guarded-reached` | `built` |
 | `Conformance.capabilityPipelineLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `CapabilityPipelineWitness` | — | 800 | `guarded-reached` | `built` |
 | `Conformance.captureReplayLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1000 | `guarded-reached` | `drawn` |
@@ -103,7 +103,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.dirtyPropagationLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `none` |
 | `Conformance.encoderInjectivityLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 200 | `guarded-reached` | `none` |
 | `Conformance.footprintLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 900 | `guarded-reached` | `none` |
-| `Conformance.footprintLawsAt` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | `independence-diamond` | 600 | `guarded-reached` | `none` |
+| `Conformance.footprintLawsAt` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | `independence-diamond` | 900 | `guarded-reached` | `none` |
 | `Conformance.freshIdLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `none` |
 | `Conformance.functionVerifyLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 600 | `unconditional` | `drawn-miss-is-red` |
 | `Conformance.hashFnAdversarialLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1000000 | `unconditional` | `none` |
@@ -127,7 +127,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.propagationEvalLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `guarded-reached` | `built` |
 | `Conformance.propagationEvaluatorLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-change-set-and-prior` | 600 | `guarded-reached` | `drawn` |
 | `Conformance.propagationEvaluatorLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `EvaluatorWitness` | `propagation-prior-blind` | 720 | `guarded-reached` | `drawn` |
-| `Conformance.queryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1400 | `unconditional` | `built` |
+| `Conformance.queryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1800 | `unconditional` | `built` |
 | `Conformance.queryLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `QuerySeamWitness` | — | 1200 | `guarded-reached` | `drawn` |
 | `Conformance.queryLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `QuerySeamWitness` | — | 1200 | `guarded-reached` | `drawn` |
 | `Conformance.reachLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 900 | `guarded-reached` | `drawn` |
@@ -135,7 +135,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.reconcileLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1500 | `guarded-reached` | `drawn` |
 | `Conformance.reducer` | `Fuaran.Core.Conformance` | base run | — | `StreamGen` | — | 400 | `guarded-reached` | `drawn` |
 | `Conformance.referenceLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `RefWitness`, `NodeWitness`, `IdWitness`, `OpGen` | — | 1400 | `guarded-reached` | `drawn` |
-| `Conformance.registryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 800 | `unconditional` | `built` |
+| `Conformance.registryLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 1000 | `unconditional` | `built` |
 | `Conformance.snapshotLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.snapshotLawsWith` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 200 | `unconditional` | `none` |
 | `Conformance.streamLaws` | `Fuaran.Core.Conformance` | base run | — | `StreamWitness`, `StreamGen` | — | 800 | `guarded-reached` | `drawn` |

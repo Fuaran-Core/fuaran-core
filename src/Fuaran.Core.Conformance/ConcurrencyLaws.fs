@@ -55,6 +55,8 @@ module internal ConcurrencyLaws =
             && Set.isSubset s.StructureWrites f.StructureWrites
             && Set.isSubset s.ContentWrites f.ContentWrites
             && Set.isSubset s.UnknownParentWrites f.UnknownParentWrites
+            && Set.isSubset s.SlotReads f.SlotReads
+            && Set.isSubset s.SlotWrites f.SlotWrites
 
         LawKit.run iterations seed (fun rng _ at ->
             let tree = rng.Draw gen.Tree
@@ -172,9 +174,36 @@ module internal ConcurrencyLaws =
         let determinism =
             LawKit.LawCell "footprint determinism at the domain's ops (a pure function of the op)"
 
+        // Phase 340 — where the domain declares slot accesses, a pair that collides on ONE slot is
+        // named at that slot by the fold and by arbitration alike, and the guard counts the pairs
+        // only the slot granularity frees.
+        let slotNamed =
+            LawKit.LawCell(
+                "a slot clash is named at the slot (Dag.conflicts reports SlotClash where Ops.interference reports it, node and slot agreeing)",
+                Some "script-pair independence"
+            )
+
         let mutable independentPairs = 0
         let mutable interferingPairs = 0
         let mutable refusedDraws = 0
+        // Phase 340 — the slot dimension: ops whose footprint declares a slot access at all; pairs
+        // independent ONLY because slots are compared at the slot (lifting every slot to its node
+        // would make them interfere); pairs that collide on a slot.
+        let mutable declaredSlots = 0
+        let mutable slotIndependentPairs = 0
+        let mutable slotClashPairs = 0
+
+        let declaresSlots (f: Footprint) =
+            not (Set.isEmpty f.SlotReads) || not (Set.isEmpty f.SlotWrites)
+
+        // Every slot access read as an access of its node — the four-set footprint the domain would
+        // have declared before Phase 340.
+        let liftSlots (f: Footprint) : Footprint =
+            { f with
+                Reads = Set.union f.Reads (Footprint.slotNodes f.SlotReads)
+                ContentWrites = Set.union f.ContentWrites (Footprint.slotNodes f.SlotWrites)
+                SlotReads = Set.empty
+                SlotWrites = Set.empty }
 
         // `n` drawn ops threaded from `s` through the domain's own `Apply`: the ops it accepted, in
         // order, and where they land. A refused draw does not extend the script.
@@ -210,9 +239,55 @@ module internal ConcurrencyLaws =
                     fun () -> at ("footprintOf is not a pure function of the op " + sw.Encode op)
                 )
 
+                if declaresSlots (footprintOf op) then
+                    declaredSlots <- declaredSlots + 1
+
+            // Phase 340 — every op pair that collides on a slot is named at that slot by both
+            // readers: `Ops.interference` carries the pairs as `SlotClash`, and `Dag.conflicts`
+            // reports one `SlotClash slot` at the node for each.
+            for oa in a do
+                for ob in b do
+                    let fa = footprintOf oa
+                    let fb = footprintOf ob
+
+                    let clashed =
+                        Ops.interference fa fb
+                        |> List.tryPick (function
+                            | Interference.SlotClash slots -> Some slots
+                            | _ -> None)
+
+                    match clashed with
+                    | None -> ()
+                    | Some slots ->
+                        slotClashPairs <- slotClashPairs + 1
+
+                        let reported =
+                            Dag.conflicts footprintOf [ oa ] [ ob ]
+                            |> List.choose (fun c ->
+                                match c.Shape with
+                                | MergeConflictShape.SlotClash slot -> Some(c.Address, slot)
+                                | _ -> None)
+                            |> Set.ofList
+
+                        slotNamed.Check(
+                            (reported = slots),
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "Ops.interference names the slot clash %A between %s and %s but Dag.conflicts reports %A"
+                                        slots
+                                        (sw.Encode oa)
+                                        (sw.Encode ob)
+                                        reported
+                                )
+                        )
+
             if not (List.isEmpty a) && not (List.isEmpty b) then
                 if List.isEmpty (Dag.conflicts footprintOf a b) then
                     independentPairs <- independentPairs + 1
+
+                    if not (List.isEmpty (Dag.conflicts (footprintOf >> liftSlots) a b)) then
+                        slotIndependentPairs <- slotIndependentPairs + 1
 
                     let ab = applyAll a state |> Result.bind (applyAll b) |> Result.map hashState
 
@@ -239,12 +314,31 @@ module internal ConcurrencyLaws =
                 else
                     interferingPairs <- interferingPairs + 1)
 
-        LawKit.results [ soundness; determinism ]
+        // Phase 340 — the slot demands bind only a domain whose footprint declares a slot access; a
+        // domain that declares none has no slot pair to draw, and the guard says so rather than
+        // demanding one.
+        let noSlots = declaredSlots = 0
+
+        let slotDemands =
+            if noSlots then
+                []
+            else
+                [ "slot-independent pair", slotIndependentPairs
+                  "slot-clash pair", slotClashPairs ]
+
+        let dimension =
+            if noSlots then
+                "script-pair independence (the footprint declares NO slot access, so the slot arms are vacuous BY DECLARATION)"
+            else
+                "script-pair independence and slot granularity"
+
+        LawKit.results [ soundness; determinism; slotNamed ]
         @ [ SampleAdequacy.reachedBeside
                 "Conformance.footprintLawsAt"
-                "script-pair independence"
+                dimension
                 seed
-                [ "independent pair", independentPairs; "interfering pair", interferingPairs ]
+                ([ "independent pair", independentPairs; "interfering pair", interferingPairs ]
+                 @ slotDemands)
                 [ "refused draw", refusedDraws ] ]
 
     /// The merge-conflict enumeration laws (Phase 64) — the teeth on `Dag.conflicts` and the

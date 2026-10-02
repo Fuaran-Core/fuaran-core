@@ -151,6 +151,25 @@ let main argv =
             SecondDomainSpike.docIdl
             (SecondDomainSpike.docIdl.Kinds |> List.map (fun k -> k.Tag))
 
+        // Phase 303 — the other two certification vocabularies' generated F# modules, so
+        // every certification vocabulary's F# backend is COMPILED by the suite, not only
+        // regenerated. The score vocabulary carries field-less (marker) kinds; the reference
+        // one is emitted under its declared support document, whose named host prelude is
+        // `ReferencePrelude.fs`.
+        writeGen
+            "tests/Fuaran.Core.Tests/ScoreGenerated.fs"
+            "Fuaran.Core.Tests.ScoreGenerated"
+            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            ScoreDomainSpike.scoreIdl
+            (ScoreDomainSpike.scoreIdl.Kinds |> List.map (fun k -> k.Tag))
+
+        writeGen
+            "tests/Fuaran.Core.Tests/ReferenceGenerated.fs"
+            "Fuaran.Core.Tests.ReferenceGenerated"
+            ReferenceIdl.support.Support
+            ReferenceIdl.refIdl
+            (ReferenceIdl.refIdl.Kinds |> List.map (fun k -> k.Tag))
+
         0
     // Phase 127 — rewrite the committed `idl.json` fixtures the repository gate runs
     // the `fuaran-core-idl` command over:
@@ -170,7 +189,8 @@ let main argv =
     // leg already applies to the extracted oracle. A flag rather than a test side-effect, for
     // the `--emit-laws` reason: a suite that rewrote a committed artefact on every run could
     // not also be the thing that notices it has changed.
-    | "--emit-fstar" :: _ -> IdlFStarTargetTests.emit ()
+    // Phase 303 — and the interpreter's vectors as normaliser facts over those models.
+    | "--emit-fstar" :: _ -> max (IdlFStarTargetTests.emit ()) (IdlThreeHostTests.emitVectors ())
     // Phase 328 — the half of `proofs/check.ps1 -Since <tree>` that decides which registered
     // models are in the module cone, and records a green `-Strict` full run as the baseline an
     // empty cone may lean on. `check.ps1` calls it; the arguments are in `coneCli`'s own comment.

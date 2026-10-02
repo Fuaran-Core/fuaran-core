@@ -907,6 +907,7 @@ type invoke_error =
 | RequiredArgsUnbound of Prims.list<Prims.string>
 | UninvocableArg of Prims.string
 | BodyFailed of Prims.string
+| NonTotalCapability of Prims.string * Prims.list<Prims.string>
 
 
 let uu___is_NoSuchCapability : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
@@ -1038,6 +1039,27 @@ let __proj__BodyFailed__item__reason : invoke_error  ->  Prims.string = (fun ( p
      end))
 
 
+let uu___is_NonTotalCapability : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| NonTotalCapability (id, addrs) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__NonTotalCapability__item__id : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| NonTotalCapability (id, addrs) -> begin
+     id
+     end))
+
+
+let __proj__NonTotalCapability__item__addrs : invoke_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| NonTotalCapability (id, addrs) -> begin
+     addrs
+     end))
+
+
 let rec find_hole : Prims.string  ->  Prims.list<hole_decl>  ->  FStar_Pervasives_Native.option<hole_decl> = (fun ( k  :  Prims.string ) ( holes  :  Prims.list<hole_decl> ) -> (match (holes) with
 | [] -> begin
      FStar_Pervasives_Native.None
@@ -1146,7 +1168,7 @@ let entry_of : hole_decl  ->  sig_entry = (fun ( h  :  hole_decl ) -> (match (h.
      {s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot"; s_space = FStar_Pervasives_Native.Some (SlotTree (c)); s_slot = c; s_action = FStar_Pervasives_Native.None; s_required = true}
      end
 | RepeatHole (s) -> begin
-     {s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat"; s_space = FStar_Pervasives_Native.Some (s); s_slot = FStar_Pervasives_Native.None; s_action = FStar_Pervasives_Native.None; s_required = false}
+     {s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat"; s_space = FStar_Pervasives_Native.Some (s); s_slot = FStar_Pervasives_Native.None; s_action = FStar_Pervasives_Native.None; s_required = (is_bounded s)}
      end
 | ActionHole (e) -> begin
      {s_addr = h.h_addr; s_name = h.h_name; s_kind = "action"; s_space = FStar_Pervasives_Native.None; s_slot = FStar_Pervasives_Native.None; s_action = FStar_Pervasives_Native.Some (e); s_required = false}
@@ -1159,13 +1181,22 @@ let signature_of = (fun ( w  :  witness<'node> ) ( name  :  Prims.string ) ( n  
 let signature_excluding : Prims.list<Prims.string>  ->  signature  ->  signature = (fun ( bound  :  Prims.list<Prims.string> ) ( sg  :  signature ) -> {sg_name = sg.sg_name; sg_holes = (excluding bound sg.sg_holes); sg_effect = sg.sg_effect})
 
 
-let entry_total : sig_entry  ->  Prims.bool = (fun ( e  :  sig_entry ) -> ((Prims.op_Less_Greater e.s_kind "repeat") || (match (e.s_space) with
-| FStar_Pervasives_Native.Some (s) -> begin
+let entry_total : sig_entry  ->  Prims.bool = (fun ( e  :  sig_entry ) -> (match (((e.s_kind), (e.s_space), (e.s_action))) with
+| ("value", FStar_Pervasives_Native.Some (uu___), uu___1) -> begin
+     true
+     end
+| ("slot", uu___, uu___1) -> begin
+     true
+     end
+| ("repeat", FStar_Pervasives_Native.Some (s), uu___) -> begin
      (is_bounded s)
      end
-| FStar_Pervasives_Native.None -> begin
+| ("action", uu___, FStar_Pervasives_Native.Some (uu___1)) -> begin
+     true
+     end
+| uu___ -> begin
      false
-     end)))
+     end))
 
 
 let is_total : signature  ->  Prims.bool = (fun ( sg  :  signature ) -> (for_all entry_total sg.sg_holes))
@@ -1333,7 +1364,17 @@ let wire = (fun ( w  :  witness<'node> ) ( slot_addr  :  Prims.string ) ( inner 
 let compose = (fun ( w  :  witness<'node> ) ( slot_addr  :  Prims.string ) ( inner  :  'node ) ( outer  :  'node ) -> (
 
 let holes = (w.holes outer)
-in (match ((find_hole slot_addr holes)) with
+in (match ((guard_total holes)) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     Error (e)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (match ((guard_total (w.holes inner))) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     Error (e)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (match ((find_hole slot_addr holes)) with
 | FStar_Pervasives_Native.None -> begin
      Error (UnknownHoleAddr (slot_addr, (map addr_of holes)))
      end
@@ -1355,6 +1396,8 @@ if (Prims.op_Less_Greater (w.kind_tag inner) kt) then begin
      end
 | uu___ -> begin
      Error (NotASlot (slot_addr))
+     end)
+     end)
      end)
      end)))
 
@@ -1675,12 +1718,31 @@ let rec ids : Prims.list<capability>  ->  Prims.list<Prims.string> = (fun ( cs  
      end))
 
 
+let rec non_total_addrs : Prims.list<sig_entry>  ->  Prims.list<Prims.string> = (fun ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+| [] -> begin
+     []
+     end
+| (e)::t -> begin
+      
+if (entry_total e) then begin
+     (non_total_addrs t)
+     end else begin
+     (e.s_addr)::(non_total_addrs t)
+     end
+     end))
+
+
 let register : capability  ->  registry  ->  outcome<registry, invoke_error> = (fun ( c  :  capability ) ( r  :  registry ) -> (match ((find_cap c.c_id r.capabilities)) with
 | FStar_Pervasives_Native.Some (uu___) -> begin
      Error (DuplicateCapability (c.c_id))
      end
 | FStar_Pervasives_Native.None -> begin
+      
+if (is_total c.c_signature) then begin
      Ok ({capabilities = (c)::r.capabilities})
+     end else begin
+     Error (NonTotalCapability (c.c_id, (non_total_addrs c.c_signature.sg_holes)))
+     end
      end))
 
 
@@ -1796,24 +1858,30 @@ let rec all_covered : effect_class  ->  Prims.list<effect_class>  ->  Prims.bool
      ((covers c x) && (all_covered c t))
      end))
 
-type key_renderers = {k_hash : Prims.string  ->  Prims.string; k_addr_le : Prims.string  ->  Prims.string  ->  Prims.bool; k_field : Prims.string  ->  Prims.string}
+type key_renderers = {k_hash : Prims.string  ->  Prims.string; k_addr_le : Prims.string  ->  Prims.string  ->  Prims.bool; k_field : Prims.string  ->  Prims.string; k_canonical : value_space  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string>}
 
 
 let __proj__Mkkey_renderers__item__k_hash : key_renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field} -> begin
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
      k_hash
      end))
 
 
 let __proj__Mkkey_renderers__item__k_addr_le : key_renderers  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field} -> begin
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
      k_addr_le
      end))
 
 
 let __proj__Mkkey_renderers__item__k_field : key_renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field} -> begin
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
      k_field
+     end))
+
+
+let __proj__Mkkey_renderers__item__k_canonical : key_renderers  ->  value_space  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
+| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
+     k_canonical
      end))
 
 
@@ -1873,7 +1941,37 @@ let rec key_fields : key_renderers  ->  Prims.list<Prims.string>  ->  Prims.stri
 let key_canonical : key_renderers  ->  invocation  ->  Prims.string = (fun ( kr  :  key_renderers ) ( l  :  invocation ) -> (key_fields kr (binding_fields l)))
 
 
-let invocation_key : key_renderers  ->  capability  ->  invocation  ->  Prims.string = (fun ( kr  :  key_renderers ) ( c  :  capability ) ( a  :  invocation ) -> (Prims.strcat c.c_id (Prims.strcat "#" (kr.k_hash (key_canonical kr (sort_bindings kr a))))))
+let spell : key_renderers  ->  capability  ->  (Prims.string * Prims.string)  ->  (Prims.string * Prims.string) = (fun ( kr  :  key_renderers ) ( c  :  capability ) ( b  :  (Prims.string * Prims.string) ) -> (
+
+let uu___ = b
+in (match (uu___) with
+| (a, v) -> begin
+     (match ((find_entry a c.c_signature.sg_holes)) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     (match (e.s_space) with
+| FStar_Pervasives_Native.Some (sp) -> begin
+     (match ((kr.k_canonical sp v)) with
+| FStar_Pervasives_Native.Some (v') -> begin
+     ((a), (v'))
+     end
+| FStar_Pervasives_Native.None -> begin
+     ((a), (v))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     ((a), (v))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     ((a), (v))
+     end)
+     end)))
+
+
+let keyed : key_renderers  ->  capability  ->  invocation  ->  invocation = (fun ( kr  :  key_renderers ) ( c  :  capability ) ( a  :  invocation ) -> (map (spell kr c) a))
+
+
+let invocation_key : key_renderers  ->  capability  ->  invocation  ->  Prims.string = (fun ( kr  :  key_renderers ) ( c  :  capability ) ( a  :  invocation ) -> (Prims.strcat c.c_id (Prims.strcat "#" (kr.k_hash (key_canonical kr (sort_bindings kr (keyed kr c a)))))))
 
 
 let rec mem_binding : (Prims.string * Prims.string)  ->  invocation  ->  Prims.bool = (fun ( x  :  (Prims.string * Prims.string) ) ( l  :  invocation ) -> (match (l) with
@@ -1908,7 +2006,7 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "determinism-tag-of-clock-and-network"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({tname = "det-of-tag-reads-its-canonical-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({tname = "det-of-tag-refuses-another-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::[]
+let twins : Prims.list<twin> = ({tname = "determinism-tag-of-clock-and-network"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({tname = "det-of-tag-reads-its-canonical-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({tname = "det-of-tag-refuses-another-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::({tname = "a-bounded-repeat-is-required"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "3")))}).s_required true))})::({tname = "an-unbounded-repeat-is-not-required"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (AnyString)}).s_required false))})::({tname = "an-entry-of-no-hole-kind-is-not-total"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_total {s_addr = "x"; s_name = "x"; s_kind = "int"; s_space = FStar_Pervasives_Native.Some (AnyString); s_slot = FStar_Pervasives_Native.None; s_action = FStar_Pervasives_Native.None; s_required = true}) false))})::[]
 
 
 

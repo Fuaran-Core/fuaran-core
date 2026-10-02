@@ -91,13 +91,16 @@ let private toModelFootprint (f: Footprint) : DagFold.footprint =
     { DagFold.reads = Set.toList f.Reads
       DagFold.structure_writes = Set.toList f.StructureWrites
       DagFold.content_writes = Set.toList f.ContentWrites
-      DagFold.unknown_parent_writes = Set.toList f.UnknownParentWrites }
+      DagFold.unknown_parent_writes = Set.toList f.UnknownParentWrites
+      DagFold.slot_reads = Set.toList f.SlotReads
+      DagFold.slot_writes = Set.toList f.SlotWrites }
 
 let private ofModelShape (s: DagFold.shape) : MergeConflictShape =
     match s with
     | DagFold.ConcurrentUpdate -> MergeConflictShape.ConcurrentUpdate
     | DagFold.InsertPositionClash -> MergeConflictShape.InsertPositionClash
     | DagFold.MoveVsRemove -> MergeConflictShape.MoveVsRemove
+    | DagFold.SlotClash slot -> MergeConflictShape.SlotClash slot
 
 let private ofModelConflict (c: DagFold.conflict<'Op>) : MergeConflict<'Op> =
     { Left = c.left
@@ -392,7 +395,9 @@ let private unionFp (a: Footprint) (b: Footprint) : Footprint =
     { Reads = Set.union a.Reads b.Reads
       StructureWrites = Set.union a.StructureWrites b.StructureWrites
       ContentWrites = Set.union a.ContentWrites b.ContentWrites
-      UnknownParentWrites = Set.union a.UnknownParentWrites b.UnknownParentWrites }
+      UnknownParentWrites = Set.union a.UnknownParentWrites b.UnknownParentWrites
+      SlotReads = Set.empty
+      SlotWrites = Set.empty }
 
 let private noAddr: Set<string> = Set.empty
 
@@ -431,7 +436,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                     { Reads = one p
                       StructureWrites = one p
                       ContentWrites = Set.ofList (idsIn child)
-                      UnknownParentWrites = noAddr }
+                      UnknownParentWrites = noAddr
+                      SlotReads = Set.empty
+                      SlotWrites = Set.empty }
             | _ -> Error "InsertChild without parentId/child"
         | Some "RemoveNode" ->
             match strField fields "target" with
@@ -440,7 +447,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                     { Reads = one t
                       StructureWrites = noAddr
                       ContentWrites = one t
-                      UnknownParentWrites = one t }
+                      UnknownParentWrites = one t
+                      SlotReads = Set.empty
+                      SlotWrites = Set.empty }
             | None -> Error "RemoveNode without target"
         | Some "MoveNode" ->
             match strField fields "target", strField fields "newParentId" with
@@ -449,7 +458,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                     { Reads = Set.ofList [ t; np ]
                       StructureWrites = one np
                       ContentWrites = one t
-                      UnknownParentWrites = one t }
+                      UnknownParentWrites = one t
+                      SlotReads = Set.empty
+                      SlotWrites = Set.empty }
             | _ -> Error "MoveNode without target/newParentId"
         | Some "ReorderChildren" ->
             match strField fields "parentId", field fields "newOrder" with
@@ -464,7 +475,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                     { Reads = Set.ofList (p :: named)
                       StructureWrites = one p
                       ContentWrites = noAddr
-                      UnknownParentWrites = noAddr }
+                      UnknownParentWrites = noAddr
+                      SlotReads = Set.empty
+                      SlotWrites = Set.empty }
             | _ -> Error "ReorderChildren without parentId/newOrder"
         | Some "ReplaceRoot" ->
             match field fields "node" with
@@ -473,7 +486,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                     { Reads = noAddr
                       StructureWrites = noAddr
                       ContentWrites = Set.ofList (idsIn node)
-                      UnknownParentWrites = noAddr }
+                      UnknownParentWrites = noAddr
+                      SlotReads = Set.empty
+                      SlotWrites = Set.empty }
             | None -> Error "ReplaceRoot without node"
         | Some "Batch" ->
             match field fields "ops" with
@@ -490,7 +505,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                         { Reads = noAddr
                           StructureWrites = noAddr
                           ContentWrites = noAddr
-                          UnknownParentWrites = noAddr })
+                          UnknownParentWrites = noAddr
+                          SlotReads = Set.empty
+                          SlotWrites = Set.empty })
             | _ -> Error "Batch without ops"
         | Some other ->
             // EditNode / UpdateProp / UpdateState / UpdateStyle / ReplaceBinding — a property
@@ -501,7 +518,9 @@ let rec private corpusFootprint (v: JVal) : Result<Footprint, string> =
                     { Reads = one t
                       StructureWrites = noAddr
                       ContentWrites = one t
-                      UnknownParentWrites = noAddr }
+                      UnknownParentWrites = noAddr
+                      SlotReads = Set.empty
+                      SlotWrites = Set.empty }
             | None -> Error(other + " without target")
         | None -> Error "no $type"
     | _ -> Error "not a JSON object"
@@ -1617,8 +1636,9 @@ let private modelMergeBase (model: DagFold.dag<'Op>) (fuel: DagFold.node<'Op> li
 //  generator produces AND over every state a prefix of that pool reaches — the generator keeps
 //  only ACCEPTED ops, so without the states (and without the hand-written refusals below) the
 //  rejection arms would be sampled only by accident. Three things are compared per (op, state):
-//    1. the FOOTPRINT, as four address sets — the model reads sets as lists, so both sides are
-//       compared deduplicated and sorted, which is the reading `proofs/README.md` records;
+//    1. the FOOTPRINT, as six address sets (four of nodes, two of slots since Phase 340) — the
+//       model reads sets as lists, so both sides are compared deduplicated and sorted, which is
+//       the reading `proofs/README.md` records;
 //    2. the VERDICT, accepted or rejected;
 //    3. an accepted RESULT through `Tree.encodeHash` — production's own function, run on both
 //       sides through a `NodeWitness` for each tree type, over the per-node content the witness
@@ -1719,17 +1739,23 @@ let private modelRejClass (r: TreeOps.rejection) =
 /// lists read as sets (proofs/README.md, "sets are lists").
 let private asSet (xs: string list) = xs |> List.distinct |> List.sort
 
+let private slotKey (n: string, s: string) = n + "\u0000" + s
+
 let private prodFpParts (f: Footprint) =
     [ asSet (Set.toList f.Reads)
       asSet (Set.toList f.StructureWrites)
       asSet (Set.toList f.ContentWrites)
-      asSet (Set.toList f.UnknownParentWrites) ]
+      asSet (Set.toList f.UnknownParentWrites)
+      asSet (f.SlotReads |> Set.toList |> List.map slotKey)
+      asSet (f.SlotWrites |> Set.toList |> List.map slotKey) ]
 
 let private modelFpParts (f: DagFold.footprint) =
     [ asSet f.reads
       asSet f.structure_writes
       asSet f.content_writes
-      asSet f.unknown_parent_writes ]
+      asSet f.unknown_parent_writes
+      asSet (f.slot_reads |> List.map slotKey)
+      asSet (f.slot_writes |> List.map slotKey) ]
 
 type private TreeTally =
     {
@@ -7445,6 +7471,7 @@ let private prodInvokeErrRender (e: InvokeError) : string =
     | RequiredArgsUnbound xs -> sprintf "RequiredArgsUnbound(%s)" (String.concat "," xs)
     | UninvocableArg a -> sprintf "UninvocableArg(%s)" a
     | BodyFailed m -> sprintf "BodyFailed(%s)" m
+    | NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
 
 let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     match e with
@@ -7454,6 +7481,7 @@ let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     | ModelCap.ArgOutOfSpace(a, s, g) -> sprintf "ArgOutOfSpace(%s;%s;%s)" a (modelSpaceRender s) g
     | ModelCap.RequiredArgsUnbound xs -> sprintf "RequiredArgsUnbound(%s)" (String.concat "," xs)
     | ModelCap.UninvocableArg a -> sprintf "UninvocableArg(%s)" a
+    | ModelCap.NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
     | ModelCap.BodyFailed m -> sprintf "BodyFailed(%s)" m
 
 let private invokeErrClass (e: InvokeError) : string =
@@ -8761,7 +8789,12 @@ let private genAdversarialFields (r: ConfRng.T) : string list * ConfRng.T =
 let private capKeyRenderers: ModelCap.key_renderers =
     { ModelCap.key_renderers.k_hash = Hash.fnv1a
       ModelCap.key_renderers.k_addr_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
-      ModelCap.key_renderers.k_field = Hash.canonicalField }
+      ModelCap.key_renderers.k_field = Hash.canonicalField
+      ModelCap.key_renderers.k_canonical =
+        fun (sp: ModelCap.value_space) (v: string) ->
+            match Space.canonical (spaceOfModel sp) v with
+            | Some c -> FStar_Pervasives_Native.Some c
+            | None -> FStar_Pervasives_Native.None }
 
 let private prodQueryErrRender (e: QueryError) : string =
     match e with
@@ -9285,7 +9318,9 @@ let private blindPlanFootprint (_: PlanOp) : Footprint =
     { Reads = Set.empty
       StructureWrites = Set.empty
       ContentWrites = Set.empty
-      UnknownParentWrites = Set.empty }
+      UnknownParentWrites = Set.empty
+      SlotReads = Set.empty
+      SlotWrites = Set.empty }
 
 /// The four shapes over four drawn lanes, each lane under its own actor: disjoint, a fast-forward (the
 /// second lane chained onto the first), the first head named twice, and a criss-cross (two merges of
@@ -9940,7 +9975,9 @@ let proofOracleTests =
                   { Reads = noAddr
                     StructureWrites = noAddr
                     ContentWrites = noAddr
-                    UnknownParentWrites = noAddr }
+                    UnknownParentWrites = noAddr
+                    SlotReads = Set.empty
+                    SlotWrites = Set.empty }
 
               let v =
                   differential "blind oracle" planW planFootprint blind planHash planLaneGen 3 4100 150
@@ -10073,7 +10110,9 @@ let proofOracleTests =
                   { Reads = noAddr
                     StructureWrites = noAddr
                     ContentWrites = noAddr
-                    UnknownParentWrites = noAddr }
+                    UnknownParentWrites = noAddr
+                    SlotReads = Set.empty
+                    SlotWrites = Set.empty }
 
               let breaks, met = treeDiamondSample blind 1320 250
               Expect.isGreaterThan met 0 "the blind run met the premise, so it had something to measure"
@@ -11651,7 +11690,9 @@ let proofOracleTests =
                   { DagFold.reads = []
                     DagFold.structure_writes = []
                     DagFold.content_writes = []
-                    DagFold.unknown_parent_writes = [] }
+                    DagFold.unknown_parent_writes = []
+                    DagFold.slot_reads = []
+                    DagFold.slot_writes = [] }
 
               let x = TreeOps.InsertChild("a", TreeOps.TNode("x133", "para", []))
               let y = TreeOps.InsertChild("a", TreeOps.TNode("y133", "para", []))

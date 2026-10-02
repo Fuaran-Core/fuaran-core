@@ -108,10 +108,15 @@ module Trust =
     /// is routed through `Sanitize.sanitizeUrlOrBlank`; the union's other cases (a
     /// by-name reference, a host-resolved query, …) carry no literal URL and pass
     /// through.
+    ///
+    /// Phase 303 — a field declared as a plain `str` carries the URL itself, so its value is
+    /// sanitised directly. [[checkHardenPolicy]] admits a URL entry only on those two shapes, so
+    /// a bare `VStr` reaches this arm only from a `str`-typed field.
     let private sanitiseUrlValue (tokens: HardenPolicy) (v: IdlValue) : IdlValue =
         match v with
         | VUnion(case, [ (field, VStr s) ]) when case = tokens.ValueLiteralCase && field = tokens.ValueLiteralField ->
             VUnion(case, [ field, VStr(Sanitize.sanitizeUrlOrBlank s) ])
+        | VStr s -> VStr(Sanitize.sanitizeUrlOrBlank s)
         | other -> other
 
     /// Scrub a markdown field value: the declared literal case of a text-shaped union
@@ -120,6 +125,8 @@ module Trust =
         match v with
         | VUnion(case, [ (field, VStr s) ]) when case = tokens.TextLiteralCase && field = tokens.TextLiteralField ->
             VUnion(case, [ field, VStr(Sanitize.scrubMarkdown s) ])
+        // Phase 303 — a `str`-typed markdown field is scrubbed directly, as a URL one is.
+        | VStr s -> VStr(Sanitize.scrubMarkdown s)
         | other -> other
 
     /// The hardening TRANSFORM, without the declaration check — the body [[harden]]
@@ -183,6 +190,69 @@ module Trust =
 
         go v
 
+    /// Phase 303 — the first URL or markdown entry of `policy` that the floor would leave
+    /// UNSANITISED, as the refusal naming it; `None` when every entry is one the transform
+    /// reaches. Before this check an entry was matched against node fields by name and its
+    /// value sanitised only when it happened to be the declared literal case, so an entry
+    /// naming no kind, no field, a record (whose nested `href` the transform never visits), a
+    /// list or any other union was accepted and FAILED OPEN: the caller had declared the field
+    /// sanitised and it was not.
+    ///
+    /// An entry is admitted on exactly the two shapes the transform rewrites: a `str` field
+    /// (sanitised directly), or an instantiation of a union carrying the declared literal case
+    /// — `ValueLiteralCase` for a URL entry, `TextLiteralCase` for a markdown one — whose one
+    /// field is the declared literal field and resolves to `str`. Optionality does not matter:
+    /// an absent value has nothing to sanitise. A `HostOnly` field never reaches the wire, so
+    /// an entry naming one is refused as naming nothing the floor can reach.
+    let private unsanitisableEntry (idl: Idl) (policy: Policy) : CodegenError option =
+        let tokens = idl.Harden
+
+        let literalUnion (caseTag: string) (fieldName: string) (name: string) (args: IdlType list) =
+            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
+            | None -> false
+            | Some u ->
+                match TypeParams.bind u args, u.Cases |> List.tryFind (fun c -> c.Tag = caseTag) with
+                | Some subst, Some c ->
+                    match c.Fields with
+                    | [ single ] -> single.Name = fieldName && TypeParams.substitute subst single.Type = TStr
+                    | _ -> false
+                | _ -> false
+
+        let check (what: string) (caseTag: string) (fieldName: string) (kindTag: string, field: string) =
+            let refuse (why: string) =
+                Some(
+                    CodegenError.UnsupportedConstruct(
+                        sprintf "the %s harden entry ('%s', '%s'): %s" what kindTag field why,
+                        "a field a caller declares sanitised is never silently left unsanitised",
+                        sprintf
+                            "declare the entry on a 'str' field, or on a union carrying the '%s' case whose one field '%s' is a 'str'; or drop it"
+                            caseTag
+                            fieldName
+                    )
+                )
+
+            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            | None -> refuse "the vocabulary declares no such kind"
+            | Some k ->
+                match k.Fields |> List.tryFind (fun f -> f.Name = field) with
+                | None -> refuse "the kind declares no such field"
+                | Some f when f.Opt = HostOnly -> refuse "the field is host-only and never reaches the wire"
+                | Some f ->
+                    match f.Type with
+                    | TStr -> None
+                    | TUnion(name, args) when literalUnion caseTag fieldName name args -> None
+                    | other -> refuse (sprintf "the floor cannot sanitise a field of type %A" other)
+
+        let urls =
+            policy.UrlFields
+            |> Seq.tryPick (check "URL" tokens.ValueLiteralCase tokens.ValueLiteralField)
+
+        match urls with
+        | Some r -> Some r
+        | None ->
+            policy.MarkdownFields
+            |> Seq.tryPick (check "markdown" tokens.TextLiteralCase tokens.TextLiteralField)
+
     /// Refuse a vocabulary whose [[HardenPolicy]] leaves a member the run NEEDS
     /// undeclared (empty) — Phase 178's opt-in half, and since Phase 180 the gate
     /// [[harden]] runs unconditionally. It stays PUBLIC because the question it
@@ -218,6 +288,12 @@ module Trust =
     /// gate reads (`moduleId` and `componentId`) is refused by name, because that is a
     /// foreign-component kind nobody declared as gated — decided from the vocabulary,
     /// never from the tree.
+    ///
+    /// **The caller's entries are checked too (Phase 303).** Once every needed member is
+    /// declared, each `UrlFields` / `MarkdownFields` entry must name a declared kind's
+    /// wire field whose type the floor rewrites — a `str`, or a union carrying the declared
+    /// literal case — or the policy is refused as `UnsupportedConstruct`, naming the entry
+    /// (see [[unsanitisableEntry]]). Sets are ordered, so the entry named is deterministic.
     let checkHardenPolicy (idl: Idl) (policy: Policy) : Result<unit, CodegenError> =
         let tokens = idl.Harden
         let gateDeclared = tokens.GatedKind <> ""
@@ -258,7 +334,10 @@ module Trust =
 
         match needed |> List.tryFind (fun (_, value, _) -> value = "") with
         | Some(name, _, need) -> Error(CodegenError.UndeclaredHardenToken(name, need))
-        | None -> Ok()
+        | None ->
+            match unsanitisableEntry idl policy with
+            | Some refusal -> Error refusal
+            | None -> Ok()
 
     /// Harden an authored `IdlValue` for the codegen boundary: refuse a vocabulary that
     /// leaves a needed [[HardenPolicy]] member undeclared, then gate every node of the

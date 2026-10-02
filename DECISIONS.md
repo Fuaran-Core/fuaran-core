@@ -1,5 +1,231 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-02 — D106: a footprint names the slot it writes; a whole-node write stays the conservative default; the keyed witness is not widened for a key no skeleton op can use
+
+**Context.** Phase 340. A `Footprint` had four sets, all node-granular, so any write to part of a node
+was a write to the node: two ops touching different fields of one node interfered, and the fold halted
+on a pair that commutes. The imprecision had a measured cost in a consumer that maps every op of a
+roadmap onto this record — two lanes writing different fields of one phase halted a whole side as an
+operator-owned conflict no verb could resolve, twice, and each new field-versus-field pair would have
+needed another hand-written safe class — and in keyed domains, where two lanes editing different keys
+under one holder halted at the holder and the report named only the holder. Phase 334 had set out to
+add a keyed-slot set and was retired on a refuted premise (two lanes placing different nodes into one
+keyed slot do NOT fold clean; they halt at the holder), leaving the label as the residue.
+
+**Decision.**
+
+1. **A footprint carries two slot sets, not one.** `SlotWrites` and `SlotReads`, each a set of
+   `(node id, slot name)` pairs. The shard asked for a fifth set and for `Footprint.readingSlot` — a
+   reader of one field that does not depend on a write to another — and a slot read cannot be
+   expressed in a write set or in the whole-node `Reads` (a whole-node read collides with every slot
+   write of the node, which is exactly the dependence the reader is declining). Two sets mirror
+   `Reads` / `ContentWrites` at slot granularity; a read set that was not there would have been added
+   by the first consumer that needed it, as a second breaking widening.
+2. **A slot access is compared at the slot against another slot access, and as an access of the node
+   against everything else.** Two writes to different slots of one node commute; a write and an access
+   of ONE slot are `Interference.SlotClash`, carrying the slots. A slot write of `n` collides with a
+   content write, a read or a structure write of `n`, and a slot read of `n` with a content write of
+   `n` (`LeftSlotsRightNode` / `RightSlotsLeftNode`). **A whole-node write stays the conservative
+   default**: it is a write of every slot, so it serialises against each. The rule is what keeps every
+   existing footprint sound without edit — a domain that declares no slot access gets the four-set
+   verdict it always got, byte for byte — and it is where the precision comes from: a consumer narrows
+   a write to a slot ONLY where it knows the op writes that slot and nothing else, and every write it
+   has not narrowed keeps refusing every slot. Proved sound at a slot store (`proofs/DagFold.fst`
+   section 17): different slots commute at every slot, one slot does not, a whole-node write is
+   refused against each slot.
+3. **One helper behind both readers.** `Footprint.slotClash` and `Footprint.slotsAgainstNode` compute
+   the slot clauses' sets, and `Ops.interference` and `Dag.conflicts` both read them, so arbitration
+   and the fold name the same slot by construction (the Phase 248 shape). `Dag.conflicts` reports
+   `MergeConflictShape.SlotClash slot` at the node — the slot rides the shape because the conflict's
+   address is the node — and the node-level slot collisions as `ConcurrentUpdate` at the node. A slot
+   clash is its own address space and is not deduplicated against the node-keyed shapes: a pair that
+   both touches a node whole and clashes on one of its slots reports both, because the slot is the
+   thing a repair has to look at.
+4. **Two writes of the same payload to one slot are still a `SlotClash`.** The footprint sees no
+   payload. The consumer's own classifier decides whether two identical writes are one intent
+   recorded twice, as it does today for identical whole-node writes; Core reports the clash and
+   decides nothing (GP6).
+5. **`KeyedWitness` is NOT widened with the key a keyed child sits under, and `Ops.footprintKeyed`
+   declares no slot write.** The shard asked for both so a keyed placement could be declared a write to
+   `(holder, key)` "where the op only places the keyed child". Measured against the tree, no skeleton
+   op does that: the only ways to write a keyed slot are `UpdateNode` of the holder and `InsertChild`
+   of a subtree carrying it, both of which rewrite the holder whole, and a pure script cannot say which
+   keyed position — or which field — a payload changed (`KeyedSlotFoldTests`, Phase 334's pin, now
+   with the slot cases beside it). A key in the witness would have had no op to serve, and a
+   `footprintKeyed` that narrowed an `UpdateNode` to its keyed slots would have declared two rewrites
+   of one holder independent — which they are not. A domain that places by key lowers its OWN op with
+   `Footprint.slotEdit holder key`, which needs no witness; the engine's keyed walk is unchanged. This
+   is the phase's premise finding, reported rather than built around.
+6. **The skeleton law families do not draw slot pairs; the domain-op family counts them.** No skeleton
+   op writes a slot, so `concurrencyLaws` and `keyedArbitrationLaws` have no slot pair to draw and
+   are not pretended to. `Conformance.footprintLawsAt` — the family at a domain's own ops, where slot
+   footprints live — gains a cell (a slot clash is named at the slot by the fold and by arbitration
+   alike) and two demands (the pairs independent ONLY because slots are compared at the slot, and the
+   pairs that clash on a slot), both vacuous BY DECLARATION for a footprint that declares no slot
+   access, so the family's verdict on such a domain is unchanged.
+
+**Consequences.** Breaking (source) on the open `0.34.0` draft, which already is: every full
+`Footprint` literal gains two fields, every exhaustive match on `Interference` three arms and on
+`MergeConflictShape` one. The record is on no wire. The consumer that motivated the phase can retire
+its hand-written field classes once it lowers its field edits to `slotEdit` and raises its pin; until
+it does, it sees exactly what it saw. Keyed domains stop halting on edits to different keys only for
+ops they lower by key themselves — the skeleton `UpdateNode` of a holder keeps halting at the holder,
+by construction, and the label on that halt is unchanged.
+
+
+## 2026-10-02 — D105: a transparent case never carries what can be an object; at a float slot the §7 tokens are read back, not refused; a map's value is its key set; a field-less declaration is a marker type
+
+**Recorded by Phase 303. `src/Fuaran.Core.Idl/Idl.fs` (`Decode`, `FloatToken`), `Artifact.fs`,
+`src/Fuaran.Core.Idl.Codegen/` (the one type emitter, `Trust.checkHardenPolicy`, the TypeScript
+runtime's verbatim encoder, `FStarTarget.vectorsModule`), `tests/Fuaran.Core.Tests/IdlThreeHostTests.fs`,
+`IdlSchemaValidatorTests.fs`, `proofs/VocabularyVectors.fst`, `proofs.json`
+(`vocabulary-vectors-agree`); rides the `0.34.0` draft (STABILITY.md, "Phase 303").**
+
+**D104.1 — the transparent-case rule, stated once.** A declared transparent union case goes on the wire
+BARE — its one field's value with no discriminator — and a reader tells it from the union's tagged
+cases by the absence of the discriminator. That test is sound only when the bare value can never be an
+object: the reference interpreter sends every object to the tagged arm, the generated F# and TypeScript
+send anything without the discriminator to the bare arm, so a bare object either changes case on one
+host or, carrying the discriminator, decodes on every host as a DIFFERENT case under identical re-encoded
+bytes (`Lit({"$type":"Ref",…})` reading as `Ref`). The rule is therefore a property of the
+DECLARATION, not of a value: a transparent case whose field type is object-capable — `json`, a record, a
+map, a union, a node, or a type variable instantiated at one — is refused by `Declare.errors` at load
+(`Artifact.ofJson`, `Proposal.applyDelta`), which Phase 292 shipped and this phase pins at the loading
+boundary. It is the premise the F* target always stated in its own refusal; now there is one statement of
+it, at the one place every vocabulary passes.
+
+**D104.2 — the §7 direction.** WIRE_FORMAT §7 spells a non-finite float at a FLOAT slot as the quoted
+token `"NaN"`, `"Infinity"` or `"-Infinity"`. The interpreter's encoder writes it, the generated F#
+`dFloat`, the generated TypeScript decoder and the emitted schema read it, and the interpreter's own
+decoder refused it — the reference host was the odd one out, refusing its own output. The direction is
+to ACCEPT: the decoder's float arm reads exactly those three strings (nothing else, and at no other
+slot — an `int` slot and a `json` slot do not widen), and the artifact reader reads a non-finite declared
+default back. The opposite direction — routing the encoder through the guarded renderer so a non-finite
+float is refused — was the second pass's first reading of Phase 292's task and is declined: it would
+move the reference interpreter further from every host, and the guarded renderer stays where §7 does not
+reach (a non-finite float inside a verbatim `json` or hosted value, which has no token of its own and is
+refused by path).
+
+**D104.3 — a map's value is its key set (the second pass's P1).** A decoded map is an entry list on the
+interpreter (wire order), a `Map` on the generated F# (key order) and an object on the TypeScript host
+(insertion order, integer-like keys first). The bytes agree — every encoder sorts a map's entries
+Ordinal, under either key order — and the VALUES differ only in an order no reader may depend on. Settled by
+statement rather than by sorting in any one host: the three-way differential's value normal form compares
+a map as its key set, and so does its TypeScript leg's deep equality.
+
+**D104.4 — a field-less declaration is a marker type.** F# has no empty record (`{ }` is FS3863), so a
+field-less kind or record emits as the single-case union `R = | R`, its value spelled `R.R` through one
+record-literal helper every F# site shares. Chosen over a nullary `NodeKind` case or a `unit` payload
+because it keeps every `NodeKind` case carrying its spec, so the codec, the projection seam and the smart
+constructors stay one shape. Before this phase the score vocabulary's generated module did not compile
+and the suite, which only regenerated it, did not notice; every certification vocabulary's generated F#
+is now compiled.
+
+**D104.5 — a harden entry names what the floor can reach.** `Trust.checkHardenPolicy` refuses a
+`UrlFields` / `MarkdownFields` entry naming no kind, no field, a host-only field, or a field whose type
+the floor does not rewrite (anything but a `str` or a union carrying the declared literal case), through
+the existing `UnsupportedConstruct` case, and a `str`-typed entry is sanitised directly. An entry used to
+be matched by name and silently passed when it did not fit: a record-typed `href` holding
+`javascript:alert(1)` survived `harden` verbatim.
+
+**What the differential found, and was fixed in the same phase.** The TypeScript runtime's verbatim
+JSON encoder wrote a whole number at or past 2^53 in `String()` layout (`1e+21`, or digits) rather than
+the canonical float layout (`1E+21`); and the reference vocabulary's support document's projection
+encoder omitted the kind discriminator — wrong since it was written, and visible only once the module was
+compiled and run against the interpreter.
+
+**What is not done here.** The F* facts see structure, presence and key order, not the float layout (the
+model's float carrier is opaque) and not the §7 tokens; the three-way differential, a test, covers both.
+The generated F# and TypeScript layers carry no op root, so a root op is certified on the interpreter and
+against the schema only.
+
+## 2026-10-02 — D104: one space relation answers every "does this value fit" question; a wire document's value space is `$type`-tagged and the descriptor's spelling is frozen; a signature and strict application agree on what a repeat requires; a registry holds only total capabilities
+
+**Context (Phase 295).** The invocable seams had drifted around the parts that were designed
+together. There were three incompatible answers to "does this space admit every value of that one":
+
+- The pipeline's edge check ignored bounds, so an `IntRange(0, 1000)` output fed an `IntRange(0, 10)`
+  argument.
+- The function registry's hole match respected bounds but refused int into float, which validation
+  accepted.
+- The query seam asked type equality, while `ColumnType.widens` called itself the single source of
+  truth.
+
+The other drift:
+
+- The effect was written three times and read twice, with two sentences for one refusal. The value
+  space was written in two spellings.
+- `Function.signature` marked a bounded repeat optional while strict `apply` refused it unbound.
+- A capability over an unbounded repeat registered and dispatched.
+- A pipeline with a cycle, a self-edge or a forward edge type-checked and failed only at evaluation.
+- Evaluation ran bodies without type-checking.
+
+**Decision.**
+
+1. **THE space relation is `Space.subsumes required available`**, and every call site asks it.
+   - The lattice: ranges compare by BOUNDS, and the one widening is int into float (a `FloatRange`
+     admits an `IntRange` its bounds contain).
+   - `StringLen` admits a `StringLen` it bounds and an `Enum` whose members it bounds. An `Enum`
+     admits a subset `Enum`.
+   - `AnyString` is the top of the SCALAR spaces, because every argument at the seam is a string.
+   - The tree spaces are their own family: an unconstrained `SlotTree` admits every `SlotTree`, and a
+     constrained one only its own kind. No scalar space admits a tree, and no tree space a scalar.
+   - The relation is sound (true only where every value of `available` validates in `required`),
+     and incomplete where the answer would need enumerating values (an `IntRange` against an `Enum`
+     of digits, say). Incomplete is the safe direction for a type check.
+   - The query seam asks `ColumnType.widens`, the same lattice over typed cells. It agrees with
+     `subsumes` on the numeric types. It does not agree on strings, where it should not: a typed
+     `string` parameter takes no `int` cell, while an `AnyString` hole admits the text `5`.
+2. **A value space in a wire DOCUMENT is `"$type"`-tagged, with `min` / `max` bounds** (`SpaceCodec`),
+   which is Phase 251's convention for anything a codec decodes back.
+   - `toSchema` is a DESCRIPTOR and keeps its `"kind"` / `minLength` spelling, through
+     `SpaceCodec.descriptorJson`.
+   - That spelling is FROZEN, not merely kept: `ContentPack.signatureFingerprint` hashes `toSchema`'s
+     bytes, so moving the descriptor onto the document spelling would re-pin every published pack for
+     no change in meaning.
+   - The reader takes the descriptor spelling too, leniently, for the 0.34.0 draft. Nothing writes it
+     into a document.
+   - The effect is untagged in both, because it is never a document of its own; `EffectCodec` is its
+     one reader and writer.
+3. **A bounded repeat is `Required`**, because strict `apply` demands it.
+   - This is the direction that changes the signature, not the law: full application binds every
+     data hole (Phase 181), and the signature is the projection of that law that had disagreed.
+   - The cost, accepted by operator ruling: a signature with a repeat hole lists it as required, so
+     its descriptor bytes and its pack fingerprint move.
+4. **A registry holds only total capabilities.**
+   - `register` refuses a non-total one, naming its entries (`NonTotalCapability`). Non-total means
+     a repeat over an unbounded count, or an entry that projects to no hole kind.
+   - `compose` checks totality on both parts, as `composeAcross` does.
+5. **A pipeline is checked before it runs.**
+   - `typeCheck` refuses a self-edge or a cycle as `PipelineCycle`, naming the cycle, and an acyclic
+     forward edge as `PipelineForwardEdge`.
+   - An argument refusal wraps the capability's own `InvokeError`.
+   - `eval` / `evalFrom` take the lookup and type-check first, so they are no longer a second
+     dispatch path beside the registry's.
+   - Both registries project the lookup, so a host with content packs keeps one registry.
+
+**Rejected.**
+
+- Retyping `SigEntry.Kind` to `HoleKind`, as the phase first proposed. `HoleKind` carries the space
+  and the effect ceiling the entry already carries in `Space` and `Action`, so the retype would make
+  a second copy of each that could disagree: the defect class this phase removes from `Capability`.
+  The typed reading is a member (`SigEntry.HoleKind`). The tag is spelled once (`HoleKind.tag`), and
+  the codec refuses any other.
+- Keeping the old `CapabilityPipeline.eval` / `evalFrom` beside type-checked twins. The old forms
+  were the unchecked path, and keeping them keeps the path.
+- Canonicalising inside `Space.validate`'s answer instead of the capture key. `validate` answers a
+  `bool`. The value is handed on typed by `typeArgs` / `invokeWithArgs`, and `invocationKey` keys
+  each argument by `Space.canonical`, so one value has one key wherever the key is built.
+
+**Consequences.**
+
+- The class is breaking (source) and, for the repeat's `required`, breaking (wire); both ride
+  0.34.0's operator ruling.
+- `proofs/Capability.fst` and `proofs/Query.fst` restate required-ness, totality, registration, the
+  widening and the keyed list, and both oracles are re-extracted.
+- `capabilityPipelineLaws`, `registryLaws` and `queryLaws` each pin their call site to the relation.
+
+
 ## 2026-10-02 — D103: a content-changing survivor is rewritten before the children it gains and after the children it loses; a contained undo is closed only from a contained pre-state; arbitration refuses a malformed base instead of arbitrating it
 
 **Recorded by Phase 305. `src/Fuaran.Core.Ops/Ops.fs` (`Diff`, `normalize`, `invert`, `invertAll`),

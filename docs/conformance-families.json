@@ -168,7 +168,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "600",
+      "cases": "1400",
       "adequacy": "unconditional",
       "refusal": "built"
     },
@@ -479,7 +479,7 @@
       "optIn": true,
       "reason": "stronger-promise",
       "discharges": ["independence-diamond"],
-      "cases": "600",
+      "cases": "900",
       "adequacy": "guarded-reached",
       "refusal": "none"
     },
@@ -790,7 +790,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1400",
+      "cases": "1800",
       "adequacy": "unconditional",
       "refusal": "built"
     },
@@ -893,7 +893,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800",
+      "cases": "1000",
       "adequacy": "unconditional",
       "refusal": "built"
     },

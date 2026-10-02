@@ -69,42 +69,73 @@ let is_empty = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
 
 let disjoint = (fun ( x  :  Prims.list<'a> ) ( y  :  Prims.list<'a> ) -> (is_empty (inter x y)))
 
-type footprint = {reads : Prims.list<Prims.string>; structure_writes : Prims.list<Prims.string>; content_writes : Prims.list<Prims.string>; unknown_parent_writes : Prims.list<Prims.string>}
+
+type slot = (Prims.string * Prims.string)
+
+type footprint = {reads : Prims.list<Prims.string>; structure_writes : Prims.list<Prims.string>; content_writes : Prims.list<Prims.string>; unknown_parent_writes : Prims.list<Prims.string>; slot_reads : Prims.list<slot>; slot_writes : Prims.list<slot>}
 
 
 let __proj__Mkfootprint__item__reads : footprint  ->  Prims.list<Prims.string> = (fun ( projectee  :  footprint ) -> (match (projectee) with
-| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes} -> begin
+| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes; slot_reads = slot_reads; slot_writes = slot_writes} -> begin
      reads
      end))
 
 
 let __proj__Mkfootprint__item__structure_writes : footprint  ->  Prims.list<Prims.string> = (fun ( projectee  :  footprint ) -> (match (projectee) with
-| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes} -> begin
+| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes; slot_reads = slot_reads; slot_writes = slot_writes} -> begin
      structure_writes
      end))
 
 
 let __proj__Mkfootprint__item__content_writes : footprint  ->  Prims.list<Prims.string> = (fun ( projectee  :  footprint ) -> (match (projectee) with
-| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes} -> begin
+| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes; slot_reads = slot_reads; slot_writes = slot_writes} -> begin
      content_writes
      end))
 
 
 let __proj__Mkfootprint__item__unknown_parent_writes : footprint  ->  Prims.list<Prims.string> = (fun ( projectee  :  footprint ) -> (match (projectee) with
-| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes} -> begin
+| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes; slot_reads = slot_reads; slot_writes = slot_writes} -> begin
      unknown_parent_writes
+     end))
+
+
+let __proj__Mkfootprint__item__slot_reads : footprint  ->  Prims.list<slot> = (fun ( projectee  :  footprint ) -> (match (projectee) with
+| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes; slot_reads = slot_reads; slot_writes = slot_writes} -> begin
+     slot_reads
+     end))
+
+
+let __proj__Mkfootprint__item__slot_writes : footprint  ->  Prims.list<slot> = (fun ( projectee  :  footprint ) -> (match (projectee) with
+| {reads = reads; structure_writes = structure_writes; content_writes = content_writes; unknown_parent_writes = unknown_parent_writes; slot_reads = slot_reads; slot_writes = slot_writes} -> begin
+     slot_writes
      end))
 
 
 let writes_structure : footprint  ->  Prims.bool = (fun ( f  :  footprint ) -> ((not ((is_empty f.structure_writes))) || (not ((is_empty f.unknown_parent_writes)))))
 
 
-let independent : footprint  ->  footprint  ->  Prims.bool = (fun ( a  :  footprint ) ( b  :  footprint ) -> ((((((disjoint a.content_writes b.content_writes) && (disjoint a.content_writes b.reads)) && (disjoint b.content_writes a.reads)) && (disjoint a.structure_writes b.structure_writes)) && (not (((not ((is_empty a.unknown_parent_writes))) && (writes_structure b))))) && (not (((not ((is_empty b.unknown_parent_writes))) && (writes_structure a))))))
+let rec nodes : Prims.list<slot>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<slot> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((n, uu___))::t -> begin
+     (n)::(nodes t)
+     end))
+
+
+let slot_clash : footprint  ->  footprint  ->  Prims.list<slot> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (inter a.slot_writes b.slot_writes) (union (inter a.slot_writes b.slot_reads) (inter a.slot_reads b.slot_writes))))
+
+
+let slots_against_node : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (inter (nodes a.slot_writes) (union b.content_writes (union b.reads b.structure_writes))) (inter (nodes a.slot_reads) b.content_writes)))
+
+
+let independent : footprint  ->  footprint  ->  Prims.bool = (fun ( a  :  footprint ) ( b  :  footprint ) -> (((((((((disjoint a.content_writes b.content_writes) && (disjoint a.content_writes b.reads)) && (disjoint b.content_writes a.reads)) && (disjoint a.structure_writes b.structure_writes)) && (not (((not ((is_empty a.unknown_parent_writes))) && (writes_structure b))))) && (not (((not ((is_empty b.unknown_parent_writes))) && (writes_structure a))))) && (is_empty (slot_clash a b))) && (is_empty (slots_against_node a b))) && (is_empty (slots_against_node b a))))
 
 type shape =
 | ConcurrentUpdate
 | InsertPositionClash
 | MoveVsRemove
+| SlotClash of Prims.string
 
 
 let uu___is_ConcurrentUpdate : shape  ->  Prims.bool = (fun ( projectee  :  shape ) -> (match (projectee) with
@@ -131,6 +162,21 @@ let uu___is_MoveVsRemove : shape  ->  Prims.bool = (fun ( projectee  :  shape ) 
      end
 | uu___ -> begin
      false
+     end))
+
+
+let uu___is_SlotClash : shape  ->  Prims.bool = (fun ( projectee  :  shape ) -> (match (projectee) with
+| SlotClash (_0) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__SlotClash__item___0 : shape  ->  Prims.string = (fun ( projectee  :  shape ) -> (match (projectee) with
+| SlotClash (_0) -> begin
+     _0
      end))
 
 type conflict<'op> = {left : 'op; right : 'op; address : Prims.string; shape : shape}
@@ -188,6 +234,18 @@ let rec tag = (fun ( a  :  'op ) ( b  :  'op ) ( s  :  shape ) ( addrs  :  Prims
      end))
 
 
+let rec tag_slots = (fun ( a  :  'op ) ( b  :  'op ) ( slots  :  Prims.list<slot> ) -> (match (slots) with
+| [] -> begin
+     []
+     end
+| ((n, s))::t -> begin
+     ({left = a; right = b; address = n; shape = SlotClash (s)})::(tag_slots a b t)
+     end))
+
+
+let concurrent_or_slots : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( fa  :  footprint ) ( fb  :  footprint ) -> (union (concurrent fa fb) (union (slots_against_node fa fb) (slots_against_node fb fa))))
+
+
 let pair_conflicts = (fun ( fp  :  'op  ->  footprint ) ( a  :  'op ) ( b  :  'op ) -> (
 
 let fa = (fp a)
@@ -196,14 +254,17 @@ in (
 let fb = (fp b)
 in (
 
-let c1 = (concurrent fa fb)
+let c1 = (concurrent_or_slots fa fb)
 in (
 
 let c2 = (diff (insert_clash fa fb) c1)
 in (
 
 let c3 = (diff (diff (move_remove fa fb) c1) c2)
-in (app (tag a b ConcurrentUpdate c1) (app (tag a b InsertPositionClash c2) (tag a b MoveVsRemove c3)))))))))
+in (
+
+let c4 = (slot_clash fa fb)
+in (app (tag a b ConcurrentUpdate c1) (app (tag a b InsertPositionClash c2) (app (tag a b MoveVsRemove c3) (tag_slots a b c4)))))))))))
 
 
 let rec conflicts_with = (fun ( fp  :  'op  ->  footprint ) ( a  :  'op ) ( db  :  Prims.list<'op> ) -> (match (db) with
@@ -463,8 +524,8 @@ type dag<'op> = {nodes : Prims.list<node<'op>>}
 
 
 let __proj__Mkdag__item__nodes = (fun ( projectee  :  dag<'op> ) -> (match (projectee) with
-| {nodes = nodes} -> begin
-     nodes
+| {nodes = nodes1} -> begin
+     nodes1
      end))
 
 type found<'a> =
@@ -1442,6 +1503,32 @@ if (same m n) then begin
      Appended (n.nid, {nodes = (n)::d.nodes})
      end))
 
+
+type slot_store = Prims.list<(slot * Prims.string)>
+
+
+let rec lookup_slot : slot_store  ->  slot  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( st  :  slot_store ) ( k  :  slot ) -> (match (st) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k', v))::t -> begin
+      
+if (Prims.op_Equals k k') then begin
+     FStar_Pervasives_Native.Some (v)
+     end else begin
+     (lookup_slot t k)
+     end
+     end))
+
+
+let write_slot : slot  ->  Prims.string  ->  slot_store  ->  slot_store = (fun ( k  :  slot ) ( v  :  Prims.string ) ( st  :  slot_store ) -> (((k), (v)))::st)
+
+
+let slot_write_fp : slot  ->  footprint = (fun ( k  :  slot ) -> {reads = []; structure_writes = []; content_writes = []; unknown_parent_writes = []; slot_reads = (k)::[]; slot_writes = (k)::[]})
+
+
+let whole_node_write_fp : Prims.string  ->  footprint = (fun ( n  :  Prims.string ) -> {reads = (n)::[]; structure_writes = []; content_writes = (n)::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []})
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -1454,6 +1541,15 @@ let __proj__Mktwin__item__tname : twin  ->  Prims.string = (fun ( projectee  :  
 let __proj__Mktwin__item__tholds : twin  ->  unit  ->  Prims.bool = (fun ( projectee  :  twin ) -> (match (projectee) with
 | {tname = tname; tholds = tholds} -> begin
      tholds
+     end))
+
+
+let rec all_ueq = (fun ( c  :  conflict<'op> ) ( cs  :  Prims.list<conflict<'op>> ) -> (match (cs) with
+| [] -> begin
+     true
+     end
+| (d)::t -> begin
+     ((ueq c d) && (all_ueq c t))
      end))
 
 
@@ -1483,7 +1579,13 @@ if (Prims.op_Equals o "x") then begin
      end)
 
 
-let twins : Prims.list<twin> = ({tname = "independent-disjoint-footprints"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []}) true))})::({tname = "dependent-shared-structure-write"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []}) false))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::[]
+let twins : Prims.list<twin> = ({tname = "independent-disjoint-footprints"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) true))})::({tname = "dependent-shared-structure-write"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) false))})::({tname = "independent-different-slots"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("thinking")))) true))})::({tname = "dependent-same-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (slot_write_fp (("n"), ("tier"))) (slot_write_fp (("n"), ("tier")))) false))})::({tname = "whole-node-write-refuses-a-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent (whole_node_write_fp "n") (slot_write_fp (("n"), ("tier")))) false))})::({tname = "slot-clash-is-tagged-at-the-slot"; tholds = (fun ( uu___  :  unit ) -> (
+
+let expected = {left = (("n"), ("tier")); right = (("n"), ("tier")); address = "n"; shape = SlotClash ("tier")}
+in (
+
+let cs = (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("tier")))
+in ((mem_u expected cs) && (all_ueq expected cs)))))})::({tname = "different-slots-fold-clean"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({tname = "slot-writes-commute-at-every-slot"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({tname = "drain-orders-a-diamond-by-the-tie-break"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({tname = "drain-refuses-a-dangling-parent"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({tname = "replay-to-folds-the-drained-closure"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (Ok ("abcm"))))})::({tname = "replay-to-refuses-an-unknown-head"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (Error (RUnknownHead ("zz")))))})::({tname = "add-node-refuses-a-differing-node"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::[]
 
 
 

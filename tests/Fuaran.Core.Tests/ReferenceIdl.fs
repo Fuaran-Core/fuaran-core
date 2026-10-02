@@ -278,7 +278,11 @@ let private noteProjection: Gen.KindProjection =
     { SpecDecl =
         """NoteSpec =
     { Body: Text }"""
-      Encoder = """and private encNoteSpec (s: NoteSpec) : JVal = JObj [ "body", encText s.Body ]"""
+      // Phase 303 — the encoder writes the kind's discriminator, as every generated spec
+      // encoder does: until the reference module was COMPILED and run against the interpreter,
+      // nothing noticed that this projection wrote `{"body":…}` where the wire says
+      // `{"$type":"Note","body":…}`, so every compiled Note was undecodable by the other hosts.
+      Encoder = """and private encNoteSpec (s: NoteSpec) : JVal = Canon.typed "Note" [ "body", encText s.Body ]"""
       Decoder =
         """and private decNoteSpec (j: JVal) : Result<NoteSpec, string> =
         jprop "body" j |> Result.bind decText |> Result.map (fun t -> { Body = t })"""

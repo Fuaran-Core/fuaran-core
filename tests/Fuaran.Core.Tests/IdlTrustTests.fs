@@ -137,7 +137,16 @@ let tests =
                             Harden = retiredDefaultTokens }
 
                     Expect.isOk (Trust.checkHardenPolicy onRetired noTrust) "every member is declared"
-                    Expect.isOk (Trust.checkHardenPolicy onRetired withUrlField) "including the URL pair")
+
+                    // Phase 303 — the TOKEN check still keys on emptiness alone; what the URL
+                    // pair now meets as well is the ENTRY check. `refIdl`'s `Link.href` is a
+                    // `Slot<str>`, which has no `Static` case, so under these tokens the floor
+                    // would never sanitise it — the policy is refused for that entry, by name,
+                    // and not for any token's spelling.
+                    match Trust.checkHardenPolicy onRetired withUrlField with
+                    | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
+                        Expect.stringContains construct "('Link', 'href')" "the entry the floor cannot reach"
+                    | other -> failtestf "expected the URL entry to be refused, got %A" other)
 
                 // An empty `TransparentUnions` is a DECLARATION, not an absence — it is
                 // how a vocabulary no case of which encodes bare says so, and `refIdl`
