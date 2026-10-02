@@ -2307,6 +2307,7 @@ let ord3 (b a:tree) (ns:list tree) (t:tree) : prop =
                             (keep (moved_pred (ids b) (kids_at q b)) (kids_at q a)))
 
 (* what the three passes leave — `settled_order` read at the two trees' child lists *)
+[@@"opaque_to_smt"]
 let predicted (b a:tree) (q:string) : Tot (list string) =
   settled_order (ids b) (kids_at q b) (kids_at q a)
 
@@ -2336,8 +2337,10 @@ let ord3_to_predicted (b a t:tree)
           (ensures forall (q:string). mem q (ids a) ==> kids_at q t == predicted b a q)
   = reveal_opaque (`%ord3) (ord3 b a [] t);
     let aux (q:string)
-      : Lemma (keep (kept3 b a [] q) (kids_at q b) == keep (in_list (kids_at q a)) (kids_at q b))
-      = keep_ext (kept3 b a [] q) (in_list (kids_at q a)) (kids_at q b)
+      : Lemma (keep (kept3 b a [] q) (kids_at q b) == keep (in_list (kids_at q a)) (kids_at q b) /\
+               predicted b a q == settled_order (ids b) (kids_at q b) (kids_at q a))
+      = reveal_opaque (`%predicted) (predicted b a q);
+        keep_ext (kept3 b a [] q) (in_list (kids_at q a)) (kids_at q b)
     in
     FStar.Classical.forall_intro aux
 
@@ -2607,6 +2610,7 @@ let reorder_settled (b a:tree) (pid:string) (r:list string) (t:tree) (pn:tree)
         | Some v -> lookup_kids_sound b (pre b) pid v
         | None -> ())
      end);
+    reveal_opaque (`%predicted) (predicted b a pid);
     assert (bk == kids_at pid b);
     assert (kids_at pid a == ak);
     assert (predicted b a pid == ak)
@@ -2773,7 +2777,13 @@ let diff_settles_order (b a:tree)
          removes_run b a (pre b) t2;
          (match apply_all p3 t2 with
           | Error _ -> ()
-          | Ok t3 -> ord3_to_predicted b a t3))
+          | Ok t3 ->
+            ord3_to_predicted b a t3;
+            let unfold_q (q:string)
+              : Lemma (predicted b a q == settled_order (ids b) (kids_at q b) (kids_at q a))
+              = reveal_opaque (`%predicted) (predicted b a q)
+            in
+            FStar.Classical.forall_intro unfold_q))
 #pop-options
 
 (* THE OPERATIONAL `diff_applicable`: `apply` accepts every step of the script `toOps` emits, in
