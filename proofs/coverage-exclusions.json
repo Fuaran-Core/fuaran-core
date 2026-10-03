@@ -525,11 +525,10 @@
     {
       "members": [
         "CapabilityCodec.decodeJsonDetailedWith",
-        "CapabilityCodec.decodeJsonWith",
-        "CapabilityCodec.encodeJson"
+        "CapabilityCodec.decodeJsonWith"
       ],
       "class": "measured-elsewhere",
-      "reason": "Capability codec arms beside the rostered `encode` / `decode` / deferred pair: invocation, invoke-error and policy-parameterised forms; the decode layer's refusal corpus and round-trip tests stand in.",
+      "reason": "The policy-parameterised capability readers; the decode layer's refusal corpus and round-trip tests stand in. `encodeJson` left this entry for the ladder at Phase 354 (`capability-codec-capability-roundtrip`), whose model is the lenient reading; the strict policy is not modelled.",
       "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
     },
     {
@@ -549,15 +548,6 @@
       "reason": "The typed-error invocation reader; the string-error `decodeInvocationWith` is it plus the sentence, and the decode tests call that.",
       "through": "CapabilityCodec.decodeInvocationWith",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
-    },
-    {
-      "members": [
-        "CapabilityCodec.decodeJson"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Reads a capability from a JSON value; `decode` parses the text and calls it.",
-      "through": "CapabilityCodec.decode",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {
       "members": [
@@ -606,27 +596,11 @@
     },
     {
       "members": [
-        "CapabilityCodec.signatureOf"
-      ],
-      "class": "forward",
-      "reason": "`Decoder.describing` over the private signature reader `decode` itself runs: the string-error spelling of a reader the capability codec tests exercise through `decode`.",
-      "forwardsTo": "Decoder.describing"
-    },
-    {
-      "members": [
         "CapabilityLookup.ofFunctionRegistry"
       ],
       "class": "measured-elsewhere",
       "reason": "Adapts a function registry to the pipeline's capability lookup; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "CapabilityPipeline.decodeDetailed"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Pipeline decode with the typed error, and node enumeration; the pipeline family covers encode/decode/eval, these are the detailed and listing forms.",
-      "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
     },
     {
       "members": [
@@ -671,26 +645,7 @@
     },
     {
       "members": [
-        "EffectCodec.hostTag"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The host-effect spelling inside a signature's effect object; measured through the capability encoder, whose round-trip tests read it.",
-      "through": "CapabilityCodec.encode",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "EffectCodec.toJson"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "An effect class as a JSON value; every signature the capability encoder writes carries one.",
-      "through": "CapabilityCodec.encode",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
         "Function.applyMemoComposed",
-        "Function.bindHandlers",
         "Function.composedEffect",
         "Function.isClosed",
         "Function.isTotal",
@@ -698,7 +653,7 @@
         "Function.toSchema"
       ],
       "class": "measured-elsewhere",
-      "reason": "Function-algebra operations beside the rostered composition and memo laws: composed memo, handler binding, totality, the closed-tree predicate strict `apply` refuses an open slot argument by (Phase 307), and signature projections. `compose` and `toJsonSchema` left this entry for the ladder at Phase 307 (`capability-register-well-formed`, `capability-wf-holes`).",
+      "reason": "Function-algebra operations beside the rostered composition and memo laws: composed memo, totality, the closed-tree predicate strict `apply` refuses an open slot argument by (Phase 307), and signature projections. `compose` and `toJsonSchema` left this entry for the ladder at Phase 307 (`capability-register-well-formed`, `capability-wf-holes`), and `bindHandlers` at Phase 354 (`capability-bind-handlers-exact`).",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {
@@ -785,12 +740,10 @@
     },
     {
       "members": [
-        "SpaceCodec.decoder",
-        "SpaceCodec.descriptorJson",
-        "SpaceCodec.toJson"
+        "SpaceCodec.descriptorJson"
       ],
       "class": "measured-elsewhere",
-      "reason": "The value-space codec; round-trip tests stand in.",
+      "reason": "The frozen descriptor spelling `toSchema` writes; round-trip tests stand in. The document spelling's writer and the reader left this entry for the ladder at Phase 354 (`capability-codec-signature-roundtrip`).",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {

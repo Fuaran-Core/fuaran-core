@@ -8282,6 +8282,1175 @@ let private capDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : C
 
 
 // ------------------------------------------------------------------------------------------
+// Phase 354 — the three sections of `proofs/Capability.fst` Phase 307 left unmodelled, each beside
+// the production function it names: the HANDLER TABLE (`Function.bindHandlers`), the CAPABILITY
+// PIPELINE (`CapabilityPipeline.typeCheck` / `eval` / `dirtySet` / `evalFrom`) and the CODECS
+// (`CapabilityCodec` for a signature and a capability, the pipeline's for its nodes).
+//
+// The draws reach what the sections' theorems are about and the Phase 307 generator did not:
+// handler sets in more than one arrival order, with a key repeated and with two undeclared keys at
+// once (so the refusal ORDER is compared, not only the refusal); pipelines with their nodes
+// reordered, an edge pointing forward, a cycle, an ill-typed edge and an argument bound twice; and
+// documents the decoders must refuse — a member dropped, a value of the wrong kind, a tag outside
+// its set, a label that disagrees with the signature it sits beside.
+// ------------------------------------------------------------------------------------------
+
+/// The ordinal order an F# `Map<string, _>` keeps its keys in — the comparator premise
+/// `bind_handlers_order_independent` takes (`total_order`).
+let private mapKeyLe (a: string) (b: string) : bool = System.String.CompareOrdinal(a, b) <= 0
+
+let private prodBindErrRender (e: BindHandlerError) : string =
+    match e with
+    | UnknownActionAddr(a, d) -> sprintf "UnknownActionAddr(%s;%s)" a (String.concat "," d)
+    | NotAnActionHole a -> sprintf "NotAnActionHole(%s)" a
+    | RequiredActionsUnbound xs -> sprintf "RequiredActionsUnbound(%s)" (String.concat "," xs)
+    | HandlerEffectExceedsCeiling(a, c, h) ->
+        sprintf "HandlerEffectExceedsCeiling(%s;%A;%A)" a (effToModel c) (effToModel h)
+
+let private modelBindErrRender (e: ModelCap.bind_handler_error) : string =
+    match e with
+    | ModelCap.UnknownActionAddr(a, d) -> sprintf "UnknownActionAddr(%s;%s)" a (String.concat "," d)
+    | ModelCap.NotAnActionHole a -> sprintf "NotAnActionHole(%s)" a
+    | ModelCap.RequiredActionsUnbound xs -> sprintf "RequiredActionsUnbound(%s)" (String.concat "," xs)
+    | ModelCap.HandlerEffectExceedsCeiling(a, c, h) -> sprintf "HandlerEffectExceedsCeiling(%s;%A;%A)" a c h
+
+let private bindErrClass (e: BindHandlerError) : string =
+    (prodBindErrRender e).Substring(0, (prodBindErrRender e).IndexOf '(')
+
+let private bindingToModel (hb: HandlerBinding<int>) : ModelCap.handler_binding<int> =
+    { ModelCap.handler_binding.hb_handler = hb.Handler
+      ModelCap.handler_binding.hb_effect = effToModel hb.Effect }
+
+/// A handler set for an artifact, in ARRIVAL order. An action hole gets a handler inside its
+/// ceiling seven draws in ten, one drawn from the pool (which may exceed it) two in ten, and none
+/// otherwise; a data hole gets one a draw in ten; one set in six carries undeclared keys — two of
+/// them half the time, so the first-in-key-order rule is exercised — and one in ten binds a key
+/// twice, the later binding replacing the earlier.
+let private genHandlers (t: RNode) (r: ConfRng.T) : (string * HandlerBinding<int>) list * ConfRng.T =
+    let mutable rng = r
+    let hs = System.Collections.Generic.List<string * HandlerBinding<int>>()
+    let mutable n = 0
+
+    for h in artw.Holes t do
+        let roll, r1 = ConfRng.intBelow 10 rng
+        let e, r2 = ConfRng.choose effPool r1
+        rng <- r2
+        n <- n + 1
+
+        match h.Kind with
+        | ActionHole ceiling ->
+            if roll < 7 then
+                let inside = if roll < 4 then Effect.pureDeterministic else ceiling
+                hs.Add(h.Addr, ({ Handler = n; Effect = inside }: HandlerBinding<int>))
+            elif roll < 9 then
+                hs.Add(h.Addr, ({ Handler = n; Effect = e }: HandlerBinding<int>))
+        | _ ->
+            if roll = 0 then
+                hs.Add(h.Addr, ({ Handler = n; Effect = e }: HandlerBinding<int>))
+
+    let extra, r3 = ConfRng.intBelow 12 rng
+    rng <- r3
+
+    if extra < 2 then
+        hs.Add(
+            "root/zz",
+            ({ Handler = 90
+               Effect = Effect.pureDeterministic }
+            : HandlerBinding<int>)
+        )
+
+    if extra = 0 then
+        hs.Add(
+            "root/aa",
+            ({ Handler = 91
+               Effect = Effect.pureDeterministic }
+            : HandlerBinding<int>)
+        )
+
+    let dup, r4 = ConfRng.intBelow 10 rng
+    rng <- r4
+
+    if dup = 0 && hs.Count > 0 then
+        hs.Add(
+            fst hs.[0],
+            ({ Handler = 99
+               Effect = Effect.pureDeterministic }
+            : HandlerBinding<int>)
+        )
+
+    List.ofSeq hs, rng
+
+type private BindTally =
+    { BDiffs: string list
+      BAccepted: int
+      BAcceptedBound: int
+      BRefused: int
+      BReordered: int
+      BReplaced: int
+      BClasses: Set<string> }
+
+let private bindCompare
+    (le: string -> string -> bool)
+    (seedTag: int)
+    (t: RNode)
+    (arriving: (string * HandlerBinding<int>) list)
+    (diffs: System.Collections.Generic.List<string>)
+    : Result<HandlerTable<int>, BindHandlerError> =
+    let p = Function.bindHandlers artw (Map.ofList arriving) t
+
+    let m =
+        ModelCap.bind_handlers_of le modelWitness (arriving |> List.map (fun (a, hb) -> a, bindingToModel hb)) t
+
+    (match p, m with
+     | Ok pt, ModelCap.Ok mt ->
+         let pl = Map.toList pt.Handlers |> List.map (fun (a, hb) -> a, bindingToModel hb)
+
+         if pl <> mt.ht_handlers then
+             diffs.Add(sprintf "seed %d: bindHandlers accepted with different tables" seedTag)
+     | Error pe, ModelCap.Error me ->
+         if prodBindErrRender pe <> modelBindErrRender me then
+             diffs.Add(
+                 sprintf
+                     "seed %d: bindHandlers refused differently\n  prod %s\n  model %s"
+                     seedTag
+                     (prodBindErrRender pe)
+                     (modelBindErrRender me)
+             )
+     | Ok _, ModelCap.Error me ->
+         diffs.Add(
+             sprintf
+                 "seed %d: bindHandlers accepted by production, refused by the model (%s)"
+                 seedTag
+                 (modelBindErrRender me)
+         )
+     | Error pe, ModelCap.Ok _ ->
+         diffs.Add(
+             sprintf
+                 "seed %d: bindHandlers refused by production (%s), accepted by the model"
+                 seedTag
+                 (prodBindErrRender pe)
+         ))
+
+    p
+
+let private bindDifferential (le: string -> string -> bool) (seed: int) (trials: int) : BindTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let diffs = System.Collections.Generic.List<string>()
+    let mutable accepted = 0
+    let mutable acceptedBound = 0
+    let mutable refused = 0
+    let mutable reordered = 0
+    let mutable replaced = 0
+    let mutable classes = Set.empty
+
+    for i in 1..trials do
+        let t, r1 = genArtifact rng
+        let arriving, r2 = genHandlers t r1
+        rng <- r2
+        let p = bindCompare le i t arriving diffs
+
+        (match p with
+         | Ok pt ->
+             accepted <- accepted + 1
+
+             if not (Map.isEmpty pt.Handlers) then
+                 acceptedBound <- acceptedBound + 1
+         | Error pe ->
+             refused <- refused + 1
+             classes <- Set.add (bindErrClass pe) classes)
+
+        let keys = arriving |> List.map fst
+
+        if List.distinct keys = keys then
+            // `bind_handlers_order_independent`, on the shipped function: the same distinct
+            // bindings in another arrival order bind identically — the table or the refusal.
+            if List.length arriving > 1 then
+                reordered <- reordered + 1
+                let again = bindCompare le i t (List.rev arriving) diffs
+
+                if again <> p then
+                    diffs.Add(sprintf "seed %d: bindHandlers depends on the order the handlers arrive in" i)
+        else
+            replaced <- replaced + 1
+
+    { BDiffs = List.ofSeq diffs
+      BAccepted = accepted
+      BAcceptedBound = acceptedBound
+      BRefused = refused
+      BReordered = reordered
+      BReplaced = replaced
+      BClasses = classes }
+
+// ---- the pipeline ----
+
+/// The two float comparisons `Space.subsumes` makes, exactly as production writes them.
+let private feedReaders: ModelCap.feed_readers =
+    let f (s: string) = System.Double.Parse(s, inv)
+
+    { ModelCap.feed_readers.float_within = fun rl rh al ah -> f rl <= f al && f ah <= f rh
+      ModelCap.feed_readers.int_within = fun rl rh al ah -> f rl <= float (int al) && float (int ah) <= f rh }
+
+let private argSrcToModel (s: ArgSource) : ModelCap.arg_source =
+    match s with
+    | ArgSource.Literal v -> ModelCap.Literal v
+    | ArgSource.FromNode n -> ModelCap.FromNode n
+
+let private nodeToModel (n: PipelineNode) : ModelCap.pipeline_node =
+    match n with
+    | PipelineNode.Source(id, dref, ty) -> ModelCap.Source(id, dref, spaceToModel ty)
+    | PipelineNode.Invoke(id, capId, ty, args) ->
+        ModelCap.Invoke(id, capId, spaceToModel ty, args |> List.map (fun (a, s) -> a, argSrcToModel s))
+
+let private pipeToModel (p: CapabilityPipeline) : ModelCap.pipeline =
+    { ModelCap.pipeline.p_nodes = p.Nodes |> List.map nodeToModel }
+
+let private outputTypeOf (n: PipelineNode) : ValueSpace =
+    match n with
+    | PipelineNode.Source(_, _, ty) -> ty
+    | PipelineNode.Invoke(_, _, ty, _) -> ty
+
+let private upstreamsOf (n: PipelineNode) : string list =
+    match n with
+    | PipelineNode.Source _ -> []
+    | PipelineNode.Invoke(_, _, _, args) ->
+        args
+        |> List.choose (fun (_, s) ->
+            match s with
+            | ArgSource.FromNode up -> Some up
+            | ArgSource.Literal _ -> None)
+
+/// Declaration order is a topological order of the edges — `ordered [] p.p_nodes`, computed here
+/// from production's nodes and from nothing the model wrote.
+let private isTopological (nodes: PipelineNode list) : bool =
+    let rec go (earlier: Set<string>) =
+        function
+        | [] -> true
+        | n :: rest ->
+            let nid = CapabilityPipeline.nodeId n
+
+            not (earlier.Contains nid)
+            && List.forall earlier.Contains (upstreamsOf n)
+            && go (earlier.Add nid) rest
+
+    go Set.empty nodes
+
+let private prodPipeErrRender (e: PipelineError) : string =
+    match e with
+    | PipelineError.DuplicateNode id -> sprintf "DuplicateNode(%s)" id
+    | PipelineError.UnknownNode id -> sprintf "UnknownNode(%s)" id
+    | PipelineError.PipelineNoSuchCapability(id, known) ->
+        sprintf "PipelineNoSuchCapability(%s;%s)" id (String.concat "," (List.sort known))
+    | PipelineError.PipelineArgRefused(n, r) -> sprintf "PipelineArgRefused(%s;%s)" n (prodInvokeErrRender r)
+    | PipelineError.PipelineCycle(n, c) -> sprintf "PipelineCycle(%s;%s)" n (String.concat ">" c)
+    | PipelineError.EdgeTypeMismatch(n, a, p, c) -> sprintf "EdgeTypeMismatch(%s;%s;%s;%s)" n a p c
+    | PipelineError.PipelineForwardEdge(n, a, u) -> sprintf "PipelineForwardEdge(%s;%s;%s)" n a u
+
+let private modelPipeErrRender (e: ModelCap.pipeline_error) : string =
+    match e with
+    | ModelCap.DuplicateNode id -> sprintf "DuplicateNode(%s)" id
+    | ModelCap.UnknownNode id -> sprintf "UnknownNode(%s)" id
+    | ModelCap.PipelineNoSuchCapability(id, known) ->
+        sprintf "PipelineNoSuchCapability(%s;%s)" id (String.concat "," (List.sort known))
+    | ModelCap.PipelineArgRefused(n, r) -> sprintf "PipelineArgRefused(%s;%s)" n (modelInvokeErrRender r)
+    | ModelCap.PipelineCycle(n, c) -> sprintf "PipelineCycle(%s;%s)" n (String.concat ">" c)
+    | ModelCap.EdgeTypeMismatch(n, a, p, c) -> sprintf "EdgeTypeMismatch(%s;%s;%s;%s)" n a p c
+    | ModelCap.PipelineForwardEdge(n, a, u) -> sprintf "PipelineForwardEdge(%s;%s;%s)" n a u
+
+let private pipeErrClass (e: PipelineError) : string =
+    (prodPipeErrRender e).Substring(0, (prodPipeErrRender e).IndexOf '(')
+
+let private prodEvalErrRender (e: PipelineEvalError) : string =
+    match e with
+    | EvalIllTyped r -> sprintf "EvalIllTyped(%s)" (prodPipeErrRender r)
+    | EvalNodeFailed(n, m) -> sprintf "EvalNodeFailed(%s;%s)" n m
+    | EvalArgRefused(n, r) -> sprintf "EvalArgRefused(%s;%s)" n (prodInvokeErrRender r)
+
+let private modelEvalErrRender (e: ModelCap.pipeline_eval_error) : string =
+    match e with
+    | ModelCap.EvalIllTyped r -> sprintf "EvalIllTyped(%s)" (modelPipeErrRender r)
+    | ModelCap.EvalNodeFailed(n, m) -> sprintf "EvalNodeFailed(%s;%s)" n m
+    | ModelCap.EvalArgRefused(n, r) -> sprintf "EvalArgRefused(%s;%s)" n (modelInvokeErrRender r)
+
+/// An evaluation's answer, rendered: the result map by id, or the refusal.
+let private prodEvalRender (r: Result<Map<string, string>, PipelineEvalError>) : string =
+    match r with
+    | Ok m ->
+        "Ok "
+        + (Map.toList m |> List.map (fun (k, v) -> k + "=" + v) |> String.concat ";")
+    | Error e -> "Error " + prodEvalErrRender e
+
+/// The model's result map is a list read latest-first (`Map.add` is the cons), so it is folded
+/// oldest-first into a map before it is rendered.
+let private modelEvalRender (r: ModelCap.outcome<(string * string) list, ModelCap.pipeline_eval_error>) : string =
+    match r with
+    | ModelCap.Ok l ->
+        "Ok "
+        + (Map.ofList (List.rev l)
+           |> Map.toList
+           |> List.map (fun (k, v) -> k + "=" + v)
+           |> String.concat ";")
+    | ModelCap.Error e -> "Error " + modelEvalErrRender e
+
+/// A value that lies in a well-formed space.
+let private validValueFor (s: ValueSpace) : string =
+    match s with
+    | IntRange(lo, _) -> lo.ToString(inv)
+    | FloatRange(lo, _) -> lo.ToString("R", inv)
+    | StringLen(lo, _) -> String.replicate (max lo 0) "s"
+    | Enum(x :: _) -> x
+    | Enum [] -> "zz"
+    | AnyString -> "v"
+    | SlotTree c -> sprintf """{"kind":"%s"}""" (defaultArg c "k0")
+
+/// A registry on both sides holding up to the three pool ids, each tried up to three times so
+/// most registries hold all of them (the admission gate refuses a good share of the draws).
+let private genRegistryPair (rd: ModelCap.readers) (r: ConfRng.T) : CapabilityRegistry * ModelCap.registry * ConfRng.T =
+    let mutable rng = r
+    let mutable preg = CapabilityRegistry.empty
+    let mutable mreg = ModelCap.empty
+
+    for id in capIdPool do
+        let mutable placed = false
+
+        for k in 1..3 do
+            if not placed then
+                let sg, r1 = genCapSignature (id + string k) rng
+                rng <- r1
+                let cap = Capability.create id sg Server
+
+                match CapabilityRegistry.register cap preg, ModelCap.register rd (capToModel cap) mreg with
+                | Ok p', ModelCap.Ok m' ->
+                    preg <- p'
+                    mreg <- m'
+                    placed <- true
+                | _ -> ()
+
+    preg, mreg, rng
+
+let private withArgs (n: PipelineNode) (f: (string * ArgSource) list -> (string * ArgSource) list) : PipelineNode =
+    match n with
+    | PipelineNode.Invoke(id, capId, ty, args) -> PipelineNode.Invoke(id, capId, ty, f args)
+    | other -> other
+
+let private isInvokeWithArgs (n: PipelineNode) : bool =
+    match n with
+    | PipelineNode.Invoke(_, _, _, _ :: _) -> true
+    | _ -> false
+
+/// Rewrite the first node `pick` holds of.
+let private rewriteFirst (pick: PipelineNode -> bool) (f: PipelineNode -> PipelineNode) (ns: PipelineNode list) =
+    match List.tryFindIndex pick ns with
+    | Some i -> ns |> List.mapi (fun k n -> if k = i then f n else n)
+    | None -> ns
+
+/// A pipeline over a registry. Each `Invoke` binds every required hole of a registered
+/// capability: a literal in its space, a fresh `Source` whose output IS the hole's space (declared
+/// first), an earlier node whatever it outputs (so an edge may be ill-typed), or a literal drawn
+/// against the space (so it may lie outside it). Then, two pipelines in five, ONE fault: a repeated
+/// node id, the first node moved last (a forward edge), a self-edge, a cycle through two nodes, an
+/// edge to no node, an argument at no hole, an argument bound twice, an argument dropped, or the
+/// whole declaration reversed.
+let private genPipeline (preg: CapabilityRegistry) (r: ConfRng.T) : CapabilityPipeline * ConfRng.T =
+    let mutable rng = r
+    let nodes = System.Collections.Generic.List<PipelineNode>()
+    let registered = CapabilityRegistry.enumerate preg
+    let count, r0 = ConfRng.intBelow 4 rng
+    rng <- r0
+    let mutable fresh = 0
+
+    for i in 1..count do
+        let pick, r1 = ConfRng.intBelow 12 rng
+        rng <- r1
+        let nid = sprintf "n%d" i
+
+        if List.isEmpty registered || pick = 0 then
+            nodes.Add(PipelineNode.Invoke(nid, "cap-x", AnyString, []))
+        else
+            let cap, r2 = ConfRng.choose registered rng
+            let outTy, r3 = genSpace r2
+            rng <- r3
+            let args = System.Collections.Generic.List<string * ArgSource>()
+
+            for e in cap.Signature.Holes do
+                match e.Space with
+                | Some sp when e.Required ->
+                    let how, r4 = ConfRng.intBelow 10 rng
+                    rng <- r4
+
+                    if how < 4 then
+                        args.Add(e.Addr, ArgSource.Literal(validValueFor sp))
+                    elif how < 7 then
+                        fresh <- fresh + 1
+                        let sid = sprintf "s%d" fresh
+                        nodes.Add(PipelineNode.Source(sid, "ref-" + sid, sp))
+                        args.Add(e.Addr, ArgSource.FromNode sid)
+                    elif how < 9 && nodes.Count > 0 then
+                        let k, r5 = ConfRng.intBelow nodes.Count rng
+                        rng <- r5
+                        args.Add(e.Addr, ArgSource.FromNode(CapabilityPipeline.nodeId nodes.[k]))
+                    else
+                        let v, r5 = genValueFor sp rng
+                        rng <- r5
+                        args.Add(e.Addr, ArgSource.Literal v)
+                | _ -> ()
+
+            nodes.Add(PipelineNode.Invoke(nid, cap.Id, outTy, List.ofSeq args))
+
+    let fault, rf = ConfRng.intBelow 22 rng
+    rng <- rf
+    let ns = List.ofSeq nodes
+
+    let faulted =
+        match fault, ns with
+        | 0, first :: _ -> ns @ [ PipelineNode.Source(CapabilityPipeline.nodeId first, "dup", AnyString) ]
+        | 1, first :: rest -> rest @ [ first ]
+        | 2, _ ->
+            ns
+            |> rewriteFirst isInvokeWithArgs (fun n ->
+                withArgs n (fun args ->
+                    match args with
+                    | (a, _) :: tl -> (a, ArgSource.FromNode(CapabilityPipeline.nodeId n)) :: tl
+                    | [] -> []))
+        | 3, _ ->
+            // a cycle through two nodes: the first `Invoke` with arguments gains an edge to a
+            // LATER node that already reaches it.
+            (match List.tryFindIndex isInvokeWithArgs ns with
+             | Some i ->
+                 let aId = CapabilityPipeline.nodeId ns.[i]
+
+                 (match
+                     ns
+                     |> List.indexed
+                     |> List.tryFind (fun (k, n) -> k > i && List.contains aId (upstreamsOf n))
+                  with
+                  | Some(_, b) ->
+                      ns
+                      |> List.mapi (fun k n ->
+                          if k = i then
+                              withArgs n (fun args ->
+                                  match args with
+                                  | (a, _) :: tl -> (a, ArgSource.FromNode(CapabilityPipeline.nodeId b)) :: tl
+                                  | [] -> [])
+                          else
+                              n)
+                  | None -> ns)
+             | None -> ns)
+        | 4, _ ->
+            ns
+            |> rewriteFirst isInvokeWithArgs (fun n ->
+                withArgs n (fun args ->
+                    match args with
+                    | (a, _) :: tl -> (a, ArgSource.FromNode "n9") :: tl
+                    | [] -> []))
+        | 5, _ ->
+            ns
+            |> rewriteFirst isInvokeWithArgs (fun n ->
+                withArgs n (fun args -> args @ [ "root/zz", ArgSource.Literal "1" ]))
+        | 6, _ ->
+            ns
+            |> rewriteFirst isInvokeWithArgs (fun n ->
+                withArgs n (fun args ->
+                    match args with
+                    | first :: _ -> args @ [ first ]
+                    | [] -> []))
+        | 7, _ -> ns |> rewriteFirst isInvokeWithArgs (fun n -> withArgs n List.tail)
+        | 8, _ -> List.rev ns
+        | _ -> ns
+
+    ({ Nodes = faulted }: CapabilityPipeline), rng
+
+type private PipeTally =
+    { PpDiffs: string list
+      PpAccepted: int
+      PpRefused: int
+      PpEvaluated: int
+      PpEvalRefused: int
+      PpIncremental: int
+      PpReused: int
+      PpReordered: int
+      PpReorderedTopological: int
+      PpStaleLost: int
+      PpSubsumes: int
+      PpClasses: Set<string> }
+
+let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : PipeTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let diffs = System.Collections.Generic.List<string>()
+    let mutable accepted = 0
+    let mutable refused = 0
+    let mutable evaluated = 0
+    let mutable evalRefused = 0
+    let mutable incremental = 0
+    let mutable reused = 0
+    let mutable reordered = 0
+    let mutable reorderedTopological = 0
+    let mutable staleLost = 0
+    let mutable subsumesCompared = 0
+    let mutable classes = Set.empty
+
+    for i in 1..trials do
+        // THE SPACE RELATION, on its own: production's `Space.subsumes` against the model's over a
+        // drawn pair, so an edge's verdict below is not the only place the relation is compared.
+        let sa, ra = genSpace rng
+        let sb, rb = genSpace ra
+        rng <- rb
+        subsumesCompared <- subsumesCompared + 1
+
+        if
+            Space.subsumes sa sb
+            <> ModelCap.subsumes feedReaders rd (spaceToModel sa) (spaceToModel sb)
+        then
+            diffs.Add(sprintf "seed %d: subsumes differs on %A against %A" i sa sb)
+
+        let preg, mreg, r1 = genRegistryPair rd rng
+        let p, r2 = genPipeline preg r1
+        rng <- r2
+        let lookup = CapabilityLookup.ofRegistry preg
+        let mlookup = ModelCap.lookup_of_registry mreg
+        let mp = pipeToModel p
+
+        // ---- typeCheck ----
+        let pt = CapabilityPipeline.typeCheck lookup p
+        let mt = ModelCap.type_check feedReaders rd mlookup mp
+
+        (match pt, mt with
+         | Ok(), ModelCap.Ok() -> accepted <- accepted + 1
+         | Error pe, ModelCap.Error me ->
+             refused <- refused + 1
+             classes <- Set.add (pipeErrClass pe) classes
+
+             if prodPipeErrRender pe <> modelPipeErrRender me then
+                 diffs.Add(
+                     sprintf
+                         "seed %d: typeCheck refused differently\n  prod %s\n  model %s"
+                         i
+                         (prodPipeErrRender pe)
+                         (modelPipeErrRender me)
+                 )
+         | Ok(), ModelCap.Error me ->
+             diffs.Add(
+                 sprintf
+                     "seed %d: typeCheck accepted by production, refused by the model (%s)"
+                     i
+                     (modelPipeErrRender me)
+             )
+         | Error pe, ModelCap.Ok() ->
+             diffs.Add(
+                 sprintf "seed %d: typeCheck refused by production (%s), accepted by the model" i (prodPipeErrRender pe)
+             ))
+
+        // `typecheck_topological`, on the shipped function: an accepted pipeline is in topological
+        // order, and another declaration of the same nodes is accepted exactly when it is too.
+        if pt = Ok() then
+            if not (isTopological p.Nodes) then
+                diffs.Add(sprintf "seed %d: typeCheck accepted a declaration that is not in topological order" i)
+
+            if List.length p.Nodes > 1 then
+                reordered <- reordered + 1
+                let k, rk = ConfRng.intBelow (List.length p.Nodes) rng
+                rng <- rk
+                let rotated = List.skip k p.Nodes @ List.take k p.Nodes
+
+                let p': CapabilityPipeline =
+                    { Nodes = (if k = 0 then List.rev rotated else rotated) }
+
+                let pt' = CapabilityPipeline.typeCheck lookup p'
+                let mt' = ModelCap.type_check feedReaders rd mlookup (pipeToModel p')
+
+                if isTopological p'.Nodes then
+                    reorderedTopological <- reorderedTopological + 1
+
+                    if pt' <> Ok() then
+                        diffs.Add(
+                            sprintf
+                                "seed %d: typeCheck's verdict moved under another topological order of the same nodes"
+                                i
+                        )
+                else
+                    match pt' with
+                    | Error(PipelineForwardEdge _) -> ()
+                    | other ->
+                        diffs.Add(
+                            sprintf
+                                "seed %d: a reordering out of topological order was not refused as a forward edge (%A)"
+                                i
+                                other
+                        )
+
+                match pt', mt' with
+                | Ok(), ModelCap.Ok() -> ()
+                | Error pe, ModelCap.Error me when prodPipeErrRender pe = modelPipeErrRender me -> ()
+                | _ -> diffs.Add(sprintf "seed %d: typeCheck disagrees on the reordered declaration" i)
+
+        // ---- eval ----
+        // The host body is a table: each node's answer drawn once — a value for its output space
+        // (in it four draws in five), or a failure one draw in twelve — and a log of what it was
+        // handed, so the RESOLVED ARGUMENTS are compared and not only the answers.
+        let table = System.Collections.Generic.Dictionary<string, Result<string, string>>()
+
+        for n in p.Nodes do
+            let roll, ra1 = ConfRng.intBelow 12 rng
+            let v, ra2 = genValueFor (outputTypeOf n) ra1
+            rng <- ra2
+
+            table.[CapabilityPipeline.nodeId n] <-
+                (if roll = 0 then Error "boom"
+                 elif roll < 10 then Ok(validValueFor (outputTypeOf n))
+                 else Ok v)
+
+        let renderArgs (render: 'a -> string) (args: (string * 'a) list) =
+            args |> List.map (fun (a, x) -> a + "=" + render x) |> String.concat ","
+
+        let pArg (a: PipelineArg<string>) =
+            match a with
+            | FromUpstream v -> "U:" + v
+            | LiteralArg s -> "L:" + s
+
+        let mArg (a: ModelCap.pipeline_arg<string>) =
+            match a with
+            | ModelCap.FromUpstream v -> "U:" + v
+            | ModelCap.LiteralArg s -> "L:" + s
+
+        let pBodyOf
+            (tbl: System.Collections.Generic.Dictionary<string, Result<string, string>>)
+            (log: ResizeArray<string>)
+            =
+            fun (n: PipelineNode) (args: (string * PipelineArg<string>) list) ->
+                log.Add(CapabilityPipeline.nodeId n + "(" + renderArgs pArg args + ")")
+                tbl.[CapabilityPipeline.nodeId n]
+
+        let mBodyOf
+            (tbl: System.Collections.Generic.Dictionary<string, Result<string, string>>)
+            (log: ResizeArray<string>)
+            =
+            fun (n: ModelCap.pipeline_node) (args: (string * ModelCap.pipeline_arg<string>) list) ->
+                log.Add(ModelCap.node_id n + "(" + renderArgs mArg args + ")")
+
+                match tbl.[ModelCap.node_id n] with
+                | Ok v -> ModelCap.Ok v
+                | Error m -> ModelCap.Error m
+
+        let pLog = ResizeArray<string>()
+        let mLog = ResizeArray<string>()
+        let pe0 = CapabilityPipeline.eval lookup id (pBodyOf table pLog) p
+        let me0 = ModelCap.eval feedReaders rd mlookup id (mBodyOf table mLog) mp
+
+        if prodEvalRender pe0 <> modelEvalRender me0 then
+            diffs.Add(
+                sprintf "seed %d: eval differs\n  prod %s\n  model %s" i (prodEvalRender pe0) (modelEvalRender me0)
+            )
+
+        if List.ofSeq pLog <> List.ofSeq mLog then
+            diffs.Add(sprintf "seed %d: eval ran the body on different nodes or arguments" i)
+
+        (match pt, pe0 with
+         | Error e, Error(EvalIllTyped e') when e = e' ->
+             // `pipeline_refused_never_evaluated`: the refusal is the type check's, and no body ran.
+             if pLog.Count > 0 then
+                 diffs.Add(sprintf "seed %d: eval ran a body on a pipeline typeCheck refused" i)
+         | Error _, _ -> diffs.Add(sprintf "seed %d: eval did not answer the type check's refusal" i)
+         | Ok(), Error(EvalIllTyped _) ->
+             // `pipeline_illtyped_iff_refused`: never, over an accepted pipeline.
+             diffs.Add(sprintf "seed %d: eval answered EvalIllTyped over a pipeline typeCheck ACCEPTED" i)
+         | Ok(), Ok _ -> evaluated <- evaluated + 1
+         | Ok(), Error _ -> evalRefused <- evalRefused + 1)
+
+        // ---- dirtySet and evalFrom ----
+        let nodeIds = p.Nodes |> List.map CapabilityPipeline.nodeId
+        let mutable changed = []
+
+        for nid in nodeIds do
+            let c, rc = ConfRng.intBelow 4 rng
+            rng <- rc
+
+            if c = 0 then
+                changed <- nid :: changed
+
+        let stray, rs = ConfRng.intBelow 8 rng
+        rng <- rs
+
+        if stray = 0 then
+            changed <- "n9" :: changed
+
+        let changedSet = Set.ofList changed
+        let changedList = Set.toList changedSet
+        let pDirty = CapabilityPipeline.dirtySet changedSet p
+        let mDirty = Set.ofList (ModelCap.dirty_set changedList mp)
+
+        if pDirty <> mDirty then
+            diffs.Add(sprintf "seed %d: dirtySet differs (%A vs %A)" i pDirty mDirty)
+
+        // The new body: the old one, re-drawn at exactly the changed nodes — `agree_off`.
+        let table1 =
+            System.Collections.Generic.Dictionary<string, Result<string, string>>(table)
+
+        for n in p.Nodes do
+            let nid = CapabilityPipeline.nodeId n
+
+            if changedSet.Contains nid then
+                let roll, rb1 = ConfRng.intBelow 12 rng
+                rng <- rb1
+
+                table1.[nid] <-
+                    (if roll = 0 then
+                         Error "boom2"
+                     else
+                         Ok(validValueFor (outputTypeOf n)))
+
+        // A prior: the first evaluation's result where it finished, a partial map otherwise (the
+        // model agrees on any prior; the theorem is about the first kind).
+        let prior =
+            match pe0 with
+            | Ok m -> m
+            | Error _ -> nodeIds |> List.truncate 1 |> List.map (fun nid -> nid, "stale") |> Map.ofList
+
+        let pLog1 = ResizeArray<string>()
+        let mLog1 = ResizeArray<string>()
+
+        let pf =
+            CapabilityPipeline.evalFrom lookup id (pBodyOf table1 pLog1) prior changedSet p
+
+        let mf =
+            ModelCap.eval_from feedReaders rd mlookup id (mBodyOf table1 mLog1) (Map.toList prior) changedList mp
+
+        if prodEvalRender pf <> modelEvalRender mf then
+            diffs.Add(
+                sprintf "seed %d: evalFrom differs\n  prod %s\n  model %s" i (prodEvalRender pf) (modelEvalRender mf)
+            )
+
+        if List.ofSeq pLog1 <> List.ofSeq mLog1 then
+            diffs.Add(sprintf "seed %d: evalFrom ran the body on different nodes or arguments" i)
+
+        match pe0 with
+        | Ok _ ->
+            // `pipeline_evalfrom_agrees`, on the shipped functions: over a finished prior
+            // evaluation and a body that moved only at the changed nodes, the incremental answer
+            // IS the full one.
+            incremental <- incremental + 1
+
+            let full =
+                CapabilityPipeline.eval lookup id (pBodyOf table1 (ResizeArray<string>())) p
+
+            if pf <> full then
+                diffs.Add(
+                    sprintf
+                        "seed %d: evalFrom is not eval over the same inputs\n  evalFrom %s\n  eval     %s"
+                        i
+                        (prodEvalRender pf)
+                        (prodEvalRender full)
+                )
+
+            reused <- reused + (List.length nodeIds - pLog1.Count |> max 0)
+
+            // THE HYPOTHESIS IS NEEDED: a body that also moves at a node the caller did NOT name
+            // is a stale reuse. Counted, not asserted per probe — the unnamed node must be one
+            // `evalFrom` reuses for the two to part.
+            (match nodeIds |> List.tryFind (fun nid -> not (pDirty.Contains nid)) with
+             | Some unnamed ->
+                 let table2 =
+                     System.Collections.Generic.Dictionary<string, Result<string, string>>(table1)
+
+                 table2.[unnamed] <- Ok "moved-unnamed"
+
+                 let stale =
+                     CapabilityPipeline.evalFrom lookup id (pBodyOf table2 (ResizeArray<string>())) prior changedSet p
+
+                 let fresh =
+                     CapabilityPipeline.eval lookup id (pBodyOf table2 (ResizeArray<string>())) p
+
+                 if stale <> fresh then
+                     staleLost <- staleLost + 1
+             | None -> ())
+        | Error _ -> ()
+
+    { PpDiffs = List.ofSeq diffs
+      PpAccepted = accepted
+      PpRefused = refused
+      PpEvaluated = evaluated
+      PpEvalRefused = evalRefused
+      PpIncremental = incremental
+      PpReused = reused
+      PpReordered = reordered
+      PpReorderedTopological = reorderedTopological
+      PpStaleLost = staleLost
+      PpSubsumes = subsumesCompared
+      PpClasses = classes }
+
+// ---- the codecs ----
+
+let rec private jvalToModel (v: JVal) : ModelCap.jval =
+    match v with
+    | JStr s -> ModelCap.JStr s
+    | JInt i -> ModelCap.JInt(bigint i)
+    | JBool b -> ModelCap.JBool b
+    | JFloat f -> ModelCap.JFloat(f.ToString("R", inv))
+    | JArr xs -> ModelCap.JArr(List.map jvalToModel xs)
+    | JObj fs -> ModelCap.JObj(fs |> List.map (fun (k, x) -> k, jvalToModel x))
+
+let rec private jvalOfModel (v: ModelCap.jval) : JVal =
+    match v with
+    | ModelCap.JStr s -> JStr s
+    | ModelCap.JInt i -> JInt(int i)
+    | ModelCap.JBool b -> JBool b
+    | ModelCap.JFloat f -> JFloat(System.Double.Parse(f, inv))
+    | ModelCap.JArr xs -> JArr(List.map jvalOfModel xs)
+    | ModelCap.JObj fs -> JObj(fs |> List.map (fun (k, x) -> k, jvalOfModel x))
+
+/// The one float read the codecs make — `float i`, as `Decoder.float` reads a `JInt`.
+let private codecReaders: ModelCap.codec_readers =
+    { ModelCap.codec_readers.float_of_int = fun i -> (float (int i)).ToString("R", inv) }
+
+/// The go-red: a `float_fault` that finds nothing, so a float range with a NaN, an infinite or an
+/// inverted bound is well-formed to the model and refused by production's readers.
+let private blindFaultReaders: ModelCap.readers =
+    { readers with
+        ModelCap.readers.float_fault = fun _ _ -> FStar_Pervasives_Native.None }
+
+let private prodDecodeErrRender (e: DecodeError) : string =
+    sprintf
+        "%A@%s"
+        e.Code
+        (e.Path
+         |> List.map (function
+             | PathSegment.Key k -> "k:" + k
+             | PathSegment.Index n -> "i:" + string n)
+         |> String.concat "/")
+
+let private modelDecodeErrRender (e: ModelCap.decode_error) : string =
+    sprintf
+        "%A@%s"
+        e.d_code
+        (e.d_path
+         |> List.map (function
+             | ModelCap.Key k -> "k:" + k
+             | ModelCap.Index n -> "i:" + string n)
+         |> String.concat "/")
+
+/// Every path to a member or an item below a document, as child indexes.
+let rec private jsites (v: JVal) : int list list =
+    let kids =
+        match v with
+        | JArr xs -> xs
+        | JObj fs -> List.map snd fs
+        | _ -> []
+
+    kids
+    |> List.mapi (fun i k -> [ i ] :: (jsites k |> List.map (fun p -> i :: p)))
+    |> List.concat
+
+/// Rewrite the child at `path`: `f` is handed its key (for a member) and value, and answers the
+/// replacement, or `None` to drop it.
+let rec private jedit (path: int list) (f: string option * JVal -> (string option * JVal) option) (v: JVal) : JVal =
+    match path, v with
+    | [ i ], JArr xs ->
+        JArr(
+            xs
+            |> List.indexed
+            |> List.choose (fun (k, x) -> if k = i then f (None, x) |> Option.map snd else Some x)
+        )
+    | [ i ], JObj fs ->
+        JObj(
+            fs
+            |> List.indexed
+            |> List.choose (fun (k, (n, x)) ->
+                if k = i then
+                    f (Some n, x) |> Option.map (fun (n', x') -> defaultArg n' n, x')
+                else
+                    Some(n, x))
+        )
+    | i :: rest, JArr xs -> JArr(xs |> List.mapi (fun k x -> if k = i then jedit rest f x else x))
+    | i :: rest, JObj fs -> JObj(fs |> List.mapi (fun k (n, x) -> if k = i then n, jedit rest f x else n, x))
+    | _ -> v
+
+let private mutantStrings =
+    [ "capability"
+      "value"
+      "slot"
+      "clock"
+      "random+clock"
+      "intRange"
+      "stringLen"
+      "pure"
+      "fromNode"
+      "source" ]
+
+/// One mutation of a document: a member or item dropped, replaced by a value of another kind or by
+/// another string of the codec's vocabulary, a `"$type"` re-keyed `"kind"` (the descriptor
+/// spelling's discriminator), the root's members reversed, or a member the reader does not read
+/// added. The last two the lenient readers must read THROUGH.
+let private jmutate (v: JVal) (r: ConfRng.T) : JVal * ConfRng.T =
+    let sites = jsites v
+    let op, r1 = ConfRng.intBelow 9 r
+
+    match op, v with
+    | 7, JObj fs -> JObj(List.rev fs), r1
+    | 8, JObj fs -> JObj(fs @ [ "unread", JInt 1 ]), r1
+    | _ when List.isEmpty sites -> v, r1
+    | _ ->
+        let path, r2 = ConfRng.choose sites r1
+        let s, r3 = ConfRng.choose mutantStrings r2
+
+        let f (key: string option, x: JVal) : (string option * JVal) option =
+            match op with
+            | 0 -> None
+            | 1 -> Some(key, JInt 7)
+            | 2 -> Some(key, JStr "zz")
+            | 3 -> Some(key, JObj [])
+            | 4 -> Some((if key = Some "$type" then Some "kind" else key), x)
+            | 5 -> Some(key, JStr s)
+            | 6 -> Some(key, JBool true)
+            | _ -> Some(key, JArr [])
+
+        jedit path f v, r3
+
+type private CodecTally =
+    { CoDiffs: string list
+      CoEncoded: int
+      CoDocuments: int
+      CoAccepted: int
+      CoRefused: int
+      CoWellFormed: int
+      CoNormalised: int
+      CoBytes: int
+      CoSignatures: int
+      CoNodes: int
+      CoNodeDocuments: int
+      CoCodes: Set<string> }
+
+let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : CodecTally =
+    let mutable rng = ConfRng.ofSeed seed
+    let diffs = System.Collections.Generic.List<string>()
+    let mutable encoded = 0
+    let mutable documents = 0
+    let mutable accepted = 0
+    let mutable refused = 0
+    let mutable wellFormed = 0
+    let mutable normalised = 0
+    let mutable bytes = 0
+    let mutable signatures = 0
+    let mutable nodesCompared = 0
+    let mutable nodeDocuments = 0
+    let mutable codes = Set.empty
+
+    let placements =
+        [ BuildTime
+          Server
+          ClientDeclarative
+          Precomputed
+          ClientIsland Pyodide
+          ClientIsland Fable
+          ClientIsland Js ]
+
+    for i in 1..trials do
+        // ---- a capability: a derived signature, sometimes with the two shapes only a hand-built
+        //      one has — a slot entry without its space, an entry whose kind is no hole kind's ----
+        let sg0, r1 = genCapSignature (sprintf "c%d" i) rng
+        let placement, r2 = ConfRng.choose placements r1
+        let shape, r3 = ConfRng.intBelow 10 r2
+        rng <- r3
+
+        let sg =
+            match shape with
+            | 0
+            | 1 ->
+                { sg0 with
+                    Holes =
+                        sg0.Holes
+                        |> List.map (fun e -> if e.Kind = "slot" then { e with Space = None } else e) }
+            | 2 ->
+                { sg0 with
+                    Holes = sg0.Holes |> List.mapi (fun k e -> if k = 0 then { e with Kind = "int" } else e) }
+            | _ -> sg0
+
+        let cap = Capability.create (sprintf "cap-%d" i) sg placement
+        let mcap = capToModel cap
+        let j0 = CapabilityCodec.encodeJson cap
+        encoded <- encoded + 1
+
+        if jvalToModel j0 <> ModelCap.capability_json mcap then
+            diffs.Add(sprintf "seed %d: the capability encodes differently" i)
+
+        // `capability_roundtrip_identity` and its converse, on the shipped codec: decode after
+        // encode is the identity EXACTLY on the well-formed capabilities.
+        let wf = ModelCap.wf_capability rd mcap
+        let back = CapabilityCodec.decodeJsonDetailedWith ReadPolicy.Lenient j0
+
+        if wf then
+            wellFormed <- wellFormed + 1
+
+        (match back with
+         | Ok c when c = cap ->
+             if not wf then
+                 diffs.Add(sprintf "seed %d: a capability that is not well-formed read back as itself" i)
+         | Ok _ ->
+             normalised <- normalised + 1
+
+             if wf then
+                 diffs.Add(sprintf "seed %d: a well-formed capability read back as another" i)
+         | Error e ->
+             if wf then
+                 diffs.Add(sprintf "seed %d: a well-formed capability was refused (%s)" i (prodDecodeErrRender e)))
+
+        // ... and through the BYTES, where the document can be written: `Canon.render` then the
+        // parser, which is where a whole float comes back as an integer token.
+        (match CapabilityCodec.tryEncode cap with
+         | Ok s ->
+             bytes <- bytes + 1
+
+             match CapabilityCodec.decode s with
+             | Ok c when c = cap ->
+                 if not wf then
+                     diffs.Add(sprintf "seed %d: through the bytes, an ill-formed capability read back as itself" i)
+             | Ok _
+             | Error _ ->
+                 if wf then
+                     diffs.Add(sprintf "seed %d: through the bytes, a well-formed capability did not read back" i)
+         | Error _ -> ())
+
+        // ---- the reader, over the encoding and three mutations of it ----
+        let mutable docs = [ j0 ]
+
+        for _ in 1..3 do
+            let m, rm = jmutate j0 rng
+            rng <- rm
+            docs <- m :: docs
+
+        for j in docs do
+            documents <- documents + 1
+            let p = CapabilityCodec.decodeJsonDetailedWith ReadPolicy.Lenient j
+            let m = ModelCap.capability_of_j rd codecReaders (jvalToModel j)
+
+            (match p, m with
+             | Ok pc, ModelCap.Ok mc ->
+                 accepted <- accepted + 1
+
+                 if capToModel pc <> mc then
+                     diffs.Add(sprintf "seed %d: a capability document decoded to different values" i)
+
+                 // `capability_decoded_wf`: whatever was accepted is well-formed.
+                 if not (ModelCap.wf_capability rd (capToModel pc)) then
+                     diffs.Add(sprintf "seed %d: the reader accepted a capability that is not well-formed" i)
+             | Error pe, ModelCap.Error me ->
+                 refused <- refused + 1
+                 codes <- Set.add (sprintf "%A" pe.Code) codes
+
+                 if prodDecodeErrRender pe <> modelDecodeErrRender me then
+                     diffs.Add(
+                         sprintf
+                             "seed %d: a capability document was refused differently\n  prod %s\n  model %s"
+                             i
+                             (prodDecodeErrRender pe)
+                             (modelDecodeErrRender me)
+                     )
+             | Ok _, ModelCap.Error me ->
+                 diffs.Add(
+                     sprintf
+                         "seed %d: a capability document accepted by production, refused by the model (%s)"
+                         i
+                         (modelDecodeErrRender me)
+                 )
+             | Error pe, ModelCap.Ok _ ->
+                 diffs.Add(
+                     sprintf
+                         "seed %d: a capability document refused by production (%s), accepted by the model"
+                         i
+                         (prodDecodeErrRender pe)
+                 ))
+
+            // the signature reader on its own, where the document still carries one
+            match Decoder.tryMember "signature" j with
+            | Some sj ->
+                signatures <- signatures + 1
+
+                match CapabilityCodec.signatureOf sj, ModelCap.signature_of_j rd codecReaders (jvalToModel sj) with
+                | Ok ps, ModelCap.Ok ms ->
+                    if sigToModel ps <> ms then
+                        diffs.Add(sprintf "seed %d: a signature document decoded to different values" i)
+                | Error _, ModelCap.Error _ -> ()
+                | _ -> diffs.Add(sprintf "seed %d: the signature reader's verdict differs" i)
+            | None -> ()
+
+        // ---- a pipeline: its encoding byte for byte, and its reader over the parsed document ----
+        let preg, _, r4 = genRegistryPair rd rng
+        let pl, r5 = genPipeline preg r4
+        rng <- r5
+        let mpl = pipeToModel pl
+        nodesCompared <- nodesCompared + List.length pl.Nodes
+
+        if
+            CapabilityPipeline.encode pl
+            <> Canon.render (jvalOfModel (ModelCap.pipeline_json mpl))
+        then
+            diffs.Add(sprintf "seed %d: the pipeline encodes differently" i)
+
+        match CapabilityPipeline.tryEncode pl with
+        | Error _ -> ()
+        | Ok s ->
+            // `node_roundtrip`, on the shipped codec: the identity exactly where every node's
+            // output space is well-formed.
+            let allWf =
+                pl.Nodes |> List.forall (fun n -> Space.wellFormed (outputTypeOf n) = Ok())
+
+            (match CapabilityPipeline.decodeDetailed s with
+             | Ok back when back = pl ->
+                 if not allWf then
+                     diffs.Add(sprintf "seed %d: a pipeline with an ill-formed output space read back as itself" i)
+             | Ok _ -> diffs.Add(sprintf "seed %d: a pipeline read back as another" i)
+             | Error e ->
+                 if allWf then
+                     diffs.Add(sprintf "seed %d: a well-formed pipeline was refused (%s)" i (prodDecodeErrRender e)))
+
+            match Decoder.parse s with
+            | Error _ -> diffs.Add(sprintf "seed %d: the pipeline's own encoding did not parse" i)
+            | Ok parsed ->
+                let mutable pdocs = [ parsed ]
+
+                for _ in 1..3 do
+                    let m, rm = jmutate parsed rng
+                    rng <- rm
+                    pdocs <- m :: pdocs
+
+                for j in pdocs do
+                    nodeDocuments <- nodeDocuments + 1
+                    let text = Canon.render j
+
+                    match Decoder.parse text with
+                    | Error _ -> diffs.Add(sprintf "seed %d: a mutated pipeline document did not parse" i)
+                    | Ok reparsed ->
+                        match
+                            CapabilityPipeline.decodeDetailed text,
+                            ModelCap.pipeline_of_j rd codecReaders (jvalToModel reparsed)
+                        with
+                        | Ok pp, ModelCap.Ok mpp ->
+                            if pipeToModel pp <> mpp then
+                                diffs.Add(sprintf "seed %d: a pipeline document decoded to different values" i)
+                        | Error pe, ModelCap.Error me ->
+                            codes <- Set.add (sprintf "%A" pe.Code) codes
+
+                            if prodDecodeErrRender pe <> modelDecodeErrRender me then
+                                diffs.Add(
+                                    sprintf
+                                        "seed %d: a pipeline document was refused differently\n  prod %s\n  model %s"
+                                        i
+                                        (prodDecodeErrRender pe)
+                                        (modelDecodeErrRender me)
+                                )
+                        | _ -> diffs.Add(sprintf "seed %d: the pipeline reader's verdict differs" i)
+
+    { CoDiffs = List.ofSeq diffs
+      CoEncoded = encoded
+      CoDocuments = documents
+      CoAccepted = accepted
+      CoRefused = refused
+      CoWellFormed = wellFormed
+      CoNormalised = normalised
+      CoBytes = bytes
+      CoSignatures = signatures
+      CoNodes = nodesCompared
+      CoNodeDocuments = nodeDocuments
+      CoCodes = codes }
+
+// ------------------------------------------------------------------------------------------
 // Phase 186 — the INCREMENTAL PROMISE. `proofs/Propagation.fst` models
 // `Fuaran.Core.Propagation`'s dirty set (`dependents`, `dirtyFromChangedIds`, `staleSet`) and its
 // driver (`eval`, `evalFrom`) clause for clause, over an abstract node evaluator and with
@@ -16409,6 +17578,223 @@ let proofOracleTests =
                       (sprintf "the query model's key is production's on %A" args)
 
               Expect.equal qCompared 500 "every drawn argument set was compared"
+
+          // ---- Phase 354 — the handler table, the capability pipeline and the codecs against
+          //      sections 14-16 of proofs/Capability.fst ----
+
+          testCase
+              "the handler-table oracle agrees with Function.bindHandlers over generated artifacts and handler sets, in more than one arrival order"
+          <| fun _ ->
+              let t = bindDifferential mapKeyLe 3541 600
+
+              match t.BDiffs with
+              | d :: _ -> failtestf "the handler-table oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy. Measured at 600 handler sets: accepted 421 (95 of them binding a
+                  // handler), refused 179, bound again in a second arrival order 80, a repeated key
+                  // 23. Each threshold sits below its measurement with room.
+                  Expect.isGreaterThan t.BAccepted 250 (sprintf "handler sets were accepted (accepted=%d)" t.BAccepted)
+
+                  Expect.isGreaterThan
+                      t.BAcceptedBound
+                      40
+                      (sprintf "accepted tables bound a handler (acceptedBound=%d)" t.BAcceptedBound)
+
+                  Expect.isGreaterThan t.BRefused 100 (sprintf "handler sets were refused (refused=%d)" t.BRefused)
+
+                  Expect.isGreaterThan
+                      t.BReordered
+                      40
+                      (sprintf "handler sets were bound in a second arrival order (reordered=%d)" t.BReordered)
+
+                  Expect.isGreaterThan
+                      t.BReplaced
+                      8
+                      (sprintf
+                          "a repeated key was reached, the later binding replacing the earlier (replaced=%d)"
+                          t.BReplaced)
+
+                  for cls in
+                      [ "UnknownActionAddr"
+                        "NotAnActionHole"
+                        "RequiredActionsUnbound"
+                        "HandlerEffectExceedsCeiling" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.BClasses)
+                          (sprintf "the sample reached a %s refusal (reached: %A)" cls t.BClasses)
+
+                  Expect.equal (bindDifferential mapKeyLe 3541 600) t "same seed => identical tally"
+
+          testCase
+              "a handler-table oracle handed a comparator that is NOT the map's key order DISAGREES with Function.bindHandlers — the measurement can fail"
+          <| fun _ ->
+              // The teeth, and the comparator premise made visible. `bind_handlers_exact` names the
+              // FIRST offending key in key order, and the table is the map's key-ordered list; under
+              // the reversed order the model names another key and lists another table. If this ever
+              // passes, the refusal order has stopped reaching the comparison.
+              let reversed (a: string) (b: string) = System.String.CompareOrdinal(a, b) >= 0
+              let t = bindDifferential reversed 3541 600
+              Expect.isNonEmpty t.BDiffs "a reversed key order MUST disagree with production"
+
+              Expect.isTrue
+                  (t.BDiffs |> List.exists (fun d -> d.Contains "UnknownActionAddr"))
+                  "and one disagreement is about WHICH undeclared key is named first"
+
+          testCase
+              "the pipeline oracle agrees with CapabilityPipeline.typeCheck, eval, dirtySet and evalFrom over generated registries, pipelines, reorderings and change sets"
+          <| fun _ ->
+              let t = underCulture "he-IL" (fun () -> pipeDifferential readers 3542 500)
+
+              match t.PpDiffs with
+              | d :: _ -> failtestf "the pipeline oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy. Measured at 500 pipelines: accepted 313, refused 187, evaluated to a
+                  // result 290, refused in evaluation 23, held to eval incrementally 290 (254
+                  // values reused), re-declared in another order 133 (79 of them topological), and
+                  // 137 probes where a body moved at an unnamed node and the agreement broke.
+                  Expect.isGreaterThan t.PpAccepted 200 (sprintf "pipelines were accepted (accepted=%d)" t.PpAccepted)
+                  Expect.isGreaterThan t.PpRefused 100 (sprintf "pipelines were refused (refused=%d)" t.PpRefused)
+
+                  Expect.isGreaterThan
+                      t.PpEvaluated
+                      180
+                      (sprintf "accepted pipelines evaluated to a result (evaluated=%d)" t.PpEvaluated)
+
+                  Expect.isGreaterThan
+                      t.PpEvalRefused
+                      8
+                      (sprintf "accepted pipelines were refused in evaluation (evalRefused=%d)" t.PpEvalRefused)
+
+                  Expect.isGreaterThan
+                      t.PpIncremental
+                      180
+                      (sprintf "evalFrom was held to eval over a finished prior (incremental=%d)" t.PpIncremental)
+
+                  Expect.isGreaterThan t.PpReused 120 (sprintf "evalFrom reused prior values (reused=%d)" t.PpReused)
+
+                  Expect.isGreaterThan
+                      t.PpReordered
+                      70
+                      (sprintf "accepted pipelines were re-declared in another order (reordered=%d)" t.PpReordered)
+
+                  Expect.isGreaterThan
+                      t.PpReorderedTopological
+                      30
+                      (sprintf
+                          "some reorderings were topological orders too (reorderedTopological=%d)"
+                          t.PpReorderedTopological)
+
+                  Expect.isGreaterThan
+                      t.PpStaleLost
+                      60
+                      (sprintf
+                          "a body that moved at an UNNAMED node broke the agreement — the hypothesis is needed (staleLost=%d)"
+                          t.PpStaleLost)
+
+                  for cls in
+                      [ "DuplicateNode"
+                        "UnknownNode"
+                        "PipelineNoSuchCapability"
+                        "PipelineArgRefused"
+                        "PipelineCycle"
+                        "EdgeTypeMismatch"
+                        "PipelineForwardEdge" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.PpClasses)
+                          (sprintf "the sample reached a %s refusal (reached: %A)" cls t.PpClasses)
+
+                  Expect.equal
+                      (underCulture "he-IL" (fun () -> pipeDifferential readers 3542 500))
+                      t
+                      "same seed => identical tally"
+
+          testCase
+              "a pipeline oracle handed a BLIND int reader DISAGREES with CapabilityPipeline.typeCheck — the measurement can fail"
+          <| fun _ ->
+              // Under the blind reader a literal in an integer hole is out of space to the model
+              // and in space to production, so the model refuses a pipeline production accepts.
+              let t = pipeDifferential blindReaders 3542 150
+              Expect.isNonEmpty t.PpDiffs "a blind int reader MUST disagree with production on the pipeline"
+
+              Expect.isTrue
+                  (t.PpDiffs |> List.exists (fun d -> d.Contains "ArgOutOfSpace"))
+                  "and the disagreement is about a literal's SPACE check, which is what the reader blinded"
+
+          testCase
+              "the codec oracle agrees with CapabilityCodec and the pipeline codec over generated capabilities, pipelines and mutated documents"
+          <| fun _ ->
+              let t = underCulture "he-IL" (fun () -> codecDifferential readers 3543 300)
+
+              match t.CoDiffs with
+              | d :: _ -> failtestf "the codec oracle and production DISAGREE\n%s" d
+              | [] ->
+                  // Adequacy. Measured at 300 capabilities: 1,200 documents (588 accepted, 612
+                  // refused), 237 well-formed, 22 read back in a normal form, 294 through the
+                  // bytes, 1,199 signature documents, 573 pipeline nodes and 1,148 pipeline
+                  // documents.
+                  Expect.equal t.CoEncoded 300 "every capability's encoding was compared"
+
+                  Expect.isGreaterThan
+                      t.CoAccepted
+                      350
+                      (sprintf "capability documents were accepted (accepted=%d)" t.CoAccepted)
+
+                  Expect.isGreaterThan
+                      t.CoRefused
+                      350
+                      (sprintf "capability documents were refused (refused=%d)" t.CoRefused)
+
+                  Expect.isGreaterThan
+                      t.CoWellFormed
+                      150
+                      (sprintf "well-formed capabilities read back as themselves (wellFormed=%d)" t.CoWellFormed)
+
+                  Expect.isGreaterThan
+                      t.CoNormalised
+                      8
+                      (sprintf
+                          "a spaceless slot read back in its normal form, as another value (normalised=%d)"
+                          t.CoNormalised)
+
+                  Expect.isGreaterThan
+                      t.CoBytes
+                      200
+                      (sprintf "the round trip ran through the bytes (bytes=%d)" t.CoBytes)
+
+                  Expect.isGreaterThan
+                      t.CoSignatures
+                      800
+                      (sprintf "the signature reader was compared on its own (signatures=%d)" t.CoSignatures)
+
+                  Expect.isGreaterThan t.CoNodes 300 (sprintf "pipeline nodes were encoded (nodes=%d)" t.CoNodes)
+
+                  Expect.isGreaterThan
+                      t.CoNodeDocuments
+                      700
+                      (sprintf "pipeline documents were decoded (nodeDocuments=%d)" t.CoNodeDocuments)
+
+                  for code in [ "MissingField"; "WrongKind"; "UnknownTag"; "OutOfRange" ] do
+                      Expect.isTrue
+                          (Set.contains code t.CoCodes)
+                          (sprintf "the sample reached a %s refusal (reached: %A)" code t.CoCodes)
+
+                  Expect.equal
+                      (underCulture "he-IL" (fun () -> codecDifferential readers 3543 300))
+                      t
+                      "same seed => identical tally"
+
+          testCase
+              "a codec oracle handed a BLIND float-fault reader DISAGREES with the shipped readers — the measurement can fail"
+          <| fun _ ->
+              // Under the blind reader a float range with a NaN, an infinite or an inverted bound
+              // is well-formed to the model, which then accepts a declaration the shipped reader
+              // refuses `OutOfRange`.
+              let t = codecDifferential blindFaultReaders 3543 300
+              Expect.isNonEmpty t.CoDiffs "a blind float-fault reader MUST disagree with the shipped readers"
+
+              Expect.isTrue
+                  (t.CoDiffs |> List.exists (fun d -> d.Contains "OutOfRange"))
+                  "and the disagreement is about the admission check on read, which is what the reader blinded"
 
           // ---- Phase 186: the incremental promise (proofs/Propagation.fst) ----
 
