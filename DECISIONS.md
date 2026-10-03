@@ -1,5 +1,77 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-03 — D117: a registry is a lattice, not an append log; the function registry is opaque so its index is a projection; the page token is an input the replay key reads; registration discharges the distinct-names premise
+
+**Context.** The four registries — `CapabilityRegistry`, `FunctionRegistry`, `QueryRegistry` and
+`Validator.RuleRegistry` — were add-only: `empty`, `register` (refusing a duplicate), `tryFind`,
+`enumerate`, `dispatch`. Removing, swapping, narrowing or combining meant editing a public record by hand,
+and the query seam declared paging on its output but not its input. Phase 316 checked the shard's
+premises against the tree before building; two were sharper than written.
+
+**D117.1 — a registry is a lattice.** Each registry gains `unregister`, `replace`, `restrict` and `union`.
+`restrict` is the meet with a set of ids and never widens; `union` is the join of two registries whose
+ids are disjoint and is REFUSED on a shared id with the seam's own duplicate error, never a silent
+overwrite, so it is associative in the sense that matters: both associations of three registries are
+refused together or agree. `unregister` is `register`'s inverse on a fresh id and refuses an id not held
+with the seam's own unknown-id error, naming the held ids; `replace` is held to exactly the admission
+gate `register` runs, so a hot reload can admit nothing a registration would refuse. The refusals stay
+typed per seam: `NoSuchCapability`/`DuplicateCapability` on the capability and function registries,
+`NoSuchQuery`/`DuplicateQuery` on the query registry, and `RegistrationError.UnknownRule`/`DuplicateRule`
+on the validator's, the one new case. A session- or actor-scoped capability set is now a `restrict` of the
+host's registry rather than a hand-edited record. `ContentPack.unload` is `load`'s inverse, all or
+nothing, refused `PackNotLoaded` by name.
+
+**D117.2 — one internal helper behind the three id-keyed registries, not four.** `KeyedRegistry`
+(internal to `Fuaran.Core.Function`, visible to `Fuaran.Core.Query`) implements the lifecycle over an
+id-keyed map once, parameterised by the seam's refusal constructors and admission gate. The validator's
+registry does not sit behind it, for two reasons that are facts about the tree rather than preferences:
+its package does not reference `Fuaran.Core.Function`, and adding that dependency would change a
+published package's graph to share forty lines; and its order is REGISTRATION order — the order `runAll`
+runs families and reports their findings in — where the helper's map is id-ordered, so a shared `union`
+or `restrict` would lose the order its runs are defined by. Its four verbs are written beside it with the
+same refusal shape. The helper is internal: publishing it so a registry outside this repository can adopt
+it is a surface commitment this phase does not make. Making it public later is additive; retracting a
+published one is not.
+
+**D117.3 — the function registry is opaque, so its index cannot drift.** The shard offered two routes —
+make the records opaque, or rebuild the index on every edit — and the second alone is not a law: with a
+public record, `{ r with Entries = … }` still bypasses every verb. Read at the base tree, the defect
+was sharper than "phantoms": `findBySignature` already dropped an id the index named and the entries did
+not (it reads each candidate back through the entries), so a hand-removed entry was never returned; but
+an entry added or re-kinded by hand was never FOUND by result type, a silent miss. `FunctionRegistry`'s
+representation is now private; every verb keeps the index the exact projection of the entries (`register`
+incrementally, the lifecycle verbs by rebuilding it), and `registryLaws` holds `findBySignature` by result
+type equal to the enumerated entries of that type the query matches after a drawn sequence of edits. The
+other three records stay public: they carry no derived index, so a lattice law over them holds of every
+registry the verbs build, and opacity would cost their consumers an edit for no law.
+
+**D117.4 — the page token is an input, and the replay key reads it.** `Query.invokePage` and
+`QueryRegistry.dispatchPage` hand the resolver the token, behind default-deny and `validateParams`, so a
+host no longer declares the token as a parameter (which leaked it into the enumerated contract) or calls
+its resolver directly (which bypassed both). `Query.invocationKeyPage` puts a page triple — an empty name,
+the tag `p` no cell's tag is, the token — in front of `invocationKey`'s fields, through the same
+`Hash.canonicalFields`. Two properties decided the shape. The first page adds nothing, so its key IS
+`invocationKey`'s and every journal keyed before paging still replays. And the pre-image stays injective
+over the pair (`invocation_key_page_injective`, extending Phase 225's theorem): a page triple cannot read
+as a binding, because its second field is a tag no cell carries, so no argument list can spell it.
+`invocationKey` keeps its signature; the paged key is a sibling, not a widening of it, because widening
+the published function would have broken every caller to add a parameter most never pass.
+
+**D117.5 — registration refuses a repeated parameter name, and the premise is discharged there.**
+Phase 307 restated `all_null_refusal_exact` over declarations with distinct parameter names, but
+`register` checked the id alone, so the theorem assumed what production did not enforce.
+`QueryRegistry.register` (and `replace`) now refuse such a declaration `DuplicateParam`, naming the first
+repeated name — the query seam's admission gate, as `IllFormedCapability` is the capability seam's — and
+`proofs/Query.fst` proves the refusal (`register_refuses_duplicate_params`), that a registry built by
+`register` holds only declarations with distinct names, and the exact all-`Null` refusal of every query
+such a registry resolves (`registered_all_null_refusal_exact`). `DuplicateParam` is reused rather than a
+new case minted: it already names the fault, and the caller knows which operation it called.
+
+**Consequences.** Behavioural break: a query declared with a repeated parameter name is refused at
+registration. Source break: `FunctionRegistry`'s fields are private, and `RegistrationError` and
+`PackLoadError` gain a case each. Everything else is additive, and the wire does not move. Both breaks
+ride the `0.35.0` draft, whose class is already `breaking (source)`.
+
 ## 2026-10-03 — D116: the sanitisation floor is held by a law family at a witness a host builds, and the markdown scrub repeats to a fixed point; the `…With` stream operations are held at the caller's own config and hash; the kit nests batches; the obsolete snapshot forwards are classed obsolete
 
 **Context.** Phase 335 mapped every public operation and left the security-relevant and

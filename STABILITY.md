@@ -2688,6 +2688,67 @@ seed nor calls `scrubMarkdown` on adversarial input; such a consumer re-reads it
 scrub and the seeded samples, riding the `0.35.0` slot, whose class (`breaking (source)`) they do not
 exceed: no number moves.
 
+### Query paging on the input side, a registration that refuses a repeated parameter, and the four lifecycle verbs on all four registries (Phase 316, DECISIONS.md D117) — BREAKING (behavioural): `QueryRegistry.register` refuses a declaration naming a parameter twice; BREAKING (source): `FunctionRegistry` is opaque, `RegistrationError` and `PackLoadError` widened; the rest additive; the wire `unchanged`
+
+**What moved, for a consumer.**
+
+- **A query declaration naming a parameter twice is refused at registration (behavioural).**
+  `QueryRegistry.register` (and the new `replace`) answer `DuplicateParam name`, naming the first repeated
+  name, after the id check. Such a declaration could never be invoked sensibly — `validateParams` refuses
+  the second binding of a name (Phase 307) — and the exact all-`Null` refusal `proofs/Query.fst` proves is
+  stated over distinct names, which registration now enforces rather than assumes. A host that registered
+  one gets the refusal at startup instead of at the first call; the remedy is to rename the parameter.
+- **Paging on the input side (additive).** `Query.invokePage q args pageToken resolve` and
+  `QueryRegistry.dispatchPage r id args pageToken resolve` hand the resolver
+  (`Query -> string option -> Deferred<QueryResult>`) the page token, with default-deny and
+  `validateParams` first, exactly as `invoke` / `dispatch`. `Query.invocationKeyPage q args pageToken`
+  keys each page apart: `None` adds nothing, so the first page's key IS `invocationKey q args` and every
+  journal keyed before this release still replays; `Some token` adds a page triple through
+  `Hash.canonicalFields`, and the pre-image stays injective over (arguments, token). A host that declared
+  the token as a `QueryParam`, or called its resolver directly, can move to the paged verbs; one that
+  journalled a paged `Network` query under `invocationKey` replayed page one for every page, and keys
+  each page with `invocationKeyPage` from here.
+- **The lifecycle (additive).** `unregister`, `replace`, `restrict` and `union` on `CapabilityRegistry`,
+  `FunctionRegistry`, `QueryRegistry` and `Validator` (the `RuleRegistry`). `unregister id` refuses an id
+  not held with the seam's own unknown-id error (`NoSuchCapability`, `NoSuchQuery`, the new
+  `RegistrationError.UnknownRule`) naming the held ids; `replace` swaps the entry under its id through the
+  admission gate `register` runs; `restrict (keep: Set<string>)` narrows a registry to the ids kept — a
+  session- or actor-scoped default-deny is a `restrict` of the host's registry; `union` joins two
+  registries whose ids are disjoint and refuses a shared id with the seam's duplicate error
+  (`DuplicateCapability`, `DuplicateQuery`, `DuplicateRule`). The validator registry keeps registration
+  order (`runAll`'s order) through all four; the others keep id order. `ContentPack.unload manifest reg`
+  removes every function the manifest registers, all or nothing, and is `load`'s inverse.
+  `FunctionRegistry.ids` reads the registered ids.
+- **`FunctionRegistry` is opaque (source).** Its `Entries` and `ByResult` fields are no longer public:
+  a registry is built and edited only through the module, whose every verb keeps the result index the
+  exact projection of the entries, so `findBySignature` by result type returns exactly the enumerated
+  entries of that type the query matches — no phantom, no miss. A consumer that read `r.Entries` reads
+  `FunctionRegistry.enumerate r` / `ids r` / `tryFind id r`; one that built or edited the record by hand
+  uses `register` / `unregister` / `replace` / `restrict` / `union`.
+- **Union widening (source).** `RegistrationError` gains `UnknownRule of id * registered` and
+  `PackLoadError` gains `PackNotLoaded of packId * newId * known`, each appended, so every earlier case
+  keeps its tag; an exhaustive `match` on either adds the arm. `RegistrationError` was a single-case union,
+  so a consumer that matched `Error(RegistrationError.DuplicateRule _)` as the only refusal of
+  `Validator.register` now meets an incomplete match: `register` still refuses only a duplicate, and the
+  new case is `unregister`'s and `replace`'s.
+- **Laws and proofs.** `registryLaws` certifies the lifecycle over all four registries (the inverse,
+  the unheld refusal, `replace`, `restrict`, `union`'s associativity and collision refusal, and the
+  function registry's index after a sequence of edits); `packLoadingLaws` that `unload` undoes `load`;
+  `queryLaws` paging (token delivery, a key per page, strict replay of page n from page n's capture) and
+  the registration refusal. `proofs/Query.fst` gains `register_refuses_duplicate_params` and its
+  discharge, `invocation_key_page_injective`, `dispatch_page_is_dispatch` and the registry lifecycle
+  theorems (three `proofs.json` rows), and the differential compares the page key with the model's.
+- **The wire: nothing moves.** No new case is on a union a codec writes; no encoder writes a different
+  document.
+
+**What adopting it costs.** A consumer that registers no query with a repeated parameter name, reads no
+field of a `FunctionRegistry` and matches neither widened union exhaustively changes nothing. The others
+make the edits named above.
+
+**Class: breaking (behavioural)** for the registration refusal and **breaking (source)** for the opaque
+`FunctionRegistry` and the two widened unions, riding the `0.35.0` slot, whose class (`breaking (source)`)
+they do not exceed: no number moves. The rest is **additive**.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the
