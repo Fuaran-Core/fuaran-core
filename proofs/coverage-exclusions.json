@@ -475,13 +475,6 @@
     },
     {
       "members": [
-        "StringEscapeVectors.lines"
-      ],
-      "class": "host-seam",
-      "reason": "The escape table rendered as lines for a host in another language to diff against; what it renders is the vector set `run` / `check` execute and `Actor.encode`, both measured, and the diff is the other host's."
-    },
-    {
-      "members": [
         "StringEscapeVectors.runActor"
       ],
       "class": "measured-elsewhere",
@@ -1056,19 +1049,6 @@
     },
     {
       "members": [
-        "Idl.Sanitize.isAllowedAttributeKey",
-        "Idl.Sanitize.isSafeAttributeValue",
-        "Idl.Sanitize.sanitizeAttributes",
-        "Idl.Sanitize.sanitizeUrl",
-        "Idl.Sanitize.sanitizeUrlOrBlank",
-        "Idl.Sanitize.scrubMarkdown"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The sanitiser's attribute, URL and markdown scrubbers; example-, vector- and generated-input tests stand in. Not modelled.",
-      "standIn": "tests/Fuaran.Core.Tests/IdlCertificationTests.fs"
-    },
-    {
-      "members": [
         "Idl.SourceLit.fsAttribute",
         "Idl.SourceLit.fsDocLines",
         "Idl.SourceLit.fsString",
@@ -1441,7 +1421,6 @@
     },
     {
       "members": [
-        "OpStream.compactChainOnlyWith",
         "OpStream.compactChainOnly",
         "OpStream.compact",
         "OpStream.fromJsonlVerified",
@@ -1455,11 +1434,8 @@
         "OpStream.snapshotStateHashedFromJsonl",
         "OpStream.snapshotToJsonlChainOnly",
         "OpStream.snapshotToJsonl",
-        "OpStream.verifyAcrossChainOnlyWith",
         "OpStream.verifyAcrossChainOnly",
-        "OpStream.verifyAcrossWith",
-        "OpStream.verifyAcross",
-        "OpStream.verifyChainWith"
+        "OpStream.verifyAcross"
       ],
       "class": "measured-elsewhere",
       "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
@@ -1468,12 +1444,10 @@
     {
       "members": [
         "OpStream.appendChainOnly",
-        "OpStream.appendIfWith",
         "OpStream.appendMany",
         "OpStream.captureHead",
         "OpStream.capturedSeed",
         "OpStream.firstChainBreak",
-        "OpStream.headWith",
         "OpStream.isDeterminismLabel",
         "OpStream.rehash",
         "OpStream.replayLenient",
@@ -1497,15 +1471,6 @@
     },
     {
       "members": [
-        "OpStream.compactWith",
-        "OpStream.snapshotAtOptWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
-    },
-    {
-      "members": [
         "OpStream.chainHashOf"
       ],
       "class": "measured-elsewhere",
@@ -1522,42 +1487,6 @@
     },
     {
       "members": [
-        "OpStream.appendManyWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The hash-parameterised batch append; `appendMany` is it at the default hash. No test passes another hash.",
-      "through": "OpStream.appendMany",
-      "standIn": "tests/Fuaran.Core.Tests/LightSetTests.fs"
-    },
-    {
-      "members": [
-        "OpStream.captureEffectWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The hash-parameterised capture; `captureEffect` (rostered) is it at the default hash. No test passes another hash.",
-      "through": "OpStream.captureEffect",
-      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
-    },
-    {
-      "members": [
-        "OpStream.captureHeadWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The hash-parameterised capture head; `captureHead` is it at the default hash. No test passes another hash.",
-      "through": "OpStream.captureHead",
-      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
-    },
-    {
-      "members": [
-        "OpStream.firstCaptureBreakWith"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The hash-parameterised capture-break scan; `firstCaptureBreak` (rostered) is it at the default hash. No test passes another hash.",
-      "through": "OpStream.firstCaptureBreak",
-      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
-    },
-    {
-      "members": [
         "OpStream.verifyAcrossWithOpt"
       ],
       "class": "measured-elsewhere",
@@ -1567,12 +1496,43 @@
     },
     {
       "members": [
-        "OpStream.verifyCapturesAtWith"
+        "OpStream.compactChainOnlyWith"
       ],
-      "class": "measured-elsewhere",
-      "reason": "The hash-parameterised anchored capture check; `verifyCapturesAt` is it at the default hash. No test passes another hash.",
-      "through": "OpStream.verifyCapturesAt",
-      "standIn": "tests/Fuaran.Core.Tests/OpStreamTests.fs"
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.compact"
+    },
+    {
+      "members": [
+        "OpStream.compactWith"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.compact"
+    },
+    {
+      "members": [
+        "OpStream.snapshotAtOptWith"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.take"
+    },
+    {
+      "members": [
+        "OpStream.verifyAcrossChainOnlyWith"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.verify"
+    },
+    {
+      "members": [
+        "OpStream.verifyAcrossWith"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.verify"
     },
     {
       "members": [

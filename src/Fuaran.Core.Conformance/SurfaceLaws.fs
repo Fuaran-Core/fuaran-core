@@ -580,7 +580,17 @@ module internal SurfaceLaws =
           "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>, [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ]
           // Phase 313 — the reference witness, frozen as it ships: a domain constructs it by name,
           // exactly as it constructs a core witness, so a field add would break it the same way.
-          "RefWitness", typeof<RefWitness<obj, obj>>, [ "RefsOf"; "DeclsOf" ] ]
+          "RefWitness", typeof<RefWitness<obj, obj>>, [ "RefsOf"; "DeclsOf" ]
+          // Phase 349 — the sanitisation floor's witness, frozen at birth on the Phase 313 precedent:
+          // a host constructs it by name from its own copy of the floor.
+          "SanitizeWitness",
+          typeof<SanitizeWitness>,
+          [ "SanitizeUrl"
+            "SanitizeUrlOrBlank"
+            "IsAllowedAttributeKey"
+            "IsSafeAttributeValue"
+            "SanitizeAttributes"
+            "ScrubMarkdown" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).

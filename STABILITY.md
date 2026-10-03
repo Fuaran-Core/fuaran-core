@@ -371,11 +371,11 @@ host in the same change-set — whatever the caller count in this repository say
 
 ## Witness-record field freeze (the 1.0 contract)
 
-The fourteen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
+The fifteen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
 `AiSurfaceWitness`, `ProjectionWitness`, since Phase 330 the six conformance-kit inputs
 `CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
-`KeyedWitness`, `EvaluatorWitness`, since Phase 313 `RefWitness` and since Phase 298 `ObserverWitness`, each
-frozen at birth) are
+`KeyedWitness`, `EvaluatorWitness`, since Phase 313 `RefWitness`, since Phase 298 `ObserverWitness` and since
+Phase 349 `SanitizeWitness`, each frozen at birth) are
 **plain records**: adding a field is a compile-break for *every* adopter's construction site, with no
 gradual-migration path. At `1.0` their field sets **freeze**. (The freeze originally named only the
 four base records; `AiSurfaceWitness` and `ProjectionWitness` are equally public, equally
@@ -2597,6 +2597,58 @@ inherited JavaScript member; and, for a reader of a failed symbolic verification
 **Class: breaking (source)** for the declaration file and **breaking (behavioural)** for the
 validator and the coverage report, riding the `0.35.0` slot, whose class (`breaking (source)`) they
 do not exceed: no number moves.
+
+### The sanitisation floor, the configured-stream operations and the escape table gain laws; the kit draws nested batches; the markdown scrub reaches a fixed point (Phase 349, DECISIONS.md D115) — ADDITIVE for the kit; BREAKING (behavioural): `Sanitize.scrubMarkdown` removes two splices it emitted live, and every op-drawing family draws a different sample at the same seed; the wire `unchanged`
+
+**What moved, for a consumer.**
+
+- **Three new law families (additive).** `Conformance.sanitizeLaws (w: SanitizeWitness) seed
+  iterations` holds the six `Fuaran.Core.Idl.Sanitize` functions to the floor each claims — an accepted
+  URL carries no edge control, no tab / line feed / carriage return, no protocol-relative start and only
+  an allowed scheme, and is accepted again unchanged; `sanitizeUrlOrBlank` is `sanitizeUrl` or
+  `about:blank`; the attribute predicates are exactly their claims and `sanitizeAttributes` keeps exactly
+  what both pass; scrubbed markdown holds no live dangerous element, no live `javascript:` /
+  `vbscript:` and no `on*` handler inside a tag, is idempotent, is at most the input plus two units per
+  nine, and leaves benign text alone — over drawn splices (a forbidden name cut with a removable piece
+  interposed) and the vectors the example tests pinned. `Conformance.streamConfigLaws sw gen hashFn cfg
+  seed iterations` holds the `…With` stream operations (`appendManyWith`, `appendIfWith`, `headWith`,
+  `verifyChainWith`, `captureEffectWith`, `captureHeadWith`, `verifyCapturesAtWith`,
+  `firstCaptureBreakWith`) to the chain their config and hash describe, and reds a variant that ignores
+  either: the chain must fail under the caller's genesis, payload or hash perturbed.
+  `StringEscapeVectors.laws ()` rosters the escape vectors on the `WireNullTolerance.laws` precedent,
+  with one law on the format `lines` renders, stated from the table.
+- **`SanitizeWitness` (additive, frozen at birth).** A record of the six functions, with
+  `SanitizeWitness.core` the reference; a host carrying its own copy of the floor certifies it by
+  building one. It joins the witness-record freeze (fifteen records), on the Phase 313 precedent.
+- **`Sanitize.scrubMarkdown` reaches a fixed point (behavioural — a security fix).** It repeats its
+  sweep until nothing changes. One pass let a removal join two halves into something an earlier step had
+  already swept: `<scr<iframe>ipt>alert(1)</script>` came out as a live `<script>alert(1)</script>`, and
+  `<scri onx=""pt>` as a live `<script>`. Output for input one pass already left at its fixed point is
+  unchanged; output for such a splice loses the element it formed. Any copy of the floor kept elsewhere
+  carries the one-pass defect until it adopts the same loop, and `sanitizeLaws` at that copy's witness
+  reds on it.
+- **The kit's op generator nests batches (behavioural, for a seeded run).** A drawn `Batch` may hold a
+  `Batch`, to two levels below the outermost, and every op-drawing family demands one in its op-kind
+  guard (`nested batch=N` among the guard's counts). The draw sequence moves, so a consumer's
+  certification at a fixed seed draws a different sample: a counterexample a seed used to find may be
+  found at another, and a family run over so few iterations that it never nests is starved by name.
+  Raise the iteration count or widen the generator, as the guard says.
+- **Committed escape file (additive).** `conformance/escape/string-escape.json` pins `lines`' format,
+  written by `--emit-escape` and held to a fresh render by the suite.
+- **Coverage.** Fifteen operations move from exclusion to a family's operation roster (the six
+  scrubbers, the eight live `…With` operations, `StringEscapeVectors.lines`); the five `System.Obsolete`
+  snapshot forwards among the `…With` set (`compactWith`, `compactChainOnlyWith`, `snapshotAtOptWith`,
+  `verifyAcrossWith`, `verifyAcrossChainOnlyWith`) are re-classed `obsolete` with `forwardsTo` their
+  `OpStream.Snapshots` replacement, whose `snapshotLawsWith` reference run now sits at a non-canonical
+  config and SHA-256.
+- **The wire: nothing moves.** No encoder writes a different document; no committed vector changes.
+
+**What adopting it costs.** Nothing for a consumer that neither runs the op-drawing families at a pinned
+seed nor calls `scrubMarkdown` on adversarial input; such a consumer re-reads its own seeded results.
+
+**Class: additive** for the new families, the witness and the file; **breaking (behavioural)** for the
+scrub and the seeded samples, riding the `0.35.0` slot, whose class (`breaking (source)`) they do not
+exceed: no number moves.
 
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 

@@ -238,7 +238,7 @@ module Sanitize =
     /// `on*=` on leading whitespace and splits attributes on the first `=` or
     /// quote, which is sound for that narrow shape and bypassable on arbitrary
     /// untrusted HTML. Do not call it as the sole sanitiser for untrusted input.
-    let scrubMarkdown (md: string) : string =
+    let private scrubPass (md: string) : string =
         if isNull md || md = "" then
             ""
         else
@@ -372,3 +372,34 @@ module Sanitize =
                         searchFrom <- i + "about:blank".Length
 
             result
+
+    /// The markdown scrub: `scrubPass` (the sweep described above) repeated until it changes nothing
+    /// (Phase 349).
+    ///
+    /// One pass is not enough, for the reason Phase 96 found in the scheme sweep and fixed there
+    /// alone: REMOVING text splices its neighbours together, and the splice can form a fresh
+    /// occurrence of something an EARLIER step of the pass already swept. `<scr<iframe>ipt>` loses
+    /// its `<iframe>` after the `<script` sweep has run and comes out a live `<script>`; a handler
+    /// stripped from `<scri onx=""pt>` does the same. `Conformance.sanitizeLaws` found both. At the
+    /// fixed point no step of the pass finds anything, which is exactly the floor this function
+    /// claims — no dangerous element opener, no `on*` handler inside a tag, no `javascript:` /
+    /// `vbscript:` — and the output is idempotent by construction.
+    ///
+    /// It terminates. After the first pass no scheme survives, so a later pass can only change the
+    /// text by a removal (at least four units — the shortest thing it removes is a handler's leading
+    /// white space, `on` and a letter) that forms at most one new scheme at its splice point, which
+    /// replacement then grows by at most two units; every pass after the first that changes anything
+    /// therefore SHORTENS the text. The same count bounds the output: never longer than the input plus
+    /// two units per nine (`vbscript:` is nine units, `about:blank` eleven).
+    let scrubMarkdown (md: string) : string =
+        if isNull md then
+            ""
+        else
+            let mutable current = scrubPass md
+            let mutable next = scrubPass current
+
+            while next <> current do
+                current <- next
+                next <- scrubPass current
+
+            current

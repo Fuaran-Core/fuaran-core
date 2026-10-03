@@ -21,6 +21,7 @@ conformance/
   apply/manifest.json          the apply family's own index + per-host adoption (`--emit-apply`)
   refusals/codec-refusals.json the codec refusal vectors: JSON grammar, surrogates, column cells, the wire-profile grammar (`--emit-refusals`, since Phase 299; profiles since Phase 306)
   refusals/manifest.json       the refusals family's own index + per-host adoption (`--emit-refusals`)
+  escape/string-escape.json   the string-escape table as the lines a host diffs (`--emit-escape`, since Phase 349; no corpus copy yet)
 ```
 
 ### Which law sets Core emits — all of them, and the UI tier emits none

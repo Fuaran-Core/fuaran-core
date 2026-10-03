@@ -39,6 +39,8 @@
     <Compile Include="PropagationLaws.fs" />
     <Compile Include="SurfaceLaws.fs" />
     <Compile Include="ObserverLaws.fs" />
+    <!-- Phase 349 — the sanitisation floor's family, over a `SanitizeWitness`. -->
+    <Compile Include="SanitizeLaws.fs" />
     <Compile Include="Conformance.fs" />
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->

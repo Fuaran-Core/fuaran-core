@@ -321,3 +321,36 @@ type UpdateGen<'Node> =
         /// `UpdateNode` keeps the tree's — so a generator may return any children it likes.
         Update: 'Node -> ConfRng.T -> 'Node * ConfRng.T
     }
+
+/// The sanitisation floor a host ships, as the six functions `Conformance.sanitizeLaws` holds to
+/// the floor each one claims (Phase 349). `Fuaran.Core.Idl.Sanitize` is the reference
+/// (`SanitizeWitness.core`); a host carrying its own copy of the floor — a renderer that predates
+/// the lift, a port in another pipeline — certifies that copy by building this record from it, so
+/// parity between the copies is held by the laws rather than by a comment.
+type SanitizeWitness =
+    {
+        /// The sanitised URL, or `None` for a refused one (`Sanitize.sanitizeUrl`).
+        SanitizeUrl: string -> string option
+        /// The sanitised URL or the deny sentinel `about:blank` (`Sanitize.sanitizeUrlOrBlank`).
+        SanitizeUrlOrBlank: string -> string
+        /// The attribute-key allowlist (`Sanitize.isAllowedAttributeKey`).
+        IsAllowedAttributeKey: string -> bool
+        /// The attribute-value floor (`Sanitize.isSafeAttributeValue`).
+        IsSafeAttributeValue: string -> bool
+        /// The attribute-map filter (`Sanitize.sanitizeAttributes`).
+        SanitizeAttributes: Map<string, string> -> Map<string, string>
+        /// The markdown scrub (`Sanitize.scrubMarkdown`).
+        ScrubMarkdown: string -> string
+    }
+
+/// The reference sanitisation witness (Phase 349).
+module SanitizeWitness =
+
+    /// `Fuaran.Core.Idl.Sanitize`, the floor every host's copy is held to.
+    let core: SanitizeWitness =
+        { SanitizeUrl = Fuaran.Core.Idl.Sanitize.sanitizeUrl
+          SanitizeUrlOrBlank = Fuaran.Core.Idl.Sanitize.sanitizeUrlOrBlank
+          IsAllowedAttributeKey = Fuaran.Core.Idl.Sanitize.isAllowedAttributeKey
+          IsSafeAttributeValue = Fuaran.Core.Idl.Sanitize.isSafeAttributeValue
+          SanitizeAttributes = Fuaran.Core.Idl.Sanitize.sanitizeAttributes
+          ScrubMarkdown = Fuaran.Core.Idl.Sanitize.scrubMarkdown }

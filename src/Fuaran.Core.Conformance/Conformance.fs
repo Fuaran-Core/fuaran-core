@@ -286,6 +286,18 @@ module Conformance =
         : LawResult list =
         StreamLaws.snapshotLaws sw gen stateEncode hashFn seed iterations
 
+    /// Forward — see `StreamLaws.streamConfigLaws` (Phase 349): the `…With` stream operations held
+    /// at the caller's `StreamConfig` and `HashFn`, so a variant that ignores either goes red.
+    let streamConfigLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (hashFn: HashFn)
+        (cfg: StreamConfig)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        StreamLaws.streamConfigLaws sw gen hashFn cfg seed iterations
+
     /// Forward — see `StreamLaws.dagLaws`.
     let dagLaws
         (sw: StreamWitness<'Op, 'State, 'Rej>)
@@ -784,6 +796,12 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         ObserverLaws.observerLaws w genInput seed iterations
+
+    /// Forward — see `SanitizeLaws.sanitizeLaws` (Phase 349): the sanitisation floor each of the six
+    /// `Fuaran.Core.Idl.Sanitize` functions claims, over generated adversarial strings and the pinned
+    /// vectors, at a `SanitizeWitness` — `SanitizeWitness.core` for Core's own floor.
+    let sanitizeLaws (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
+        SanitizeLaws.sanitizeLaws w seed iterations
 
     /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
     /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.

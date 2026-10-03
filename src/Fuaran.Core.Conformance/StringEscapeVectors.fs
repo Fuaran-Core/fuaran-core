@@ -209,3 +209,62 @@ module StringEscapeVectors =
         [ for v in vectors -> v.Name + "\t" + v.Escaped + "\t" + Actor.encode (Human v.Input)
           for name, actor, encoded in actorVectors ->
               name + "\t" + encoded + "\t" + OpStream.canonicalConfig.Payload 0 actor "{}" ]
+
+    /// The family as `LawResult`s (Phase 349), rostered as `StringEscapeVectors.laws` on the
+    /// `WireNullTolerance.laws` precedent: one law per character vector and per named actor, green
+    /// exactly when every check `runVector` / `runActor` makes for it passes, and one law on the
+    /// FORMAT `lines` renders — each character vector as `name<TAB>escaped<TAB>{"kind":"human",
+    /// "id":"escaped"}` and each named actor as `name<TAB>encoding<TAB>` its chain pre-image, in table
+    /// order, no field carrying a tab or a line break. The format law is stated from the TABLE, not
+    /// by calling the escapers, so a renderer that drifted from the table is caught even where the
+    /// escapers still agree with it. The corpus is fixed, so the one run is the whole sample; the
+    /// committed rendering a host in another language diffs against is
+    /// `conformance/escape/string-escape.json`.
+    let laws () : LawResult list =
+        let verdict (name: string) (outcomes: Corpus.Outcome list) : LawResult =
+            let law = LawKit.LawCell("string escape: " + name)
+
+            match outcomes |> List.tryFind (fun o -> not o.Passed) with
+            | Some o -> law.Check(false, (fun () -> o.Name + ": " + o.Detail))
+            | None -> law.Saw()
+
+            law.Result
+
+        let expected =
+            [ for v in vectors ->
+                  v.Name
+                  + "\t"
+                  + v.Escaped
+                  + "\t"
+                  + "{\"kind\":\"human\",\"id\":"
+                  + quoted v.Escaped
+                  + "}"
+              for name, _, encoded in actorVectors -> name + "\t" + encoded + "\t" + payload encoded ]
+
+        let rendered = lines ()
+
+        let format =
+            LawKit.LawCell
+                "lines () renders the table as name, spelling and pre-image, tab-separated, in table order, one line each"
+
+        let wellFormed (l: string) =
+            l.Split('\t').Length = 3 && not (l.Contains "\n") && not (l.Contains "\r")
+
+        format.Check(
+            rendered = expected && List.forall wellFormed rendered,
+            fun () ->
+                match
+                    List.zip (List.truncate expected.Length rendered) (List.truncate rendered.Length expected)
+                    |> List.tryFind (fun (a, b) -> a <> b)
+                with
+                | Some(got, want) -> sprintf "lines () rendered %A where the table says %A" got want
+                | None ->
+                    sprintf
+                        "lines () rendered %d lines for a %d-entry table, or a line that is not three tab-separated fields"
+                        rendered.Length
+                        expected.Length
+        )
+
+        (vectors |> List.map (fun v -> verdict v.Name (runVector v)))
+        @ (actorVectors |> List.map (fun ((name, _, _) as a) -> verdict name (runActor a)))
+        @ [ format.Result ]

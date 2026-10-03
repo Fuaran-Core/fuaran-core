@@ -1,5 +1,77 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-03 — D115: the sanitisation floor is held by a law family at a witness a host builds, and the markdown scrub repeats to a fixed point; the `…With` stream operations are held at the caller's own config and hash; the kit nests batches; the obsolete snapshot forwards are classed obsolete
+
+**Context.** Phase 335 mapped every public operation and left the security-relevant and
+hash-parameterised ones `measured-elsewhere`: example tests, no law a host could certify against.
+Phase 349 gives them laws. Its premises were checked against the tree first, and two did not hold
+as written.
+
+**D115.1 — the sanitisation floor is a law family over `SanitizeWitness`.** `Conformance.sanitizeLaws`
+takes a record of the six functions rather than calling `Fuaran.Core.Idl.Sanitize` directly, with
+`SanitizeWitness.core` the reference. Two reasons. The floor has copies — `Sanitize.fs` itself says a
+change not mirrored in the renderer's copy is a defect until they are consolidated — and a law over a
+witness is the mechanism that holds a copy to it, where the comment could not. And a family whose
+subject is a parameter can be shown failing permanently, in the vacuity suite, at a witness with an
+open floor, rather than once by editing the production code. The record is frozen at birth on the
+Phase 313 precedent.
+
+Every predicate the laws apply is written from the claim in `Sanitize.fs`'s doc comments, not by
+calling into it, so a scrubber and its law cannot share a defect through a helper. The generator draws
+two shapes per iteration: a uniform splice of adversarial fragments, and a forbidden name cut at a
+drawn point with a removable piece interposed. The second exists because the first reaches a
+resurrection about once in a hundred thousand draws; measured, three seeds of the cut-and-interpose
+draw each found the defect below within their first two iterations with the pinned vectors masked.
+
+**D115.2 — `scrubMarkdown` repeats its sweep to a fixed point (a behavioural fix).** The family's first
+run was red on Core's own floor. A removal splices its neighbours together, and the splice can form
+something an earlier step of the same pass already swept: `<scr<iframe>ipt>alert(1)</script>` came out
+as a live `<script>alert(1)</script>`, and the handler strip turned `<scri onx=""pt>` into `<script>`.
+Phase 96 found the same class in the scheme sweep and fixed it there alone. The fix is the smallest one
+that closes the class rather than the instance: the whole pass repeats until it changes nothing. At the
+fixed point no step finds anything, which is the floor the function claims, and idempotence holds by
+construction. It terminates: after the first pass no scheme survives, so a later pass changes the text
+only by a removal of at least four units that can form at most one scheme at its splice, grown two units
+by replacement — every later pass that changes anything shortens the text. The same count gives the
+length bound the family checks: at most the input plus two units per nine.
+
+**D115.3 — the `…With` operations are config-parameterised, and the family perturbs the caller's
+parameters.** The shard asked for the `…With` variants' laws "at a second, non-default hash". The bare
+forms already take a `HashFn`; what the `…With` forms add is the `StreamConfig` — the payload pre-image
+and the genesis — and the exclusions' reasons ("the hash-parameterised capture … is it at the default
+hash") described the wrong parameter. `Conformance.streamConfigLaws` takes both, states the chain they
+describe (sequence, link from `cfg.Genesis`, `Hash = hashFn PrevHash (cfg.Payload …)`), and requires a
+non-empty chain or journal to FAIL under the caller's own genesis, payload and hash each perturbed by a
+suffix — so the perturbation differs from the caller's parameter on every input by construction, at
+any config the caller passes, including the canonical one. The reference run sits at a second config
+and SHA-256 anyway, and `snapshotLawsWith`'s reference run moves there too. Measured: a
+`verifyChainWith` that ignored its config and a `captureEffectWith` that ignored its hash each turned
+the family red.
+
+**D115.4 — the obsolete snapshot forwards are classed `obsolete`, not given laws.** Five of the
+`…With` set (`compactWith`, `compactChainOnlyWith`, `snapshotAtOptWith`, `verifyAcrossWith`,
+`verifyAcrossChainOnlyWith`) carry `System.Obsolete` and forward to `OpStream.Snapshots`; Phase 335
+classed them `measured-elsewhere`. A law over an entry point scheduled for removal certifies nothing a
+consumer should call, so they are re-classed `obsolete` with `forwardsTo` the replacement, whose laws
+now run at the second config and hash. Their bare-form twins (`compact`, `snapshotAt`, `verifyAcross`
+and the rest) carry the same attribute and the same misclassification; they are outside this phase's
+set and are left for the coverage owner to re-class in one pass.
+
+**D115.5 — the kit's op generator nests batches, and demands it.** `LawKit.genBatch` draws a batch of
+one to three ops, each a structural op or, one time in three while under `batchDepthBound` (two levels
+below the outermost), a batch drawn the same way. The op-kind tally counts `nested batch` beside the
+kinds and every op-drawing family demands it, so a sample that never nested is starved by name rather
+than green over flat batches; measured, setting the bound to zero reds every such family's guard at the
+reference witness. The draw sequence moves for every seeded run, which `STABILITY.md` records as
+behavioural.
+
+**D115.6 — the escape table's format is a committed file and a law.** `StringEscapeVectors.lines` was
+`host-seam`: a rendering for another language's host to diff, pinned nowhere. It now has
+`conformance/escape/string-escape.json` (written by `--emit-escape`, held to a fresh render), and
+`StringEscapeVectors.laws` — rostered on the `WireNullTolerance.laws` precedent — carries one law on the
+format, stated from the table rather than from the escapers, so a renderer that drifted from the table
+reds even where the escapers still agree with it. The file is new, so no corpus copy of it exists yet.
+
 ## 2026-10-03 — D114: a coverage report states what was evaluated; the declaration file types the decode refusal as the object it is; a field name every JavaScript object already carries is refused by the IDL, `prototype` is not
 
 **Recorded by Phase 348. `src/Fuaran.Core.Conformance/FunctionLaws.fs` (`verifyFunctionSymbolic`),

@@ -177,7 +177,7 @@ let witnessSurfaceLawTests =
 
               Expect.isTrue control.Passed "the real KeyedWitness fails its own pin"
 
-          testCase "Phase 330, 313 and 298: fourteen records are frozen and none is declared outside the freeze"
+          testCase "Phase 330, 313, 298 and 349: fifteen records are frozen and none is declared outside the freeze"
           <| fun _ ->
               Expect.equal
                   (Conformance.frozenWitnessFields |> List.map fst)
@@ -194,7 +194,8 @@ let witnessSurfaceLawTests =
                     "ConstructWitness"
                     "KeyedWitness"
                     "EvaluatorWitness"
-                    "RefWitness" ]
+                    "RefWitness"
+                    "SanitizeWitness" ]
                   "the frozen records, in pin order"
 
               Expect.isEmpty Conformance.unfrozenWitnesses "a witness is declared outside the freeze again"

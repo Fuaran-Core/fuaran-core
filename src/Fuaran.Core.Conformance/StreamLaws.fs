@@ -242,6 +242,273 @@ module internal StreamLaws =
         : LawResult list =
         snapshotLawsWith sw gen stateEncode hashFn OpStream.canonicalConfig seed iterations
 
+    /// The configured-stream laws (Phase 349): the `…With` stream operations — each the bare form
+    /// with its `StreamConfig` (the payload pre-image and the genesis) a parameter beside its
+    /// `HashFn` — held at the config and hash the caller passes, so a domain on its own chain format
+    /// certifies the operations it actually calls, and a variant that ignores either parameter goes
+    /// red. Run it at a config and a hash that are NOT the canonical ones: at `canonicalConfig` and
+    /// `defaultHash` a variant that silently used them would agree with itself.
+    ///
+    ///  - **the configured chain is the chain its config and hash describe** — every record built
+    ///    with `appendWith cfg hashFn` has `Seq` its index, `PrevHash` the previous `Hash` (from
+    ///    `cfg.Genesis`) and `Hash = hashFn PrevHash (cfg.Payload Seq Actor (Encode Op))`;
+    ///    `headWith cfg` is the last hash or the genesis; `verifyChainWith` accepts the chain and
+    ///    `firstChainBreakWith` finds no break;
+    ///  - **`appendManyWith` is the fold of `appendWith`** — the same state and records, byte for
+    ///    byte, or the index of the first op the fold refuses with nothing chained;
+    ///  - **`appendIfWith` at the configured head is `appendWith`**, and at any other head it is
+    ///    `StaleHead` naming the configured head;
+    ///  - **the parameters are read** — a non-empty configured chain fails `verifyChainWith` under
+    ///    another genesis, another payload and another hash (each the caller's own, perturbed), and a
+    ///    record whose hash is tampered fails it with `firstChainBreakWith` naming that record;
+    ///  - **captures under the config** — a journal built with `captureEffectWith cfg hashFn` links
+    ///    from `cfg.Genesis`, `captureHeadWith cfg` is its last hash or the genesis, it verifies
+    ///    against that head with `verifyCapturesAtWith` and `firstCaptureBreakWith` finds no break;
+    ///    under another genesis or another hash a non-empty journal does neither, and a deterministic
+    ///    effect journals nothing.
+    ///
+    /// Every arm is built on every iteration (an empty chain still checks its head and its
+    /// `appendIfWith`), so the family carries no guard. The perturbed parameters are DERIVED from the
+    /// caller's — a suffix on the genesis, the payload and the hash — so they differ from the
+    /// caller's on every input by construction rather than by a fixture's luck.
+    let streamConfigLaws
+        (sw: StreamWitness<'Op, 'State, 'Rej>)
+        (gen: StreamGen<'Op, 'State>)
+        (hashFn: HashFn)
+        (cfg: StreamConfig)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let described =
+            LawKit.LawCell "the configured chain is the chain its config and hash describe, and verifies under them"
+
+        let many =
+            LawKit.LawCell "appendManyWith is the fold of appendWith, byte for byte, or refuses at the fold's index"
+
+        let cas =
+            LawKit.LawCell "appendIfWith at the configured head is appendWith; at another head it is StaleHead"
+
+        let read =
+            LawKit.LawCell
+                "the parameters are read: another genesis, payload or hash, or a tampered record, fails verifyChainWith"
+
+        let captures =
+            LawKit.LawCell
+                "captures under the config link from its genesis and verify against captureHeadWith, and under no other"
+
+        let otherGenesis = { cfg with Genesis = cfg.Genesis + "'" }
+
+        let otherPayload =
+            { cfg with
+                Payload = fun s a e -> cfg.Payload s a e + "'" }
+
+        let otherHash: HashFn = fun prev payload -> hashFn prev payload + "'"
+        let actor = Human "conf"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let ops = [ for _ in 1 .. rng.IntBelow 7 -> rng.Draw gen.Op ]
+
+            // ---- the fold of appendWith, and the chain it builds ----
+            let mutable state = gen.State0
+            let mutable recs = OpStream.empty
+            let mutable refusedAt = None
+
+            ops
+            |> List.iteri (fun k op ->
+                if refusedAt.IsNone then
+                    match OpStream.appendWith cfg hashFn sw actor op state recs with
+                    | Ok(s', r') ->
+                        state <- s'
+                        recs <- r'
+                    | Error _ -> refusedAt <- Some k)
+
+            // The fold stops at its first refusal; the chain it built is the accepted prefix.
+            let arr = List.toArray recs
+
+            let describedOk =
+                arr
+                |> Array.mapi (fun k r ->
+                    let prev = if k = 0 then cfg.Genesis else arr[k - 1].Hash
+
+                    r.Seq = k
+                    && r.PrevHash = prev
+                    && r.Hash = hashFn prev (cfg.Payload k r.Actor (sw.Encode r.Op)))
+                |> Array.forall id
+
+            let expectedHead =
+                if arr.Length = 0 then
+                    cfg.Genesis
+                else
+                    arr[arr.Length - 1].Hash
+
+            described.Check(
+                describedOk
+                && OpStream.headWith cfg recs = expectedHead
+                && OpStream.verifyChainWith cfg hashFn sw recs
+                && OpStream.firstChainBreakWith cfg hashFn sw recs = None,
+                fun () ->
+                    at (
+                        sprintf
+                            "records described: %b; headWith %A (expected %A); verifyChainWith %b; firstChainBreakWith %A"
+                            describedOk
+                            (OpStream.headWith cfg recs)
+                            expectedHead
+                            (OpStream.verifyChainWith cfg hashFn sw recs)
+                            (OpStream.firstChainBreakWith cfg hashFn sw recs)
+                    )
+            )
+
+            // ---- appendManyWith is the fold ----
+            match OpStream.appendManyWith cfg hashFn sw actor ops gen.State0 OpStream.empty, refusedAt with
+            | Ok(s, r), None when s = state && r = recs -> many.Saw()
+            | Error(k, _), Some k' when k = k' -> many.Saw()
+            | other, _ ->
+                many.Check(
+                    false,
+                    fun () ->
+                        at (
+                            sprintf
+                                "appendManyWith answered %s where the fold of appendWith %s"
+                                (match other with
+                                 | Ok(_, r) -> sprintf "Ok with %d records" (List.length r)
+                                 | Error(k, _) -> sprintf "Error at %d" k)
+                                (match refusedAt with
+                                 | Some k -> sprintf "refused op %d" k
+                                 | None -> sprintf "chained %d records" (List.length recs))
+                        )
+                )
+
+            // ---- appendIfWith ----
+            let probe = rng.Draw gen.Op
+            let head = OpStream.headWith cfg recs
+
+            let casOk =
+                match
+                    OpStream.appendIfWith cfg hashFn sw head actor probe state recs,
+                    OpStream.appendWith cfg hashFn sw actor probe state recs
+                with
+                | Ok a, Ok b -> a = b
+                | Error(AppendRejection.Domain _), Error _ -> true
+                | _ -> false
+
+            let staleOk =
+                match OpStream.appendIfWith cfg hashFn sw (head + "'") actor probe state recs with
+                | Error(AppendRejection.StaleHead(_, actual)) -> actual = head
+                | _ -> false
+
+            cas.Check(
+                casOk && staleOk,
+                fun () -> at (sprintf "appendIfWith at the head agrees: %b; at a stale head refuses: %b" casOk staleOk)
+            )
+
+            // ---- the parameters are read ----
+            if arr.Length > 0 then
+                let victim = rng.IntBelow arr.Length
+
+                let tampered =
+                    recs
+                    |> List.mapi (fun k r -> if k = victim then { r with Hash = r.Hash + "'" } else r)
+
+                let breakAt = OpStream.firstChainBreakWith cfg hashFn sw tampered
+
+                read.Check(
+                    not (OpStream.verifyChainWith otherGenesis hashFn sw recs)
+                    && not (OpStream.verifyChainWith otherPayload hashFn sw recs)
+                    && not (OpStream.verifyChainWith cfg otherHash sw recs)
+                    && not (OpStream.verifyChainWith cfg hashFn sw tampered)
+                    && (breakAt |> Option.map (fun b -> b.Index)) = Some victim,
+                    fun () ->
+                        at (
+                            sprintf
+                                "a %d-record chain verified under another genesis %b, payload %b, hash %b; tampered at %d: verified %b, first break %A"
+                                arr.Length
+                                (OpStream.verifyChainWith otherGenesis hashFn sw recs)
+                                (OpStream.verifyChainWith otherPayload hashFn sw recs)
+                                (OpStream.verifyChainWith cfg otherHash sw recs)
+                                victim
+                                (OpStream.verifyChainWith cfg hashFn sw tampered)
+                                breakAt
+                        )
+                )
+
+            // ---- captures under the config ----
+            let values = [ for _ in 1 .. rng.IntBelow 4 -> rng.IntBelow 1000 ]
+
+            let journal =
+                values
+                |> List.indexed
+                |> List.fold
+                    (fun caps (k, v) ->
+                        snd (
+                            OpStream.captureEffectWith
+                                cfg
+                                hashFn
+                                string
+                                "random"
+                                ("eff" + string k)
+                                (fun () -> v)
+                                caps
+                        ))
+                    []
+
+            let det =
+                snd (
+                    OpStream.captureEffectWith cfg hashFn string OpStream.deterministicTag "det" (fun () -> 0) journal
+                )
+
+            let jarr = List.toArray journal
+
+            let linked =
+                jarr
+                |> Array.mapi (fun k c -> c.Seq = k && c.PrevHash = (if k = 0 then cfg.Genesis else jarr[k - 1].Hash))
+                |> Array.forall id
+
+            let capHead = OpStream.captureHeadWith cfg journal
+
+            let expectedCapHead =
+                if jarr.Length = 0 then
+                    cfg.Genesis
+                else
+                    jarr[jarr.Length - 1].Hash
+
+            let refusedElsewhere =
+                jarr.Length = 0
+                || (not (
+                        OpStream.verifyCapturesAtWith
+                            otherGenesis
+                            hashFn
+                            (OpStream.captureHeadWith otherGenesis journal)
+                            journal
+                    )
+                    && not (OpStream.verifyCapturesAtWith cfg otherHash capHead journal)
+                    && (OpStream.firstCaptureBreakWith otherGenesis hashFn journal).IsSome
+                    && (OpStream.firstCaptureBreakWith cfg otherHash journal).IsSome)
+
+            captures.Check(
+                jarr.Length = List.length values
+                && linked
+                && capHead = expectedCapHead
+                && OpStream.verifyCapturesAtWith cfg hashFn capHead journal
+                && OpStream.firstCaptureBreakWith cfg hashFn journal = None
+                && refusedElsewhere
+                && det = journal,
+                fun () ->
+                    at (
+                        sprintf
+                            "a %d-capture journal: linked %b, head %A (expected %A), verifies %b, first break %A, refused elsewhere %b, deterministic effect journalled %b"
+                            jarr.Length
+                            linked
+                            capHead
+                            expectedCapHead
+                            (OpStream.verifyCapturesAtWith cfg hashFn capHead journal)
+                            (OpStream.firstCaptureBreakWith cfg hashFn journal)
+                            refusedElsewhere
+                            (det <> journal)
+                    )
+            ))
+
+        LawKit.results [ described; many; cas; read; captures ]
+
     /// Op-DAG laws (Phase 07): **verifyDag accepts an intact DAG**, **replayTo is
     /// deterministic** (the total topo order ⇒ the same head replays to the same state), and
     /// **verifyDag detects a tampered node**. A domain that adopts the branching op-DAG runs

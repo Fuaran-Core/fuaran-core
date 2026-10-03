@@ -62,6 +62,13 @@ let private sink = ConformanceTests.keyedSink "test-key-0"
 /// honest one.
 let private honestFootprint = Ops.footprint nodew idw
 
+/// A chain format that is NOT the canonical one (Phase 349): its own genesis and a payload that
+/// frames the canonical pre-image, so every `…With` operation's reference run is at a config a
+/// variant ignoring its parameter could not agree with.
+let secondConfig: StreamConfig =
+    { Genesis = "phase-349-genesis"
+      Payload = fun seq actor encoded -> "v2|" + OpStream.canonicalConfig.Payload seq actor encoded }
+
 /// Every law family the kit ships, run once. Evaluated at most once per process: several of these
 /// are three-hundred-iteration property runs.
 let private runs =
@@ -248,9 +255,20 @@ let private runs =
                    ConformanceTests.sw
                    ConformanceTests.streamGen
                    string
-                   OpStream.defaultHash
-                   OpStream.canonicalConfig
+                   OpStream.sha256Hash
+                   secondConfig
                    321
+                   100)
+           // Phase 349 — the `…With` operations at the second config and a non-default hash.
+           run
+               "Conformance.streamConfigLaws"
+               100
+               (Conformance.streamConfigLaws
+                   ConformanceTests.sw
+                   ConformanceTests.streamGen
+                   OpStream.sha256Hash
+                   secondConfig
+                   349
                    100)
            run
                "Conformance.dagLaws"
@@ -554,7 +572,9 @@ let private runs =
 
            // Phase 297 — the null-tolerant read vectors: a fixed corpus, one law per vector, so the
            // one run is the whole sample.
-           run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ()) ]
+           run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ())
+           run "StringEscapeVectors.laws" 1 (StringEscapeVectors.laws ())
+           run "Conformance.sanitizeLaws" 200 (Conformance.sanitizeLaws SanitizeWitness.core 349 200) ]
         : Run list)
 
 /// The family's own adequacy class, which is what decides how its run is read. Looked up rather
@@ -1256,6 +1276,50 @@ let floorTests =
                   Conformance.hashFnLaws ConformanceTests.sw ConformanceTests.streamGen OpStream.defaultHash 4242 200
 
               Expect.isEmpty (redLaws honest) "and green under the default HashFn"
+
+          // Phase 349 — every sanitisation law is red at a witness whose floor is open, each arm on
+          // the defect it exists for; and green at Core's own floor.
+          testCase "sanitizeLaws is red at an open floor, every law, and green at SanitizeWitness.core"
+          <| fun _ ->
+              let core = SanitizeWitness.core
+
+              let witnesses =
+                  [ "an accepted URL passes the floor", { core with SanitizeUrl = Some }
+                    "the URL floor is idempotent",
+                    { core with
+                        SanitizeUrlOrBlank = fun u -> u + " " }
+                    "the URL floor refuses every dangerous URL",
+                    { core with
+                        SanitizeUrl = fun _ -> None }
+                    "the attribute floor is exactly its claim",
+                    { core with
+                        IsSafeAttributeValue = fun _ -> true }
+                    "scrubbed markdown passes the floor", { core with ScrubMarkdown = id }
+                    "the markdown scrub is idempotent",
+                    { core with
+                        ScrubMarkdown = fun s -> s + "x" } ]
+
+              for fragment, w in witnesses do
+                  let results = Conformance.sanitizeLaws w 349 200
+                  Expect.isTrue (hasRed fragment results) (sprintf "%s is red: %A" fragment (redLaws results))
+
+              Expect.isEmpty (redLaws (Conformance.sanitizeLaws core 349 200)) "and green at Core's own floor"
+
+          // Phase 349 — the configured-stream laws are green at the canonical config as well as the
+          // second one the reference run uses, so the family is not a statement about one format.
+          testCase "streamConfigLaws are green at the canonical config and the default hash too"
+          <| fun _ ->
+              Expect.isEmpty
+                  (redLaws (
+                      Conformance.streamConfigLaws
+                          ConformanceTests.sw
+                          ConformanceTests.streamGen
+                          OpStream.defaultHash
+                          OpStream.canonicalConfig
+                          349
+                          100
+                  ))
+                  "green at the canonical config"
 
           testCase "a constant node encode starves all four confluence families on the encode-distinguished guard"
           <| fun _ ->

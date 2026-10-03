@@ -943,23 +943,24 @@ records that no theorem and no law family states the operation's contract and th
 stand in. It is not a pass on the operation's design; it is the inventory of where the next law
 family would earn its keep. A law family that DRIVES an operation as harness (hashing a fixture,
 walking a tree to draw a node) does not list it on its roster: the roster says what a green run is
-evidence FOR. And a roster line is credit for what the family SAMPLES: the kit's op generator
-(`LawKit`) builds a `Batch` of one to three structural ops and never a `Batch` inside a `Batch`, so the
-families that draw ops credit the apply operations over flat batches only. Nested batches are the
-models' (the apply-engine theorems recurse through `Batch`), not a sampled family's.
+evidence FOR. And a roster line is credit for what the family SAMPLES: since Phase 349 the kit's op
+generator (`LawKit.genBatch`) builds a `Batch` of one to three ops any of which may itself be a
+`Batch`, to two levels below the outermost, and every family that draws ops demands a nested batch in
+its op-kind guard — a sample that never nested is starved by name — so the apply operations those
+families credit are credited over nested batches as well as flat ones.
 
 <!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by the Proofs.Coverage family; CORE_APPROVE_LADDER=1 rewrites it -->
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 21 | 0 | 9 | 2 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
-| `Fuaran.Core.Conformance` | 132 | 1 | 85 | 2 | 6 | 0 | 1 | 37 |
+| `Fuaran.Core.Conformance` | 135 | 1 | 89 | 2 | 6 | 0 | 0 | 37 |
 | `Fuaran.Core.Function` | 114 | 20 | 34 | 5 | 1 | 5 | 0 | 49 |
-| `Fuaran.Core.Idl` | 61 | 0 | 0 | 1 | 1 | 0 | 0 | 59 |
+| `Fuaran.Core.Idl` | 61 | 0 | 6 | 1 | 1 | 0 | 0 | 53 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Observer` | 20 | 0 | 8 | 2 | 2 | 0 | 5 | 3 |
-| `Fuaran.Core.OpStream` | 123 | 10 | 28 | 3 | 1 | 0 | 2 | 79 |
+| `Fuaran.Core.OpStream` | 123 | 10 | 36 | 3 | 1 | 5 | 2 | 66 |
 | `Fuaran.Core.OpStream.Dag` | 81 | 24 | 33 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 67 | 22 | 22 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
@@ -968,7 +969,7 @@ models' (the apply-engine theorems recurse through `Batch`), not a sampled famil
 | `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Validator` | 39 | 0 | 17 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 1007 | 119 | 275 | 29 | 15 | 5 | 9 | 555 |
+| **Total** | 1010 | 119 | 293 | 29 | 15 | 10 | 8 | 536 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

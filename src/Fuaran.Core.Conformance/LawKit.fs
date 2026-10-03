@@ -178,8 +178,12 @@ module internal LawKit =
 
     /// The op kinds `genOp` draws, in the order it rolls them — the dimension the op-kind guard
     /// counts. `update` is the identity update unless an `UpdateGen` is supplied.
+    ///
+    /// `nested batch` (Phase 349) is not a kind `opKindOf` answers — a nested batch IS a batch — but
+    /// a demand the tally counts beside the kinds: a `Batch` with a `Batch` among its members. It is
+    /// demanded so a sample that never nested is starved by name, not green over flat batches.
     let opKinds: string list =
-        [ "insert"; "remove"; "move"; "reorder"; "batch"; "update" ]
+        [ "insert"; "remove"; "move"; "reorder"; "batch"; "update"; "nested batch" ]
 
     /// The kind a drawn op is, in the vocabulary of `opKinds`.
     let opKindOf (op: SkeletonOp<'Node, 'Id>) : string =
@@ -228,8 +232,49 @@ module internal LawKit =
                 ReorderChildren(parent, shuffled), r3
             | None -> ReorderChildren(parent, []), r2
 
+    /// How deep a drawn `Batch` may nest (Phase 349): the outermost batch is depth 0, so a batch can
+    /// hold a batch that holds a batch, and no deeper. Bounded so a draw always terminates and a
+    /// sample's ops stay small; two levels below the outermost reach every shape the apply engine
+    /// treats differently — a batch member that is itself a batch, and one whose own member is.
+    [<Literal>]
+    let batchDepthBound = 2
+
+    /// A `Batch` of one to three members drawn against the SAME pre-state (Phase 297), each member a
+    /// structural op or — while `depth` is under `batchDepthBound`, one time in three — a batch drawn
+    /// the same way one level down (Phase 349). Until Phase 349 a batch held structural ops only, so
+    /// no sampled family reached a `Batch` inside a `Batch`.
+    let rec genBatch
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (tree: 'Node)
+        (depth: int)
+        (rng: ConfRng.T)
+        : SkeletonOp<'Node, 'Id> * ConfRng.T =
+        let n, r2 = ConfRng.intBelow 3 rng
+        let mutable r = r2
+        let mutable ops = []
+
+        for _ in 0..n do
+            let nest, r' =
+                if depth < batchDepthBound then
+                    ConfRng.intBelow 3 r
+                else
+                    1, r
+
+            let op, r'' =
+                if nest = 0 then
+                    genBatch nodew idw gen tree (depth + 1) r'
+                else
+                    genStructuralOp nodew idw gen tree r'
+
+            r <- r''
+            ops <- ops @ [ op ]
+
+        Batch ops, r
+
     /// Generate one (possibly-invalid) op against `tree`, drawing EVERY kind (Phase 297): the four
-    /// structural kinds, a `Batch` of one to three structural ops, and an `UpdateNode` — a domain
+    /// structural kinds, a `Batch` of one to three ops (nested since Phase 349, `genBatch`), and an `UpdateNode` — a domain
     /// content edit through `updates`, or the identity update of a drawn node when the domain
     /// supplies none. Until this phase only the four structural kinds were drawn, so `opAlgebra`
     /// never certified `apply ∘ invert` for `UpdateNode`, `footprintLaws` never reached
@@ -256,17 +301,7 @@ module internal LawKit =
             // The structural roll is re-drawn so that `genStructuralOp` keeps one draw sequence
             // whether it is reached from here or called directly.
             genStructuralOp nodew idw gen tree r1
-        | 4 ->
-            let n, r2 = ConfRng.intBelow 3 r1
-            let mutable r = r2
-            let mutable ops = []
-
-            for _ in 0..n do
-                let op, r' = genStructuralOp nodew idw gen tree r
-                r <- r'
-                ops <- ops @ [ op ]
-
-            Batch ops, r
+        | 4 -> genBatch nodew idw gen tree 0 r1
         | _ ->
             let nodes = Tree.preorder nodew tree
             let target, r2 = ConfRng.choose nodes r1
@@ -297,8 +332,14 @@ module internal LawKit =
         let mutable counts: Map<string, int> = Map.empty
 
         member _.Note(op: SkeletonOp<'Node, 'Id>) =
-            let k = opKindOf op
-            counts <- counts |> Map.add k ((counts |> Map.tryFind k |> Option.defaultValue 0) + 1)
+            let bump k =
+                counts <- counts |> Map.add k ((counts |> Map.tryFind k |> Option.defaultValue 0) + 1)
+
+            bump (opKindOf op)
+
+            match op with
+            | Batch inner when inner |> List.exists (fun o -> o.IsBatch) -> bump "nested batch"
+            | _ -> ()
 
         member _.Counts = counts
 

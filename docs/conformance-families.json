@@ -950,6 +950,19 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.sanitizeLaws",
+      "module": "Conformance",
+      "entry": "sanitizeLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["SanitizeWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "1200",
+      "adequacy": "unconditional",
+      "refusal": "built"
+    },
+    {
       "id": "Conformance.snapshotLaws",
       "module": "Conformance",
       "entry": "snapshotLaws",
@@ -974,6 +987,19 @@
       "cases": "200",
       "adequacy": "unconditional",
       "refusal": "none"
+    },
+    {
+      "id": "Conformance.streamConfigLaws",
+      "module": "Conformance",
+      "entry": "streamConfigLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness", "StreamGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "500",
+      "adequacy": "unconditional",
+      "refusal": "built"
     },
     {
       "id": "Conformance.streamLaws",
@@ -1021,7 +1047,7 @@
       "optIn": true,
       "reason": "no-witness-to-certify",
       "discharges": [],
-      "cases": "15",
+      "cases": "16",
       "adequacy": "unconditional",
       "refusal": "none"
     },
@@ -1050,6 +1076,19 @@
       "cases": "360",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
+    },
+    {
+      "id": "StringEscapeVectors.laws",
+      "module": "StringEscapeVectors",
+      "entry": "laws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "39",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "WireNullTolerance.laws",

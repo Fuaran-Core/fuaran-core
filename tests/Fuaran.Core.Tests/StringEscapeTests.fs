@@ -46,11 +46,79 @@ let private plainActors: (Actor * NoteOp) list =
       Agent("model", "4.8", "planner"), Note "two"
       Human "bob \"quoted\" \\ slashed / é", Note "three" ]
 
+/// The committed rendering of `StringEscapeVectors.lines` (Phase 349): the file a host in another
+/// language diffs its own rendering against, so the line FORMAT is pinned in the repository rather
+/// than recomputed by whoever reads it. Written by `--emit-escape`, held to a fresh render below.
+module EscapeCorpus =
+
+    let familyDirName = "escape"
+    let fileName = "string-escape.json"
+
+    let private description =
+        "String-escape vectors (Phase 287; committed since Phase 349). One rule spells a string inside canonical JSON: a quotation mark as backslash-quote, a backslash as two, every control character U+0000-U+001F as a lower-case backslash-u escape with no short form, and nothing else. Each entry of `lines` is one line of the table, three fields separated by one TAB (U+0009), no field carrying a TAB or a line break: for each character vector (every control character, the quotation mark, the backslash, then a plain-text control that must pass through unescaped) its name, its canonical spelling (the body of the JSON string literal, quotes excluded) and the actor encoding of a human whose id is that character; then for each named actor its name, its encoding and the linear chain pre-image at sequence 0 with an empty op. A host that reproduces this package's chain hashes renders the same lines, byte for byte and in this order."
+
+    /// The file, rendered: a header, then one JSON string per line of the table.
+    let render () : string =
+        let lines = StringEscapeVectors.lines ()
+
+        let body =
+            lines
+            |> List.mapi (fun i l ->
+                "    \""
+                + Json.escape l
+                + "\""
+                + (if i < List.length lines - 1 then ",\n" else "\n"))
+            |> String.concat ""
+
+        "{\n  \"family\": \"stringEscape\",\n  \"description\": \""
+        + Json.escape description
+        + "\",\n  \"format\": \"name<TAB>spelling<TAB>pre-image\",\n  \"lines\": [\n"
+        + body
+        + "  ]\n}\n"
+
+    let path (dir: string) =
+        System.IO.Path.Combine(dir, familyDirName, fileName)
+
+    let write (dir: string) : unit =
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, familyDirName))
+        |> ignore
+
+        System.IO.File.WriteAllText(path dir, render ())
+
 [<Tests>]
 let tests =
     testList
         "StringEscape"
-        [ testCase "the conformance family is green, and it measured something"
+        [ testCase "the committed conformance/escape/ file is what this kit renders, and parses back to the lines"
+          <| fun _ ->
+              let file = EscapeCorpus.path (OwnedConformance.root ())
+
+              Expect.isTrue
+                  (System.IO.File.Exists file)
+                  (sprintf "%s exists — run `--emit-escape` (no argument) and commit conformance/" file)
+
+              let committed = (System.IO.File.ReadAllText file).Replace("\r\n", "\n")
+
+              Expect.equal
+                  committed
+                  (EscapeCorpus.render ())
+                  "the committed escape file is not what this kit renders — re-run `--emit-escape` (no argument) and commit conformance/"
+
+              match Json.parse committed with
+              | Ok(JObj members) ->
+                  match members |> List.tryFind (fun (k, _) -> k = "lines") with
+                  | Some(_, JArr items) ->
+                      Expect.equal
+                          (items
+                           |> List.map (function
+                               | JStr s -> s
+                               | other -> failtestf "a line is not a string: %A" other))
+                          (StringEscapeVectors.lines ())
+                          "the file's lines read back as the table"
+                  | other -> failtestf "no lines array: %A" other
+              | other -> failtestf "the escape file does not parse as an object: %A" other
+
+          testCase "the conformance family is green, and it measured something"
           <| fun _ ->
               match StringEscapeVectors.check () with
               | Ok() -> ()

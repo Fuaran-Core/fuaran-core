@@ -369,6 +369,18 @@ module Families =
               (Unconditional
                   "each iteration takes a snapshot and replays across it; a run whose chains are too short to cut one reds both laws as never reached")
               (NoRefusal, "a rejected append is skipped; a compact Error only fails a law")
+          // Phase 349 — the `…With` stream operations at the caller's own config and hash. Every arm
+          // is a strict runner cell built each iteration; the read arm needs a non-empty chain, and a
+          // run whose every op is refused reds it as never reached.
+          c
+              "streamConfigLaws"
+              streamWitness
+              (Some StrongerPromise)
+              []
+              (Unconditional
+                  "each iteration builds a configured chain and journal and checks them under their own and perturbed parameters; a run that never chains an op reds the read law as never reached")
+              (Built,
+               "every refused verification (another genesis, payload or hash, a tampered record, a stale head) is built from the iteration's own chain; a domain-refused append only ends the fold")
           // Phase 297 — the tamper arm runs only when a fresh draw differs from the op it replaces;
           // the law is a STRICT runner cell, so a run that never draws a differing op reds it as
           // never reached rather than passing it.
@@ -958,6 +970,31 @@ module Families =
               (Unconditional
                   "every run reads the field set of every frozen witness record, and every public record the kit's assemblies export, by reflection — nothing is drawn, so the one run is the whole sample")
               (NoRefusal, "reads record field sets by reflection; no op is applied and no refused outcome exists")
+
+          // Phase 349 — the sanitisation floor, at a host's `SanitizeWitness` (`SanitizeWitness.core`
+          // for Core's own). Every arm is built each iteration: the pinned vectors on the first, drawn
+          // splices on every one.
+          c
+              "sanitizeLaws"
+              [ "SanitizeWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional
+                  "every iteration scrubs drawn splices and benign text; the first also runs every pinned URL, markdown and attribute vector")
+              (Built,
+               "the refused URLs, the rejected attribute keys and values and the dangerous markdown are fixed vectors the first iteration always runs")
+
+          // Phase 349 — the string-escape vectors (Phase 287) rostered as laws, on the
+          // `WireNullTolerance.laws` precedent, so `lines`' format is a mapped operation.
+          f
+              "StringEscapeVectors"
+              "laws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "a fixed vector corpus: every run evaluates every character and actor vector and the rendered table, so there is no sample that could miss one")
+              (NoRefusal, "every vector is an accepted spelling; no refused outcome is read")
 
           // Phase 297 — the null-tolerant read vectors (Phase 102), rostered now that the family
           // answers in `LawResult`s. The corpus is fixed, so the one run is the whole sample.
@@ -1687,12 +1724,30 @@ module Families =
                 "FunctionRegistry.entry"
                 "FunctionRegistry.findBySignature"
                 "FunctionRegistry.partiallyApply" ] }
+          { Family = "Conformance.sanitizeLaws"
+            Operations =
+              [ "Idl.Sanitize.isAllowedAttributeKey"
+                "Idl.Sanitize.isSafeAttributeValue"
+                "Idl.Sanitize.sanitizeAttributes"
+                "Idl.Sanitize.sanitizeUrl"
+                "Idl.Sanitize.sanitizeUrlOrBlank"
+                "Idl.Sanitize.scrubMarkdown" ] }
           { Family = "Conformance.snapshotLawsWith"
             Operations =
               [ "OpStream.Snapshots.compact"
                 "OpStream.Snapshots.replayFrom"
                 "OpStream.Snapshots.verify"
                 "OpStream.appendWith" ] }
+          { Family = "Conformance.streamConfigLaws"
+            Operations =
+              [ "OpStream.appendIfWith"
+                "OpStream.appendManyWith"
+                "OpStream.captureEffectWith"
+                "OpStream.captureHeadWith"
+                "OpStream.firstCaptureBreakWith"
+                "OpStream.headWith"
+                "OpStream.verifyCapturesAtWith"
+                "OpStream.verifyChainWith" ] }
           { Family = "Conformance.streamLaws"
             Operations =
               [ "OpStream.empty"
@@ -1706,5 +1761,7 @@ module Families =
             Operations = [ "Conformance.verifyFunction"; "Conformance.renderCounterexample" ] }
           { Family = "FoldConfluence.laneFoldLaws"
             Operations = [ "FoldConfluence.foldOnce"; "Dag.reconcileMany" ] }
+          { Family = "StringEscapeVectors.laws"
+            Operations = [ "StringEscapeVectors.lines" ] }
           { Family = "WireNullTolerance.laws"
             Operations = [ "Json.parseTolerantOfNull"; "Json.parseDetailedTolerantOfNull" ] } ]

@@ -79,6 +79,14 @@ let main argv =
         printfn "Wrote %s" (DecodeLayerTests.DecodeRejectCorpus.vectorsPath dir)
         printfn "Wrote %s" (DecodeLayerTests.DecodeRejectCorpus.manifestPath dir)
         0
+    // Phase 349 — write the `escape/` file (the string-escape table as the lines a host in another
+    // language diffs against); same target rule as `--emit-laws`:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-escape [<dir>]
+    | "--emit-escape" :: rest ->
+        let dir = emitTarget rest
+        StringEscapeTests.EscapeCorpus.write dir
+        printfn "Wrote %s" (StringEscapeTests.EscapeCorpus.path dir)
+        0
     // Phase 184 — write the law-family roster's two generated artefacts (the human-readable
     // `docs/conformance-families.md` and the machine-readable `docs/conformance-families.json`
     // an offline projection reads):
