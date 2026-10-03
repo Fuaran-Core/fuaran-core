@@ -146,6 +146,15 @@ type QueryError =
     /// required `a` bound `[a = 1; a = Null]` was accepted while a resolver reading the map saw
     /// `Null`), and the capture key depended on the order of the list.
     | DuplicateParam of name: string
+    /// The registry's policy DENIED the invocation (Phase 318): the gate named `policy` refused it,
+    /// with `reason` and the `allowed` alternatives its guidance enumerates. Raised after the
+    /// parameters validated and before the resolver: no resolver ran, and nothing was captured.
+    /// Prefixed `Query…` because `InvokeError.PolicyRefused` is a case in the same namespace, and an
+    /// unqualified case name shared by two unions resolves to whichever was declared last.
+    | QueryPolicyRefused of policy: string * reason: string * allowed: string list
+    /// The registry's policy answered `NeedsApproval` (Phase 318): the gate named `policy` will not
+    /// let the query run until an approval is given. No resolver ran.
+    | QueryApprovalRequired of policy: string
 
 /// A resolver's typed failure (Phase 295) — what `Query.invokeWithArgs`'s resolver answers when the
 /// fetch cannot complete, so the refusals the resolver alone can know of reach the caller as the
@@ -229,6 +238,20 @@ module QueryError =
             "Refused: parameter '"
             + name
             + "' is given more than once. Give each parameter once."
+        | QueryPolicyRefused(policy, reason, []) ->
+            "Refused: the policy '" + policy + "' does not allow this: " + reason + "."
+        | QueryPolicyRefused(policy, reason, allowed) ->
+            "Refused: the policy '"
+            + policy
+            + "' does not allow this: "
+            + reason
+            + ". What it allows instead: "
+            + quoteAll allowed
+            + "."
+        | QueryApprovalRequired policy ->
+            "Refused: the policy '"
+            + policy
+            + "' requires an approval before this query runs."
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Query.validateParamsAll`'s answer.
@@ -568,6 +591,10 @@ type QueryRegistry =
         /// The registered queries keyed by `Query.Id`. Build it with `QueryRegistry.register`,
         /// which refuses a duplicate id, rather than adding to the map directly.
         Queries: Map<string, Query>
+        /// The gates every dispatch runs after the parameters validate and before the resolver, and
+        /// the observers a refusal reaches (Phase 318). `RegistryPolicy.none` in `empty`; only
+        /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
+        Policy: RegistryPolicy<Query, (string * Cell) list>
     }
 
 /// Building, enumerating and dispatching through a `QueryRegistry`.
@@ -575,7 +602,9 @@ module QueryRegistry =
 
     /// The registry with no queries: every dispatch against it is `NoSuchQuery` with an empty
     /// `known` list.
-    let empty: QueryRegistry = { Queries = Map.empty }
+    let empty: QueryRegistry =
+        { Queries = Map.empty
+          Policy = RegistryPolicy.none }
 
     /// The registration refusal a declaration earns, or `None` (Phase 316): a declaration naming a
     /// parameter twice is refused `DuplicateParam`, naming the first repeated name — the query seam's
@@ -593,7 +622,7 @@ module QueryRegistry =
     /// otherwise, naming the repeated name). The id is checked first.
     let register (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
         KeyedRegistry.register DuplicateQuery admissionFault q.Id q r.Queries
-        |> Result.map (fun m -> { Queries = m })
+        |> Result.map (fun m -> { r with Queries = m })
 
     /// The query registered under `id`, or `None`. A bare lookup: unlike `dispatch` it
     /// validates nothing and names no alternatives.
@@ -603,9 +632,59 @@ module QueryRegistry =
     /// the contract (`queryLaws` certifies it).
     let enumerate (r: QueryRegistry) : Query list = r.Queries |> Map.toList |> List.map snd
 
+    // ---- the policy gate (Phase 318) ----
+
+    /// `r` with `gate` added to the gates every dispatch runs (`RegistryPolicy.withGate`): after the
+    /// parameters validate, before the resolver. The decision is the join over every gate, so adding
+    /// one can only refuse more.
+    let withGate (gate: PolicyGate<Query, (string * Cell) list>) (r: QueryRegistry) : QueryRegistry =
+        { r with
+            Policy = RegistryPolicy.withGate gate r.Policy }
+
+    /// `r` with `observe` told of every invocation its policy refuses, before the refusal returns.
+    let onDenied (observe: PolicyDenial<(string * Cell) list> -> unit) (r: QueryRegistry) : QueryRegistry =
+        { r with
+            Policy = RegistryPolicy.onDenied observe r.Policy }
+
+    /// What the registry would decide for an invocation without dispatching it: an unknown id is a
+    /// `Deny` naming the registered ids as alternatives, parameters that do not validate a `Deny`
+    /// with the refusal's sentence, otherwise the gates' join. No observer is told.
+    let decide (r: QueryRegistry) (id: string) (args: (string * Cell) list) : PolicyDecision =
+        match Map.tryFind id r.Queries with
+        | None ->
+            let known = r.Queries |> Map.toList |> List.map fst
+            PolicyDecision.denyWith (QueryError.describe (NoSuchQuery(id, known))) known
+        | Some q ->
+            match Query.validateParams q args with
+            | Error e -> PolicyDecision.deny (QueryError.describe e)
+            | Ok() -> RegistryPolicy.decide r.Policy q args
+
+    /// The policy's admission of one validated invocation, in this seam's error.
+    let private admit (r: QueryRegistry) (q: Query) (args: (string * Cell) list) : Result<unit, QueryError> =
+        RegistryPolicy.admit
+            (fun policy (g: RejectionGuidance) -> QueryPolicyRefused(policy, g.Message, g.Alternatives))
+            QueryApprovalRequired
+            r.Policy
+            q.Id
+            q
+            args
+
+    /// Validate, admit through the policy, then `run` — the order every dispatch keeps (Phase 318).
+    let private gated
+        (r: QueryRegistry)
+        (q: Query)
+        (args: (string * Cell) list)
+        (run: unit -> Result<Deferred<QueryResult>, QueryError>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        Query.validateParams q args
+        |> Result.bind (fun () -> admit r q args)
+        |> Result.bind run
+
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered id
-    /// is `NoSuchQuery`), then `Query.invoke`. The host resolver is supplied by the caller per the
-    /// resolved query's source + placement, and answers in the `Deferred` envelope — so the same
+    /// is `NoSuchQuery`), validate the parameters, run the policy's gates (Phase 318 —
+    /// `QueryPolicyRefused` / `QueryApprovalRequired`, reaching every `onDenied` observer), then the
+    /// resolver; with no gate this is `Query.invoke` exactly. The host resolver is supplied by the
+    /// caller per the resolved query's source + placement, and answers in the `Deferred` envelope — so the same
     /// three outcomes `Query.invoke` documents are what a registry dispatch returns.
     let dispatch
         (r: QueryRegistry)
@@ -615,7 +694,7 @@ module QueryRegistry =
         : Result<Deferred<QueryResult>, QueryError> =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
-        | Some q -> Query.invoke q args resolve
+        | Some q -> gated r q args (fun () -> Query.invoke q args resolve)
 
     /// `dispatch`, with the resolver handed the resolved query and the validated argument list
     /// (`Query.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny the same.
@@ -627,7 +706,7 @@ module QueryRegistry =
         : Result<Deferred<QueryResult>, QueryError> =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
-        | Some q -> Query.invokeWithArgs q args resolve
+        | Some q -> gated r q args (fun () -> Query.invokeWithArgs q args resolve)
 
     /// `dispatch` for ONE PAGE (Phase 316): resolve the id (default-deny), then `Query.invokePage`,
     /// handing the resolver the page token. `dispatch r id args resolve` is
@@ -641,7 +720,7 @@ module QueryRegistry =
         : Result<Deferred<QueryResult>, QueryError> =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
-        | Some q -> Query.invokePage q args pageToken resolve
+        | Some q -> gated r q args (fun () -> Query.invokePage q args pageToken resolve)
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
@@ -650,26 +729,161 @@ module QueryRegistry =
     /// the registry it was registered into.
     let unregister (id: string) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
         KeyedRegistry.unregister (fun id known -> NoSuchQuery(id, known)) id r.Queries
-        |> Result.map (fun m -> { Queries = m })
+        |> Result.map (fun m -> { r with Queries = m })
 
     /// Swap the query registered under `q.Id` for `q` — the hot-reload verb. Refused `NoSuchQuery`
     /// when the id is not registered, and held to the admission `register` runs (`DuplicateParam`);
     /// on a refusal the registry is unchanged.
     let replace (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
         KeyedRegistry.replace (fun id known -> NoSuchQuery(id, known)) admissionFault q.Id q r.Queries
-        |> Result.map (fun m -> { Queries = m })
+        |> Result.map (fun m -> { r with Queries = m })
 
     /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny. An id
     /// in `keep` the registry does not hold is ignored, so the result enumerates a subset of what `r`
     /// enumerates.
     let restrict (keep: Set<string>) (r: QueryRegistry) : QueryRegistry =
-        { Queries = KeyedRegistry.restrict keep r.Queries }
+        { r with
+            Queries = KeyedRegistry.restrict keep r.Queries }
 
     /// The join of two registries whose ids are disjoint — refused `DuplicateQuery` naming the first
-    /// id, in id order, that both hold (no silent overwrite, as `register`). Associative.
+    /// id, in id order, that both hold (no silent overwrite, as `register`). Associative. The union
+    /// runs both registries' gates (Phase 318, `RegistryPolicy.combine`).
     let union (a: QueryRegistry) (b: QueryRegistry) : Result<QueryRegistry, QueryError> =
         KeyedRegistry.union DuplicateQuery a.Queries b.Queries
-        |> Result.map (fun m -> { Queries = m })
+        |> Result.map (fun m ->
+            { Queries = m
+              Policy = RegistryPolicy.combine a.Policy b.Policy })
+
+    // ---- invocation-keyed capture (Phase 318) ----
+
+    /// The keyed capture of one admitted invocation: journal the attempt under `key` and the query's
+    /// determinism label, run `run`, settle with its answer. A deterministic query journals nothing.
+    let private captured
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (q: Query)
+        (key: string)
+        (run: unit -> Result<Deferred<QueryResult>, QueryError>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        let det = Query.determinismTag q
+
+        if det = OpStream.deterministicTag then
+            run (), None, journal
+        else
+            let mutable answered: Result<Deferred<QueryResult>, QueryError> = Ok Pending
+
+            let _, occ, journal' =
+                OpStream.captureEffectKeyed
+                    hashFn
+                    encode
+                    det
+                    key
+                    (fun () ->
+                        answered <- run ()
+
+                        match answered with
+                        | Ok d -> Deferred.settled d
+                        | Error e -> Some(Error(QueryError.describe e)))
+                    journal
+
+            answered, Some(key, occ), journal'
+
+    /// `dispatch`, journalling the invocation in the KEYED capture journal under
+    /// `Query.invocationKey` (Phase 318): the attempt after the id resolved, the parameters validated
+    /// and the policy admitted it, before the resolver runs; a `Ready` result settles it `Completed`
+    /// (through `encode`, `QueryCodec.encodeResult` for the canonical form), a refusal from the
+    /// resolver settles it `Refused` with
+    /// `QueryError.describe`'s sentence, and `Pending` leaves it open with the returned ticket. A
+    /// refusal before the resolver journals nothing; a deterministic query journals nothing. The
+    /// result is exactly `dispatch`'s.
+    let dispatchCaptured
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (resolve: Query -> Deferred<QueryResult>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        match Map.tryFind id r.Queries with
+        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), None, journal
+        | Some q ->
+            match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
+            | Error e -> Error e, None, journal
+            | Ok() ->
+                captured hashFn encode q (Query.invocationKey q args) (fun () -> Query.invoke q args resolve) journal
+
+    /// `dispatchPage`, journalled under `Query.invocationKeyPage` (Phase 318), so every page of a
+    /// non-deterministic query has its own capture and replays from it.
+    let dispatchPageCaptured
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> Deferred<QueryResult>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        match Map.tryFind id r.Queries with
+        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), None, journal
+        | Some q ->
+            match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
+            | Error e -> Error e, None, journal
+            | Ok() ->
+                captured
+                    hashFn
+                    encode
+                    q
+                    (Query.invocationKeyPage q args pageToken)
+                    (fun () -> Query.invokePage q args pageToken resolve)
+                    journal
+
+    /// REPLAY a query invocation from the keyed journal instead of resolving it (Phase 318). The id,
+    /// the parameters and the policy run exactly as `dispatchPage` (a refusal there is answered as
+    /// `dispatchPage` answers it, consulting no journal); then a non-deterministic query is answered by
+    /// its invocation key — `invocationKeyPage`, which for `None` is `invocationKey` — a completion as
+    /// `Ready` (through `decode`, `QueryCodec.decodeResult` for the canonical form), a recorded
+    /// refusal as `ExecutionFailed` with the
+    /// recorded sentence, an unsettled attempt as `Pending`. A deterministic query resolves live. A
+    /// journal that cannot answer is the `KeyedCaptureFault`, never a live fetch.
+    let dispatchReplayed
+        (decode: string -> Result<QueryResult, string>)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> Deferred<QueryResult>)
+        (cursor: Map<string, int>)
+        (journal: KeyedCapture list)
+        : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
+        match Map.tryFind id r.Queries with
+        | None -> Ok(Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), cursor)
+        | Some q ->
+            match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
+            | Error e -> Ok(Error e, cursor)
+            | Ok() ->
+                let det = Query.determinismTag q
+
+                if det = OpStream.deterministicTag then
+                    Ok(Query.invokePage q args pageToken resolve, cursor)
+                else
+                    OpStream.replayEffectKeyed
+                        decode
+                        det
+                        (Query.invocationKeyPage q args pageToken)
+                        (fun () -> None)
+                        cursor
+                        journal
+                    |> Result.map (fun (answer, cursor') ->
+                        let outcome =
+                            match answer with
+                            | Some(Ok v) -> Ok(Ready v)
+                            | Some(Error m) -> Error(ExecutionFailed(m, []))
+                            | None -> Ok Pending
+
+                        outcome, cursor')
 
 /// The canonical wire codec for a `Query` declaration + a `QueryResult`. Round-trips the typed
 /// params, the result schema, the effect class, the source (via `ColumnCodec`), and the paging
@@ -890,6 +1104,9 @@ module QueryCodec =
         | Timeout -> Canon.typed "timeout" []
         | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
         | DuplicateParam name -> Canon.typed "duplicateParam" [ "name", JStr name ]
+        | QueryPolicyRefused(policy, reason, allowed) ->
+            Canon.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
+        | QueryApprovalRequired policy -> Canon.typed "approvalRequired" [ "policy", JStr policy ]
 
     /// `queryErrorJson` as canonical JSON text — the wire form; `QueryError.describe` is the
     /// sentence a model reads.
@@ -918,7 +1135,13 @@ module QueryCodec =
               "executionFailed", both (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
               "timeout", Decoder.succeed Timeout
               "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull
-              "duplicateParam", str "name" |> Decoder.map DuplicateParam ]
+              "duplicateParam", str "name" |> Decoder.map DuplicateParam
+              "policyRefused",
+              str "policy"
+              |> Decoder.bind (fun policy ->
+                  both (str "reason") (strList "allowed") (fun reason allowed ->
+                      QueryPolicyRefused(policy, reason, allowed)))
+              "approvalRequired", str "policy" |> Decoder.map QueryApprovalRequired ]
 
         // The dispatch's own miss keeps this codec's sentence.
         fun el ->

@@ -590,7 +590,11 @@ module internal SurfaceLaws =
             "IsAllowedAttributeKey"
             "IsSafeAttributeValue"
             "SanitizeAttributes"
-            "ScrubMarkdown" ] ]
+            "ScrubMarkdown" ]
+          // Phase 318 — the AI surface's composing witness, frozen at birth: it EMBEDS the frozen
+          // `AiSurfaceWitness` and adds the dry run and the effects accessor, the "compose, never
+          // grow" route STABILITY prescribes, and a domain constructs it by name.
+          "GuardedSurfaceWitness", typeof<GuardedSurfaceWitness<obj, obj, obj>>, [ "Surface"; "DryRun"; "EffectsOf" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).

@@ -86,6 +86,14 @@ type InvokeError =
     /// the second binding: one address takes one value, so which one was meant is not a question
     /// the seam answers, and a capture key over the list would depend on its order.
     | DuplicateArg of addr: string
+    /// The registry's policy DENIED the invocation (Phase 318): the gate named `policy` refused it,
+    /// with `reason` and the `allowed` alternatives its guidance enumerates. Raised after the
+    /// arguments validated and before the body: no body ran, and nothing was captured.
+    | PolicyRefused of policy: string * reason: string * allowed: string list
+    /// The registry's policy answered `NeedsApproval` for the invocation (Phase 318): the gate named
+    /// `policy` will not let it run until an approval is given. Raised where `PolicyRefused` is, and
+    /// with the same guarantee — no body ran.
+    | ApprovalRequired of policy: string
 
 /// What a model reads when an invocation is refused (Phase 251). The union names the failure and
 /// carries the alternatives in its fields; `describe` turns a case into one plain sentence that
@@ -148,6 +156,25 @@ module InvokeError =
             "Refused: argument '"
             + addr
             + "' is given more than once. Give each argument once."
+        | PolicyRefused(policy, reason, []) ->
+            "Refused: the policy '" + policy + "' does not allow this: " + reason + "."
+        | PolicyRefused(policy, reason, allowed) ->
+            "Refused: the policy '"
+            + policy
+            + "' does not allow this: "
+            + reason
+            + ". What it allows instead: "
+            + Space.quoteAll allowed
+            + "."
+        | ApprovalRequired policy ->
+            "Refused: the policy '"
+            + policy
+            + "' requires an approval before this tool runs."
+
+    /// The refusal a registry's policy makes, in this seam's error (Phase 318): a `Deny`'s guidance
+    /// becomes `PolicyRefused` naming the gate, its message and its alternatives.
+    let internal policyRefused (policy: string) (g: RejectionGuidance) : InvokeError =
+        PolicyRefused(policy, g.Message, g.Alternatives)
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Capability.validateArgsAll`'s answer, so a call with two bad arguments is answered once.
@@ -454,6 +481,10 @@ type CapabilityRegistry =
     {
         /// Keyed by `Capability.Id`; every member was admitted by `register`, so each is total.
         Capabilities: Map<string, Capability>
+        /// The gates every dispatch runs after validation and before the body, and the observers a
+        /// refusal reaches (Phase 318). `RegistryPolicy.none` — no gate — in `empty`; only
+        /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
+        Policy: RegistryPolicy<Capability, (string * string) list>
     }
 
 /// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295,
@@ -464,7 +495,9 @@ module CapabilityRegistry =
 
     /// The registry with no capabilities: every dispatch through it is `NoSuchCapability` with an
     /// empty `known` list.
-    let empty: CapabilityRegistry = { Capabilities = Map.empty }
+    let empty: CapabilityRegistry =
+        { Capabilities = Map.empty
+          Policy = RegistryPolicy.none }
 
     /// Register a capability — additive, no silent overwrite (a duplicate id is a named error), and
     /// only a TOTAL one (Phase 295): a capability whose signature carries a repeat over no count
@@ -473,7 +506,54 @@ module CapabilityRegistry =
     /// non-finite space, two holes at one address — is `IllFormedCapability`.
     let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
         KeyedRegistry.register DuplicateCapability Capability.admissionFault c.Id c r.Capabilities
-        |> Result.map (fun m -> { Capabilities = m })
+        |> Result.map (fun m -> { r with Capabilities = m })
+
+    // ---- the policy gate (Phase 318) ----
+
+    /// `r` with `gate` added to the gates every dispatch runs (`RegistryPolicy.withGate`). A gate runs
+    /// after the arguments validate and before the body, and the decision is the join over every
+    /// gate — so adding one can only refuse more: an invocation `r` refused, the result refuses.
+    let withGate (gate: PolicyGate<Capability, (string * string) list>) (r: CapabilityRegistry) : CapabilityRegistry =
+        { r with
+            Policy = RegistryPolicy.withGate gate r.Policy }
+
+    /// `r` with `observe` told of every invocation its policy refuses — a `Deny` or a
+    /// `NeedsApproval` — before the refusal is returned. A refusal for any other reason (an unknown
+    /// id, an argument out of space) is not a policy refusal and reaches no observer.
+    let onDenied (observe: PolicyDenial<(string * string) list> -> unit) (r: CapabilityRegistry) : CapabilityRegistry =
+        { r with
+            Policy = RegistryPolicy.onDenied observe r.Policy }
+
+    /// What the registry would decide for an invocation, without dispatching it (Phase 318) — the
+    /// meeting point of default-deny by shape and the policy gate: an id the
+    /// registry does not hold is a `Deny` whose guidance is `NoSuchCapability`'s sentence with the
+    /// registered ids as its alternatives; an invocation whose arguments do not validate is a
+    /// `Deny` with the validation refusal's sentence; otherwise the gates' join. No observer is told.
+    let decide (r: CapabilityRegistry) (id: string) (args: (string * string) list) : PolicyDecision =
+        match Map.tryFind id r.Capabilities with
+        | None ->
+            let known = r.Capabilities |> Map.toList |> List.map fst
+            PolicyDecision.denyWith (InvokeError.describe (NoSuchCapability(id, known))) known
+        | Some c ->
+            match Capability.validateArgs c args with
+            | Error e -> PolicyDecision.deny (InvokeError.describe e)
+            | Ok() -> RegistryPolicy.decide r.Policy c args
+
+    /// The policy's admission of one validated invocation: `Ok ()`, or the typed refusal after the
+    /// observers were told.
+    let private admit
+        (r: CapabilityRegistry)
+        (c: Capability)
+        (args: (string * string) list)
+        : Result<unit, InvokeError> =
+        RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired r.Policy c.Id c args
+
+    /// A body's answer in the seam's outcome: `Failed m` is the typed `BodyFailed m`.
+    let private settle (d: Deferred<'v>) : Result<Deferred<'v>, InvokeError> =
+        match d with
+        | Ready v -> Ok(Ready v)
+        | Pending -> Ok Pending
+        | Failed m -> Error(BodyFailed m)
 
     /// The capability registered under exactly `id` (ordinal, case-sensitive), or `None`.
     let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Map.tryFind id r.Capabilities
@@ -484,9 +564,12 @@ module CapabilityRegistry =
         r.Capabilities |> Map.toList |> List.map snd
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered
-    /// id is `NoSuchCapability`), then `Capability.invoke`. The host body is supplied by the caller
-    /// per the resolved capability's placement, and answers in the `Deferred` envelope (Phase 210 —
-    /// the same three outcomes `Capability.invoke` documents).
+    /// id is `NoSuchCapability`), validate the arguments, run the policy's gates (Phase 318 — a
+    /// `Deny` is `PolicyRefused`, a `NeedsApproval` is `ApprovalRequired`, and either reaches every
+    /// `onDenied` observer), and only then the body. With no gate this is `Capability.invoke`
+    /// exactly. The host body is supplied by the caller per the resolved capability's placement, and
+    /// answers in the `Deferred` envelope (Phase 210 — the same three outcomes `Capability.invoke`
+    /// documents).
     let dispatch
         (r: CapabilityRegistry)
         (id: string)
@@ -495,10 +578,14 @@ module CapabilityRegistry =
         : Result<Deferred<'v>, InvokeError> =
         match Map.tryFind id r.Capabilities with
         | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
-        | Some c -> Capability.invoke c args (body c)
+        | Some c ->
+            Capability.validateArgs c args
+            |> Result.bind (fun () -> admit r c args)
+            |> Result.bind (fun () -> settle (body c ()))
 
     /// `dispatch`, with the body handed the resolved capability and the validated arguments, typed
-    /// (`Capability.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny the same.
+    /// (`Capability.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny and gated
+    /// the same (Phase 318: the gate runs after the arguments type, before the body).
     let dispatchWithArgs
         (r: CapabilityRegistry)
         (id: string)
@@ -507,7 +594,100 @@ module CapabilityRegistry =
         : Result<Deferred<'v>, InvokeError> =
         match Map.tryFind id r.Capabilities with
         | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
-        | Some c -> Capability.invokeWithArgs c args (body c)
+        | Some c ->
+            Capability.typeArgs c args
+            |> Result.bind (fun typed -> admit r c args |> Result.map (fun () -> typed))
+            |> Result.bind (fun typed -> settle (body c typed))
+
+    // ---- invocation-keyed capture (Phase 318) ----
+
+    /// `dispatch`, journalling the invocation in the KEYED capture journal (Phase 318) under
+    /// `Capability.invocationKey` and the capability's `determinismTag`: the attempt is journalled
+    /// after the id resolved, the arguments validated and the policy admitted the invocation, and
+    /// before the body runs; the body's answer settles it — `Ready v` as `Completed` (`encode v`),
+    /// `Failed m` as `Refused m` — and a `Pending` answer leaves the attempt open, with the returned
+    /// ticket (`key`, occurrence) the one `OpStream.settleEffectKeyed` settles it with later. A refusal
+    /// before the body journals nothing, so a policy refusal leaves no capture; a deterministic
+    /// capability journals nothing either (ticket `None`). The result is exactly `dispatch`'s.
+    let dispatchCaptured
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (r: CapabilityRegistry)
+        (id: string)
+        (args: (string * string) list)
+        (body: Capability -> unit -> Deferred<'v>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<'v>, InvokeError> * (string * int) option * KeyedCapture list =
+        match Map.tryFind id r.Capabilities with
+        | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst)), None, journal
+        | Some c ->
+            match Capability.validateArgs c args |> Result.bind (fun () -> admit r c args) with
+            | Error e -> Error e, None, journal
+            | Ok() ->
+                let det = Capability.determinismTag c
+
+                if det = OpStream.deterministicTag then
+                    settle (body c ()), None, journal
+                else
+                    let key = Capability.invocationKey c args
+                    let mutable answered = Pending
+
+                    let _, occ, journal' =
+                        OpStream.captureEffectKeyed
+                            hashFn
+                            encode
+                            det
+                            key
+                            (fun () ->
+                                answered <- body c ()
+                                Deferred.settled answered)
+                            journal
+
+                    settle answered, Some(key, occ), journal'
+
+    /// REPLAY an invocation from the keyed capture journal instead of running its body (Phase 318) —
+    /// so a `Network` capability's replay is exact. The id resolves, the arguments validate and the
+    /// policy runs exactly as `dispatch` (a refusal there is answered as `dispatch` answers it, and
+    /// consults no journal); then a non-deterministic capability is answered from the journal by its
+    /// invocation key: a completion as `Ready`, a recorded refusal as the same `BodyFailed`, an attempt
+    /// that never settled as `Pending`. A deterministic capability runs `body` live, as a reproducible
+    /// effect may. A journal that cannot answer is the `KeyedCaptureFault` — `NoCapture` for an
+    /// invocation never captured, `Exhausted` past the recorded ones — never a live call.
+    let dispatchReplayed
+        (decode: string -> Result<'v, string>)
+        (r: CapabilityRegistry)
+        (id: string)
+        (args: (string * string) list)
+        (body: Capability -> unit -> Deferred<'v>)
+        (cursor: Map<string, int>)
+        (journal: KeyedCapture list)
+        : Result<Result<Deferred<'v>, InvokeError> * Map<string, int>, KeyedCaptureFault> =
+        match Map.tryFind id r.Capabilities with
+        | None -> Ok(Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst)), cursor)
+        | Some c ->
+            match Capability.validateArgs c args |> Result.bind (fun () -> admit r c args) with
+            | Error e -> Ok(Error e, cursor)
+            | Ok() ->
+                let det = Capability.determinismTag c
+
+                if det = OpStream.deterministicTag then
+                    Ok(settle (body c ()), cursor)
+                else
+                    OpStream.replayEffectKeyed
+                        decode
+                        det
+                        (Capability.invocationKey c args)
+                        (fun () -> None)
+                        cursor
+                        journal
+                    |> Result.map (fun (answer, cursor') ->
+                        let outcome =
+                            match answer with
+                            | Some(Ok v) -> Ok(Ready v)
+                            | Some(Error m) -> Error(BodyFailed m)
+                            | None -> Ok Pending
+
+                        outcome, cursor')
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
@@ -516,7 +696,7 @@ module CapabilityRegistry =
     /// registered gives back the registry it was registered into.
     let unregister (id: string) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
         KeyedRegistry.unregister (fun id known -> NoSuchCapability(id, known)) id r.Capabilities
-        |> Result.map (fun m -> { Capabilities = m })
+        |> Result.map (fun m -> { r with Capabilities = m })
 
     /// Swap the capability registered under `c.Id` for `c` — the hot-reload verb. Refused
     /// `NoSuchCapability` when the id is not registered, and held to the admission gate `register`
@@ -529,19 +709,24 @@ module CapabilityRegistry =
             c.Id
             c
             r.Capabilities
-        |> Result.map (fun m -> { Capabilities = m })
+        |> Result.map (fun m -> { r with Capabilities = m })
 
     /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny is a
     /// `restrict` of the host's registry. An id in `keep` the registry does not hold is ignored, so
     /// the result enumerates a subset of what `r` enumerates and dispatches nothing `r` would refuse.
     let restrict (keep: Set<string>) (r: CapabilityRegistry) : CapabilityRegistry =
-        { Capabilities = KeyedRegistry.restrict keep r.Capabilities }
+        { r with
+            Capabilities = KeyedRegistry.restrict keep r.Capabilities }
 
     /// The join of two registries whose ids are disjoint — refused `DuplicateCapability` naming the
-    /// first id, in id order, that both hold (no silent overwrite, as `register`). Associative.
+    /// first id, in id order, that both hold (no silent overwrite, as `register`). Associative. The
+    /// union runs BOTH registries' gates and tells both registries' observers (Phase 318,
+    /// `RegistryPolicy.combine`), so it refuses every invocation either registry's policy refused.
     let union (a: CapabilityRegistry) (b: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
         KeyedRegistry.union DuplicateCapability a.Capabilities b.Capabilities
-        |> Result.map (fun m -> { Capabilities = m })
+        |> Result.map (fun m ->
+            { Capabilities = m
+              Policy = RegistryPolicy.combine a.Policy b.Policy })
 
 /// The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295): each
 /// member forwards to `CapabilityRegistry`.
@@ -950,6 +1135,9 @@ module CapabilityCodec =
         | IllFormedCapability(id, fault) ->
             Canon.typed "illFormedCapability" [ "id", JStr id; "fault", faultJson fault ]
         | DuplicateArg addr -> Canon.typed "duplicateArg" [ "addr", JStr addr ]
+        | PolicyRefused(policy, reason, allowed) ->
+            Canon.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
+        | ApprovalRequired policy -> Canon.typed "approvalRequired" [ "policy", JStr policy ]
 
     /// `invokeErrorJson` rendered canonically; `decodeInvokeError` reads it back to the same value.
     let encodeInvokeError (e: InvokeError) : string = Canon.render (invokeErrorJson e)
@@ -979,7 +1167,13 @@ module CapabilityCodec =
                   both (str "id") (strList "addrs") (fun id addrs -> NonTotalCapability(id, addrs))
                   "illFormedCapability",
                   both (str "id") (Decoder.field "fault" faultOf) (fun id f -> IllFormedCapability(id, f))
-                  "duplicateArg", str "addr" |> Decoder.map DuplicateArg ]
+                  "duplicateArg", str "addr" |> Decoder.map DuplicateArg
+                  "policyRefused",
+                  str "policy"
+                  |> Decoder.bind (fun policy ->
+                      both (str "reason") (strList "allowed") (fun reason allowed ->
+                          PolicyRefused(policy, reason, allowed)))
+                  "approvalRequired", str "policy" |> Decoder.map ApprovalRequired ]
 
         Decoder.describing invokeError el
 

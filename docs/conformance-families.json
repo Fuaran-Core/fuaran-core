@@ -627,6 +627,19 @@
       "refusal": "drawn"
     },
     {
+      "id": "Conformance.keyedCaptureLaws",
+      "module": "Conformance",
+      "entry": "keyedCaptureLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "1000",
+      "adequacy": "unconditional",
+      "refusal": "built"
+    },
+    {
       "id": "Conformance.keyedChildrenLaws",
       "module": "Conformance",
       "entry": "keyedChildrenLaws",
@@ -780,6 +793,32 @@
       "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "built"
+    },
+    {
+      "id": "Conformance.policyLaws",
+      "module": "Conformance",
+      "entry": "policyLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "1000",
+      "adequacy": "unconditional",
+      "refusal": "built"
+    },
+    {
+      "id": "Conformance.policyLawsAt",
+      "module": "Conformance",
+      "entry": "policyLawsAt",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["GuardedSurfaceWitness"],
+      "optIn": true,
+      "reason": "needs-witness-capability",
+      "discharges": [],
+      "cases": "900",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "Conformance.projectionLaws",
@@ -1047,9 +1086,22 @@
       "optIn": true,
       "reason": "no-witness-to-certify",
       "discharges": [],
-      "cases": "16",
+      "cases": "17",
       "adequacy": "unconditional",
       "refusal": "none"
+    },
+    {
+      "id": "Conformance.writeGateLaws",
+      "module": "Conformance",
+      "entry": "writeGateLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "1200",
+      "adequacy": "guarded-reached",
+      "refusal": "drawn"
     },
     {
       "id": "FoldConfluence.laneFoldLaws",

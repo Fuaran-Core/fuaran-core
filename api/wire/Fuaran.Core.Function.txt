@@ -48,6 +48,7 @@ doc	invokeError / DeclarationFault.DuplicateHoleAddr	sha256:d786ab1845e36fad4446
 doc	invokeError / DeclarationFault.EmptySpace	sha256:77c31aa666fde0171e5d6c6edba84c243a0e3e10ffdf540fb06f577fcf74cbfc	{"$type":"illFormedCapability","fault":{"$type":"emptySpace","addr":"s","space":{"$type":"intRange","max":1,"min":1}},"id":"s"}
 doc	invokeError / DeclarationFault.HoleUnderSlot	sha256:205bed4c94e971cc385ab66c239ad0b7e5ee233a7f5ffc4f329c17c9b085f66c	{"$type":"illFormedCapability","fault":{"$type":"holeUnderSlot","node":"s"},"id":"s"}
 doc	invokeError / DeclarationFault.NonFiniteBound	sha256:3a7c012b0c394b9f8fd8b731c7cc8c3b9fa3df8b76901585d2e4c84182b1f289	{"$type":"illFormedCapability","fault":{"$type":"nonFiniteBound","addr":"s"},"id":"s"}
+doc	invokeError / InvokeError.ApprovalRequired	sha256:ca8797ddd0dd61af54402cfda6a4d2937216d9ccbc7add43dd47054d906750f4	{"$type":"approvalRequired","policy":"s"}
 doc	invokeError / InvokeError.ArgOutOfSpace	sha256:8bea1f5e58b347b588e4f20e83c30b08efcc7dd5364772d8b00ede9693c88904	{"$type":"argOutOfSpace","addr":"s","got":"s","space":{"$type":"intRange","max":1,"min":1}}
 doc	invokeError / InvokeError.BodyFailed	sha256:9fd996b6d6be1b53565a72caf0cbb42d47410ed07215c5ddcd4e67aa5adfccb2	{"$type":"bodyFailed","reason":"s"}
 doc	invokeError / InvokeError.DuplicateArg	sha256:e7afbd2bef29f653dd045663dd1f017d8b55a0ba23df9da58fa56dda4be29377	{"$type":"duplicateArg","addr":"s"}
@@ -55,6 +56,7 @@ doc	invokeError / InvokeError.DuplicateCapability	sha256:1f6cd76956fe0ab9454d853
 doc	invokeError / InvokeError.IllFormedCapability	sha256:77c31aa666fde0171e5d6c6edba84c243a0e3e10ffdf540fb06f577fcf74cbfc	{"$type":"illFormedCapability","fault":{"$type":"emptySpace","addr":"s","space":{"$type":"intRange","max":1,"min":1}},"id":"s"}
 doc	invokeError / InvokeError.NoSuchCapability	sha256:a00f5ff0b8f9179dcbad9ac66834fb669bbbabb207d72e12eb344583a1eb63d4	{"$type":"noSuchCapability","id":"s","known":["s"]}
 doc	invokeError / InvokeError.NonTotalCapability	sha256:362f5b8c7a69c64bc4775fca1b4f6b3995e79ec7febb7eb0db767cf01ba1bf89	{"$type":"nonTotalCapability","addrs":["s"],"id":"s"}
+doc	invokeError / InvokeError.PolicyRefused	sha256:5140c5d66e6875c380cc3e0e8a4c2b67ef7085ae0a47998dbb6d4263aa396b73	{"$type":"policyRefused","allowed":["s"],"policy":"s","reason":"s"}
 doc	invokeError / InvokeError.RequiredArgsUnbound	sha256:682ad35bd95fe0cc2ec554dd8dafc6f9daeb206c5176632e3802ece348eadf1e	{"$type":"requiredArgsUnbound","addrs":["s"]}
 doc	invokeError / InvokeError.UninvocableArg	sha256:e6fd858bb4a0af3c708ccae78dd17518e545c618afe53408abef06fde80ac672	{"$type":"uninvocableArg","addr":"s"}
 doc	invokeError / InvokeError.UnknownArg	sha256:c4f593d98b0bbe22c0c112830bec84ca4be7134ce9a6eecb05dbf00f27f7bc95	{"$type":"unknownArg","addr":"s","declared":["s"]}

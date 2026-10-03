@@ -188,7 +188,11 @@ let private invokeErrors: InvokeError list =
       IllFormedCapability("span", NonFiniteBound "span/x")
       IllFormedCapability("span", DuplicateHoleAddr "span/n")
       IllFormedCapability("span", HoleUnderSlot "body")
-      DuplicateArg "fmt-temp/celsius" ]
+      DuplicateArg "fmt-temp/celsius"
+      // Phase 318 — the policy gate's two refusals.
+      PolicyRefused("operators-only", "only an operator may purge a station", [ "fmt-temp"; "read-station" ])
+      PolicyRefused("quiet-hours", "no writes between 22:00 and 06:00", [])
+      ApprovalRequired "two-person-rule" ]
 
 let private queryErrors: QueryError list =
     [ NoSuchQuery("raw-dump", [ "readings"; "stations" ])
@@ -202,7 +206,11 @@ let private queryErrors: QueryError list =
       ExecutionFailed("busy", [ "limit" ])
       Timeout
       RequiredParamsNull [ "station" ]
-      DuplicateParam "station" ]
+      DuplicateParam "station"
+      // Phase 318 — the policy gate's two refusals.
+      QueryPolicyRefused("tenant-scope", "the station belongs to another tenant", [ "harbour" ])
+      QueryPolicyRefused("budget", "the daily query budget is spent", [])
+      QueryApprovalRequired "export-review" ]
     @ [ for expected in
             [ IntType
               FloatType
@@ -339,7 +347,8 @@ let tests =
                         | UnknownArg(_, xs)
                         | ArgOutOfSpace(_, Enum xs, _)
                         | RequiredArgsUnbound xs
-                        | NonTotalCapability(_, xs) -> xs
+                        | NonTotalCapability(_, xs)
+                        | PolicyRefused(_, _, xs) -> xs
                         | _ -> []
 
                     for e in invokeErrors do
@@ -355,7 +364,8 @@ let tests =
                         | UnknownParam(_, xs)
                         | RequiredParamsUnbound xs
                         | RequiredParamsNull xs
-                        | ExecutionFailed(_, xs) -> xs
+                        | ExecutionFailed(_, xs)
+                        | QueryPolicyRefused(_, _, xs) -> xs
                         | _ -> []
 
                     for e in queryErrors do

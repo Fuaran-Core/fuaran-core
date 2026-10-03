@@ -12,6 +12,7 @@ ctor Fuaran.Core.RefWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Micro
 ctor Fuaran.Core.RejectionGuidance..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.RejectionNouns..ctor(System.String, System.String)
 ctor Fuaran.Core.StaleProposal`1..ctor(System.Int32, !0, System.Int32, Microsoft.FSharp.Collections.FSharpList`1<!0>)
+ctor Fuaran.Core.WriteGate..ctor(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpSet`1<System.String>>)
 field Fuaran.Core.Anchor`1+Tags.After : System.Int32 (literal)
 field Fuaran.Core.Anchor`1+Tags.Before : System.Int32 (literal)
 field Fuaran.Core.Anchor`1+Tags.First : System.Int32 (literal)
@@ -29,6 +30,8 @@ field Fuaran.Core.Diff+DiffError`1+Tags.DuplicateIdInTree : System.Int32 (litera
 field Fuaran.Core.Diff+DiffError`1+Tags.IllegalChildInTree : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.RootIdMismatch : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.TargetNotAContainer : System.Int32 (literal)
+field Fuaran.Core.GatedApplyFailure`1+Tags.Denied : System.Int32 (literal)
+field Fuaran.Core.GatedApplyFailure`1+Tags.Rejected : System.Int32 (literal)
 field Fuaran.Core.Interference+Tags.LeftSlotsRightNode : System.Int32 (literal)
 field Fuaran.Core.Interference+Tags.LeftUnknownParent : System.Int32 (literal)
 field Fuaran.Core.Interference+Tags.LeftWritesRightReads : System.Int32 (literal)
@@ -59,6 +62,8 @@ field Fuaran.Core.SkeletonOp`2+Tags.MoveNode : System.Int32 (literal)
 field Fuaran.Core.SkeletonOp`2+Tags.RemoveNode : System.Int32 (literal)
 field Fuaran.Core.SkeletonOp`2+Tags.ReorderChildren : System.Int32 (literal)
 field Fuaran.Core.SkeletonOp`2+Tags.UpdateNode : System.Int32 (literal)
+field Fuaran.Core.WriteDenial+Tags.Locked : System.Int32 (literal)
+field Fuaran.Core.WriteDenial+Tags.NotWritable : System.Int32 (literal)
 method Fuaran.Core.ArbitrationModule.arbitrateContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!!0, !!1>>) : Fuaran.Core.Arbitration`2<!!0, !!1>
 method Fuaran.Core.ArbitrationModule.arbitrateGrammar`2(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!!0, !!1>>) : Fuaran.Core.Arbitration`2<!!0, !!1>
 method Fuaran.Core.ArbitrationModule.arbitrateReferenced`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!!0, !!1>>) : Fuaran.Core.Arbitration`2<!!0, !!1>
@@ -126,9 +131,16 @@ method Fuaran.Core.TreePlacement.moveContained`2(Microsoft.FSharp.Core.FSharpFun
 method Fuaran.Core.TreePlacement.move`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!1, Fuaran.Core.Anchor`1<!!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.PlaceError`1<!!1>>
 method Fuaran.Core.TreePlacement.placeContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, Fuaran.Core.Anchor`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.PlaceError`1<!!1>>
 method Fuaran.Core.TreePlacement.place`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, Fuaran.Core.Anchor`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.PlaceError`1<!!1>>
+method Fuaran.Core.WriteGateModule.allowOnly(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Fuaran.Core.WriteGate
+method Fuaran.Core.WriteGateModule.applyGated`2(Fuaran.Core.WriteGate, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.GatedApplyFailure`1<!!1>>
+method Fuaran.Core.WriteGateModule.decide`2(Fuaran.Core.WriteGate, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.WriteDenial>
+method Fuaran.Core.WriteGateModule.guidance(Fuaran.Core.WriteDenial) : Fuaran.Core.RejectionGuidance
+method Fuaran.Core.WriteGateModule.lockOnly(Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Fuaran.Core.WriteGate
+method Fuaran.Core.WriteGateModule.targetsOf`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 property Fuaran.Core.ArbitrationModule.staleSampleSize : System.Int32 { get }
 property Fuaran.Core.FootprintModule.empty : Fuaran.Core.Footprint { get }
 property Fuaran.Core.RejectionNounsModule.generic : Fuaran.Core.RejectionNouns { get }
+property Fuaran.Core.WriteGateModule.allowAll : Fuaran.Core.WriteGate { get }
 record-field Fuaran.Core.Arbitration`2.Accepted #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>
 record-field Fuaran.Core.Arbitration`2.MergedScript #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>
 record-field Fuaran.Core.Arbitration`2.Rejected #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Fuaran.Core.OpScriptProposal`2<!0, !1>, Fuaran.Core.ArbitrationRejection`1<!1>>>
@@ -153,6 +165,8 @@ record-field Fuaran.Core.StaleProposal`1.AddressableCount #2 : System.Int32
 record-field Fuaran.Core.StaleProposal`1.Missing #1 : !0
 record-field Fuaran.Core.StaleProposal`1.OpIndex #0 : System.Int32
 record-field Fuaran.Core.StaleProposal`1.Sample #3 : Microsoft.FSharp.Collections.FSharpList`1<!0>
+record-field Fuaran.Core.WriteGate.Locked #0 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
+record-field Fuaran.Core.WriteGate.Writable #1 : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpSet`1<System.String>>
 type Fuaran.Core.Anchor`1 (union)
 type Fuaran.Core.Anchor`1+After (type)
 type Fuaran.Core.Anchor`1+Before (type)
@@ -178,6 +192,10 @@ type Fuaran.Core.Diff+DiffError`1+Tags (type)
 type Fuaran.Core.Diff+DiffError`1+TargetNotAContainer (type)
 type Fuaran.Core.Footprint (record)
 type Fuaran.Core.FootprintModule (module)
+type Fuaran.Core.GatedApplyFailure`1 (union)
+type Fuaran.Core.GatedApplyFailure`1+Denied (type)
+type Fuaran.Core.GatedApplyFailure`1+Rejected (type)
+type Fuaran.Core.GatedApplyFailure`1+Tags (type)
 type Fuaran.Core.Interference (union)
 type Fuaran.Core.Interference+LeftSlotsRightNode (type)
 type Fuaran.Core.Interference+LeftUnknownParent (type)
@@ -225,6 +243,12 @@ type Fuaran.Core.SkeletonOp`2+Tags (type)
 type Fuaran.Core.SkeletonOp`2+UpdateNode (type)
 type Fuaran.Core.StaleProposal`1 (record)
 type Fuaran.Core.TreePlacement (module)
+type Fuaran.Core.WriteDenial (union)
+type Fuaran.Core.WriteDenial+Locked (type)
+type Fuaran.Core.WriteDenial+NotWritable (type)
+type Fuaran.Core.WriteDenial+Tags (type)
+type Fuaran.Core.WriteGate (record)
+type Fuaran.Core.WriteGateModule (module)
 union-case Fuaran.Core.Anchor`1.First #0()
 union-case Fuaran.Core.Anchor`1.Last #1()
 union-case Fuaran.Core.Anchor`1.NewAfter #3(sibling: !0)
@@ -242,6 +266,8 @@ union-case Fuaran.Core.Diff+DiffError`1.NewDuplicateIdInTree #1(Item: !0)
 union-case Fuaran.Core.Diff+DiffError`1.NewIllegalChildInTree #3(child: !0, childKind: System.String, parent: !0, parentKind: System.String, legal: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Diff+DiffError`1.NewRootIdMismatch #0(before: !0, after: !0)
 union-case Fuaran.Core.Diff+DiffError`1.NewTargetNotAContainer #2(target: !0, kindTag: System.String)
+union-case Fuaran.Core.GatedApplyFailure`1.NewDenied #0(Item: Fuaran.Core.WriteDenial)
+union-case Fuaran.Core.GatedApplyFailure`1.NewRejected #1(Item: Fuaran.Core.Rejection`1<!0>)
 union-case Fuaran.Core.Interference.NewLeftSlotsRightNode #7(nodes: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
 union-case Fuaran.Core.Interference.NewLeftUnknownParent #4(relocated: Microsoft.FSharp.Collections.FSharpSet`1<System.String>, structural: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
 union-case Fuaran.Core.Interference.NewLeftWritesRightReads #1(addresses: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
@@ -272,3 +298,5 @@ union-case Fuaran.Core.SkeletonOp`2.NewMoveNode #2(target: !1, newParent: !1)
 union-case Fuaran.Core.SkeletonOp`2.NewRemoveNode #1(target: !1)
 union-case Fuaran.Core.SkeletonOp`2.NewReorderChildren #3(parent: !1, order: Microsoft.FSharp.Collections.FSharpList`1<!1>)
 union-case Fuaran.Core.SkeletonOp`2.NewUpdateNode #5(node: !0)
+union-case Fuaran.Core.WriteDenial.NewLocked #0(target: System.String, lockedBy: System.String)
+union-case Fuaran.Core.WriteDenial.NewNotWritable #1(target: System.String, writable: Microsoft.FSharp.Collections.FSharpList`1<System.String>)

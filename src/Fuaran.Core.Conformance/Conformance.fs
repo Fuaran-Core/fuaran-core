@@ -626,6 +626,44 @@ module Conformance =
     /// Forward — see `SeamLaws.registryLaws`.
     let registryLaws (seed: int) (iterations: int) : LawResult list = SeamLaws.registryLaws seed iterations
 
+    /// Forward — see `SeamLaws.policyLaws` (Phase 318): the policy decision's join and the gate on
+    /// the three invocable registries, from the kit's own fixtures.
+    let policyLaws (seed: int) (iterations: int) : LawResult list = SeamLaws.policyLaws seed iterations
+
+    /// Forward — see `SeamLaws.policyLawsAt` (Phase 318): the no-unapproved-write law and the dry
+    /// run's agreement with `Apply`, under the DOMAIN'S own policy, its effects accessor and the
+    /// registry its actors act through. `privileged` names the actors a host-writing op may be
+    /// allowed for; every other actor drawn from `actors` is held to the law.
+    let policyLawsAt
+        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry)
+        (state0: 'State)
+        (genOp: ConfRng.T -> 'Op * ConfRng.T)
+        (actors: string list)
+        (privileged: string -> bool)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        SeamLaws.policyLawsAt "Conformance.policyLawsAt" gw registry state0 genOp actors privileged seed iterations
+
+    /// Forward — see `SeamLaws.writeGateLaws` (Phase 318): the write gate's targets cover what an
+    /// op writes, the gate runs before the reducer, a lock covers its subtree, and a wider lock never
+    /// admits more — at the domain's tree witnesses and op generator.
+    let writeGateLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        SeamLaws.writeGateLaws "Conformance.writeGateLaws" nodew idw gen seed iterations
+
+    /// Forward — see `SeamLaws.keyedCaptureLaws` (Phase 318): the keyed, two-phase capture journal
+    /// verifies, replays by key in any order across keys, refuses a miss, detects tampering, and
+    /// replays a network capability exactly through the seam.
+    let keyedCaptureLaws (seed: int) (iterations: int) : LawResult list =
+        SeamLaws.keyedCaptureLaws seed iterations
+
     /// Forward — see `SeamLaws.packLoadingLaws`.
     let packLoadingLaws (seed: int) (iterations: int) : LawResult list =
         SeamLaws.packLoadingLaws seed iterations

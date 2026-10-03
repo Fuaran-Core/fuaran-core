@@ -981,6 +981,138 @@ module OpStream =
     /// line scanner as `fromJsonl`; a malformed line is a named `Error`, never an exception.
     let captureFromJsonl (text: string) : Result<EffectCapture list, string> = OpStreamCapture.captureFromJsonl text
 
+    // ---- the keyed capture journal (Phase 318) (bodies in Capture.fs) ----
+    //
+    // `captureEffect` journals an effect at its POSITION, runs it synchronously, and records only a
+    // value: replay must make the same calls in the same order, and an effect that has not settled,
+    // or that failed, has nowhere to go. The keyed journal records an invocation under its
+    // INVOCATION KEY (`Capability.invocationKey`, `Query.invocationKey`, `Query.invocationKeyPage`),
+    // in two phases — `Attempted` before the body runs, then `Completed` or `Refused` when it answers
+    // — so a body that answers later settles later, a failure replays as the same failure, and replay
+    // finds an invocation by what it was, not by when it happened.
+
+    /// Journal the ATTEMPT of an invocation under `key` (Phase 318) — the first phase, written before
+    /// the body runs, so a host that persists the journal here has a record of every invocation it
+    /// started even if it never learns the outcome. Returns the invocation's occurrence (how many
+    /// attempts under `key` came before it) and the journal. Call it for a non-deterministic label
+    /// only: a `deterministic` invocation is reproducible and journals nothing (`captureEffectKeyed`
+    /// skips it).
+    let beginEffectKeyed
+        (hashFn: HashFn)
+        (det: string)
+        (key: string)
+        (captures: KeyedCapture list)
+        : int * KeyedCapture list =
+        OpStreamCapture.beginEffectKeyedWith canonicalConfig hashFn det key captures
+
+    /// `beginEffectKeyed` from `cfg.Genesis`.
+    let beginEffectKeyedWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (det: string)
+        (key: string)
+        (captures: KeyedCapture list)
+        : int * KeyedCapture list =
+        OpStreamCapture.beginEffectKeyedWith cfg hashFn det key captures
+
+    /// SETTLE an attempted invocation (Phase 318) — the second phase, written when the body answers:
+    /// `Ok v` journals `Completed` with `encode v`, `Error reason` journals `Refused` with the reason.
+    /// Refused `NotAttempted` when the journal holds no attempt at (`key`, `occurrence`), and
+    /// `AlreadySettled` when that attempt is settled already — an invocation answers once.
+    let settleEffectKeyed
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (key: string)
+        (occurrence: int)
+        (outcome: Result<'v, string>)
+        (captures: KeyedCapture list)
+        : Result<KeyedCapture list, KeyedCaptureFault> =
+        OpStreamCapture.settleEffectKeyedWith canonicalConfig hashFn encode key occurrence outcome captures
+
+    /// `settleEffectKeyed` from `cfg.Genesis`.
+    let settleEffectKeyedWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (key: string)
+        (occurrence: int)
+        (outcome: Result<'v, string>)
+        (captures: KeyedCapture list)
+        : Result<KeyedCapture list, KeyedCaptureFault> =
+        OpStreamCapture.settleEffectKeyedWith cfg hashFn encode key occurrence outcome captures
+
+    /// Capture one invocation under its invocation key (Phase 318): attempt, run `effect`, and settle
+    /// with what it answered. The effect answers `None` while it has not settled — the shape of
+    /// `Deferred.settled`, so a seam's `Deferred` body plugs straight in — and then the attempt stays
+    /// open and the returned occurrence is what `settleEffectKeyed` settles it with later. A
+    /// `deterministic` label journals nothing (occurrence `0`, the journal unchanged), as
+    /// `captureEffect`'s does.
+    let captureEffectKeyed
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (det: string)
+        (key: string)
+        (effect: unit -> Result<'v, string> option)
+        (captures: KeyedCapture list)
+        : Result<'v, string> option * int * KeyedCapture list =
+        OpStreamCapture.captureEffectKeyedWith canonicalConfig hashFn encode det key effect captures
+
+    /// `captureEffectKeyed` from `cfg.Genesis`.
+    let captureEffectKeyedWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (det: string)
+        (key: string)
+        (effect: unit -> Result<'v, string> option)
+        (captures: KeyedCapture list)
+        : Result<'v, string> option * int * KeyedCapture list =
+        OpStreamCapture.captureEffectKeyedWith cfg hashFn encode det key effect captures
+
+    /// Replay one invocation from the keyed journal (Phase 318) — by its KEY, never its position.
+    /// `cursor` counts the invocations already replayed under each key (start from `Map.empty`), so
+    /// the n-th call under a key replays its n-th attempt. The answer is what the invocation settled
+    /// to: `Some(Ok v)` for a completion, `Some(Error reason)` for a refusal — a failure replays as
+    /// the same failure — and `None` for an attempt that never settled. Strict, as
+    /// `replayEffectStrict` is: a key with no record is `NoCapture`, a key whose attempts are all
+    /// replayed is `Exhausted`, an attempt under another label `LabelMismatch`, a non-canonical label
+    /// `LabelNotCanonical`, a value the codec refuses `Undecodable`; the live `effect` runs for the
+    /// `deterministic` label only, which never journals. Replaying calls under DIFFERENT keys in any
+    /// order answers each the same.
+    let replayEffectKeyed
+        (decode: string -> Result<'v, string>)
+        (det: string)
+        (key: string)
+        (effect: unit -> Result<'v, string> option)
+        (cursor: Map<string, int>)
+        (captures: KeyedCapture list)
+        : Result<Result<'v, string> option * Map<string, int>, KeyedCaptureFault> =
+        OpStreamCapture.replayEffectKeyed decode det key effect cursor captures
+
+    /// The first chain fault in a keyed journal, or `None` — through the one chain walker, from
+    /// `cfg.Genesis`, so a keyed break localises exactly as an op break does.
+    let firstKeyedCaptureBreakWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (captures: KeyedCapture list)
+        : ChainBreak option =
+        OpStreamCapture.firstKeyedCaptureBreakWith cfg hashFn captures
+
+    /// `firstKeyedCaptureBreakWith` from the canonical genesis `""`.
+    let firstKeyedCaptureBreak (hashFn: HashFn) (captures: KeyedCapture list) : ChainBreak option =
+        OpStreamCapture.firstKeyedCaptureBreakWith canonicalConfig hashFn captures
+
+    /// `verifyCaptures` over the keyed form (Phase 318): the chain is intact AND the two phases pair —
+    /// under each key the attempts number 0, 1, … in journal order, every settlement follows its
+    /// attempt under the attempt's label, and no attempt settles twice. A tampered value, a dropped or
+    /// reordered record, or a settlement with no attempt all fail it.
+    let verifyKeyedCaptures (hashFn: HashFn) (captures: KeyedCapture list) : bool =
+        OpStreamCapture.verifyKeyedCapturesWith canonicalConfig hashFn captures
+
+    /// `verifyKeyedCaptures` from `cfg.Genesis`.
+    let verifyKeyedCapturesWith (cfg: StreamConfig) (hashFn: HashFn) (captures: KeyedCapture list) : bool =
+        OpStreamCapture.verifyKeyedCapturesWith cfg hashFn captures
+
     // ---- cryptographic attestation (Phase 320) (the head in Chain.fs, the rest in Capture.fs) ----
 
     /// The default no-op attestation sink: never signs (`Sign` ⇒ `None`) and verifies nothing

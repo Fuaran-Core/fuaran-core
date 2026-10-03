@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="Ops.fs" />
     <Compile Include="Arbitration.fs" />
+    <Compile Include="WriteGate.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

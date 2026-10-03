@@ -516,6 +516,22 @@ let private runs =
            run "Conformance.capabilityLaws" 200 (Conformance.capabilityLaws 4242 200)
            run "Conformance.queryLaws" 200 (Conformance.queryLaws 4242 200)
            run "Conformance.registryLaws" 200 (Conformance.registryLaws 4242 200)
+           // Phase 318 — the policy gate, the write gate and the keyed capture journal.
+           run "Conformance.policyLaws" 200 (Conformance.policyLaws 4242 200)
+           run "Conformance.keyedCaptureLaws" 200 (Conformance.keyedCaptureLaws 4242 200)
+           run "Conformance.writeGateLaws" 300 (Conformance.writeGateLaws nodew idw ConformanceTests.opGen 4242 300)
+           run
+               "Conformance.policyLawsAt"
+               300
+               (Conformance.policyLawsAt
+                   PolicyGateTests.guarded
+                   PolicyGateTests.noteRegistry
+                   AiSurfaceTests.state0
+                   AiSurfaceTests.genNoteOp
+                   PolicyGateTests.actors
+                   PolicyGateTests.privileged
+                   4242
+                   300)
            run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
            run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
            run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)

@@ -3211,6 +3211,300 @@ let capture_value_tamper_detected
     (requires verify_captures h show esc genesis cs /\ capture_value_at cs n == Found v /\ not (v = v'))
     (ensures not (verify_captures h show esc genesis (replace_value cs n v'))) =
   capture_tamper_from h show esc inj genesis PZero cs n v v'
+(* ---- 7d. The KEYED capture journal (Phase 318; F#: `KeyedCapture`, `CapturePhase`,
+   `beginEffectKeyed` / `settleEffectKeyed` / `captureEffectKeyed`, `firstKeyedCaptureBreak`,
+   `replayEffectKeyed`) ----
+
+   Section 6 at the KEYED capture payload. A keyed record is chained exactly as a positional
+   capture is — `Hash` is the hash of its predecessor's `Hash` and its own pre-image, walked by the
+   one walker — so the intact-journal theorem has a keyed instance, proved here as 7c proves the
+   positional one. The pre-image is `{"capture":"keyed","seq":…,"key":…,"occ":…,"det":…,
+   "phase":…,"value":…}`; `esc` and the hash are production's and parameters, as in 7c.
+
+   A session is a list of INVOCATIONS, each journalled as an `attempted` record and — when its
+   body answered — a `completed` or `refused` record straight after it; one whose body never
+   answered stays an open attempt. The occurrence is the number of earlier attempts under the
+   same key. Replay finds an invocation by KEY and occurrence, never by position.
+
+   Four results: a journal recorded from its genesis verifies (`intact_keyed_verify`); a key the
+   journal holds no record of is refused `NoCapture` and never answered (`missing_key_no_capture`);
+   replay under a key is blind to every record of OTHER keys in front of it
+   (`replay_skips_other_keys` — what "keyed, not positional" means as an equation); and the first
+   invocation of a session whose key no later invocation reuses is answered exactly what it
+   settled to — its value, its refusal, or nothing for an open attempt (`replay_answers_head`).
+   What is NOT proved here and is sampled by `Conformance.keyedCaptureLaws` instead: that EVERY
+   invocation of a session is answered, in any order across keys — the composition of the last two
+   through a decomposition of the recorded journal that this section does not state. *)
+
+[@@ noextract_to "FSharp"]
+type kphase =
+  | KAttempted : kphase
+  | KCompleted : kphase
+  | KRefused : kphase
+
+(* F#: `KeyedCapture`. *)
+[@@ noextract_to "FSharp"]
+type kcap = { kseq: pos; kkey: string; kocc: pos; kdet: string; kphase: kphase; kval: string; kprev: string;
+              khash: string }
+
+[@@ noextract_to "FSharp"]
+let kphase_tag (p: kphase) : Tot string =
+  match p with
+  | KAttempted -> "attempted"
+  | KCompleted -> "completed"
+  | KRefused -> "refused"
+
+(* F#: `keyedPayload`. *)
+[@@ noextract_to "FSharp"]
+let kcap_payload (show: pos -> string) (esc: string -> string) (s: pos) (k: string) (o: pos) (d: string)
+  (p: kphase) (v: string)
+  : Tot string =
+  "{\"capture\":\"keyed\",\"seq\":" ^ show s ^ ",\"key\":" ^ esc k ^ ",\"occ\":" ^ show o ^ ",\"det\":" ^ esc d
+  ^ ",\"phase\":" ^ esc (kphase_tag p) ^ ",\"value\":" ^ v ^ "}"
+
+(* F#: `firstKeyedCaptureBreakWith`, through the one walker. *)
+[@@ noextract_to "FSharp"]
+let rec first_kcap_break_from
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (cs: list kcap)
+  : Tot (found cbreak) (decreases cs) =
+  match cs with
+  | [] -> Missing
+  | c :: rest ->
+    if not (c.kseq = i)
+    then Found ({ cindex = i; creason = "sequence-number mismatch"; cexpected = show i; cgot = show c.kseq })
+    else if not (c.kprev = prev)
+    then Found ({ cindex = i; creason = "prev-hash link broken"; cexpected = prev; cgot = c.kprev })
+    else
+      let expected = h prev (kcap_payload show esc c.kseq c.kkey c.kocc c.kdet c.kphase c.kval) in
+      if not (c.khash = expected)
+      then
+        Found
+          ({ cindex = i; creason = "hash mismatch (tampered op/actor/seq)"; cexpected = expected; cgot = c.khash })
+      else first_kcap_break_from h show esc c.khash (PSucc i) rest
+
+[@@ noextract_to "FSharp"]
+let verify_kcaps
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (genesis: string)
+  (cs: list kcap)
+  : Tot bool =
+  match first_kcap_break_from h show esc genesis PZero cs with
+  | Missing -> true
+  | Found _ -> false
+
+(* One invocation of a session: its key, its label, what its body settled to (`KAttempted` for a
+   body that never answered) and the settled value's encoding. *)
+[@@ noextract_to "FSharp"]
+type kreq = { rkey: string; rdet: string; rphase: kphase; rval: string }
+
+(* The occurrence an attempt is journalled under: the earlier attempts under its key. *)
+[@@ noextract_to "FSharp"]
+let rec occ_in (k: string) (seen: list string) : Tot pos (decreases seen) =
+  match seen with
+  | [] -> PZero
+  | x :: t -> if x = k then PSucc (occ_in k t) else occ_in k t
+
+(* F#: `captureEffectKeyedWith` folded over a session: the attempt, then — when the body answered —
+   its settlement, each linked to the record before it. *)
+[@@ noextract_to "FSharp"]
+let rec record_keyed
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (seen: list string)
+  (qs: list kreq)
+  : Tot (list kcap) (decreases qs) =
+  match qs with
+  | [] -> []
+  | q :: t ->
+    let o = occ_in q.rkey seen in
+    let ah = h prev (kcap_payload show esc i q.rkey o q.rdet KAttempted "null") in
+    let a = { kseq = i; kkey = q.rkey; kocc = o; kdet = q.rdet; kphase = KAttempted; kval = "null"; kprev = prev;
+              khash = ah } in
+    match q.rphase with
+    | KAttempted -> a :: record_keyed h show esc ah (PSucc i) (q.rkey :: seen) t
+    | p ->
+      let sh = h ah (kcap_payload show esc (PSucc i) q.rkey o q.rdet p q.rval) in
+      let s = { kseq = PSucc i; kkey = q.rkey; kocc = o; kdet = q.rdet; kphase = p; kval = q.rval; kprev = ah;
+                khash = sh } in
+      a :: s :: record_keyed h show esc sh (PSucc (PSucc i)) (q.rkey :: seen) t
+
+let rec intact_keyed_from
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (seen: list string)
+  (qs: list kreq)
+  : Lemma (ensures first_kcap_break_from h show esc prev i (record_keyed h show esc prev i seen qs) == Missing)
+    (decreases qs) =
+  match qs with
+  | [] -> ()
+  | q :: t ->
+    let o = occ_in q.rkey seen in
+    let ah = h prev (kcap_payload show esc i q.rkey o q.rdet KAttempted "null") in
+    match q.rphase with
+    | KAttempted -> intact_keyed_from h show esc ah (PSucc i) (q.rkey :: seen) t
+    | p ->
+      let sh = h ah (kcap_payload show esc (PSucc i) q.rkey o q.rdet p q.rval) in
+      intact_keyed_from h show esc sh (PSucc (PSucc i)) (q.rkey :: seen) t
+
+(* THEOREM (Phase 318). A keyed journal recorded from its genesis verifies. *)
+let intact_keyed_verify
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (genesis: string)
+  (qs: list kreq)
+  : Lemma (ensures verify_kcaps h show esc genesis (record_keyed h show esc genesis PZero [] qs)) =
+  intact_keyed_from h show esc genesis PZero [] qs
+
+[@@ noextract_to "FSharp"]
+let rec has_key (k: string) (cs: list kcap) : Tot bool (decreases cs) =
+  match cs with
+  | [] -> false
+  | c :: t -> c.kkey = k || has_key k t
+
+[@@ noextract_to "FSharp"]
+let rec find_attempt (k: string) (o: pos) (cs: list kcap) : Tot (found kcap) (decreases cs) =
+  match cs with
+  | [] -> Missing
+  | c :: t -> if c.kkey = k && c.kocc = o && KAttempted? c.kphase then Found c else find_attempt k o t
+
+[@@ noextract_to "FSharp"]
+let rec find_settle (k: string) (o: pos) (cs: list kcap) : Tot (found kcap) (decreases cs) =
+  match cs with
+  | [] -> Missing
+  | c :: t -> if c.kkey = k && c.kocc = o && not (KAttempted? c.kphase) then Found c else find_settle k o t
+
+[@@ noextract_to "FSharp"]
+type kstep =
+  | KNoCapture : string -> kstep
+  | KExhausted : string -> kstep
+  | KLabel : string -> string -> kstep
+  | KAnswer : found (kphase & string) -> kstep
+
+(* F#: `replayEffectKeyed` for a non-deterministic label, before the domain decode: a key with no
+   record is `NoCapture`, an occurrence with no attempt `Exhausted`, an attempt under another
+   label `LabelMismatch`, and otherwise the settlement — or `Missing` for an open attempt. *)
+[@@ noextract_to "FSharp"]
+let replay_keyed (k: string) (d: string) (o: pos) (cs: list kcap) : Tot kstep =
+  if not (has_key k cs)
+  then KNoCapture k
+  else
+    match find_attempt k o cs with
+    | Missing -> KExhausted k
+    | Found a ->
+      if not (a.kdet = d)
+      then KLabel d a.kdet
+      else
+        match find_settle k o cs with
+        | Missing -> KAnswer Missing
+        | Found s -> KAnswer (Found (s.kphase, s.kval))
+
+(* THEOREM (Phase 318). A key the journal holds no record of is refused, never answered. *)
+let missing_key_no_capture (k: string) (d: string) (o: pos) (cs: list kcap)
+  : Lemma (requires not (has_key k cs)) (ensures replay_keyed k d o cs == KNoCapture k) =
+  ()
+
+let rec has_key_app (k: string) (xs ys: list kcap)
+  : Lemma (requires not (has_key k xs)) (ensures has_key k (app xs ys) == has_key k ys) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: t -> has_key_app k t ys
+
+let rec find_attempt_app (k: string) (o: pos) (xs ys: list kcap)
+  : Lemma (requires not (has_key k xs)) (ensures find_attempt k o (app xs ys) == find_attempt k o ys)
+    (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: t -> find_attempt_app k o t ys
+
+let rec find_settle_app (k: string) (o: pos) (xs ys: list kcap)
+  : Lemma (requires not (has_key k xs)) (ensures find_settle k o (app xs ys) == find_settle k o ys)
+    (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: t -> find_settle_app k o t ys
+
+(* THEOREM (Phase 318) — replay is KEYED, not positional: records of other keys in front of an
+   invocation's records change nothing about how it replays. *)
+let replay_skips_other_keys (k: string) (d: string) (o: pos) (xs ys: list kcap)
+  : Lemma (requires not (has_key k xs)) (ensures replay_keyed k d o (app xs ys) == replay_keyed k d o ys) =
+  has_key_app k xs ys;
+  find_attempt_app k o xs ys;
+  find_settle_app k o xs ys
+
+[@@ noextract_to "FSharp"]
+let rec reuses (k: string) (qs: list kreq) : Tot bool (decreases qs) =
+  match qs with
+  | [] -> false
+  | q :: t -> q.rkey = k || reuses k t
+
+let rec record_avoids_key
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (prev: string)
+  (i: pos)
+  (seen: list string)
+  (k: string)
+  (qs: list kreq)
+  : Lemma (requires not (reuses k qs)) (ensures not (has_key k (record_keyed h show esc prev i seen qs)))
+    (decreases qs) =
+  match qs with
+  | [] -> ()
+  | q :: t ->
+    let o = occ_in q.rkey seen in
+    let ah = h prev (kcap_payload show esc i q.rkey o q.rdet KAttempted "null") in
+    match q.rphase with
+    | KAttempted -> record_avoids_key h show esc ah (PSucc i) (q.rkey :: seen) k t
+    | p ->
+      let sh = h ah (kcap_payload show esc (PSucc i) q.rkey o q.rdet p q.rval) in
+      record_avoids_key h show esc sh (PSucc (PSucc i)) (q.rkey :: seen) k t
+
+[@@ noextract_to "FSharp"]
+let rec find_settle_none (k: string) (o: pos) (cs: list kcap)
+  : Lemma (requires not (has_key k cs)) (ensures find_settle k o cs == Missing) (decreases cs) =
+  match cs with
+  | [] -> ()
+  | _ :: t -> find_settle_none k o t
+
+[@@ noextract_to "FSharp"]
+let kexpected (q: kreq) : Tot (found (kphase & string)) =
+  match q.rphase with
+  | KAttempted -> Missing
+  | p -> Found (p, q.rval)
+
+(* THEOREM (Phase 318). The first invocation of a recorded session, whose key no later invocation
+   reuses, replays by its key to exactly what it settled to: its value, its refusal, or `Missing`
+   for an attempt its body never answered. *)
+let replay_answers_head
+  (h: string -> string -> string)
+  (show: pos -> string)
+  (esc: string -> string)
+  (genesis: string)
+  (q: kreq)
+  (t: list kreq)
+  : Lemma (requires not (reuses q.rkey t))
+    (ensures replay_keyed q.rkey q.rdet PZero (record_keyed h show esc genesis PZero [] (q :: t)) == KAnswer (kexpected q)) =
+  let ah = h genesis (kcap_payload show esc PZero q.rkey PZero q.rdet KAttempted "null") in
+  match q.rphase with
+  | KAttempted ->
+    record_avoids_key h show esc ah (PSucc PZero) [ q.rkey ] q.rkey t;
+    find_settle_none q.rkey PZero (record_keyed h show esc ah (PSucc PZero) [ q.rkey ] t)
+  | p -> ()
+
 (* ======================================================================================
    8. The signed head (Phase 193; F#: `Attestation`, `IAttestationSink`, `OpStream.head`,
       `attestHead`, `verifyAttestation`).

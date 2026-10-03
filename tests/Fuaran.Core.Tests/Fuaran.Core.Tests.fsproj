@@ -106,6 +106,7 @@
     <Compile Include="IdlProposalTests.fs" />
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
+    <Compile Include="PolicyGateTests.fs" />
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="DigestTests.fs" />
     <Compile Include="SmallSeamsTests.fs" />

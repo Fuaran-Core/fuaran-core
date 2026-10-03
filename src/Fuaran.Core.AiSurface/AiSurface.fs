@@ -103,39 +103,13 @@ type PatternCard<'Op> =
         Emit: (string * string) list -> Result<'Op list, string>
     }
 
-/// The policy decision for one op by one actor — the shape of the domain's
-/// write policy (the rules stay domain-side). Default-deny lives in the domain;
-/// the core only routes the three outcomes.
-///
-/// **A denial is GUIDANCE (Phase 298).** `Deny` carries a `RejectionGuidance` — the
-/// message and the alternatives the actor may take instead — so a refused agent
-/// repairs from the same envelope a reducer rejection gives it through `Explain`
-/// (`Proposals.renderGuidance` renders both), where a bare reason string used to
-/// reach it with nothing to choose from. `PolicyDecision.deny` builds one from a
-/// reason alone. `RequireQualifiedAccess` (Phase 298): `PolicyDecision.Allow`, …
-[<RequireQualifiedAccess>]
-type PolicyDecision =
-    /// The op may apply now. A submitted sequence applies only when every op is allowed.
-    | Allow
-    /// The op must be approved first: one such op parks the whole submitted sequence. When
-    /// `Proposals.approve` re-consults the policy for the approver, this is not a refusal.
-    | NeedsApproval
-    /// The op is refused; one denial refuses the whole sequence, and the first denial's guidance
-    /// is the one reported.
-    | Deny of guidance: RejectionGuidance
-
-/// Constructors for `PolicyDecision` (Phase 298).
-module PolicyDecision =
-
-    /// A denial with `reason` and no alternatives.
-    let deny (reason: string) : PolicyDecision =
-        PolicyDecision.Deny { Message = reason; Alternatives = [] }
-
-    /// A denial with `reason` and the `alternatives` the actor may take instead.
-    let denyWith (reason: string) (alternatives: string list) : PolicyDecision =
-        PolicyDecision.Deny
-            { Message = reason
-              Alternatives = alternatives }
+// `PolicyDecision` — the policy decision for one op by one actor, whose `Deny` carries the
+// `RejectionGuidance` a refused agent repairs from — is declared in `Fuaran.Core.Function` since
+// Phase 318, beside the invocable registries' gate and with the join (`PolicyDecision.join` /
+// `all` / `any`) a domain combines policies through. Same namespace, same cases, same
+// constructors: a source that names it here still compiles unchanged. The witness's `Decide` is an
+// instance of the registries' gate shape — a decision for an actor and an action — and `submit`
+// combines a sequence's decisions with `PolicyDecision.all`.
 
 // `RejectionGuidance` — the agent-readable guidance `Explain` returns — is declared in
 // `Fuaran.Core.Ops` since Phase 315, beside `Rejection.explain`, which builds it. Same namespace,
@@ -221,6 +195,26 @@ type AiSurfaceWitness<'State, 'Op, 'Rej> =
         /// A reducer rejection as the guidance `Proposals.explainRejection` renders; the AI-surface
         /// laws require the rendering to be non-empty.
         Explain: 'Rej -> RejectionGuidance
+    }
+
+/// The AI surface with what its proposals do to the WORLD declared (Phase 318) — a composing witness that EMBEDS the frozen `AiSurfaceWitness` and adds two accessors,
+/// the evolution path STABILITY's witness-record freeze prescribes ("compose, never grow"). A domain
+/// that builds none is untouched; one that builds it gets `Proposals.submitGuarded` /
+/// `approveGuarded`, which consult the capability registry's gate for every capability an op
+/// invokes and dry-run a whole sequence before the first `Apply`, and `Conformance.policyLawsAt`,
+/// which certifies the domain's own policy never allows an unapproved write. Frozen at birth.
+type GuardedSurfaceWitness<'State, 'Op, 'Rej> =
+    {
+        /// The surface this guards: its `Decide`, `Apply` and `Explain` are the ones run.
+        Surface: AiSurfaceWitness<'State, 'Op, 'Rej>
+        /// An effect-free check of one op against a state: the state the op WOULD produce, or the
+        /// rejection `Apply` would give. Must run no capability body and perform no effect — it is
+        /// what lets a sequence be refused before any op's effects run. Must agree with `Apply` on
+        /// which ops apply (`Conformance.policyLawsAt` samples it).
+        DryRun: 'Op -> 'State -> Result<'State, 'Rej>
+        /// The capability invocations an op makes when it applies — `(capability id, arguments)`,
+        /// in the order it makes them. An op that invokes nothing answers `[]`. Total.
+        EffectsOf: 'Op -> (string * (string * string) list) list
     }
 
 /// The NL→op fast-path: deterministic anchor matching over the witness's
@@ -565,23 +559,110 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : SubmitOutcome<'State, 'Op, 'Rej> =
-        let decisions = ops |> List.map (w.Decide author)
+        // Phase 318: the sequence's decision is the JOIN of its ops' decisions — the most
+        // restrictive wins, and of several denials the first — which is exactly the rule this
+        // function always applied by hand.
+        match PolicyDecision.all (ops |> List.map (w.Decide author)) with
+        | PolicyDecision.Deny g -> SubmitDenied g
+        | PolicyDecision.NeedsApproval ->
+            let q', id = propose author at intent ops q
+            SubmitProposed(q', id)
+        | PolicyDecision.Allow ->
+            match applyAll w ops state with
+            | Ok next -> SubmitApplied next
+            | Error rejection -> SubmitOpRejected rejection
 
-        match
-            decisions
-            |> List.tryPick (function
-                | PolicyDecision.Deny g -> Some g
-                | _ -> None)
-        with
-        | Some g -> SubmitDenied g
-        | None ->
-            if decisions |> List.exists ((=) PolicyDecision.NeedsApproval) then
-                let q', id = propose author at intent ops q
-                SubmitProposed(q', id)
+    /// The capabilities an op invokes, through the registry the actor acts through, joined with the
+    /// domain's own decision for the op (Phase 318): `w.Decide actor op`
+    /// joined with `CapabilityRegistry.decide registry id args` for every invocation
+    /// `EffectsOf op` names — so an op that invokes an unregistered capability is denied naming the
+    /// registered ones, an op whose arguments do not validate is denied, and the registry's gates
+    /// refuse what they refuse, without the domain stating any of it in `Decide`. The registry is
+    /// the one THIS actor acts through: an actor-scoped policy is a `restrict` or a `withGate` of the
+    /// host's registry.
+    let decideGuarded
+        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry)
+        (actor: string)
+        (op: 'Op)
+        : PolicyDecision =
+        gw.Surface.Decide actor op
+        :: (gw.EffectsOf op
+            |> List.map (fun (id, args) -> CapabilityRegistry.decide registry id args))
+        |> PolicyDecision.all
+
+    /// Dry-run the whole sequence through `DryRun` (Phase 318): the first op that
+    /// would not apply, threaded through the states the earlier ones would produce. Runs no `Apply`.
+    let private dryRunAll
+        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (ops: 'Op list)
+        (state: 'State)
+        : Result<unit, 'Rej> =
+        ops
+        |> List.fold (fun acc op -> acc |> Result.bind (gw.DryRun op)) (Ok state)
+        |> Result.map ignore
+
+    /// `submit` behind the registry's gate and a dry run (Phase 318). Every op's decision is
+    /// `decideGuarded` — the domain's policy joined with the registry's decision for each capability
+    /// the op invokes — and the sequence's is their join; a `Deny` refuses it before anything else.
+    /// Then the WHOLE sequence is dry-run through `DryRun`, so an op that would not apply refuses the
+    /// sequence (`SubmitOpRejected`) before the first `Apply` runs — and before it is parked, so a
+    /// proposal an approver can never apply is not queued. Only then is it parked (`NeedsApproval`)
+    /// or applied (`Allow`). An `Apply` that performs effects therefore never runs for a sequence a
+    /// later op refuses.
+    let submitGuarded
+        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry)
+        (author: string)
+        (at: string)
+        (intent: string option)
+        (ops: 'Op list)
+        (q: ProposalQueue<'Op>)
+        (state: 'State)
+        : SubmitOutcome<'State, 'Op, 'Rej> =
+        match PolicyDecision.all (ops |> List.map (decideGuarded gw registry author)) with
+        | PolicyDecision.Deny g -> SubmitDenied g
+        | decision ->
+            match dryRunAll gw ops state with
+            | Error rejection -> SubmitOpRejected rejection
+            | Ok() ->
+                match decision with
+                | PolicyDecision.NeedsApproval ->
+                    let q', id = propose author at intent ops q
+                    SubmitProposed(q', id)
+                | _ ->
+                    match applyAll gw.Surface ops state with
+                    | Ok next -> SubmitApplied next
+                    | Error rejection -> SubmitOpRejected rejection
+
+    /// `approve` behind the registry's gate and a dry run (Phase 318). The approver may not be the
+    /// author (`SelfApproval`); every op's `decideGuarded` for the APPROVER through `registry` — the
+    /// registry the approver acts through — must not be a `Deny` (`ApprovalDenied`, the first
+    /// denial's guidance); the whole sequence is dry-run before the first `Apply`, and an op that no
+    /// longer applies is `OpNoLongerApplies` with the proposal left pending and nothing applied.
+    let approveGuarded
+        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry)
+        (approver: string)
+        (at: string)
+        (id: int)
+        (q: ProposalQueue<'Op>)
+        (state: 'State)
+        : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
+        find id q
+        |> Result.bind (fun p ->
+            if p.Author = approver then
+                Error(SelfApproval(id, p.Author))
             else
-                match applyAll w ops state with
-                | Ok next -> SubmitApplied next
-                | Error rejection -> SubmitOpRejected rejection
+                match PolicyDecision.all (p.Ops |> List.map (decideGuarded gw registry approver)) with
+                | PolicyDecision.Deny g -> Error(ApprovalDenied(id, g))
+                | _ ->
+                    match dryRunAll gw p.Ops state with
+                    | Error rejection -> Error(OpNoLongerApplies(id, rejection))
+                    | Ok() ->
+                        match applyAll gw.Surface p.Ops state with
+                        | Error rejection -> Error(OpNoLongerApplies(id, rejection))
+                        | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
 
     /// Render guidance as agent-readable text: the message plus the enumerated
     /// alternatives (one per line), so a refused agent repairs instead of

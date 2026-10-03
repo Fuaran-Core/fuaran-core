@@ -62,6 +62,8 @@ doc	queryError / QueryError.DuplicateQuery	sha256:cf8b2ee63e8d110f1c6698095030cf
 doc	queryError / QueryError.ExecutionFailed	sha256:281c004c43f5bd70f55bee4fd2b3f2b533ba894ad2455a044a48b1e7c19b8dc7	{"$type":"executionFailed","detail":"s","recoverable":["s"]}
 doc	queryError / QueryError.NoSuchQuery	sha256:a9f5bd643eaf4ed46a92a4c8f1c5ab0eab2d058b9afa13ab06ad10cac67e6044	{"$type":"noSuchQuery","id":"s","known":["s"]}
 doc	queryError / QueryError.ParamTypeMismatch	sha256:40756df6eaad9030851c5f60d6e6432c7f59c59527fc41d65b52242b1de84908	{"$type":"paramTypeMismatch","expected":"int","got":"int","name":"s"}
+doc	queryError / QueryError.QueryApprovalRequired	sha256:ca8797ddd0dd61af54402cfda6a4d2937216d9ccbc7add43dd47054d906750f4	{"$type":"approvalRequired","policy":"s"}
+doc	queryError / QueryError.QueryPolicyRefused	sha256:5140c5d66e6875c380cc3e0e8a4c2b67ef7085ae0a47998dbb6d4263aa396b73	{"$type":"policyRefused","allowed":["s"],"policy":"s","reason":"s"}
 doc	queryError / QueryError.RequiredParamsNull	sha256:76ad5f5445e4f43c4d7830b1f625e0804224bdca8da21ed699abdc26c795379e	{"$type":"requiredParamsNull","names":["s"]}
 doc	queryError / QueryError.RequiredParamsUnbound	sha256:9a2fefc533a2dda5897725b59d0e5299e97067ef3da835498dd2aa1d7a0cafc8	{"$type":"requiredParamsUnbound","names":["s"]}
 doc	queryError / QueryError.SourceNotResolved	sha256:5088411cc913767be0d292d368cf38c536db37c279299380d91a111e8c5ad13c	{"$type":"sourceNotResolved","ref":"s"}

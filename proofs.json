@@ -2203,6 +2203,28 @@
       }
     },
     {
+      "id": "policy-gate-before-body",
+      "level": "proved",
+      "claim": "THE POLICY GATE RUNS BEFORE THE BODY AND NAMES ITSELF (Phase 318). Over a registry carrying a list of named gates — the model of `CapabilityRegistry.withGate` / `dispatch`: resolve the id, validate the arguments, take the join of every gate's decision, and run the body only under `Allow` — an invocation of a held id whose arguments validate and whose gates' join is not `Allow` is refused `ApprovalRequired n` (a `NeedsApproval`) or `PolicyRefused n reason allowed` (a `Deny`), the SAME under every body, so no body ran; and `n` names a gate of the list whose own decision is exactly the one the refusal reports (`gate_before_body`, with `decide_named_names_a_gate`). With no gate the gated dispatch is the seam's ungated `dispatch`, its refusals wrapped (`no_gate_is_dispatch`), so the gate is additive over the Phase 177 theorems. The model wraps the ungated refusals in its own `gated_error` rather than widening the extracted `invoke_error`; production adds the two cases to `InvokeError`. Everything in the section is `noextract_to \"FSharp\"`, so the extracted oracle is unchanged and the bridge to production is the `Conformance.policyLaws` family, which samples the same refusals, the observer and the untouched body on all three registries. NOT claimed: that no effect is CAPTURED for a refused invocation — capture is not in this model; `Conformance.keyedCaptureLaws` samples it. Proved with no assume and no admit.",
+      "phase": "fuaran-core#318",
+      "evidence": {
+        "theorem": "gate_before_body",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "policy-join-monotone",
+      "level": "proved",
+      "claim": "THE POLICY JOIN IS MONOTONE (Phase 318). `PolicyDecision.join` is the maximum in the order `Allow < NeedsApproval < Deny` (`join_is_max`), and raising either argument never lowers it (`policy_join_monotone`); the gates' fold only ever rises along its list (`decide_from_rises`), which is why `withGate` can tighten a registry and never loosen it. Over the model's `decision`, whose ranks are production's `PolicyDecision.rank`; the bridge is `Conformance.policyLaws`' lattice law. Proved with no assume and no admit.",
+      "phase": "fuaran-core#318",
+      "evidence": {
+        "theorem": "policy_join_monotone",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
       "id": "capability-validate-before-invoke",
       "level": "proved",
       "claim": "An argument set `validateArgs` rejects makes `invoke` return that rejection, for every body alike — no body ran — and, at the registry, a dispatch that resolved its id still runs nothing on a set validation rejects (`dispatch_validates_first`). The converse holds too: an accepted result or a `BodyFailed` is reachable only past an accepted validation (`body_runs_only_validated`). What validation says is characterised beside it — the refusal is one of its own four classes (`validate_args_shape`), an accepted set addresses declared holes only and binds every required one (`validate_args_sound`), and a refusal is truthful: an `ArgOutOfSpace` names a value the named space really refuses, an `UnknownArg` an address no entry declares, an `UninvocableArg` an entry with no value space (`refusal_is_truthful`).",
@@ -3276,6 +3298,28 @@
         "operations": [
           "OpStream.replayEffectStrict"
         ]
+      }
+    },
+    {
+      "id": "keyed-capture-chain",
+      "level": "proved",
+      "claim": "THE KEYED CAPTURE JOURNAL IS A CHAIN (Phase 318). Section 6 at the keyed capture payload `{\"capture\":\"keyed\",\"seq\":…,\"key\":…,\"occ\":…,\"det\":…,\"phase\":…,\"value\":…}`: a journal recorded from its genesis by `captureEffectKeyed` — each invocation an `attempted` record and, when its body answered, a `completed` or `refused` record straight after it, under the occurrence that counts the earlier attempts under its key — verifies (`intact_keyed_verify`). The escaper and the hash are parameters, as in section 7c. The PAIRING half of `verifyKeyedCaptures` (attempts numbered in order, one settlement per attempt, after it, under its label) is not in the model; `Conformance.keyedCaptureLaws` samples it. Everything the section defines is `noextract_to \"FSharp\"`, so the extracted oracle is unchanged. Proved with no assume and no admit.",
+      "phase": "fuaran-core#318",
+      "evidence": {
+        "theorem": "intact_keyed_verify",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "keyed-replay-by-key",
+      "level": "proved",
+      "claim": "KEYED REPLAY FINDS AN INVOCATION BY WHAT IT WAS, NOT WHEN (Phase 318). The model of `replayEffectKeyed` for a non-deterministic label, before the domain decode: a key the journal holds no record of is refused `NoCapture` and never answered (`missing_key_no_capture`); records of OTHER keys in front of an invocation's records change nothing about how it replays (`replay_skips_other_keys` — positional independence as an equation); and the first invocation of a recorded session whose key no later invocation reuses replays to exactly what it settled to — its value, its refusal, or nothing for an attempt its body never answered (`replay_answers_head`). NOT claimed: that EVERY invocation of a session replays in any order across keys — the composition of the last two through a decomposition of the recorded journal this section does not state; `Conformance.keyedCaptureLaws` samples it, shuffling the calls across keys. Proved with no assume and no admit.",
+      "phase": "fuaran-core#318",
+      "evidence": {
+        "theorem": "replay_skips_other_keys",
+        "model": "proofs/Chain.fst",
+        "prover": "proofs/fstar-pin.json"
       }
     },
     {

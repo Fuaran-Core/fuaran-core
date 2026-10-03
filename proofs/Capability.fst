@@ -4987,3 +4987,169 @@ let twins : list twin = [
         = Error ({ d_code = OutOfRange; d_path = [Key "outputType"] })) } ]
 
 let _ = assert_norm (twins_hold twins == true)
+
+
+(* ======================================================================================
+   THE POLICY GATE (Phase 318; F#: `PolicyDecision`, `PolicyDecision.rank` / `join`,
+   `RegistryPolicy.decideNamed`, `CapabilityRegistry.withGate` / `dispatch`).
+
+   A registry carries a list of named gates; `dispatch` resolves the id, validates the
+   arguments, takes the JOIN of every gate's decision, and only under `Allow` runs the body.
+   Two theorems, both over every gate list and every body:
+
+     `policy_join_monotone` — raising either argument of `join` never lowers the result, in
+     the order `Allow < NeedsApproval < Deny` (`policy_rank`). With `join_is_max` it is what makes
+     `withGate` a tightening: the decision over a longer gate list is the join of the shorter
+     one's with the new gate's, so it can only rise.
+
+     `gate_before_body` — for an id the registry holds and arguments that validate, a gate
+     list whose join is not `Allow` answers `ApprovalRequired n` or `PolicyRefused n m alts`
+     for EVERY body alike (so no body ran — the first theorem's reading of "runs no handler"),
+     and `n` is the name of a gate in the list whose own decision is exactly the one returned
+     (`decide_named_names_a_gate`) — the refusal names the policy that refused it.
+
+   The gated outcome wraps the ungated seam's refusals (`GRefused`) rather than widening
+   `invoke_error`: production adds the two cases to `InvokeError` itself, and the wrapper is
+   the same three-way split stated without touching the extracted type. Everything in this
+   section is `noextract_to "FSharp"`, so the extracted oracle is unchanged; the bridge to
+   production is the `Conformance.policyLaws` family, which samples the same two properties
+   against the shipped registries. ====================================================== *)
+
+[@@ noextract_to "FSharp"]
+type decision =
+  | DAllow : decision
+  | DNeedsApproval : decision
+  | DDeny : msg:string -> alts:list string -> decision
+
+(* F#: `PolicyDecision.rank`. *)
+[@@ noextract_to "FSharp"]
+let policy_rank (d:decision) : Tot nat =
+  match d with
+  | DAllow -> 0
+  | DNeedsApproval -> 1
+  | DDeny _ _ -> 2
+
+(* F#: `PolicyDecision.join` — the left one on a tie. *)
+[@@ noextract_to "FSharp"]
+let policy_join (a b:decision) : Tot decision = if policy_rank b > policy_rank a then b else a
+
+(* The join is the maximum in rank. *)
+let join_is_max (a b:decision)
+  : Lemma (policy_rank (policy_join a b) == (if policy_rank a >= policy_rank b then policy_rank a else policy_rank b))
+  = ()
+
+(* THEOREM (Phase 318) — `policy_join_monotone`. *)
+let policy_join_monotone (a a' b b':decision)
+  : Lemma (requires policy_rank a <= policy_rank a' /\ policy_rank b <= policy_rank b')
+          (ensures policy_rank (policy_join a b) <= policy_rank (policy_join a' b'))
+  = ()
+
+(* F#: `PolicyGate`. *)
+[@@ noextract_to "FSharp"]
+noeq type gate = { gname: string; gdecide: capability -> invocation -> decision }
+
+(* F#: `RegistryPolicy.decideNamed` — the fold from `("", Allow)`, keeping the first gate of the
+   highest rank. *)
+[@@ noextract_to "FSharp"]
+let rec decide_from (gs:list gate) (c:capability) (a:invocation) (acc:(string & decision))
+  : Tot (string & decision) (decreases gs) =
+  match gs with
+  | [] -> acc
+  | g :: t ->
+    let d = g.gdecide c a in
+    if policy_rank d > policy_rank (snd acc) then decide_from t c a (g.gname, d) else decide_from t c a acc
+
+[@@ noextract_to "FSharp"]
+let decide_named (gs:list gate) (c:capability) (a:invocation) : Tot (string & decision) =
+  decide_from gs c a ("", DAllow)
+
+[@@ noextract_to "FSharp"]
+let rec gate_named (n:string) (d:decision) (gs:list gate) (c:capability) (a:invocation) : Tot prop =
+  match gs with
+  | [] -> False
+  | g :: t -> (g.gname == n /\ g.gdecide c a == d) \/ gate_named n d t c a
+
+let rec decide_from_names_a_gate (gs:list gate) (c:capability) (a:invocation) (acc:(string & decision))
+  : Lemma (ensures (let (n, d) = decide_from gs c a acc in
+                    (n == fst acc /\ d == snd acc) \/ gate_named n d gs c a))
+          (decreases gs)
+  = match gs with
+    | [] -> ()
+    | g :: t ->
+      let d = g.gdecide c a in
+      if policy_rank d > policy_rank (snd acc) then decide_from_names_a_gate t c a (g.gname, d)
+      else decide_from_names_a_gate t c a acc
+
+(* A decision other than `Allow` was made by a gate of the list, under the name it carries. *)
+let decide_named_names_a_gate (gs:list gate) (c:capability) (a:invocation)
+  : Lemma (ensures (let (n, d) = decide_named gs c a in DAllow? d \/ gate_named n d gs c a))
+  = decide_from_names_a_gate gs c a ("", DAllow)
+
+(* The decision only rises along the fold, so a longer gate list never decides lower. *)
+let rec decide_from_rises (gs:list gate) (c:capability) (a:invocation) (acc:(string & decision))
+  : Lemma (ensures policy_rank (snd (decide_from gs c a acc)) >= policy_rank (snd acc)) (decreases gs)
+  = match gs with
+    | [] -> ()
+    | g :: t ->
+      let d = g.gdecide c a in
+      if policy_rank d > policy_rank (snd acc) then decide_from_rises t c a (g.gname, d)
+      else decide_from_rises t c a acc
+
+[@@ noextract_to "FSharp"]
+type gated_error =
+  | GRefused : invoke_error -> gated_error
+  | GPolicyRefused : policy:string -> msg:string -> alts:list string -> gated_error
+  | GApprovalRequired : policy:string -> gated_error
+
+(* F#: `CapabilityRegistry.dispatch` over a registry carrying `gs`: resolve, validate, the gates'
+   join, and only under `Allow` the body. *)
+[@@ noextract_to "FSharp"]
+let dispatch_gated (#v:Type) (rd:readers) (r:registry) (gs:list gate) (id:string) (a:invocation)
+                   (body:capability -> unit -> deferred v)
+  : Tot (outcome (deferred v) gated_error) =
+  match find_cap id r.capabilities with
+  | None -> Error (GRefused (NoSuchCapability id (ids r.capabilities)))
+  | Some c ->
+    match validate_args rd c a with
+    | Error e -> Error (GRefused e)
+    | Ok () ->
+      match decide_named gs c a with
+      | (_, DAllow) ->
+        (match body c () with
+         | Ready x -> Ok (Ready x)
+         | Pending -> Ok Pending
+         | Failed m -> Error (GRefused (BodyFailed m)))
+      | (n, DNeedsApproval) -> Error (GApprovalRequired n)
+      | (n, DDeny m alts) -> Error (GPolicyRefused n m alts)
+
+(* THEOREM (Phase 318) — `gate_before_body`. For a held id and arguments that validate, a gate
+   list whose join is not `Allow` is refused — `GApprovalRequired n` or `GPolicyRefused n m alts`
+   — identically under every body, so no body runs; and `n` names a gate of the list whose own
+   decision is the one the refusal reports. *)
+let gate_before_body (#v:Type) (rd:readers) (r:registry) (gs:list gate) (id:string) (a:invocation)
+                     (body body':capability -> unit -> deferred v)
+  : Lemma (requires (match find_cap id r.capabilities with
+                     | Some c -> validate_args rd c a == Ok () /\ ~(DAllow? (snd (decide_named gs c a)))
+                     | None -> False))
+          (ensures (match find_cap id r.capabilities with
+                    | Some c ->
+                      (let (n, d) = decide_named gs c a in
+                       gate_named n d gs c a /\
+                       (match d with
+                        | DNeedsApproval -> dispatch_gated rd r gs id a body == Error (GApprovalRequired n)
+                        | DDeny m alts -> dispatch_gated rd r gs id a body == Error (GPolicyRefused n m alts)
+                        | DAllow -> False))
+                    | None -> True) /\
+                   dispatch_gated rd r gs id a body == dispatch_gated rd r gs id a body')
+  = match find_cap id r.capabilities with
+    | Some c -> decide_named_names_a_gate gs c a
+    | None -> ()
+
+(* With no gate the gated dispatch IS the seam's `dispatch`, its refusals wrapped: the gate is
+   additive over the Phase 30 theorems. *)
+let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
+                        (body:capability -> unit -> deferred v)
+  : Lemma (ensures (match dispatch rd r id a body with
+                    | Ok x -> dispatch_gated rd r [] id a body == Ok x
+                    | Error e -> dispatch_gated rd r [] id a body == Error (GRefused e)))
+  = ()

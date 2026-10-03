@@ -11,6 +11,7 @@
     <Compile Include="Space.fs" />
     <Compile Include="Function.fs" />
     <Compile Include="Deferred.fs" />
+    <Compile Include="Policy.fs" />
     <Compile Include="KeyedRegistry.fs" />
     <Compile Include="Capability.fs" />
     <Compile Include="FunctionRegistry.fs" />
@@ -26,6 +27,8 @@
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Ops\Fuaran.Core.Ops.fsproj" />
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <!-- Phase 318: the seams' capturing dispatch journals through the keyed capture journal. -->
+    <ProjectReference Include="..\Fuaran.Core.OpStream\Fuaran.Core.OpStream.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

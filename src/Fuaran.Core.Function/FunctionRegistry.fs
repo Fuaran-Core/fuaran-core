@@ -74,6 +74,9 @@ type FunctionRegistry =
             /// Result kind to the ids producing it: exactly the ids of `Entries`, grouped by result
             /// kind, with no empty group — the projection every verb below maintains.
             ByResult: Map<string, Set<string>>
+            /// The gates `dispatch` runs and the observers a refusal reaches (Phase 318); carried
+            /// through every lifecycle verb, combined by `union`.
+            Policy: RegistryPolicy<Capability, (string * string) list>
         }
 
 /// Populate / enumerate / query / dispatch the signature-typed registry. Additive over the `Capability`
@@ -85,7 +88,8 @@ module FunctionRegistry =
     /// The registry with no entries and an empty result index; every query against it is empty.
     let empty: FunctionRegistry =
         { Entries = Map.empty
-          ByResult = Map.empty }
+          ByResult = Map.empty
+          Policy = RegistryPolicy.none }
 
     /// Build an entry from the node-kind it produces + an invocable capability.
     let entry (resultType: string) (cap: Capability) : FunctionEntry =
@@ -114,7 +118,8 @@ module FunctionRegistry =
                 |> Set.add id
 
             { Entries = entries
-              ByResult = Map.add e.ResultType ids r.ByResult })
+              ByResult = Map.add e.ResultType ids r.ByResult
+              Policy = r.Policy })
 
     /// The entry registered under exactly `id` (ordinal, case-sensitive), or `None`; the result index
     /// is not consulted.
@@ -130,7 +135,10 @@ module FunctionRegistry =
 
     /// The registry over `entries` with its result index REBUILT from them — the one constructor the
     /// lifecycle verbs below share, so the index cannot be anything but the entries' projection.
-    let private ofEntries (entries: Map<string, FunctionEntry>) : FunctionRegistry =
+    let private ofEntries
+        (policy: RegistryPolicy<Capability, (string * string) list>)
+        (entries: Map<string, FunctionEntry>)
+        : FunctionRegistry =
         { Entries = entries
           ByResult =
             entries
@@ -138,7 +146,8 @@ module FunctionRegistry =
                 (fun idx id (e: FunctionEntry) ->
                     let held = idx |> Map.tryFind e.ResultType |> Option.defaultValue Set.empty
                     Map.add e.ResultType (Set.add id held) idx)
-                Map.empty }
+                Map.empty
+          Policy = policy }
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
@@ -148,7 +157,7 @@ module FunctionRegistry =
     /// entry just registered gives back the registry it was registered into.
     let unregister (id: string) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
         KeyedRegistry.unregister (fun id known -> NoSuchCapability(id, known)) id r.Entries
-        |> Result.map ofEntries
+        |> Result.map (ofEntries r.Policy)
 
     /// Swap the entry registered under `e.Capability.Id` for `e` — the hot-reload verb, which may
     /// change the result kind the entry is indexed under. Refused `NoSuchCapability` when the id is
@@ -161,19 +170,45 @@ module FunctionRegistry =
             e.Capability.Id
             e
             r.Entries
-        |> Result.map ofEntries
+        |> Result.map (ofEntries r.Policy)
 
     /// The registry narrowed to the ids in `keep`, its index rebuilt — a session- or actor-scoped
     /// catalogue. An id in `keep` the registry does not hold is ignored, so the result enumerates a
     /// subset of what `r` enumerates.
     let restrict (keep: Set<string>) (r: FunctionRegistry) : FunctionRegistry =
-        ofEntries (KeyedRegistry.restrict keep r.Entries)
+        ofEntries r.Policy (KeyedRegistry.restrict keep r.Entries)
 
     /// The join of two registries whose ids are disjoint, its index rebuilt — refused
-    /// `DuplicateCapability` naming the first id, in id order, that both hold. Associative.
+    /// `DuplicateCapability` naming the first id, in id order, that both hold. Associative. The union
+    /// runs both registries' gates (Phase 318, `RegistryPolicy.combine`).
     let union (a: FunctionRegistry) (b: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
         KeyedRegistry.union DuplicateCapability a.Entries b.Entries
-        |> Result.map ofEntries
+        |> Result.map (ofEntries (RegistryPolicy.combine a.Policy b.Policy))
+
+    // ---- the policy gate (Phase 318) ----
+
+    /// `r` with `gate` added to the gates `dispatch` runs — the same gate shape, over the entry's
+    /// capability, that `CapabilityRegistry.withGate` takes, so one gate value serves both registries.
+    /// Adding a gate can only refuse more.
+    let withGate (gate: PolicyGate<Capability, (string * string) list>) (r: FunctionRegistry) : FunctionRegistry =
+        { r with
+            Policy = RegistryPolicy.withGate gate r.Policy }
+
+    /// `r` with `observe` told of every invocation its policy refuses, before the refusal returns.
+    let onDenied (observe: PolicyDenial<(string * string) list> -> unit) (r: FunctionRegistry) : FunctionRegistry =
+        { r with
+            Policy = RegistryPolicy.onDenied observe r.Policy }
+
+    /// What the registry would decide for an invocation without dispatching it — as
+    /// `CapabilityRegistry.decide`: an unknown id and an invalid argument set are denials, otherwise
+    /// the gates' join. No observer is told.
+    let decide (r: FunctionRegistry) (id: string) (args: (string * string) list) : PolicyDecision =
+        match Map.tryFind id r.Entries with
+        | None -> PolicyDecision.denyWith (InvokeError.describe (NoSuchCapability(id, ids r))) (ids r)
+        | Some e ->
+            match Capability.validateArgs e.Capability args with
+            | Error err -> PolicyDecision.deny (InvokeError.describe err)
+            | Ok() -> RegistryPolicy.decide r.Policy e.Capability args
 
     /// Is a required slot constraint satisfied by an available slot? An unconstrained required slot
     /// (`None`) accepts any available slot; a constrained one needs the same kind.
@@ -267,7 +302,17 @@ module FunctionRegistry =
         : Result<Deferred<'v>, InvokeError> =
         match Map.tryFind id r.Entries with
         | None -> Error(NoSuchCapability(id, ids r))
-        | Some e -> Capability.invoke e.Capability args (body e)
+        | Some e ->
+            // Phase 318: validate, then the policy's gates, then the body — `Capability.invoke`
+            // exactly when no gate runs.
+            Capability.validateArgs e.Capability args
+            |> Result.bind (fun () ->
+                RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired r.Policy id e.Capability args)
+            |> Result.bind (fun () ->
+                match body e () with
+                | Ready v -> Ok(Ready v)
+                | Pending -> Ok Pending
+                | Failed m -> Error(BodyFailed m))
 
     /// Partially apply a registered function (Phase 50) — the content-pack formalism. Produce a NEW
     /// entry under `newId` whose signature is `Function.signatureExcluding boundAddrs` of the source's

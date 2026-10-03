@@ -7554,6 +7554,10 @@ let private prodInvokeErrRender (e: InvokeError) : string =
     | NonTotalCapability(id, xs) -> sprintf "NonTotalCapability(%s;%s)" id (String.concat "," xs)
     | IllFormedCapability(id, f) -> sprintf "IllFormedCapability(%s;%s)" id (prodFaultRender f)
     | DuplicateArg a -> sprintf "DuplicateArg(%s)" a
+    // Phase 318 — the policy gate's two refusals; the model's dispatch has no gate, so they never
+    // arise in the differential, which renders them only to stay total.
+    | PolicyRefused(p, r, xs) -> sprintf "PolicyRefused(%s;%s;%s)" p r (String.concat "," xs)
+    | ApprovalRequired p -> sprintf "ApprovalRequired(%s)" p
 
 let private modelInvokeErrRender (e: ModelCap.invoke_error) : string =
     match e with
@@ -10144,6 +10148,9 @@ let private prodQueryErrRender (e: QueryError) : string =
     | Timeout -> "Timeout"
     | RequiredParamsNull names -> sprintf "RequiredParamsNull(%s)" (String.concat "," names)
     | DuplicateParam name -> sprintf "DuplicateParam(%s)" name
+    // Phase 318 — the gate's refusals; never raised by the ungated model, rendered to stay total.
+    | QueryPolicyRefused(p, r, xs) -> sprintf "PolicyRefused(%s;%s;%s)" p r (String.concat "," xs)
+    | QueryApprovalRequired p -> sprintf "ApprovalRequired(%s)" p
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -10172,6 +10179,8 @@ let private queryErrClass (e: QueryError) : string =
     | Timeout -> "Timeout"
     | RequiredParamsNull _ -> "RequiredParamsNull"
     | DuplicateParam _ -> "DuplicateParam"
+    | QueryPolicyRefused _ -> "PolicyRefused"
+    | QueryApprovalRequired _ -> "ApprovalRequired"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with

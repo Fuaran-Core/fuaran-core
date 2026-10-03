@@ -88,6 +88,67 @@ type CaptureReplayFault =
     /// The captured value did not decode: the domain codec's reason.
     | Undecodable of reason: string
 
+/// Where a keyed capture stands in its two phases (Phase 318). An invocation is ATTEMPTED before its
+/// body runs, and SETTLED — `Completed` with the value or `Refused` with the reason — when the body
+/// answers, which for an asynchronous body is later than the attempt and may be never.
+[<RequireQualifiedAccess>]
+type CapturePhase =
+    /// The invocation was about to run its body. Its value is `null`.
+    | Attempted
+    /// The body answered a value; the capture's value is the domain codec's encoding of it.
+    | Completed
+    /// The body answered a failure; the capture's value is the reason, as a JSON string.
+    | Refused
+
+/// One record of the KEYED capture journal (Phase 318) — the journal a seam writes when it captures
+/// an invocation under its invocation key rather than at its position. `Key` is the invocation key
+/// (`Capability.invocationKey`, `Query.invocationKey`, `Query.invocationKeyPage`); `Occurrence` is
+/// which invocation under that key this is, counting from 0 in the order the attempts were journalled,
+/// so a session that makes the same call twice has two attempts and replays both. Chained exactly as
+/// `EffectCapture` is: `Hash` is the hash of `PrevHash` and the record's pre-image.
+type KeyedCapture =
+    {
+        /// Zero-based position in this journal's chain.
+        Seq: int
+        /// The invocation key the record is about. Replay finds an invocation by it, never by position.
+        Key: string
+        /// Which invocation under `Key`: 0 for the first attempt journalled under it, 1 for the second.
+        Occurrence: int
+        /// The determinism label the invocation was journalled under — never `deterministic`.
+        Determinism: string
+        /// The phase this record moves the invocation into.
+        Phase: CapturePhase
+        /// Raw JSON: `null` for an attempt, the encoded value for a completion, the reason as a JSON
+        /// string for a refusal.
+        Value: string
+        /// The previous record's `Hash`, or the genesis on the first record.
+        PrevHash: string
+        /// `hashFn PrevHash` over the `{capture:"keyed", seq, key, occ, det, phase, value}` pre-image.
+        Hash: string
+    }
+
+/// Why the keyed capture journal refused a request (Phase 318). Each verb names the cases it can
+/// raise: `settleEffectKeyed` the last two, `replayEffectKeyed` the first five.
+[<RequireQualifiedAccess>]
+type KeyedCaptureFault =
+    /// Replay asked for a key the journal holds no record of at all — the invocation was never
+    /// captured, so there is nothing to answer it with and the live source is not consulted.
+    | NoCapture of key: string
+    /// Replay asked for more invocations under `key` than were attempted: `recorded` attempts were
+    /// journalled under it and every one has been replayed.
+    | Exhausted of key: string * recorded: int
+    /// The attempt was journalled under another determinism label: the label requested, and the one
+    /// recorded. Compared exactly.
+    | LabelMismatch of key: string * requested: string * recorded: string
+    /// The requested label is not a canonical determinism label (`OpStream.isDeterminismLabel`).
+    | LabelNotCanonical of label: string
+    /// The completed value did not decode: the domain codec's reason.
+    | Undecodable of reason: string
+    /// Settling named an invocation the journal holds no attempt for.
+    | NotAttempted of key: string * occurrence: int
+    /// Settling named an invocation that was already settled; an invocation settles once.
+    | AlreadySettled of key: string * occurrence: int
+
 /// The bodies of the `OpStream` capture and attestation members (Phase 332): determinism capture /
 /// replay and the attestation seam's default sink, signer and verifier. Internal: a consumer reaches
 /// each one through its forward in `OpStream` (OpStream.fs), which carries the member's contract
@@ -301,6 +362,234 @@ module internal OpStreamCapture =
                                       PrevHash = prevHash
                                       Hash = hash })))))))
         |> Result.mapError JsonlFault.toString
+
+    // ---- the keyed capture journal (Phase 318) ----
+
+    let private phaseTag (p: CapturePhase) : string =
+        match p with
+        | CapturePhase.Attempted -> "attempted"
+        | CapturePhase.Completed -> "completed"
+        | CapturePhase.Refused -> "refused"
+
+    /// The keyed record's hash pre-image. The tag `"keyed"` keeps it disjoint from a positional
+    /// capture's (`"capture":true`), so a record of one journal never verifies in the other.
+    let private keyedPayload
+        (seq: int)
+        (key: string)
+        (occ: int)
+        (det: string)
+        (phase: CapturePhase)
+        (value: string)
+        : string =
+        "{\"capture\":\"keyed\",\"seq\":"
+        + string seq
+        + ",\"key\":"
+        + jstr key
+        + ",\"occ\":"
+        + string occ
+        + ",\"det\":"
+        + jstr det
+        + ",\"phase\":"
+        + jstr (phaseTag phase)
+        + ",\"value\":"
+        + value
+        + "}"
+
+    /// Append one keyed record at the journal's tip.
+    let private appendKeyed
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (key: string)
+        (occ: int)
+        (det: string)
+        (phase: CapturePhase)
+        (value: string)
+        (captures: KeyedCapture list)
+        : KeyedCapture list =
+        let mutable seq = 0
+        let mutable prev = cfg.Genesis
+        let mutable rest = captures
+
+        while not rest.IsEmpty do
+            prev <- rest.Head.Hash
+            seq <- seq + 1
+            rest <- rest.Tail
+
+        captures
+        @ [ { Seq = seq
+              Key = key
+              Occurrence = occ
+              Determinism = det
+              Phase = phase
+              Value = value
+              PrevHash = prev
+              Hash = hashFn prev (keyedPayload seq key occ det phase value) } ]
+
+    /// How many attempts the journal holds under `key`.
+    let private attemptsOf (key: string) (captures: KeyedCapture list) : int =
+        captures
+        |> List.filter (fun c -> c.Key = key && c.Phase = CapturePhase.Attempted)
+        |> List.length
+
+    let beginEffectKeyedWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (det: string)
+        (key: string)
+        (captures: KeyedCapture list)
+        : int * KeyedCapture list =
+        let occ = attemptsOf key captures
+        occ, appendKeyed cfg hashFn key occ det CapturePhase.Attempted "null" captures
+
+    let settleEffectKeyedWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (key: string)
+        (occurrence: int)
+        (outcome: Result<'v, string>)
+        (captures: KeyedCapture list)
+        : Result<KeyedCapture list, KeyedCaptureFault> =
+        let mine (c: KeyedCapture) =
+            c.Key = key && c.Occurrence = occurrence
+
+        match captures |> List.tryFind (fun c -> mine c && c.Phase = CapturePhase.Attempted) with
+        | None -> Error(KeyedCaptureFault.NotAttempted(key, occurrence))
+        | Some attempt ->
+            if captures |> List.exists (fun c -> mine c && c.Phase <> CapturePhase.Attempted) then
+                Error(KeyedCaptureFault.AlreadySettled(key, occurrence))
+            else
+                let phase, value =
+                    match outcome with
+                    | Ok v -> CapturePhase.Completed, encode v
+                    | Error reason -> CapturePhase.Refused, jstr reason
+
+                Ok(appendKeyed cfg hashFn key occurrence attempt.Determinism phase value captures)
+
+    let captureEffectKeyedWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (encode: 'v -> string)
+        (det: string)
+        (key: string)
+        (effect: unit -> Result<'v, string> option)
+        (captures: KeyedCapture list)
+        : Result<'v, string> option * int * KeyedCapture list =
+        if det = deterministicTag then
+            effect (), 0, captures
+        else
+            let occ, attempted = beginEffectKeyedWith cfg hashFn det key captures
+
+            match effect () with
+            | None -> None, occ, attempted
+            | Some outcome ->
+                let settled =
+                    match settleEffectKeyedWith cfg hashFn encode key occ outcome attempted with
+                    | Ok cs -> cs
+                    // unreachable: the attempt was just appended and nothing settled it
+                    | Error _ -> attempted
+
+                Some outcome, occ, settled
+
+    /// A JSON string literal's text (the inverse of `jstr` over what `jstr` writes), or `None`.
+    let private unquote (raw: string) : string option =
+        Jsonl.parseLine 1 ("{\"s\":" + raw + "}")
+        |> Result.bind (Jsonl.stringField "s")
+        |> Result.toOption
+
+    let replayEffectKeyed
+        (decode: string -> Result<'v, string>)
+        (det: string)
+        (key: string)
+        (effect: unit -> Result<'v, string> option)
+        (cursor: Map<string, int>)
+        (captures: KeyedCapture list)
+        : Result<Result<'v, string> option * Map<string, int>, KeyedCaptureFault> =
+        if not (isCanonicalLabel det) then
+            Error(KeyedCaptureFault.LabelNotCanonical det)
+        elif det = deterministicTag then
+            Ok(effect (), cursor)
+        else
+            let occ = cursor |> Map.tryFind key |> Option.defaultValue 0
+            let mine = captures |> List.filter (fun c -> c.Key = key)
+
+            match mine with
+            | [] -> Error(KeyedCaptureFault.NoCapture key)
+            | _ ->
+                match
+                    mine
+                    |> List.tryFind (fun c -> c.Occurrence = occ && c.Phase = CapturePhase.Attempted)
+                with
+                | None -> Error(KeyedCaptureFault.Exhausted(key, attemptsOf key captures))
+                | Some attempt when attempt.Determinism <> det ->
+                    Error(KeyedCaptureFault.LabelMismatch(key, det, attempt.Determinism))
+                | Some _ ->
+                    let next = Map.add key (occ + 1) cursor
+
+                    match
+                        mine
+                        |> List.tryFind (fun c -> c.Occurrence = occ && c.Phase <> CapturePhase.Attempted)
+                    with
+                    | None -> Ok(None, next)
+                    | Some c when c.Phase = CapturePhase.Completed ->
+                        match decode c.Value with
+                        | Ok v -> Ok(Some(Ok v), next)
+                        | Error reason -> Error(KeyedCaptureFault.Undecodable reason)
+                    | Some c ->
+                        match unquote c.Value with
+                        | Some reason -> Ok(Some(Error reason), next)
+                        | None ->
+                            Error(KeyedCaptureFault.Undecodable("a refusal's reason is not a JSON string: " + c.Value))
+
+    let firstKeyedCaptureBreakWith
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (captures: KeyedCapture list)
+        : ChainBreak option =
+        walkChain
+            hashFn
+            cfg.Genesis
+            0
+            (fun (c: KeyedCapture) -> c.Seq)
+            (fun c -> c.PrevHash)
+            (fun c -> c.Hash)
+            (fun c -> keyedPayload c.Seq c.Key c.Occurrence c.Determinism c.Phase c.Value)
+            captures
+
+    /// The journal's PAIRING is well formed: under each key the attempts carry occurrences 0, 1, …
+    /// in journal order, every settlement follows the attempt it settles, carries its label, and no
+    /// attempt is settled twice.
+    let keyedPairingHolds (captures: KeyedCapture list) : bool =
+        let step
+            (ok: bool, attempts: Map<string, int>, settled: Set<string * int>, labels: Map<string * int, string>)
+            (c: KeyedCapture)
+            =
+            if not ok then
+                ok, attempts, settled, labels
+            else
+                let held = attempts |> Map.tryFind c.Key |> Option.defaultValue 0
+
+                match c.Phase with
+                | CapturePhase.Attempted ->
+                    (c.Occurrence = held && c.Determinism <> deterministicTag),
+                    Map.add c.Key (held + 1) attempts,
+                    settled,
+                    Map.add (c.Key, c.Occurrence) c.Determinism labels
+                | _ ->
+                    (c.Occurrence < held
+                     && not (settled.Contains(c.Key, c.Occurrence))
+                     && Map.tryFind (c.Key, c.Occurrence) labels = Some c.Determinism),
+                    attempts,
+                    settled.Add(c.Key, c.Occurrence),
+                    labels
+
+        let ok, _, _, _ = captures |> List.fold step (true, Map.empty, Set.empty, Map.empty)
+
+        ok
+
+    let verifyKeyedCapturesWith (cfg: StreamConfig) (hashFn: HashFn) (captures: KeyedCapture list) : bool =
+        (firstKeyedCaptureBreakWith cfg hashFn captures).IsNone
+        && keyedPairingHolds captures
 
     // ---- cryptographic attestation (Phase 320) ----
 

@@ -868,6 +868,46 @@ module Families =
                   "each iteration queries matching and non-matching signatures on a built registry, and runs the four lifecycle verbs on all four registries")
               (Built,
                "an unregistered id and an out-of-space arg are built, and so are an unheld id, an ill-formed replacement and a repeated parameter")
+          // Phase 318 — the policy gate: the decision lattice and the gate on the three registries,
+          // from the kit's own fixtures; every decision is run through every registry each iteration.
+          c
+              "policyLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration runs every decision — allow, park and two denials — through a gate on all three registries, and a drawn triple through the lattice")
+              (Built,
+               "a denial, a park and an out-of-space argument are built through all three registries each iteration")
+          // Phase 318 — the no-unapproved-write law runs the DOMAIN'S own policy and effects
+          // accessor, so whether a host-writing op or a refused dry run is reached is its generator's.
+          c
+              "policyLawsAt"
+              [ "GuardedSurfaceWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "unprivileged actor"; "host-writing op"; "refused dry run" ])
+              (Drawn,
+               "a host-writing op, an unprivileged actor and a sequence whose dry run refuses are reached only when the domain's generator and actor list draw them")
+          // Phase 318 — the write gate at the domain's tree witnesses; a denial is reached only when
+          // the drawn lock covers a drawn op's target.
+          c
+              "writeGateLaws"
+              treeWitness
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "applied op"; "denied op" ])
+              (Drawn,
+               "the cover law reads an applied op and the subtree law a denied one, and both are drawn: the op from the domain's generator, the lock from its tree")
+          // Phase 318 — the keyed capture journal, self-contained.
+          c
+              "keyedCaptureLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration records a drawn session, replays it shuffled across keys, tampers with it and dispatches through the seam")
+              (Built, "NoCapture, Exhausted, NotAttempted and a policy refusal at the seam are built each iteration")
           c
               "packLoadingLaws"
               none
@@ -1716,6 +1756,63 @@ module Families =
                 "Dag.tryReplayToWith" ] }
           { Family = "Conformance.reconcileLawsWith"
             Operations = [ "Dag.reconcile"; "Dag.mergeBase"; "Dag.replayTo" ] }
+          { Family = "Conformance.policyLaws"
+            Operations =
+              [ "PolicyDecision.rank"
+                "PolicyDecision.join"
+                "PolicyDecision.meet"
+                "PolicyDecision.all"
+                "PolicyDecision.any"
+                "PolicyDecision.guidance"
+                "RegistryPolicy.none"
+                "RegistryPolicy.withGate"
+                "RegistryPolicy.onDenied"
+                "RegistryPolicy.combine"
+                "RegistryPolicy.gates"
+                "RegistryPolicy.decide"
+                "RegistryPolicy.decideNamed"
+                "RegistryPolicy.Equals"
+                "RegistryPolicy.GetHashCode"
+                "CapabilityRegistry.withGate"
+                "CapabilityRegistry.onDenied"
+                "CapabilityRegistry.decide"
+                "FunctionRegistry.withGate"
+                "FunctionRegistry.onDenied"
+                "FunctionRegistry.decide"
+                "QueryRegistry.withGate"
+                "QueryRegistry.onDenied"
+                "QueryRegistry.decide" ] }
+          { Family = "Conformance.policyLawsAt"
+            Operations =
+              [ "Proposals.decideGuarded"
+                "Proposals.submitGuarded"
+                "Proposals.approveGuarded" ] }
+          { Family = "Conformance.writeGateLaws"
+            Operations =
+              [ "WriteGate.lockOnly"
+                "WriteGate.allowOnly"
+                "WriteGate.targetsOf"
+                "WriteGate.decide"
+                "WriteGate.applyGated"
+                "WriteGate.guidance" ] }
+          { Family = "Conformance.keyedCaptureLaws"
+            Operations =
+              [ "OpStream.beginEffectKeyed"
+                "OpStream.beginEffectKeyedWith"
+                "OpStream.settleEffectKeyed"
+                "OpStream.settleEffectKeyedWith"
+                "OpStream.captureEffectKeyed"
+                "OpStream.captureEffectKeyedWith"
+                "OpStream.replayEffectKeyed"
+                "OpStream.firstKeyedCaptureBreak"
+                "OpStream.firstKeyedCaptureBreakWith"
+                "OpStream.verifyKeyedCaptures"
+                "OpStream.verifyKeyedCapturesWith"
+                "CapabilityRegistry.dispatchCaptured"
+                "CapabilityRegistry.dispatchReplayed"
+                "QueryRegistry.dispatchCaptured"
+                "QueryRegistry.dispatchPageCaptured"
+                "QueryRegistry.dispatchReplayed" ] }
           { Family = "Conformance.referenceLaws"
             Operations =
               [ "Ops.applyReferenced"

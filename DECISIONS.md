@@ -1,5 +1,70 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-03 — D118: the gate's SHAPE is Core's and its CONTENT is the domain's; a gate only tightens; the write gate's targets are the footprint's; a capture is keyed by what was invoked, in two phases; three premises were sharper than written
+
+**Context.** Being registered was being permitted: a registry refused only an id it did not hold, the one
+three-way decision Core had (`PolicyDecision`) lived inside the AI surface's witness with no way to
+combine two of them, and every consumer that needed a gate, an id-scoped write policy or an
+invocation journal wrote its own — the same join, the same `{Locked; Writable}` record, the same
+attempted-then-settled journal. Phase 318 checked the shard's premises against the tree first; three
+were sharper than written, and each changed what was built.
+
+**D118.1 — policy content is the domain's; the gate's shape is Core's.** Core owns the decision type and
+its lattice (`PolicyDecision.join` is the maximum of `Allow < NeedsApproval < Deny`, the left denial kept
+on a tie; `all` folds it, `any` folds the meet and denies when empty), the hook (`PolicyGate`: a named
+decision over the resolved declaration and its validated arguments), the order (resolve, validate, gate,
+body), the typed refusals (`PolicyRefused` naming the gate, its reason and what it allows;
+`ApprovalRequired`) and the denial observer. It owns no rule. Who may invoke what, under which
+approval, is written by the domain into `Decide`; nothing in Core inspects an actor.
+
+**D118.2 — a gate only tightens.** A registry carries a LIST of gates and decides by their join, so
+`withGate` can only refuse more, a `union` runs both sides' gates, and the lifecycle verbs carry the
+policy through. There is no verb that removes a gate: an actor-scoped registry is built from the host's
+ungated one, which keeps "this session may do less" a property of construction rather than of a
+discipline. The policy is a FIELD of the registry because a gate that lived beside it would be bypassed
+by whichever dispatch path forgot it. That field makes registry equality identity of the functions —
+the only sound equality a function has — and costs the registries their ordering.
+
+**D118.3 — PREMISE SHARPENED: the move of `PolicyDecision` is source-compatible and binary-breaking, and
+the AI surface now depends on `Function`.** The shard asked for the type to move with "an alias kept for
+one draft". Both packages declare it in namespace `Fuaran.Core`, so no alias is needed or possible —
+a second declaration of the name would collide — and a source that names it compiles unchanged through
+the new `Fuaran.Core.AiSurface → Fuaran.Core.Function` reference. F# emits no type forwarder, so a binary
+compiled against the old assembly must be rebuilt; the surface gate classes the AI surface `removal`,
+and STABILITY says so rather than calling the move additive.
+
+**D118.4 — PREMISE SHARPENED: the frozen witness is composed, not grown.** The shard put an `EffectsOf`
+accessor and a dry run on the AI surface. `AiSurfaceWitness` is frozen; STABILITY prescribes a composing
+record for exactly this, so `GuardedSurfaceWitness` embeds it, adds `DryRun` and `EffectsOf`, and is
+frozen at birth. `submitGuarded` / `approveGuarded` join the domain's decision with the registry's for
+every capability an op invokes — so "not registered" is stated once, by the registry — and dry-run the
+whole sequence before the first `Apply`, so an `Apply` that performs effects never runs for a sequence a
+later op refuses. `submit` and `approve` are unchanged in behaviour.
+
+**D118.5 — the write gate's targets are the footprint's, read against the tree.** The ids an op writes
+are `Ops.footprint`'s structure, content and unknown-parent writes and its slot writes' nodes, plus the
+subtree a removal destroys — the one thing the pure footprint records only by its target, and the tree
+can name. Locks and allowances reach down a subtree through `Tree` ancestry, and a node an op creates has
+the ancestors it is created under. The guarantee is a LAW (`writeGateLaws`: every id an applied op
+creates, destroys or whose child list it changes is a target, or the source parent of one) and not a
+theorem: **PREMISE REFUTED as stated** — the shard called `targets ⊇ written ids` "a corollary of
+footprint soundness", and no footprint-soundness (frame) theorem exists in `proofs/TreeOps.fst`. The
+footprint's proved property is the independence diamond, which is about commuting, not about what an op
+leaves untouched. The frame theorem is its own piece of work over the tree model.
+
+**D118.6 — PREMISE SHARPENED: a capture is keyed by what was invoked, and asynchrony is two phases, not
+`Deferred`.** `Fuaran.Core.OpStream` sits below `Fuaran.Core.Function` and cannot name `Deferred`. The
+keyed journal is two-phase instead — `Attempted` before the body, `Completed` or `Refused` when it
+answers, the settlement free to come later — and its effect answers `Result<'v, string> option`, which is
+`Deferred.settled`'s shape. Replay finds an invocation by key and occurrence, refuses a miss
+(`NoCapture`, `Exhausted`) rather than calling the live source, and replays a refusal as the same
+refusal. The seams' capturing dispatch needed `Fuaran.Core.Function → Fuaran.Core.OpStream`; the positional
+`captureEffect` is unchanged beside it.
+
+**D118.7 — the shared keyed-registry helper stays internal** (D117.2's open question is not settled
+here): the gate lives in `RegistryPolicy`, a public type the three registries carry, and does not need
+the helper published.
+
 ## 2026-10-03 — D117: a registry is a lattice, not an append log; the function registry is opaque so its index is a projection; the page token is an input the replay key reads; registration discharges the distinct-names premise
 
 **Context.** The four registries — `CapabilityRegistry`, `FunctionRegistry`, `QueryRegistry` and
