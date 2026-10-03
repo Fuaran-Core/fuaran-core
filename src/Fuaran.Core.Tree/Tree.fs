@@ -334,6 +334,157 @@ module Tree =
     let contentHash (w: NodeWitness<'Node, 'Id>) (node: 'Node) : string =
         preimageWith w w.KindTag node |> Hash.fnv1a
 
+    // ---- per-node digest maps (Phase 314) ----
+
+    /// Per-node digests over one tree (Phase 314), keyed by `IdWitness.ToString` like every map on
+    /// the spine, built once by `Tree.digests` in a single pass. Every digest is SHA-256
+    /// (`Hash.sha256Hex`) over a `Hash.canonicalFields` pre-image — the crypto regime, never the
+    /// 32-bit `fnv1a`: a digest a consumer compares across snapshots, reconciles a subtree by or
+    /// signs is one a collision silently corrupts, and over enough edits a 32-bit checksum WILL
+    /// collide (Phase 298 measured the content digest letting a real edit read as unchanged;
+    /// DECISIONS.md D112 records the width).
+    ///
+    ///   - `Own` — the node's OWN content: its id key, its kind tag and the caller's `encode` of its
+    ///     SHELL (`ReplaceChildren n []`, so a change in the children alone never moves it — Phase
+    ///     305's posture for the content-aware diff). The map to diff for the nodes whose own
+    ///     content changed.
+    ///   - `Frame` — `Own`'s fields, then the child count and each child's id key: the node as a
+    ///     PARENT, moved by a content edit, a child arriving or leaving or a reorder, and by nothing
+    ///     below its children. `Projection.snapshotDigestOf` (Phase 298) is this digest, and the
+    ///     changed-since baseline reads it from here.
+    ///   - `Subtree` — the Merkle digest: `Own`, then each child's `Subtree` digest in order. An edit
+    ///     anywhere below the node moves it, and two nodes with one `Subtree` digest head one subtree
+    ///     — ids, kinds and shape unconditionally, content wherever `encode` is injective over a
+    ///     shell — up to a SHA-256 collision (`subtree_digest_injective`, `proofs/TreeDiff.fst`
+    ///     section 14; the ids and kinds are fields of the pre-image, which is why no hypothesis on
+    ///     the encoder is needed for the structure). The map to diff for the containers that bracket
+    ///     a change, and the fast path: a subtree whose digest agrees holds no change and needs no
+    ///     walk (`Digests.diff`, `Projection.project` under `ChangedSince`).
+    ///
+    /// A well-formed tree is the contract (`Tree.wellFormed`); for an id carried twice the LAST
+    /// preorder occurrence holds the entry, as `Tree.Index.build` keeps it.
+    type Digests =
+        {
+            /// Id key → own-content digest (`Tree.ownDigest`): id, kind and the encoded shell.
+            Own: Map<string, string>
+            /// Id key → frame digest (`Tree.frameDigest`): the own fields, then the child count and
+            /// the ordered child id keys — what `Projection`'s changed-since baseline compares.
+            Frame: Map<string, string>
+            /// Id key → Merkle digest over the own digest and the children's subtree digests, in
+            /// order; equal digests head equal subtrees up to a SHA-256 collision.
+            Subtree: Map<string, string>
+        }
+
+    /// The four-way partition `Digests.diff` reports over two digest maps, every list in ascending
+    /// id-key order (the maps' own order). Every id key of either side lands in exactly one list:
+    /// `added ⊎ removed ⊎ changed ⊎ unchanged` is the union of the two key sets
+    /// (`digest_partition`, `proofs/TreeDiff.fst` section 14).
+    type DigestDelta =
+        {
+            /// Keys the later side holds and the earlier does not.
+            Added: string list
+            /// Keys the earlier side holds and the later does not.
+            Removed: string list
+            /// Keys both sides hold whose OWN digest differs — the nodes whose own content moved;
+            /// a node whose children alone changed is not here.
+            Changed: string list
+            /// Keys both sides hold whose own digest agrees.
+            Unchanged: string list
+        }
+
+    /// The own-content fields of a node, before the field encoding: its id key, its kind tag and the
+    /// encoder over its shell. Shared by the three digests so the three pre-images cannot drift.
+    let private ownFields (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) =
+        [ idw.ToString(w.Id n); w.KindTag n; encode (w.ReplaceChildren n []) ]
+
+    /// A node's own-content digest (Phase 314): SHA-256 over its id key, its kind tag and `encode`
+    /// of its shell, through `Hash.canonicalFields`. `Digests.Own` holds one per node; this is the
+    /// per-node form for a caller that has one node in hand.
+    let ownDigest (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) : string =
+        ownFields w idw encode n |> Hash.canonicalFields |> Hash.sha256Hex
+
+    /// The fields a frame digest adds after the own fields: the child count, then each child's id key.
+    let private frameTail (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (n: 'Node) : string list =
+        let kids = w.Children n
+        string (List.length kids) :: (kids |> List.map (fun c -> idw.ToString(w.Id c)))
+
+    /// A node's frame digest (Phase 314): SHA-256 over the own fields, then the child count and each
+    /// child's id key, through `Hash.canonicalFields` — the node as a parent. Byte-for-byte Phase
+    /// 298's `Projection.snapshotDigestOf` for a child-blind encoder, which now reads it from here.
+    let frameDigest (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (n: 'Node) : string =
+        ownFields w idw encode n @ frameTail w idw n
+        |> Hash.canonicalFields
+        |> Hash.sha256Hex
+
+    /// Every node's three digests (Phase 314), built in ONE pass over the reversed preorder: a child
+    /// follows its parent in preorder, so walking the list backwards meets every child before its
+    /// parent and a parent's Merkle digest reads its children's out of the map being built. No
+    /// recursion over the tree — a deep tree cannot overflow, the `Tree.preorder` posture. The
+    /// encoder is applied to each node's SHELL and should be injective over a node's own content
+    /// (`Conformance.encoderInjectivityLaws`); a lossy encoder reads two different nodes as one.
+    let digests (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (encode: 'Node -> string) (root: 'Node) : Digests =
+        let key (n: 'Node) = idw.ToString(w.Id n)
+
+        let step (own: Map<string, string>, frame: Map<string, string>, sub: Map<string, string>) (n: 'Node) =
+            let k = key n
+            // the LAST preorder occurrence of a repeated id holds the entry, as `Tree.Index.build`:
+            // walking backwards meets it first, so a later (earlier-in-preorder) twin is skipped.
+            if Map.containsKey k own then
+                own, frame, sub
+            else
+                // the encoder runs ONCE per node: the own fields feed both the own and the frame digest
+                let fields = ownFields w idw encode n
+                let o = fields |> Hash.canonicalFields |> Hash.sha256Hex
+                let f = fields @ frameTail w idw n |> Hash.canonicalFields |> Hash.sha256Hex
+
+                let s =
+                    o
+                    :: (w.Children n
+                        |> List.map (fun c -> Map.tryFind (key c) sub |> Option.defaultValue ""))
+                    |> Hash.canonicalFields
+                    |> Hash.sha256Hex
+
+                Map.add k o own, Map.add k f frame, Map.add k s sub
+
+        let own, frame, sub =
+            preorder w root |> List.rev |> List.fold step (Map.empty, Map.empty, Map.empty)
+
+        { Own = own
+          Frame = frame
+          Subtree = sub }
+
+    /// Reading two `Digests` against each other (Phase 314).
+    [<RequireQualifiedAccess>]
+    module Digests =
+
+        /// True when both maps hold `key` with one `Subtree` digest — the whole subtree under it is
+        /// unchanged (up to a SHA-256 collision), so nothing below it needs reading.
+        let subtreeEqual (a: Digests) (b: Digests) (key: string) : bool =
+            match Map.tryFind key a.Subtree, Map.tryFind key b.Subtree with
+            | Some x, Some y -> x = y
+            | _ -> false
+
+        /// Partition the id keys of `a` (earlier) and `b` (later) into added, removed, changed (own
+        /// content) and unchanged, each in ascending key order. A key both hold is `Unchanged`
+        /// without its own digest being read when its subtree digests agree — the fast path — and is
+        /// otherwise `Changed` exactly when its `Own` digests differ. Works over any two maps built
+        /// by `Tree.digests` with one encoder; built from two different encoders every common key
+        /// reads as changed, which is the honest answer.
+        let diff (a: Digests) (b: Digests) : DigestDelta =
+            let inA k = Map.containsKey k a.Own
+            let inB k = Map.containsKey k b.Own
+            let aKeys = a.Own |> Map.toList |> List.map fst
+            let bKeys = b.Own |> Map.toList |> List.map fst
+
+            let changed, unchanged =
+                bKeys
+                |> List.filter inA
+                |> List.partition (fun k -> not (subtreeEqual a b k) && Map.tryFind k a.Own <> Map.tryFind k b.Own)
+
+            { Added = bKeys |> List.filter (not << inA)
+              Removed = aKeys |> List.filter (not << inB)
+              Changed = changed
+              Unchanged = unchanged }
     // ---- convenience combinators (Phase 249) ----
     // The everyday traversals every domain otherwise re-derives atop `preorder` + the
     // witness accessors. Purely additive, structurally recursive — no new types.
@@ -828,6 +979,7 @@ module Tree =
     /// domain generator. That two distinct pre-images hash apart under FNV-1a is not claimed.
     let encodeHash (w: NodeWitness<'Node, 'Id>) (encode: 'Node -> string) (node: 'Node) : string =
         encodePreimage w encode node |> Hash.fnv1a
+
 
 /// Deterministic fresh ids for a caller that must mint one (Phase 312): a derived or a sequential
 /// id that a caller-supplied TAKEN set does not hold, and the repair of a tree that carries an id

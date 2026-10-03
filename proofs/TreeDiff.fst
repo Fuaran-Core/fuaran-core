@@ -3746,6 +3746,212 @@ let content_aware_script_applies_where_the_structural_one_is_refused ()
                    == Ok pre_fix_after)
 
 (* ======================================================================================
+   14. Digests (F#: `Tree.ownDigest`, `Tree.digests`, `Tree.Digests.diff` in Tree.fs — Phase 314).
+
+      WHAT IS MODELLED. The own digest of a node — the hash of the field encoding of its id, its
+      kind and the caller's encoder over its SHELL — and the Merkle subtree digest: the hash of the
+      field encoding of the own digest followed by each child's subtree digest, in order. The HASH
+      `h` (F#: `Hash.sha256Hex`) and the FIELD ENCODING `cf` (F#: `Hash.canonicalFields`) enter as
+      PARAMETERS with their injectivity as hypotheses: the hash's is the standing assumption every
+      digest on the spine rests on (an unseen difference is a SHA-256 collision), the encoding's is
+      proved (`invocation_key_injective`, `proofs/Query.fst`). The encoder `enc` enters with NO
+      hypothesis — the id and the kind are fields of the own pre-image in their own right, so the
+      STRUCTURE of a tree is recovered from its digest whatever the encoder says, and what the
+      encoder adds is the content beyond the kind, which this model's tree does not carry;
+      `own_digest_recovers_shell` is the clause a domain's `encoderInjectivityLaws` extends to it.
+
+      WHAT IS PROVED.
+        - `subtree_digest_injective` — two trees with one subtree digest are one tree: the Merkle
+          rollup loses nothing of ids, kinds or shape. The document domain's roadmap had queued
+          this obligation against its own copy of the rollup; it is discharged here once.
+        - `digest_partition` — `Digests.diff`'s four lists, modelled over the id lists of the two
+          trees, PARTITION the union of the two id sets: every id of either tree is in exactly one
+          list, no other id is in any, and under `wf` each list carries an id once. The lists'
+          ascending order is a rendering of the F# maps the model does not carry.
+      Both are evaluated on concrete pairs below (`digest_theorems_are_not_vacuous`) and the diff
+      is sampled by the twins at the end of the module.
+   ====================================================================================== *)
+
+(* F#: `Tree.ownDigest` — `sha256Hex (canonicalFields [ idKey; kindTag; encode shell ])`; `shell`
+   is section 2's, the same `ReplaceChildren n []` the inserted graft is. *)
+let own_digest (h:string -> string) (cf:list string -> string) (enc:tree -> string) (t:tree)
+  : Tot string =
+  h (cf [tid_of t; kind_of t; enc (shell t)])
+
+(* F#: the `Subtree` map of `Tree.digests` at a node — the own digest, then each child's subtree
+   digest in order, through the field encoding and the hash. *)
+let rec subtree_digest (h:string -> string) (cf:list string -> string) (enc:tree -> string) (t:tree)
+  : Tot string (decreases t) =
+  match t with
+  | TNode _ _ cs -> h (cf (own_digest h cf enc t :: subtree_digests h cf enc cs))
+and subtree_digests (h:string -> string) (cf:list string -> string) (enc:tree -> string) (ts:list tree)
+  : Tot (list string) (decreases ts) =
+  match ts with
+  | [] -> []
+  | t :: r -> subtree_digest h cf enc t :: subtree_digests h cf enc r
+
+(* One instance of an injectivity hypothesis, named so no query has to find the trigger. *)
+let inj_at (#a #b:eqtype) (f:a -> b) (x y:a)
+  : Lemma (requires injective f /\ f x == f y) (ensures x == y)
+  = ()
+
+(* ---- equal own digests recover the id, the kind and the encoded shell ---- *)
+let own_digest_recovers_shell (h:string -> string) (cf:list string -> string) (enc:tree -> string)
+                              (t u:tree)
+  : Lemma (requires injective h /\ injective cf /\ own_digest h cf enc t == own_digest h cf enc u)
+          (ensures tid_of t == tid_of u /\ kind_of t == kind_of u /\ enc (shell t) == enc (shell u))
+  = inj_at h (cf [tid_of t; kind_of t; enc (shell t)]) (cf [tid_of u; kind_of u; enc (shell u)]);
+    inj_at cf [tid_of t; kind_of t; enc (shell t)] [tid_of u; kind_of u; enc (shell u)]
+
+(* ---- THE THEOREM: the Merkle digest is injective over trees ---- *)
+let rec subtree_digest_injective (h:string -> string) (cf:list string -> string) (enc:tree -> string)
+                                 (t u:tree)
+  : Lemma (requires injective h /\ injective cf /\
+                    subtree_digest h cf enc t == subtree_digest h cf enc u)
+          (ensures t == u) (decreases t)
+  = match t, u with
+    | TNode _ _ cs, TNode _ _ cs' ->
+      let l1 = own_digest h cf enc t :: subtree_digests h cf enc cs in
+      let l2 = own_digest h cf enc u :: subtree_digests h cf enc cs' in
+      inj_at h (cf l1) (cf l2);
+      inj_at cf l1 l2;
+      own_digest_recovers_shell h cf enc t u;
+      subtree_digests_injective h cf enc cs cs'
+and subtree_digests_injective (h:string -> string) (cf:list string -> string) (enc:tree -> string)
+                              (ts us:list tree)
+  : Lemma (requires injective h /\ injective cf /\
+                    subtree_digests h cf enc ts == subtree_digests h cf enc us)
+          (ensures ts == us) (decreases ts)
+  = match ts, us with
+    | [], [] -> ()
+    | t :: tr, u :: ur ->
+      subtree_digest_injective h cf enc t u;
+      subtree_digests_injective h cf enc tr ur
+    | _ -> ()
+
+(* ---- F#: `Tree.Digests.diff`, over the id lists of the two trees ----
+
+   A key is `mem` of an id list (the README's standing reading); `own_at` is the map lookup
+   `Own[k]`. The four predicates are named so each `keep` carries the same function term the
+   lemmas below instantiate. *)
+let own_at (h:string -> string) (cf:list string -> string) (enc:tree -> string) (x:string) (t:tree)
+  : Tot (option string) =
+  match find_in x t with
+  | Some n -> Some (own_digest h cf enc n)
+  | None -> None
+
+let not_in (a:tree) (x:string) : Tot bool = not (mem x (ids a))
+
+let changed_at (h:string -> string) (cf:list string -> string) (enc:tree -> string) (a b:tree)
+               (x:string) : Tot bool =
+  mem x (ids a) && own_at h cf enc x a <> own_at h cf enc x b
+
+let unchanged_at (h:string -> string) (cf:list string -> string) (enc:tree -> string) (a b:tree)
+                 (x:string) : Tot bool =
+  mem x (ids a) && own_at h cf enc x a = own_at h cf enc x b
+
+let d_added (a b:tree) : Tot (list string) = keep (not_in a) (ids b)
+let d_removed (a b:tree) : Tot (list string) = keep (not_in b) (ids a)
+
+let d_changed (h:string -> string) (cf:list string -> string) (enc:tree -> string) (a b:tree)
+  : Tot (list string) = keep (changed_at h cf enc a b) (ids b)
+
+let d_unchanged (h:string -> string) (cf:list string -> string) (enc:tree -> string) (a b:tree)
+  : Tot (list string) = keep (unchanged_at h cf enc a b) (ids b)
+
+(* `keep` keeps `no_dups`. *)
+let rec keep_no_dups (f:string -> bool) (l:list string)
+  : Lemma (requires no_dups l) (ensures no_dups (keep f l))
+  = match l with
+    | [] -> ()
+    | x :: t -> mem_keep f t x; keep_no_dups f t
+
+(* ---- the partition, clause by clause ---- *)
+
+(* Every id of either tree is in one of the four lists, and no other id is in any of them. *)
+let digest_partition_covers (h:string -> string) (cf:list string -> string) (enc:tree -> string)
+                            (a b:tree) (x:string)
+  : Lemma (ensures (mem x (ids a) || mem x (ids b)) ==
+                   (mem x (d_added a b) || mem x (d_removed a b) ||
+                    mem x (d_changed h cf enc a b) || mem x (d_unchanged h cf enc a b)))
+  = mem_keep (not_in a) (ids b) x;
+    mem_keep (not_in b) (ids a) x;
+    mem_keep (changed_at h cf enc a b) (ids b) x;
+    mem_keep (unchanged_at h cf enc a b) (ids b) x
+
+(* No id is in two of them. *)
+let digest_partition_disjoint (h:string -> string) (cf:list string -> string) (enc:tree -> string)
+                              (a b:tree) (x:string)
+  : Lemma (ensures not (mem x (d_added a b) && mem x (d_removed a b)) /\
+                   not (mem x (d_added a b) && mem x (d_changed h cf enc a b)) /\
+                   not (mem x (d_added a b) && mem x (d_unchanged h cf enc a b)) /\
+                   not (mem x (d_removed a b) && mem x (d_changed h cf enc a b)) /\
+                   not (mem x (d_removed a b) && mem x (d_unchanged h cf enc a b)) /\
+                   not (mem x (d_changed h cf enc a b) && mem x (d_unchanged h cf enc a b)))
+  = mem_keep (not_in a) (ids b) x;
+    mem_keep (not_in b) (ids a) x;
+    mem_keep (changed_at h cf enc a b) (ids b) x;
+    mem_keep (unchanged_at h cf enc a b) (ids b) x
+
+(* Under `wf`, each list carries an id once. *)
+let digest_partition_once (h:string -> string) (cf:list string -> string) (enc:tree -> string)
+                          (a b:tree)
+  : Lemma (requires wf a /\ wf b)
+          (ensures no_dups (d_added a b) /\ no_dups (d_removed a b) /\
+                   no_dups (d_changed h cf enc a b) /\ no_dups (d_unchanged h cf enc a b))
+  = wf_iff_no_dups a;
+    wf_iff_no_dups b;
+    keep_no_dups (not_in a) (ids b);
+    keep_no_dups (not_in b) (ids a);
+    keep_no_dups (changed_at h cf enc a b) (ids b);
+    keep_no_dups (unchanged_at h cf enc a b) (ids b)
+
+(* THE THEOREM, as one statement a reader cites: added ⊎ removed ⊎ changed ⊎ unchanged is the
+   union of the two id sets. *)
+let digest_partition (h:string -> string) (cf:list string -> string) (enc:tree -> string) (a b:tree)
+  : Lemma (requires wf a /\ wf b)
+          (ensures (forall (x:string).
+                      (mem x (ids a) || mem x (ids b)) ==
+                      (mem x (d_added a b) || mem x (d_removed a b) ||
+                       mem x (d_changed h cf enc a b) || mem x (d_unchanged h cf enc a b))) /\
+                   (forall (x:string).
+                      not (mem x (d_added a b) && mem x (d_removed a b)) /\
+                      not (mem x (d_added a b) && mem x (d_changed h cf enc a b)) /\
+                      not (mem x (d_added a b) && mem x (d_unchanged h cf enc a b)) /\
+                      not (mem x (d_removed a b) && mem x (d_changed h cf enc a b)) /\
+                      not (mem x (d_removed a b) && mem x (d_unchanged h cf enc a b)) /\
+                      not (mem x (d_changed h cf enc a b) && mem x (d_unchanged h cf enc a b))) /\
+                   no_dups (d_added a b) /\ no_dups (d_removed a b) /\
+                   no_dups (d_changed h cf enc a b) /\ no_dups (d_unchanged h cf enc a b))
+  = FStar.Classical.forall_intro (digest_partition_covers h cf enc a b);
+    FStar.Classical.forall_intro (digest_partition_disjoint h cf enc a b);
+    digest_partition_once h cf enc a b
+
+(* ---- and the two are NOT VACUOUS: evaluated on a pair with every list non-empty ----
+
+   The hash is the identity and the field encoding the second field, so an own digest is the
+   kind: `a` keeps its id and changes kind (changed), `b` leaves (removed), `c` arrives (added),
+   and the root keeps its kind (unchanged). The injectivity theorem is not evaluated — its
+   hypotheses are about the functions, and no computable stand-in for the hash is injective. *)
+let second_field (l:list string) : Tot string =
+  match l with
+  | _ :: k :: _ -> k
+  | _ -> ""
+
+let dg_before : tree = TNode "r" "d" [ TNode "a" "x" []; TNode "b" "y" [] ]
+let dg_after : tree = TNode "r" "d" [ TNode "a" "z" []; TNode "c" "y" [] ]
+
+let digest_theorems_are_not_vacuous ()
+  : Lemma (ensures d_added dg_before dg_after == [ "c" ] /\
+                   d_removed dg_before dg_after == [ "b" ] /\
+                   d_changed (fun s -> s) second_field kind_of dg_before dg_after == [ "a" ] /\
+                   d_unchanged (fun s -> s) second_field kind_of dg_before dg_after == [ "r" ])
+  = assert_norm (d_added dg_before dg_after == [ "c" ]);
+    assert_norm (d_removed dg_before dg_after == [ "b" ]);
+    assert_norm (d_changed (fun s -> s) second_field kind_of dg_before dg_after == [ "a" ]);
+    assert_norm (d_unchanged (fun s -> s) second_field kind_of dg_before dg_after == [ "r" ])
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -3784,6 +3990,18 @@ let twins : list twin = [
   { tname = "to-ops-refuses-a-root-id-mismatch";
     tholds = (fun () -> to_ops (TNode "r" "doc" []) (TNode "s" "doc" []) = Error (RootIdMismatch "r" "s")) };
   { tname = "dup-id-names-the-repeat";
-    tholds = (fun () -> dup_id (TNode "r" "d" [ TNode "a" "x" []; TNode "a" "y" [] ]) = Some "a") } ]
+    tholds = (fun () -> dup_id (TNode "r" "d" [ TNode "a" "x" []; TNode "a" "y" [] ]) = Some "a") };
+  (* Phase 314 — the digest diff's four lists on section 14's pair: the hash the identity, the field
+     encoding the second field, so an own digest is the kind. *)
+  { tname = "digest-diff-partitions-the-ids";
+    tholds = (fun () ->
+      d_added dg_before dg_after = [ "c" ] && d_removed dg_before dg_after = [ "b" ] &&
+      d_changed (fun s -> s) second_field kind_of dg_before dg_after = [ "a" ] &&
+      d_unchanged (fun s -> s) second_field kind_of dg_before dg_after = [ "r" ]) };
+  { tname = "digest-diff-over-one-tree-is-all-unchanged";
+    tholds = (fun () ->
+      d_added dg_before dg_before = [] && d_removed dg_before dg_before = [] &&
+      d_changed (fun s -> s) second_field kind_of dg_before dg_before = [] &&
+      d_unchanged (fun s -> s) second_field kind_of dg_before dg_before = [ "r"; "a"; "b" ]) } ]
 
 let _ = assert_norm (twins_hold twins == true)

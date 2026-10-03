@@ -106,6 +106,7 @@
     <Compile Include="VersioningTests.fs" />
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="ProjectionTests.fs" />
+    <Compile Include="DigestTests.fs" />
     <Compile Include="SmallSeamsTests.fs" />
     <Compile Include="PropagationTests.fs" />
     <Compile Include="PropagationContractTests.fs" />

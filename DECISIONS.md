@@ -1,5 +1,84 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-03 — D112: the digest maps are SHA-256 and three — own, frame, Merkle — with the id and the kind as fields of the pre-image; a change classification is a PROJECTION of the diff, held to its script by law; a gate verdict is a set difference keyed `(code, node)` under one of three policies
+
+**Recorded by Phase 314. `Tree.digests` / `Tree.ownDigest` / `Tree.frameDigest` / `Tree.Digests.diff`,
+`Diff.changes` and `Diff.ChangeKind`, `Validator.introduced` / `verdict` / `gate` / `encodeVerdict`,
+`Projection.snapshot` / `snapshotDigestOf` / `Scope.ChangedSince` / `Scope.BySubtreeDigest`,
+`Conformance.digestLaws` / `changeLaws` / `introducedLaws`, `proofs/TreeDiff.fst` section 14; rides the
+`0.35.0` draft (STABILITY.md, "Phase 314").**
+
+**D112.1 — the width is SHA-256, and the pre-image carries the id key and the kind as fields.** Four
+consumers kept per-node self and subtree digests of their own, one at 32 bits. Phase 290 named the two
+hash regimes and this is the crypto one: a digest map is compared across snapshots, across hosts and
+across a reconcile that keeps a subtree BECAUSE its digest agrees, so an unseen difference must cost a
+SHA-256 collision and not a 1-in-2^32 chance (Phase 298 measured the content digest letting an edit
+read as unchanged). Three maps, because three readers want three things: `Own` (the node's content —
+what a four-way delta classifies as changed), `Frame` (the node as a PARENT — own content, child count
+and ordered child id keys: what a changed-since read wants, and exactly Phase 298's snapshot digest, so
+`Projection.snapshotDigestOf` is now this function and no second definition exists) and `Subtree` (the
+Merkle rollup — own digest then each child's subtree digest, in order: what a reconcile keys a kept
+subtree by, and the fast path every walk takes). The own pre-image is `[id key; kind tag; encode shell]`
+rather than the encoder's output alone, for two reasons that are one: the subtree digest then recovers
+ids, kinds and shape with NO hypothesis on the encoder (`subtree_digest_injective` takes none), so the
+subtree-equal fast path — skip a subtree whose digest agrees, read none of it — is sound by
+construction and not by the domain's diligence, and `Digests.diff`'s `Changed` sees a kind change
+whatever the encoder encodes. The encoder is read over the SHELL (`ReplaceChildren n []`), Phase 305's
+posture for the content-aware diff, so a change in the children alone never moves an own digest.
+Rejected: a 64-bit form (the shard's alternative) — cheaper, but a second width beside `sha256Hex` with
+nothing on the spine to spend it on; and one map with the three derivable — `Frame` and `Subtree` are
+not derivable from `Own` without the tree, and the reader who has only the maps (a snapshot) is the one
+the fast path is for.
+
+**D112.2 — a change classification is a projection of the diff, defined on the trees and HELD to the
+script.** Three consumers classify every id as `Added | Removed | Moved | KindChanged | Changed`, each
+by hand and each slightly differently (one carries positions, one picks a single kind per id by
+priority). `Diff.changes` reads the two indexes directly — a survivor's parents, kind tags and encoded
+shells, and its kept children's relative order — and `Conformance.changeLaws` holds the result to the
+script `Diff.toOpsWith` emits, kind by kind: `Added` is exactly the `InsertChild` grafts, `Moved` the
+`MoveNode` targets, `KindChanged ∪ Changed` the `UpdateNode` targets, `Removed` is `before`'s ids minus
+`after`'s with every `RemoveNode` target among them and every other below one, and every
+`ReorderChildren` parent is `Reordered` or holds an `Added` or `Moved` child. Three choices follow
+from making the script the referee. (a) **`Reordered` is a sixth kind and names the PARENT**, because a
+position is a fact about a parent's child list and that is where the op algebra puts it
+(`ReorderChildren` names the parent); it is defined semantically — the KEPT children stand in a new
+relative order — so a sibling shifting index because a neighbour left is not a reorder, and a consumer
+that reported per-child positions reads them off the parent's two child lists. (b) **One id may carry
+two entries** — `Moved` and `Changed` for a survivor that was reparented and edited — because the two
+facts are independent and the script carries both ops; `KindChanged` subsumes `Changed` (one
+`UpdateNode` either way), and the canonical order is `(id key, kind rank)` so a reader wanting one kind
+per id takes the first. (c) **`Moved` is a change of PARENT only.** Rejected: deriving the
+classification FROM the script — a front insert emits a `ReorderChildren` although no kept order moved,
+because the structural passes append (section 10's settled order), so a reorder read off the script
+would be an artefact of the emission strategy and not a fact about the trees; and the UI shape's
+position-carrying `Moved`, which marks every later sibling moved when one leaves. The law's one
+hypothesis is the encoder seeing the kind, which an injective encoder does; a red `changeLaws` over a
+domain's encoder is the encoder losing the kind, which is the finding.
+
+**D112.3 — a gate verdict is a set difference keyed `(code, node)`, read under one of three policies.**
+Two consumers computed "the defects the candidate has that no parent has" and each named the same
+three policies. The identity is the code and the node key — what two hosts agree on, as
+`canonicalCodes` agrees on codes — and never the message, family or related nodes, so rewording a
+message cannot introduce a defect; `introducedDefects` is pure over defect lists, for a host that has
+already run its validators, and `introduced` runs a registry over the candidate and every baseline (one
+baseline is a before/after gate, two are a merge's parents, none introduces everything). `Lenient`
+consults no validator (`gate` short-circuits, as the presentation tier's did), `Diagnostic` reports and
+never blocks, `Gated` blocks on an introduced `Severity.Error` and never on a warning. `encodeVerdict`
+is the cross-host surface a refused fold's verdict hash is taken over — through `Hash.canonicalFields`,
+the policy, the block, then each defect's code, location and severity in canonical order — and
+excludes the message for the parity reason above; the UI tier's JSON verdict carried the message, and
+a host adopting this encoding drops it from the hash.
+
+**D112.4 — the projection READS the digests; the fast path is new, the bytes are not.** `snapshot` is
+one `Tree.digests` pass re-keyed by `idKey` (escaping is injective), `ProjectionSnapshot` gains the
+Merkle map, and `ChangedSince` skips a subtree whose Merkle digest the snapshot holds — nothing below it
+can differ up to a collision — while reporting a node by exactly the Phase 298 test (`snapshotDigestOf`,
+now `Tree.frameDigest`). A snapshot with an empty `Subtrees` reads as before. `Scope.BySubtreeDigest`
+is the `Subtree` slice addressed by content, for the consumer that holds a digest from a snapshot or a
+reconcile rather than an id. The shard's premise that Phase 298 left the projection structurally blind
+was checked and found FALSE: 298's digest already carried the child count and ordered child ids, so
+what this phase closes is the second definition of that digest, not a blindness.
+
 ## 2026-10-02 — D111: the invocable seams have ONE admission gate — totality, then well-formedness — run at registration, at every reader and by `compose`; a repeat counts over a capped integer range; an argument names its hole once
 
 **Recorded by Phase 307. `Space.wellFormed` / `Space.isCount` / `Space.maxRepeatCount`, `Signature.validate`,

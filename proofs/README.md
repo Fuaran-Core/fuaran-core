@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 271 claims — 194 proved across 27 models, 45 tested, 30 assumed (6 `domain-obligation`, 19 `model-bridge`, 5 `premise`), 2 policy.
+**The ladder, counted:** 273 claims — 196 proved across 27 models, 45 tested, 30 assumed (6 `domain-obligation`, 19 `model-bridge`, 5 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -953,7 +953,7 @@ models' (the apply-engine theorems recurse through `Batch`), not a sampled famil
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 21 | 0 | 9 | 2 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
-| `Fuaran.Core.Conformance` | 129 | 1 | 82 | 2 | 6 | 0 | 1 | 37 |
+| `Fuaran.Core.Conformance` | 132 | 1 | 85 | 2 | 6 | 0 | 1 | 37 |
 | `Fuaran.Core.Function` | 114 | 20 | 34 | 5 | 1 | 5 | 0 | 49 |
 | `Fuaran.Core.Idl` | 61 | 0 | 0 | 1 | 1 | 0 | 0 | 59 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
@@ -961,14 +961,14 @@ models' (the apply-engine theorems recurse through `Batch`), not a sampled famil
 | `Fuaran.Core.Observer` | 20 | 0 | 8 | 2 | 2 | 0 | 5 | 3 |
 | `Fuaran.Core.OpStream` | 123 | 10 | 28 | 3 | 1 | 0 | 2 | 79 |
 | `Fuaran.Core.OpStream.Dag` | 81 | 24 | 33 | 0 | 0 | 0 | 0 | 24 |
-| `Fuaran.Core.Ops` | 66 | 22 | 21 | 6 | 0 | 0 | 0 | 17 |
+| `Fuaran.Core.Ops` | 67 | 22 | 22 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
 | `Fuaran.Core.Query` | 32 | 6 | 8 | 0 | 0 | 0 | 0 | 18 |
-| `Fuaran.Core.Tree` | 57 | 7 | 5 | 0 | 1 | 0 | 0 | 44 |
-| `Fuaran.Core.Validator` | 34 | 0 | 12 | 3 | 0 | 0 | 0 | 19 |
+| `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
+| `Fuaran.Core.Validator` | 39 | 0 | 17 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 993 | 117 | 263 | 29 | 15 | 5 | 9 | 555 |
+| **Total** | 1007 | 119 | 275 | 29 | 15 | 5 | 9 | 555 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

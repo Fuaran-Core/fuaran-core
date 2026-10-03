@@ -228,6 +228,142 @@ module Validator =
     let canonicalCodes (defects: Defect<'Id> list) : string =
         defects |> List.map (fun d -> d.Code) |> List.sort |> Hash.canonicalFields
 
+    // ---- Phase 314: the defect-set diff and its gate verdict ----
+    // What a merge gate asks is not "is the candidate valid" but "did THIS step make it less valid":
+    // a defect every baseline already carried was not caused by the fold, so it is carried through
+    // and never flagged, and the defects the candidate has that no baseline has are the ones the
+    // step INTRODUCED. The diff is a set difference keyed on `(code, node)` — the identity two hosts
+    // agree on, as `canonicalCodes` keys on codes — and the verdict is one of three policies over it.
+
+    /// How introduced defects gate a candidate (Phase 314). `RequireQualifiedAccess`:
+    /// `GatePolicy.Gated`.
+    [<RequireQualifiedAccess>]
+    type GatePolicy =
+        /// The validator is not consulted: nothing is reported and nothing blocks.
+        | Lenient
+        /// The introduced defects are reported; nothing blocks.
+        | Diagnostic
+        /// The introduced defects are reported, and an introduced `Severity.Error` blocks.
+        | Gated
+
+    /// The verdict of a gate over a candidate (Phase 314): the policy it was read under, the defects
+    /// the candidate introduced against every baseline (`[]` under `Lenient`), and whether the policy
+    /// blocks it — `Gated` and an introduced error, and nothing else.
+    type GateVerdict<'Id> =
+        {
+            /// The policy the verdict was read under.
+            Policy: GatePolicy
+            /// The introduced defects in canonical `(code, node)` order; `[]` under `Lenient`.
+            Introduced: Defect<'Id> list
+            /// True exactly when `Policy` is `Gated` and `Introduced` carries a `Severity.Error`.
+            Blocked: bool
+        }
+
+    /// The identity the introduced-set diff keys on: the code and the node key (`None` for a finding
+    /// about the whole subject). Message, family and the related nodes are outside it, as they are
+    /// outside `canonicalCodes`: two hosts agree on codes and locations, not on prose.
+    let private identityOf (idw: IdWitness<'Id>) (d: Defect<'Id>) : string * string option =
+        d.Code, d.Node |> Option.map idw.ToString
+
+    /// The defects of `candidate` whose `(code, node)` identity no baseline's findings carry, in
+    /// canonical order — ascending code, then node key, a whole-subject finding before any node —
+    /// each kept as the candidate reported it (a `(code, node)` the candidate reports twice is
+    /// reported twice). Pure over the defect lists, so a host that has already run its validators
+    /// diffs their output here; `introduced` is the form that runs a registry. No baseline at all
+    /// introduces everything.
+    let introducedDefects
+        (idw: IdWitness<'Id>)
+        (baselines: Defect<'Id> list list)
+        (candidate: Defect<'Id> list)
+        : Defect<'Id> list =
+        let known = baselines |> List.collect (List.map (identityOf idw)) |> Set.ofList
+
+        candidate
+        |> List.filter (fun d -> not (Set.contains (identityOf idw d) known))
+        |> List.sortBy (identityOf idw)
+
+    /// Run `reg` over `candidate` and every baseline, and report the candidate's findings absent from
+    /// every baseline's (`introducedDefects`). One baseline is a before/after gate; two are a merge's
+    /// parents over a lane fold; none makes every finding introduced.
+    let introduced
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (reg: RuleRegistry<'Node, 'Id>)
+        (baselines: 'Node list)
+        (candidate: 'Node)
+        : Defect<'Id> list =
+        introducedDefects idw (baselines |> List.map (runAll w reg)) (runAll w reg candidate)
+
+    /// Read introduced defects under a policy: `Lenient` reports none and never blocks, `Diagnostic`
+    /// reports them and never blocks, `Gated` reports them and blocks on an introduced error
+    /// (`hasErrors`). Pure, so a host composes it over `introducedDefects` or `introduced`.
+    let verdict (policy: GatePolicy) (introduced: Defect<'Id> list) : GateVerdict<'Id> =
+        match policy with
+        | GatePolicy.Lenient ->
+            { Policy = policy
+              Introduced = []
+              Blocked = false }
+        | GatePolicy.Diagnostic ->
+            { Policy = policy
+              Introduced = introduced
+              Blocked = false }
+        | GatePolicy.Gated ->
+            { Policy = policy
+              Introduced = introduced
+              Blocked = hasErrors introduced }
+
+    /// The whole gate in one call: `verdict policy (introduced w idw reg baselines candidate)`, except
+    /// that `Lenient` runs no validator at all.
+    let gate
+        (policy: GatePolicy)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (reg: RuleRegistry<'Node, 'Id>)
+        (baselines: 'Node list)
+        (candidate: 'Node)
+        : GateVerdict<'Id> =
+        match policy with
+        | GatePolicy.Lenient -> verdict policy []
+        | _ -> verdict policy (introduced w idw reg baselines candidate)
+
+    /// The policy's tag in the verdict encoding.
+    let private policyTag (p: GatePolicy) : string =
+        match p with
+        | GatePolicy.Lenient -> "lenient"
+        | GatePolicy.Diagnostic -> "diagnostic"
+        | GatePolicy.Gated -> "gated"
+
+    /// The severity's tag in the verdict encoding.
+    let private severityTag (s: Severity) : string =
+        match s with
+        | Severity.Error -> "error"
+        | Severity.Warning -> "warning"
+        | Severity.Info -> "info"
+
+    /// The canonical, byte-stable encoding of a verdict — the cross-host surface a refused fold's
+    /// verdict hash is taken over, as `canonicalCodes` is for a defect list. Through
+    /// `Hash.canonicalFields`: the policy tag, `blocked` or `passed`, then for each introduced defect
+    /// in canonical order its code, its location as two fields (`node` and the id key, or `subject`
+    /// and the empty string) and its severity tag. INJECTIVE over verdicts up to the fields it reads
+    /// (message, family and related nodes are outside it, as they are outside the parity projection),
+    /// so two hosts that introduce one defect set under one policy encode one string, and a
+    /// `Hash.sha256Hex` over it is the verdict hash.
+    let encodeVerdict (idw: IdWitness<'Id>) (v: GateVerdict<'Id>) : string =
+        policyTag v.Policy
+        :: (if v.Blocked then "blocked" else "passed")
+        :: (v.Introduced
+            |> List.sortBy (identityOf idw)
+            |> List.collect (fun d ->
+                [ d.Code
+                  (match d.Node with
+                   | Some _ -> "node"
+                   | None -> "subject")
+                  (match d.Node with
+                   | Some n -> idw.ToString n
+                   | None -> "")
+                  severityTag d.Severity ]))
+        |> Hash.canonicalFields
+
     // ---- Phase 315: the versioned rule pack ----
     // The container the `PackRule` convention above was always about, which every domain that
     // ships packs wrote for itself: a named, VERSIONED set of rules whose findings each carry the

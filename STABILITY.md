@@ -2455,6 +2455,62 @@ type-check (Phase 295), and the optional-field decoder for `slotKind` and `nextP
 are pinned by tests here rather than redone. `ParityVectors` pins the integer reader on `-5`, U+2212 `5`,
 ` 5`, `+5`, `1e999` and `05` on both pipelines.
 
+### Merkle digests, a change classification, a defect-set gate, and the projection reading them (Phase 314, DECISIONS.md D112) — ADDITIVE; two widenings of the slot's own class (source) ride it: `ProjectionSnapshot` gains `Subtrees`, `Scope` gains `BySubtreeDigest`
+
+**What moved, for a consumer.**
+
+- **New, additive — `Fuaran.Core.Tree`.** `Tree.Digests` (`Own` / `Frame` / `Subtree`, each id key →
+  64-hex SHA-256), `Tree.DigestDelta`, `Tree.ownDigest`, `Tree.frameDigest`, `Tree.digests` (one pass
+  over the reversed preorder, no recursion), `Tree.Digests.diff` (the four-way partition, every list
+  ascending by key) and `Tree.Digests.subtreeEqual` (the fast path). SHA-256 and never the 32-bit
+  `fnv1a` — the maps are compared across snapshots and hosts, which is the crypto regime (D112.1).
+- **New, additive — `Fuaran.Core.Ops`.** `Diff.ChangeKind` (`Added | Removed | Moved of fromParent *
+  toParent | KindChanged of fromKind * toKind | Changed | Reordered`, `RequireQualifiedAccess`),
+  `Diff.Change` and `Diff.changes encode w idw before after : Result<Change list, DiffError>` — the per-id
+  classification in canonical `(id key, kind rank)` order, read off the two indexes and held to
+  `Diff.toOpsWith`'s script by `Conformance.changeLaws`. `Reordered` names the PARENT whose kept children
+  changed relative order; a sibling shifting position because a neighbour left is not a reorder (D112.2).
+- **New, additive — `Fuaran.Core.Validator`.** `Validator.GatePolicy` (`Lenient | Diagnostic | Gated`),
+  `Validator.GateVerdict`, `Validator.introducedDefects` (pure, over defect lists, keyed `(code, node)`),
+  `Validator.introduced` (runs a registry over the candidate and every baseline), `Validator.verdict`,
+  `Validator.gate` (`Lenient` consults no validator) and `Validator.encodeVerdict` — the cross-host
+  verdict encoding through `Hash.canonicalFields`, over the policy, the block and each introduced
+  defect's code, location and severity; message, family and related nodes are outside it, as they are
+  outside `canonicalCodes`.
+- **`Fuaran.Core.Projection` — two widenings, both of the slot's class.** `ProjectionSnapshot` gains
+  `Subtrees: Map<string, string>` (the Merkle map; a full-literal construction adds the field —
+  `Map.empty` disables the fast path and reads exactly as before). `Scope` gains `BySubtreeDigest of
+  string`, declared last (an exhaustive `match` adds the arm): the `Subtree` slice addressed by the
+  Merkle digest the current tree gives a node. `Projection.snapshot` is one `Tree.digests` pass;
+  `snapshotDigestOf` IS `Tree.frameDigest` under the witness's encoder — byte-identical to the Phase
+  298 digest for the child-blind `Encode` the witness contract demands (`DigestTests` pins the 298
+  pre-image). A witness whose `Encode` read children re-reads every node as changed once at the first
+  read against an older snapshot, and never again. `ChangedSince` answers exactly what it did and
+  skips a subtree whose Merkle digest the snapshot already holds, with its whole subtree (behavioural:
+  fewer `Encode` calls, the same lines).
+- **`Fuaran.Core.Conformance` — three opt-in families.** `digestLaws` and `changeLaws` (take the base
+  witness and the domain's content encoder — `StrongerPromise`), `introducedLaws` (takes the domain's
+  `RuleRegistry` — `SeamNotEveryDomainHas`); each `Guarded` on the shape of the pairs it drew. The
+  families' operation rosters map every new operation for `Proofs.Coverage`.
+- **Proofs.** `proofs/TreeDiff.fst` section 14 — `subtree_digest_injective` (the Merkle rollup is
+  injective over trees under the hash's and the field encoding's injectivity, with NO hypothesis on
+  the encoder, since the id and the kind are fields of the own pre-image) and `digest_partition`
+  (added ⊎ removed ⊎ changed ⊎ unchanged is the union of the two id sets, each id once under `wf`);
+  ladder rows `subtree-digest-injective` and `digest-partition`; two twins. The document domain's
+  queued proof obligation over its own copy of the rollup is discharged here.
+- **The wire: nothing moves.** No wire document is added or changed.
+
+**What adopting it costs.** Nothing, unless a consumer constructs `ProjectionSnapshot` as a full
+record literal (add `Subtrees = Map.empty`, or build through `Projection.snapshot`) or matches `Scope`
+exhaustively (add the `BySubtreeDigest` arm). A consumer's own digest module, change classifier or
+introduced-defect diff is replaced by a call: `Tree.digests` + `Digests.diff` for the self and subtree
+maps and their four-way delta, `Diff.changes` for the per-id classification (a per-child position is
+read off the `Reordered` parent's child lists), `Validator.gate` for the merge verdict.
+
+**Class: additive**, riding the `0.35.0` slot. The two widenings are source-breaking in the way the
+slot already is (Phase 307 widened three closed unions); neither moves a byte an existing caller
+reads, and both are recorded here so the slot's class stays the record of every such edit.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

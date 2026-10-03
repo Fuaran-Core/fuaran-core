@@ -5,6 +5,7 @@
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 ctor Fuaran.Core.Arbitration`2..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Fuaran.Core.OpScriptProposal`2<!0, !1>, Fuaran.Core.ArbitrationRejection`1<!1>>>)
+ctor Fuaran.Core.Diff+Change`1..ctor(!0, Fuaran.Core.Diff+ChangeKind`1<!0>)
 ctor Fuaran.Core.Footprint..ctor(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>)
 ctor Fuaran.Core.OpScriptProposal`2..ctor(System.Int32, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>)
 ctor Fuaran.Core.RefWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!1>>)
@@ -18,6 +19,12 @@ field Fuaran.Core.Anchor`1+Tags.Index : System.Int32 (literal)
 field Fuaran.Core.Anchor`1+Tags.Last : System.Int32 (literal)
 field Fuaran.Core.ArbitrationRejection`1+Tags.Conflicts : System.Int32 (literal)
 field Fuaran.Core.ArbitrationRejection`1+Tags.Inapplicable : System.Int32 (literal)
+field Fuaran.Core.Diff+ChangeKind`1+Tags.Added : System.Int32 (literal)
+field Fuaran.Core.Diff+ChangeKind`1+Tags.Changed : System.Int32 (literal)
+field Fuaran.Core.Diff+ChangeKind`1+Tags.KindChanged : System.Int32 (literal)
+field Fuaran.Core.Diff+ChangeKind`1+Tags.Moved : System.Int32 (literal)
+field Fuaran.Core.Diff+ChangeKind`1+Tags.Removed : System.Int32 (literal)
+field Fuaran.Core.Diff+ChangeKind`1+Tags.Reordered : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.DuplicateIdInTree : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.IllegalChildInTree : System.Int32 (literal)
 field Fuaran.Core.Diff+DiffError`1+Tags.RootIdMismatch : System.Int32 (literal)
@@ -60,6 +67,7 @@ method Fuaran.Core.ArbitrationModule.arbitrate`2(Fuaran.Core.NodeWitness`2<!!0, 
 method Fuaran.Core.ArbitrationModule.duplicateIds`2(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!!0, !!1>>) : Microsoft.FSharp.Collections.FSharpList`1<System.Int32>
 method Fuaran.Core.ArbitrationModule.interference`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!!0, !!1>>, Fuaran.Core.OpScriptProposal`2<!!0, !!1>) : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Interference>>>
 method Fuaran.Core.ArbitrationModule.stale`1(Fuaran.Core.ArbitrationRejection`1<!!0>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.StaleProposal`1<!!0>>
+method Fuaran.Core.Diff.changes`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Diff+Change`1<!!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
 method Fuaran.Core.Diff.toOpsContainedWith`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
 method Fuaran.Core.Diff.toOpsContained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
 method Fuaran.Core.Diff.toOpsGrammarWith`2(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<System.String>>>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.Diff+DiffError`1<!!1>>
@@ -124,6 +132,8 @@ property Fuaran.Core.RejectionNounsModule.generic : Fuaran.Core.RejectionNouns {
 record-field Fuaran.Core.Arbitration`2.Accepted #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>
 record-field Fuaran.Core.Arbitration`2.MergedScript #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>
 record-field Fuaran.Core.Arbitration`2.Rejected #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Fuaran.Core.OpScriptProposal`2<!0, !1>, Fuaran.Core.ArbitrationRejection`1<!1>>>
+record-field Fuaran.Core.Diff+Change`1.Id #0 : !0
+record-field Fuaran.Core.Diff+Change`1.Kind #1 : Fuaran.Core.Diff+ChangeKind`1<!0>
 record-field Fuaran.Core.Footprint.ContentWrites #2 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 record-field Fuaran.Core.Footprint.Reads #0 : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 record-field Fuaran.Core.Footprint.SlotReads #4 : Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>
@@ -155,6 +165,11 @@ type Fuaran.Core.ArbitrationRejection`1+Inapplicable (type)
 type Fuaran.Core.ArbitrationRejection`1+Tags (type)
 type Fuaran.Core.Arbitration`2 (record)
 type Fuaran.Core.Diff (module)
+type Fuaran.Core.Diff+ChangeKind`1 (union)
+type Fuaran.Core.Diff+ChangeKind`1+KindChanged (type)
+type Fuaran.Core.Diff+ChangeKind`1+Moved (type)
+type Fuaran.Core.Diff+ChangeKind`1+Tags (type)
+type Fuaran.Core.Diff+Change`1 (record)
 type Fuaran.Core.Diff+DiffError`1 (union)
 type Fuaran.Core.Diff+DiffError`1+DuplicateIdInTree (type)
 type Fuaran.Core.Diff+DiffError`1+IllegalChildInTree (type)
@@ -217,6 +232,12 @@ union-case Fuaran.Core.Anchor`1.NewBefore #2(sibling: !0)
 union-case Fuaran.Core.Anchor`1.NewIndex #4(Item: System.Int32)
 union-case Fuaran.Core.ArbitrationRejection`1.NewConflicts #1(interfering: Microsoft.FSharp.Collections.FSharpList`1<System.Int32>, interference: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.Int32, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Interference>>>)
 union-case Fuaran.Core.ArbitrationRejection`1.NewInapplicable #0(opIndex: System.Int32, rejection: Fuaran.Core.Rejection`1<!0>)
+union-case Fuaran.Core.Diff+ChangeKind`1.Added #0()
+union-case Fuaran.Core.Diff+ChangeKind`1.Changed #4()
+union-case Fuaran.Core.Diff+ChangeKind`1.NewKindChanged #3(fromKind: System.String, toKind: System.String)
+union-case Fuaran.Core.Diff+ChangeKind`1.NewMoved #2(fromParent: !0, toParent: !0)
+union-case Fuaran.Core.Diff+ChangeKind`1.Removed #1()
+union-case Fuaran.Core.Diff+ChangeKind`1.Reordered #5()
 union-case Fuaran.Core.Diff+DiffError`1.NewDuplicateIdInTree #1(Item: !0)
 union-case Fuaran.Core.Diff+DiffError`1.NewIllegalChildInTree #3(child: !0, childKind: System.String, parent: !0, parentKind: System.String, legal: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Diff+DiffError`1.NewRootIdMismatch #0(before: !0, after: !0)

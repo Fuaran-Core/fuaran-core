@@ -8,6 +8,8 @@ ctor Fuaran.Core.IdWitness`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System
 ctor Fuaran.Core.IllFormedUtf16..ctor(System.Int32, System.Int32)
 ctor Fuaran.Core.KeyedWitness`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!0>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, !0>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpOption`1<!0>>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.Boolean>)
 ctor Fuaran.Core.NodeWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, !1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!0>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, !0>>)
+ctor Fuaran.Core.Tree+DigestDelta..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+ctor Fuaran.Core.Tree+Digests..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>)
 ctor Fuaran.Core.Tree+NodeIndex`2..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, !1>, !1, System.String)
 field Fuaran.Core.Tree+WellFormed`1+Tags.RepeatedId : System.Int32 (literal)
 field Fuaran.Core.Tree+WellFormed`1+Tags.Structural : System.Int32 (literal)
@@ -25,6 +27,8 @@ method Fuaran.Core.Hash.sha256HexOfBytes(System.Byte[]) : System.String
 method Fuaran.Core.Hash.trySha256Hex(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.IllFormedUtf16>
 method Fuaran.Core.Hash.tryUtf8Bytes(System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Byte[], Fuaran.Core.IllFormedUtf16>
 method Fuaran.Core.Hash.utf8Bytes(System.String) : System.Byte[]
+method Fuaran.Core.Tree+DigestsModule.diff(Fuaran.Core.Tree+Digests, Fuaran.Core.Tree+Digests) : Fuaran.Core.Tree+DigestDelta
+method Fuaran.Core.Tree+DigestsModule.subtreeEqual(Fuaran.Core.Tree+Digests, Fuaran.Core.Tree+Digests, System.String) : System.Boolean
 method Fuaran.Core.Tree+Index.ancestors`2(Fuaran.Core.IdWitness`1<!!0>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!1, !!0>) : Microsoft.FSharp.Collections.FSharpList`1<!!1>
 method Fuaran.Core.Tree+Index.buildWith`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>
 method Fuaran.Core.Tree+Index.build`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0) : Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>
@@ -41,6 +45,7 @@ method Fuaran.Core.Tree.contentHash`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) 
 method Fuaran.Core.Tree.count`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : System.Int32
 method Fuaran.Core.Tree.depth`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!0) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.Tree.descendants`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
+method Fuaran.Core.Tree.digests`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : Fuaran.Core.Tree+Digests
 method Fuaran.Core.Tree.encodeHash`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : System.String
 method Fuaran.Core.Tree.encodePreimage`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : System.String
 method Fuaran.Core.Tree.exists`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!0) : System.Boolean
@@ -48,6 +53,7 @@ method Fuaran.Core.Tree.filter`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.
 method Fuaran.Core.Tree.firstRepeatedId`1(Fuaran.Core.IdWitness`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<!!0>) : Microsoft.FSharp.Core.FSharpOption`1<!!0>
 method Fuaran.Core.Tree.foldKeyed`3(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.KeyedWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!2, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!2>>, !!2, !!0) : !!2
 method Fuaran.Core.Tree.fold`3(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!2, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!2>>, !!2, !!0) : !!2
+method Fuaran.Core.Tree.frameDigest`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : System.String
 method Fuaran.Core.Tree.graftWellFormedKeyed`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.KeyedWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Fuaran.Core.Tree+WellFormed`1<!!1>
 method Fuaran.Core.Tree.graftWellFormed`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0, !!0) : Fuaran.Core.Tree+WellFormed`1<!!1>
 method Fuaran.Core.Tree.idsKeyed`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.KeyedWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!1>
@@ -55,6 +61,7 @@ method Fuaran.Core.Tree.ids`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, !!0) : Micros
 method Fuaran.Core.Tree.isWellFormed`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!0) : System.Boolean
 method Fuaran.Core.Tree.keyedIds`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.KeyedWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!1>
 method Fuaran.Core.Tree.map`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!0>, !!0) : !!0
+method Fuaran.Core.Tree.ownDigest`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0) : System.String
 method Fuaran.Core.Tree.parentOf`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!0) : Microsoft.FSharp.Core.FSharpOption`1<!!0>
 method Fuaran.Core.Tree.path`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, !!1, !!0) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<!!1>>
 method Fuaran.Core.Tree.preorderKeyed`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.KeyedWitness`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!0>
@@ -84,6 +91,13 @@ record-field Fuaran.Core.NodeWitness`2.Children #2 : Microsoft.FSharp.Core.FShar
 record-field Fuaran.Core.NodeWitness`2.Id #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, !1>
 record-field Fuaran.Core.NodeWitness`2.KindTag #1 : Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>
 record-field Fuaran.Core.NodeWitness`2.ReplaceChildren #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, !0>>
+record-field Fuaran.Core.Tree+DigestDelta.Added #0 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Tree+DigestDelta.Changed #2 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Tree+DigestDelta.Removed #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Tree+DigestDelta.Unchanged #3 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Tree+Digests.Frame #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Tree+Digests.Own #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
+record-field Fuaran.Core.Tree+Digests.Subtree #2 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Tree+NodeIndex`2.ById #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, !0>
 record-field Fuaran.Core.Tree+NodeIndex`2.Fingerprint #3 : System.String
 record-field Fuaran.Core.Tree+NodeIndex`2.ParentOf #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, !1>
@@ -95,6 +109,9 @@ type Fuaran.Core.IllFormedUtf16 (record)
 type Fuaran.Core.KeyedWitness`2 (record)
 type Fuaran.Core.NodeWitness`2 (record)
 type Fuaran.Core.Tree (module)
+type Fuaran.Core.Tree+DigestDelta (record)
+type Fuaran.Core.Tree+Digests (record)
+type Fuaran.Core.Tree+DigestsModule (module)
 type Fuaran.Core.Tree+Index (module)
 type Fuaran.Core.Tree+NodeIndex`2 (record)
 type Fuaran.Core.Tree+WellFormed`1 (union)

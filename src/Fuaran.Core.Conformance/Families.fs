@@ -688,6 +688,33 @@ module Families =
           // Phase 313 — the structural-integrity strand. The grammar family takes the base witness
           // and the domain's grammar (a function, not a witness record); the reference family needs
           // the `RefWitness` only a domain with cross-node references declares.
+          // Phase 314 — the digest maps and the change classification take the base run's witness
+          // and the domain's content ENCODER, and ask for more than the base contract promises (a
+          // content-aware diff over an injective encoder); the gate certifies the rule-registry seam,
+          // which not every domain runs. Each is guarded on the shape of the pairs it drew: a run
+          // whose pairs were all identities, or whose edits never tripped a rule, certified the
+          // partition or the diff over empty sets.
+          c
+              "digestLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "pair shape" ])
+              (NoRefusal, "no refused outcome is read; a drawn pair that is refused only fails a law")
+          c
+              "changeLaws"
+              treeWitness
+              (Some StrongerPromise)
+              []
+              (Guarded [ "pair shape" ])
+              (NoRefusal, "no refused outcome is read; a drawn pair that is refused only fails a law")
+          c
+              "introducedLaws"
+              treeWitness
+              (Some SeamNotEveryDomainHas)
+              []
+              (Guarded [ "gate arm" ])
+              (NoRefusal, "the gate's block is a verdict over findings, not a refused outcome; no law reads a refusal")
           c
               "containmentLaws"
               treeWitness
@@ -1485,10 +1512,19 @@ module Families =
                 "Deferred.toResult"
                 "CapabilityCodec.encodeDeferred"
                 "CapabilityCodec.decodeDeferred" ] }
+          { Family = "Conformance.changeLaws"
+            Operations = [ "Diff.changes" ] }
           { Family = "Conformance.diffContainedLaws"
             Operations = [ "Diff.toOpsContained"; "Ops.applyAllWith"; "Ops.canApplyAllWith" ] }
           { Family = "Conformance.diffLaws"
             Operations = [ "Diff.toOps"; "Ops.applyAll"; "Ops.canApplyAll" ] }
+          { Family = "Conformance.digestLaws"
+            Operations =
+              [ "Tree.digests"
+                "Tree.ownDigest"
+                "Tree.frameDigest"
+                "Tree.Digests.diff"
+                "Tree.Digests.subtreeEqual" ] }
           { Family = "Conformance.dirtyPropagationLaws"
             Operations =
               [ "Propagation.dirtyFromChangedIds"
@@ -1516,6 +1552,13 @@ module Families =
                 "KeyIndex.add"
                 "KeyIndex.ofStream"
                 "KeyIndex.tryFind" ] }
+          { Family = "Conformance.introducedLaws"
+            Operations =
+              [ "Validator.introduced"
+                "Validator.introducedDefects"
+                "Validator.verdict"
+                "Validator.gate"
+                "Validator.encodeVerdict" ] }
           { Family = "Conformance.keyedApplyLaws"
             Operations =
               [ "Ops.applyContainedKeyed"

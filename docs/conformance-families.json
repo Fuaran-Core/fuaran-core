@@ -238,6 +238,19 @@
       "refusal": "built"
     },
     {
+      "id": "Conformance.changeLaws",
+      "module": "Conformance",
+      "entry": "changeLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "1600",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.checkpointLaws",
       "module": "Conformance",
       "entry": "checkpointLaws",
@@ -432,6 +445,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.digestLaws",
+      "module": "Conformance",
+      "entry": "digestLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "stronger-promise",
+      "discharges": [],
+      "cases": "1200",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.dirtyPropagationLaws",
       "module": "Conformance",
       "entry": "dirtyPropagationLaws",
@@ -547,6 +573,19 @@
       "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
+    },
+    {
+      "id": "Conformance.introducedLaws",
+      "module": "Conformance",
+      "entry": "introducedLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["NodeWitness", "IdWitness", "OpGen"],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "1000",
+      "adequacy": "guarded-reached",
+      "refusal": "none"
     },
     {
       "id": "Conformance.keyedApplyLaws",

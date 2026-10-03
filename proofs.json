@@ -1727,6 +1727,34 @@
       }
     },
     {
+      "id": "subtree-digest-injective",
+      "level": "proved",
+      "claim": "Two trees with one Merkle subtree digest are one tree (`Tree.digests`' `Subtree` map, Phase 314): `subtree_digest h cf enc t == subtree_digest h cf enc u ==> t == u`, for ANY encoder `enc`, under the injectivity of the hash `h` (F#: `Hash.sha256Hex` — the standing assumption every digest on the spine rests on, so a collision here is a SHA-256 collision) and of the field encoding `cf` (F#: `Hash.canonicalFields`, proved injective by `canonical-digest-preimage-injective`). The encoder needs no hypothesis because the id and the kind are fields of the own pre-image in their own right (`own_digest h cf enc t = h (cf [id; kind; enc shell])`), so the rollup recovers ids, kinds and shape unconditionally; what the encoder adds is the content beyond the kind, which the model's tree does not carry, and `own_digest_recovers_shell` is the clause a domain's `Conformance.encoderInjectivityLaws` extends to it. This is the obligation the document domain's roadmap had queued against its own copy of the rollup, discharged once here; `Conformance.digestLaws` samples the shipped engine's half (subtree digests agree iff `Diff.changes` over the two subtrees is empty, both directions).",
+      "phase": "fuaran-core#314",
+      "evidence": {
+        "theorem": "subtree_digest_injective",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Tree.digests"
+        ]
+      }
+    },
+    {
+      "id": "digest-partition",
+      "level": "proved",
+      "claim": "`Tree.Digests.diff`'s four lists partition the union of the two id sets (Phase 314): modelled over the id lists of two trees — `d_added`, `d_removed`, `d_changed` and `d_unchanged`, each a `keep` over one tree's ids by membership in the other and by the own digests agreeing — every id of either tree is in one of the four lists, no other id is in any, no id is in two, and under `wf` each list carries an id once (`digest_partition`, the three clauses `digest_partition_covers`, `digest_partition_disjoint` and `digest_partition_once` as one statement). The lists' ascending key order is a rendering of the F# maps the model does not carry, and `Conformance.digestLaws` samples it beside the partition. `digest_theorems_are_not_vacuous` evaluates the four lists on a pair where every list is non-empty, so the statement is not about the identity pair; the twins `digest-diff-partitions-the-ids` and `digest-diff-over-one-tree-is-all-unchanged` run the same pairs through the extracted oracle.",
+      "phase": "fuaran-core#314",
+      "evidence": {
+        "theorem": "digest_partition",
+        "model": "proofs/TreeDiff.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Tree.Digests.diff"
+        ]
+      }
+    },
+    {
       "id": "diff-settled-order",
       "level": "proved",
       "claim": "After `Diff.toOps`'s three structural blocks — the inserts, the moves, the removals — every parent of `after` holds its kept survivors in `before`'s order, then the inserted shells, then the moved-in survivors, the last two each in `after`'s order (`settled_order`, which `emitWith`'s step 4 computes clause for clause from the two trees' child lists and the before-id set). This is the ORDER-PREDICTION LEMMA behind Phase 305's drop of the `ReorderChildren` that used to trail every append: a parent whose after-order IS the settled order holds it already, so pass 4 emits nothing for it, and `diff_applicable` / `diff_reconstructs` are re-proved over the changed pass with the drop inside them (the skip is `reorder_settled`, which reads `inv4`'s new disjunct). Proved by three exact-order invariants carried BESIDE section 10's membership invariants through the same `_run` lemmas — `ord1`/`ord2`/`ord3`, each a `keep` over one of the two trees' child lists under a predicate naming the pass's worklist — with one order lemma per step over the per-node view and a short list algebra: `keep_split_at` (widening a filter by the id just placed APPENDS it, since every id after it in the child list is still on the worklist) and `kids_precede` (child order is preorder order), the latter being how pass 1's walk of `after`'s preorder reaches a parent's new children in child order. It carries no hypothesis beyond two well-formed trees sharing a root id, like `diff-applicable`; what it says about the SHIPPED engine is carried by `diff-differential` and `content-diff-differential`, whose script comparison is operation for operation and whose model is this one, re-extracted.",

@@ -776,6 +776,67 @@ let structural_op : TreeOps.op  ->  Prims.bool = (fun ( o  :  TreeOps.op ) -> (m
      true
      end))
 
+
+let own_digest : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  Prims.string = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( t  :  TreeOps.tree ) -> (h (cf (((TreeOps.tid_of t))::((TreeOps.kind_of t))::((enc (shell t)))::[]))))
+
+
+let rec subtree_digest : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  Prims.string = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( t  :  TreeOps.tree ) -> (match (t) with
+| TreeOps.TNode (uu___, uu___1, cs) -> begin
+     (h (cf (((own_digest h cf enc t))::(subtree_digests h cf enc cs))))
+     end))
+and subtree_digests : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  Prims.list<TreeOps.tree>  ->  Prims.list<Prims.string> = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( ts  :  Prims.list<TreeOps.tree> ) -> (match (ts) with
+| [] -> begin
+     []
+     end
+| (t)::r -> begin
+     ((subtree_digest h cf enc t))::(subtree_digests h cf enc r)
+     end))
+
+
+let own_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  Prims.string  ->  TreeOps.tree  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( x  :  Prims.string ) ( t  :  TreeOps.tree ) -> (match ((TreeOps.find_in x t)) with
+| FStar_Pervasives_Native.Some (n) -> begin
+     FStar_Pervasives_Native.Some ((own_digest h cf enc n))
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let not_in : TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( a  :  TreeOps.tree ) ( x  :  Prims.string ) -> (not ((DagFold.mem x (TreeOps.ids a)))))
+
+
+let changed_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) ( x  :  Prims.string ) -> ((DagFold.mem x (TreeOps.ids a)) && (Prims.op_Less_Greater (own_at h cf enc x a) (own_at h cf enc x b))))
+
+
+let unchanged_at : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.string  ->  Prims.bool = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) ( x  :  Prims.string ) -> ((DagFold.mem x (TreeOps.ids a)) && (Prims.op_Equals (own_at h cf enc x a) (own_at h cf enc x b))))
+
+
+let d_added : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string> = (fun ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) -> (DagFold.keep (not_in a) (TreeOps.ids b)))
+
+
+let d_removed : TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string> = (fun ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) -> (DagFold.keep (not_in b) (TreeOps.ids a)))
+
+
+let d_changed : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string> = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) -> (DagFold.keep (changed_at h cf enc a b) (TreeOps.ids b)))
+
+
+let d_unchanged : (Prims.string  ->  Prims.string)  ->  (Prims.list<Prims.string>  ->  Prims.string)  ->  (TreeOps.tree  ->  Prims.string)  ->  TreeOps.tree  ->  TreeOps.tree  ->  Prims.list<Prims.string> = (fun ( h  :  Prims.string  ->  Prims.string ) ( cf  :  Prims.list<Prims.string>  ->  Prims.string ) ( enc  :  TreeOps.tree  ->  Prims.string ) ( a  :  TreeOps.tree ) ( b  :  TreeOps.tree ) -> (DagFold.keep (unchanged_at h cf enc a b) (TreeOps.ids b)))
+
+
+let second_field : Prims.list<Prims.string>  ->  Prims.string = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| (uu___)::(k)::uu___1 -> begin
+     k
+     end
+| uu___ -> begin
+     ""
+     end))
+
+
+let dg_before : TreeOps.tree = TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x", []))::(TreeOps.TNode ("b", "y", []))::[])
+
+
+let dg_after : TreeOps.tree = TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "z", []))::(TreeOps.TNode ("c", "y", []))::[])
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -800,7 +861,7 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "to-ops-appends-with-no-trailing-reorder"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::(TreeOps.TNode ("b", "para", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::[]))))})::({tname = "to-ops-prepends-then-reorders"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("b", "para", []))::(TreeOps.TNode ("a", "sec", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::(TreeOps.ReorderChildren ("r", ("b")::("a")::[]))::[]))))})::({tname = "to-ops-contained-with-rewrites-the-container-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after) (DagFold.Ok ((TreeOps.UpdateNode (TreeOps.TNode ("p", "section", (TreeOps.TNode ("q", "para", []))::[])))::(TreeOps.InsertChild ("p", TreeOps.TNode ("q", "para", [])))::[]))))})::({tname = "to-ops-refuses-a-root-id-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", [])) (TreeOps.TNode ("s", "doc", []))) (DagFold.Error (RootIdMismatch ("r", "s")))))})::({tname = "dup-id-names-the-repeat"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dup_id (TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x", []))::(TreeOps.TNode ("a", "y", []))::[]))) (FStar_Pervasives_Native.Some ("a"))))})::[]
+let twins : Prims.list<twin> = ({tname = "to-ops-appends-with-no-trailing-reorder"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::(TreeOps.TNode ("b", "para", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::[]))))})::({tname = "to-ops-prepends-then-reorders"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("a", "sec", []))::[])) (TreeOps.TNode ("r", "doc", (TreeOps.TNode ("b", "para", []))::(TreeOps.TNode ("a", "sec", []))::[]))) (DagFold.Ok ((TreeOps.InsertChild ("r", TreeOps.TNode ("b", "para", [])))::(TreeOps.ReorderChildren ("r", ("b")::("a")::[]))::[]))))})::({tname = "to-ops-contained-with-rewrites-the-container-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops_contained_with pre_fix_ch pre_fix_before pre_fix_after) (DagFold.Ok ((TreeOps.UpdateNode (TreeOps.TNode ("p", "section", (TreeOps.TNode ("q", "para", []))::[])))::(TreeOps.InsertChild ("p", TreeOps.TNode ("q", "para", [])))::[]))))})::({tname = "to-ops-refuses-a-root-id-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_ops (TreeOps.TNode ("r", "doc", [])) (TreeOps.TNode ("s", "doc", []))) (DagFold.Error (RootIdMismatch ("r", "s")))))})::({tname = "dup-id-names-the-repeat"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (dup_id (TreeOps.TNode ("r", "d", (TreeOps.TNode ("a", "x", []))::(TreeOps.TNode ("a", "y", []))::[]))) (FStar_Pervasives_Native.Some ("a"))))})::({tname = "digest-diff-partitions-the-ids"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (d_added dg_before dg_after) (("c")::[])) && (Prims.op_Equals (d_removed dg_before dg_after) (("b")::[]))) && (Prims.op_Equals (d_changed (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_after) (("a")::[]))) && (Prims.op_Equals (d_unchanged (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_after) (("r")::[]))))})::({tname = "digest-diff-over-one-tree-is-all-unchanged"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (d_added dg_before dg_before) []) && (Prims.op_Equals (d_removed dg_before dg_before) [])) && (Prims.op_Equals (d_changed (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_before) [])) && (Prims.op_Equals (d_unchanged (fun ( s  :  Prims.string ) -> s) second_field TreeOps.kind_of dg_before dg_before) (("r")::("a")::("b")::[]))))})::[]
 
 
 

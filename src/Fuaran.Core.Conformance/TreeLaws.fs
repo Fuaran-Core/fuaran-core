@@ -2552,3 +2552,546 @@ module internal TreeLaws =
                 [ "accepted remove", removes
                   "StillReferenced", stillReferenced
                   "race built", races ] ]
+
+    // ---- Phase 314: digests, the change classification and the defect-set gate ----
+
+    /// The pairs one iteration of the Phase 314 families reads: `before` with an `after` derived by
+    /// up to four drawn ops (the `diffLaws` shape — a pair one of which was derived from the other),
+    /// and, when the generator's second draw shares `before`'s root key and is well-formed, that
+    /// INDEPENDENT draw as well — the pair shape that reaches a changed kind, a removed region and a
+    /// moved survivor at once, which a four-op derivation rarely does.
+    let private pairsOf
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (rng: LawKit.Draws)
+        : ('Node * 'Node) list =
+        let canHold = LawKit.canHoldOf gen
+        let before = rng.Draw gen.Tree
+        let mutable after = before
+
+        for _ in 1..4 do
+            let op = rng.Draw(LawKit.genOp nodew idw gen after)
+
+            match Ops.applyContained canHold nodew idw op after with
+            | Ok t' -> after <- t'
+            | Error _ -> ()
+
+        let other = rng.Draw gen.Tree
+        let key (n: 'Node) = idw.ToString(nodew.Id n)
+
+        let independent =
+            if key other = key before && Tree.isWellFormed nodew idw other then
+                [ before, other ]
+            else
+                []
+
+        (before, after) :: independent
+
+    /// The canonical rank of a change kind — `ChangeKind`'s declaration order, re-derived here so the
+    /// law reads the order off the type rather than off the function under test.
+    let private changeRank (k: Diff.ChangeKind<'Id>) : int =
+        match k with
+        | Diff.ChangeKind.Added -> 0
+        | Diff.ChangeKind.Removed -> 1
+        | Diff.ChangeKind.Moved _ -> 2
+        | Diff.ChangeKind.KindChanged _ -> 3
+        | Diff.ChangeKind.Changed -> 4
+        | Diff.ChangeKind.Reordered -> 5
+
+    /// True when `xs` ascends strictly under `compare`.
+    let private ascending (xs: 'a list) : bool =
+        xs |> List.pairwise |> List.forall (fun (x, y) -> compare x y < 0)
+
+    /// The digest-map laws (Phase 314) — certify `Tree.digests` and `Tree.Digests.diff` against a
+    /// domain's witness and content encoder. Over each pair `pairsOf` draws: the `Own` and `Frame`
+    /// maps agree with the per-node `Tree.ownDigest` / `Tree.frameDigest` at every node; `diff d d`
+    /// reads every key `Unchanged`; the four lists of `diff a b` PARTITION the union of the two key
+    /// sets (each key exactly once, each list ascending — the sampled form of `digest_partition` in
+    /// `proofs/TreeDiff.fst`); a common key is `Changed` exactly when the two nodes' kind or encoded
+    /// shell differ; two subtree digests agree exactly when `Diff.changes` over the two subtrees is
+    /// empty (the sampled form of `subtree_digest_injective`, both directions); and the `Added`,
+    /// `Removed` and `Changed` lists are the ids `Diff.changes` names `Added`, `Removed` and
+    /// `KindChanged`-or-`Changed`. `'Node` needs equality. Guarded on the pair shape: a run whose
+    /// pairs were all identities, or never reached an added, a removed or an updated id, certified
+    /// the partition over nothing but `Unchanged`.
+    let digestLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (encode: 'Node -> string)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let key (n: 'Node) = idw.ToString(nodew.Id n)
+        let shell (n: 'Node) = encode (nodew.ReplaceChildren n [])
+
+        let keysOf (d: Tree.Digests) =
+            d.Own |> Map.toList |> List.map fst |> Set.ofList
+
+        let perNode =
+            LawKit.LawCell "digests: the Own and Frame maps agree with ownDigest / frameDigest at every node"
+
+        let identity =
+            LawKit.LawCell "digests: diff d d reads every key Unchanged and nothing else"
+
+        let partition =
+            LawKit.LawCell
+                "digests: added ⊎ removed ⊎ changed ⊎ unchanged is the union of the two key sets, each key once, each list ascending"
+
+        let changedIsOwn =
+            LawKit.LawCell "digests: a common key is Changed iff the two nodes' kind or encoded shell differ"
+
+        let merkle =
+            LawKit.LawCell "digests: two subtree digests agree iff Diff.changes over the two subtrees is empty"
+
+        let agreesWithChanges =
+            LawKit.LawCell
+                "digests: Added, Removed and Changed are the ids Diff.changes names Added, Removed and KindChanged-or-Changed"
+
+        let mutable nonIdentity = 0
+        let mutable added = 0
+        let mutable removed = 0
+        let mutable updated = 0
+
+        LawKit.run iterations seed (fun rng _ at ->
+            for before, after in pairsOf nodew idw gen rng do
+                if after <> before then
+                    nonIdentity <- nonIdentity + 1
+
+                let da = Tree.digests nodew idw encode before
+                let db = Tree.digests nodew idw encode after
+
+                for n in Tree.preorder nodew before do
+                    let k = key n
+
+                    perNode.Check(
+                        Map.tryFind k da.Own = Some(Tree.ownDigest nodew idw encode n)
+                        && Map.tryFind k da.Frame = Some(Tree.frameDigest nodew idw encode n),
+                        fun () -> at (sprintf "the maps disagree with the per-node digests at %s" k)
+                    )
+
+                let dd = Tree.Digests.diff da da
+
+                identity.Check(
+                    List.isEmpty dd.Added
+                    && List.isEmpty dd.Removed
+                    && List.isEmpty dd.Changed
+                    && Set.ofList dd.Unchanged = keysOf da
+                    && List.length dd.Unchanged = Set.count (keysOf da),
+                    fun () -> at (sprintf "diff d d is not all Unchanged: %A" dd)
+                )
+
+                let delta = Tree.Digests.diff da db
+                let all = delta.Added @ delta.Removed @ delta.Changed @ delta.Unchanged
+                let union = Set.union (keysOf da) (keysOf db)
+                added <- added + List.length delta.Added
+                removed <- removed + List.length delta.Removed
+                updated <- updated + List.length delta.Changed
+
+                partition.Check(
+                    List.length all = Set.count union
+                    && Set.ofList all = union
+                    && ascending delta.Added
+                    && ascending delta.Removed
+                    && ascending delta.Changed
+                    && ascending delta.Unchanged,
+                    fun () -> at (sprintf "the four lists do not partition the key union: %A" delta)
+                )
+
+                match Tree.Index.tryBuild nodew idw before, Tree.Index.tryBuild nodew idw after with
+                | Ok bix, Ok aix ->
+                    for k in Set.intersect (keysOf da) (keysOf db) do
+                        match Map.tryFind k bix.ById, Map.tryFind k aix.ById with
+                        | Some b, Some a ->
+                            let differs = nodew.KindTag b <> nodew.KindTag a || shell b <> shell a
+
+                            changedIsOwn.Check(
+                                (List.contains k delta.Changed = differs),
+                                fun () -> at (sprintf "Changed disagrees with the nodes' own content at %s" k)
+                            )
+
+                            let below =
+                                match Diff.changes encode nodew idw b a with
+                                | Ok [] -> true
+                                | _ -> false
+
+                            merkle.Check(
+                                (Tree.Digests.subtreeEqual da db k = below),
+                                fun () -> at (sprintf "subtree digests and Diff.changes disagree below %s" k)
+                            )
+                        | _ -> ()
+
+                    match Diff.changes encode nodew idw before after with
+                    | Error e ->
+                        agreesWithChanges.Check(
+                            false,
+                            fun () -> at (sprintf "Diff.changes refused a drawn pair: %A" e)
+                        )
+                    | Ok cs ->
+                        let named (pick: Diff.ChangeKind<'Id> -> bool) =
+                            cs
+                            |> List.filter (fun c -> pick c.Kind)
+                            |> List.map (fun c -> idw.ToString c.Id)
+                            |> Set.ofList
+
+                        agreesWithChanges.Check(
+                            Set.ofList delta.Added = named ((=) Diff.ChangeKind.Added)
+                            && Set.ofList delta.Removed = named ((=) Diff.ChangeKind.Removed)
+                            && Set.ofList delta.Changed = named (function
+                                | Diff.ChangeKind.KindChanged _
+                                | Diff.ChangeKind.Changed -> true
+                                | _ -> false),
+                            fun () ->
+                                at (sprintf "Digests.diff and Diff.changes name different ids: %A vs %A" delta cs)
+                        )
+                | _ -> ())
+
+        LawKit.results [ perNode; identity; partition; changedIsOwn; merkle; agreesWithChanges ]
+        @ [ SampleAdequacy.reached
+                "Conformance.digestLaws"
+                "pair shape"
+                seed
+                [ "non-identity pair", nonIdentity
+                  "added id", added
+                  "removed id", removed
+                  "updated survivor", updated ] ]
+
+    /// The change-classification laws (Phase 314) — hold `Diff.changes` to the script
+    /// `Diff.toOpsWith` emits, over the pairs `pairsOf` draws. The identity pair classifies to `[]`;
+    /// the entries ascend by `(id key, kind rank)` and name only ids of the two trees; the `Added` ids
+    /// are exactly the `InsertChild` grafts; the `Moved` ids exactly the `MoveNode` targets, each from
+    /// its before-parent to its after-parent; the `KindChanged` and `Changed` ids together exactly
+    /// the `UpdateNode` targets (the encoder must see the kind for this to hold, as an injective one
+    /// does — a red here over a domain's encoder is the encoder losing the kind); the `Removed` ids
+    /// are `before`'s minus `after`'s, every `RemoveNode` target is one and every other sits below one
+    /// in `before`; every `Reordered` id is a `ReorderChildren` parent and every such parent is
+    /// `Reordered` or holds an `Added` or `Moved` child; and the script's landing classifies as
+    /// unchanged against `after`. `'Node` needs equality. Guarded on the pair shape.
+    let changeLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (encode: 'Node -> string)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let key (i: 'Id) = idw.ToString i
+        let identity = LawKit.LawCell "changes: the identity pair classifies to []"
+
+        let canonical =
+            LawKit.LawCell "changes: entries ascend by (id key, kind rank) and name only ids of the two trees"
+
+        let inserts =
+            LawKit.LawCell "changes: Added ids are exactly the InsertChild grafts of toOpsWith"
+
+        let moves =
+            LawKit.LawCell
+                "changes: Moved ids are exactly the MoveNode targets of toOpsWith, each from its before-parent to its after-parent"
+
+        let updates =
+            LawKit.LawCell
+                "changes: KindChanged and Changed ids together are exactly the UpdateNode targets of toOpsWith"
+
+        let removes =
+            LawKit.LawCell
+                "changes: Removed ids are before's minus after's; every RemoveNode target is one, and every other sits below one in before"
+
+        let reorders =
+            LawKit.LawCell
+                "changes: every Reordered id is a ReorderChildren parent, and every such parent is Reordered or holds an Added or Moved child"
+
+        let landing =
+            LawKit.LawCell "changes: the script's landing classifies as unchanged against after"
+
+        let mutable nonIdentity = 0
+        let mutable added = 0
+        let mutable removed = 0
+        let mutable moved = 0
+        let mutable updated = 0
+        let mutable reordered = 0
+
+        LawKit.run iterations seed (fun rng _ at ->
+            for before, after in pairsOf nodew idw gen rng do
+                if after <> before then
+                    nonIdentity <- nonIdentity + 1
+
+                identity.Check(
+                    (Diff.changes encode nodew idw before before = Ok []),
+                    fun () -> at "the identity pair does not classify to []"
+                )
+
+                match
+                    Diff.changes encode nodew idw before after,
+                    Diff.toOpsWith encode nodew idw before after,
+                    Tree.Index.tryBuild nodew idw before,
+                    Tree.Index.tryBuild nodew idw after
+                with
+                | Ok cs, Ok ops, Ok bix, Ok aix ->
+                    let bIds = bix.ById |> Map.keys |> Set.ofSeq
+                    let aIds = aix.ById |> Map.keys |> Set.ofSeq
+
+                    let named (pick: Diff.ChangeKind<'Id> -> bool) =
+                        cs
+                        |> List.filter (fun c -> pick c.Kind)
+                        |> List.map (fun c -> key c.Id)
+                        |> Set.ofList
+
+                    let addedIds = named ((=) Diff.ChangeKind.Added)
+                    let removedIds = named ((=) Diff.ChangeKind.Removed)
+
+                    let movedIds =
+                        named (function
+                            | Diff.ChangeKind.Moved _ -> true
+                            | _ -> false)
+
+                    let updatedIds =
+                        named (function
+                            | Diff.ChangeKind.KindChanged _
+                            | Diff.ChangeKind.Changed -> true
+                            | _ -> false)
+
+                    let reorderedIds = named ((=) Diff.ChangeKind.Reordered)
+                    added <- added + Set.count addedIds
+                    removed <- removed + Set.count removedIds
+                    moved <- moved + Set.count movedIds
+                    updated <- updated + Set.count updatedIds
+                    reordered <- reordered + Set.count reorderedIds
+
+                    canonical.Check(
+                        ascending (cs |> List.map (fun c -> key c.Id, changeRank c.Kind))
+                        && cs |> List.forall (fun c -> Set.contains (key c.Id) (Set.union bIds aIds)),
+                        fun () -> at (sprintf "entries are not canonical: %A" cs)
+                    )
+
+                    let grafts =
+                        ops
+                        |> List.choose (function
+                            | InsertChild(_, n) -> Some(key (nodew.Id n))
+                            | _ -> None)
+                        |> Set.ofList
+
+                    inserts.Check((addedIds = grafts), fun () -> at (sprintf "Added %A vs grafts %A" addedIds grafts))
+
+                    let moveTargets =
+                        ops
+                        |> List.choose (function
+                            | MoveNode(t, _) -> Some(key t)
+                            | _ -> None)
+                        |> Set.ofList
+
+                    let movedWell =
+                        cs
+                        |> List.forall (fun c ->
+                            match c.Kind with
+                            | Diff.ChangeKind.Moved(f, t) ->
+                                (Map.tryFind (key c.Id) bix.ParentOf |> Option.map key) = Some(key f)
+                                && (Map.tryFind (key c.Id) aix.ParentOf |> Option.map key) = Some(key t)
+                            | _ -> true)
+
+                    moves.Check(
+                        movedIds = moveTargets && movedWell,
+                        fun () -> at (sprintf "Moved %A vs MoveNode targets %A" movedIds moveTargets)
+                    )
+
+                    let updateTargets =
+                        ops
+                        |> List.choose (function
+                            | UpdateNode n -> Some(key (nodew.Id n))
+                            | _ -> None)
+                        |> Set.ofList
+
+                    updates.Check(
+                        (updatedIds = updateTargets),
+                        fun () ->
+                            at (sprintf "KindChanged and Changed %A vs UpdateNode targets %A" updatedIds updateTargets)
+                    )
+
+                    let removeTargets =
+                        ops
+                        |> List.choose (function
+                            | RemoveNode t -> Some(key t)
+                            | _ -> None)
+                        |> Set.ofList
+
+                    let belowARemoval (k: string) =
+                        match Map.tryFind k bix.ById with
+                        | Some n ->
+                            Tree.Index.ancestors idw (nodew.Id n) bix
+                            |> List.exists (fun p -> Set.contains (key (nodew.Id p)) removeTargets)
+                        | None -> false
+
+                    removes.Check(
+                        removedIds = Set.difference bIds aIds
+                        && Set.isSubset removeTargets removedIds
+                        && removedIds
+                           |> Set.forall (fun k -> Set.contains k removeTargets || belowARemoval k),
+                        fun () -> at (sprintf "Removed %A vs RemoveNode targets %A" removedIds removeTargets)
+                    )
+
+                    let reorderParents =
+                        ops
+                        |> List.choose (function
+                            | ReorderChildren(p, _) -> Some(key p)
+                            | _ -> None)
+                        |> Set.ofList
+
+                    let explained (p: string) =
+                        Set.contains p reorderedIds
+                        || (match Map.tryFind p aix.ById with
+                            | Some n ->
+                                nodew.Children n
+                                |> List.exists (fun c ->
+                                    let ck = key (nodew.Id c)
+                                    Set.contains ck addedIds || Set.contains ck movedIds)
+                            | None -> false)
+
+                    reorders.Check(
+                        Set.isSubset reorderedIds reorderParents
+                        && reorderParents |> Set.forall explained,
+                        fun () -> at (sprintf "Reordered %A vs ReorderChildren parents %A" reorderedIds reorderParents)
+                    )
+
+                    match Ops.applyAll nodew idw ops before with
+                    | Ok landed ->
+                        landing.Check(
+                            (Diff.changes encode nodew idw landed after = Ok []),
+                            fun () -> at "the script's landing still classifies as changed against after"
+                        )
+                    | Error e -> landing.Check(false, fun () -> at (sprintf "the script does not apply: %A" e))
+                | cs, ops, _, _ ->
+                    canonical.Check(
+                        false,
+                        fun () -> at (sprintf "a drawn pair was refused: changes %A, toOpsWith %A" cs ops)
+                    ))
+
+        LawKit.results [ identity; canonical; inserts; moves; updates; removes; reorders; landing ]
+        @ [ SampleAdequacy.reached
+                "Conformance.changeLaws"
+                "pair shape"
+                seed
+                [ "non-identity pair", nonIdentity
+                  "added id", added
+                  "removed id", removed
+                  "moved survivor", moved
+                  "updated survivor", updated
+                  "reordered parent", reordered ] ]
+
+    /// The introduced-defect laws (Phase 314) — certify `Validator.introduced`, `verdict`, `gate` and
+    /// `encodeVerdict` against a domain's registry over the pairs `pairsOf` draws, `after` the
+    /// candidate and `before` (and the independent draw, when admitted) the baselines. A tree
+    /// introduces nothing against itself; the introduced list is exactly the candidate's findings
+    /// whose `(code, node)` no baseline reports, in canonical order; `Lenient` reports nothing and
+    /// never blocks, `Diagnostic` reports and never blocks, `Gated` blocks exactly on an introduced
+    /// error; `gate` is `verdict` over `introduced` under every policy; and `encodeVerdict` is
+    /// deterministic, reads the introduced list as a set (a permutation encodes alike) and separates
+    /// the three policies. Guarded on the gate arm: a registry the drawn edits never trip certifies
+    /// the diff over empty sets.
+    let introducedLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let identityOf (d: Defect<'Id>) =
+            d.Code, d.Node |> Option.map idw.ToString
+
+        let self = LawKit.LawCell "introduced: a tree introduces nothing against itself"
+
+        let exact =
+            LawKit.LawCell
+                "introduced: exactly the candidate findings whose (code, node) no baseline reports, in canonical order"
+
+        let policies =
+            LawKit.LawCell
+                "introduced: Lenient reports nothing and never blocks, Diagnostic reports and never blocks, Gated blocks exactly on an introduced error"
+
+        let composed =
+            LawKit.LawCell "introduced: gate is verdict over introduced under every policy"
+
+        let encoding =
+            LawKit.LawCell
+                "introduced: encodeVerdict is deterministic, order-free over the introduced list and separates the policies"
+
+        let mutable introducedN = 0
+        let mutable blockedN = 0
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let pairs = pairsOf nodew idw gen rng
+            let before = fst (List.head pairs)
+            let candidate = snd (List.head pairs)
+            let baselines = before :: (pairs |> List.tail |> List.map snd)
+
+            self.Check(
+                List.isEmpty (Validator.introduced nodew idw reg [ candidate ] candidate),
+                fun () -> at "a tree introduces a defect against itself"
+            )
+
+            let introduced = Validator.introduced nodew idw reg baselines candidate
+            let found = Validator.runAll nodew reg candidate
+
+            let known =
+                baselines
+                |> List.collect (Validator.runAll nodew reg >> List.map identityOf)
+                |> Set.ofList
+
+            let expected =
+                found
+                |> List.filter (fun d -> not (Set.contains (identityOf d) known))
+                |> List.sortBy identityOf
+
+            if not (List.isEmpty introduced) then
+                introducedN <- introducedN + 1
+
+            exact.Check(
+                (introduced = expected),
+                fun () -> at (sprintf "introduced %A, expected %A" introduced expected)
+            )
+
+            let lenient = Validator.verdict Validator.GatePolicy.Lenient introduced
+            let diagnostic = Validator.verdict Validator.GatePolicy.Diagnostic introduced
+            let gated = Validator.verdict Validator.GatePolicy.Gated introduced
+
+            if gated.Blocked then
+                blockedN <- blockedN + 1
+
+            policies.Check(
+                List.isEmpty lenient.Introduced
+                && not lenient.Blocked
+                && diagnostic.Introduced = introduced
+                && not diagnostic.Blocked
+                && gated.Introduced = introduced
+                && gated.Blocked = Validator.hasErrors introduced,
+                fun () -> at (sprintf "the policies misread %A" introduced)
+            )
+
+            composed.Check(
+                [ Validator.GatePolicy.Lenient
+                  Validator.GatePolicy.Diagnostic
+                  Validator.GatePolicy.Gated ]
+                |> List.forall (fun p ->
+                    Validator.gate p nodew idw reg baselines candidate = Validator.verdict p introduced),
+                fun () -> at "gate and verdict over introduced disagree"
+            )
+
+            let enc = Validator.encodeVerdict idw
+
+            encoding.Check(
+                enc gated = enc gated
+                && enc
+                    { gated with
+                        Introduced = List.rev introduced } = enc gated
+                && enc lenient <> enc diagnostic
+                && enc diagnostic <> enc gated
+                && enc lenient <> enc gated,
+                fun () -> at "encodeVerdict is not canonical over the verdicts"
+            ))
+
+        LawKit.results [ self; exact; policies; composed; encoding ]
+        @ [ SampleAdequacy.reached
+                "Conformance.introducedLaws"
+                "gate arm"
+                seed
+                [ "introduced defect", introducedN; "blocked verdict", blockedN ] ]

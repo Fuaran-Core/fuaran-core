@@ -140,7 +140,15 @@ module Hash =
     ///   - `Tree.Index.fingerprintOf`
     ///   - `Tree.Index.fingerprintOfWith` (Phase 305: the same term with the caller's content encoder
     ///     between the kind and the child count — the stamp `buildWith` / `isFreshForWith` read)
-    ///   - `Projection.snapshotDigestOf` (Phase 298: the changed-since baseline, under SHA-256)
+    ///   - `Tree.ownDigest` (Phase 314: a node's own content — id key, kind, encoded shell — under
+    ///     SHA-256; the `Own` map of `Tree.digests`)
+    ///   - `Tree.frameDigest` (Phase 314: the own fields, then the child count and child id keys,
+    ///     under SHA-256 — the `Frame` map, and `Projection.snapshotDigestOf` since Phase 314, which
+    ///     carried this key from Phase 298 as the changed-since baseline)
+    ///   - `Tree.digests` (Phase 314: the Merkle `Subtree` digest — the own digest, then each child's
+    ///     subtree digest in order — under SHA-256)
+    ///   - `Validator.encodeVerdict` (Phase 314: a gate verdict's cross-host encoding — the policy,
+    ///     the block, then each introduced defect's code, location and severity)
     ///   - `ColumnValidator.ruleId` (Phase 298: a stock column rule's id over its parameters)
     ///   - `ColumnValidator.keyText` (Phase 298: one composite key of the `unique` rule)
     let canonicalFields (fields: string list) : string =

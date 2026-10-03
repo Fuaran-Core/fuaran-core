@@ -98,19 +98,33 @@ type Projection =
 /// 32-bit content digest saw neither, and over enough random edits let a real
 /// content edit read as unchanged. A snapshot taken before Phase 298 holds the
 /// old digests, and reads every node as changed once.
+///
+/// **Both maps are `Tree.digests`' (Phase 314).** `Digests` is the `Frame` map and
+/// `Subtrees` the Merkle `Subtree` map of one `Tree.digests` pass, re-keyed by
+/// `idKey`, so the projection holds no digest definition of its own. The Merkle
+/// map is the fast path: under `ChangedSince` a node whose subtree digest agrees
+/// with the snapshot's is skipped WITH its whole subtree, since nothing below it
+/// can differ (up to a SHA-256 collision) — the per-node check runs only where a
+/// subtree moved. A snapshot with an empty `Subtrees` (one taken before this
+/// phase, or built by hand) reads exactly as before: every node is checked.
 type ProjectionSnapshot =
     {
         /// Id key → `snapshotDigestOf` (64 lowercase hex). When two nodes share an id
         /// key, the later one in preorder holds the entry.
         Digests: Map<string, string>
+        /// Id key → Merkle subtree digest (`Tree.digests`' `Subtree`, 64 lowercase hex)
+        /// — the subtree-equal fast path under `ChangedSince`. Empty disables it.
+        Subtrees: Map<string, string>
     }
 
 /// The read window. `Whole` is the full artifact; `ById` a single node's line;
 /// `Subtree` a node and everything below it (the contiguous preorder slice);
 /// `ChangedSince` every node whose snapshot digest differs from (or is absent
-/// in) the snapshot — the incremental re-read. `RequireQualifiedAccess` (Phase
-/// 298): `Scope.Whole`, `Scope.ById`, … — the cases no longer shadow a
-/// consumer's own `Whole` or `ById`.
+/// in) the snapshot — the incremental re-read; `BySubtreeDigest` (Phase 314) the
+/// subtree a Merkle digest names — a content-addressed read for a consumer that
+/// holds a digest from a snapshot or a reconcile rather than an id.
+/// `RequireQualifiedAccess` (Phase 298): `Scope.Whole`, `Scope.ById`, … — the
+/// cases no longer shadow a consumer's own `Whole` or `ById`.
 [<RequireQualifiedAccess>]
 type Scope<'Id> =
     /// Every node, in preorder.
@@ -123,6 +137,11 @@ type Scope<'Id> =
     /// Every current node whose snapshot digest differs from, or is missing in, the
     /// snapshot; nodes deleted since are not reported.
     | ChangedSince of ProjectionSnapshot
+    /// The first node in preorder whose Merkle subtree digest (`Tree.digests`'
+    /// `Subtree`, under the witness's `Encode`) is this string, then each following
+    /// node deeper than it — the `Subtree` slice, addressed by content rather than
+    /// by id. Empty when no node's subtree hashes to it. Declared last (Phase 314).
+    | BySubtreeDigest of string
 
 /// The generic projection functions. No domain content is ever in scope here —
 /// every content-bearing cell (id, kind, encode, snippet) comes through the
@@ -200,17 +219,26 @@ module Projection =
     /// `Encode`, child count and each child's id, through `Hash.canonicalFields`.
     /// A content edit, a reorder of its children and a child arriving or leaving
     /// each move it; a 64-hex digest makes an unseen change a SHA-256 collision,
-    /// not a 1-in-2^32 chance.
+    /// not a 1-in-2^32 chance. Since Phase 314 it IS `Tree.frameDigest` under the
+    /// witness's encoder — one definition, the one `Tree.digests` builds its `Frame`
+    /// map from — and the encoder is read over the node's SHELL, which for the
+    /// child-blind `Encode` the witness contract demands is the same string.
     let snapshotDigestOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (node: 'Node) : string =
-        let kids = pw.Tree.Children node
+        Tree.frameDigest pw.Tree pw.IdW pw.Encode node
 
-        pw.IdW.ToString(pw.Tree.Id node)
-        :: pw.Tree.KindTag node
-        :: pw.Encode node
-        :: string (List.length kids)
-        :: (kids |> List.map (fun c -> pw.IdW.ToString(pw.Tree.Id c)))
-        |> Hash.canonicalFields
-        |> Hash.sha256Hex
+    /// `Tree.digests` under the witness's encoder, both maps re-keyed from the raw
+    /// `IdW.ToString` key to the projection's `idKey` (the escaped form every scope
+    /// compares, Phase 298). `escapeCell` is injective, so the re-keying loses no
+    /// entry.
+    let private digestsOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (root: 'Node) : Tree.Digests =
+        let rekey (m: Map<string, string>) =
+            m |> Map.toList |> List.map (fun (k, v) -> escapeCell k, v) |> Map.ofList
+
+        let d = Tree.digests pw.Tree pw.IdW pw.Encode root
+
+        { Own = rekey d.Own
+          Frame = rekey d.Frame
+          Subtree = rekey d.Subtree }
 
     /// Project one node at `depth` into its terse line.
     let lineOf (pw: ProjectionWitness<'Node, 'Id, 'Op>) (depth: int) (node: 'Node) : ProjectionLine =
@@ -255,16 +283,9 @@ module Projection =
         let render (nodes: ('Node * int) list) =
             nodes |> List.map (fun (n, d) -> lineOf pw d n)
 
-        match scope with
-        | Scope.Whole -> { Lines = render placed }
-        | Scope.ById target ->
-            let key = idKey pw target
-            { Lines = placed |> List.filter (fun (n, _) -> keyOf n = key) |> render }
-        | Scope.Subtree target ->
-            // the contiguous preorder slice: the target + every following node
-            // strictly deeper than it (its descendants, and nothing else)
-            let key = idKey pw target
-
+        // the contiguous preorder slice at the first node `hit` accepts: that node + every
+        // following node strictly deeper than it (its descendants, and nothing else)
+        let sliceAt (hit: 'Node -> bool) =
             let rec take acc rootDepth rest =
                 match rest with
                 | (n, d) :: tl when d > rootDepth -> take ((n, d) :: acc) rootDepth tl
@@ -273,23 +294,57 @@ module Projection =
             let rec find rest =
                 match rest with
                 | [] -> []
-                | (n, d) :: tl when keyOf n = key -> (n, d) :: take [] d tl
+                | (n, d) :: tl when hit n -> (n, d) :: take [] d tl
                 | _ :: tl -> find tl
 
-            { Lines = find placed |> render }
-        | Scope.ChangedSince snap ->
-            { Lines =
-                placed
-                |> List.filter (fun (n, _) -> Map.tryFind (keyOf n) snap.Digests <> Some(snapshotDigestOf pw n))
-                |> render }
+            find placed
 
-    /// Capture the changed-since baseline for `root`: every node's snapshot
-    /// digest (`snapshotDigestOf`) keyed by its id key (`idKey`).
+        match scope with
+        | Scope.Whole -> { Lines = render placed }
+        | Scope.ById target ->
+            let key = idKey pw target
+            { Lines = placed |> List.filter (fun (n, _) -> keyOf n = key) |> render }
+        | Scope.Subtree target ->
+            let key = idKey pw target
+            { Lines = sliceAt (fun n -> keyOf n = key) |> render }
+        | Scope.BySubtreeDigest digest ->
+            // Phase 314 — the same slice, addressed by the Merkle digest the current tree
+            // gives the node rather than by its id.
+            let d = digestsOf pw root
+            { Lines = sliceAt (fun n -> Map.tryFind (keyOf n) d.Subtree = Some digest) |> render }
+        | Scope.ChangedSince snap ->
+            // Phase 314 — one `Tree.digests` pass, then a preorder walk that SKIPS a whole
+            // subtree whose Merkle digest the snapshot already holds: nothing below it can
+            // differ (up to a SHA-256 collision), so none of it is read. Where the subtree
+            // moved, the node itself is reported exactly as before — its frame digest differs
+            // from, or is absent in, the snapshot — and the walk goes on into its children.
+            let d = digestsOf pw root
+
+            let rec walk acc rest =
+                match rest with
+                | [] -> List.rev acc
+                | (n, depth) :: tl ->
+                    let k = keyOf n
+
+                    if
+                        Map.tryFind k snap.Subtrees = Map.tryFind k d.Subtree
+                        && Map.containsKey k d.Subtree
+                    then
+                        walk acc (tl |> List.skipWhile (fun (_, d') -> d' > depth))
+                    else
+                        let changed = Map.tryFind k snap.Digests <> Some(snapshotDigestOf pw n)
+                        walk (if changed then (n, depth) :: acc else acc) tl
+
+            { Lines = walk [] placed |> render }
+
+    /// Capture the changed-since baseline for `root`: every node's snapshot digest
+    /// (`snapshotDigestOf`, the `Frame` map of `Tree.digests`) and its Merkle subtree
+    /// digest, each keyed by its id key (`idKey`) — one `Tree.digests` pass.
     let snapshot (pw: ProjectionWitness<'Node, 'Id, 'Op>) (root: 'Node) : ProjectionSnapshot =
-        { Digests =
-            preorderDepth pw.Tree root
-            |> List.map (fun (n, _) -> idKey pw (pw.Tree.Id n), snapshotDigestOf pw n)
-            |> Map.ofList }
+        let d = digestsOf pw root
+
+        { Digests = d.Frame
+          Subtrees = d.Subtree }
 
     /// Render a projection to its textual form — the thing an AI reads instead
     /// of the wire JSON. One line per node, newline-joined.

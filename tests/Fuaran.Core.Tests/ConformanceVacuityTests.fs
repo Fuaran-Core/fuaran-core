@@ -97,6 +97,21 @@ let private runs =
                200
                (Conformance.placementLaws nodew idw ConformanceTests.containedGen 312 200)
            run "Conformance.loweringLaws" 200 (Conformance.loweringLaws nodew idw ConformanceTests.containedGen 312 200)
+           // Phase 314 — the digest maps, the change classification and the defect-set gate, at
+           // the reference encoder and registry; the kit's own second draw supplies the independent
+           // pairs that reach a changed kind, a removed region and a moved survivor.
+           run
+               "Conformance.digestLaws"
+               200
+               (Conformance.digestLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
+           run
+               "Conformance.changeLaws"
+               200
+               (Conformance.changeLaws nodew idw DigestTests.encode ConformanceTests.opGen 314 200)
+           run
+               "Conformance.introducedLaws"
+               200
+               (Conformance.introducedLaws nodew idw DigestTests.registry ConformanceTests.opGen 314 200)
            // Phase 313 — the structural-integrity families at the reference grammar and the
            // reference `RefWitness`, whose generators draw both sides of each refusal.
            run

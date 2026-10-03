@@ -107,6 +107,44 @@ module Conformance =
         : LawResult list =
         TreeLaws.diffContainedLaws nodew idw gen seed iterations
 
+    /// Forward — see `TreeLaws.digestLaws` (Phase 314): `Tree.digests` and `Tree.Digests.diff` held
+    /// to the per-node digests, the four-way partition and `Diff.changes`, over a domain's witness
+    /// and content encoder.
+    let digestLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (encode: 'Node -> string)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.digestLaws nodew idw encode gen seed iterations
+
+    /// Forward — see `TreeLaws.changeLaws` (Phase 314): `Diff.changes` held to the script
+    /// `Diff.toOpsWith` emits, kind by kind.
+    let changeLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (encode: 'Node -> string)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.changeLaws nodew idw encode gen seed iterations
+
+    /// Forward — see `TreeLaws.introducedLaws` (Phase 314): `Validator.introduced`, `verdict`, `gate`
+    /// and `encodeVerdict` held to the defect-set difference and the three policies, over a domain's
+    /// registry.
+    let introducedLaws
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        TreeLaws.introducedLaws nodew idw reg gen seed iterations
+
     /// Forward — see `TreeLaws.normalizeLaws`.
     let normalizeLaws
         (nodew: NodeWitness<'Node, 'Id>)

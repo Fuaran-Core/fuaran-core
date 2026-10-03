@@ -2450,6 +2450,47 @@ module Diff =
         /// `legal` enumerating what the grammar lets `parentKind` hold. Declared last.
         | IllegalChildInTree of child: 'Id * childKind: string * parent: 'Id * parentKind: string * legal: string list
 
+    /// How one id changed between `before` and `after` (Phase 314) — the per-id reading of the
+    /// content-aware diff, which `Diff.changes` derives from the two trees and `Conformance.changeLaws`
+    /// holds to the script `toOpsWith` emits (DECISIONS.md D112: a classification is a PROJECTION of
+    /// the diff, never a second diff). One id may carry more than one entry — a survivor that moved
+    /// AND whose content changed carries `Moved` and `Changed` — because the two facts are
+    /// independent and the script carries both ops; a reader that wants one kind per id takes the
+    /// first in declaration order, which is what the consumers' single-kind classifiers reported.
+    /// `RequireQualifiedAccess`: `ChangeKind.Added`, so the cases shadow nothing a consumer owns.
+    [<RequireQualifiedAccess>]
+    type ChangeKind<'Id> =
+        /// The id is in `after` and not in `before` — the child an `InsertChild` of the script
+        /// grafts.
+        | Added
+        /// The id is in `before` and not in `after` — a `RemoveNode` target, or a node below one
+        /// (the script removes a region at its top; every id in it is `Removed` here).
+        | Removed
+        /// A survivor whose parent differs between the two trees — the script's `MoveNode`. A change
+        /// of position under ONE parent is not a move of the child; it is a `Reordered` parent.
+        | Moved of fromParent: 'Id * toParent: 'Id
+        /// A survivor whose kind tag differs. Reported INSTEAD of `Changed`, which it subsumes: the
+        /// script carries one `UpdateNode` for the node, whichever this reads as.
+        | KindChanged of fromKind: string * toKind: string
+        /// A survivor of unchanged kind whose own content differs under the caller's encoder over
+        /// the two shells — exactly the test `toOpsWith` emits an `UpdateNode` on.
+        | Changed
+        /// A survivor whose KEPT children — the children both trees place under it — stand in a
+        /// different relative order in `after`; a child arriving or leaving alone is not a reorder.
+        /// Every `ReorderChildren` the script emits names a parent that is `Reordered`, or one that
+        /// gained an `Added` or `Moved` child (the structural passes append, so a child placed before
+        /// a kept one is restated by a reorder the trees do not otherwise show). Declared last.
+        | Reordered
+
+    /// One entry of `Diff.changes`: the id and how it changed.
+    type Change<'Id> =
+        {
+            /// The id the entry is about.
+            Id: 'Id
+            /// How it changed.
+            Kind: ChangeKind<'Id>
+        }
+
     // ---- the one emitter behind every entry (Phase 305) ----
     // The four structural passes are Phase 245's, and are what `proofs/TreeDiff.fst` models
     // clause for clause; Phase 305 changed one clause of step 4 (the settled-order drop, below).
@@ -2802,3 +2843,103 @@ module Diff =
 
                 Error(IllegalChildInTree(w.Id c, w.KindTag c, w.Id p, pk, allowedChildren pk |> Option.defaultValue []))
             | [] -> Ok ops
+
+    /// The rank of a change kind in the canonical order: declaration order, so an id's entries read
+    /// added, removed, moved, kind, content, reordered.
+    let private rankOf (k: ChangeKind<'Id>) : int =
+        match k with
+        | ChangeKind.Added -> 0
+        | ChangeKind.Removed -> 1
+        | ChangeKind.Moved _ -> 2
+        | ChangeKind.KindChanged _ -> 3
+        | ChangeKind.Changed -> 4
+        | ChangeKind.Reordered -> 5
+
+    /// The per-id change classification between two trees (Phase 314): every id of either tree that
+    /// changed, in canonical order — ascending id key, then `ChangeKind` declaration order — each
+    /// entry one of `Added | Removed | Moved | KindChanged | Changed | Reordered` as the cases
+    /// document. Read off the two trees' indexes directly, not off a script, and held to the script
+    /// by `Conformance.changeLaws`: over `Ok ops = toOpsWith encode w idw before after`, the `Added`
+    /// ids are exactly the `InsertChild` grafts' ids, the `Moved` ids exactly the `MoveNode` targets,
+    /// the `KindChanged` and `Changed` ids together exactly the `UpdateNode` targets (when `encode`
+    /// sees the kind, as an injective encoder does), the `RemoveNode` targets are `Removed` and every
+    /// other `Removed` id sits below one in `before`, and every `ReorderChildren` parent is
+    /// `Reordered` or holds an `Added` or `Moved` child. The encoder is read over each survivor's
+    /// SHELL, exactly as `toOpsWith` reads it. The refusals are `toOps`'s and in its order: a root id
+    /// mismatch, then a repeated id in `before`, then one in `after`. An identity pair classifies to
+    /// `[]`.
+    let changes
+        (encode: 'Node -> string)
+        (w: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (before: 'Node)
+        (after: 'Node)
+        : Result<Change<'Id> list, DiffError<'Id>> =
+        let key (i: 'Id) = idw.ToString i
+        let shell (n: 'Node) = encode (w.ReplaceChildren n [])
+
+        let index (root: 'Node) =
+            match Tree.Index.tryBuild w idw root with
+            | Ok ix -> Ok ix
+            | Error(Tree.RepeatedId d) -> Error(DuplicateIdInTree d)
+            | Error Tree.Structural -> Ok(Tree.Index.build w idw root)
+
+        let childKeysOf (n: 'Node) =
+            w.Children n |> List.map (fun c -> key (w.Id c))
+
+        if key (w.Id before) <> key (w.Id after) then
+            Error(RootIdMismatch(w.Id before, w.Id after))
+        else
+            match index before with
+            | Error e -> Error e
+            | Ok bix ->
+                match index after with
+                | Error e -> Error e
+                | Ok aix ->
+                    let found = ResizeArray<Change<'Id>>()
+
+                    for n in Tree.preorder w after do
+                        let k = key (w.Id n)
+
+                        match Map.tryFind k bix.ById with
+                        | None -> found.Add { Id = w.Id n; Kind = ChangeKind.Added }
+                        | Some b ->
+                            match Map.tryFind k aix.ParentOf, Map.tryFind k bix.ParentOf with
+                            | Some ap, Some bp when key ap <> key bp ->
+                                found.Add
+                                    { Id = w.Id n
+                                      Kind = ChangeKind.Moved(bp, ap) }
+                            | _ -> ()
+
+                            let bKind = w.KindTag b
+                            let aKind = w.KindTag n
+
+                            if bKind <> aKind then
+                                found.Add
+                                    { Id = w.Id n
+                                      Kind = ChangeKind.KindChanged(bKind, aKind) }
+                            elif shell b <> shell n then
+                                found.Add
+                                    { Id = w.Id n
+                                      Kind = ChangeKind.Changed }
+
+                            let bKids = childKeysOf b
+                            let aKids = childKeysOf n
+                            let aSet = Set.ofList aKids
+                            let bSet = Set.ofList bKids
+
+                            if
+                                (bKids |> List.filter (fun c -> Set.contains c aSet))
+                                <> (aKids |> List.filter (fun c -> Set.contains c bSet))
+                            then
+                                found.Add
+                                    { Id = w.Id n
+                                      Kind = ChangeKind.Reordered }
+
+                    for n in Tree.preorder w before do
+                        if not (Map.containsKey (key (w.Id n)) aix.ById) then
+                            found.Add
+                                { Id = w.Id n
+                                  Kind = ChangeKind.Removed }
+
+                    found |> List.ofSeq |> List.sortBy (fun c -> key c.Id, rankOf c.Kind) |> Ok
