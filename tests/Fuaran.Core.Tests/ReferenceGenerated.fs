@@ -262,7 +262,14 @@ let private dFloat (j: JVal) : Result<float, DecodeError> =
     | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
     | _ -> dFail DecodeCode.WrongKind "number" "expected a number"
 
-let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()
+// Phase 347 — a closure / opaque slot holds one fixed sentinel string, read BY VALUE as the
+// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
+// takes), any other kind `WrongKind`. The sentinel carries nothing, so it decodes to `()`.
+let private dSentinel (sentinel: string) (j: JVal) : Result<unit, DecodeError> =
+    match j with
+    | JStr s when s = sentinel -> Ok()
+    | JStr _ -> dFail DecodeCode.OutOfRange "string" ("expected the sentinel " + sentinel)
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"
 
 // Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
@@ -282,15 +289,19 @@ let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T l
         go 0 [] xs
     | _ -> dFail DecodeCode.WrongKind "array" "expected an array"
 
+// Every entry is checked, in document order; a repeated key keeps its FIRST value, as every
+// member read does (Phase 347 — `Map.ofList` kept the last, as `JSON.parse` does).
 let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
     match j with
     | JObj fs ->
-        (Ok [], fs)
+        (Ok Map.empty, fs)
         ||> List.fold (fun acc (k, v) ->
             match acc with
             | Error e -> Error e
-            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
-        |> Result.map (List.rev >> Map.ofList)
+            | Ok items ->
+                dec v
+                |> dUnder (PathSegment.Key k)
+                |> Result.map (fun d -> if Map.containsKey k items then items else Map.add k d items))
     | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
 let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
@@ -310,11 +321,6 @@ let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<
     match fs |> List.tryFind (fun (k, _) -> k = name) with
     | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt
-
-// An optional closure / opaque field: the value is a sentinel carrying nothing,
-// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
-let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
-    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
 
 // A hosted slot's codec answers a SENTENCE (`JVal -> Result<'host, string>`): its refusal is
 // `OutOfRange` at the slot — any declared wire form has already been checked, so the value is
@@ -431,14 +437,14 @@ and private decGroupSpec (j: JVal) : Result<GroupSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "children" __fs (dList decNode) |> Result.bind (fun children ->
     dDef "layout" __fs decLayoutKind (LayoutKind.Stack) |> Result.bind (fun layout ->
-    Ok (ignore) |> Result.bind (fun onSelect ->
+    dReq "onSelect" __fs (fun (__j: JVal) -> dSentinel "<closure>" __j |> Result.map (fun () -> ignore)) |> Result.bind (fun onSelect ->
     Ok { Children = children; Layout = layout; OnSelect = onSelect }))))
 
 and private decLinkSpec (j: JVal) : Result<LinkSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "href" __fs (decSlot dStr) |> Result.bind (fun href ->
     dReq "label" __fs decText |> Result.bind (fun label ->
-    Ok() |> Result.bind (fun onClick ->
+    dReq "onClick" __fs (dSentinel "<closure>") |> Result.bind (fun onClick ->
     Ok { Href = href; Label = label; OnClick = onClick }))))
 
 and private decMeasureSpec (j: JVal) : Result<MeasureSpec, DecodeError> =
@@ -446,7 +452,7 @@ and private decMeasureSpec (j: JVal) : Result<MeasureSpec, DecodeError> =
     dReq "label" __fs decText |> Result.bind (fun label ->
     dDef "level" __fs decLevel (Level.Low) |> Result.bind (fun level ->
     dOpt "origin" __fs decPoint |> Result.bind (fun origin ->
-    Ok() |> Result.bind (fun raw ->
+    dReq "raw" __fs (dSentinel "<opaque>") |> Result.bind (fun raw ->
     dReq "series" __fs (fun (__j: JVal) -> dHosted ((decSeries) __j)) |> Result.bind (fun series ->
     dDef "value" __fs (decSlot dFloat) (Slot.Fixed(0.0)) |> Result.bind (fun value ->
     Ok { Label = label; Level = level; Origin = origin; Raw = raw; Series = series; Value = value })))))))

@@ -411,7 +411,14 @@ let private dFloat (j: JVal) : Result<float, DecodeError> =
     | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
     | _ -> dFail DecodeCode.WrongKind "number" "expected a number"
 
-let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()
+// Phase 347 — a closure / opaque slot holds one fixed sentinel string, read BY VALUE as the
+// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
+// takes), any other kind `WrongKind`. The sentinel carries nothing, so it decodes to `()`.
+let private dSentinel (sentinel: string) (j: JVal) : Result<unit, DecodeError> =
+    match j with
+    | JStr s when s = sentinel -> Ok()
+    | JStr _ -> dFail DecodeCode.OutOfRange "string" ("expected the sentinel " + sentinel)
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"
 
 // Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
@@ -431,15 +438,19 @@ let private dList (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T l
         go 0 [] xs
     | _ -> dFail DecodeCode.WrongKind "array" "expected an array"
 
+// Every entry is checked, in document order; a repeated key keeps its FIRST value, as every
+// member read does (Phase 347 — `Map.ofList` kept the last, as `JSON.parse` does).
 let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
     match j with
     | JObj fs ->
-        (Ok [], fs)
+        (Ok Map.empty, fs)
         ||> List.fold (fun acc (k, v) ->
             match acc with
             | Error e -> Error e
-            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
-        |> Result.map (List.rev >> Map.ofList)
+            | Ok items ->
+                dec v
+                |> dUnder (PathSegment.Key k)
+                |> Result.map (fun d -> if Map.containsKey k items then items else Map.add k d items))
     | _ -> dFail DecodeCode.WrongKind "object" "expected an object"
 
 let private dReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError>) : Result<'T, DecodeError> =
@@ -459,11 +470,6 @@ let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<
     match fs |> List.tryFind (fun (k, _) -> k = name) with
     | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt
-
-// An optional closure / opaque field: the value is a sentinel carrying nothing,
-// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
-let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
-    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))
 
 let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     dObj j |> Result.bind (fun __fs ->

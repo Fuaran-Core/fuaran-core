@@ -339,10 +339,10 @@ let private encFloat (f: float) : JVal =
     //
     // Two inversions are NOT symmetric with the encoder, and are the ones to get
     // right:
-    //   * §16 sentinel omission — the no-information closure sentinels
-    //     (`Binding.Query.accessor`, `Selection.accessor`, `Action.Dispatch.msg`)
-    //     are OFF the wire, so a `TClosure`/`TOpaque` field decodes from
-    //     *absence* and must never look for its key.
+    //   * a closure / opaque slot carries a sentinel that holds no information, so
+    //     the decoded value is `()` or the declared placeholder rather than anything
+    //     read off the wire — but the slot IS read (Phase 347): present, it must be
+    //     its sentinel, and required, it must be present, as the interpreter checks.
     //   * a whole-valued float renders without a decimal point, so it parses
     //     back as `JInt` — `dFloat` accepts both.
     // -----------------------------------------------------------------------
@@ -369,12 +369,14 @@ let private encFloat (f: float) : JVal =
         | TKind
         | TOp -> Error(opVocabularySlot "the F# decoder emitter" t)
         | TList inner -> decFn inner |> Result.map (sprintf "(dList %s)")
-        | TClosure
-        | TOpaque -> Ok "dUnit"
+        // Phase 347 — the sentinel is checked (`dSentinel`), as the interpreter checks it.
+        | TClosure -> Ok "(dSentinel \"<closure>\")"
+        | TOpaque -> Ok "(dSentinel \"<opaque>\")"
         // Phase 689 — a `TFn` slot decodes to its declared placeholder. There is
         // nothing on the wire to rebuild a closure from, so the decoded tree is the
         // storage shape and the placeholder is what a host re-attaches over.
-        | TFn s -> Ok(sprintf "(fun _ -> Ok (%s))" s.Placeholder)
+        | TFn s ->
+            Ok(sprintf "(fun (__j: JVal) -> dSentinel \"<closure>\" __j |> Result.map (fun () -> %s))" s.Placeholder)
         // Phase 676 — accept any JSON verbatim; a shape check would contradict the
         // field's contract.
         | TJson -> Ok "dJson"
@@ -410,29 +412,35 @@ let private encFloat (f: float) : JVal =
     /// [[casePiece]] wrote it under.
     let decField (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
         match f.Type with
+        // The VALUE is a sentinel and carries nothing, so what decodes is `()` — or, for a
+        // `TFn` slot (Phase 689), its declared placeholder. An OPTIONAL slot's PRESENCE is real
+        // wire information — the encoder omits the key when `None` and emits the sentinel when
+        // `Some` — so reading it is what makes the decode a structural inverse (a flat `Ok None`
+        // silently dropped the field, caught by the corpus round-trip gate on `grid-1`'s
+        // optional `rowKey`).
+        //
+        // Phase 347 — and the slot is READ like any other, as the interpreter reads it: a
+        // required one absent is `MissingField`, a present one must be its sentinel (`dSentinel`:
+        // another string is `OutOfRange`, another kind `WrongKind`). Until 347 a required slot
+        // was never looked for and an optional one was read for its presence only.
         | TClosure
-        | TOpaque ->
-            // The VALUE is a sentinel and carries nothing, so it is never read. But an
-            // OPTIONAL sentinel field's PRESENCE is real wire information — the encoder
-            // omits the key when `None` and emits the sentinel when `Some ()`. Reading
-            // presence is what makes the decode a structural inverse; a flat `Ok None`
-            // silently drops the field (caught by the corpus round-trip gate on
-            // `grid-1`'s optional `rowKey`).
-            match f.Opt with
-            | Optional -> Ok(sprintf "dPresent %s __fs" (SourceLit.fsString f.Name))
-            | _ -> Ok "Ok()"
-        // Phase 689 — same presence rule, but the slot is typed, so the value put
-        // back is the declared placeholder rather than `()`.
-        | TFn s ->
-            match f.Opt with
-            | Optional ->
-                Ok(
-                    sprintf
-                        "(dPresent %s __fs |> Result.map (Option.map (fun () -> %s)))"
-                        (SourceLit.fsString f.Name)
-                        s.Placeholder
-                )
-            | _ -> Ok(sprintf "Ok (%s)" s.Placeholder)
+        | TOpaque
+        | TFn _ ->
+            let name = SourceLit.fsString f.Name
+
+            let placeholder =
+                match f.Type with
+                | TFn s -> s.Placeholder
+                | _ -> "()"
+
+            decFn f.Type
+            |> Result.map (fun d ->
+                match f.Opt with
+                | Required -> sprintf "dReq %s __fs %s" name d
+                | Optional -> sprintf "dOpt %s __fs %s" name d
+                | OmitDefault _ -> sprintf "dDef %s __fs %s (%s)" name d placeholder
+                // Never on the wire — nothing to read, so take the placeholder.
+                | HostOnly -> sprintf "Ok (%s)" placeholder)
         | _ ->
             match f.Opt with
             | Required ->
@@ -737,7 +745,16 @@ let private dFloat (j: JVal) : Result<float, DecodeError> =
     | JStr "-Infinity" -> Ok System.Double.NegativeInfinity
     | _ -> dFail DecodeCode.WrongKind "number" "expected a number"""
               + q
-          yield "let private dUnit (_: JVal) : Result<unit, DecodeError> = Ok()"
+          yield
+              """// Phase 347 — a closure / opaque slot holds one fixed sentinel string, read BY VALUE as the
+// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
+// takes), any other kind `WrongKind`. The sentinel carries nothing, so it decodes to `()`.
+let private dSentinel (sentinel: string) (j: JVal) : Result<unit, DecodeError> =
+    match j with
+    | JStr s when s = sentinel -> Ok()
+    | JStr _ -> dFail DecodeCode.OutOfRange "string" ("expected the sentinel " + sentinel)
+    | _ -> dFail DecodeCode.WrongKind "string" "expected a string"""
+              + q
           yield
               """// Phase 676 — arbitrary JSON, kept verbatim. No shape check: the field's
 // contract is that its content is not the schema's business.
@@ -758,15 +775,19 @@ let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j"""
     | _ -> dFail DecodeCode.WrongKind "array" "expected an array"""
               + q
           yield
-              """let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
+              """// Every entry is checked, in document order; a repeated key keeps its FIRST value, as every
+// member read does (Phase 347 — `Map.ofList` kept the last, as `JSON.parse` does).
+let private dMap (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Map<string, 'T>, DecodeError> =
     match j with
     | JObj fs ->
-        (Ok [], fs)
+        (Ok Map.empty, fs)
         ||> List.fold (fun acc (k, v) ->
             match acc with
             | Error e -> Error e
-            | Ok items -> dec v |> dUnder (PathSegment.Key k) |> Result.map (fun d -> (k, d) :: items))
-        |> Result.map (List.rev >> Map.ofList)
+            | Ok items ->
+                dec v
+                |> dUnder (PathSegment.Key k)
+                |> Result.map (fun d -> if Map.containsKey k items then items else Map.add k d items))
     | _ -> dFail DecodeCode.WrongKind "object" "expected an object"""
               + q
           yield
@@ -787,11 +808,6 @@ let private dJson (j: JVal) : Result<JVal, DecodeError> = Ok j"""
     match fs |> List.tryFind (fun (k, _) -> k = name) with
     | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt"""
-          yield
-              """// An optional closure / opaque field: the value is a sentinel carrying nothing,
-// but its PRESENCE distinguishes `Some ()` from `None` and must be read back.
-let private dPresent (name: string) (fs: (string * JVal) list) : Result<unit option, DecodeError> =
-    Ok(fs |> List.tryFind (fun (k, _) -> k = name) |> Option.map (fun _ -> ()))"""
           if hosted then
               yield
                   """// A hosted slot's codec answers a SENTENCE (`JVal -> Result<'host, string>`): its refusal is

@@ -518,7 +518,7 @@ module internal TypeScript =
     // is validation plus rebuilding the positions the encoder writes implicitly:
     // omit-when-default fields (refilled so the encoder omits them again),
     // transparent union cases (re-wrapped so the encoder can re-flatten them), and
-    // closure/opaque sentinels (whose PRESENCE is the only information they carry).
+    // closure/opaque sentinels (which carry nothing, but are read by value — Phase 347).
 
     /// The point-free TS decoder reference for a type.
     let rec tsDecFn (t: IdlType) : Result<string, CodegenError> =
@@ -541,12 +541,13 @@ module internal TypeScript =
             |> concatR ", "
             |> Result.map (fun a -> "((x) => dec" + n + "(" + a + ", x))")
         | TList inner -> tsDecFn inner |> Result.map (fun d -> "dList(" + d + ")")
-        // The value carries nothing; only its presence matters (see tsDecField).
-        // A `TFn` slot is the same on the wire — the TS tier has no `'Msg` to
-        // rebuild into, so it stays `null` there regardless of the declared signature.
+        // The value carries nothing, so it decodes to `null`; but it is READ (Phase 347): the
+        // slot holds its one sentinel string, as the interpreter checks. A `TFn` slot is the same
+        // on the wire — the TS tier has no `'Msg` to rebuild into, so it stays `null` there
+        // regardless of the declared signature.
         | TClosure
-        | TFn _
-        | TOpaque -> Ok "(() => null)"
+        | TFn _ -> Ok "dSentinel('<closure>')"
+        | TOpaque -> Ok "dSentinel('<opaque>')"
         // Phase 252 — a hosted slot that declares its wire form is CHECKED against it (its
         // type, then its format), which is what makes this host refuse what the F# host's
         // codec refuses.
@@ -585,12 +586,21 @@ module internal TypeScript =
         let key = SourceLit.tsString f.Name
 
         match f.Type with
+        // Phase 347 — a sentinel slot is read like any other: a required one absent is
+        // `MissingField`, a present one is checked BY VALUE (`dSentinel`), and an optional one's
+        // presence is what decodes `null` rather than `undefined`. Until 347 a required slot was
+        // not read at all and an optional one was read for its presence only, so both hosts
+        // accepted documents the interpreter refuses.
         | TClosure
         | TFn _
         | TOpaque ->
-            match f.Opt with
-            | Optional -> Ok("dPresent(" + key + ", fs)")
-            | _ -> Ok "null"
+            tsDecFn f.Type
+            |> Result.map (fun d ->
+                match f.Opt with
+                | Required -> "dReq(" + key + ", fs, " + d + ")"
+                | Optional -> "dOpt(" + key + ", fs, " + d + ")"
+                | OmitDefault _ -> "dDef(" + key + ", fs, " + d + ", null)"
+                | HostOnly -> "null")
         | _ ->
             match f.Opt with
             | Required -> tsDecFn f.Type |> Result.map (fun d -> "dReq(" + key + ", fs, " + d + ")")
@@ -750,6 +760,11 @@ module internal TypeScript =
     /// answers it as `{ code, path, expected, message }`, `DecodeError.toJson`'s members. A
     /// member is read only when it is the object's OWN: `in` also finds a prototype's
     /// (`toString`, `constructor`), which reads an absent member as present.
+    ///
+    /// Phase 347 — a member or an item is read through `dRead`, which tells an int slot whether
+    /// the reader ([[tsParseLeg]]) met that number as a FLOAT token; a map is decoded in document
+    /// order into a null-prototype object, so a key is data whatever it spells; and a sentinel
+    /// slot is read by value (`dSentinel`).
     let tsDecodePrelude (disc: string) =
         let discLit = SourceLit.tsStringSingle disc
 
@@ -780,6 +795,21 @@ const dMissing = (name, m) => {
 };
 const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const isObj = (j) => j !== null && typeof j === 'object' && !Array.isArray(j);
+// Phase 347 — what the reader (`dParse`) knows and a JS value cannot carry, kept beside the value
+// for the decode that reads it: per object or array, the members and items whose WHOLE number was
+// written as a float token (an int slot refuses it); and per object whose JS form loses its document
+// order, its members as written — a repeated key (the object holds the first) or an index-like key
+// (the object lists those first).
+const dFloatAt = new WeakMap();
+const dMembersOf = new WeakMap();
+// Whether the value being decoded was read as a float token: set by `dRead` as each member or item
+// is handed to its decoder, and read by `dInt` before any other value is.
+let dFloatTok = false;
+const dRead = (c, k) => {
+  const at = dFloatAt.get(c);
+  dFloatTok = at !== undefined && at.has(k);
+  return c[k];
+};
 const dDisc = __DISC__;
 // The discriminator: absent is MissingField naming it, a non-string WrongKind at it.
 const dTag = (j) => {
@@ -793,7 +823,9 @@ const dObj = (j) => isObj(j) ? j : dFail('WrongKind', 'object', 'expected an obj
 const dStr = (j) => (typeof j === 'string') ? j : dFail('WrongKind', 'string', 'expected a string');
 // An int slot is the interpreter's 32-bit int: an integral number outside it is refused here as
 // the interpreter and the compiled F# host refuse it (Phase 304), never read as a wider value.
-const dInt = (j) => (typeof j === 'number' && Number.isInteger(j) && j >= -2147483648 && j <= 2147483647) ? j : dFail('WrongKind', 'int', 'expected an int');
+// Phase 347 — and only a number the reader met as an INTEGER token: `1.0` and `1e0` are float
+// tokens, which the F# reader reads as a float and an int slot refuses, though their value is whole.
+const dInt = (j) => (typeof j === 'number' && !dFloatTok && Number.isInteger(j) && j >= -2147483648 && j <= 2147483647) ? j : dFail('WrongKind', 'int', 'expected an int');
 // §7 — a float slot also accepts the three quoted non-finite sentinels `encFloat` emits
 // (§5), and decodes them to the NUMBER, never the string. `dInt` above is not widened:
 // §7 stops at the float slot.
@@ -805,79 +837,260 @@ const dFloat = (j) => {
   return dFail('WrongKind', 'number', 'expected a number');
 };
 const dBool = (j) => (typeof j === 'boolean') ? j : dFail('WrongKind', 'bool', 'expected a bool');
-const dList = (dec) => (j) => Array.isArray(j) ? j.map((x, i) => dAt(i, () => dec(x))) : dFail('WrongKind', 'array', 'expected an array');
+const dList = (dec) => (j) => Array.isArray(j) ? j.map((_, i) => dAt(i, () => dec(dRead(j, i)))) : dFail('WrongKind', 'array', 'expected an array');
+// Phase 347 — a map decodes into a NULL-PROTOTYPE object: a key is data whatever it spells, so
+// `__proto__` is an entry like any other (on a plain object it replaced the prototype, and every
+// later read of the map went through the document's object), and no key reads one the prototype
+// has (`constructor`, `toString`). Its entries are read in DOCUMENT order, as the interpreter and
+// the F# host read them — an object lists an index-like key first — and a repeated key keeps its
+// first value, as every member read does, after each entry is checked.
 const dMap = (dec) => (j) => {
   const o = dObj(j);
-  const out = {};
-  for (const k of Object.keys(o)) out[k] = dAt(k, () => dec(o[k]));
+  const out = Object.create(null);
+  const members = dMembersOf.get(o);
+  if (members === undefined) {
+    for (const k of Object.keys(o)) out[k] = dAt(k, () => dec(dRead(o, k)));
+  } else {
+    for (const [k, v, floatTok] of members) {
+      const d = dAt(k, () => { dFloatTok = floatTok; return dec(v); });
+      if (!hasOwn(out, k)) out[k] = d;
+    }
+  }
   return out;
 };
 const dEnum = (name, cases) => (j) => {
   if (typeof j !== 'string') return dFail('WrongKind', 'string', 'not a ' + name);
   return (cases.indexOf(j) >= 0) ? j : dFail('UnknownTag', 'one of ' + cases.map((c) => "'" + c + "'").join(', '), 'not a ' + name);
 };
-const dReq = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(fs[name])) : dMissing(name, "missing required field '" + name + "'");
-const dOpt = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(fs[name])) : undefined;
-const dDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? dAt(name, () => dec(fs[name])) : dflt;
-// An optional closure/opaque field: the value is a sentinel carrying nothing, but
-// its PRESENCE distinguishes present-from-absent and must survive the round trip.
-const dPresent = (name, fs) => hasOwn(fs, name) ? null : undefined;"""
+const dReq = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(dRead(fs, name))) : dMissing(name, "missing required field '" + name + "'");
+const dOpt = (name, fs, dec) => hasOwn(fs, name) ? dAt(name, () => dec(dRead(fs, name))) : undefined;
+const dDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? dAt(name, () => dec(dRead(fs, name))) : dflt;
+// Phase 347 — a closure / opaque slot holds one fixed sentinel string and is read BY VALUE, as the
+// interpreter reads it: another string is `OutOfRange` (a string, but not the one value the slot
+// takes), any other kind `WrongKind`. It decodes to `null` — the sentinel carries nothing — and an
+// optional slot's presence is still what tells `null` from `undefined`.
+const dSentinel = (sentinel) => (j) => {
+  if (j === sentinel) return null;
+  return (typeof j === 'string')
+    ? dFail('OutOfRange', 'string', 'expected the sentinel ' + sentinel)
+    : dFail('WrongKind', 'string', 'expected a string');
+};"""
             .Replace("__DISC__", discLit)
 
     /// Phase 337 — the parse leg of the TypeScript `decodeNode`, held to the F# reader's
     /// answers (`Decoder.parse`): text the reader cannot parse is `InvalidJson` at the root, and
-    /// a container opened past its nesting cap is `LimitExceeded` there. `JSON.parse` has no cap
-    /// and reads `null`, which the wire model has no value for, so the text is first scanned for
-    /// the first container opened past the cap. When there is one, what the F# reader meets
-    /// FIRST decides: the prefix before it is closed with a value and parsed, and a prefix that
-    /// does not parse, or carries a `null`, is `InvalidJson` (the reader stops there), while a
-    /// clean one is `LimitExceeded`. Without one, a `JSON.parse` refusal or a `null` anywhere is
-    /// `InvalidJson`.
+    /// a container opened past its nesting cap is `LimitExceeded` there.
+    ///
+    /// Phase 347 — the leg IS a reader now, the F# reader's twin (`Json.parse`), not `JSON.parse`
+    /// behind a scan. `JSON.parse` answers five questions differently from it, and each answer
+    /// reached the decode: it keeps the LAST of a repeated member (the F# reader keeps every
+    /// member, and a member read takes the first); it reads `1.0` and `1e0` as the number `1`, so
+    /// an int slot cannot see they were float tokens; it reads a literal past the double range as
+    /// `Infinity` and an integer past 2^53 by rounding it, where the F# reader refuses both; it
+    /// refuses a raw control character in a string and admits a lone surrogate, where the F#
+    /// reader does the opposite; and it reads `null` and any depth. This reader holds the text to
+    /// the F# grammar in the F# order — the first fault met is the one reported, so a malformed
+    /// prefix still outranks a container past the cap — and it records, beside the value, what a
+    /// JS value cannot carry (`dFloatAt`, `dMembersOf`). An object is built with every key as
+    /// data: `__proto__` becomes an own member, never the object's prototype.
     let tsParseLeg =
         """const dMaxDepth = __CAP__;
-const dHasNull = (v) => v === null || (typeof v === 'object' && Object.keys(v).some((k) => dHasNull(v[k])));
-// The first container opened past the cap, and the containers open there; null when none is.
-const dDepthBreach = (s) => {
-  const open = [];
-  let inStr = false;
-  let esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === '[' || c === '{') {
-      if (open.length >= dMaxDepth) return { at: i, open };
-      open.push(c);
-    } else if (c === ']' || c === '}') open.pop();
-  }
-  return null;
-};
 const dParse = (s) => {
-  const refuse = (code, expected, message) => { throw new DecodeFault(code, expected, message); };
-  const breach = dDepthBreach(s);
-  if (breach !== null) {
-    const closers = breach.open.map((c) => (c === '[' ? ']' : '}')).reverse().join('');
-    let prefix;
-    try {
-      // ' 0' cannot join a token the prefix leaves open, so a malformed prefix stays malformed.
-      prefix = JSON.parse(s.slice(0, breach.at) + ' 0' + closers);
-    } catch (e) {
-      return refuse('InvalidJson', 'JSON text', 'not valid JSON: ' + String(e && e.message ? e.message : e));
+  const n = s.length;
+  let i = 0;
+  // Whether the value just read was a WHOLE number written as a float token.
+  let floatTok = false;
+  const bad = (m) => { throw new DecodeFault('InvalidJson', 'JSON text', 'not valid JSON: ' + m); };
+  const ws = () => {
+    while (i < n) {
+      const c = s.charCodeAt(i);
+      if (c === 32 || c === 9 || c === 10 || c === 13) i++;
+      else break;
     }
-    if (dHasNull(prefix)) return refuse('InvalidJson', 'JSON text', 'not valid JSON: null is not representable in the Fuaran wire JVal model');
-    return refuse('LimitExceeded', "nesting within the parser's cap", 'not valid JSON: max nesting depth ' + dMaxDepth + ' exceeded');
-  }
-  let j;
-  try {
-    j = JSON.parse(s);
-  } catch (e) {
-    return refuse('InvalidJson', 'JSON text', 'not valid JSON: ' + String(e && e.message ? e.message : e));
-  }
-  if (dHasNull(j)) return refuse('InvalidJson', 'JSON text', 'not valid JSON: null is not representable in the Fuaran wire JVal model');
-  return j;
+  };
+  const expect = (c) => { if (i < n && s[i] === c) i++; else bad("expected '" + c + "'"); };
+  const markFloat = (c, k) => {
+    let at = dFloatAt.get(c);
+    if (at === undefined) {
+      at = new Set();
+      dFloatAt.set(c, at);
+    }
+    at.add(k);
+  };
+  // A string is well-formed UTF-16 or refused, whichever spelling a unit arrived in; any other
+  // character, a control character included, is read as itself.
+  const str = () => {
+    expect('"');
+    let out = '';
+    let run = i;
+    let high = false;
+    const unit = (u) => {
+      const low = u >= 0xDC00 && u <= 0xDFFF;
+      if (high && !low) bad('ill-formed string: a high surrogate not followed by a low surrogate');
+      if (!high && low) bad('ill-formed string: a low surrogate with no high surrogate before it');
+      high = u >= 0xD800 && u <= 0xDBFF;
+      out += String.fromCharCode(u);
+    };
+    for (;;) {
+      if (i >= n) bad('unterminated string');
+      const c = s.charCodeAt(i);
+      if (!high && c !== 34 && c !== 92 && (c < 0xD800 || c > 0xDFFF)) {
+        i++;
+        continue;
+      }
+      out += s.slice(run, i);
+      i++;
+      if (c === 34) {
+        if (high) bad('ill-formed string: a high surrogate not followed by a low surrogate');
+        return out;
+      }
+      if (c !== 92) unit(c);
+      else {
+        if (i >= n) bad('unterminated escape');
+        const e = s[i++];
+        if (e === '"') unit(34);
+        else if (e === '\\') unit(92);
+        else if (e === '/') unit(47);
+        else if (e === 'n') unit(10);
+        else if (e === 'r') unit(13);
+        else if (e === 't') unit(9);
+        else if (e === 'b') unit(8);
+        else if (e === 'f') unit(12);
+        else if (e === 'u') {
+          if (i + 4 > n) bad('truncated \\u escape');
+          const h = s.slice(i, i + 4);
+          if (!/^[0-9a-fA-F]{4}$/.test(h)) bad('bad hex digit in \\u escape');
+          i += 4;
+          unit(parseInt(h, 16));
+        } else bad("bad escape '\\" + e + "'");
+      }
+      run = i;
+    }
+  };
+  // The F# reader's number: the JSON grammar exactly; a float token finite; an integer token an
+  // int within Int32, else a float while |n| <= 2^53, else only the canonical layout of its double
+  // (which writes a 16- or 17-digit whole double in full, and every longer one with an exponent).
+  const num = () => {
+    const start = i;
+    let isFloat = false;
+    const digits = () => { while (i < n && s[i] >= '0' && s[i] <= '9') i++; };
+    if (s[i] === '-') i++;
+    digits();
+    if (s[i] === '.') {
+      isFloat = true;
+      i++;
+      digits();
+    }
+    if (s[i] === 'e' || s[i] === 'E') {
+      isFloat = true;
+      i++;
+      if (s[i] === '+' || s[i] === '-') i++;
+      digits();
+    }
+    const tok = s.slice(start, i);
+    if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.test(tok)) bad('malformed number: ' + tok);
+    const v = Number(tok);
+    if (isFloat) {
+      if (!Number.isFinite(v)) bad('number outside the finite double range; it cannot round-trip on the wire: ' + tok);
+      floatTok = Number.isInteger(v) && v >= -2147483648 && v <= 2147483647;
+      return v;
+    }
+    if (v >= -2147483648 && v <= 2147483647) return v;
+    const mag = tok[0] === '-' ? tok.slice(1) : tok;
+    if (mag.length < 16 || (mag.length === 16 && mag <= '9007199254740992')) return v;
+    if (mag.length <= 17 && String(v) === tok) return v;
+    return bad('integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: ' + tok);
+  };
+  const lit = (word, v) => {
+    if (s.startsWith(word, i)) {
+      i += word.length;
+      return v;
+    }
+    return bad("expected '" + word + "'");
+  };
+  const deep = (depth) => {
+    if (depth >= dMaxDepth) throw new DecodeFault('LimitExceeded', "nesting within the parser's cap", 'not valid JSON: max nesting depth ' + dMaxDepth + ' exceeded');
+  };
+  const obj = (depth) => {
+    deep(depth);
+    expect('{');
+    ws();
+    const o = {};
+    const members = [];
+    let reordered = false;
+    if (s[i] === '}') {
+      i++;
+      return o;
+    }
+    for (;;) {
+      ws();
+      const k = str();
+      ws();
+      expect(':');
+      ws();
+      const v = val(depth + 1);
+      const f = floatTok;
+      members.push([k, v, f]);
+      if (hasOwn(o, k)) reordered = true;
+      else {
+        if (k === '__proto__') Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
+        else o[k] = v;
+        if (f) markFloat(o, k);
+        if (/^(0|[1-9][0-9]*)$/.test(k)) reordered = true;
+      }
+      ws();
+      if (s[i] === ',') i++;
+      else if (s[i] === '}') {
+        i++;
+        break;
+      } else bad("expected ',' or '}'");
+    }
+    if (reordered) dMembersOf.set(o, members);
+    return o;
+  };
+  const arr = (depth) => {
+    deep(depth);
+    expect('[');
+    ws();
+    const a = [];
+    if (s[i] === ']') {
+      i++;
+      return a;
+    }
+    for (;;) {
+      const v = val(depth + 1);
+      if (floatTok) markFloat(a, a.length);
+      a.push(v);
+      ws();
+      if (s[i] === ',') i++;
+      else if (s[i] === ']') {
+        i++;
+        break;
+      } else bad("expected ',' or ']'");
+    }
+    return a;
+  };
+  const val = (depth) => {
+    ws();
+    floatTok = false;
+    if (i >= n) return bad('unexpected end of input');
+    const c = s[i];
+    let v;
+    if (c === '"') v = str();
+    else if (c === '{') v = obj(depth);
+    else if (c === '[') v = arr(depth);
+    else if (c === 't') v = lit('true', true);
+    else if (c === 'f') v = lit('false', false);
+    else if (c === 'n') return bad('null is not representable in the Fuaran wire JVal model');
+    else if (c === '-' || (c >= '0' && c <= '9')) return num();
+    else return bad("unexpected character '" + c + "'");
+    floatTok = false;
+    return v;
+  };
+  const root = val(0);
+  ws();
+  if (i !== n) bad('trailing characters');
+  return root;
 };"""
             .Replace("__CAP__", string Json.defaultMaxDepth)
 
@@ -1208,7 +1421,7 @@ const plain = (pairs) =>
                 + "// reject set) composes ABOVE this — see the Phase 672 note in the generator.\n"
                 + "// Phase 337 — a refusal is `{ code, path, expected, message }`: the code and path the IDL\n"
                 + "// interpreter reports for the same document, and this layer's sentence.\n"
-                + "function decodeNode(s) {\n  try {\n    return { ok: true, value: decNode(dParse(s)) };\n  } catch (e) {\n    if (!(e instanceof DecodeFault)) throw e;\n    return { ok: false, error: { code: e.code, path: e.path, expected: e.expected, message: e.message } };\n  }\n}")
+                + "function decodeNode(s) {\n  try {\n    const root = dParse(s);\n    dFloatTok = false;\n    return { ok: true, value: decNode(root) };\n  } catch (e) {\n    if (!(e instanceof DecodeFault)) throw e;\n    return { ok: false, error: { code: e.code, path: e.path, expected: e.expected, message: e.message } };\n  }\n}")
 
         [ [ Ok prelude ]
           records |> List.map (tsRecordEncoder idl disc)

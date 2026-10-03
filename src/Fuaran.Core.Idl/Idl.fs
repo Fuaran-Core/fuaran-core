@@ -22,7 +22,8 @@ open Fuaran.Core
 /// F# / TypeScript declaration should say the slot's type is.
 ///
 /// A closure is invisible to the wire: the encoder emits the fixed `"<closure>"`
-/// sentinel without ever reading the value, and the decoder reads presence only.
+/// sentinel without ever reading the value, and a decoder checks only that the slot
+/// holds that sentinel (Phase 347: the interpreter and both generated hosts alike).
 /// That is exactly why the slot's HOST type is free — nothing downstream of the
 /// declaration depends on it. [[TClosure]] takes the cheapest option and erases the
 /// slot to `unit`; [[TFn]] declares the real signature instead, which is what lets
@@ -83,7 +84,7 @@ type IdlType =
     | TClosure
     /// A function-typed field carrying its **host signature** (Phase 689). Wire
     /// behaviour is identical to [[TClosure]] in every respect — same `"<closure>"`
-    /// sentinel, same presence-only decode, same schema. The only difference is the
+    /// sentinel, same sentinel-checking decode, same schema. The only difference is the
     /// generated *declaration*: `TClosure` says `unit`, `TFn` says `(int -> 'Msg)`.
     | TFn of ClosureSig
     /// An `obj`-erased field whose CLR shape the encoder cannot see (e.g. a

@@ -12,11 +12,16 @@
 ///   string replaced by one no case names, the text truncated — where the interpreter is the
 ///   oracle and both hosts must answer as it does, refusal or acceptance.
 ///
-/// Two places a mutation is NOT made, each a documented boundary rather than a tolerance: a
-/// closure or opaque SENTINEL (`"<closure>"`, `"<opaque>"`) — the generated hosts read a sentinel
-/// slot's presence only, never its value, which is the §16 posture this phase does not move; and a
-/// hosted slot declaring no wire form (the reference vocabulary's `series`) — the interpreter and
-/// the TypeScript host carry it verbatim and only the compiled host runs its codec (Phase 252).
+/// One place a mutation is NOT made, a documented boundary rather than a tolerance: a hosted slot
+/// declaring no wire form (the reference vocabulary's `series`) — the interpreter and the TypeScript
+/// host carry it verbatim and only the compiled host runs its codec (Phase 252).
+///
+/// Phase 347 — the sentinel exclusion is GONE (both generated hosts read a sentinel slot by value
+/// now, as the interpreter does), and the mutations draw the reader's corners too: a whole number
+/// rewritten as a float token, a literal past the double range or past 2^53, a member repeated with
+/// a value of another kind before or after it, and a member renamed `__proto__`. The corners are
+/// also pinned one by one over `RefusalCornersIdl`, a vocabulary with a slot of every type a corner
+/// lives at, which joins the certification vocabularies in the mutation law.
 module Fuaran.Core.Tests.IdlRefusalHostTests
 
 open System
@@ -71,17 +76,34 @@ let private runNode (script: string) : string option =
         with _ ->
             ()
 
+/// A JS string literal holding `s` exactly, every unit outside printable ASCII escaped — so a
+/// document that is ill-formed UTF-16 (a lone surrogate, which no JSON renderer will write) reaches
+/// the TypeScript host as the same units the other two hosts read.
+let private jsString (s: string) : string =
+    "\""
+    + (s
+       |> String.collect (fun c ->
+           if c < ' ' || c > '~' || c = '"' || c = '\\' then
+               sprintf "\\u%04x" (int c)
+           else
+               string c))
+    + "\""
+
+/// The generated TypeScript module for every kind of a vocabulary.
+let private tsModuleOf (idl: Idl) : string =
+    match Gen.typescriptModule idl (idl.Kinds |> List.map _.Tag) with
+    | Ok src -> src
+    | Error e -> failtestf "TypeScript codegen refused: %s" (CodegenError.describe e)
+
 /// The TypeScript host's answer for every document, in order; `None` when node is absent.
 let private tsAnswers (idl: Idl) (docs: string list) : Answer list option =
-    let tsModule =
-        match Gen.typescriptModule idl (idl.Kinds |> List.map _.Tag) with
-        | Ok src -> src
-        | Error e -> failtestf "TypeScript codegen refused: %s" (CodegenError.describe e)
+    let tsModule = tsModuleOf idl
 
     let harness =
         tsModule
-        + "\nconst __docs = "
-        + Canon.render (JArr(docs |> List.map JStr))
+        + "\nconst __docs = ["
+        + (docs |> List.map jsString |> String.concat ", ")
+        + "]"
         + ";\nfor (const d of __docs) {\n"
         + "  const r = decodeNode(d);\n"
         + "  console.log(JSON.stringify(r.ok ? { ok: true } : { ok: false, code: r.error.code, path: r.error.path, expected: r.error.expected, message: r.error.message }));\n"
@@ -232,13 +254,23 @@ let private certified: Certified list =
       { Name = "reference"
         Idl = ReferenceIdl.refIdl
         Compiled = fun s -> ofResult (ReferenceGenerated.decodeNode s)
-        Verbatim = [ "series" ] } ]
+        Verbatim = [ "series" ] }
+      // Phase 347 — a slot of every type a reader corner lives at.
+      { Name = "corners"
+        Idl = RefusalCornersIdl.idl
+        Compiled = fun s -> ofResult (RefusalCornersGenerated.decodeNode s)
+        Verbatim = [] } ]
 
-let private sentinel (v: JVal) =
-    match v with
-    | JStr "<closure>"
-    | JStr "<opaque>" -> true
-    | _ -> false
+/// Whether a vocabulary declares a wire-visible sentinel slot.
+let private declaresSentinel (idl: Idl) =
+    idl.Kinds
+    |> List.exists (fun k ->
+        k.Fields
+        |> List.exists (fun f ->
+            match f.Type, f.Opt with
+            | _, HostOnly -> false
+            | (TClosure | TOpaque | TFn _), _ -> true
+            | _ -> false))
 
 /// Every value in a document with its path, root first — except below a verbatim member.
 let rec private positions (verbatim: string list) (path: PathSegment list) (v: JVal) =
@@ -290,6 +322,14 @@ let private replacements =
       JArr [ JInt 1 ]
       JObj [ "q", JInt 1 ] ]
 
+/// A string no sampled document carries. A mutation that writes RAW text at a position puts this
+/// there, renders, and replaces it: `Canon.render` can spell neither a whole number as a float token
+/// nor a repeated key, and those are two of the corners the law draws.
+let private marker = "__mutation_347__"
+
+let private withRaw (path: PathSegment list) (raw: string) (doc: JVal) : string =
+    (edit path (fun _ -> Some(JStr marker)) doc |> Canon.render).Replace("\"" + marker + "\"", raw)
+
 /// One mutation of a valid document's bytes, or `None` where the drawn position is one the law
 /// does not mutate.
 let private mutate (rng: Random) (verbatim: string list) (bytes: string) : string option =
@@ -307,7 +347,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
 
         Some(bytes.Substring(0, max 1 cut))
     | 1 -> Some(bytes.Replace("{", "{\"__n\":null,"))
-    | _ ->
+    | draw ->
         let doc =
             match Json.parse bytes with
             | Ok d -> d
@@ -316,20 +356,64 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
         let spots = positions verbatim [] doc |> List.toArray
         let path, value = spots.[rng.Next spots.Length]
 
-        if sentinel value then
-            None
-        else
+        match draw, value, List.rev path with
+        // Phase 347 — a whole number written as a FLOAT token: an int slot refuses `7.0` and `7e0`
+        // (the reader reads a float), a float slot reads them.
+        | 2, JInt i, _ -> Some(withRaw path (string i + (if rng.Next 2 = 0 then ".0" else "e0")) doc)
+        // Phase 347 — a literal the reader refuses wherever it stands: past the double range, or an
+        // integer past 2^53 that is not the canonical layout of a double.
+        | 3, _, _ :: _ -> Some(withRaw path (if rng.Next 2 = 0 then "1e400" else "-12345678901234567890") doc)
+        // Phase 347 — a member repeated with a value of another kind, before or after it: every
+        // member read takes the first, and every map entry is checked.
+        | 4, _, PathSegment.Key k :: _ ->
+            let others =
+                replacements |> List.filter (fun r -> kindOf r <> kindOf value) |> List.toArray
+
+            let mine = Canon.render value
+            let other = Canon.render others.[rng.Next others.Length]
+            let key = Canon.render (JStr k)
+
+            Some(
+                withRaw
+                    path
+                    (if rng.Next 2 = 0 then
+                         mine + "," + key + ":" + other
+                     else
+                         other + "," + key + ":" + mine)
+                    doc
+            )
+        // Phase 347 — a member renamed `__proto__`: a map entry like any other, a record's
+        // undeclared member.
+        | 5, JObj fields, _ when not fields.IsEmpty ->
+            let name, _ = fields.[rng.Next fields.Length]
+
+            if List.contains name verbatim then
+                None
+            else
+                Some(
+                    Canon.render (
+                        edit
+                            path
+                            (fun _ ->
+                                Some(
+                                    JObj(fields |> List.map (fun (n, x) -> if n = name then "__proto__", x else n, x))
+                                ))
+                            doc
+                    )
+                )
+        | _ ->
             let mutated =
                 match rng.Next 3, value with
-                // Delete a member of an object — its value not a sentinel.
+                // Delete a member of an object.
                 | 0, JObj fields when not fields.IsEmpty ->
-                    let name, member' = fields.[rng.Next fields.Length]
+                    let name, _ = fields.[rng.Next fields.Length]
 
-                    if sentinel member' || List.contains name verbatim then
+                    if List.contains name verbatim then
                         None
                     else
                         Some(edit (path @ [ PathSegment.Key name ]) (fun _ -> None) doc)
-                // A string no case names — at a discriminator or an enum, an unknown tag.
+                // A string no case names — at a discriminator or an enum an unknown tag, at a
+                // sentinel slot a value it does not take.
                 | 1, JStr _ -> Some(edit path (fun _ -> Some(JStr "zz-unknown-337")) doc)
                 // A value of another kind.
                 | _ ->
@@ -401,7 +485,21 @@ let private lawOn (c: Certified) =
             Expect.isGreaterThan codes.Length (perVocabulary / 2) "most mutations are refusals"
 
             for code in [ "InvalidJson"; "MissingField"; "WrongKind" ] do
-                Expect.contains codes code (sprintf "some mutation is refused as %s" code))
+                Expect.contains codes code (sprintf "some mutation is refused as %s" code)
+
+            // Phase 347 — and the corners are drawn: a sentinel slot given a string it does not
+            // take, a literal the reader refuses, a `__proto__` member.
+            if declaresSentinel c.Idl then
+                Expect.contains codes "OutOfRange" "some mutation is refused at a sentinel slot as OutOfRange"
+
+            Expect.isTrue
+                (docs
+                 |> List.exists (fun d -> d.Contains "1e400" || d.Contains "-12345678901234567890"))
+                "some mutation writes a literal the reader refuses"
+
+            Expect.isTrue
+                (docs |> List.exists (fun d -> d.Contains "\"__proto__\""))
+                "some mutation writes a __proto__ member")
 
 [<Tests>]
 let mutationLaw =
@@ -432,3 +530,251 @@ let mutationLaw =
                       "expected an int"
                       "the generated layer's own sentence, unchanged"
               | other -> failtestf "both must refuse: %A" other) ]
+
+// ---------------------------------------------------------------------------
+// Phase 347 — the corners, one by one.
+// ---------------------------------------------------------------------------
+
+let private corner (name: string) (value: string option) = RefusalCornersIdl.withMember name value
+
+let private refused (code: string) (path: PathSegment list) = Refused(code, DecodePath.render path)
+
+let private member' (name: string) = [ PathSegment.Key name ]
+
+/// The nesting past the reader's cap, as a JSON value.
+let private deep = String.replicate 600 "[" + String.replicate 600 "]"
+
+/// Each corner: what it is, the document, and the answer the interpreter gives — which both
+/// generated hosts must give too. Every answer is the F# reader's and the interpreter's walk, and
+/// one is not what the shard proposed: a literal past the double range is refused by the READER
+/// (`InvalidJson` at the root), never as `OutOfRange` at its slot, because the F# reader refuses it
+/// before any slot is read.
+let private corners: (string * string * Answer) list =
+    [ "a whole number written 1.0 at an int slot", corner "count" (Some "1.0"), refused "WrongKind" (member' "count")
+      "a whole number written 1e0 at an int slot", corner "count" (Some "1e0"), refused "WrongKind" (member' "count")
+      "-0.0 at an int slot", corner "count" (Some "-0.0"), refused "WrongKind" (member' "count")
+      "the integer token -0 at an int slot", corner "count" (Some "-0"), Accepted
+      "a whole float token at a float slot", corner "ratio" (Some "2.0"), Accepted
+      "a whole float token as a list item at an int slot",
+      corner "items" (Some "[1,2e0]"),
+      refused "WrongKind" [ PathSegment.Key "items"; PathSegment.Index 1 ]
+      "a whole float token as a map entry at an int slot",
+      corner "counts" (Some """{"a":1,"b":3.0}"""),
+      refused "WrongKind" [ PathSegment.Key "counts"; PathSegment.Key "b" ]
+      "an integer past Int32 at an int slot", corner "count" (Some "3000000000"), refused "WrongKind" (member' "count")
+      "a literal past the double range at a float slot", corner "ratio" (Some "1e400"), refused "InvalidJson" []
+      "a literal past the double range inside a json slot",
+      corner "meta" (Some """{"x":-1e400}"""),
+      refused "InvalidJson" []
+      "an integer past 2^53 that is no double's canonical layout",
+      corner "ratio" (Some "9007199254740993"),
+      refused "InvalidJson" []
+      "an integer past 2^53 that is the canonical layout of its double",
+      corner "ratio" (Some "10000000000000000"),
+      Accepted
+      "a 17-digit integer that is the canonical layout of its double",
+      corner "ratio" (Some "12345678901234568"),
+      Accepted
+      "an 18-digit integer, which the canonical layout writes with an exponent",
+      corner "ratio" (Some "100000000000000000"),
+      refused "InvalidJson" []
+      "a number token outside the JSON grammar", corner "ratio" (Some "1."), refused "InvalidJson" []
+      "a repeated member whose FIRST value is of another kind",
+      corner "count" (Some "\"x\",\"count\":1"),
+      refused "WrongKind" (member' "count")
+      "a repeated member whose SECOND value is of another kind", corner "count" (Some "1,\"count\":\"x\""), Accepted
+      "a repeated map key whose second value is of another kind",
+      corner "counts" (Some """{"a":1,"a":"x"}"""),
+      refused "WrongKind" [ PathSegment.Key "counts"; PathSegment.Key "a" ]
+      "map entries refused in document order when an index-like key comes last",
+      corner "counts" (Some """{"b":"x","1":"y"}"""),
+      refused "WrongKind" [ PathSegment.Key "counts"; PathSegment.Key "b" ]
+      "a repeated discriminator", corner "kind" (Some "\"Corner\",\"kind\":\"Nope\""), Accepted
+      "a __proto__ map key", corner "counts" (Some """{"__proto__":1}"""), Accepted
+      "a __proto__ map key of the wrong kind",
+      corner "counts" (Some """{"__proto__":"x"}"""),
+      refused "WrongKind" [ PathSegment.Key "counts"; PathSegment.Key "__proto__" ]
+      "a required closure absent", corner "onClick" None, refused "MissingField" (member' "onClick")
+      "a required closure given the opaque sentinel",
+      corner "onClick" (Some "\"<opaque>\""),
+      refused "OutOfRange" (member' "onClick")
+      "a required closure given another kind", corner "onClick" (Some "7"), refused "WrongKind" (member' "onClick")
+      "an optional closure absent", corner "onHover" None, Accepted
+      "an optional closure given another string",
+      corner "onHover" (Some "\"nope\""),
+      refused "OutOfRange" (member' "onHover")
+      "a typed handler absent", corner "onPick" None, refused "MissingField" (member' "onPick")
+      "a typed handler given another string", corner "onPick" (Some "\"x\""), refused "OutOfRange" (member' "onPick")
+      "an opaque slot given the closure sentinel",
+      corner "raw" (Some "\"<closure>\""),
+      refused "OutOfRange" (member' "raw")
+      "an opaque slot absent", corner "raw" None, refused "MissingField" (member' "raw")
+      "a raw control character in a string", corner "meta" (Some("\"a" + string (char 1) + "b\"")), Accepted
+      "a lone surrogate written as an escape", corner "meta" (Some "\"\\ud800\""), refused "InvalidJson" []
+      "a lone surrogate written raw", corner "meta" (Some("\"" + string (char 0xDC00) + "\"")), refused "InvalidJson" []
+      "null in a json slot", corner "meta" (Some "null"), refused "InvalidJson" []
+      "nesting past the reader's cap", corner "meta" (Some deep), refused "LimitExceeded" []
+      "a malformed number met before nesting past the cap",
+      (corner "meta" (Some deep)).Replace("\"count\":1", "\"count\":01"),
+      refused "InvalidJson" []
+      "trailing characters", RefusalCornersIdl.valid + " x", refused "InvalidJson" [] ]
+
+/// Run a script under node and parse its one line of JSON output; `None` when node is absent.
+let private nodeJson (script: string) : JVal option =
+    runNode script
+    |> Option.map (fun stdout ->
+        match Json.parse (stdout.Trim()) with
+        | Ok j -> j
+        | Error e -> failtestf "the harness printed a non-JSON line (%s): %s" e stdout)
+
+[<Tests>]
+let cornerTests =
+    testList
+        "Phase 347 — the refusal corners through the interpreter and both generated hosts"
+        [ testCase "drift guard: the generator still reproduces the committed RefusalCornersGenerated.fs" (fun _ ->
+              let path = Snapshots.repoFile RefusalCornersIdl.generatedFile
+
+              match Gen.fsharpModule RefusalCornersIdl.moduleName RefusalCornersIdl.idl [ "Corner" ] with
+              | Error e -> failtestf "codegen refused the corner vocabulary: %s" (CodegenError.describe e)
+              | Ok src ->
+                  Expect.equal
+                      (File.ReadAllText(path).Replace("\r\n", "\n"))
+                      src
+                      "the committed module is not what the generator emits — regenerate it with: dotnet run --project tests/Fuaran.Core.Tests -- --regen-snapshots")
+
+          testCase
+              "the corner vocabulary is well-formed and its valid document is accepted by all three hosts"
+              (fun _ ->
+                  Expect.isEmpty (Declare.errors RefusalCornersIdl.idl) "Declare.errors finds nothing"
+                  let doc = RefusalCornersIdl.valid
+                  Expect.equal (ofResult (Decode.decodeDetailed RefusalCornersIdl.idl doc)) Accepted "the interpreter"
+                  Expect.equal (ofResult (RefusalCornersGenerated.decodeNode doc)) Accepted "the compiled F# host"
+
+                  match tsAnswers RefusalCornersIdl.idl [ doc ] with
+                  | Some answers -> Expect.equal answers [ Accepted ] "the TypeScript host"
+                  | None -> skiptest noNode)
+
+          testCase "every corner gets the pinned answer — one code, one path — from all three hosts" (fun _ ->
+              let idl = RefusalCornersIdl.idl
+
+              let ts =
+                  match tsAnswers idl (corners |> List.map (fun (_, doc, _) -> doc)) with
+                  | Some answers -> answers
+                  | None -> skiptest noNode
+
+              let findings =
+                  List.zip corners ts
+                  |> List.collect (fun ((what, doc, want), tsAnswer) ->
+                      [ for host, got in
+                            [ "interpreter", ofResult (Decode.decodeDetailed idl doc)
+                              "compiled F#", ofResult (RefusalCornersGenerated.decodeNode doc)
+                              "TypeScript", tsAnswer ] do
+                            if got <> want then
+                                sprintf
+                                    "%s: the %s host answered %s, the corner pins %s"
+                                    what
+                                    host
+                                    (show got)
+                                    (show want) ])
+
+              Expect.isEmpty findings (String.concat "\n" findings))
+
+          testCase "a __proto__ map key is an entry, and no document reaches Object.prototype" (fun _ ->
+              let doc =
+                  (corner "counts" (Some """{"__proto__":7,"constructor":8,"k":1}"""))
+                      .Replace("\"meta\":{\"x\":1}", "\"meta\":{\"__proto__\":{\"polluted\":true}}")
+
+              // The compiled host: the key is an entry like any other.
+              match RefusalCornersGenerated.decodeNode doc with
+              | Ok n ->
+                  match n.Kind with
+                  | RefusalCornersGenerated.NodeKind.Corner c ->
+                      Expect.equal (Map.tryFind "__proto__" c.Counts) (Some 7) "the compiled host keeps the entry"
+                      Expect.equal (RefusalCornersGenerated.encodeNode n) doc "and writes it back"
+              | Error e -> failtestf "the compiled host refused: %s" (DecodeError.describe e)
+
+              let script =
+                  tsModuleOf RefusalCornersIdl.idl
+                  + "\nconst r = decodeNode("
+                  + Canon.render (JStr doc)
+                  + ");\nconst m = r.value.counts;\nconsole.log(JSON.stringify({\n"
+                  + "  ok: r.ok,\n"
+                  + "  keys: Object.keys(m).sort(),\n"
+                  + "  proto: m['__proto__'],\n"
+                  + "  ctor: m['constructor'],\n"
+                  + "  nullPrototype: Object.getPrototypeOf(m) === null,\n"
+                  + "  metaOwn: Object.prototype.hasOwnProperty.call(r.value.meta, '__proto__'),\n"
+                  + "  metaPrototype: Object.getPrototypeOf(r.value.meta) === Object.prototype,\n"
+                  + "  clean: ({}).polluted === undefined && !('polluted' in Object.prototype),\n"
+                  + "  bytes: encodeNode(r.value)\n"
+                  + "}));\n"
+
+              match nodeJson script with
+              | None -> skiptest noNode
+              | Some o ->
+                  let get k =
+                      Decoder.tryMember k o
+                      |> Option.defaultWith (fun () -> failtestf "no %s in %A" k o)
+
+                  Expect.equal (get "ok") (JBool true) "the TypeScript host accepts the document"
+
+                  Expect.equal
+                      (get "keys")
+                      (JArr [ JStr "__proto__"; JStr "constructor"; JStr "k" ])
+                      "`__proto__` and `constructor` are entries of the decoded map"
+
+                  Expect.equal (get "proto") (JInt 7) "the `__proto__` entry holds its value"
+                  Expect.equal (get "ctor") (JInt 8) "the `constructor` entry holds its value"
+                  Expect.equal (get "nullPrototype") (JBool true) "the decoded map has no prototype to reach"
+                  Expect.equal (get "metaOwn") (JBool true) "a json slot's `__proto__` member is an own member"
+                  Expect.equal (get "metaPrototype") (JBool true) "and that object's prototype is untouched"
+                  Expect.equal (get "clean") (JBool true) "Object.prototype is untouched"
+                  Expect.equal (get "bytes") (JStr doc) "the TypeScript host writes the document back byte for byte")
+
+          testCase
+              "a repeated key keeps its first value on all three hosts, as a member read and as a map entry"
+              (fun _ ->
+                  let doc =
+                      (corner "counts" (Some """{"a":1,"a":2}""")).Replace("\"count\":1", "\"count\":5,\"count\":6")
+
+                  match Decode.decodeDetailed RefusalCornersIdl.idl doc with
+                  | Ok(VNode(_, _, fields)) ->
+                      Expect.equal
+                          (fields |> List.tryFind (fun (k, _) -> k = "count") |> Option.map snd)
+                          (Some(VInt 5))
+                          "the interpreter reads the first member"
+
+                      match fields |> List.tryFind (fun (k, _) -> k = "counts") with
+                      | Some(_, VMap entries) ->
+                          Expect.equal
+                              (entries |> List.tryFind (fun (k, _) -> k = "a") |> Option.map snd)
+                              (Some(VInt 1))
+                              "and a map read finds the first entry"
+                      | other -> failtestf "the interpreter's map: %A" other
+                  | other -> failtestf "the interpreter: %A" other
+
+                  match RefusalCornersGenerated.decodeNode doc with
+                  | Ok n ->
+                      match n.Kind with
+                      | RefusalCornersGenerated.NodeKind.Corner c ->
+                          Expect.equal c.Count 5 "the compiled host reads the first member"
+                          Expect.equal (Map.tryFind "a" c.Counts) (Some 1) "and keeps the first map entry"
+                  | Error e -> failtestf "the compiled host refused: %s" (DecodeError.describe e)
+
+                  let script =
+                      tsModuleOf RefusalCornersIdl.idl
+                      + "\nconst r = decodeNode("
+                      + Canon.render (JStr doc)
+                      + ");\nconsole.log(JSON.stringify({ ok: r.ok, count: r.value.count, a: r.value.counts.a }));\n"
+
+                  match nodeJson script with
+                  | None -> skiptest noNode
+                  | Some o ->
+                      Expect.equal (Decoder.tryMember "ok" o) (Some(JBool true)) "the TypeScript host accepts it"
+
+                      Expect.equal
+                          (Decoder.tryMember "count" o)
+                          (Some(JInt 5))
+                          "the TypeScript host reads the first member"
+
+                      Expect.equal (Decoder.tryMember "a" o) (Some(JInt 1)) "and keeps the first map entry") ]

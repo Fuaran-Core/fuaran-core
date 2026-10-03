@@ -6,3 +6,4 @@ tests/Fuaran.Core.Tests/DocAnnotatedGenerated.fs
 tests/Fuaran.Core.Tests/ScoreGenerated.fs
 tests/Fuaran.Core.Tests/ReferenceGenerated.fs
 tests/Fuaran.Core.Tests/DecodeVectorsGenerated.fs
+tests/Fuaran.Core.Tests/RefusalCornersGenerated.fs

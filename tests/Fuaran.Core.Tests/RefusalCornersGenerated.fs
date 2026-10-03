@@ -1,60 +1,26 @@
 // AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 0.35.0. Do not edit by hand.
-module Fuaran.Core.Tests.DocAnnotatedGenerated
-#nowarn "44" // this layer implements every declared member, including deprecated ones
+module Fuaran.Core.Tests.RefusalCornersGenerated
 
 open Fuaran.Core
 
-[<RequireQualifiedAccess>]
-type Tone =
-    | Quiet
-    /// <summary>
-    /// &lt;'T> is not a tag here: Option&lt;'T> &amp; friends.
-    /// </summary>
-    | Loud
-
-[<RequireQualifiedAccess>]
-type Src =
-    /// The literal case: the value is the text.
-    | Lit of value: string
-    /// A by-name reference to another note.
-    /// **Deprecated.** Use `Lit` instead.
-    /// resolve the reference before encoding.
-    /// **In-process only** — this member has no wire projection: a value here
-    /// is carried inside one host process and is LOST across any wire boundary.
-    /// Since `0.2.0`.
-    | [<System.Obsolete("deprecated — use `Lit` instead: resolve the reference before encoding.; in-process only — no wire projection; a value here is lost across a wire boundary", false)>] Ref of target: string
-
-and Pair =
+// corner
+type CornerSpec =
     {
-      /// The left half, < the right.
-      Left: string
-      Right: string
-    }
-
-// leaf
-/// A short note.
-/// Renders as one paragraph & never wraps <'T>.
-and NoteSpec =
-    {
-      /// Holds a List<'T> & a <b>bold</b> claim.
-      /// See javascript:alert(1) <script>x</script>.
-      ///
-      /// Tab	here, bell �, lone � end.
-      Label: string
-      Src: Src option
-      Tone: Tone
-      Pair: Pair option
+      Count: int
+      Counts: Map<string, int>
+      Items: int list
+      Meta: JVal
+      OnClick: unit
+      OnHover: unit option
+      OnPick: (int -> unit)
+      Ratio: float
+      Raw: unit
     }
 
 and [<RequireQualifiedAccess>] NodeKind =
-    | Note of NoteSpec
+    | Corner of CornerSpec
 
 and Node = { Id: string; Kind: NodeKind }
-
-let private encTone (v: Tone) : JVal =
-    match v with
-    | Tone.Quiet -> JStr "Quiet"
-    | Tone.Loud -> JStr "Loud"
 
 // WIRE_FORMAT §5 — a non-finite double has no JSON *number* spelling, so it rides as
 // one of the three quoted sentinel strings, which §7 requires a decoder to read back
@@ -72,25 +38,23 @@ let private encFloat (f: float) : JVal =
     elif System.Double.IsNegativeInfinity f then JStr "-Infinity"
     else JFloat f
 
+// Phase 108 — `Canon.typed` under this vocabulary's DECLARED discriminator key.
+let private typedTag (tag: string) (fields: (string * JVal) list) : JVal =
+    JObj(("kind", JStr tag) :: fields)
+
 let rec private encNodeKind (k: NodeKind) : JVal =
     match k with
-    | NodeKind.Note s -> encNoteSpec s
+    | NodeKind.Corner s -> encCornerSpec s
 
 and private encNode (n: Node) : JVal =
     let kind = encNodeKind n.Kind
 
-    JObj [ "id", JStr n.Id; "kind", kind ]
+    match kind with
+    | JObj(__d :: __kf) -> JObj(__d :: ("id", JStr n.Id) :: __kf)
+    | __other -> __other
 
-and private encSrc (v: Src) : JVal =
-    match v with
-    | Src.Lit value -> Canon.typed "Lit" [ "value", JStr value ]
-    | Src.Ref target -> Canon.typed "Ref" [ "target", JStr target ]
-
-and private encPair (s: Pair) : JVal =
-    JObj([ Some("left", JStr s.Left); Some("right", JStr s.Right) ] |> List.choose id)
-
-and private encNoteSpec (s: NoteSpec) : JVal =
-    Canon.typed "Note" ([ Some("label", JStr s.Label); (s.Src |> Option.map (fun v -> "src", encSrc v)); Some("tone", encTone s.Tone); (s.Pair |> Option.map (fun v -> "pair", encPair v)) ] |> List.choose id)
+and private encCornerSpec (s: CornerSpec) : JVal =
+    typedTag "Corner" ([ Some("count", JInt s.Count); Some("counts", (fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, JInt v))) s.Counts); Some("items", JArr(List.map JInt s.Items)); Some("meta", id s.Meta); Some("onClick", JStr "<closure>"); (s.OnHover |> Option.map (fun v -> "onHover", JStr "<closure>")); Some("onPick", JStr "<closure>"); Some("ratio", encFloat s.Ratio); Some("raw", JStr "<opaque>") ] |> List.choose id)
 
 let encodeNode (n: Node) : string = Canon.render (encNode n)
 
@@ -120,17 +84,17 @@ let private dObj (j: JVal) : Result<(string * JVal) list, DecodeError> =
 
 // The discriminator: absent is `MissingField` naming it, a non-string `WrongKind` at it.
 let private dTag (fs: (string * JVal) list) : Result<string, DecodeError> =
-    match fs |> List.tryFind (fun (k, _) -> k = "$type") with
+    match fs |> List.tryFind (fun (k, _) -> k = "kind") with
     | Some(_, JStr t) -> Ok t
-    | Some _ -> dFail DecodeCode.WrongKind "string" "missing or non-string $type" |> dUnder (PathSegment.Key "$type")
+    | Some _ -> dFail DecodeCode.WrongKind "string" "missing or non-string kind" |> dUnder (PathSegment.Key "kind")
     | None ->
         Error
-            { Decoder.missing "$type" with
-                Message = "missing or non-string $type" }
+            { Decoder.missing "kind" with
+                Message = "missing or non-string kind" }
 
 // A tag naming no case this decoder knows: `UnknownTag` at the discriminator.
 let private dUnknown (expected: string) (message: string) : Result<'T, DecodeError> =
-    dFail DecodeCode.UnknownTag expected message |> dUnder (PathSegment.Key "$type")
+    dFail DecodeCode.UnknownTag expected message |> dUnder (PathSegment.Key "kind")
 
 let private dStr (j: JVal) : Result<string, DecodeError> =
     match j with
@@ -222,53 +186,31 @@ let private dDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<
     | Some(_, v) -> dec v |> dUnder (PathSegment.Key name)
     | None -> Ok dflt
 
-let private decTone (j: JVal) : Result<Tone, DecodeError> =
-    match j with
-    | JStr "Quiet" -> Ok Tone.Quiet
-    | JStr "Loud" -> Ok Tone.Loud
-    | JStr _ -> dFail DecodeCode.UnknownTag "one of 'Quiet', 'Loud'" "not a Tone"
-    | _ -> dFail DecodeCode.WrongKind "string" "not a Tone"
-
 let rec private decNodeKind (j: JVal) : Result<NodeKind, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dTag __fs |> Result.bind (fun __t ->
     match __t with
-    | "Note" -> decNoteSpec j |> Result.map NodeKind.Note
-    | __other -> dUnknown "one of 'Note'" ("unknown node kind: " + __other)))
+    | "Corner" -> decCornerSpec j |> Result.map NodeKind.Corner
+    | __other -> dUnknown "one of 'Corner'" ("unknown node kind: " + __other)))
 
 and private decNode (j: JVal) : Result<Node, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
     dReq "id" __fs dStr |> Result.bind (fun id ->
-    dReq "kind" __fs decNodeKind |> Result.bind (fun kind ->
+    decNodeKind j |> Result.bind (fun kind ->
     Ok { Id = id; Kind = kind })))
 
-and private decSrc (j: JVal) : Result<Src, DecodeError> =
-    match j with
-    | JObj __fs ->
-        dTag __fs |> Result.bind (fun __t ->
-        match __t with
-        | "Lit" ->
-            dReq "value" __fs dStr |> Result.bind (fun value ->
-            Ok(Src.Lit(value)))
-        | "Ref" ->
-            dReq "target" __fs dStr |> Result.bind (fun target ->
-            Ok(Src.Ref(target)))
-        | __other -> dUnknown "one of 'Lit', 'Ref'" ("unknown Src case: " + __other))
-    | _ -> dFail DecodeCode.WrongKind "object" "expected a Src object"
-
-and private decPair (j: JVal) : Result<Pair, DecodeError> =
+and private decCornerSpec (j: JVal) : Result<CornerSpec, DecodeError> =
     dObj j |> Result.bind (fun __fs ->
-    dReq "left" __fs dStr |> Result.bind (fun left ->
-    dReq "right" __fs dStr |> Result.bind (fun right ->
-    Ok { Left = left; Right = right })))
-
-and private decNoteSpec (j: JVal) : Result<NoteSpec, DecodeError> =
-    dObj j |> Result.bind (fun __fs ->
-    dReq "label" __fs dStr |> Result.bind (fun label ->
-    dOpt "src" __fs decSrc |> Result.bind (fun src ->
-    dReq "tone" __fs decTone |> Result.bind (fun tone ->
-    dOpt "pair" __fs decPair |> Result.bind (fun pair ->
-    Ok { Label = label; Src = src; Tone = tone; Pair = pair })))))
+    dReq "count" __fs dInt |> Result.bind (fun count ->
+    dReq "counts" __fs (dMap dInt) |> Result.bind (fun counts ->
+    dReq "items" __fs (dList dInt) |> Result.bind (fun items ->
+    dReq "meta" __fs dJson |> Result.bind (fun meta ->
+    dReq "onClick" __fs (dSentinel "<closure>") |> Result.bind (fun onClick ->
+    dOpt "onHover" __fs (dSentinel "<closure>") |> Result.bind (fun onHover ->
+    dReq "onPick" __fs (fun (__j: JVal) -> dSentinel "<closure>" __j |> Result.map (fun () -> ignore)) |> Result.bind (fun onPick ->
+    dReq "ratio" __fs dFloat |> Result.bind (fun ratio ->
+    dReq "raw" __fs (dSentinel "<opaque>") |> Result.bind (fun raw ->
+    Ok { Count = count; Counts = counts; Items = items; Meta = meta; OnClick = onClick; OnHover = onHover; OnPick = onPick; Ratio = ratio; Raw = raw }))))))))))
 
 /// Structural decode. The policy layer (diagnostics, §16 lenient-accept,
 /// the reject set) composes ABOVE this — see the Phase 672 note in the generator.
@@ -279,7 +221,7 @@ let decodeNode (s: string) : Result<Node, DecodeError> =
 
 let private witnessKindTag (n: Node) : string =
     match n.Kind with
-    | NodeKind.Note _ -> "Note"
+    | NodeKind.Corner _ -> "Corner"
 
 let private witnessChildren (n: Node) : Node list =
     match n.Kind with
@@ -302,5 +244,5 @@ let runValidator (reg: Validator.Registry<Node, string>) (root: Node) : Defect<s
 // Smart constructors — required-without-default fields are parameters; IDL-declared
 // defaults are filled, other optionals default to None.
 
-let mkNote (id: string) (label: string) (tone: Tone) : Node =
-    { Id = id; Kind = NodeKind.Note { Label = label; Src = None; Tone = tone; Pair = None } }
+let mkCorner (id: string) (count: int) (counts: Map<string, int>) (items: int list) (meta: JVal) (onClick: unit) (onPick: (int -> unit)) (ratio: float) (raw: unit) : Node =
+    { Id = id; Kind = NodeKind.Corner { Count = count; Counts = counts; Items = items; Meta = meta; OnClick = onClick; OnHover = None; OnPick = onPick; Ratio = ratio; Raw = raw } }

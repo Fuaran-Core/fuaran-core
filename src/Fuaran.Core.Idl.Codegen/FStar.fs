@@ -1141,8 +1141,10 @@ module FStarTarget =
                     v
                     (k "w")
             | SJson -> sprintf "(let w = %s in %s)" v (k "w")
-            // `dUnit` in the generated F#: the sentinel carries nothing, so the value is read
-            // without inspecting it, and the member's PRESENCE is the only information there is.
+            // The sentinel carries nothing, so the model reads the member without inspecting it:
+            // its PRESENCE is the only information there is. The generated F# also refuses a
+            // value that is not the sentinel (`dSentinel`, Phase 347) — a refusal on input no
+            // encoder writes, which the model's round trip has no need to state.
             | SSentinel _ -> sprintf "(let _ = %s in let w = () in %s)" v (k "w")
             | SEnum _
             | SRecord _

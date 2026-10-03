@@ -2511,6 +2511,46 @@ read off the `Reordered` parent's child lists), `Validator.gate` for the merge v
 slot already is (Phase 307 widened three closed unions); neither moves a byte an existing caller
 reads, and both are recorded here so the slot's class stays the record of every such edit.
 
+### The generated hosts agree with the interpreter on the reader's corners and the sentinel slots (Phase 347, DECISIONS.md D113) — BREAKING (behavioural): documents both generated hosts accepted are refused; the public surface and the wire `unchanged`
+
+**What moved, for a consumer.**
+
+- **The generated TypeScript decoder reads JSON itself (behavioural).** `decodeNode` no longer calls
+  `JSON.parse`; its reader is the F# reader's twin. Each of these was accepted by the TypeScript host
+  and is refused now, with the interpreter's code and path: `1.0` / `1e0` / `-0.0` at an int slot
+  (`WrongKind`); a literal past the double range (`1e400`) or an integer token past 2^53 that is not a
+  double's canonical layout, anywhere in the document (`InvalidJson` at the root — the F# reader's
+  answer, and the interpreter's); a lone surrogate in a string (`InvalidJson`). The other way round, a
+  raw control character inside a string is now read, as the other two hosts read it, where
+  `JSON.parse` refused it. A repeated member keeps its FIRST value (it kept the last), so a document
+  whose first copy is the wrong kind is refused where it was accepted, and the reverse.
+- **A decoded map is a null-prototype object (behavioural, and a shape change in JS).** A `__proto__`
+  key is an entry (it replaced the map's prototype and vanished); `constructor` and `toString` are
+  read only when they are entries. Entries are checked in document order (an index-like key used to
+  be checked first). A consumer calling an inherited method on a decoded map
+  (`m.hasOwnProperty(k)`) switches to `Object.hasOwn(m, k)`. An object in a verbatim `json` slot
+  keeps its ordinary prototype and holds a `__proto__` member as an own member.
+- **A sentinel slot is read by value, in both generated hosts (behavioural).** A closure / opaque slot
+  that is absent while required (`MissingField`), holds another string (`OutOfRange`) or another kind
+  (`WrongKind`) is refused, as the interpreter refuses it; both hosts read the slot's presence only,
+  or not at all, before. The decoded value is unchanged (`()`, the `TFn` placeholder, JS `null`).
+- **The compiled F# host's map keeps the first of a repeated key** (it kept the last, through
+  `Map.ofList`); every entry is still checked.
+- **Generated modules change.** Every generated F# module's decode prelude gains `dSentinel` and loses
+  `dUnit` and `dPresent` (all private); every generated TypeScript module's decode prelude and parse
+  leg are replaced. Regenerate a committed module at adoption; no emitted public name moves.
+- **The wire: nothing moves.** No document the canonical encoder writes is refused by any host; every
+  newly refused document is one no encoder emits. No conformance vector changes.
+
+**What adopting it costs.** Regenerating each committed generated module. A consumer that relied on a
+generated host accepting a sentinel slot's absence (a vocabulary whose producer omits a slot the IDL
+declares `Required`) declares that slot `Optional` or `HostOnly` — that document was already refused
+by the interpreter. A JS consumer that calls inherited methods on a decoded map moves to
+`Object.hasOwn`.
+
+**Class: breaking (behavioural)**, riding the `0.35.0` slot, whose class (`breaking (source)`) is
+higher: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

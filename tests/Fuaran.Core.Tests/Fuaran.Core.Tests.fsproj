@@ -369,6 +369,8 @@
          modules; appended (append-only). -->
     <Compile Include="DecodeVectorsIdl.fs" />
     <Compile Include="DecodeVectorsGenerated.fs" />
+    <Compile Include="RefusalCornersIdl.fs" />
+    <Compile Include="RefusalCornersGenerated.fs" />
     <Compile Include="IdlRefusalHostTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

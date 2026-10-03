@@ -181,6 +181,15 @@ let main argv =
             decodeIdl
             (decodeIdl.Kinds |> List.map (fun k -> k.Tag))
 
+        // Phase 347 — the refusal corners' vocabulary, so every corner is read by a COMPILED
+        // generated host beside the interpreter and the TypeScript one.
+        writeGen
+            RefusalCornersIdl.generatedFile
+            RefusalCornersIdl.moduleName
+            Fuaran.Core.Idl.Gen.GenSupport.Empty
+            RefusalCornersIdl.idl
+            (RefusalCornersIdl.idl.Kinds |> List.map (fun k -> k.Tag))
+
         0
     // Phase 127 — rewrite the committed `idl.json` fixtures the repository gate runs
     // the `fuaran-core-idl` command over:

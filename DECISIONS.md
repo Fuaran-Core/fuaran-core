@@ -1,5 +1,75 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-03 — D113: the TypeScript host reads JSON with the F# reader's twin, not `JSON.parse`; a map is a null-prototype object read in document order; a sentinel slot is read by value; a repeated key keeps its first value everywhere
+
+**Recorded by Phase 347. `src/Fuaran.Core.Idl.Codegen/Emit/TypeScript.fs` (the decode prelude's `dRead`,
+`dInt`, `dMap`, `dSentinel`, and the parse leg `dParse`), `Emit/FSharpCodec.fs` (`dSentinel`, `dMap`, the
+sentinel arms of `decFn` and `decField`), every committed generated module under `tests/`,
+`tests/Fuaran.Core.Tests/RefusalCornersIdl.fs` and `IdlRefusalHostTests.fs`; rides the `0.35.0` draft
+(STABILITY.md, "Phase 347"). Supersedes D109.4's scan and D109.5's sentinel boundary.**
+
+**D113.1 — the premises, checked before anything was built.** Phase 337's worker named four places the
+generated hosts answered differently from the interpreter. All four reproduced on the tree Phase 347
+started from, each as a three-way case: (a) the TypeScript `dMap` assigned `out[k] = …`, so a map key
+`__proto__` replaced the decoded map's prototype — the entry vanished and every later read of the map
+went through an object the document chose; (b) a required closure / opaque slot was not read by either
+generated host — absent, another string, another kind, all accepted — where the interpreter refuses
+them as `MissingField`, `OutOfRange` and `WrongKind`; (c) a repeated member kept its LAST value in the
+TypeScript host and its first in the interpreter and the F# host; (d) `1.0` and `1e0` at an int slot
+were accepted by the TypeScript host and refused (`WrongKind`) by the other two. One premise was
+WRONG: the shard asked that an out-of-range literal (`1e400`) be refused "with `OutOfRange`". The F#
+reader refuses it before any slot is read (`MalformedNumber`, so `InvalidJson` at the root), and so
+does an integer token past 2^53 that is not the canonical layout of a double; the interpreter answers
+exactly that, so `InvalidJson` at the root is the one answer, and the TypeScript host — which read
+`1e400` as `Infinity` and accepted it at a float slot — moved to it. The same check found two more
+reader corners of the same class: `JSON.parse` refuses a raw control character in a string, which the
+F# reader admits, and admits a lone surrogate, which the F# reader refuses (Phase 299).
+
+**D113.2 — the TypeScript host's reader is the F# reader's twin.** Every one of those corners is a
+question `JSON.parse` answers before the decoder runs, and three of them (a float token's spelling, a
+repeated key, the document order of an index-like key) are facts a JS value cannot carry afterwards.
+So `dParse` no longer calls `JSON.parse`: it reads the text itself, to the F# reader's grammar
+(`Json.parseDetailedWithPolicy` under `RejectNull`) and in its order — whitespace, strings and their
+surrogate rule, the number grammar and its three classes (an Int32 integer token, a float, and past
+2^53 only a double's canonical layout, which writes a 16- or 17-digit whole double in full and every
+longer one with an exponent), the nesting cap checked as a container opens, trailing characters last.
+The first fault met is the one reported, which is what D109.4's prefix scan approximated; that scan,
+`dDepthBreach` and `dHasNull` are gone. Beside the value the reader keeps what the value cannot carry,
+in two `WeakMap`s keyed by the parsed container: the members and items whose whole number was written
+as a float token, and the members as written of an object whose JS form loses them (a repeated key, an
+index-like key). `dRead` hands a member or an item to its decoder and tells `dInt` whether it was a
+float token. An object is built with every key as data: `__proto__` becomes an own member through
+`Object.defineProperty`, never the object's prototype. Rejected: `JSON.parse` with a reviver — it sees
+neither the token nor the repeated key (the source-text proposal does, on some runtimes, which would
+make the host's answer depend on where it runs); and the documented-gap route the shard allowed — four
+of the five corners are refusal differences on documents a model can emit, which is the property the
+law exists to close. The cost is a reader in JS rather than the engine's native one; the emitted
+module stays dependency-free.
+
+**D113.3 — a map is a null-prototype object, read in document order, first value kept.** The decoded
+map is `Object.create(null)`: a key is data whatever it spells, and no key reads one the prototype
+has (`constructor`, `toString`), which a plain object answered for an absent key. Its entries are
+checked in document order — the interpreter's and the F# host's order; an object lists an index-like
+key first, so `{"b":"x","1":"y"}` was refused at `1` by this host and at `b` by the other two — and a
+repeated key keeps its first value after every entry is checked. A consumer that called a decoded
+map's inherited methods (`m.hasOwnProperty(k)`) calls `Object.prototype.hasOwnProperty.call(m, k)` or
+`Object.hasOwn(m, k)`. The F# host's `dMap` took `Map.ofList`, which keeps the LAST of a repeated key;
+it keeps the first now, as every member read and the interpreter's map lookup do. A repeated key in a
+verbatim `json` slot is the one residue: the interpreter carries both members in its `JObj`, and a JS
+object holds one per key, so the TypeScript host keeps the first — the value every member read of
+that object answers. No refusal depends on it.
+
+**D113.4 — a sentinel slot is read by value; D109.5's exclusion is removed.** Both generated hosts read
+a closure / opaque slot as the interpreter does (`dSentinel`): present, it must be its sentinel —
+another string is `OutOfRange`, another kind `WrongKind`, expected `string` — and required, it must be
+present (`MissingField`). It still decodes to nothing (`()`, the declared `TFn` placeholder, or JS
+`null`), and an optional slot's presence still decides `Some` from `None`. The mutation law now
+mutates sentinel positions, draws the reader's corners (a whole number written as a float token, a
+literal past the double range or past 2^53, a member repeated with a value of another kind before or
+after it, a member renamed `__proto__`) and runs over a fourth vocabulary, `RefusalCornersIdl`, which
+holds a slot of every type a corner lives at; each corner is also pinned one by one, three ways. The
+one boundary D109.5 named that stands is a hosted slot declaring no wire form, unchanged.
+
 ## 2026-10-03 — D112: the digest maps are SHA-256 and three — own, frame, Merkle — with the id and the kind as fields of the pre-image; a change classification is a PROJECTION of the diff, held to its script by law; a gate verdict is a set difference keyed `(code, node)` under one of three policies
 
 **Recorded by Phase 314. `Tree.digests` / `Tree.ownDigest` / `Tree.frameDigest` / `Tree.Digests.diff`,
