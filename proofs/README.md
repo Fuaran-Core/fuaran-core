@@ -962,7 +962,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Observer` | 20 | 0 | 8 | 2 | 2 | 0 | 5 | 3 |
-| `Fuaran.Core.OpStream` | 123 | 10 | 36 | 3 | 1 | 5 | 2 | 66 |
+| `Fuaran.Core.OpStream` | 123 | 10 | 36 | 3 | 1 | 19 | 2 | 52 |
 | `Fuaran.Core.OpStream.Dag` | 81 | 24 | 33 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 67 | 22 | 22 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
@@ -971,7 +971,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Validator` | 39 | 0 | 17 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 1010 | 132 | 289 | 29 | 14 | 10 | 8 | 528 |
+| **Total** | 1010 | 132 | 289 | 29 | 14 | 24 | 8 | 514 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

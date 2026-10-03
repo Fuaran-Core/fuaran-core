@@ -55,7 +55,12 @@ classed them `measured-elsewhere`. A law over an entry point scheduled for remov
 consumer should call, so they are re-classed `obsolete` with `forwardsTo` the replacement, whose laws
 now run at the second config and hash. Their bare-form twins (`compact`, `snapshotAt`, `verifyAcross`
 and the rest) carry the same attribute and the same misclassification; they are outside this phase's
-set and are left for the coverage owner to re-class in one pass.
+set and are left for the coverage owner to re-class in one pass. That pass was made the same day: the fourteen
+(`compact`, `compactChainOnly`, `replayFrom`, `snapshotAt`, `snapshotAtChainOnly`, `snapshotAtOpt`,
+`snapshotFromJsonl`, `snapshotFromJsonlResult`, `snapshotStateHashedFromJsonl`, `snapshotToJsonl`,
+`snapshotToJsonlChainOnly`, `verifyAcross`, `verifyAcrossChainOnly`, `verifyAcrossWithOpt`) are classed
+`obsolete`, each naming its `OpStream.Snapshots` replacement, so the census reads 24 obsolete and 514
+measured-elsewhere.
 
 **D116.5 — the kit's op generator nests batches, and demands it.** `LawKit.genBatch` draws a batch of
 one to three ops, each a structural op or, one time in three while under `batchDepthBound` (two levels

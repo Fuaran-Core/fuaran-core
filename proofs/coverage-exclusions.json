@@ -1374,21 +1374,8 @@
     },
     {
       "members": [
-        "OpStream.compactChainOnly",
-        "OpStream.compact",
         "OpStream.fromJsonlVerified",
-        "OpStream.fromJsonlWithSnapshots",
-        "OpStream.replayFrom",
-        "OpStream.snapshotAtChainOnly",
-        "OpStream.snapshotAtOpt",
-        "OpStream.snapshotAt",
-        "OpStream.snapshotFromJsonlResult",
-        "OpStream.snapshotFromJsonl",
-        "OpStream.snapshotStateHashedFromJsonl",
-        "OpStream.snapshotToJsonlChainOnly",
-        "OpStream.snapshotToJsonl",
-        "OpStream.verifyAcrossChainOnly",
-        "OpStream.verifyAcross"
+        "OpStream.fromJsonlWithSnapshots"
       ],
       "class": "measured-elsewhere",
       "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
@@ -1440,15 +1427,6 @@
     },
     {
       "members": [
-        "OpStream.verifyAcrossWithOpt"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Cross-snapshot verification with an optional state encoder; `verifyAcrossWith` is it with the encoder supplied.",
-      "through": "OpStream.verifyAcrossWith",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
-    },
-    {
-      "members": [
         "OpStream.compactChainOnlyWith"
       ],
       "class": "obsolete",
@@ -1482,6 +1460,118 @@
     {
       "members": [
         "OpStream.verifyAcrossWith"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.verify"
+    },
+    {
+      "members": [
+        "OpStream.compact"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.compact"
+    },
+    {
+      "members": [
+        "OpStream.compactChainOnly"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.compact"
+    },
+    {
+      "members": [
+        "OpStream.replayFrom"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.replayFrom"
+    },
+    {
+      "members": [
+        "OpStream.snapshotAt"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.take"
+    },
+    {
+      "members": [
+        "OpStream.snapshotAtChainOnly"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.take"
+    },
+    {
+      "members": [
+        "OpStream.snapshotAtOpt"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.take"
+    },
+    {
+      "members": [
+        "OpStream.snapshotFromJsonl"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.ofJsonl"
+    },
+    {
+      "members": [
+        "OpStream.snapshotFromJsonlResult"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.ofJsonl"
+    },
+    {
+      "members": [
+        "OpStream.snapshotStateHashedFromJsonl"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.ofJsonl"
+    },
+    {
+      "members": [
+        "OpStream.snapshotToJsonl"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.toJsonl"
+    },
+    {
+      "members": [
+        "OpStream.snapshotToJsonlChainOnly"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.toJsonl"
+    },
+    {
+      "members": [
+        "OpStream.verifyAcross"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.verify"
+    },
+    {
+      "members": [
+        "OpStream.verifyAcrossChainOnly"
+      ],
+      "class": "obsolete",
+      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
+      "forwardsTo": "OpStream.Snapshots.verify"
+    },
+    {
+      "members": [
+        "OpStream.verifyAcrossWithOpt"
       ],
       "class": "obsolete",
       "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
