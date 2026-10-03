@@ -2836,26 +2836,11 @@ module Diff =
     /// is EMPTY, and the report says so, rather than falling back to one vocabulary's
     /// hosts ([[declaredRoster]]) for every vocabulary.
     ///
-    /// No support documents are read. `Error` names the side (`old:` / `new:`) that did not parse.
+    /// No support documents are read: it is [[runWith]] with neither side's, so the roster
+    /// is resolved in exactly one place (Phase 348). `Error` names the side (`old:` / `new:`)
+    /// that did not parse.
     let run (manifestText: string option) (oldText: string) (newText: string) : Result<string, string> =
-        let roster =
-            manifestText
-            |> Option.bind (fun t -> Json.parse t |> Result.toOption)
-            |> Option.bind rosterFrom
-            |> function
-                | Some hs -> "manifest.json `hosts`", hs
-                | None ->
-                    (match manifestText with
-                     | None -> "none declared (no manifest given)"
-                     | Some _ -> "none declared (the manifest carries no `hosts` key)"),
-                    []
-
-        parse oldText
-        |> Result.mapError (fun e -> "old: " + e)
-        |> Result.bind (fun before ->
-            parse newText
-            |> Result.mapError (fun e -> "new: " + e)
-            |> Result.map (fun after -> report (fst roster) (snd roster) before after))
+        runWith manifestText oldText newText None None
 
     // -----------------------------------------------------------------------
     // Phase 127 — ONE classifier entry point, the F# consequence table, and the
@@ -3224,8 +3209,9 @@ module Diff =
     /// branch on: `run`'s advisory report, the verdict block under it, and the
     /// `Verdict` value itself.
     ///
-    /// It calls `run` rather than reproducing its roster resolution, so there stays
-    /// exactly one place that decides whether the manifest carries a host roster.
+    /// It calls [[runVerdictWith]], and so [[runWith]], rather than reproducing the roster
+    /// resolution; `run` calls `runWith` too, so there stays exactly one place that decides
+    /// whether the manifest carries a host roster.
     /// The cost is reading the two artifacts twice, which for two files on a gate's
     /// command line is not a cost.
     ///

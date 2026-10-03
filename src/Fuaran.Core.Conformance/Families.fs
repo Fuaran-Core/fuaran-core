@@ -577,7 +577,7 @@ module Families =
           // rejection only when the caller's op generator draws one; the decision axis, the unknown
           // tool and the unknown proposal id are built.
           //
-          // Phase 246 — `aiSurfaceLaws` runs the DOMAIN'S `Decide`, so which proposal arm a drawn op
+          // Phase 246 — `aiSurfaceLawsAt` runs the DOMAIN'S `Decide`, so which proposal arm a drawn op
           // reaches is the domain's policy's answer: a policy that never parks or never denies
           // leaves those arms untested, and one that allows everything is exactly that. The kit-
           // policy form rolls the decision itself and keeps the two Phase 223 dimensions.

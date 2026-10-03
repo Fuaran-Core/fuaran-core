@@ -802,6 +802,15 @@ module FStarTarget =
         | Error _ -> Set.empty
         | Ok c -> c.Order |> List.filter declares |> List.map slotName |> Set.ofList
 
+    /// Why a kind the target CAN express is nonetheless outside the proof vocabulary — the
+    /// declared types it would add beyond the node envelope's own closure. Empty when it is
+    /// inside it (or cannot be expressed at all, which `partition` already answers).
+    /// [[proofKinds]] filters on this answer being empty, so the set difference lives in one
+    /// place (Phase 348).
+    let beyondEnvelope (idl: Idl) (tag: string) : string list =
+        let envelope = declaredTypes idl []
+        declaredTypes idl [ tag ] - envelope |> Set.toList
+
     /// The kinds the PROOF VOCABULARY covers: every kind the target can express **that
     /// introduces no declared type beyond the node envelope's own closure**, in the
     /// vocabulary's declaration order.
@@ -820,20 +829,13 @@ module FStarTarget =
     /// regeneration and re-proves itself, and one that brings a new object of its own is NAMED
     /// in the emitted header with the reason. Widening it is a measured decision, not an edit —
     /// see `proofs/README.md`, theorem 1's cost note.
+    ///
+    /// A kind is in exactly when it is expressible and [[beyondEnvelope]] answers it empty.
     let proofKinds (idl: Idl) : string list =
-        let envelope = declaredTypes idl []
-
         partition idl
         |> List.filter (fun v -> v.Refusal.IsNone)
         |> List.map _.Tag
-        |> List.filter (fun tag -> Set.isSubset (declaredTypes idl [ tag ]) envelope)
-
-    /// Why a kind the target CAN express is nonetheless outside the proof vocabulary — the
-    /// declared types it would add. Empty when it is inside it (or cannot be expressed at all,
-    /// which `partition` already answers).
-    let beyondEnvelope (idl: Idl) (tag: string) : string list =
-        let envelope = declaredTypes idl []
-        declaredTypes idl [ tag ] - envelope |> Set.toList
+        |> List.filter (fun tag -> List.isEmpty (beyondEnvelope idl tag))
 
     // -----------------------------------------------------------------------
     // 7. Emission — the model.

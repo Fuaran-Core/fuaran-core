@@ -1,5 +1,74 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-03 — D114: a coverage report states what was evaluated; the declaration file types the decode refusal as the object it is; a field name every JavaScript object already carries is refused by the IDL, `prototype` is not
+
+**Recorded by Phase 348. `src/Fuaran.Core.Conformance/FunctionLaws.fs` (`verifyFunctionSymbolic`),
+`ConformanceWitnesses.fs` (`VerifyCoverage`), `src/Fuaran.Core.Idl.Codegen/Emit/TypeScript.fs`
+(`typescriptDeclarations`), `src/Fuaran.Core.Idl/Idl.fs` (`Declare.errors`), and the tests that pin
+each; rides the `0.35.0` draft (STABILITY.md, "Phase 348").**
+
+**D114.1 — the premises, checked on the tree the phase started from (`a5426b9`).** All six held. (1)
+`Idl.Diff.run` carried a copy of `runWith`'s roster resolution while `runVerdict`'s doc said the roster
+lived in one place. (2) `FStarTarget.proofKinds` filtered on `Set.isSubset` over the same two sets
+`beyondEnvelope` subtracts. (3) `verifyFunctionSymbolic` reported `Exhaustive spaceSize` after a
+counterexample stopped the enumeration, and `Sampled(maxCases, _)` after one stopped the sampling, where
+`verifyFunction` reported `Sampled(i, None)`, the count drawn. Every reader of `VerifyCoverage`: in this
+repository only `FunctionLawsTests` (both cases); downstream, the UI host's recipe certification, which
+maps both cases into its own verdict and renders `exhaustive over N` / `sampled K of N` — after this
+phase an early-stopped finite certification renders `sampled K of N`, which is what happened. (4) The
+ladder claims of `capability-unregistered-refused`, `capability-enumerate-is-registry` and
+`capability-differential` named the obsolete `Registry.*` alias; three `AiSurface.fs` comments cited the
+obsolete `aiSurfaceLaws` forward; `Encode.valueJson`'s doc opened with the private renderer's
+paragraph. The same `Registry.*` citations stood in `proofs/Capability.fst`'s comments,
+`proofs/README.md`, the module's `proofs/modules.json` note, `proofs/check.ps1`'s header and the
+oracle project's comment, and one more `aiSurfaceLaws` in `SurfaceLaws.fs` and `Families.fs`; all
+name the current members now. (5) The declaration file emitted `{ ok: false; error: string }` while
+the module has returned `{ code, path, expected, message }` since Phase 337. (6) A field named
+`__proto__` passed `Declare.errors`.
+
+**D114.2 — a coverage report states what was evaluated.** The ruling: `Exhaustive` only when every case
+of a finite space was evaluated — which includes a counterexample at the enumeration's LAST case — and
+`Sampled(evaluated, Some size)` when an enumeration stopped early; the sampled branch reports the count
+drawn rather than the count planned. No case is added: `Sampled`'s meaning widens from "a sample was
+drawn" to "fewer than the whole space was evaluated", and its doc says that an early-stopped
+enumeration's cases are its first `drawn` in order. Rejected: a third case (`Stopped of evaluated *
+size`) — a union widening every exhaustive `match` downstream pays for, to name a distinction
+(enumerated prefix vs random draw) no reader branches on; the counterexample's `Iteration` already says
+where the run stopped.
+
+**D114.3 — the refusal is declared as the object it is, under one exported name.** The declaration file
+exports `DecodeRefusal = { code: <the nine codes>; path: Array<string | number>; expected: string;
+message: string }`, the code union read off `DecodeError.codes`, and `decodeNode`'s signature names it.
+One exported type, so a consumer writes `DecodeRefusal` rather than restating the shape. A vocabulary
+type spelled like a name the file declares for itself (`Node`, `NodeKind`, a `<Kind>Spec`, now
+`DecodeRefusal`) is refused as `UnsupportedConstruct` — it would be declared twice, which a consumer's
+compiler reports far from its cause; before this the clash was silent at generation. The consumer
+type-check needs a TypeScript compiler this repository does not carry: the leg runs when
+`FUARAN_CORE_TSC` names one (`typescript`'s `lib/tsc.js`) and skips otherwise, and two legs that need
+none hold the declaration's text and the runtime refusal's members and types under node.
+
+**D114.4 — the inherited-name rule, settled by measurement.** Through the generated TypeScript host,
+for an optional member of each name: a document carrying it decoded and re-encoded, one without it,
+and a value built without it (what `?:` permits), each compared with the canonical bytes.
+
+| name | the TypeScript host | F# host, interpreter, F* model, JSON Schema |
+|---|---|---|
+| `__proto__` | every path fails: the decoder's object literal SETS the prototype, so the member is never held, and the encoder reads `Object.prototype` back and throws | none |
+| `constructor`, `toString`, `valueOf`, `hasOwnProperty` (and the other `Object.prototype` members) | a decoded value round-trips (the literal writes an own member); a value built without the member fails — `s.constructor` reads the inherited function, so the absent member reads as present and the encoder throws. A consumer reading the member of such a value gets the function where its type says `string \| undefined` | none |
+| `prototype` | clean on every path — a plain object inherits no such member | none |
+
+So the rule refuses `__proto__` and every other name `Object.prototype` carries (`__defineGetter__`,
+`__defineSetter__`, `__lookupGetter__`, `__lookupSetter__`, `constructor`, `hasOwnProperty`,
+`isPrototypeOf`, `propertyIsEnumerable`, `toLocaleString`, `toString`, `valueOf`) and admits
+`prototype`. It is ONE rule in `Declare.errors`, over every field a vocabulary declares (kind, op,
+record, union case, envelope), for every host: a vocabulary is one document, and a name one of its
+hosts cannot carry is not a name the vocabulary has. The other hosts have no hazard, and that does not
+narrow the rule. Rejected: reading only own members in the generated encoder — it would make the
+generated encoder safe and leave every consumer that reads `node.kind.constructor` with a function its
+type denies; and refusing `__proto__` alone, which leaves a measured hazard standing. The measurement
+is a test (`IdlRefusalHostTests`, "the evidence the rule rests on"): if a host change ever makes a
+refused name safe, it goes red and the rule is re-examined.
+
 ## 2026-10-03 — D113: the TypeScript host reads JSON with the F# reader's twin, not `JSON.parse`; a map is a null-prototype object read in document order; a sentinel slot is read by value; a repeated key keeps its first value everywhere
 
 **Recorded by Phase 347. `src/Fuaran.Core.Idl.Codegen/Emit/TypeScript.fs` (the decode prelude's `dRead`,

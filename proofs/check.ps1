@@ -121,7 +121,7 @@ $ErrorActionPreference = 'Stop'
 #   Capability — Phase 177, the FUNCTION SEAM every AI edit crosses: `Fuaran.Core.Function`'s
 #                effect lattice, value spaces, `signature` / `apply` / `curry` / `compose` /
 #                `auditEffect` over an abstract witness, and `Capability.validateArgs` / `invoke`
-#                with `Registry.register` / `enumerate` / `dispatch`, clause for clause — with
+#                with `CapabilityRegistry.register` / `enumerate` / `dispatch`, clause for clause — with
 #                default-deny dispatch, validation before invocation, enumeration equal to the
 #                registry and the three function laws proved. Self-contained: it opens nothing,
 #                so its position is free.

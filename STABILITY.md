@@ -2551,6 +2551,53 @@ by the interpreter. A JS consumer that calls inherited methods on a decoded map 
 **Class: breaking (behavioural)**, riding the `0.35.0` slot, whose class (`breaking (source)`) is
 higher: no number moves.
 
+### One place for each rule, coverage that states what was evaluated, the decode refusal declared as it is, and the inherited JavaScript member names refused (Phase 348, DECISIONS.md D114) — BREAKING (source) for TypeScript consumers of the declaration file; BREAKING (behavioural): a vocabulary using one of the refused names is refused, and an early-stopped symbolic verification no longer reports `Exhaustive`; the rest additive; the public surface and the wire `unchanged`
+
+**What moved, for a consumer.**
+
+- **The declaration file types the decode refusal (source, TypeScript).** `Gen.typescriptDeclarations`
+  emits `export type DecodeRefusal = { code: …; path: Array<string | number>; expected: string;
+  message: string }` (the code a union of the nine `DecodeCode` names) and `decodeNode(s: string): { ok:
+  true; value: Node } | { ok: false; error: DecodeRefusal }`. It declared `error: string`, which the
+  module has not returned since Phase 337, so a consumer that typed the refusal as a string stops
+  compiling; it reads `r.error.code`, `.path`, `.expected` and `.message`. Regenerate the declaration
+  file beside each generated module. A vocabulary type named `Node`, `NodeKind`, `DecodeRefusal` or
+  `<Kind>Spec` is refused by the declarations emitter (`UnsupportedConstruct`, naming it); it was
+  declared twice before, which the consumer's compiler refused.
+- **A field named for an inherited JavaScript member is refused (behavioural).** `Declare.errors` — and
+  so every loading path that runs it (`Artifact.ofJson`, `Proposal.applyDelta`) — refuses a field, in
+  any kind, op, record, union case or the node envelope, named `__proto__` or any other member
+  `Object.prototype` carries (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`,
+  `propertyIsEnumerable`, `toLocaleString`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`,
+  `__lookupSetter__`), naming it as reserved. The generated TypeScript host could not hold such a
+  member as data (D114.4). `prototype` is admitted. A vocabulary using one of the names renames the
+  field — a wire break for that vocabulary, which is the point: no TypeScript consumer could read it.
+- **`verifyFunctionSymbolic` reports what it evaluated (behavioural).** An enumeration a counterexample
+  stops before its last case reports `Sampled(evaluated, Some spaceSize)` where it reported `Exhaustive
+  spaceSize`; a sampled run a counterexample stops reports the count drawn (`Iteration + 1`) where it
+  reported `maxCases`. `Exhaustive` now means every case was evaluated. A reader that matched
+  `Exhaustive` on a FAILED report reads `Sampled` now; a passing report is unchanged. `VerifyCoverage`'s
+  doc says what each case means under both verifiers.
+- **One implementation each (additive, no behaviour moves).** `Idl.Diff.run` is `runWith` with no
+  support documents, and `FStarTarget.proofKinds` filters on `beyondEnvelope`; each pair answers
+  exactly as before, pinned by a test.
+- **Docs and claims name the current members.** The proof ladder's `capability-unregistered-refused`,
+  `capability-enumerate-is-registry` and `capability-differential` claims (and the matching twin case
+  name), the comments of `proofs/Capability.fst`, `proofs/README.md`'s capability section and the
+  module's `proofs/modules.json` note name `CapabilityRegistry.*`, not the obsolete `Registry` alias;
+  `AiSurface.fs` and the conformance families cite `aiSurfaceLawsAt`; `Encode.valueJson`'s doc is its
+  own.
+- **The wire: nothing moves.** No document any encoder writes changes; no conformance vector changes.
+
+**What adopting it costs.** Regenerating each TypeScript declaration file and moving a consumer's
+refusal handling from a string to the object's members; renaming any vocabulary field spelled like an
+inherited JavaScript member; and, for a reader of a failed symbolic verification's coverage, matching
+`Sampled`.
+
+**Class: breaking (source)** for the declaration file and **breaking (behavioural)** for the
+validator and the coverage report, riding the `0.35.0` slot, whose class (`breaking (source)`) they
+do not exceed: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

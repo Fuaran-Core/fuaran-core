@@ -1524,8 +1524,9 @@ let idlFStarTargetTests =
                   "the in-file `--z3rlimit 200` Phase 150 measured at UI scale is gone: the leg's own rlimit is what the split is checked under" ]
 
 // Phase 335 — the operation-coverage clause found `FStarTarget.beyondEnvelope` published with no
-// test and no caller: `proofKinds` inlines the same set difference rather than calling it. These
-// cases hold the two to one relation, so the helper cannot drift from the rule it explains.
+// test and no caller: `proofKinds` inlined the same set difference rather than calling it (it calls
+// it since Phase 348). These cases hold the two to one relation, so the helper cannot drift from the
+// rule it explains.
 [<Tests>]
 let beyondEnvelopeTests =
     testList
@@ -1540,6 +1541,36 @@ let beyondEnvelopeTests =
                           (List.isEmpty (FStarTarget.beyondEnvelope g.Idl tag))
                           (kinds.Contains tag)
                           (sprintf "%s.%s" g.Module tag)
+
+          // Phase 348 — `proofKinds` now CALLS `beyondEnvelope`; this holds the relation over EVERY
+          // kind, an inexpressible one included (a tree-op slot), where `beyondEnvelope`
+          // answers empty and the kind is out all the same.
+          testCase "Phase 348 — on every kind, in proofKinds exactly when expressible and nothing lies beyond"
+          <| fun _ ->
+              let inexpressible =
+                  let t = tinyIdl TOp Required
+
+                  { t with
+                      Kinds =
+                          t.Kinds
+                          @ [ { List.head (tinyIdl TStr Required).Kinds with
+                                  Tag = "Plain" } ] }
+
+              for name, idl in
+                  (generated |> List.map (fun g -> g.Module, g.Idl))
+                  @ [ "inexpressible", inexpressible ] do
+                  let kinds = FStarTarget.proofKinds idl |> Set.ofList
+                  let expressible = selection idl |> Set.ofList
+
+                  for k in idl.Kinds do
+                      Expect.equal
+                          (kinds.Contains k.Tag)
+                          (expressible.Contains k.Tag
+                           && List.isEmpty (FStarTarget.beyondEnvelope idl k.Tag))
+                          (sprintf "%s.%s" name k.Tag)
+
+              let probe = FStarTarget.proofKinds inexpressible
+              Expect.equal probe [ "Plain" ] "the probe reached both sides: the tree-op kind out, the plain kind in"
 
           testCase "the relation is not vacuous: a certification kind lies beyond the envelope"
           <| fun _ ->

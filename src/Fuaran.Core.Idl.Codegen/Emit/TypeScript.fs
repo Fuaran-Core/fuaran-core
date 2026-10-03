@@ -1585,6 +1585,24 @@ const plain = (pairs) =>
 
         go Map.empty t v
 
+    /// The name the declaration file gives a decode refusal (Phase 348).
+    let private refusalTypeName = "DecodeRefusal"
+
+    /// Phase 348 — the decode refusal's declared shape: the object `decodeNode` answers with since
+    /// Phase 337, `DecodeError.toJson`'s members — the code from the closed set (spelled as every
+    /// host spells it, read off [[DecodeError.codes]] so a code added there is declared here), the
+    /// path from the document root (a member key or an item index per step), what the position
+    /// expected, and the sentence. One exported type, which every decode signature names.
+    let private refusalDecl: string =
+        "/** A decode refusal: what kind of fault, where (root-first steps: a member key or an item index), what the position admits, and a sentence. */\n"
+        + "export type "
+        + refusalTypeName
+        + " = { code: "
+        + (DecodeError.codes
+           |> List.map (DecodeError.codeName >> SourceLit.tsString)
+           |> String.concat " | ")
+        + "; path: Array<string | number>; expected: string; message: string };"
+
     /// Phase 252 — TypeScript TYPE DECLARATIONS for the module [[typescriptModule]] emits
     /// over the same kinds: one declaration per enum, record, union and kind spec the
     /// module reaches, the `Node` type, and the signatures of `encodeNode` / `decodeNode`.
@@ -1597,6 +1615,12 @@ const plain = (pairs) =>
     /// host-only member is `?:` (it is never on the wire), an enum is the union of its wire
     /// strings, and a sentinel, JSON or hosted slot is `unknown` (the TypeScript tier
     /// carries a hosted slot's JSON verbatim).
+    ///
+    /// Phase 348 — `decodeNode`'s refusal is declared as the object it is, the exported
+    /// `DecodeRefusal` (it read `error: string` after Phase 337 made it an object), and a
+    /// vocabulary type spelled like a name the file declares for itself (`Node`, `NodeKind`, a
+    /// `<Kind>Spec`, `DecodeRefusal`) is refused as `UnsupportedConstruct` rather than declared
+    /// twice.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         let kinds =
             kindTags
@@ -1711,18 +1735,48 @@ const plain = (pairs) =>
                     + orNever (specs |> List.map (fun s -> "(" + s + " & " + env + ")"))
                     + ";")
 
-        [ [ Ok(
-                "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 252 — type declarations for the TS backend). Do not edit by hand."
-            ) ]
-          enumDecls
-          recordDecls
-          unionDecls
-          specDecls
-          [ nodeDecl ]
-          [ Ok(
-                "export declare function encodeNode(n: Node): string;\n"
-                + "export declare function decodeNode(s: string): { ok: true; value: Node } | { ok: false; error: string };"
-            ) ] ]
-        |> List.concat
-        |> concatR "\n\n"
-        |> Result.map (fun s -> normalizeEol s + "\n")
+        // Phase 348 — the names this file declares beside the vocabulary's own: a vocabulary type
+        // spelled like one of them would be declared twice, which a consumer's compiler refuses
+        // far from its cause. Refused here, naming it.
+        let fixedNames =
+            [ "Node"; refusalTypeName ]
+            @ (match idl.Wire.NodeEnvelope with
+               | NodeEnvelopeShape.NestedKind -> [ "NodeKind" ]
+               | NodeEnvelopeShape.FlatKind -> [])
+            @ specs
+
+        let clash =
+            (enums |> List.map _.Name)
+            @ (unions |> List.map _.Name)
+            @ (records |> List.map _.Name)
+            |> List.tryFind (fun n -> List.contains n fixedNames)
+
+        match clash with
+        | Some name ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    sprintf "a vocabulary type named '%s' in the TypeScript declarations" name,
+                    "the declaration file already declares that name for the node, a kind spec or the decode refusal",
+                    "rename the type"
+                )
+            )
+        | None ->
+            [ [ Ok(
+                    "// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 252 — type declarations for the TS backend). Do not edit by hand."
+                ) ]
+              enumDecls
+              recordDecls
+              unionDecls
+              specDecls
+              [ nodeDecl ]
+              [ Ok(
+                    refusalDecl
+                    + "\n\n"
+                    + "export declare function encodeNode(n: Node): string;\n"
+                    + "export declare function decodeNode(s: string): { ok: true; value: Node } | { ok: false; error: "
+                    + refusalTypeName
+                    + " };"
+                ) ] ]
+            |> List.concat
+            |> concatR "\n\n"
+            |> Result.map (fun s -> normalizeEol s + "\n")

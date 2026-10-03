@@ -15666,7 +15666,7 @@ let proofOracleTests =
 
 
           testCase
-              "the capability oracle agrees with Registry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations"
+              "the capability oracle agrees with CapabilityRegistry.register, enumerate, tryFind and dispatch, and Capability.validateArgs, over generated registries and invocations"
           <| fun _ ->
               let t = underCulture "he-IL" (fun () -> capDifferential readers 1771 300)
 

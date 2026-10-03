@@ -4903,8 +4903,8 @@ invoke what was not registered.)_
 The doc comments of `Function.fs` state the contract in four places and the theorems are their
 names:
 
-> **`Registry.dispatch` — "default-deny — an unregistered id is `NoSuchCapability`".
-> `Capability.invoke` — "validate the args, then run the host `body`". `Registry.enumerate` — "the
+> **`CapabilityRegistry.dispatch` — "default-deny — an unregistered id is `NoSuchCapability`".
+> `Capability.invoke` — "validate the args, then run the host `body`". `CapabilityRegistry.enumerate` — "the
 > discovery surface … what compute may I invoke". The three laws — totality ("bounded iteration
 > only"), hygiene ("bound by their absolute lexical address, never a bare name, so composition
 > cannot capture"), effect signature ("joined componentwise through composition").**
@@ -4913,7 +4913,7 @@ names:
 the five-constructor value-space vocabulary and `Space.validate`, `signature` / `signatureExcluding`
 / `isTotal` / `guardTotal` / `validateArg` / `bindArgs` and the `apply` / `curry` that are its two
 faces, `compose` / `composedEffect` / `observedEffect` / `auditEffect`, and `Capability.create` /
-`validateArgs` / `invoke` with `Registry.register` / `tryFind` / `enumerate` / `dispatch` — over
+`validateArgs` / `invoke` with `CapabilityRegistry.register` / `tryFind` / `enumerate` / `dispatch` — over
 two **parameters**. The witness (`Holes`, `Effect`, `Bind`, the tree witness's `KindTag`, and
 `Tree.preorder` over it) is a record of functions over an abstract node type, exactly as theorem 5
 takes `ReplaceChildren` abstractly; and the three scalar readers `Space.validate` reaches for —

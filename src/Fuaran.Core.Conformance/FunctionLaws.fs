@@ -285,12 +285,14 @@ module internal FunctionLaws =
 
     /// Property-verify an artifact-function by deriving the param space from its holes' value-spaces
     /// (Phase 48) — the symbolic / bounded mode. Value / repeat holes are enumerated **exhaustively**
-    /// when their combined finite space is small (≤ `maxCases`) and **sampled** (`maxCases` draws)
+    /// when their combined finite space is small (≤ `maxCases`) and **sampled** (up to `maxCases` draws)
     /// when it is large or unbounded, with the coverage reported either way (never silently
     /// sample-and-claim-verified). Slot holes — and any value hole the caller pins in `fixedArgs` —
     /// are held constant while the remaining value holes vary; `fixedArgs` must cover every slot hole
     /// (strict `apply` demands it). Each case is applied, validated against `reg`, and effect-audited;
-    /// the first failure is a reproducible counterexample. `'Node` is unconstrained.
+    /// the first failure is a reproducible counterexample and stops the run, and the coverage counts
+    /// the cases evaluated up to it — an enumeration stopped short of its last case is `Sampled`,
+    /// not `Exhaustive` (Phase 348). `'Node` is unconstrained.
     let verifyFunctionSymbolic
         (w: ArtifactWitness<'Node, 'Id>)
         (fn: 'Node)
@@ -388,9 +390,20 @@ module internal FunctionLaws =
                 |> Seq.tryPick (fun (i, combo) -> verifyCase w reg fn seed i (psetOf combo))
 
             // Under `enumerable` every hole is finite and the product is below the ceiling, so
-            // `spaceSize` is the exact case count the sequence enumerates.
+            // `spaceSize` is the exact case count the sequence enumerates. A counterexample stops
+            // the enumeration at its index (Phase 348): the report states the cases evaluated, and
+            // claims `Exhaustive` only when that is every case — a stop at the last one included.
+            let evaluated =
+                match cx with
+                | Some c -> c.Iteration + 1
+                | None -> int spaceSize
+
             { Verified = cx.IsNone
-              Coverage = Exhaustive(int spaceSize)
+              Coverage =
+                if int64 evaluated = spaceSize then
+                    Exhaustive evaluated
+                else
+                    Sampled(evaluated, Some(int spaceSize))
               Counterexample = cx }
         else
             // sampled — draw `maxCases` param-sets, each varying hole drawn from its domain.
@@ -410,8 +423,10 @@ module internal FunctionLaws =
                 cx <- verifyCase w reg fn seed i (psetOf valueArgs)
                 i <- i + 1
 
+            // `i` is the count drawn: `maxCases` (none for a negative one) unless a counterexample
+            // stopped the run first (Phase 348 — it reported the planned `maxCases` before).
             { Verified = cx.IsNone
-              Coverage = Sampled(maxCases, reportedSize)
+              Coverage = Sampled(i, reportedSize)
               Counterexample = cx }
 
     /// Render a counterexample as one readable line (Phase 48): the offending param-set

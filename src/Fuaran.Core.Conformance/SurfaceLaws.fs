@@ -521,7 +521,7 @@ module internal SurfaceLaws =
     /// it is `aiSurfaceLaws` as it stood before `0.32.0`). Per draw the kit rolls `Allow`,
     /// `NeedsApproval` or `Deny` itself, so every proposal arm is exercised for ANY policy — which
     /// certifies the proposal plumbing and says nothing about the domain's `Decide`, sampled here
-    /// only for totality. A policy that allows every write passes it. Run it beside `aiSurfaceLaws`
+    /// only for totality. A policy that allows every write passes it. Run it beside `aiSurfaceLawsAt`
     /// when the plumbing is the question, never instead of it.
     let aiSurfaceLawsUnderKitPolicy
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)

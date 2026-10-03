@@ -125,6 +125,16 @@ let functionLawTests =
                   results
                   "same seed ⇒ identical report" ]
 
+/// Phase 348 — the coverage a report must state: `Sampled` with the count actually evaluated when a
+/// counterexample stopped the run (its `Iteration + 1`), and the full count otherwise.
+let private expectSampled (what: string) (planned: int) (size: int option) (r: FunctionVerifyReport<RNode, string>) =
+    let evaluated =
+        match r.Counterexample with
+        | Some cx -> cx.Iteration + 1
+        | None -> planned
+
+    Expect.equal r.Coverage (Sampled(evaluated, size)) what
+
 /// A single-hole template: just a `count` over [lo, hi] — a small finite space for the symbolic mode.
 let private countOnly (lo, hi) =
     { RNode.node "ct" "template" [ RNode.hole "c" "field" "count" (ValueHole(IntRange(lo, hi))) ] with
@@ -180,17 +190,44 @@ let functionVerifyTests =
               let broken =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 10)) countReg Map.empty 100 7
 
-              Expect.equal broken.Coverage (Exhaustive 11) "11 ints in [0,10], the whole space"
+              // Phase 348 — the enumeration stops at 6, its seventh case: seven evaluated of eleven, and the
+              // report says so. It reported `Exhaustive 11` until then.
+              Expect.equal broken.Coverage (Sampled(7, Some 11)) "7 of the 11 ints in [0,10] evaluated, then stopped"
               Expect.isFalse broken.Verified "exhaustive enumeration finds the >5 values"
+
+          testCase "Phase 348 — both verifiers stopped early on one function report the count they evaluated"
+          <| fun _ ->
+              // The same broken function (a count over [0, 10] under the ≤5 rule) through both
+              // verifiers, each stopped by its first counterexample. Until Phase 348 the two reports
+              // disagreed about the same kind of run: `verifyFunction` said how many it drew, and
+              // `verifyFunctionSymbolic` claimed `Exhaustive 11` after evaluating seven.
+              let fn = countOnly (0, 10)
+              let sampled = Conformance.verifyFunction artw fn countReg genParamsFor 4242 200
+              let symbolic = Conformance.verifyFunctionSymbolic artw fn countReg Map.empty 100 7
+
+              for name, r, size in [ "verifyFunction", sampled, None; "verifyFunctionSymbolic", symbolic, Some 11 ] do
+                  match r.Counterexample with
+                  | None -> failtestf "%s: the probe needs a run a counterexample stops" name
+                  | Some cx ->
+                      Expect.equal r.Coverage (Sampled(cx.Iteration + 1, size)) (sprintf "%s: the count evaluated" name)
+
+              match symbolic.Coverage with
+              | Exhaustive _ -> failtest "an enumeration stopped early claims no exhaustion"
+              | Sampled _ -> ()
+
+              // A stop AT the last case is still every case: [5, 6] fails only at 6, its last value.
+              let atLast =
+                  Conformance.verifyFunctionSymbolic artw (countOnly (5, 6)) countReg Map.empty 100 7
+
+              Expect.isFalse atLast.Verified "6 breaks the rule"
+              Expect.equal atLast.Coverage (Exhaustive 2) "both cases evaluated, so the enumeration was exhaustive"
 
           testCase "symbolic mode samples a large space with the coverage reported (coverage honesty)"
           <| fun _ ->
               let report =
                   Conformance.verifyFunctionSymbolic artw (countOnly (0, 100000)) countReg Map.empty 50 7
 
-              match report.Coverage with
-              | Sampled(50, Some 100001) -> ()
-              | other -> failtestf "expected Sampled(50, Some 100001), got %A" other
+              expectSampled "a sample of the 100,001-value space, the count drawn" 50 (Some 100001) report
 
           // Phase 297 — the space size is an int64 product that saturates, so a multi-hole space too
           // large for an `int` can neither wrap into an exhaustive enumeration nor be misreported.
@@ -207,9 +244,7 @@ let functionVerifyTests =
               let fits =
                   Conformance.verifyFunctionSymbolic artw (holes 4 (0, 99)) countReg Map.empty 50 7
 
-              match fits.Coverage with
-              | Sampled(50, Some 100000000) -> ()
-              | other -> failtestf "four holes of 100: expected Sampled(50, Some 100000000), got %A" other
+              expectSampled "four holes of 100: sampled, the size exact" 50 (Some 100000000) fits
 
               // 1000^4 = 10^12: as an unchecked `int` product this wrapped to a negative number, which
               // passed `<= maxCases` and materialised the full cartesian product. It samples now, and
@@ -217,9 +252,7 @@ let functionVerifyTests =
               let wraps =
                   Conformance.verifyFunctionSymbolic artw (holes 4 (0, 999)) countReg Map.empty 50 7
 
-              match wraps.Coverage with
-              | Sampled(50, None) -> ()
-              | other -> failtestf "four holes of 1,000: expected Sampled(50, None), got %A" other
+              expectSampled "four holes of 1,000: sampled, the size unknown" 50 None wraps
 
               Expect.isFalse wraps.Verified "values above five are drawn, and the validator catches one"
 

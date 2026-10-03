@@ -170,6 +170,35 @@ let private adversarial: (string * string * Idl) list =
       "field 'kind' is reserved",
       { small with
           NodeFields = [ f "kind" TStr Optional ] }
+      // Phase 348 — a field named for a member every JavaScript object carries: `__proto__` sets
+      // the prototype in a generated host's object literal, and an absent optional member of the
+      // others reads the inherited function. Refused in every position a field is declared.
+      "a kind field named __proto__",
+      "field '__proto__' is reserved",
+      small |> withKinds [ kind "Bad" [ f "__proto__" TStr Optional ] ]
+      "a record field named constructor",
+      "field 'constructor' is reserved",
+      { small with
+          Records =
+              small.Records
+              @ [ { Name = "Ctor"
+                    Fields = [ f "constructor" TStr Optional ] } ] }
+      "a union case field named toString",
+      "field 'toString' is reserved",
+      { small with
+          Unions =
+              small.Unions
+              @ [ { Name = "Shown"
+                    Params = []
+                    Cases = [ case "One" [ f "toString" TStr Required ] ] } ] }
+      "an envelope field named valueOf",
+      "field 'valueOf' is reserved",
+      { small with
+          NodeFields = [ f "valueOf" TStr Optional ] }
+      "an op field named hasOwnProperty",
+      "field 'hasOwnProperty' is reserved",
+      { small with
+          Ops = [ kind "Touch" [ f "hasOwnProperty" TStr Required ] ] }
       "an ill-formed wire string",
       "ill-formed UTF-16",
       { small with
@@ -208,6 +237,18 @@ let declareErrorsTests =
                   Expect.isTrue
                       (errs |> List.exists (fun e -> e.Contains fragment))
                       (sprintf "%s: an error names '%s' — got %A" name fragment errs)
+          }
+
+          test "Phase 348 — a field named prototype is admitted: a plain object inherits no such member" {
+              // The other half of the inherited-name rule (DECISIONS.md D114): `prototype` measured
+              // clean through the generated TypeScript host on every path, so it is not refused.
+              Expect.isEmpty
+                  (Declare.errors (small |> withKinds [ kind "Proto" [ f "prototype" TStr Optional ] ]))
+                  "prototype"
+
+              Expect.isEmpty
+                  (Declare.errors (small |> withKinds [ kind "Under" [ f "_proto_" TStr Optional ] ]))
+                  "a name that only resembles one"
           }
 
           test "a zero-field kind and a zero-field record are well-formed, and the artifact carries them" {

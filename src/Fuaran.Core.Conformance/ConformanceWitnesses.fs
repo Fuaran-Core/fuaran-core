@@ -245,21 +245,26 @@ type VerifyCounterexample<'Node, 'Id> =
         /// reproduces the whole run.
         Seed: int
         /// The 0-based index of the failing param-set: its draw within the run, or its position
-        /// in the enumeration when coverage is `Exhaustive`.
+        /// in the enumeration when the space was enumerated. The run stops here, so the report's
+        /// coverage counts `Iteration + 1` cases evaluated.
         Iteration: int
     }
 
-/// How the param space was covered — coverage honesty (never silently sample-and-claim-verified):
-/// the whole finite space was enumerated (`Exhaustive`), or a sample of `drawn` cases was taken
-/// from a space of `SpaceSize` (`None` = unbounded: a hole ranges over `FloatRange` / `StringLen`
-/// / `AnyString`).
+/// How the param space was covered — coverage honesty (never silently sample-and-claim-verified).
+/// A report states what was EVALUATED, never what was planned (Phase 348): `Exhaustive` when every
+/// case of a finite space was evaluated, `Sampled` otherwise — a run that stopped early included.
 type VerifyCoverage =
-    /// Every combination of the finite hole domains was enumerated; `cases` is the size of that
-    /// product, reported even when a counterexample stopped the enumeration early.
+    /// Every combination of the finite hole domains was evaluated; `cases` is the size of that
+    /// product, which is the count evaluated. Only `verifyFunctionSymbolic` reports it, and only
+    /// when the enumeration reached its last case — a counterexample AT the last case included.
     | Exhaustive of cases: int
-    /// A sample was drawn: `drawn` is the planned sample size under `verifyFunctionSymbolic` and
-    /// the count actually drawn under `verifyFunction`; `spaceSize` is `None` when the space is
-    /// unbounded, too large for an `int`, or (under `verifyFunction`) not known.
+    /// Fewer cases than the whole space were evaluated, or the space is not known to be finite:
+    /// `drawn` is the count of cases actually evaluated, under both verifiers — a counterexample
+    /// stops the run, so it is the counterexample's `Iteration + 1` when there is one. The cases are
+    /// draws, or, when `verifyFunctionSymbolic` stopped an enumeration early, the enumeration's
+    /// first `drawn` cases in order. `spaceSize` is the size of the space they came from: `None`
+    /// when the space is unbounded (a hole ranges over `FloatRange` / `StringLen` / `AnyString`),
+    /// too large for an `int`, or (under `verifyFunction`, whose generator is opaque) not known.
     | Sampled of drawn: int * spaceSize: int option
 
 /// The verification verdict: certified across the covered param space, or a counterexample.

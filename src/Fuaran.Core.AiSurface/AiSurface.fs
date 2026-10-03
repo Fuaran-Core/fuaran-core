@@ -40,7 +40,7 @@ namespace Fuaran.Core
 
 /// A named read-only projection over the domain artifact — rendered as a
 /// canonical wire `JVal` so a host serves the answer without a serializer
-/// dependency. Idempotent and side-effect-free by contract (`aiSurfaceLaws`
+/// dependency. Idempotent and side-effect-free by contract (`Conformance.aiSurfaceLawsAt`
 /// samples it); the projection body is domain-supplied — typically a compact
 /// `Fuaran.Core.Projection` scoped read (Phase 58) or a domain AiTools
 /// projection (outline / index / unbound-reference queries).
@@ -88,7 +88,7 @@ type Intent =
 /// matches against (literal segments; a `{...}` span is a wildcard), and the
 /// domain's typed emission — args in, canonical op list out. The emission body
 /// (the pattern *content*) stays domain-side; the core owns only matching and
-/// resolution discipline. `Emit` must be deterministic (`aiSurfaceLaws` checks).
+/// resolution discipline. `Emit` must be deterministic (`Conformance.aiSurfaceLawsAt` checks).
 type PatternCard<'Op> =
     {
         /// The pattern's stable identifier, served in the catalogue; resolution never reads it.
@@ -232,7 +232,7 @@ module PatternBank =
     /// The literal segments of an anchor: a `{...}` span is a wildcard, so
     /// `"look up {key}"` yields `[ "look up " ]`. An unterminated `{` treats
     /// the rest as consumed (defensive — anchors are domain-authored). An anchor
-    /// with NO literal segment matches every intent (`aiSurfaceLaws` refuses one,
+    /// with NO literal segment matches every intent (`Conformance.aiSurfaceLawsAt` refuses one,
     /// Phase 298).
     let literalSegments (anchor: string) : string list =
         let rec go (rest: string) (acc: string list) =

@@ -13,7 +13,7 @@
        `signatureExcluding`, `isTotal`, the private `guardTotal` / `validateArg` / `bindArgs` and
        the `apply` / `curry` that are its two faces, `compose`, `composedEffect`, `observedEffect`
        and `auditEffect`;
-     - the CAPABILITY SEAM: `Capability.create` / `validateArgs` / `invoke`, `Registry.empty` /
+     - the CAPABILITY SEAM: `Capability.create` / `validateArgs` / `invoke`, `CapabilityRegistry.empty` /
        `register` / `tryFind` / `enumerate` / `dispatch`, the seven-case `InvokeError`, and — since
        Phase 210 — the `Deferred<'T>` envelope the host body answers in. The envelope's three cases
        are modelled; its COMBINATORS (`Deferred.map` / `bind` / `toResult` / `tryValue`) are not,
@@ -33,7 +33,7 @@
 
    WHAT IS PROVED, over any witness, any readers, any registry and any host body:
 
-     - `unregistered_refused` — `Registry.dispatch` of an id the registry does not hold is the
+     - `unregistered_refused` — `CapabilityRegistry.dispatch` of an id the registry does not hold is the
        typed refusal `NoSuchCapability id known`, and the result is the SAME for every host body,
        which is what "runs no handler" means without instrumenting one.
      - `validate_before_invoke` — an argument set `validateArgs` rejects makes `invoke` return
@@ -83,7 +83,7 @@
    slot's inner tree is where `compose` put it — which is the witness contract
    (`lawful-abstract-witness`). Anything about the two lexical parsers or a float range beyond
    the envelope the readers premise states (`capability-scalar-readers-abstract`). The ORDER
-   `Registry.enumerate` returns — production's `Map` sorts by id, the model holds a finite map
+   `CapabilityRegistry.enumerate` returns — production's `Map` sorts by id, the model holds a finite map
    as a list, and the theorem is about membership. Whether two distinct capture-key pre-images
    HASH apart (a claim about FNV-1a). `CapabilityCodec`, the
    `FunctionRegistry`, `ContentPack` and `CapabilityPipeline` surfaces, and `applyMemo`.
@@ -771,7 +771,7 @@ let audit_effect (#node:Type) (w:witness node) (n:node) : Tot (outcome unit (eff
 
 (* ======================================================================================
    5. The capability seam — `Capability`, `Capability.create` / `validateArgs` / `invoke`,
-      `CapabilityRegistry`, `Registry.empty` / `register` / `tryFind` / `enumerate` / `dispatch`.
+      `CapabilityRegistry` and its `empty` / `register` / `tryFind` / `enumerate` / `dispatch`.
    ====================================================================================== *)
 
 (* F#: `IslandKind`. *)
@@ -900,7 +900,7 @@ let invoke (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> de
 (* F#: `CapabilityRegistry` — a `Map<string, Capability>` keyed by `Id`, read as a finite map. *)
 type registry = { capabilities: list capability }
 
-(* F#: `Registry.empty`. *)
+(* F#: `CapabilityRegistry.empty`. *)
 let empty : registry = { capabilities = [] }
 
 (* F#: `Map.tryFind id r.Capabilities`. *)
@@ -934,14 +934,14 @@ let register (rd:readers) (c:capability) (r:registry) : Tot (outcome registry in
       | Some f -> Error (IllFormedCapability c.c_id f)
       | None -> Ok { capabilities = c :: r.capabilities }
 
-(* F#: `Registry.tryFind`. *)
+(* F#: `CapabilityRegistry.tryFind`. *)
 let try_find_cap (id:string) (r:registry) : Tot (option capability) = find_cap id r.capabilities
 
-(* F#: `Registry.enumerate` — the discovery surface. Production sorts by id; the model returns
+(* F#: `CapabilityRegistry.enumerate` — the discovery surface. Production sorts by id; the model returns
    the map's entries, and the theorem below is about membership. *)
 let enumerate (r:registry) : Tot (list capability) = r.capabilities
 
-(* F#: `Registry.dispatch` — resolve the id (default-deny), then `Capability.invoke`. *)
+(* F#: `CapabilityRegistry.dispatch` — resolve the id (default-deny), then `Capability.invoke`. *)
 let dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
              (body:capability -> unit -> deferred v)
   : Tot (outcome (deferred v) invoke_error) =
@@ -959,7 +959,7 @@ let rec find_cap_mem (id:string) (cs:list capability)
     | [] -> ()
     | _ :: t -> find_cap_mem id t
 
-(* THE FIRST THEOREM. F#: `Registry.dispatch` on an id the registry does not hold. The refusal is
+(* THE FIRST THEOREM. F#: `CapabilityRegistry.dispatch` on an id the registry does not hold. The refusal is
    the typed `NoSuchCapability`, naming the id and every id it does hold — and the result is the
    same under EVERY host body, which is what "runs no handler" means for a pure function. *)
 let unregistered_refused (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
@@ -1233,7 +1233,7 @@ let slot_scalar_uninvocable (rd:readers) (c:capability) (h:sig_entry) (sc:option
    8. THE THIRD THEOREM — what is enumerable is exactly what is dispatchable.
    ====================================================================================== *)
 
-(* THE THIRD THEOREM. F#: `Registry.enumerate` and `Registry.tryFind` read the same map. An id is
+(* THE THIRD THEOREM. F#: `CapabilityRegistry.enumerate` and `CapabilityRegistry.tryFind` read the same map. An id is
    in the enumeration exactly when `tryFind` resolves it — no hidden entry, no phantom one. *)
 let enumerate_is_registry (r:registry) (id:string)
   : Lemma (mem id (ids (enumerate r)) <==> Some? (try_find_cap id r))

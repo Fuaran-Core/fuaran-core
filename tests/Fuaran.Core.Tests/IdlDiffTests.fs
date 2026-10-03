@@ -620,6 +620,39 @@ let tests =
                   Expect.isFalse (text.Contains "codec: fuaran") "no default roster"
               | Error e -> failtestf "idl-diff: %s" e
 
+          testCase "Phase 348 — `run` is `runWith` with no support documents, on every roster source"
+          <| fun _ ->
+              // One place resolves the roster. `run` carried a copy of it until Phase 348; the
+              // copies agreed, and this pins that the two entries cannot drift apart again: the
+              // same report, or the same refusal, for each way a manifest can name a roster.
+              let after =
+                  { oneKind with
+                      Kinds = oneKind.Kinds @ [ kind "Badge" [ f "label" TStr Required ] ] }
+
+              let withHosts =
+                  Canon.render (
+                      JObj
+                          [ "hosts",
+                            JArr [ JObj [ "id", JStr "fuaran-zig"; "language", JStr "Zig"; "role", JStr "codec" ] ] ]
+                  )
+
+              let manifests =
+                  [ None
+                    Some(Canon.render (JObj [ "kinds", JArr [] ]))
+                    Some withHosts
+                    Some "not json" ]
+
+              for m in manifests do
+                  for before, afterText in [ art oneKind, art after; art oneKind, "{"; "{", art after ] do
+                      Expect.equal
+                          (Diff.run m before afterText)
+                          (Diff.runWith m before afterText None None)
+                          (sprintf "run and runWith agree (manifest %A)" m)
+
+              match Diff.run (Some withHosts) (art oneKind) (art after) with
+              | Ok text -> Expect.stringContains text "codec: fuaran-zig (Zig)" "the probe compared a real report"
+              | Error e -> failtestf "idl-diff: %s" e
+
           testCase "the UI tier's rows follow its reference host, passed explicitly"
           <| fun _ ->
               let after =

@@ -1328,14 +1328,16 @@ module Encode =
                     | NodeEnvelopeShape.FlatKind ->
                         Ok(JObj((idl.Wire.Discriminator, JStr kindTag) :: ("id", JStr id) :: (kindFs @ envFs)))
 
+    /// A value of `t` as its canonical `JVal` — what the sampler draws a hosted slot's
+    /// declared wire form through (Phase 252), so the drawn JSON is exactly what the
+    /// interpreter would write for that type, and what `Declare.errors` checks a declared
+    /// default against.
+    let internal valueJson (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> = encodeValue idl t v
+
     /// The declared canonical renderer (Phase 111): Ordinal-sorted by default,
     /// authored order under `KeyOrder.Declared` — where the encoder's own
     /// construction order (discriminator, id, declared fields) is normative.
-    /// A value of `t` as its canonical `JVal` — what the sampler draws a hosted slot's
-    /// declared wire form through (Phase 252), so the drawn JSON is exactly what the
-    /// interpreter would write for that type.
-    let internal valueJson (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> = encodeValue idl t v
-
+    ///
     /// The guarded render (Phase 292): the declared key order, with the refusal
     /// `Canon.tryRender` makes for a string that is not well-formed UTF-16 — a lone
     /// surrogate has no UTF-8 encoding, so its bytes would be some other string's, and the
@@ -2001,6 +2003,31 @@ module Declare =
     /// bytes, and no spelling in an F# or F* literal.
     let private illFormed (s: string) : bool = not (SourceLit.isWellFormed s)
 
+    /// The field names no vocabulary may declare (Phase 348, DECISIONS.md D114): every name a
+    /// JavaScript object carries before anything is written to it — `Object.prototype`'s own
+    /// members, `__proto__` among them. A generated TypeScript host holds a node, a spec, a
+    /// record and a union case as plain objects, so a field of one of these names is not data
+    /// there: `__proto__` written in an object literal SETS the prototype (the member is never
+    /// held, and the encoder reads the prototype back), and an absent optional member of any
+    /// other reads as the inherited function (the encoder then throws). The rule is the IDL's,
+    /// so it binds every host: a vocabulary is one document, and a name one host cannot carry
+    /// is a name the vocabulary does not have. `prototype` is NOT here — a plain object has no
+    /// such member to inherit, and it measured clean on every path.
+    let private inheritedMemberNames: Set<string> =
+        set
+            [ "__proto__"
+              "__defineGetter__"
+              "__defineSetter__"
+              "__lookupGetter__"
+              "__lookupSetter__"
+              "constructor"
+              "hasOwnProperty"
+              "isPrototypeOf"
+              "propertyIsEnumerable"
+              "toLocaleString"
+              "toString"
+              "valueOf" ]
+
     /// Whether `s` carries a control character or a line break (U+0085, U+2028, U+2029
     /// included) — what a single-line slot spliced into a comment must not carry.
     let private controlOrBreak (s: string) : bool =
@@ -2050,6 +2077,8 @@ module Declare =
     /// - **the envelope** — `id` is reserved in every shape and `kind` beside it under
     ///   [[NodeEnvelopeShape.NestedKind]], where an envelope field of either name emitted a
     ///   duplicate key or an undecodable node;
+    /// - **inherited member names** (Phase 348) — no field anywhere is named `__proto__` or
+    ///   any other member every JavaScript object carries (`constructor`, `toString`, …);
     /// - **text** — every emitted NAME is an identifier; a category and a deprecation's
     ///   replacement, message and version are single-line text; and no declared string is
     ///   ill-formed UTF-16. A `Doc` (Phase 255) is free prose and may span lines.
@@ -2147,6 +2176,13 @@ module Declare =
 
         let fieldErrors (owner: string) (pars: string list) (fields: IdlField list) : string list =
             [ yield! nameErrors (owner + ": field") (fields |> List.map (fun f -> f.Name))
+
+              for f in fields do
+                  if inheritedMemberNames.Contains f.Name then
+                      sprintf
+                          "%s: field '%s' is reserved — every JavaScript object already carries a member of that name, so a generated TypeScript host cannot hold it as data"
+                          owner
+                          f.Name
 
               for f in fields do
                   let at = sprintf "%s, field '%s'" owner f.Name
