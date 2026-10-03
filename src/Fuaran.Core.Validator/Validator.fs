@@ -63,14 +63,17 @@ module Defect =
     /// `d` attributed to `family` — what every walker does to a rule's output.
     let inFamily (family: string) (d: Defect<'Id>) : Defect<'Id> = { d with Family = family }
 
-/// Why a rule could not be registered (Phase 298): the id is already registered. `registered`
-/// enumerates the ids the registry holds, in registration order, so the refusal names the closed
-/// set (GP5).
+/// Why a rule registry refused an edit (Phase 298): the id is already registered, or (Phase 316)
+/// it is not. `registered` enumerates the ids the registry holds, in registration order, so the
+/// refusal names the closed set (GP5).
 [<RequireQualifiedAccess>]
 type RegistrationError =
     /// `id` is already registered; `registered` lists every id the registry holds, in
     /// registration order.
     | DuplicateRule of id: string * registered: string list
+    /// `id` is not registered (Phase 316: `unregister` / `replace` name a family the registry does
+    /// not hold); `registered` lists every id the registry holds, in registration order.
+    | UnknownRule of id: string * registered: string list
 
 /// A registered rule family — a named bundle of checks the walker runs over a tree.
 /// The framework owns registration + walking; the rule *body* is domain-supplied.
@@ -147,6 +150,57 @@ module Validator =
             Ok
                 { reg with
                     Families = reg.Families @ [ family ] }
+
+    // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
+    //
+    // The same four verbs the invocable seams' registries carry, with the same refusals in this
+    // registry's own vocabulary. They keep REGISTRATION order, which is the order `runAll` runs the
+    // families and reports their findings in — the one way this registry differs from the three
+    // id-keyed ones, and the reason it does not share their id-ordered helper.
+
+    /// Remove the family registered under `id`, keeping the others in order — refused `UnknownRule`
+    /// when the registry does not hold it, naming every id it does hold. Removing a family just
+    /// registered gives back the registry it was registered into.
+    let unregister (id: string) (reg: RuleRegistry<'Node, 'Id>) : Result<RuleRegistry<'Node, 'Id>, RegistrationError> =
+        if reg.Families |> List.exists (fun f -> f.Id = id) then
+            Ok
+                { reg with
+                    Families = reg.Families |> List.filter (fun f -> f.Id <> id) }
+        else
+            Error(RegistrationError.UnknownRule(id, enumerate reg))
+
+    /// Swap the family registered under `family.Id` for `family`, in the same position — refused
+    /// `UnknownRule` when the id is not registered.
+    let replace
+        (family: RuleFamily<'Node, 'Id>)
+        (reg: RuleRegistry<'Node, 'Id>)
+        : Result<RuleRegistry<'Node, 'Id>, RegistrationError> =
+        if reg.Families |> List.exists (fun f -> f.Id = family.Id) then
+            Ok
+                { reg with
+                    Families = reg.Families |> List.map (fun f -> if f.Id = family.Id then family else f) }
+        else
+            Error(RegistrationError.UnknownRule(family.Id, enumerate reg))
+
+    /// The registry narrowed to the families whose id is in `keep`, in their registration order. An
+    /// id in `keep` the registry does not hold is ignored, so the result enumerates a subsequence of
+    /// what `reg` enumerates.
+    let restrict (keep: Set<string>) (reg: RuleRegistry<'Node, 'Id>) : RuleRegistry<'Node, 'Id> =
+        { reg with
+            Families = reg.Families |> List.filter (fun f -> keep.Contains f.Id) }
+
+    /// `a`'s families then `b`'s, each in its own order — refused `DuplicateRule` naming the first of
+    /// `b`'s ids, in `b`'s order, that `a` also holds (and `a`'s ids), so no family runs twice under
+    /// one provenance id. Associative.
+    let union
+        (a: RuleRegistry<'Node, 'Id>)
+        (b: RuleRegistry<'Node, 'Id>)
+        : Result<RuleRegistry<'Node, 'Id>, RegistrationError> =
+        let held = enumerate a |> Set.ofList
+
+        match b.Families |> List.tryFind (fun f -> held.Contains f.Id) with
+        | Some f -> Error(RegistrationError.DuplicateRule(f.Id, enumerate a))
+        | None -> Ok { Families = a.Families @ b.Families }
 
     /// A registry holding `families` in order — `register` folded from `empty`, refusing the first
     /// repeated id.

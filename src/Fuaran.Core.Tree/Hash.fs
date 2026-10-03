@@ -130,6 +130,8 @@ module Hash =
     /// the encoding. Two of Phase 225's three were the first entries; the rest joined in Phase 290
     /// (until then they joined on the bare separator, which a value can spell).
     ///   - `Query.invocationKey`
+    ///   - `Query.invocationKeyPage` (Phase 316: `Query.invocationKey`'s fields behind a page triple —
+    ///     an empty name, the tag `p` no cell carries, the page token)
     ///   - `Capability.invocationKey`
     ///   - `CapabilityPipeline.nodeInvocationKey`
     ///   - `Function.memoKey`

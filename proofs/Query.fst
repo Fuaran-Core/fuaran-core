@@ -45,6 +45,17 @@
        sharing an id, and two argument lists binding the same names to the same cells in ANY
        order, key identically. That the key reads no resolver answer and no clock is its TYPE —
        it is handed neither — and is said here rather than dressed as a lemma.
+     - (Phase 316) `register_refuses_duplicate_params` — the registry refuses a declaration naming
+       a parameter twice, so every query a registry built by `register` holds has distinct names
+       (`register_keeps_params_distinct`) and `all_null_refusal_exact`'s premise is DISCHARGED for
+       every registered query (`registered_all_null_refusal_exact`) rather than assumed;
+       `invocation_key_page_injective` — the PAGE key's pre-image is injective over the pair
+       (argument set, page token), so distinct tokens give distinct pre-images and the first page
+       keys exactly as `invocationKey` (`invocation_key_page_none`); `dispatch_page_is_dispatch`
+       carries every dispatch theorem to the paged verb; and the lifecycle — `unregister` undoes a
+       registration (`unregister_register`), refuses an id not held (`unregister_refuses_unheld`),
+       `restrict` keeps exactly the ids kept (`restrict_members`), and `union` refuses a shared id
+       and otherwise holds exactly the ids of both (`union_members`).
      - `invocation_key_injective` (Phase 225) — the capture key's pre-image is INJECTIVE: two
        argument lists with one name-sorted canonical string are one sorted list and hold the same
        bindings, so distinct argument sets have distinct pre-images. It is proved over a reading
@@ -445,11 +456,16 @@ let rec ids (qs:list query) : Tot (list string) =
   | [] -> []
   | q :: t -> q.q_id :: ids t
 
-(* F#: `QueryRegistry.register` — additive, no silent overwrite. *)
+(* F#: `QueryRegistry.register` — additive, no silent overwrite, and (Phase 316) only a declaration
+   whose parameter names are distinct: the id is checked first, then the first repeated name is
+   refused `DuplicateParam` (production's `admissionFault`, through `Capability.repeatedAddrs`). *)
 let register (q:query) (r:registry) : Tot (outcome registry query_error) =
   match find_query q.q_id r.queries with
   | Some _ -> Error (DuplicateQuery q.q_id)
-  | None -> Ok { queries = q :: r.queries }
+  | None ->
+    match repeated [] (param_names q.q_params) with
+    | d :: _ -> Error (DuplicateParam d)
+    | [] -> Ok { queries = q :: r.queries }
 
 (* F#: `QueryRegistry.tryFind`. *)
 let try_find_query (id:string) (r:registry) : Tot (option query) = find_query id r.queries
@@ -697,7 +713,7 @@ let register_refuses_duplicate (q:query) (r:registry)
   = find_query_mem q.q_id r.queries
 
 let register_extends (q:query) (r:registry)
-  : Lemma (requires not (mem q.q_id (ids (enumerate r))))
+  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ repeated [] (param_names q.q_params) == [])
           (ensures register q r == Ok { queries = q :: r.queries } /\
                    (forall (id:string). mem id (ids (q :: r.queries)) <==> (id = q.q_id \/ mem id (ids (enumerate r)))))
   = find_query_mem q.q_id r.queries
@@ -1216,6 +1232,235 @@ let collision_one : arguments = [ ("a", Str "1b=s2") ]
 let collision_two : arguments = [ ("a", Str "1"); ("b", Str "2") ]
 
 (* ======================================================================================
+   10. PHASE 316 — the registry discharges the distinct-names premise; the page key; the
+       lifecycle. A registry is a lattice, not an append log.
+   ====================================================================================== *)
+
+(* `register` refuses a fresh declaration that names a parameter twice, naming the first repeat. *)
+let register_refuses_duplicate_params (q:query) (r:registry)
+  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ Cons? (repeated [] (param_names q.q_params)))
+          (ensures register q r == Error (DuplicateParam (Cons?.hd (repeated [] (param_names q.q_params)))))
+  = find_query_mem q.q_id r.queries
+
+(* Every declaration the list holds names its parameters once. *)
+let rec params_distinct (qs:list query) : Tot bool =
+  match qs with
+  | [] -> true
+  | q :: t -> Nil? (repeated [] (param_names q.q_params)) && params_distinct t
+
+(* The invariant `empty` starts and `register` keeps. *)
+let register_keeps_params_distinct (q:query) (r r':registry)
+  : Lemma (requires params_distinct r.queries /\ register q r == Ok r')
+          (ensures params_distinct r'.queries)
+  = ()
+
+let rec find_query_params_distinct (id:string) (qs:list query)
+  : Lemma (requires params_distinct qs)
+          (ensures (match find_query id qs with
+                    | Some q -> repeated [] (param_names q.q_params) == []
+                    | None -> True))
+  = match qs with
+    | [] -> ()
+    | _ :: t -> find_query_params_distinct id t
+
+(* THE DISCHARGE. `all_null_refusal_exact` is stated over distinct names; a query a registry built
+   by `register` resolves HAS distinct names, so the exact refusal of its all-`Null` set holds of
+   every registered query with no premise left about the declaration. *)
+let registered_all_null_refusal_exact (r:registry) (id:string)
+  : Lemma (requires params_distinct r.queries)
+          (ensures (match try_find_query id r with
+                    | Some q ->
+                      validate_params q (nulls_of q.q_params) ==
+                      (match required_names q.q_params with
+                       | [] -> Ok ()
+                       | n -> Error (RequiredParamsNull n))
+                    | None -> True))
+  = find_query_params_distinct id r.queries;
+    match try_find_query id r with
+    | Some q -> all_null_refusal_exact q
+    | None -> ()
+
+(* F#: `Query.invocationKeyPage`'s pre-image fields — for the first page the arguments' fields
+   alone, otherwise the page triple (an empty name, the tag `p` no cell carries, the token) in
+   front of them. *)
+let page_fields (rn:renderers) (tok:option string) (l:arguments) : Tot (list string) =
+  match tok with
+  | None -> arg_fields rn l
+  | Some t -> "" :: "p" :: t :: arg_fields rn l
+
+(* F#: `Hash.canonicalFields` over the page fields. *)
+let canonical_page (rn:renderers) (tok:option string) (l:arguments) : Tot string =
+  fields rn (page_fields rn tok l)
+
+(* F#: `Query.invocationKeyPage`. *)
+let invocation_key_page (rn:renderers) (q:query) (a:arguments) (tok:option string) : Tot string =
+  q.q_id ^ "#" ^ rn.hash (canonical_page rn tok (sort_args rn a))
+
+(* The first page keys exactly as `invocationKey`, so a journal keyed before paging still replays. *)
+let invocation_key_page_none (rn:renderers) (q:query) (a:arguments)
+  : Lemma (invocation_key_page rn q a None == invocation_key rn q a)
+  = ()
+
+(* No cell's tag is the page tag — which is what keeps a page triple from reading as a binding. *)
+let cell_tag_not_page (c:cell) : Lemma (cell_tag c <> "p") = ()
+
+(* The page fields determine the token and the argument list. *)
+let page_fields_injective (rn:renderers) (t1 t2:option string) (a1 a2:arguments)
+  : Lemma (requires injective rn.render_int /\ injective rn.render_float /\
+                    page_fields rn t1 a1 == page_fields rn t2 a2)
+          (ensures t1 == t2 /\ a1 == a2)
+  = match t1, t2 with
+    | None, None -> arg_fields_injective rn a1 a2
+    | Some _, Some _ -> arg_fields_injective rn a1 a2
+    | None, Some _ ->
+      (match a1 with
+       | [] -> ()
+       | (_, v) :: _ -> cell_tag_not_page v)
+    | Some _, None ->
+      (match a2 with
+       | [] -> ()
+       | (_, v) :: _ -> cell_tag_not_page v)
+
+(* THE PAGE KEY'S INJECTIVITY (Phase 316, extending 225's). Two (argument set, token) pairs whose
+   page pre-images agree hold the SAME token and the same bindings — so a paged query captured page
+   by page keys every page apart, and replay of page n reads page n's capture. Conditional exactly
+   as `invocation_key_injective` is, on `key_premises`; whether two distinct pre-images HASH apart
+   is a claim about FNV-1a and is not made. *)
+let invocation_key_page_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+  (a a':arguments) (tok tok':option string)
+  : Lemma (requires key_premises reveal e t rn /\
+                    canonical_page rn tok (sort_args rn a) == canonical_page rn tok' (sort_args rn a'))
+          (ensures tok == tok' /\ sort_args rn a == sort_args rn a' /\
+                   (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  fields_injective reveal e t rn (page_fields rn tok (sort_args rn a)) (page_fields rn tok' (sort_args rn a'));
+  page_fields_injective rn tok tok' (sort_args rn a) (sort_args rn a');
+  let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
+    sort_mem rn a x; sort_mem rn a' x
+  in
+  FStar.Classical.forall_intro aux
+
+(* The law a host reads: distinct tokens give distinct pre-images, whatever the arguments. *)
+let distinct_tokens_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+  (rn:renderers) (a a':arguments) (tok tok':option string)
+  : Lemma (requires key_premises reveal e t rn /\ ~(tok == tok'))
+          (ensures ~(canonical_page rn tok (sort_args rn a) == canonical_page rn tok' (sort_args rn a')))
+  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn a a' tok) tok'
+
+(* F#: `Query.invokePage` — `invoke`, with the token handed to the resolver. *)
+let invoke_page (#v:Type) (q:query) (a:arguments) (tok:option string)
+  (resolve:query -> option string -> deferred v) : Tot (outcome (deferred v) query_error) =
+  invoke q a (fun q -> resolve q tok)
+
+(* F#: `QueryRegistry.dispatchPage`. *)
+let dispatch_page (#v:Type) (r:registry) (id:string) (a:arguments) (tok:option string)
+  (resolve:query -> option string -> deferred v) : Tot (outcome (deferred v) query_error) =
+  match find_query id r.queries with
+  | None -> Error (NoSuchQuery id (ids r.queries))
+  | Some q -> invoke_page q a tok resolve
+
+(* The paged dispatch IS a dispatch, under the resolver that reads the token: default-deny,
+   validation first and the three outcomes all carry over unchanged. *)
+let dispatch_page_is_dispatch (#v:Type) (r:registry) (id:string) (a:arguments) (tok:option string)
+  (resolve:query -> option string -> deferred v)
+  : Lemma (dispatch_page r id a tok resolve == dispatch r id a (fun q -> resolve q tok))
+  = ()
+
+(* F#: `QueryRegistry.unregister` — the declaration under `id` removed, or `NoSuchQuery`. *)
+let rec remove_query (id:string) (qs:list query) : Tot (list query) =
+  match qs with
+  | [] -> []
+  | q :: t -> if q.q_id = id then remove_query id t else q :: remove_query id t
+
+let unregister (id:string) (r:registry) : Tot (outcome registry query_error) =
+  match find_query id r.queries with
+  | None -> Error (NoSuchQuery id (ids r.queries))
+  | Some _ -> Ok { queries = remove_query id r.queries }
+
+let rec remove_absent (id:string) (qs:list query)
+  : Lemma (requires not (mem id (ids qs))) (ensures remove_query id qs == qs)
+  = match qs with
+    | [] -> ()
+    | _ :: t -> remove_absent id t
+
+(* `unregister` undoes a registration: what it gives back holds exactly what the registry held
+   before. *)
+let unregister_register (q:query) (r r':registry)
+  : Lemma (requires register q r == Ok r')
+          (ensures (match unregister q.q_id r' with
+                    | Ok r'' -> r''.queries == r.queries
+                    | Error _ -> False))
+  = find_query_mem q.q_id r.queries;
+    remove_absent q.q_id r.queries
+
+(* And refuses an id the registry does not hold, naming every id it holds. *)
+let unregister_refuses_unheld (id:string) (r:registry)
+  : Lemma (requires not (mem id (ids (enumerate r))))
+          (ensures unregister id r == Error (NoSuchQuery id (ids r.queries)))
+  = find_query_mem id r.queries
+
+(* F#: `QueryRegistry.restrict` — the declarations whose id is kept. *)
+let rec keep_queries (keep:list string) (qs:list query) : Tot (list query) =
+  match qs with
+  | [] -> []
+  | q :: t -> if mem q.q_id keep then q :: keep_queries keep t else keep_queries keep t
+
+let restrict (keep:list string) (r:registry) : Tot registry = { queries = keep_queries keep r.queries }
+
+(* `restrict` keeps exactly the held ids that are kept — never widening. *)
+let rec restrict_members_list (keep:list string) (qs:list query) (id:string)
+  : Lemma (mem id (ids (keep_queries keep qs)) <==> (mem id keep /\ mem id (ids qs)))
+  = match qs with
+    | [] -> ()
+    | _ :: t -> restrict_members_list keep t id
+
+let restrict_members (keep:list string) (r:registry) (id:string)
+  : Lemma (mem id (ids (enumerate (restrict keep r))) <==> (mem id keep /\ mem id (ids (enumerate r))))
+  = restrict_members_list keep r.queries id
+
+(* F#: `QueryRegistry.union` — refused at the first declaration of `b` whose id `a` holds,
+   otherwise both. *)
+let rec first_shared (a:list query) (b:list query) : Tot (option string) =
+  match b with
+  | [] -> None
+  | q :: t -> if mem q.q_id (ids a) then Some q.q_id else first_shared a t
+
+let rec app_queries (x y:list query) : Tot (list query) =
+  match x with
+  | [] -> y
+  | h :: t -> h :: app_queries t y
+
+let union (a b:registry) : Tot (outcome registry query_error) =
+  match first_shared a.queries b.queries with
+  | Some id -> Error (DuplicateQuery id)
+  | None -> Ok { queries = app_queries a.queries b.queries }
+
+let rec first_shared_some (a b:list query)
+  : Lemma (ensures (match first_shared a b with
+                    | Some id -> mem id (ids a) /\ mem id (ids b)
+                    | None -> forall (id:string). ~(mem id (ids a) /\ mem id (ids b))))
+  = match b with
+    | [] -> ()
+    | _ :: t -> first_shared_some a t
+
+let rec app_ids (x y:list query) (id:string)
+  : Lemma (mem id (ids (app_queries x y)) <==> (mem id (ids x) \/ mem id (ids y)))
+  = match x with
+    | [] -> ()
+    | _ :: t -> app_ids t y id
+
+(* `union` refuses exactly when the two registries share an id, naming one they share; otherwise
+   its result holds exactly the ids of both. *)
+let union_members (a b:registry) (id:string)
+  : Lemma (ensures (match union a b with
+                    | Error (DuplicateQuery d) -> mem d (ids a.queries) /\ mem d (ids b.queries)
+                    | Error _ -> False
+                    | Ok u ->
+                      (forall (x:string). ~(mem x (ids a.queries) /\ mem x (ids b.queries))) /\
+                      (mem id (ids u.queries) <==> (mem id (ids a.queries) \/ mem id (ids b.queries)))))
+  = first_shared_some a.queries b.queries;
+    app_ids a.queries b.queries id
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -1246,6 +1491,17 @@ let twin_query : query =
     q_timeout_ms = None;
     q_page_size = None }
 
+let twin_param : query_param = { p_name = "region"; p_type = StringType; p_required = true }
+
+(* A renderer record for the page-field twins: the fields they compare carry no number and are
+   never hashed, so only the shape of the record matters. *)
+let twin_rn : renderers =
+  { render_int = (fun _ -> "");
+    render_float = (fun x -> x);
+    hash = (fun x -> x);
+    name_le = (fun _ _ -> true);
+    field = (fun x -> x) }
+
 let twins : list twin = [
   { tname = "validate-params-accepts-a-bound-required-param";
     tholds = (fun () -> validate_params twin_query [ ("region", Str "eu") ] = Ok ()) };
@@ -1262,6 +1518,16 @@ let twins : list twin = [
   { tname = "validate-params-refuses-a-float-for-an-int-param";
     tholds = (fun () -> widens FloatType IntType = false) };
   { tname = "register-refuses-a-duplicate";
-    tholds = (fun () -> register twin_query ({ queries = [ twin_query ] }) = Error (DuplicateQuery "q")) } ]
+    tholds = (fun () -> register twin_query ({ queries = [ twin_query ] }) = Error (DuplicateQuery "q")) };
+  { tname = "register-refuses-a-repeated-parameter-name";
+    tholds = (fun () ->
+      register ({ twin_query with q_params = [ twin_param; twin_param ] }) empty
+      = Error (DuplicateParam "region")) };
+  { tname = "unregister-undoes-register";
+    tholds = (fun () -> unregister "q" ({ queries = [ twin_query ] }) = Ok empty) };
+  { tname = "the-first-page-adds-no-field";
+    tholds = (fun () -> page_fields twin_rn None [ ("a", Str "x") ] = [ "a"; "s"; "x" ]) };
+  { tname = "a-later-page-leads-with-the-page-triple";
+    tholds = (fun () -> page_fields twin_rn (Some "t") [] = [ ""; "p"; "t" ]) } ]
 
 let _ = assert_norm (twins_hold twins == true)

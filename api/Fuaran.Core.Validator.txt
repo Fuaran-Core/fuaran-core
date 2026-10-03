@@ -18,6 +18,8 @@ ctor Fuaran.Core.Validator+Summary..ctor(System.Int32, System.Int32, System.Int3
 field Fuaran.Core.ColumnValidator.BadRangeCode : System.String (literal)
 field Fuaran.Core.ColumnValidator.NotANumberCode : System.String (literal)
 field Fuaran.Core.ColumnValidator.RaggedCode : System.String (literal)
+field Fuaran.Core.RegistrationError+Tags.DuplicateRule : System.Int32 (literal)
+field Fuaran.Core.RegistrationError+Tags.UnknownRule : System.Int32 (literal)
 field Fuaran.Core.Severity+Tags.Error : System.Int32 (literal)
 field Fuaran.Core.Severity+Tags.Info : System.Int32 (literal)
 field Fuaran.Core.Severity+Tags.Warning : System.Int32 (literal)
@@ -67,11 +69,15 @@ method Fuaran.Core.Validator.referenceDefects`2(Fuaran.Core.RefWitness`2<!!0, !!
 method Fuaran.Core.Validator.referenceIntegrity`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
 method Fuaran.Core.Validator.referenceOrder`2(Fuaran.Core.RefWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
 method Fuaran.Core.Validator.register`2(Fuaran.Core.RuleFamily`2<!!0, !!1>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.RegistrationError>
+method Fuaran.Core.Validator.replace`2(Fuaran.Core.RuleFamily`2<!!0, !!1>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.RegistrationError>
+method Fuaran.Core.Validator.restrict`2(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>
 method Fuaran.Core.Validator.runAllTagged`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Defect`1<!!1>>>
 method Fuaran.Core.Validator.runAll`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!1>>
 method Fuaran.Core.Validator.runPack`2(Fuaran.Core.Validator+Pack`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Validator+PackFinding`1<!!1>>
 method Fuaran.Core.Validator.summary`1(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : Fuaran.Core.Validator+Summary
 method Fuaran.Core.Validator.tryFind`2(System.String, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.RuleFamily`2<!!0, !!1>>
+method Fuaran.Core.Validator.union`2(Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.RegistrationError>
+method Fuaran.Core.Validator.unregister`2(System.String, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.RegistrationError>
 method Fuaran.Core.Validator.verdict`1(Fuaran.Core.Validator+GatePolicy, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : Fuaran.Core.Validator+GateVerdict`1<!!0>
 property Fuaran.Core.ColumnValidator.empty : Fuaran.Core.ColumnValidator+Registry { get }
 record-field Fuaran.Core.ColumnRule.Id #0 : System.String
@@ -109,6 +115,9 @@ type Fuaran.Core.Defect (module)
 type Fuaran.Core.Defect`1 (record)
 type Fuaran.Core.PackRule (record)
 type Fuaran.Core.RegistrationError (union)
+type Fuaran.Core.RegistrationError+DuplicateRule (type)
+type Fuaran.Core.RegistrationError+Tags (type)
+type Fuaran.Core.RegistrationError+UnknownRule (type)
 type Fuaran.Core.RuleFamily`2 (record)
 type Fuaran.Core.Severity (union)
 type Fuaran.Core.Severity+Tags (type)
@@ -128,6 +137,7 @@ type Fuaran.Core.Validator+ReferenceDefect`1+UnusedDeclaration (type)
 type Fuaran.Core.Validator+RuleRegistry`2 (record)
 type Fuaran.Core.Validator+Summary (record)
 union-case Fuaran.Core.RegistrationError.NewDuplicateRule #0(id: System.String, registered: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.RegistrationError.NewUnknownRule #1(id: System.String, registered: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Severity.Error #0()
 union-case Fuaran.Core.Severity.Info #2()
 union-case Fuaran.Core.Severity.Warning #1()

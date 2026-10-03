@@ -42,8 +42,8 @@ let seamLawTests =
 
               Expect.equal
                   (List.length results)
-                  9
-                  "validation + replay + enumeration + round-trip + the three envelope laws + the widening relation + the typed fault reported"
+                  11
+                  "validation + replay + enumeration + round-trip + the three envelope laws + the widening relation + the typed fault + paging (Phase 316) + the registration refusal (Phase 316) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -63,8 +63,8 @@ let seamLawTests =
 
               Expect.equal
                   (List.length results)
-                  5
-                  "findable + non-match + narrowing + default-deny + space-relation laws reported"
+                  11
+                  "findable + non-match + narrowing + default-deny + space-relation + the six lifecycle laws (Phase 316) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -85,8 +85,8 @@ let seamLawTests =
 
               Expect.equal
                   (List.length results)
-                  4
-                  "round-trip + version-mismatch + unknown-base + shape-derived laws reported"
+                  5
+                  "round-trip + version-mismatch + unknown-base + shape-derived + unload (Phase 316) laws reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

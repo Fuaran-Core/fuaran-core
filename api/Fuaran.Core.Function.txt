@@ -11,7 +11,6 @@ ctor Fuaran.Core.CapabilityPipeline..ctor(Microsoft.FSharp.Collections.FSharpLis
 ctor Fuaran.Core.CapabilityRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>)
 ctor Fuaran.Core.EffectClass..ctor(Fuaran.Core.HostEffect, Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>)
 ctor Fuaran.Core.FunctionEntry..ctor(Fuaran.Core.Capability, System.String)
-ctor Fuaran.Core.FunctionRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.FunctionEntry>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>)
 ctor Fuaran.Core.HandlerBinding`1..ctor(!0, Fuaran.Core.EffectClass)
 ctor Fuaran.Core.HandlerTable`1..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.HandlerBinding`1<!0>>)
 ctor Fuaran.Core.HoleDecl..ctor(System.String, System.String, Fuaran.Core.HoleKind)
@@ -74,6 +73,7 @@ field Fuaran.Core.IslandKind+Tags.Js : System.Int32 (literal)
 field Fuaran.Core.IslandKind+Tags.Pyodide : System.Int32 (literal)
 field Fuaran.Core.MatchMode+Tags.Exact : System.Int32 (literal)
 field Fuaran.Core.MatchMode+Tags.Subsumes : System.Int32 (literal)
+field Fuaran.Core.PackLoadError+Tags.PackNotLoaded : System.Int32 (literal)
 field Fuaran.Core.PackLoadError+Tags.PackRegisterFailed : System.Int32 (literal)
 field Fuaran.Core.PackLoadError+Tags.SignatureVersionMismatch : System.Int32 (literal)
 field Fuaran.Core.PackLoadError+Tags.UnknownBaseFunction : System.Int32 (literal)
@@ -158,10 +158,15 @@ method Fuaran.Core.CapabilityRegistryModule.dispatchWithArgs`1(Fuaran.Core.Capab
 method Fuaran.Core.CapabilityRegistryModule.dispatch`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
 method Fuaran.Core.CapabilityRegistryModule.enumerate(Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Capability>
 method Fuaran.Core.CapabilityRegistryModule.register(Fuaran.Core.Capability, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
+method Fuaran.Core.CapabilityRegistryModule.replace(Fuaran.Core.Capability, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
+method Fuaran.Core.CapabilityRegistryModule.restrict(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.CapabilityRegistry) : Fuaran.Core.CapabilityRegistry
 method Fuaran.Core.CapabilityRegistryModule.tryFind(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>
+method Fuaran.Core.CapabilityRegistryModule.union(Fuaran.Core.CapabilityRegistry, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
+method Fuaran.Core.CapabilityRegistryModule.unregister(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.ContentPack.load(Fuaran.Core.PackManifest, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.PackLoadError>
 method Fuaran.Core.ContentPack.pack(System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.FunctionEntry) : Fuaran.Core.PackedFunction
 method Fuaran.Core.ContentPack.signatureFingerprint(Fuaran.Core.Signature) : System.String
+method Fuaran.Core.ContentPack.unload(Fuaran.Core.PackManifest, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.PackLoadError>
 method Fuaran.Core.DeclarationFaultModule.describe(Fuaran.Core.DeclarationFault) : System.String
 method Fuaran.Core.Deferred.bind`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Deferred`1<!!1>>, Fuaran.Core.Deferred`1<!!0>) : Fuaran.Core.Deferred`1<!!1>
 method Fuaran.Core.Deferred.map`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!1>, Fuaran.Core.Deferred`1<!!0>) : Fuaran.Core.Deferred`1<!!1>
@@ -196,9 +201,14 @@ method Fuaran.Core.FunctionRegistryModule.dispatch`1(Fuaran.Core.FunctionRegistr
 method Fuaran.Core.FunctionRegistryModule.entry(System.String, Fuaran.Core.Capability) : Fuaran.Core.FunctionEntry
 method Fuaran.Core.FunctionRegistryModule.enumerate(Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.FunctionEntry>
 method Fuaran.Core.FunctionRegistryModule.findBySignature(Fuaran.Core.MatchMode, Fuaran.Core.SignatureQuery, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.FunctionEntry>
+method Fuaran.Core.FunctionRegistryModule.ids(Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.FunctionRegistryModule.partiallyApply(System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.FunctionEntry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionEntry, Fuaran.Core.InvokeError>
 method Fuaran.Core.FunctionRegistryModule.register(Fuaran.Core.FunctionEntry, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.InvokeError>
+method Fuaran.Core.FunctionRegistryModule.replace(Fuaran.Core.FunctionEntry, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.InvokeError>
+method Fuaran.Core.FunctionRegistryModule.restrict(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Fuaran.Core.FunctionRegistry) : Fuaran.Core.FunctionRegistry
 method Fuaran.Core.FunctionRegistryModule.tryFind(System.String, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.FunctionEntry>
+method Fuaran.Core.FunctionRegistryModule.union(Fuaran.Core.FunctionRegistry, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.InvokeError>
+method Fuaran.Core.FunctionRegistryModule.unregister(System.String, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.HoleKindModule.tag(Fuaran.Core.HoleKind) : System.String
 method Fuaran.Core.HoleKindModule.tryOf(System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ValueSpace>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EffectClass>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.HoleKind>
 method Fuaran.Core.InvokeErrorModule.describe(Fuaran.Core.InvokeError) : System.String
@@ -253,8 +263,6 @@ record-field Fuaran.Core.EffectClass.Determinism #1 : Microsoft.FSharp.Collectio
 record-field Fuaran.Core.EffectClass.Host #0 : Fuaran.Core.HostEffect
 record-field Fuaran.Core.FunctionEntry.Capability #0 : Fuaran.Core.Capability
 record-field Fuaran.Core.FunctionEntry.ResultType #1 : System.String
-record-field Fuaran.Core.FunctionRegistry.ByResult #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpSet`1<System.String>>
-record-field Fuaran.Core.FunctionRegistry.Entries #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.FunctionEntry>
 record-field Fuaran.Core.HandlerBinding`1.Effect #1 : Fuaran.Core.EffectClass
 record-field Fuaran.Core.HandlerBinding`1.Handler #0 : !0
 record-field Fuaran.Core.HandlerTable`1.Handlers #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.HandlerBinding`1<!0>>
@@ -380,6 +388,7 @@ type Fuaran.Core.MatchMode+Tags (type)
 type Fuaran.Core.Memo (module)
 type Fuaran.Core.MemoCache`1 (record)
 type Fuaran.Core.PackLoadError (union)
+type Fuaran.Core.PackLoadError+PackNotLoaded (type)
 type Fuaran.Core.PackLoadError+PackRegisterFailed (type)
 type Fuaran.Core.PackLoadError+SignatureVersionMismatch (type)
 type Fuaran.Core.PackLoadError+Tags (type)
@@ -483,6 +492,7 @@ union-case Fuaran.Core.IslandKind.Js #2()
 union-case Fuaran.Core.IslandKind.Pyodide #0()
 union-case Fuaran.Core.MatchMode.Exact #1()
 union-case Fuaran.Core.MatchMode.Subsumes #0()
+union-case Fuaran.Core.PackLoadError.NewPackNotLoaded #4(packId: System.String, newId: System.String, known: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.PackLoadError.NewPackRegisterFailed #2(packId: System.String, newId: System.String, reason: Fuaran.Core.InvokeError)
 union-case Fuaran.Core.PackLoadError.NewSignatureVersionMismatch #1(packId: System.String, baseId: System.String, declared: System.String, actual: System.String)
 union-case Fuaran.Core.PackLoadError.NewUnknownBaseFunction #0(packId: System.String, baseId: System.String, known: Microsoft.FSharp.Collections.FSharpList`1<System.String>)

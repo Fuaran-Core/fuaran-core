@@ -1049,7 +1049,13 @@ let register : query  ->  registry  ->  outcome<registry, query_error> = (fun ( 
      Error (DuplicateQuery (q.q_id))
      end
 | FStar_Pervasives_Native.None -> begin
+     (match ((repeated [] (param_names q.q_params))) with
+| (d)::uu___ -> begin
+     Error (DuplicateParam (d))
+     end
+| [] -> begin
      Ok ({queries = (q)::r.queries})
+     end)
      end))
 
 
@@ -1162,6 +1168,120 @@ let collision_one : arguments = ((("a"), (Str ("1b=s2"))))::[]
 
 let collision_two : arguments = ((("a"), (Str ("1"))))::((("b"), (Str ("2"))))::[]
 
+
+let rec params_distinct : Prims.list<query>  ->  Prims.bool = (fun ( qs  :  Prims.list<query> ) -> (match (qs) with
+| [] -> begin
+     true
+     end
+| (q)::t -> begin
+     ((match ((repeated [] (param_names q.q_params))) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) && (params_distinct t))
+     end))
+
+
+let page_fields : renderers  ->  FStar_Pervasives_Native.option<Prims.string>  ->  arguments  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( l  :  arguments ) -> (match (tok) with
+| FStar_Pervasives_Native.None -> begin
+     (arg_fields rn l)
+     end
+| FStar_Pervasives_Native.Some (t) -> begin
+     ("")::("p")::(t)::(arg_fields rn l)
+     end))
+
+
+let canonical_page : renderers  ->  FStar_Pervasives_Native.option<Prims.string>  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( l  :  arguments ) -> (fields rn (page_fields rn tok l)))
+
+
+let invocation_key_page : renderers  ->  query  ->  arguments  ->  FStar_Pervasives_Native.option<Prims.string>  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical_page rn tok (sort_args rn a))))))
+
+
+let invoke_page = (fun ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (invoke q a (fun ( q1  :  query ) -> (resolve q1 tok))))
+
+
+let dispatch_page = (fun ( r  :  registry ) ( id  :  Prims.string ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (match ((find_query id r.queries)) with
+| FStar_Pervasives_Native.None -> begin
+     Error (NoSuchQuery (id, (ids r.queries)))
+     end
+| FStar_Pervasives_Native.Some (q) -> begin
+     (invoke_page q a tok resolve)
+     end))
+
+
+let rec remove_query : Prims.string  ->  Prims.list<query>  ->  Prims.list<query> = (fun ( id  :  Prims.string ) ( qs  :  Prims.list<query> ) -> (match (qs) with
+| [] -> begin
+     []
+     end
+| (q)::t -> begin
+      
+if (Prims.op_Equals q.q_id id) then begin
+     (remove_query id t)
+     end else begin
+     (q)::(remove_query id t)
+     end
+     end))
+
+
+let unregister : Prims.string  ->  registry  ->  outcome<registry, query_error> = (fun ( id  :  Prims.string ) ( r  :  registry ) -> (match ((find_query id r.queries)) with
+| FStar_Pervasives_Native.None -> begin
+     Error (NoSuchQuery (id, (ids r.queries)))
+     end
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     Ok ({queries = (remove_query id r.queries)})
+     end))
+
+
+let rec keep_queries : Prims.list<Prims.string>  ->  Prims.list<query>  ->  Prims.list<query> = (fun ( keep  :  Prims.list<Prims.string> ) ( qs  :  Prims.list<query> ) -> (match (qs) with
+| [] -> begin
+     []
+     end
+| (q)::t -> begin
+      
+if (mem q.q_id keep) then begin
+     (q)::(keep_queries keep t)
+     end else begin
+     (keep_queries keep t)
+     end
+     end))
+
+
+let restrict : Prims.list<Prims.string>  ->  registry  ->  registry = (fun ( keep  :  Prims.list<Prims.string> ) ( r  :  registry ) -> {queries = (keep_queries keep r.queries)})
+
+
+let rec first_shared : Prims.list<query>  ->  Prims.list<query>  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( a  :  Prims.list<query> ) ( b  :  Prims.list<query> ) -> (match (b) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (q)::t -> begin
+      
+if (mem q.q_id (ids a)) then begin
+     FStar_Pervasives_Native.Some (q.q_id)
+     end else begin
+     (first_shared a t)
+     end
+     end))
+
+
+let rec app_queries : Prims.list<query>  ->  Prims.list<query>  ->  Prims.list<query> = (fun ( x  :  Prims.list<query> ) ( y  :  Prims.list<query> ) -> (match (x) with
+| [] -> begin
+     y
+     end
+| (h)::t -> begin
+     (h)::(app_queries t y)
+     end))
+
+
+let union : registry  ->  registry  ->  outcome<registry, query_error> = (fun ( a  :  registry ) ( b  :  registry ) -> (match ((first_shared a.queries b.queries)) with
+| FStar_Pervasives_Native.Some (id) -> begin
+     Error (DuplicateQuery (id))
+     end
+| FStar_Pervasives_Native.None -> begin
+     Ok ({queries = (app_queries a.queries b.queries)})
+     end))
+
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
 
@@ -1189,7 +1309,13 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
 let twin_query : query = {q_id = "q"; q_params = ({p_name = "region"; p_type = StringType; p_required = true})::[]; q_schema = ((("n"), (StringType)))::[]; q_effect = {host = Pure; determinism = {has_clock = false; has_random = false; has_network = false}}; q_source = "src"; q_timeout_ms = FStar_Pervasives_Native.None; q_page_size = FStar_Pervasives_Native.None}
 
 
-let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::[]
+let twin_param : query_param = {p_name = "region"; p_type = StringType; p_required = true}
+
+
+let twin_rn : renderers = {render_int = (fun ( uu___  :  Prims.int ) -> ""); render_float = (fun ( x  :  Prims.string ) -> x); hash = (fun ( x  :  Prims.string ) -> x); name_le = (fun ( uu___  :  Prims.string ) ( uu___1  :  Prims.string ) -> true); field = (fun ( x  :  Prims.string ) -> x)}
+
+
+let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) []) (("")::("p")::("t")::[])))})::[]
 
 
 

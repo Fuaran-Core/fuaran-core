@@ -56,18 +56,25 @@ type MatchMode =
     | Exact
 
 /// A signature-typed function registry (Phase 50) — the artifact-function catalogue, queried BY
-/// SIGNATURE. `ByResult` is the result-type index (result-kind → the ids producing it), maintained
-/// additively so a "produces a Document" query narrows before the hole-shape filter runs. Default-deny
-/// by shape on dispatch (only a registered id resolves) — the same trust posture as
-/// `CapabilityRegistry`, reusing `Capability.invoke`.
+/// SIGNATURE. It keeps a result-type index (result-kind → the ids producing it) so a "produces a
+/// Document" query narrows before the hole-shape filter runs. Default-deny by shape on dispatch (only
+/// a registered id resolves) — the same trust posture as `CapabilityRegistry`, reusing
+/// `Capability.invoke`.
+///
+/// OPAQUE since Phase 316: the entries and the index are reachable only through this module's
+/// verbs, every one of which keeps the index the exact projection of the entries. While the record
+/// was public, `{ r with Entries = Map.remove id r.Entries }` left the index naming an id `tryFind`
+/// no longer resolved, and an entry added to `Entries` by hand was never found by result type; now
+/// `findBySignature` returns exactly the enumerated entries the query matches, by law.
 type FunctionRegistry =
-    {
-        /// Every entry, keyed by its capability id; each was admitted by `register`, so each is total.
-        Entries: Map<string, FunctionEntry>
-        /// Result kind to the ids producing it; holds exactly the ids of `Entries`, and is maintained
-        /// only by `register` — a hand-built registry that lets the two drift misleads `findBySignature`.
-        ByResult: Map<string, Set<string>>
-    }
+    private
+        {
+            /// Every entry, keyed by its capability id; each was admitted by `register`, so each is total.
+            Entries: Map<string, FunctionEntry>
+            /// Result kind to the ids producing it: exactly the ids of `Entries`, grouped by result
+            /// kind, with no empty group — the projection every verb below maintains.
+            ByResult: Map<string, Set<string>>
+        }
 
 /// Populate / enumerate / query / dispatch the signature-typed registry. Additive over the `Capability`
 /// surface; FSharp.Core-only, Fable-clean. (`ModuleSuffix` so the module and the `FunctionRegistry`
@@ -93,21 +100,21 @@ module FunctionRegistry =
     let register (e: FunctionEntry) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
         let id = e.Capability.Id
 
-        if Map.containsKey id r.Entries then
-            Error(DuplicateCapability id)
-        else
-            match Capability.admissionFault e.Capability with
-            | Some fault -> Error fault
-            | None ->
-                let ids =
-                    r.ByResult
-                    |> Map.tryFind e.ResultType
-                    |> Option.defaultValue Set.empty
-                    |> Set.add id
+        KeyedRegistry.register
+            DuplicateCapability
+            (fun (e: FunctionEntry) -> Capability.admissionFault e.Capability)
+            id
+            e
+            r.Entries
+        |> Result.map (fun entries ->
+            let ids =
+                r.ByResult
+                |> Map.tryFind e.ResultType
+                |> Option.defaultValue Set.empty
+                |> Set.add id
 
-                Ok
-                    { Entries = Map.add id e r.Entries
-                      ByResult = Map.add e.ResultType ids r.ByResult }
+            { Entries = entries
+              ByResult = Map.add e.ResultType ids r.ByResult })
 
     /// The entry registered under exactly `id` (ordinal, case-sensitive), or `None`; the result index
     /// is not consulted.
@@ -116,6 +123,57 @@ module FunctionRegistry =
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part of
     /// the contract (`registryLaws` certifies it).
     let enumerate (r: FunctionRegistry) : FunctionEntry list = r.Entries |> Map.toList |> List.map snd
+
+    /// The registered ids, in id order — what a `NoSuchCapability` refusal from this registry names
+    /// (Phase 316: the record is opaque, so the id set is read through the module).
+    let ids (r: FunctionRegistry) : string list = KeyedRegistry.ids r.Entries
+
+    /// The registry over `entries` with its result index REBUILT from them — the one constructor the
+    /// lifecycle verbs below share, so the index cannot be anything but the entries' projection.
+    let private ofEntries (entries: Map<string, FunctionEntry>) : FunctionRegistry =
+        { Entries = entries
+          ByResult =
+            entries
+            |> Map.fold
+                (fun idx id (e: FunctionEntry) ->
+                    let held = idx |> Map.tryFind e.ResultType |> Option.defaultValue Set.empty
+                    Map.add e.ResultType (Set.add id held) idx)
+                Map.empty }
+
+    // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
+
+    /// Remove the entry registered under `id` — refused `NoSuchCapability(id, known)` when the
+    /// registry does not hold it, naming every id it does hold. The result index drops the id with
+    /// it, so `findBySignature` can never return an entry `tryFind` no longer resolves; removing an
+    /// entry just registered gives back the registry it was registered into.
+    let unregister (id: string) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
+        KeyedRegistry.unregister (fun id known -> NoSuchCapability(id, known)) id r.Entries
+        |> Result.map ofEntries
+
+    /// Swap the entry registered under `e.Capability.Id` for `e` — the hot-reload verb, which may
+    /// change the result kind the entry is indexed under. Refused `NoSuchCapability` when the id is
+    /// not registered, and held to the admission gate `register` runs; on a refusal the registry is
+    /// unchanged.
+    let replace (e: FunctionEntry) (r: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
+        KeyedRegistry.replace
+            (fun id known -> NoSuchCapability(id, known))
+            (fun (e: FunctionEntry) -> Capability.admissionFault e.Capability)
+            e.Capability.Id
+            e
+            r.Entries
+        |> Result.map ofEntries
+
+    /// The registry narrowed to the ids in `keep`, its index rebuilt — a session- or actor-scoped
+    /// catalogue. An id in `keep` the registry does not hold is ignored, so the result enumerates a
+    /// subset of what `r` enumerates.
+    let restrict (keep: Set<string>) (r: FunctionRegistry) : FunctionRegistry =
+        ofEntries (KeyedRegistry.restrict keep r.Entries)
+
+    /// The join of two registries whose ids are disjoint, its index rebuilt — refused
+    /// `DuplicateCapability` naming the first id, in id order, that both hold. Associative.
+    let union (a: FunctionRegistry) (b: FunctionRegistry) : Result<FunctionRegistry, InvokeError> =
+        KeyedRegistry.union DuplicateCapability a.Entries b.Entries
+        |> Result.map ofEntries
 
     /// Is a required slot constraint satisfied by an available slot? An unconstrained required slot
     /// (`None`) accepts any available slot; a constrained one needs the same kind.
@@ -208,7 +266,7 @@ module FunctionRegistry =
         (body: FunctionEntry -> unit -> Deferred<'v>)
         : Result<Deferred<'v>, InvokeError> =
         match Map.tryFind id r.Entries with
-        | None -> Error(NoSuchCapability(id, r.Entries |> Map.toList |> List.map fst))
+        | None -> Error(NoSuchCapability(id, ids r))
         | Some e -> Capability.invoke e.Capability args (body e)
 
     /// Partially apply a registered function (Phase 50) — the content-pack formalism. Produce a NEW

@@ -471,6 +471,13 @@ module internal SeamLaws =
     /// the seam — it becomes the enumerated `ExecutionFailed`, so `Ok(Failed _)` is unreachable. The
     /// three shapes MIRROR `deferredLaws` rather than delegating to it: that family takes no witness
     /// (it is self-contained at an `int` payload), so there is nothing to instantiate over a query.
+    ///
+    /// Since Phase 316 it also certifies PAGING on the input side — a paged query reached through
+    /// `Query.invokePage` and `QueryRegistry.dispatchPage` receives the token it was asked for, each
+    /// page keys apart under `Query.invocationKeyPage` (over tokens carrying the page tag and the
+    /// encoding's own symbols), the first page keys as `invocationKey`, and a journal captured page
+    /// by page replays page n from page n's capture under strict replay — and that the registry
+    /// refuses a declaration naming a parameter twice, by name.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
         let validation =
             LawKit.LawCell
@@ -500,6 +507,13 @@ module internal SeamLaws =
         let typedFault =
             LawKit.LawCell
                 "a resolver's typed fault reaches the caller by name (SourceNotResolved, Timeout, ExecutionFailed with its recoverable)"
+
+        let paging =
+            LawKit.LawCell
+                "a paged query receives its token through the seam, keys each page apart, and replays page n from page n's capture"
+
+        let registration =
+            LawKit.LawCell "the registry refuses a declaration naming a parameter twice (DuplicateParam), by name"
 
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
@@ -592,6 +606,98 @@ module internal SeamLaws =
              | Ok(v, rest) ->
                  replay.Check((v = realized && List.isEmpty rest), fun () -> at "replay ≠ recorded result")
              | Error m -> replay.Check(false, fun () -> at (sprintf "replay errored: %s" m)))
+
+            // ---- Phase 316: paging on the input side, visible to the replay key ----
+            // The token alphabet carries the canonical encoding's own symbols and the page tag, so a
+            // pre-image that only concatenated would collide here.
+            let pages = 1 + rng.IntBelow 4
+
+            let tokens =
+                None
+                :: List.init (pages - 1) (fun n -> Some(rng.Choose [ ""; "p"; "\u0001"; "\u0010"; "t" ] + string n))
+
+            let pageOf (n: int) : QueryResult =
+                { realized with
+                    PageNum = n
+                    NextPageToken = List.tryItem (n + 1) tokens |> Option.flatten }
+
+            // The resolver reads the token it was handed and answers that page.
+            let resolver (_: Query) (token: string option) : Deferred<QueryResult> =
+                match List.tryFindIndex ((=) token) tokens with
+                | Some n -> Ready(pageOf n)
+                | None -> Failed "no such page"
+
+            let pagedArgs = [ "p0", Int 42 ]
+
+            let reg =
+                QueryRegistry.register q QueryRegistry.empty
+                |> Result.defaultValue QueryRegistry.empty
+
+            let served =
+                tokens
+                |> List.map (fun t ->
+                    match
+                        Query.invokePage q pagedArgs t resolver,
+                        QueryRegistry.dispatchPage reg q.Id pagedArgs t resolver
+                    with
+                    | Ok(Ready r), Ok(Ready r') when r = r' -> Some r
+                    | _ -> None)
+
+            let keys = tokens |> List.map (Query.invocationKeyPage q pagedArgs)
+
+            // Capture every page under its own key, then replay strictly: each key yields its page,
+            // and the journal is consumed exactly.
+            let journal =
+                List.zip keys served
+                |> List.fold
+                    (fun caps (k, r) ->
+                        match r with
+                        | Some page -> OpStream.captureEffect hashFn encodeV det k (fun () -> page) caps |> snd
+                        | None -> caps)
+                    []
+
+            let replayed =
+                keys
+                |> List.fold
+                    (fun (acc, caps) k ->
+                        match OpStream.replayEffectStrict decodeV k det (fun () -> pageOf 99) caps with
+                        | Ok(v, rest) -> acc @ [ Some v ], rest
+                        | Error _ -> acc @ [ None ], caps)
+                    ([], journal)
+
+            let pageNums = served |> List.map (Option.map (fun r -> r.PageNum))
+
+            paging.Check(
+                pageNums = List.init pages Some
+                && List.distinct keys = keys
+                && Query.invocationKeyPage q pagedArgs None = Query.invocationKey q pagedArgs
+                && fst replayed = served
+                && List.isEmpty (snd replayed)
+                && Query.invokePage q pagedArgs (Some "t") resolver = Error(ExecutionFailed("no such page", []))
+                && QueryRegistry.dispatchPage reg "nope" pagedArgs None resolver = Error(NoSuchQuery("nope", [ q.Id ]))
+                && Query.invokePage q [ "p0", Str "x" ] None resolver = Error(
+                    ParamTypeMismatch("p0", IntType, StringType)
+                ),
+                fun () -> at (sprintf "paging over tokens %A served pages %A under keys %A" tokens pageNums keys)
+            )
+
+            // ---- Phase 316: registration refuses a parameter named twice ----
+            let repeated = rng.Choose [ "p0"; "p1" ]
+
+            let twice =
+                { qOpt with
+                    Id = "twice-" + string i
+                    Params =
+                        qOpt.Params
+                        @ [ { Name = repeated
+                              Type = BoolType
+                              Required = false } ] }
+
+            registration.Check(
+                QueryRegistry.register twice QueryRegistry.empty = Error(DuplicateParam repeated)
+                && QueryRegistry.register qOpt QueryRegistry.empty |> Result.isOk,
+                fun () -> at (sprintf "a declaration naming %s twice was registered" repeated)
+            )
 
             // stable enumeration regardless of insertion order.
             let qB = { q with Id = "q-a" + string i }
@@ -743,7 +849,9 @@ module internal SeamLaws =
               asyncAxis
               typedFailure
               relation
-              typedFault ]
+              typedFault
+              paging
+              registration ]
 
     /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`
@@ -901,6 +1009,23 @@ module internal SeamLaws =
     ///  - **dispatch stays default-deny + arg-validated** — an unregistered id is `NoSuchCapability`, a
     ///    registered id with in-space args runs the body, and an out-of-space arg is rejected
     ///    (`ArgOutOfSpace`) before the body runs (the Capability trust posture, carried over).
+    ///
+    /// Since Phase 316 it also certifies the LIFECYCLE of all four registries — `CapabilityRegistry`,
+    /// `FunctionRegistry`, `QueryRegistry` and `Validator.RuleRegistry` — over registries drawn from
+    /// a five-id pool, so collisions arise:
+    ///
+    ///  - **unregister undoes register** on a fresh id: `unregister id (register x r) = Ok r`;
+    ///  - **an id not held is refused** by the seam's own unknown-id error (`NoSuchCapability`,
+    ///    `NoSuchQuery`, `UnknownRule`) naming the held ids, by `unregister` and `replace` alike;
+    ///  - **replace swaps exactly the entry under its id**, and refuses what `register` would;
+    ///  - **restrict narrows**: `enumerate (restrict s r)` is exactly the entries of `r` whose id is in
+    ///    `s`, so a subset of `enumerate r`;
+    ///  - **union is associative and refuses a collision**: both associations of three registries are
+    ///    refused together or agree, two registries join exactly when their ids are disjoint, and a
+    ///    refusal names a shared id by the seam's duplicate error;
+    ///  - **the function registry's index stays consistent**: after a random sequence of lifecycle
+    ///    edits, `findBySignature` by result type returns exactly the enumerated entries of that type
+    ///    the query matches — no phantom, no miss.
     let registryLaws (seed: int) (iterations: int) : LawResult list =
         let findable =
             LawKit.LawCell "a function is findable by its declared result type + required holes (subsumption + exact)"
@@ -1105,7 +1230,343 @@ module internal SeamLaws =
                         )
                 ))
 
-        LawKit.results [ findable; nonMatch; narrowing; defaultDeny; relation ]
+        // ---- Phase 316: the lifecycle — a registry is a lattice, not an append log ----
+        let inverse =
+            LawKit.LawCell "unregister undoes register on a fresh id, on all four registries"
+
+        let unknown =
+            LawKit.LawCell
+                "unregister and replace of an id not held are refused by the seam's unknown-id error, naming the held ids"
+
+        let replaces =
+            LawKit.LawCell "replace swaps exactly the entry under its id, and refuses what register refuses"
+
+        let restricts =
+            LawKit.LawCell "restrict s r enumerates exactly the entries of r whose id is in s, a subset of enumerate r"
+
+        let unions =
+            LawKit.LawCell
+                "union is associative, joins exactly the registries whose ids are disjoint, and refuses a shared id by the seam's duplicate error"
+
+        let index =
+            LawKit.LawCell
+                "after any lifecycle edit, findBySignature by result type is exactly the enumerated entries of that type the query matches"
+
+        let pool = [ "a"; "b"; "c"; "d"; "e" ]
+        let kinds = [ "doc"; "sheet" ]
+
+        let capOf (id: string) (hi: int) : Capability =
+            Capability.create
+                id
+                { Name = id
+                  Holes =
+                    [ { Addr = "h"
+                        Name = "h"
+                        Kind = "value"
+                        Space = Some(IntRange(0, hi))
+                        Slot = None
+                        Action = None
+                        Required = true } ]
+                  Effect = Effect.pureDeterministic }
+                BuildTime
+
+        let queryOf (id: string) (param: string) : Query =
+            { Id = id
+              Params =
+                [ { Name = param
+                    Type = IntType
+                    Required = true } ]
+              ResultSchema = [ "n", IntType ]
+              Effect = Effect.pureDeterministic
+              Source = Ref id
+              TimeoutMs = None
+              PageSize = None }
+
+        let familyOf (id: string) : RuleFamily<unit, string> = { Id = id; Run = fun _ _ -> [] }
+
+        let build (add: 'x -> 'r -> Result<'r, 'e>) (empty: 'r) (xs: 'x list) : Result<'r, 'e> =
+            xs |> List.fold (fun acc x -> acc |> Result.bind (add x)) (Ok empty)
+
+        let capIds (r: CapabilityRegistry) =
+            CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
+
+        let qIds (r: QueryRegistry) =
+            QueryRegistry.enumerate r |> List.map (fun q -> q.Id)
+
+        // Both associations of a union agree: refused together, or equal under `same`.
+        let associates (same: 'r -> 'r -> bool) (left: Result<'r, 'e>) (right: Result<'r, 'e>) : bool =
+            match left, right with
+            | Ok l, Ok r -> same l r
+            | Error _, Error _ -> true
+            | _ -> false
+
+        LawKit.run iterations (seed + 316) (fun rng i at ->
+            let subset () =
+                pool |> List.filter (fun _ -> rng.IntBelow 2 = 0)
+
+            let held = subset ()
+
+            let fresh =
+                pool
+                |> List.tryFind (fun id -> not (List.contains id held))
+                |> Option.defaultValue "z"
+
+            let kindOf (id: string) = kinds.[(int id.[0] + i) % 2]
+
+            match
+                build CapabilityRegistry.register CapabilityRegistry.empty (held |> List.map (fun id -> capOf id 9)),
+                build
+                    FunctionRegistry.register
+                    FunctionRegistry.empty
+                    (held |> List.map (fun id -> FunctionRegistry.entry (kindOf id) (capOf id 9))),
+                build QueryRegistry.register QueryRegistry.empty (held |> List.map (fun id -> queryOf id "p")),
+                build Validator.register Validator.empty (held |> List.map familyOf)
+            with
+            | Ok cr, Ok fr, Ok qr, Ok vr ->
+                // ---- unregister undoes register on a fresh id ----
+                let capBack =
+                    CapabilityRegistry.register (capOf fresh 9) cr
+                    |> Result.bind (CapabilityRegistry.unregister fresh)
+
+                let fnBack =
+                    FunctionRegistry.register (FunctionRegistry.entry "doc" (capOf fresh 9)) fr
+                    |> Result.bind (FunctionRegistry.unregister fresh)
+
+                let qBack =
+                    QueryRegistry.register (queryOf fresh "p") qr
+                    |> Result.bind (QueryRegistry.unregister fresh)
+
+                let vBack =
+                    Validator.register (familyOf fresh) vr
+                    |> Result.bind (Validator.unregister fresh)
+
+                inverse.Check(
+                    capBack = Ok cr
+                    && fnBack = Ok fr
+                    && qBack = Ok qr
+                    && (vBack |> Result.map Validator.enumerate) = Ok(Validator.enumerate vr),
+                    fun () -> at (sprintf "unregister did not undo register of %s over %A" fresh held)
+                )
+
+                // ---- an id not held is refused, naming the held ids ----
+                let sorted = List.sort held
+
+                let refusedRight =
+                    CapabilityRegistry.unregister fresh cr = Error(NoSuchCapability(fresh, sorted))
+                    && CapabilityRegistry.replace (capOf fresh 9) cr = Error(NoSuchCapability(fresh, sorted))
+                    && FunctionRegistry.unregister fresh fr = Error(NoSuchCapability(fresh, sorted))
+                    && FunctionRegistry.replace (FunctionRegistry.entry "doc" (capOf fresh 9)) fr = Error(
+                        NoSuchCapability(fresh, sorted)
+                    )
+                    && QueryRegistry.unregister fresh qr = Error(NoSuchQuery(fresh, sorted))
+                    && QueryRegistry.replace (queryOf fresh "p") qr = Error(NoSuchQuery(fresh, sorted))
+                    && (match Validator.unregister fresh vr, Validator.replace (familyOf fresh) vr with
+                        | Error(RegistrationError.UnknownRule(a, ka)), Error(RegistrationError.UnknownRule(b, kb)) ->
+                            a = fresh && b = fresh && ka = held && kb = held
+                        | _ -> false)
+
+                unknown.Check(
+                    refusedRight,
+                    fun () -> at (sprintf "an unheld id %s was not refused by name over %A" fresh held)
+                )
+
+                // ---- replace swaps exactly the entry under its id ----
+                (match held with
+                 | [] -> ()
+                 | _ ->
+                     let k = rng.Choose held
+                     let others (ids: string list) = ids |> List.filter (fun id -> id <> k)
+                     let swapped = capOf k 3
+                     let swappedEntry = FunctionRegistry.entry "sheet" swapped
+                     let swappedQuery = queryOf k "p2"
+
+                     let capOk =
+                         match CapabilityRegistry.replace swapped cr with
+                         | Ok r2 ->
+                             CapabilityRegistry.tryFind k r2 = Some swapped
+                             && capIds r2 = capIds cr
+                             && others (capIds r2)
+                                |> List.forall (fun id ->
+                                    CapabilityRegistry.tryFind id r2 = CapabilityRegistry.tryFind id cr)
+                         | Error _ -> false
+
+                     let fnOk =
+                         match FunctionRegistry.replace swappedEntry fr with
+                         | Ok r2 ->
+                             FunctionRegistry.tryFind k r2 = Some swappedEntry
+                             && FunctionRegistry.ids r2 = FunctionRegistry.ids fr
+                         | Error _ -> false
+
+                     let qOk =
+                         match QueryRegistry.replace swappedQuery qr with
+                         | Ok r2 -> QueryRegistry.tryFind k r2 = Some swappedQuery && qIds r2 = qIds qr
+                         | Error _ -> false
+
+                     let vOk =
+                         match Validator.replace (familyOf k) vr with
+                         | Ok r2 -> Validator.enumerate r2 = Validator.enumerate vr
+                         | Error _ -> false
+
+                     // What register refuses, replace refuses: an ill-formed space, a repeated parameter.
+                     let gateOk =
+                         (match CapabilityRegistry.replace (capOf k (-1)) cr with
+                          | Error(IllFormedCapability(id, _)) -> id = k
+                          | _ -> false)
+                         && (match
+                                 QueryRegistry.replace
+                                     { swappedQuery with
+                                         Params = swappedQuery.Params @ swappedQuery.Params }
+                                     qr
+                             with
+                             | Error(DuplicateParam "p2") -> true
+                             | _ -> false)
+
+                     replaces.Check(
+                         capOk && fnOk && qOk && vOk && gateOk,
+                         fun () ->
+                             at (
+                                 sprintf
+                                     "replace of %s misbehaved (cap=%b fn=%b q=%b v=%b gate=%b)"
+                                     k
+                                     capOk
+                                     fnOk
+                                     qOk
+                                     vOk
+                                     gateOk
+                             )
+                     ))
+
+                // ---- restrict narrows ----
+                let keep = Set.ofList (subset () @ [ "zz" ])
+                let within (ids: string list) = ids |> List.filter keep.Contains
+
+                restricts.Check(
+                    capIds (CapabilityRegistry.restrict keep cr) = within (capIds cr)
+                    && FunctionRegistry.ids (FunctionRegistry.restrict keep fr) = within (FunctionRegistry.ids fr)
+                    && qIds (QueryRegistry.restrict keep qr) = within (qIds qr)
+                    && Validator.enumerate (Validator.restrict keep vr) = within (Validator.enumerate vr),
+                    fun () -> at (sprintf "restrict %A over %A did not narrow exactly" keep held)
+                )
+
+                // ---- union: associative, disjoint-exactly, refused by name ----
+                let a, b, c = subset (), subset (), subset ()
+
+                let caps ids =
+                    build CapabilityRegistry.register CapabilityRegistry.empty (ids |> List.map (fun id -> capOf id 9))
+
+                let fns ids =
+                    build
+                        FunctionRegistry.register
+                        FunctionRegistry.empty
+                        (ids |> List.map (fun id -> FunctionRegistry.entry (kindOf id) (capOf id 9)))
+
+                let qs ids =
+                    build QueryRegistry.register QueryRegistry.empty (ids |> List.map (fun id -> queryOf id "p"))
+
+                let vs ids =
+                    build Validator.register Validator.empty (ids |> List.map familyOf)
+
+                match caps a, caps b, caps c, fns a, fns b, fns c, qs a, qs b, qs c, vs a, vs b, vs c with
+                | Ok ca, Ok cb, Ok cc, Ok fa, Ok fb, Ok fc, Ok qa, Ok qb, Ok qc, Ok va, Ok vb, Ok vc ->
+                    let shared = Set.intersect (Set.ofList a) (Set.ofList b)
+
+                    let assoc =
+                        associates
+                            (=)
+                            (CapabilityRegistry.union ca cb
+                             |> Result.bind (fun ab -> CapabilityRegistry.union ab cc))
+                            (CapabilityRegistry.union cb cc |> Result.bind (CapabilityRegistry.union ca))
+                        && associates
+                            (=)
+                            (FunctionRegistry.union fa fb
+                             |> Result.bind (fun ab -> FunctionRegistry.union ab fc))
+                            (FunctionRegistry.union fb fc |> Result.bind (FunctionRegistry.union fa))
+                        && associates
+                            (=)
+                            (QueryRegistry.union qa qb |> Result.bind (fun ab -> QueryRegistry.union ab qc))
+                            (QueryRegistry.union qb qc |> Result.bind (QueryRegistry.union qa))
+                        && associates
+                            (fun l r -> Validator.enumerate l = Validator.enumerate r)
+                            (Validator.union va vb |> Result.bind (fun ab -> Validator.union ab vc))
+                            (Validator.union vb vc |> Result.bind (Validator.union va))
+
+                    let joins =
+                        match CapabilityRegistry.union ca cb, QueryRegistry.union qa qb, Validator.union va vb with
+                        | Ok cab, Ok qab, Ok vab ->
+                            Set.isEmpty shared
+                            && capIds cab = List.sort (a @ b)
+                            && qIds qab = List.sort (a @ b)
+                            && Validator.enumerate vab = a @ b
+                        | Error(DuplicateCapability ci),
+                          Error(DuplicateQuery qi),
+                          Error(RegistrationError.DuplicateRule(vi, _)) ->
+                            ci = Set.minElement shared && qi = ci && shared.Contains vi
+                        | _ -> false
+
+                    unions.Check(
+                        assoc && joins,
+                        fun () -> at (sprintf "union over %A / %A / %A (assoc=%b joins=%b)" a b c assoc joins)
+                    )
+
+                    // ---- the function registry's index after a sequence of edits ----
+                    let step (r: FunctionRegistry) =
+                        match rng.IntBelow 4 with
+                        | 0 -> FunctionRegistry.unregister (rng.Choose pool) r |> Result.defaultValue r
+                        | 1 ->
+                            let k = rng.Choose pool
+
+                            FunctionRegistry.replace (FunctionRegistry.entry (rng.Choose kinds) (capOf k 9)) r
+                            |> Result.defaultValue r
+                        | 2 -> FunctionRegistry.restrict (Set.ofList (subset ())) r
+                        | _ -> FunctionRegistry.union r fc |> Result.defaultValue r
+
+                    let edited =
+                        List.init 4 id
+                        |> List.fold (fun r _ -> step r) (FunctionRegistry.union fa fb |> Result.defaultValue fa)
+
+                    let probe = [ (capOf "probe" 0).Signature.Holes.Head ]
+
+                    for kind in kinds do
+                        let found =
+                            FunctionRegistry.findBySignature
+                                Subsumes
+                                { ResultType = Some kind
+                                  Available = probe }
+                                edited
+
+                        let scanned =
+                            FunctionRegistry.findBySignature Subsumes { ResultType = None; Available = probe } edited
+                            |> List.filter (fun e -> e.ResultType = kind)
+
+                        let enumerated =
+                            FunctionRegistry.enumerate edited |> List.filter (fun e -> e.ResultType = kind)
+
+                        index.Check(
+                            found = scanned && found = enumerated,
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "findBySignature %s found %A; the enumeration holds %A"
+                                        kind
+                                        (found |> List.map (fun e -> e.Capability.Id))
+                                        (enumerated |> List.map (fun e -> e.Capability.Id))
+                                )
+                        )
+                | _ -> unions.Check(false, fun () -> at "a drawn registry did not build")
+            | _ -> inverse.Check(false, fun () -> at (sprintf "the drawn registries over %A did not build" held)))
+
+        LawKit.results
+            [ findable
+              nonMatch
+              narrowing
+              defaultDeny
+              relation
+              inverse
+              unknown
+              replaces
+              restricts
+              unions
+              index ]
 
     // ---- content-pack loading contract (Phase 57) ----
     // The teeth on `PackManifest` / `ContentPack.load` + the signature-version compatibility check: a
@@ -1125,6 +1586,8 @@ module internal SeamLaws =
     ///  - **the version is genuinely shape-derived** — changing the hole set shifts the fingerprint
     ///    (`signatureFingerprint sg ≠ signatureFingerprint sg'`), so the version check is real
     ///    change-detection, not a hand-incremented counter a host can forget to bump.
+    ///  - **unload undoes load** (Phase 316) — `ContentPack.unload m` over the registry `load m reg`
+    ///    returned gives back `reg`, and a second unload is refused `PackNotLoaded` by name.
     let packLoadingLaws (seed: int) (iterations: int) : LawResult list =
         let roundTrip =
             LawKit.LawCell "a content pack loads and each curried function is findable under its narrowed signature"
@@ -1138,6 +1601,10 @@ module internal SeamLaws =
 
         let shapeDerived =
             LawKit.LawCell "the signature version is shape-derived (a changed hole set shifts the fingerprint)"
+
+        let unloads =
+            LawKit.LawCell
+                "unload undoes load (the registry the pack loaded into comes back), and unloading a pack not loaded is refused PackNotLoaded"
 
         LawKit.run iterations seed (fun rng i at ->
             let lo = rng.IntBelow 50
@@ -1196,7 +1663,21 @@ module internal SeamLaws =
                                      "loaded packed function not findable under its narrowed signature (found=%A)"
                                      ids
                              )
-                     ))
+                     )
+
+                     // Phase 316: unload is load's inverse, and a second unload is refused by name.
+                     match ContentPack.unload manifest loaded with
+                     | Ok back when back = reg ->
+                         match ContentPack.unload manifest back with
+                         | Error(PackNotLoaded(_, newId, known)) ->
+                             unloads.Check(
+                                 newId = pf.NewId && known = FunctionRegistry.ids reg,
+                                 fun () -> at (sprintf "the second unload named %s / %A" newId known)
+                             )
+                         | other ->
+                             unloads.Check(false, fun () -> at (sprintf "a second unload was not refused: %A" other))
+                     | other ->
+                         unloads.Check(false, fun () -> at (sprintf "unload did not give back the registry: %A" other)))
 
                 // ---- 2. a stale-version pack fails loudly ----
                 let stale =
@@ -1249,7 +1730,7 @@ module internal SeamLaws =
                     fun () -> at "a changed hole set did not shift the signature fingerprint"
                 ))
 
-        LawKit.results [ roundTrip; mismatch; unknownBase; shapeDerived ]
+        LawKit.results [ roundTrip; mismatch; unknownBase; shapeDerived; unloads ]
 
     // ---- aggregate null-skip (Phase 36; split by Phase 257) ----
     // The `Column.aggregate` half of what was `aggregateParityLaws`. The parity half compares the

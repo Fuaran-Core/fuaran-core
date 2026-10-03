@@ -857,14 +857,17 @@ module Families =
               (Some SeamNotEveryDomainHas)
               []
               (Unconditional "each iteration exercises accept, type-mismatch and unknown-param on a built declaration")
-              (Built, "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built")
+              (Built,
+               "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built, and so is a declaration naming a parameter twice")
           c
               "registryLaws"
               none
               (Some SeamNotEveryDomainHas)
               []
-              (Unconditional "each iteration queries matching and non-matching signatures on a built registry")
-              (Built, "an unregistered id and an out-of-space arg are built")
+              (Unconditional
+                  "each iteration queries matching and non-matching signatures on a built registry, and runs the four lifecycle verbs on all four registries")
+              (Built,
+               "an unregistered id and an out-of-space arg are built, and so are an unheld id, an ill-formed replacement and a repeated parameter")
           c
               "packLoadingLaws"
               none
@@ -1653,6 +1656,7 @@ module Families =
               [ "ContentPack.load"
                 "ContentPack.pack"
                 "ContentPack.signatureFingerprint"
+                "ContentPack.unload"
                 "FunctionRegistry.findBySignature" ] }
           { Family = "Conformance.placementLaws"
             Operations =
@@ -1691,7 +1695,10 @@ module Families =
                 "QueryRegistry.register"
                 "QueryRegistry.dispatch"
                 "QueryRegistry.dispatchWithArgs"
-                "QueryRegistry.enumerate" ] }
+                "QueryRegistry.enumerate"
+                "Query.invokePage"
+                "Query.invocationKeyPage"
+                "QueryRegistry.dispatchPage" ] }
           { Family = "Conformance.queryLawsAt"
             Operations = [ "QueryRegistry.enumerate"; "QueryRegistry.tryFind"; "Query.validateParams" ] }
           { Family = "Conformance.reachLaws"
@@ -1723,7 +1730,24 @@ module Families =
                 "FunctionRegistry.dispatch"
                 "FunctionRegistry.entry"
                 "FunctionRegistry.findBySignature"
-                "FunctionRegistry.partiallyApply" ] }
+                "FunctionRegistry.partiallyApply"
+                "FunctionRegistry.ids"
+                "FunctionRegistry.unregister"
+                "FunctionRegistry.replace"
+                "FunctionRegistry.restrict"
+                "FunctionRegistry.union"
+                "CapabilityRegistry.unregister"
+                "CapabilityRegistry.replace"
+                "CapabilityRegistry.restrict"
+                "CapabilityRegistry.union"
+                "QueryRegistry.unregister"
+                "QueryRegistry.replace"
+                "QueryRegistry.restrict"
+                "QueryRegistry.union"
+                "Validator.unregister"
+                "Validator.replace"
+                "Validator.restrict"
+                "Validator.union" ] }
           { Family = "Conformance.sanitizeLaws"
             Operations =
               [ "Idl.Sanitize.isAllowedAttributeKey"

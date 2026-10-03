@@ -2614,7 +2614,7 @@
     {
       "id": "query-enumerate-is-registry",
       "level": "proved",
-      "claim": "An id is in `QueryRegistry.enumerate`'s output exactly when `QueryRegistry.tryFind` resolves it, and `dispatch` raises `NoSuchQuery` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS declaration's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise (`register_extends`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`), which is what makes a capture key's id prefix name ONE declaration. Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `queryLaws`'s to certify and is outside the theorem.",
+      "claim": "An id is in `QueryRegistry.enumerate`'s output exactly when `QueryRegistry.tryFind` resolves it, and `dispatch` raises `NoSuchQuery` exactly off that enumeration (`no_such_iff_unregistered`) — no hidden entry, no phantom one. A resolved id dispatches to ITS declaration's `invoke` (`registered_dispatches`); `register` refuses a held id (`register_refuses_duplicate`) and extends by exactly one entry otherwise, over a declaration naming each parameter once (`register_extends`; since Phase 316 a repeated name is refused, row `query-register-refuses-duplicate-params`); and a registry built by `register` from `empty` holds distinct ids (`register_keeps_distinct`), which is what makes a capture key's id prefix name ONE declaration. Membership, not order: production's `Map` sorts the enumeration by id and the model holds the map as a list, so the sorted order is `queryLaws`'s to certify and is outside the theorem.",
       "phase": "fuaran-core#187",
       "evidence": {
         "theorem": "enumerate_is_registry",
@@ -2666,7 +2666,7 @@
     {
       "id": "query-differential",
       "level": "tested",
-      "claim": "The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so first-wins is compared, and argument sets that bind, skip, null, mistype, repeat and reverse. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else. Agreement is over the pools drawn, never over all inputs. The generator draws no character of the key encoding, so it cannot tell an escaping `field` from a bare one (measured, Phase 225: a `field` that only appends the terminator leaves it green); the escaper case compares the capture key over string cells drawn from an adversarial alphabet, and it goes red on exactly that.",
+      "claim": "The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so the registration refusal of a repeated name is compared (Phase 316; it was first-wins until the registry began refusing such a declaration, and the draw grew from 300 registries to 500 to keep the sample's floors), and argument sets that bind, skip, null, mistype, repeat and reverse. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, and (Phase 316) the PAGE key `invocationKeyPage` byte for byte under six tokens carrying the page tag and the encoding's own symbols, with the first page's key held equal to `invocationKey`, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else. Agreement is over the pools drawn, never over all inputs. The generator draws no character of the key encoding, so it cannot tell an escaping `field` from a bare one (measured, Phase 225: a `field` that only appends the terminator leaves it green); the escaper case compares the capture key over string cells drawn from an adversarial alphabet, and it goes red on exactly that.",
       "phase": "fuaran-core#187",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -2681,7 +2681,8 @@
         ],
         "operations": [
           "Query.validateParams",
-          "QueryRegistry.register"
+          "QueryRegistry.register",
+          "Query.invocationKeyPage"
         ]
       }
     },
@@ -3644,6 +3645,53 @@
         "operations": [
           "ColumnType.widens",
           "Space.subsumes"
+        ]
+      }
+    },
+    {
+      "id": "query-register-refuses-duplicate-params",
+      "level": "proved",
+      "claim": "Phase 316: `QueryRegistry.register` refuses a fresh declaration that names a parameter twice, as `DuplicateParam` naming the first repeated name (`register_refuses_duplicate_params`), after the id check and before anything is held. So a registry built by `register` from `empty` holds only declarations with distinct parameter names (`register_keeps_params_distinct`, over `params_distinct`), and the premise `all_null_refusal_exact` is stated under is DISCHARGED for every query such a registry resolves rather than assumed (`registered_all_null_refusal_exact`): the all-`Null` argument set of a registered query is refused as `RequiredParamsNull` naming every required parameter in declaration order, and accepted only when it requires nothing. Until Phase 316 the registry checked the id alone, so the theorem assumed of a declaration what production never enforced. A hand-built `QueryRegistry` record is outside the claim: the record is public, and the invariant is `register`'s.",
+      "phase": "fuaran-core#316",
+      "evidence": {
+        "theorem": "register_refuses_duplicate_params",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "QueryRegistry.register",
+          "QueryRegistry.replace"
+        ]
+      }
+    },
+    {
+      "id": "query-invocation-key-page-injective",
+      "level": "proved",
+      "claim": "Phase 316: `Query.invocationKeyPage`'s pre-image is INJECTIVE over the pair (argument set, page token): two pairs whose page pre-images agree hold the same token and exactly the same bindings (`invocation_key_page_injective`, extending 225's `invocation_key_injective`), so distinct tokens never share a pre-image (`distinct_tokens_distinct_preimages`) and a paged query captured page by page replays page n from page n's capture. The page fields are a triple in front of the arguments' — an empty name, the tag `p` that no cell's tag is (`cell_tag_not_page`), the token — and nothing for the first page, so the first page keys exactly as `invocationKey` (`invocation_key_page_none`) and every journal keyed before paging still replays. CONDITIONAL on `key_premises`, as the 225 theorem is: the symbol reading of a string, the escaper premise of `Hash.canonicalField`, and injective int and float renderers (`query-renderers-abstract`). Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made. The paged verbs carry every dispatch theorem unchanged: `dispatchPage` IS `dispatch` under the resolver that reads the token (`dispatch_page_is_dispatch`).",
+      "phase": "fuaran-core#316",
+      "evidence": {
+        "theorem": "invocation_key_page_injective",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Query.invocationKeyPage",
+          "Query.invokePage",
+          "QueryRegistry.dispatchPage"
+        ]
+      }
+    },
+    {
+      "id": "query-registry-lifecycle",
+      "level": "proved",
+      "claim": "Phase 316: a registry is a lattice, not an append log. `QueryRegistry.unregister` after a successful `register` gives back exactly the declarations the registry held before (`unregister_register`), and refuses an id the registry does not hold as `NoSuchQuery` naming every id it holds (`unregister_refuses_unheld`); `restrict` holds exactly the held ids that are kept, so it never widens (`restrict_members`); `union` is refused exactly when the two registries share an id, as `DuplicateQuery` naming one they share, and otherwise holds exactly the ids of both (`union_members`). Membership, not order: production's `Map` sorts by id and the model holds a list, so the order, `union`'s associativity and the same lifecycle on the capability, function and validator registries are `registryLaws`' to certify, over drawn registries, and are outside the theorem.",
+      "phase": "fuaran-core#316",
+      "evidence": {
+        "theorem": "union_members",
+        "model": "proofs/Query.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "QueryRegistry.unregister",
+          "QueryRegistry.restrict",
+          "QueryRegistry.union"
         ]
       }
     },

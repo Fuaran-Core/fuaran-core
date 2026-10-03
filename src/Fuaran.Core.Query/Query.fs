@@ -139,7 +139,8 @@ type QueryError =
     /// The required params the args bind only to `Null` — present, but bound to no value (Phase 226).
     /// Distinct from `RequiredParamsUnbound` (left out), so a caller can tell the two apart.
     | RequiredParamsNull of names: string list
-    /// An invocation binds this parameter twice (Phase 307) — the query seam's `DuplicateArg`.
+    /// An invocation binds this parameter twice (Phase 307) — the query seam's `DuplicateArg` — or,
+    /// since Phase 316, a declaration handed to `QueryRegistry.register` / `replace` names it twice.
     /// Refused at the second binding: one name takes one cell, and with two the `Map.ofList`
     /// reading and the "some binding has a value" reading of `Required` answered differently (a
     /// required `a` bound `[a = 1; a = Null]` was accepted while a resolver reading the map saw
@@ -298,6 +299,32 @@ module Query =
 
         q.Id + "#" + Hash.fnv1a canonical
 
+    /// The capture key of ONE PAGE of an invocation (Phase 316): `invocationKey`'s pre-image with
+    /// the page token in front of it, so a paged `Network` query captured page by page replays each
+    /// page from its own capture rather than page one for every page. `None` (the first page, or a
+    /// query that does not page) adds nothing, so `invocationKeyPage q args None` IS
+    /// `invocationKey q args`, byte for byte, and every journal keyed before paging reached the seam
+    /// still replays. `Some token` adds three fields — an empty name, the tag `p` that no cell's tag
+    /// is, and the token — through the same `Hash.canonicalFields`, so the pre-image stays INJECTIVE
+    /// over the pair (`invocation_key_page_injective` in `proofs/Query.fst`): two (argument set,
+    /// token) pairs share a pre-image only when they hold the same bindings AND the same token, so
+    /// distinct tokens give distinct pre-images. That two distinct pre-images hash apart is a property
+    /// of `Hash.fnv1a` and is not claimed.
+    let invocationKeyPage (q: Query) (args: (string * Cell) list) (pageToken: string option) : string =
+        match pageToken with
+        | None -> invocationKey q args
+        | Some token ->
+            let canonical =
+                [ ""; "p"; token ]
+                @ (args
+                   |> List.sortBy fst
+                   |> List.collect (fun (n, v) ->
+                       let tag, payload = cellFields v
+                       [ n; tag; payload ]))
+                |> Hash.canonicalFields
+
+            q.Id + "#" + Hash.fnv1a canonical
+
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
     /// fetch: every arg must address a declared param, once (`DuplicateParam`, Phase 307 — so the
     /// list `invocationKey` keys has distinct names, the hypothesis of its proved determinism), and
@@ -381,6 +408,22 @@ module Query =
             | Ready r -> Ok(Ready r)
             | Pending -> Ok Pending
             | Failed m -> Error(ExecutionFailed(m, [])))
+
+    /// Invoke ONE PAGE of a query (Phase 316): `invoke`, with the page token handed to the resolver
+    /// beside the declaration, so a host pages through the seam — default-deny and `validateParams`
+    /// both still run first — instead of declaring the token as a parameter (which would leak it into
+    /// the query's enumerated contract) or calling its resolver directly (which would bypass both).
+    /// `None` asks for the first page; `Some token` is a `QueryResult.NextPageToken` the host handed
+    /// back, opaque to the seam. The same three outcomes as `invoke`, and `invoke q args resolve` is
+    /// `invokePage q args None (fun q _ -> resolve q)`. A non-deterministic page is journalled under
+    /// `invocationKeyPage q args pageToken`, so each page replays from its own capture.
+    let invokePage
+        (q: Query)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> Deferred<QueryResult>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        invoke q args (fun q -> resolve q pageToken)
 
     // ---- every refusal at once, the validated arguments handed on, and the schema (Phase 251) ----
 
@@ -534,14 +577,23 @@ module QueryRegistry =
     /// `known` list.
     let empty: QueryRegistry = { Queries = Map.empty }
 
-    /// Register a query — additive, no silent overwrite (a duplicate id is a named error).
+    /// The registration refusal a declaration earns, or `None` (Phase 316): a declaration naming a
+    /// parameter twice is refused `DuplicateParam`, naming the first repeated name — the query seam's
+    /// admission gate, as `IllFormedCapability` is the capability seam's. An invocation could never
+    /// bind such a declaration's repeated name sensibly (`validateParams` refuses the second binding),
+    /// and `proofs/Query.fst` states its exact all-`Null` refusal over distinct names, so registration
+    /// is where the premise is discharged rather than assumed (`register_refuses_duplicate_params`).
+    let private admissionFault (q: Query) : QueryError option =
+        match Capability.repeatedAddrs (q.Params |> List.map (fun p -> p.Name, ())) with
+        | dup :: _ -> Some(DuplicateParam dup)
+        | [] -> None
+
+    /// Register a query — additive, no silent overwrite (a duplicate id is a named error), and,
+    /// since Phase 316, only a declaration whose parameter names are distinct (`DuplicateParam`
+    /// otherwise, naming the repeated name). The id is checked first.
     let register (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
-        if Map.containsKey q.Id r.Queries then
-            Error(DuplicateQuery q.Id)
-        else
-            Ok
-                { r with
-                    Queries = Map.add q.Id q r.Queries }
+        KeyedRegistry.register DuplicateQuery admissionFault q.Id q r.Queries
+        |> Result.map (fun m -> { Queries = m })
 
     /// The query registered under `id`, or `None`. A bare lookup: unlike `dispatch` it
     /// validates nothing and names no alternatives.
@@ -576,6 +628,48 @@ module QueryRegistry =
         match Map.tryFind id r.Queries with
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
         | Some q -> Query.invokeWithArgs q args resolve
+
+    /// `dispatch` for ONE PAGE (Phase 316): resolve the id (default-deny), then `Query.invokePage`,
+    /// handing the resolver the page token. `dispatch r id args resolve` is
+    /// `dispatchPage r id args None (fun q _ -> resolve q)`.
+    let dispatchPage
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> Deferred<QueryResult>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        match Map.tryFind id r.Queries with
+        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
+        | Some q -> Query.invokePage q args pageToken resolve
+
+    // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
+
+    /// Remove the query registered under `id` — refused `NoSuchQuery(id, known)` when the registry
+    /// does not hold it, naming every id it does hold. Removing a query just registered gives back
+    /// the registry it was registered into.
+    let unregister (id: string) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
+        KeyedRegistry.unregister (fun id known -> NoSuchQuery(id, known)) id r.Queries
+        |> Result.map (fun m -> { Queries = m })
+
+    /// Swap the query registered under `q.Id` for `q` — the hot-reload verb. Refused `NoSuchQuery`
+    /// when the id is not registered, and held to the admission `register` runs (`DuplicateParam`);
+    /// on a refusal the registry is unchanged.
+    let replace (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
+        KeyedRegistry.replace (fun id known -> NoSuchQuery(id, known)) admissionFault q.Id q r.Queries
+        |> Result.map (fun m -> { Queries = m })
+
+    /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny. An id
+    /// in `keep` the registry does not hold is ignored, so the result enumerates a subset of what `r`
+    /// enumerates.
+    let restrict (keep: Set<string>) (r: QueryRegistry) : QueryRegistry =
+        { Queries = KeyedRegistry.restrict keep r.Queries }
+
+    /// The join of two registries whose ids are disjoint — refused `DuplicateQuery` naming the first
+    /// id, in id order, that both hold (no silent overwrite, as `register`). Associative.
+    let union (a: QueryRegistry) (b: QueryRegistry) : Result<QueryRegistry, QueryError> =
+        KeyedRegistry.union DuplicateQuery a.Queries b.Queries
+        |> Result.map (fun m -> { Queries = m })
 
 /// The canonical wire codec for a `Query` declaration + a `QueryResult`. Round-trips the typed
 /// params, the result schema, the effect class, the source (via `ColumnCodec`), and the paging

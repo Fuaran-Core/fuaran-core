@@ -302,3 +302,27 @@ let duplicateParamTests =
               let e = DuplicateParam "year"
               Expect.equal (QueryCodec.decodeQueryError (QueryCodec.encodeQueryError e)) (Ok e) "round trip"
               Expect.stringStarts (QueryError.describe e) "Refused: " "described" ]
+
+// ---- Phase 316: the registry refuses a declaration that names a parameter twice ----
+
+[<Tests>]
+let registrationDuplicateParamTests =
+    testList
+        "Query registration refuses a repeated parameter name (Phase 316)"
+        [ testCase "register refuses a declaration naming a parameter twice, by name, and holds nothing"
+          <| fun _ ->
+              let twice =
+                  { sampleQuery with
+                      Id = "twice"
+                      Params =
+                          sampleQuery.Params
+                          @ [ { Name = "year"
+                                Type = StringType
+                                Required = false } ] }
+
+              Expect.equal
+                  (QueryRegistry.register twice QueryRegistry.empty)
+                  (Error(DuplicateParam "year"))
+                  "the repeated name is refused at registration"
+
+              Expect.isOk (QueryRegistry.register sampleQuery QueryRegistry.empty) "distinct names still register" ]

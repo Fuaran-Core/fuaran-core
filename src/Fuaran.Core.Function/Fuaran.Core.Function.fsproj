@@ -11,10 +11,16 @@
     <Compile Include="Space.fs" />
     <Compile Include="Function.fs" />
     <Compile Include="Deferred.fs" />
+    <Compile Include="KeyedRegistry.fs" />
     <Compile Include="Capability.fs" />
     <Compile Include="FunctionRegistry.fs" />
     <Compile Include="ContentPack.fs" />
     <Compile Include="CapabilityPipeline.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 316: the query registry sits behind the same internal keyed-registry helper
+         (`KeyedRegistry`) as the two registries in this package. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Query" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

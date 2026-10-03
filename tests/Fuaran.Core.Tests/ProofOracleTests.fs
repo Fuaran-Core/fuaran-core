@@ -10562,6 +10562,32 @@ let private queryProbe
                     sprintf "seed %d: invocationKey differs on %s %A\n  prod %s\n  model %s" seedTag id args pKey mKey
                 )
 
+            // Phase 316 — the PAGE key, byte for byte, over a token alphabet carrying the page tag
+            // and the canonical encoding's own symbols; and the first page keys as `invocationKey`.
+            for token in [ None; Some ""; Some "p"; Some "\u0001"; Some "\u0010t"; Some "cursor" ] do
+                let mToken =
+                    match token with
+                    | None -> FStar_Pervasives_Native.None
+                    | Some t -> FStar_Pervasives_Native.Some t
+
+                let pPage = Query.invocationKeyPage q args token
+                let mPage = ModelQuery.invocation_key_page rn mq margs mToken
+
+                if pPage <> mPage then
+                    diffs.Add(
+                        sprintf
+                            "seed %d: invocationKeyPage differs on %s %A %A\n  prod %s\n  model %s"
+                            seedTag
+                            id
+                            args
+                            token
+                            pPage
+                            mPage
+                    )
+
+                if token.IsNone && pPage <> pKey then
+                    diffs.Add(sprintf "seed %d: the first page's key is not invocationKey on %s" seedTag id)
+
             // `invocation_key_deterministic`, sampled on the shipped seam: with distinct names the
             // caller's order does not reach the key.
             let names = args |> List.map fst
@@ -17070,15 +17096,18 @@ let proofOracleTests =
           testCase
               "the query oracle agrees with QueryRegistry.register, enumerate, tryFind and dispatch, and Query.validateParams, invocationKey and determinismTag, over generated registries, declarations and argument sets"
           <| fun _ ->
-              let t = queryDifferential queryToModel queryRenderers 1871 300
+              let t = queryDifferential queryToModel queryRenderers 1871 500
 
               match t.QDiffs with
               | d :: _ -> failtestf "the query oracle and production DISAGREE\n%s" d
               | [] ->
-                  // Measured at 300 registries: registered 337, dupRefused 87, repeated-name
-                  // declarations 89; settled 64, pending 24, noSuch 532, validated 110, refused 108,
-                  // execFailed 22, refusedWithoutResolver 640; keys 218 (40 over a Null binding, 57
-                  // held still under a reordering).
+                  // Measured at 500 registries (Phase 316: 300 until the registry began refusing a
+                  // declaration that names a parameter twice, which left fewer queries registered and
+                  // the Null-binding key floor short): registered 506, dupRefused 246 (duplicate ids
+                  // and repeated parameter names), repeated-name declarations 161; settled 83,
+                  // pending 45, noSuch 885, validated 171, refused 133, execFailed 43,
+                  // refusedWithoutResolver 1018; keys 304 (36 over a Null binding, 72 held still
+                  // under a reordering), each compared with its six page keys.
                   Expect.isGreaterThan
                       t.QRegistered
                       200
@@ -17093,7 +17122,7 @@ let proofOracleTests =
                       t.QRepeatedParamDecls
                       40
                       (sprintf
-                          "declarations repeating a param name arose, so first-wins was compared (repeated=%d)"
+                          "declarations repeating a param name arose, so the registration refusal was compared (repeated=%d)"
                           t.QRepeatedParamDecls)
 
                   Expect.isGreaterThan t.QSettled 30 (sprintf "dispatches settled (settled=%d)" t.QSettled)
@@ -17154,7 +17183,7 @@ let proofOracleTests =
                           (Set.contains cls t.QClasses)
                           (sprintf "the sample reached a %s refusal (reached: %A)" cls t.QClasses)
 
-                  Expect.equal (queryDifferential queryToModel queryRenderers 1871 300) t "same seed => identical tally"
+                  Expect.equal (queryDifferential queryToModel queryRenderers 1871 500) t "same seed => identical tally"
 
           testCase
               "a query oracle behind a FORGETFUL bridge or an ORDER-BLIND comparator DISAGREES with Query.validateParams and Query.invocationKey — the measurement can fail"
@@ -17176,7 +17205,9 @@ let proofOracleTests =
               Expect.isNonEmpty blind.QDiffs "an order-blind comparator MUST disagree with production"
 
               Expect.isTrue
-                  (blind.QDiffs |> List.forall (fun d -> d.Contains "invocationKey differs"))
+                  (blind.QDiffs
+                   |> List.forall (fun d ->
+                       d.Contains "invocationKey differs" || d.Contains "invocationKeyPage differs"))
                   "and every disagreement is about the capture key — the comparator reaches nothing else"
 
           testCase

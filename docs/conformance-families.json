@@ -764,7 +764,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "800",
+      "cases": "1000",
       "adequacy": "unconditional",
       "refusal": "built"
     },
@@ -842,7 +842,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1800",
+      "cases": "2200",
       "adequacy": "unconditional",
       "refusal": "built"
     },
@@ -945,7 +945,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1000",
+      "cases": "2200",
       "adequacy": "unconditional",
       "refusal": "built"
     },

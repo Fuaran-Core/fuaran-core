@@ -63,7 +63,7 @@ type PackManifest =
         Functions: PackedFunction list
     }
 
-/// Why a content pack was refused at load time — total, and (per the envelope discipline, GP5) it names
+/// Why a content pack was refused at load time (or, since Phase 316, at unload time) — total, and (per the envelope discipline, GP5) it names
 /// the failure and enumerates the alternatives where a closed set is expected. Default-deny by shape:
 /// only a known base + a matching signature version + a non-duplicate id loads.
 type PackLoadError =
@@ -82,6 +82,10 @@ type PackLoadError =
     /// registered an UN-narrowed signature under its new id: the silent stale binding this contract
     /// exists to refuse.
     | UnknownBoundAddr of packId: string * newId: string * addr: string * declared: string list
+    /// An unload refused (Phase 316): the pack's function `newId` is not registered, so the pack is
+    /// not (or no longer wholly) loaded; `known` lists the ids the registry holds. Declared last, so
+    /// every earlier case keeps its tag.
+    | PackNotLoaded of packId: string * newId: string * known: string list
 
 /// Build / fingerprint / load content packs over the Phase-50 signature-typed registry. Additive over
 /// `FunctionRegistry`; FSharp.Core-only, Fable-clean.
@@ -130,9 +134,8 @@ module ContentPack =
             function
             | [] -> Ok acc
             | (pf: PackedFunction) :: rest ->
-                match Map.tryFind pf.BaseId acc.Entries with
-                | None ->
-                    Error(UnknownBaseFunction(manifest.PackId, pf.BaseId, acc.Entries |> Map.toList |> List.map fst))
+                match FunctionRegistry.tryFind pf.BaseId acc with
+                | None -> Error(UnknownBaseFunction(manifest.PackId, pf.BaseId, FunctionRegistry.ids acc))
                 | Some baseEntry ->
                     let actual = signatureFingerprint baseEntry.Capability.Signature
 
@@ -147,5 +150,23 @@ module ContentPack =
                             match FunctionRegistry.register curried acc with
                             | Ok acc' -> go acc' rest
                             | Error e -> Error(PackRegisterFailed(manifest.PackId, pf.NewId, e))
+
+        go reg manifest.Functions
+
+    /// Unload a content pack (Phase 316) — the inverse of `load`: every function the manifest
+    /// registers (each `NewId`) is removed through `FunctionRegistry.unregister`, so the result
+    /// index drops them with the entries. All-or-nothing, like `load`: the first `NewId` the registry
+    /// does not hold refuses the whole unload `PackNotLoaded`, naming it and the ids the registry
+    /// holds, and the caller keeps its registry. `unload m` undoes a successful `load m`: over the
+    /// registry `load m reg` returned it gives back `reg`. The base functions the pack curried are
+    /// not the pack's and stay registered.
+    let unload (manifest: PackManifest) (reg: FunctionRegistry) : Result<FunctionRegistry, PackLoadError> =
+        let rec go (acc: FunctionRegistry) =
+            function
+            | [] -> Ok acc
+            | (pf: PackedFunction) :: rest ->
+                match FunctionRegistry.unregister pf.NewId acc with
+                | Ok acc' -> go acc' rest
+                | Error _ -> Error(PackNotLoaded(manifest.PackId, pf.NewId, FunctionRegistry.ids acc))
 
         go reg manifest.Functions

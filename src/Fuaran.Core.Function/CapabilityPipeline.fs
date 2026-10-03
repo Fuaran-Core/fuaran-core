@@ -123,7 +123,7 @@ module CapabilityLookup =
     /// A function registry as a lookup: each entry's capability, by its id.
     let ofFunctionRegistry (r: FunctionRegistry) : CapabilityLookup =
         { TryFind = fun id -> FunctionRegistry.tryFind id r |> Option.map (fun e -> e.Capability)
-          Known = r.Entries |> Map.toList |> List.map fst }
+          Known = FunctionRegistry.ids r }
 
 /// Build / type-check / key / serialise / **evaluate** a `CapabilityPipeline`. Additive over the
 /// `Capability` surface; FSharp.Core-only, Fable-clean.

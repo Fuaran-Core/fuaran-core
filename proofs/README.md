@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 284 claims — 204 proved across 27 models, 46 tested, 32 assumed (6 `domain-obligation`, 20 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 287 claims — 207 proved across 27 models, 46 tested, 32 assumed (6 `domain-obligation`, 20 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -957,7 +957,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.AiSurface` | 21 | 0 | 9 | 2 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
 | `Fuaran.Core.Conformance` | 135 | 1 | 89 | 2 | 6 | 0 | 0 | 37 |
-| `Fuaran.Core.Function` | 114 | 33 | 30 | 5 | 0 | 5 | 0 | 41 |
+| `Fuaran.Core.Function` | 124 | 33 | 40 | 5 | 0 | 5 | 0 | 41 |
 | `Fuaran.Core.Idl` | 61 | 0 | 6 | 1 | 1 | 0 | 0 | 53 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
@@ -967,11 +967,11 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Ops` | 67 | 22 | 22 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
-| `Fuaran.Core.Query` | 32 | 6 | 8 | 0 | 0 | 0 | 0 | 18 |
+| `Fuaran.Core.Query` | 39 | 13 | 8 | 0 | 0 | 0 | 0 | 18 |
 | `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
-| `Fuaran.Core.Validator` | 39 | 0 | 17 | 3 | 0 | 0 | 0 | 19 |
+| `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 1010 | 132 | 289 | 29 | 14 | 10 | 8 | 528 |
+| **Total** | 1031 | 139 | 303 | 29 | 14 | 10 | 8 | 528 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

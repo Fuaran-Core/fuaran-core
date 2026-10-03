@@ -472,15 +472,8 @@ module CapabilityRegistry =
     /// WELL-FORMED one (Phase 307): a signature `Signature.validate` refuses — an empty or
     /// non-finite space, two holes at one address — is `IllFormedCapability`.
     let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
-        if Map.containsKey c.Id r.Capabilities then
-            Error(DuplicateCapability c.Id)
-        else
-            match Capability.admissionFault c with
-            | Some e -> Error e
-            | None ->
-                Ok
-                    { r with
-                        Capabilities = Map.add c.Id c r.Capabilities }
+        KeyedRegistry.register DuplicateCapability Capability.admissionFault c.Id c r.Capabilities
+        |> Result.map (fun m -> { Capabilities = m })
 
     /// The capability registered under exactly `id` (ordinal, case-sensitive), or `None`.
     let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Map.tryFind id r.Capabilities
@@ -515,6 +508,40 @@ module CapabilityRegistry =
         match Map.tryFind id r.Capabilities with
         | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
         | Some c -> Capability.invokeWithArgs c args (body c)
+
+    // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
+
+    /// Remove the capability registered under `id` — refused `NoSuchCapability(id, known)` when the
+    /// registry does not hold it, naming every id it does hold. Removing a capability just
+    /// registered gives back the registry it was registered into.
+    let unregister (id: string) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+        KeyedRegistry.unregister (fun id known -> NoSuchCapability(id, known)) id r.Capabilities
+        |> Result.map (fun m -> { Capabilities = m })
+
+    /// Swap the capability registered under `c.Id` for `c` — the hot-reload verb. Refused
+    /// `NoSuchCapability` when the id is not registered, and held to the admission gate `register`
+    /// runs (`NonTotalCapability`, `IllFormedCapability`), so a replacement can admit nothing a
+    /// registration would refuse. On a refusal the registry is unchanged.
+    let replace (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+        KeyedRegistry.replace
+            (fun id known -> NoSuchCapability(id, known))
+            Capability.admissionFault
+            c.Id
+            c
+            r.Capabilities
+        |> Result.map (fun m -> { Capabilities = m })
+
+    /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny is a
+    /// `restrict` of the host's registry. An id in `keep` the registry does not hold is ignored, so
+    /// the result enumerates a subset of what `r` enumerates and dispatches nothing `r` would refuse.
+    let restrict (keep: Set<string>) (r: CapabilityRegistry) : CapabilityRegistry =
+        { Capabilities = KeyedRegistry.restrict keep r.Capabilities }
+
+    /// The join of two registries whose ids are disjoint — refused `DuplicateCapability` naming the
+    /// first id, in id order, that both hold (no silent overwrite, as `register`). Associative.
+    let union (a: CapabilityRegistry) (b: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+        KeyedRegistry.union DuplicateCapability a.Capabilities b.Capabilities
+        |> Result.map (fun m -> { Capabilities = m })
 
 /// The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295): each
 /// member forwards to `CapabilityRegistry`.
