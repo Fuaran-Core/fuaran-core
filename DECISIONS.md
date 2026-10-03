@@ -1,13 +1,13 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-03 — D115: the sanitisation floor is held by a law family at a witness a host builds, and the markdown scrub repeats to a fixed point; the `…With` stream operations are held at the caller's own config and hash; the kit nests batches; the obsolete snapshot forwards are classed obsolete
+## 2026-10-03 — D116: the sanitisation floor is held by a law family at a witness a host builds, and the markdown scrub repeats to a fixed point; the `…With` stream operations are held at the caller's own config and hash; the kit nests batches; the obsolete snapshot forwards are classed obsolete
 
 **Context.** Phase 335 mapped every public operation and left the security-relevant and
 hash-parameterised ones `measured-elsewhere`: example tests, no law a host could certify against.
 Phase 349 gives them laws. Its premises were checked against the tree first, and two did not hold
 as written.
 
-**D115.1 — the sanitisation floor is a law family over `SanitizeWitness`.** `Conformance.sanitizeLaws`
+**D116.1 — the sanitisation floor is a law family over `SanitizeWitness`.** `Conformance.sanitizeLaws`
 takes a record of the six functions rather than calling `Fuaran.Core.Idl.Sanitize` directly, with
 `SanitizeWitness.core` the reference. Two reasons. The floor has copies — `Sanitize.fs` itself says a
 change not mirrored in the renderer's copy is a defect until they are consolidated — and a law over a
@@ -23,7 +23,7 @@ drawn point with a removable piece interposed. The second exists because the fir
 resurrection about once in a hundred thousand draws; measured, three seeds of the cut-and-interpose
 draw each found the defect below within their first two iterations with the pinned vectors masked.
 
-**D115.2 — `scrubMarkdown` repeats its sweep to a fixed point (a behavioural fix).** The family's first
+**D116.2 — `scrubMarkdown` repeats its sweep to a fixed point (a behavioural fix).** The family's first
 run was red on Core's own floor. A removal splices its neighbours together, and the splice can form
 something an earlier step of the same pass already swept: `<scr<iframe>ipt>alert(1)</script>` came out
 as a live `<script>alert(1)</script>`, and the handler strip turned `<scri onx=""pt>` into `<script>`.
@@ -35,7 +35,7 @@ only by a removal of at least four units that can form at most one scheme at its
 by replacement — every later pass that changes anything shortens the text. The same count gives the
 length bound the family checks: at most the input plus two units per nine.
 
-**D115.3 — the `…With` operations are config-parameterised, and the family perturbs the caller's
+**D116.3 — the `…With` operations are config-parameterised, and the family perturbs the caller's
 parameters.** The shard asked for the `…With` variants' laws "at a second, non-default hash". The bare
 forms already take a `HashFn`; what the `…With` forms add is the `StreamConfig` — the payload pre-image
 and the genesis — and the exclusions' reasons ("the hash-parameterised capture … is it at the default
@@ -48,7 +48,7 @@ and SHA-256 anyway, and `snapshotLawsWith`'s reference run moves there too. Meas
 `verifyChainWith` that ignored its config and a `captureEffectWith` that ignored its hash each turned
 the family red.
 
-**D115.4 — the obsolete snapshot forwards are classed `obsolete`, not given laws.** Five of the
+**D116.4 — the obsolete snapshot forwards are classed `obsolete`, not given laws.** Five of the
 `…With` set (`compactWith`, `compactChainOnlyWith`, `snapshotAtOptWith`, `verifyAcrossWith`,
 `verifyAcrossChainOnlyWith`) carry `System.Obsolete` and forward to `OpStream.Snapshots`; Phase 335
 classed them `measured-elsewhere`. A law over an entry point scheduled for removal certifies nothing a
@@ -57,7 +57,7 @@ now run at the second config and hash. Their bare-form twins (`compact`, `snapsh
 and the rest) carry the same attribute and the same misclassification; they are outside this phase's
 set and are left for the coverage owner to re-class in one pass.
 
-**D115.5 — the kit's op generator nests batches, and demands it.** `LawKit.genBatch` draws a batch of
+**D116.5 — the kit's op generator nests batches, and demands it.** `LawKit.genBatch` draws a batch of
 one to three ops, each a structural op or, one time in three while under `batchDepthBound` (two levels
 below the outermost), a batch drawn the same way. The op-kind tally counts `nested batch` beside the
 kinds and every op-drawing family demands it, so a sample that never nested is starved by name rather
@@ -65,12 +65,119 @@ than green over flat batches; measured, setting the bound to zero reds every suc
 reference witness. The draw sequence moves for every seeded run, which `STABILITY.md` records as
 behavioural.
 
-**D115.6 — the escape table's format is a committed file and a law.** `StringEscapeVectors.lines` was
+**D116.6 — the escape table's format is a committed file and a law.** `StringEscapeVectors.lines` was
 `host-seam`: a rendering for another language's host to diff, pinned nowhere. It now has
 `conformance/escape/string-escape.json` (written by `--emit-escape`, held to a fresh render), and
 `StringEscapeVectors.laws` — rostered on the `WireNullTolerance.laws` precedent — carries one law on the
 format, stated from the table rather than from the escapers, so a renderer that drifted from the table
 reds even where the escapers still agree with it. The file is new, so no corpus copy of it exists yet.
+
+## 2026-10-03 — D115: the Capability model gains the handler table, the pipeline and the codecs; a theorem is stated about what the code does where the request described something else; the codec lemmas are by hand because each reader does more than a structural vocabulary can say
+
+**Recorded by Phase 354. `proofs/Capability.fst` (sections 14 to 16), `proofs/oracle/Capability.fs`,
+`tests/Fuaran.Core.Tests/ProofOracleTests.fs`, `proofs.json`, `proofs/coverage-exclusions.json`,
+`proofs/modules.json`, `proofs/README.md`; rides the `0.35.0` draft (STABILITY.md, "Phase 354"). No
+file under `src/` moves: the phase found no defect in production.**
+
+**D115.1 — the premises, checked on the tree the phase started from (`a289cbc`).** The model as Phase
+307 left it held the effect lattice, the value spaces with their count and well-formedness checks, the
+hole and signature vocabulary, the function algebra over the abstract witness, `validateArgs`, `invoke`,
+the registry, the capture key and the admission gate — and none of `bindHandlers`, the pipeline or a
+codec, as the deferral said. `Function.bindHandlers`, `CapabilityPipeline.typeCheck` / `eval` /
+`dirtySet` / `evalFrom` and the codecs were as Phase 307 left them. Four things the request said did
+NOT hold of the code, and each theorem is stated about the code:
+
+1. *"Every declared capability is bound to exactly its handler."* `bindHandlers` binds ACTION HOLES,
+   not capabilities, and it runs a check the request did not name: a bound handler's declared effect
+   must be covered by its hole's ceiling. The characterisation carries all three checks.
+2. *"The check visits nodes in a topological order of the pipeline's edges."* It visits DECLARATION
+   order and REFUSES a declaration that is not topological (`PipelineCycle`, `PipelineForwardEdge`); it
+   searches for no order. The theorem says an accepted declaration IS in topological order, and that
+   the verdict is the same across topological orders of one node set.
+3. *"`evalFrom` at any node yields the value the whole evaluation assigns that node."* `evalFrom` is
+   not addressed at a node: it re-evaluates a whole pipeline from a prior result and a change set. The
+   theorem is that its result map equals `eval`'s, which gives the per-node reading as a corollary —
+   under a hypothesis the request omitted and the claim is false without (D115.3).
+4. *"Decode refuses what encode never produces."* False of a lenient reader, which accepts an extra
+   member, any member order and the descriptor spelling of a space. What is proved is the statement
+   about values: everything a reader accepts is a well-formed value that reads back as itself.
+
+**D115.2 — the model's clauses, and what each parameter assumes.**
+
+- *Section 14.* `action_holes`, `check_keys`, `check_effects`, the unbound filter and `bind_handlers`
+  are production's clauses in production's order, over the handlers read as a `Map`'s key-ordered list.
+  `Map.ofList` is modelled too (`map_add` replaces an equal key; `map_of_list` folds it from the left),
+  because "the order the handlers arrive in" exists only before it. **Parameter:** `le`, the order the
+  map keeps its keys in. `bind_handlers_exact` and `bind_handlers_complete` assume nothing of it;
+  `bind_handlers_order_independent` assumes it is a total order (`total_order`, the premise the capture
+  key's determinism already takes) and that the arriving addresses are distinct — with a repeated
+  address the later binding wins, so order then matters and the hypothesis is not removable.
+- *Section 15.* `typeCheck` with its duplicate scan (`first_dup`, the first id in order of first
+  occurrence that occurs again, which is what `List.countBy` then `tryPick` computes), its position
+  test, `edgeFault`, `argFault` and the required-hole check; the cycle search `pathTo` with its visited
+  set, terminating by a checked measure (the declared ids not yet visited), the growth of the set
+  carried as a refinement on the result; `runNode`, `eval`, `dirtySet` (the inversion and the frontier
+  loop, its termination a checked measure) and `evalFrom`. Two readings are the model's: `nodeById`
+  and `position` are `Map.ofList`s that keep the LAST of a repeated id, and the model looks up the
+  FIRST — the two agree over distinct ids, and both are consulted only after the duplicate scan has
+  passed; and the result map is a list read latest-first, `Map.add` its cons. **Parameters:** the host
+  body and `spell` (any total functions); `feed_readers`, the two float comparisons `Space.subsumes`
+  makes, of which NOTHING is assumed — every pipeline theorem holds for any relation; the capability
+  lookup, a function and a list as in production, with no assumption that the two agree.
+- *Section 16.* The writers and the lenient readers of `SpaceCodec`, `EffectCodec`, the signature and
+  capability codec and the pipeline's node codec, at the `JVal`, through `Decoder.field` / `optField` /
+  `list` / the tag dispatch as each is written; a refusal is its `DecodeCode` and path. `Decoder.list`
+  is the direct recursion rather than production's reversed accumulator (the same first refusal, the
+  same list). **Parameter:** `codec_readers.float_of_int`, `float i` as `Decoder.float` reads a `JInt`,
+  of which nothing is assumed. **Not modelled:** the bytes (`Canon.render`, `Json.parse` — other
+  models' theorems; the differential runs the round trip through them), the `Strict` policy, a
+  refusal's sentence, and the invocation, `Deferred` and `InvokeError` codecs.
+
+**D115.3 — every theorem conditional on a parameter or a hypothesis, named.**
+`bind_handlers_order_independent`: `total_order le`, and distinct arriving addresses.
+`typecheck_topological`'s second half: both declarations topological (a declaration that is not is
+refused whatever its nodes are, which is the first half). `pipeline_evalfrom_agrees`: `prior` is what
+`eval` answered under some body, and the new body agrees with that one at every node outside `changed`
+(`agree_off`) — the differential counts 137 probes where a body moved at an unnamed node and `evalFrom`
+parted from `eval`, so the hypothesis is the contract, not a convenience. The three
+`…_roundtrip_identity` lemmas: the value is well-formed (`wf_signature`, `wf_capability`, a
+well-formed output space), which the exact forms beside them make an equivalence. Every theorem about
+an evaluator: the body is total and a function of its arguments (`capability-pipeline-body-total`).
+
+**D115.4 — the codec lemmas are stated by hand, and why the IDL route fits none of the three.**
+Declaring `Capability`, `Signature` and `PipelineNode` as an IDL vocabulary would have the F\* target
+generate `rt_<T>` over a STRUCTURAL codec: one member per field, a tag per case. Each of the three
+readers does something that vocabulary cannot say, so a generated lemma would be about a different
+function from the one shipped:
+
+- a signature entry OMITS its space on write when it is the slot's derived one and RESTORES it from the
+  constraint on read (Phase 229), and its kind is a string from a closed set rather than a tag;
+- the signature reader runs `Signature.validate` and refuses what it refuses (Phase 307);
+- the capability reader cross-checks the `determinism` label against the signature it has just read
+  (Phase 44), a constraint between two members;
+- the node reader runs `Space.wellFormed` on the output space it has just read (Phase 307), and the
+  space reader accepts a second, descriptor spelling.
+
+The hand lemmas are stated EXACTLY — decode after encode for every value, with the refusal's code and
+path where there is one — and the exact form is what found the one value that does not read back as
+itself: a hand-built slot entry with no space reads back with the `SlotTree` of its constraint
+(`normal_entry`). The generated route stays right for a vocabulary whose codec IS structural.
+
+**D115.5 — the spec-strength check, and the falsification probes.** Each theorem was read against the
+seam before it was discharged, and three were strengthened from the request: the handler theorem
+carries the effect ceiling and names WHICH offender each refusal reports; the evaluator theorem is an
+equivalence (`EvalIllTyped` exactly when the check refuses) rather than its refused half; the codec
+theorems are exact for every value rather than an identity over a domain. Twelve single perturbations
+were then run, one per prover invocation, each weakening one hypothesis or falsifying one conclusion
+(the closure of the dirty set, `agree_off`, the acceptance premise, the topological premise, an
+accepted declaration claimed to be in REVERSE order, an undeclared key claimed for `NotAnActionHole`,
+distinct addresses, the ceiling, an entry claimed to read back as itself, a capability's determinism,
+a node with an ill-formed output space claimed to read back as itself, a refused signature claimed
+accepted): the prover refused all twelve.
+
+**D115.6 — the budget moves, by the seeding rule.** The module roughly doubled. The re-seed and the
+measurements it came from are in `proofs/modules.json`'s `Capability` note; the pinned flags are
+untouched and no query needed a scoped option.
 
 ## 2026-10-03 — D114: a coverage report states what was evaluated; the declaration file types the decode refusal as the object it is; a field name every JavaScript object already carries is refused by the IDL, `prototype` is not
 

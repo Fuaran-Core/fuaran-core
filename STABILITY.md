@@ -2598,7 +2598,45 @@ inherited JavaScript member; and, for a reader of a failed symbolic verification
 validator and the coverage report, riding the `0.35.0` slot, whose class (`breaking (source)`) they
 do not exceed: no number moves.
 
-### The sanitisation floor, the configured-stream operations and the escape table gain laws; the kit draws nested batches; the markdown scrub reaches a fixed point (Phase 349, DECISIONS.md D115) — ADDITIVE for the kit; BREAKING (behavioural): `Sanitize.scrubMarkdown` removes two splices it emitted live, and every op-drawing family draws a different sample at the same seed; the wire `unchanged`
+### The Capability model grows the handler table, the pipeline and the codecs (Phase 354, DECISIONS.md D115) — ADDITIVE: no public surface moves, no emitted byte moves
+
+**What moved, for a consumer: nothing it compiles against or reads.** No file under `src/` changed,
+so no package's public surface, no document any encoder writes and no conformance vector moves. The
+phase found no defect in production.
+
+**What a consumer may now cite.** Three surfaces of `Fuaran.Core.Function` that were sampled are
+machine-checked, in `proofs/Capability.fst` (sections 14 to 16), each beside a differential that runs
+the extracted section against the shipped function:
+
+- **`Function.bindHandlers`** is characterised exactly (`bind_handlers_exact`,
+  `bind_handlers_complete`): accepted exactly when every handler key is a declared action hole's
+  address and every action hole has a handler its ceiling covers; refused naming the first undeclared
+  key in key order, then the first hole in declaration order whose handler exceeds its ceiling, then
+  exactly the holes left unbound. The result does not depend on the order the handlers arrive in
+  (`bind_handlers_order_independent`).
+- **`CapabilityPipeline`**: an accepted pipeline's declaration order is a topological order of its
+  edges, and the verdict is the same across topological orders of one node set
+  (`typecheck_topological`); `eval` and `evalFrom` answer `EvalIllTyped` exactly when `typeCheck`
+  refuses, and then no body runs (`pipeline_refused_never_evaluated`,
+  `pipeline_illtyped_iff_refused`); and `evalFrom` over a finished prior evaluation, under a body that
+  agrees with the prior one outside the change set, equals `eval` (`pipeline_evalfrom_agrees`).
+- **The codecs**, at the `JVal`: decode after encode is stated exactly for every `Signature`,
+  `Capability` and `PipelineNode` — the identity on the well-formed ones, a named refusal or a normal
+  form on the others — and every document a reader accepts is a well-formed value that reads back as
+  itself (`signature_roundtrip`, `capability_roundtrip`, `node_roundtrip` and the three
+  `…_decoded_wf`).
+
+**One fact a consumer building entries by hand should know, which the exact round trip states rather
+than introduces.** A slot entry with no `Space` — the pre-Phase-229 hand-built shape — does not read
+back as itself: the reader restores the `SlotTree` of its constraint. It has done so since Phase 229;
+`Function.signature` never produces such an entry.
+
+**The ladder.** Eight `proved` rows, one `tested` row and two `assumed` rows (`proofs.json`); nine
+operations leave `proofs/coverage-exclusions.json` for the ladder.
+
+**Class: additive**, riding the `0.35.0` slot: no number moves.
+
+### The sanitisation floor, the configured-stream operations and the escape table gain laws; the kit draws nested batches; the markdown scrub reaches a fixed point (Phase 349, DECISIONS.md D116) — ADDITIVE for the kit; BREAKING (behavioural): `Sanitize.scrubMarkdown` removes two splices it emitted live, and every op-drawing family draws a different sample at the same seed; the wire `unchanged`
 
 **What moved, for a consumer.**
 

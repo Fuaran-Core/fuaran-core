@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 273 claims — 196 proved across 27 models, 45 tested, 30 assumed (6 `domain-obligation`, 19 `model-bridge`, 5 `premise`), 2 policy.
+**The ladder, counted:** 284 claims — 204 proved across 27 models, 46 tested, 32 assumed (6 `domain-obligation`, 20 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -650,7 +650,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 30 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 32 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -666,11 +666,11 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 19 rows.
+  `unscheduled` where something could and nobody has. 20 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
-  on. 5 rows.
+  on. 6 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
 and **can never discharge the other two**. A green kit run is evidence about your witness and about
@@ -716,6 +716,8 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `column-int-layouts` | `model-bridge` | `permanent` |
 | `column-codec-abstractions` | `model-bridge` | `permanent` |
 | `capability-body-total` | `premise` | — |
+| `capability-sections-parameters-abstract` | `model-bridge` | `permanent` |
+| `capability-pipeline-body-total` | `premise` | — |
 | `propagation-ops-model-bridge` | `model-bridge` | `unscheduled` |
 | `propagation-evaluator-total` | `premise` | — |
 
@@ -955,7 +957,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.AiSurface` | 21 | 0 | 9 | 2 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
 | `Fuaran.Core.Conformance` | 135 | 1 | 89 | 2 | 6 | 0 | 0 | 37 |
-| `Fuaran.Core.Function` | 114 | 20 | 34 | 5 | 1 | 5 | 0 | 49 |
+| `Fuaran.Core.Function` | 114 | 33 | 30 | 5 | 0 | 5 | 0 | 41 |
 | `Fuaran.Core.Idl` | 61 | 0 | 6 | 1 | 1 | 0 | 0 | 53 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
@@ -969,7 +971,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Validator` | 39 | 0 | 17 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 1010 | 119 | 293 | 29 | 15 | 10 | 8 | 536 |
+| **Total** | 1010 | 132 | 289 | 29 | 14 | 10 | 8 | 528 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -5144,6 +5146,78 @@ The differential draws the declarations the gate refuses — negative, empty, Na
 past-2^53 bounds, a count past the cap, duplicate addresses, a hole under a slot, an open slot
 argument, a repeated argument — and compares `Function.validate` with `validate_decl`.
 
+### What Phase 354 added here: the handler table, the pipeline and the codecs
+
+Phase 307 proved the admission half of its theorem task and deferred the rest, because three
+surfaces were not in the model at all. They are sections 14 to 16 now, each modelled clause for
+clause and each with a theorem that says what the code computes rather than that it answers.
+
+**Section 14 — `Function.bindHandlers`.** The three checks as production runs them (every key an
+action hole's address; every bound handler inside its hole's ceiling; every action hole bound),
+over the handlers read as the key-ordered list a `Map` is, with `Map.ofList` itself modelled
+(`map_add` replaces an equal key, so a later binding of an address wins). `bind_handlers_exact`
+characterises the result in both directions: the handlers are accepted exactly when every key is a
+declared action hole's address and every action hole has a handler its ceiling covers, the table is
+the handlers given, and each refusal names what is refused and why — the FIRST key in key order
+that is no action hole's (`NotAnActionHole` for a declared hole of another kind, `UnknownActionAddr`
+naming the declared actions otherwise), the FIRST hole in declaration order whose handler exceeds
+its ceiling, or exactly the addresses left unbound. `bind_handlers_order_independent` then says the
+whole result is a function of the bindings: any two arrivals of the same distinct bindings give the
+same table or the same refusal. That one theorem takes a premise — the map's key comparator is a
+total order — and it is the premise the capture key's determinism already takes.
+
+**Section 15 — the capability pipeline.** `typeCheck` as Phase 295 strengthened it, its cycle
+search included: production's `pathTo` terminates because a visited set grows inside a finite
+pipeline, and here that is a checked measure with the growth carried as a refinement on the
+result. Then `eval`, `dirtySet` (the inversion and the frontier loop, the loop's termination a
+checked measure too) and `evalFrom`, over an abstract host body. Four theorems:
+
+- `typecheck_topological` — an accepted pipeline's declaration order is a topological order of its
+  `FromNode` edges (ids distinct, every edge naming a node declared strictly earlier), and of two
+  declarations of the same nodes, each in such an order, the check accepts both or neither. The
+  phase asked for "the check visits nodes in a topological order", and that is not what the code
+  does: it visits DECLARATION order and REFUSES a declaration that is not topological. The theorem
+  is stated about what it does.
+- `pipeline_refused_never_evaluated` and `pipeline_illtyped_iff_refused` — an evaluator answers
+  `EvalIllTyped e` exactly when `typeCheck` refuses with `e`, and then under every body alike, so no
+  body runs; over an accepted pipeline the two arms `runNode` comments as unreachable are proved so.
+- `pipeline_evalfrom_agrees` — over a prior evaluation that finished, and a body that agrees with
+  the prior one at every node outside the change set, `evalFrom` equals `eval`: the same map, hence
+  the same value at every node, and the same refusal. The proof needs the dirty set to contain the
+  change and be closed downstream (`dirty_closed`) and needs nothing else of the pipeline; that the
+  set is the LEAST such is a cost claim and is not restated here.
+
+**Section 16 — the codecs, at the `JVal`.** `SpaceCodec`, `EffectCodec`, the signature and
+capability codec and the pipeline's node codec: writers, lenient readers through the typed decode
+layer, each refusal as its `DecodeCode` and path. The route Phase 307 named as cheapest — declare
+the three types as an IDL vocabulary and let the F\* target generate `rt_<T>` — does not fit any of
+them, and `../DECISIONS.md` records why: each reader does something a structural vocabulary cannot
+say (a slot entry's space is omitted on write and restored from its constraint on read; the
+signature reader runs `Signature.validate`; the capability reader cross-checks the determinism
+label against the signature it has just read; the node reader runs `Space.wellFormed`). So the
+lemmas are stated by hand, and stated EXACTLY: `signature_roundtrip`, `capability_roundtrip` and
+`node_roundtrip` each give decode-after-encode for EVERY value — the identity on the well-formed
+ones, a named refusal (code and path) or a normal form on the others. The normal form is a finding
+the round trip surfaces rather than hides: a hand-built slot entry with no space reads back with
+the `SlotTree` of its constraint, so it is the one value that does not read back as itself.
+
+The phase also asked that "decode refuses what encode never produces". For a lenient reader that
+is false, and it is not what is proved: the readers accept an extra member, any member order and
+the descriptor spelling of a space, none of which a writer produces. What is true, and proved
+(`signature_decoded_wf`, `capability_decoded_wf`, `node_decoded_wf`), is the statement about
+VALUES: every document a reader accepts reads as a well-formed value, which encodes and reads back
+as itself. A reader never yields a value its writer could not have written.
+
+The differential gained three pairs of cases. Handler sets are bound in two arrival orders, with a
+key repeated and with two undeclared keys at once, so the refusal ORDER is compared; pipelines
+carry a repeated id, a forward edge, a self-edge, a two-node cycle, an edge to no node, an
+ill-typed edge and an argument bound twice or dropped, accepted ones are re-declared in another
+order, and each body logs what it was handed so the resolved arguments are compared and not only
+the answers; codec documents are each encoding and three mutations of it — a member dropped, a
+value of the wrong kind, a tag outside its set, a re-keyed discriminator — plus the round trip
+through the bytes. Three go-reds: a comparator that is not the map's key order, a blind int reader,
+a blind float-fault reader.
+
 ### The claims ladder, for this theorem
 
 1. **Proved (machine-checked, no admits).** The six theorems above plus the characterisations
@@ -5158,8 +5232,12 @@ argument, a repeated argument — and compares `Function.validate` with `validat
    `slot_space_exact`, `slot_wrong_kind_refused`, `slot_scalar_uninvocable`, with Phase 177's
    statement kept as `spaceless_required_uninvocable`) and, since Phase 225, the capture key's
    injectivity (`invocation_key_injective`, with `esc_split`, `enc_injective`,
-   `key_fields_injective` and `binding_fields_injective` under it), over any
-   witness, any readers, any registry and any host body. F\* 2026.09.06, Z3 4.13.3, every query
+   `key_fields_injective` and `binding_fields_injective` under it), and since Phase 354 the three
+   new sections' theorems (`bind_handlers_exact`, `bind_handlers_complete`,
+   `bind_handlers_order_independent`; `typecheck_topological`, `pipeline_refused_never_evaluated`,
+   `pipeline_illtyped_iff_refused`, `pipeline_evalfrom_agrees`; `signature_roundtrip`,
+   `capability_roundtrip`, `node_roundtrip`, `pipeline_roundtrip` and the three `…_decoded_wf`),
+   over any witness, any readers, any registry and any host body. F\* 2026.09.06, Z3 4.13.3, every query
    3/3 under `--quake 3`, `--report_assumes error` on, no `assume`, no `admit`. Self-contained: it
    opens nothing and restates `outcome` and its list helpers as `ColumnOps.fst` does.
 2. **Differentially tested.** The extracted model agrees with the algebra and the seam over the
@@ -5184,6 +5262,15 @@ argument, a repeated argument — and compares `Function.validate` with `validat
    - **The total-body premise** (`capability-body-total`, a `premise`; Phase 307). The model's body
      is `Tot`; production's may throw, and `Capability.invoke` propagates the exception rather than
      catching it. Every theorem about `invoke` is about bodies that return.
+   - **The parameters of sections 14 to 16** (`capability-sections-parameters-abstract`, a
+     `model-bridge`, permanent; Phase 354). The map's key comparator, the two float comparisons
+     behind `Space.subsumes` and the codecs' one float read are parameters. Only the comparator is
+     ever constrained, and only by `bind_handlers_order_independent`, which asks that it be a total
+     order; every pipeline and codec theorem holds for any float relation. The codecs are compared
+     at the `JVal`; the bytes are theorems 4 and 7's.
+   - **The pipeline's total-body premise** (`capability-pipeline-body-total`, a `premise`; Phase
+     354). The pipeline's host body is `Tot` and a function of the node and its resolved
+     arguments; `runNode` does not wrap it, for the reason `Capability.invoke` does not.
    - **The extractor and the compiler**, inherited from theorem 1's `extractor-and-compiler-trusted`.
 
 ## Theorem 11 — incremental evaluation agrees with full evaluation (Phase 186)

@@ -3479,6 +3479,160 @@
       }
     },
     {
+      "id": "capability-bind-handlers-exact",
+      "level": "proved",
+      "claim": "Phase 354, `bind_handlers_exact`: `Function.bindHandlers` accepts a handler map exactly when every key is a declared action hole's address and every declared action hole has a handler whose declared effect its ceiling covers, and the table it hands back is the handlers given, unchanged (`bind_handlers_complete` is the converse); each refusal says what is refused and why, in the order the checks run — the first key, in key order, that is no action hole's address (`NotAnActionHole` when it is a declared hole of another kind, `UnknownActionAddr` naming every declared action when it is no hole at all), then the first action hole, in declaration order, whose handler exceeds its ceiling (`HandlerEffectExceedsCeiling`, naming both effects), then exactly the action addresses left without a handler (`RequiredActionsUnbound`).",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "bind_handlers_exact",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Function.bindHandlers"
+        ]
+      }
+    },
+    {
+      "id": "capability-bind-handlers-order-independent",
+      "level": "proved",
+      "claim": "Phase 354, `bind_handlers_order_independent`: two arrivals of the same handlers — distinct addresses, the same bindings, in any order — bind identically through `Map.ofList`, the same table when accepted and the same refusal when not, given only that the map's key comparator is a total order (`map_of_list_order_independent`, over `sorted_unique_k`); with a repeated address the later binding replaces the earlier, which is why distinctness is the hypothesis.",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "bind_handlers_order_independent",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "capability-pipeline-typecheck-topological",
+      "level": "proved",
+      "claim": "Phase 354, `typecheck_topological`: a pipeline `CapabilityPipeline.typeCheck` accepts has distinct node ids and every `FromNode` edge naming a node declared strictly earlier — its declaration order is a topological order of its edges, so it is acyclic and each upstream runs before the node it feeds (`typecheck_ordered`) — and of two declarations of the same nodes, each in a topological order, the check accepts both or refuses both (`typecheck_order_independent`): the verdict is a fact about the node set, never about which topological order was written. The check walks DECLARATION order and refuses one that is not topological (`PipelineCycle`, `PipelineForwardEdge`); it does not search for an order. The cycle search is modelled with its visited set and terminates by a checked measure.",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "typecheck_topological",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityPipeline.typeCheck"
+        ]
+      }
+    },
+    {
+      "id": "capability-pipeline-illtyped-iff-refused",
+      "level": "proved",
+      "claim": "Phase 354: `CapabilityPipeline.eval` and `evalFrom` answer `EvalIllTyped e` exactly when `typeCheck` refuses with `e`. A refused pipeline is answered with the check's own refusal under every host body, prior evaluation and change set alike, so no body runs (`pipeline_refused_never_evaluated`); over an accepted one neither evaluator answers `EvalIllTyped` — the two arms `runNode` marks unreachable are unreachable — and what remains is a result, a body's failure (`EvalNodeFailed`) or an upstream value outside the space of the hole it feeds (`EvalArgRefused`) (`pipeline_illtyped_iff_refused`).",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "pipeline_illtyped_iff_refused",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityPipeline.eval"
+        ]
+      }
+    },
+    {
+      "id": "capability-pipeline-evalfrom-agrees",
+      "level": "proved",
+      "claim": "Phase 354, `pipeline_evalfrom_agrees`: where `prior` is what `CapabilityPipeline.eval` answered under one host body and a second body agrees with it at every node outside `changed`, `evalFrom` under the second body from `prior` and `changed` answers exactly what a full `eval` under it answers — the same result map, so at every node the value the whole evaluation assigns it, and the same refusal when a re-run node fails. It rests on the dirty set containing the change and being closed downstream (`dirty_closed`, with the loop's termination a checked measure), and on nothing about the pipeline beyond the prior evaluation having succeeded. Without the agreement hypothesis the claim is false: a body that moves at a node the caller did not name is a stale reuse.",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "pipeline_evalfrom_agrees",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityPipeline.dirtySet",
+          "CapabilityPipeline.evalFrom"
+        ]
+      }
+    },
+    {
+      "id": "capability-codec-signature-roundtrip",
+      "level": "proved",
+      "claim": "Phase 354, `signature_roundtrip`: `CapabilityCodec.signatureOf` after the signature writer, exactly, for every signature, at the `JVal` — an entry whose kind is no hole kind's tag is refused `UnknownTag`, the path naming the first such entry and its `kind`; otherwise a signature `Signature.validate` refuses is refused `OutOfRange` at `holes`; otherwise it reads back as its normal form, itself with each spaceless slot entry given the `SlotTree` of its constraint. On a well-formed signature the round trip is the identity (`signature_roundtrip_identity`), and every document the reader accepts is a well-formed signature that reads back as itself (`signature_decoded_wf`). A value space and an effect class read back as themselves with no condition (`space_roundtrip`, `effect_roundtrip`).",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "signature_roundtrip",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityCodec.signatureOf",
+          "EffectCodec.hostTag",
+          "EffectCodec.toJson",
+          "SpaceCodec.decoder",
+          "SpaceCodec.toJson"
+        ]
+      }
+    },
+    {
+      "id": "capability-codec-capability-roundtrip",
+      "level": "proved",
+      "claim": "Phase 354, `capability_roundtrip`: `CapabilityCodec.decodeJson` after `encodeJson`, exactly, for every capability, at the `JVal` — the signature's refusal under `signature` where `signature_roundtrip` refuses it, `OutOfRange` at `determinism` where the label written disagrees with the one the signature's effect derives, otherwise the capability with its signature in normal form. On a well-formed capability the round trip is the identity (`capability_roundtrip_identity`), and every document the reader accepts is a well-formed capability that reads back as itself (`capability_decoded_wf`) — which is the true form of \"the reader refuses what the writer never produces\": the reader is lenient, so it accepts documents the writer never wrote, and what it never does is yield a value the writer could not have written.",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "capability_roundtrip",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityCodec.decodeJson",
+          "CapabilityCodec.encodeJson"
+        ]
+      }
+    },
+    {
+      "id": "capability-codec-node-roundtrip",
+      "level": "proved",
+      "claim": "Phase 354, `node_roundtrip`: the pipeline codec's node reader after its writer, exactly, for every `PipelineNode`, at the `JVal` — a node whose output space `Space.wellFormed` refuses is refused `OutOfRange` at `outputType`, and every other node reads back as itself, its arguments in order, each edge and each literal; a whole pipeline is refused at its first such node, naming it, and is otherwise the identity (`pipeline_roundtrip`), and every document the node reader accepts carries a well-formed output space and reads back as itself (`node_decoded_wf`).",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "theorem": "node_roundtrip",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityPipeline.decodeDetailed"
+        ]
+      }
+    },
+    {
+      "id": "capability-sections-differential",
+      "level": "tested",
+      "claim": "Phase 354: the extracted sections 14 to 16 agree with the shipped `Function.bindHandlers` (the table or the refusal by class and payload, over handler sets bound in two arrival orders, with a repeated key and with two undeclared keys at once), with `CapabilityPipeline.typeCheck`, `eval`, `dirtySet` and `evalFrom` and `Space.subsumes` (the verdict, the refusal by class and payload, the result map, and the nodes and resolved arguments each body was handed, over pipelines carrying a repeated id, a forward edge, a self-edge, a two-node cycle, an edge to no node, an ill-typed edge and an argument bound twice or dropped, and over reorderings of the accepted ones), and with the capability and pipeline codecs (the encoding, an accepted value, a refusal by code and path, over each encoding and three mutations of it, and the round trip through the bytes). Each theorem's statement is also instantiated on the shipped functions: the incremental answer against the full one, a reordering accepted exactly when it is topological, a round trip that is the identity exactly on the well-formed. Three go-reds: a comparator that is not the map's key order, a blind int reader and a blind float-fault reader each lose. Agreement is over the pools drawn, never over all inputs.",
+      "phase": "fuaran-core#354",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Capability.fst",
+        "cases": [
+          "the handler-table oracle agrees with Function.bindHandlers over generated artifacts and handler sets, in more than one arrival order",
+          "a handler-table oracle handed a comparator that is NOT the map's key order DISAGREES with Function.bindHandlers — the measurement can fail",
+          "the pipeline oracle agrees with CapabilityPipeline.typeCheck, eval, dirtySet and evalFrom over generated registries, pipelines, reorderings and change sets",
+          "a pipeline oracle handed a BLIND int reader DISAGREES with CapabilityPipeline.typeCheck — the measurement can fail",
+          "the codec oracle agrees with CapabilityCodec and the pipeline codec over generated capabilities, pipelines and mutated documents",
+          "a codec oracle handed a BLIND float-fault reader DISAGREES with the shipped readers — the measurement can fail"
+        ]
+      }
+    },
+    {
+      "id": "capability-sections-parameters-abstract",
+      "level": "assumed",
+      "claim": "THE PARAMETERS OF SECTIONS 14 TO 16 (Phase 354). Three host functions the new sections reach for are parameters, each for the reason the scalar readers are: the order an F# `Map<string, _>` keeps its keys in (`le`, which `bind_handlers_order_independent` asks to be a total order and no other theorem asks anything of), the two float comparisons `Space.subsumes` makes (`feed_readers`, of which nothing is assumed — every pipeline theorem holds for any relation), and `float i`, the one float read the codecs make (`codec_readers`, likewise unconstrained). The codecs are modelled at the `JVal`: the bytes on either side are `Canon.render` and `Json.parse`, which are other models' theorems, and the differential runs the round trip through them. A refusal is its code and its path; its sentence and its `Expected` phrase are not modelled. Permanent: the model has no float and no string order, and a `JVal` is where a codec's own logic ends.",
+      "phase": "fuaran-core#354",
+      "class": "model-bridge",
+      "closes": "permanent",
+      "evidence": {
+        "assumption": "the map's key comparator, the float comparisons behind Space.subsumes and the codecs' one float read are host functions the model takes as parameters; the codecs are compared at the JVal, between the canonical renderer and the parser"
+      }
+    },
+    {
+      "id": "capability-pipeline-body-total",
+      "level": "assumed",
+      "claim": "THE TOTAL-BODY PREMISE, FOR THE PIPELINE (Phase 354). The model's host body is a total function from a node and its resolved arguments to a value or a failure's message, and every theorem about `eval` and `evalFrom` spends that. Production's body is an F# closure that may throw, and `runNode` does not wrap it, for the reason `Capability.invoke` does not (`capability-body-total`). `pipeline_evalfrom_agrees` also takes the body to be a FUNCTION of the node and its arguments: a body that answers differently on a second call with the same arguments is outside it, which is what journalling a non-deterministic capability's result is for.",
+      "phase": "fuaran-core#354",
+      "class": "premise",
+      "evidence": {
+        "assumption": "a pipeline's host body returns rather than throwing, and answers as a function of the node and its resolved arguments"
+      }
+    },
+    {
       "id": "query-validate-widens",
       "level": "proved",
       "claim": "Phase 295: a parameter takes a cell exactly when the cell's type WIDENS to the parameter's (`ColumnType.widens`: the identity, `int` into `float`, `int` into `decimal`), the one lattice the column codec reads by. `validateParams` is characterised exactly over it (`validate_params_exact`, through `well_typed`), and a `ParamTypeMismatch` names a cell type that does NOT widen to the declared one (`refusal_is_truthful`). Until Phase 295 the seam asked type equality, so an `int` argument to a `float` parameter was refused while the same value decoded into a `float` column. On the numeric types the widening is `Space.subsumes`, which `queryLaws` certifies; the cell a resolver reads through `invokeWithArgs` is promoted to the declared type, which is outside this model.",

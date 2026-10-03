@@ -19,6 +19,16 @@
        are modelled; its COMBINATORS (`Deferred.map` / `bind` / `toResult` / `tryValue`) are not,
        being outside the seam.
 
+   And since Phase 354, three sections the admission work of Phase 307 left unmodelled:
+
+     - the HANDLER TABLE (section 14): `Function.bindHandlers` — the behaviour-axis binding of a
+       host's handlers to an artifact's action holes — with the `Map` its table is;
+     - the CAPABILITY PIPELINE (section 15): `CapabilityPipeline.typeCheck` with its cycle search,
+       `eval`, `dirtySet` and `evalFrom` over an abstract host body, from
+       `src/Fuaran.Core.Function/CapabilityPipeline.fs`;
+     - the CODECS (section 16): `CapabilityCodec` for a signature and a capability and the
+       pipeline's codec for a node, with `SpaceCodec` and `EffectCodec`, at the `JVal`.
+
    Two things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a parameter
    and Phase 176 made the pipeline evaluator one. The WITNESS (`ArtifactWitness`'s `Holes`,
    `Effect`, `Bind`, the tree witness's `KindTag`, and `Tree.preorder` over it) is a record of
@@ -27,9 +37,14 @@
    value-space check needs — `System.Int32.TryParse`, `System.Double.TryParse` against a float
    range, and `String.Length` — are a `readers` record: the space vocabulary is modelled, the
    lexical parsers behind two of its five constructors are not, and a float range's bounds cross
-   as opaque carriers. The two codecs are outside the model; `invocationKey` entered it with
-   Phase 225 (section 12), over a `key_renderers` record — `Hash.fnv1a`, the address comparator
-   and `Hash.canonicalField` — for the same reason.
+   as opaque carriers. `invocationKey` entered the model with Phase 225 (section 12), over a
+   `key_renderers` record — `Hash.fnv1a`, the address comparator and `Hash.canonicalField` — for
+   the same reason. The Phase 354 sections add three more of the same kind and no other: the
+   ordinal comparator an F# `Map<string, _>` keeps its keys by (`le`, under `total_order` where a
+   theorem spends it), the two float comparisons `Space.subsumes` makes (`feed_readers`), and the
+   one float read the codecs make (`codec_readers`). The pipeline's host body and the value it
+   spells (`node_body`, `spell`) are parameters as `invoke`'s body is; a handler is an abstract
+   type.
 
    WHAT IS PROVED, over any witness, any readers, any registry and any host body:
 
@@ -78,6 +93,23 @@
        same bindings, so distinct argument sets have distinct pre-images whatever their values
        contain. Proved over a reading of a string as its symbols (`symbols_faithful`, the one
        `Chain.fst` takes) and an escaper premise (`field_faithful`), named in `key_premises`.
+     - `bind_handlers_exact` (Phase 354) — what `bindHandlers` computes: the handlers are accepted
+       exactly when every key is a declared action hole's address and every action hole has a
+       handler its ceiling covers, and the table is the handlers given (`bind_handlers_complete`
+       is the converse); each refusal says what is refused and why, naming the first offender in
+       the order the check walks. `bind_handlers_order_independent` — the whole result is a
+       function of the bindings, never of the order the handlers arrive in.
+     - `typecheck_topological` (Phase 354) — an accepted pipeline's declaration order is a
+       topological order of its edges, and of two declarations of the same nodes each in such an
+       order `typeCheck` accepts both or neither. `pipeline_refused_never_evaluated` and
+       `pipeline_illtyped_iff_refused` — an evaluator answers `EvalIllTyped` exactly when the
+       check refuses, and then no body runs. `pipeline_evalfrom_agrees` — `evalFrom` over a prior
+       evaluation, under a body that agrees with the prior one off the change set, equals `eval`.
+     - `signature_roundtrip`, `capability_roundtrip`, `node_roundtrip` (Phase 354) — decode after
+       encode, EXACTLY, for every value: the identity on the well-formed ones
+       (`…_roundtrip_identity`), a named refusal or a normal form on the others; and every
+       document a reader accepts is a well-formed value that reads back as itself
+       (`…_decoded_wf`).
 
    WHAT IS NOT CLAIMED. Anything about a domain's `Bind` — that a bound hole is cleared, that a
    slot's inner tree is where `compose` put it — which is the witness contract
@@ -85,8 +117,16 @@
    the envelope the readers premise states (`capability-scalar-readers-abstract`). The ORDER
    `CapabilityRegistry.enumerate` returns — production's `Map` sorts by id, the model holds a finite map
    as a list, and the theorem is about membership. Whether two distinct capture-key pre-images
-   HASH apart (a claim about FNV-1a). `CapabilityCodec`, the
-   `FunctionRegistry`, `ContentPack` and `CapabilityPipeline` surfaces, and `applyMemo`.
+   HASH apart (a claim about FNV-1a). The `FunctionRegistry` and `ContentPack` surfaces, and
+   `applyMemo`. Of the surfaces Phase 354 modelled: a handler's MESSAGE typing, which lives in the
+   host language; that `dirtySet` is the LEAST closed set (its closure is what `evalFrom` needs —
+   leastness is a cost claim, proved of the same-shaped loop in `Propagation.fst`); the pipeline's
+   capture key `nodeInvocationKey`; the BYTES of any codec — `Canon.render` and `Json.parse` are
+   `WireCanon.fst`'s and `JsonParse.fst`'s — the `Strict` read policy, the invocation, `Deferred`
+   and `InvokeError` codecs, and a refusal's sentence. And NOT that a reader refuses whatever its
+   writer never produces: the readers are lenient — an extra member, another member order, the
+   descriptor spelling of a space are all read — so what is proved is that everything a reader
+   ACCEPTS is a well-formed value, which is the claim that is true.
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
    `ColumnOps.fst`. The module is SELF-CONTAINED like `ColumnOps.fst` — it opens nothing,
@@ -2379,6 +2419,2452 @@ let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:plac
                 | None -> bind_walk rd w true la n [] dh)))
 
 (* ======================================================================================
+   14. THE HANDLER TABLE (Phase 354) — `Function.bindHandlers`, the behaviour-axis analogue of
+       `apply`: the three checks clause for clause, the table a `Map` is, and what the operation
+       computes — the acceptance characterised exactly, each refusal saying what is refused and
+       why, and the whole result a function of the bindings rather than of their arrival order.
+   ====================================================================================== *)
+
+(* F#: `Set.isSubset` on lists read as sets — every member of `a` is in `b`. *)
+let rec subset (a b:list string) : Tot bool =
+  match a with
+  | [] -> true
+  | h :: t -> mem h b && subset t b
+
+let rec subset_mem (a b:list string) (x:string)
+  : Lemma (requires subset a b /\ mem x a) (ensures mem x b) =
+  match a with
+  | [] -> ()
+  | h :: t -> if x = h then () else subset_mem t b x
+
+let rec subset_intro (a b:list string)
+  : Lemma (requires (forall (x:string). mem x a ==> mem x b)) (ensures subset a b) =
+  match a with
+  | [] -> ()
+  | _ :: t -> subset_intro t b
+
+(* F#: `HandlerBinding<'Handler>` — the host's handler, opaque, beside the effect it declares. *)
+type handler_binding (h:Type) = { hb_handler: h; hb_effect: effect_class }
+
+(* F#: `Map<string, HandlerBinding<'Handler>>`, read as its key-ordered list — as `args` reads
+   `Map<string, Arg<'Node>>`. *)
+type handler_map (h:Type) = list (string & handler_binding h)
+
+(* F#: `HandlerTable<'Handler>`. *)
+type handler_table (h:Type) = { ht_handlers: handler_map h }
+
+(* F#: `BindHandlerError`. *)
+type bind_handler_error =
+  | UnknownActionAddr          : addr:string -> declared_actions:list string -> bind_handler_error
+  | NotAnActionHole            : addr:string -> bind_handler_error
+  | RequiredActionsUnbound     : addrs:list string -> bind_handler_error
+  | HandlerEffectExceedsCeiling: addr:string -> ceiling:effect_class -> handler:effect_class -> bind_handler_error
+
+(* F#: `bindHandlers`'s `actionHoles` — `List.choose` of the action holes, each with its ceiling,
+   in declaration order. *)
+let rec action_holes (hs:list hole_decl) : Tot (list (string & effect_class)) =
+  match hs with
+  | [] -> []
+  | h :: t ->
+    (match h.h_kind with
+     | ActionHole e -> (h.h_addr, e) :: action_holes t
+     | _ -> action_holes t)
+
+(* F#: `bindHandlers`'s local `checkKeys` — check 1, over `Map.toList handlers` (key order). *)
+let rec check_keys (#h:Type) (action_addrs all_addrs:list string) (hs:handler_map h)
+  : Tot (outcome unit bind_handler_error) =
+  match hs with
+  | [] -> Ok ()
+  | (addr, _) :: rest ->
+    if mem addr action_addrs then check_keys action_addrs all_addrs rest
+    else if mem addr all_addrs then Error (NotAnActionHole addr)
+    else Error (UnknownActionAddr addr action_addrs)
+
+(* F#: `bindHandlers`'s local `checkEffects` — check 2, over the action holes in declaration order. *)
+let rec check_effects (#h:Type) (hs:handler_map h) (holes:list (string & effect_class))
+  : Tot (outcome unit bind_handler_error) =
+  match holes with
+  | [] -> Ok ()
+  | (addr, ceiling) :: rest ->
+    (match assoc addr hs with
+     | Some hb ->
+       if not (covers ceiling hb.hb_effect) then Error (HandlerEffectExceedsCeiling addr ceiling hb.hb_effect)
+       else check_effects hs rest
+     | None -> check_effects hs rest)
+
+(* F#: `fun a -> not (Map.containsKey a handlers)`. *)
+let no_handler (#h:Type) (hs:handler_map h) (a:string) : Tot bool = not (has_key a hs)
+
+(* F#: `Function.bindHandlers`. *)
+let bind_handlers (#node #h:Type) (w:witness node) (hs:handler_map h) (n:node)
+  : Tot (outcome (handler_table h) bind_handler_error) =
+  let all_addrs = map addr_of (w.holes n) in
+  let ah = action_holes (w.holes n) in
+  let action_addrs = keys ah in
+  match check_keys action_addrs all_addrs hs with
+  | Error e -> Error e
+  | Ok () ->
+    match check_effects hs ah with
+    | Error e -> Error e
+    | Ok () ->
+      match filter (no_handler hs) action_addrs with
+      | [] -> Ok ({ ht_handlers = hs })
+      | u -> Error (RequiredActionsUnbound u)
+
+(* ---- the table a `Map` is ---- *)
+
+(* F#: `Map.add` on a map read as its key-ordered list — an equal key is REPLACED, a new one takes
+   its place in the order. *)
+let rec map_add (#a:Type) (le:string -> string -> bool) (k:string) (v:a) (l:list (string & a))
+  : Tot (list (string & a)) =
+  match l with
+  | [] -> [(k, v)]
+  | (k', v') :: t ->
+    if k = k' then (k, v) :: t
+    else if le k k' then (k, v) :: l
+    else (k', v') :: map_add le k v t
+
+(* F#: `Map.ofList` — the fold of `Map.add` from the left, so a later binding of a key replaces an
+   earlier one. *)
+let rec map_fold (#a:Type) (le:string -> string -> bool) (acc l:list (string & a))
+  : Tot (list (string & a)) (decreases l) =
+  match l with
+  | [] -> acc
+  | (k, v) :: t -> map_fold le (map_add le k v acc) t
+
+let map_of_list (#a:Type) (le:string -> string -> bool) (l:list (string & a)) : Tot (list (string & a)) =
+  map_fold le [] l
+
+(* The handlers as they ARRIVE — a list in the caller's order — bound: F#
+   `Function.bindHandlers w (Map.ofList handlers) node`. *)
+let bind_handlers_of (#node #h:Type) (le:string -> string -> bool) (w:witness node)
+                     (arriving:handler_map h) (n:node)
+  : Tot (outcome (handler_table h) bind_handler_error) =
+  bind_handlers w (map_of_list le arriving) n
+
+(* F#: a `Map`'s keys are ordered. *)
+let rec sorted_k (#a:Type) (le:string -> string -> bool) (l:list (string & a)) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: tl ->
+    (match tl with
+     | [] -> true
+     | y :: _ -> le (fst x) (fst y) && sorted_k le tl)
+
+let rec map_add_keys (#a:Type) (le:string -> string -> bool) (k:string) (v:a) (l:list (string & a)) (n:string)
+  : Lemma (mem n (keys (map_add le k v l)) = (n = k || mem n (keys l)))
+  = match l with
+    | [] -> ()
+    | _ :: t -> map_add_keys le k v t n
+
+(* Adding a NEW key keeps the keys distinct, keeps the order, and adds exactly the one binding. *)
+let rec map_add_distinct (#a:Type) (le:string -> string -> bool) (k:string) (v:a) (l:list (string & a))
+  : Lemma (requires distinct (keys l) /\ not (mem k (keys l)))
+          (ensures distinct (keys (map_add le k v l)))
+  = match l with
+    | [] -> ()
+    | (k', _) :: t ->
+      if le k k' then ()
+      else (map_add_distinct le k v t; map_add_keys le k v t k')
+
+let rec map_add_sorted (#a:Type) (le:string -> string -> bool) (k:string) (v:a) (l:list (string & a))
+  : Lemma (requires total_order le /\ sorted_k le l)
+          (ensures sorted_k le (map_add le k v l))
+  = match l with
+    | [] -> ()
+    | (k', _) :: t ->
+      if k = k' then ()
+      else if le k k' then ()
+      else map_add_sorted le k v t
+
+let rec map_add_memp (#a:Type) (le:string -> string -> bool) (k:string) (v:a) (l:list (string & a))
+                     (x:(string & a))
+  : Lemma (requires not (mem k (keys l)))
+          (ensures memp x (map_add le k v l) <==> (x == (k, v) \/ memp x l))
+  = match l with
+    | [] -> ()
+    | (k', _) :: t ->
+      if le k k' then ()
+      else map_add_memp le k v t x
+
+(* The fold over DISTINCT new keys: ordered, distinct, and holding exactly the bindings given. *)
+let rec map_fold_facts (#a:Type) (le:string -> string -> bool) (acc l:list (string & a))
+  : Lemma (requires total_order le /\ sorted_k le acc /\ distinct (keys acc) /\ distinct (keys l) /\
+                    (forall (n:string). mem n (keys l) ==> not (mem n (keys acc))))
+          (ensures (let r = map_fold le acc l in
+                    sorted_k le r /\ distinct (keys r) /\
+                    (forall (x:(string & a)). memp x r <==> (memp x acc \/ memp x l))))
+          (decreases l)
+  = match l with
+    | [] -> ()
+    | (k, v) :: t ->
+      let acc' = map_add le k v acc in
+      map_add_sorted le k v acc;
+      map_add_distinct le k v acc;
+      FStar.Classical.forall_intro (map_add_keys le k v acc);
+      FStar.Classical.forall_intro (FStar.Classical.move_requires (map_add_memp le k v acc));
+      map_fold_facts le acc' t
+
+let rec memp_key (#a:Type) (x:(string & a)) (l:list (string & a))
+  : Lemma (memp x l ==> mem (fst x) (keys l))
+  = match l with
+    | [] -> ()
+    | _ :: t -> memp_key x t
+
+let rec sorted_head_le_k (#a:Type) (le:string -> string -> bool) (x:(string & a)) (t:list (string & a))
+                         (y:(string & a))
+  : Lemma (requires total_order le /\ sorted_k le (x :: t) /\ memp y t)
+          (ensures le (fst x) (fst y))
+          (decreases t)
+  = match t with
+    | [] -> ()
+    | h :: t' ->
+      FStar.Classical.or_elim #(y == h) #(memp y t') #(fun _ -> le (fst x) (fst y))
+        (fun _ -> ())
+        (fun _ -> sorted_head_le_k le h t' y)
+
+(* A key-ordered list with distinct keys is determined by its bindings — `sorted_unique_b` over any
+   value type, membership propositional because a handler has no decidable equality. *)
+let rec sorted_unique_k (#a:Type) (le:string -> string -> bool) (s1 s2:list (string & a))
+  : Lemma (requires total_order le /\ sorted_k le s1 /\ sorted_k le s2 /\
+                    distinct (keys s1) /\ distinct (keys s2) /\
+                    (forall (x:(string & a)). memp x s1 <==> memp x s2))
+          (ensures s1 == s2)
+          (decreases s1)
+  = match s1, s2 with
+    | [], [] -> ()
+    | [], h :: _ -> assert (memp h s2)
+    | h :: _, [] -> assert (memp h s1)
+    | h1 :: t1, h2 :: t2 ->
+      assert (memp h1 s1); assert (memp h2 s2);
+      memp_key h1 t2; memp_key h2 t1;
+      if fst h1 = fst h2 then begin
+        assert (h1 == h2);
+        let aux (x:(string & a)) : Lemma (memp x t1 <==> memp x t2) =
+          memp_key x t1; memp_key x t2;
+          assert (memp x s1 <==> memp x s2)
+        in
+        FStar.Classical.forall_intro aux;
+        sorted_unique_k le t1 t2
+      end else begin
+        assert (memp h1 t2); assert (memp h2 t1);
+        sorted_head_le_k le h2 t2 h1;
+        sorted_head_le_k le h1 t1 h2
+      end
+
+(* `Map.ofList` of a list with distinct keys is a function of the BINDINGS, never of their order. *)
+let map_of_list_order_independent (#a:Type) (le:string -> string -> bool) (l l':list (string & a))
+  : Lemma (requires total_order le /\ distinct (keys l) /\ distinct (keys l') /\
+                    (forall (x:(string & a)). memp x l <==> memp x l'))
+          (ensures map_of_list le l == map_of_list le l')
+  = map_fold_facts le [] l;
+    map_fold_facts le [] l';
+    sorted_unique_k le (map_of_list le l) (map_of_list le l')
+
+(* ---- what the three checks say ---- *)
+
+(* Check 1 passes exactly when every handler key is an action hole's address ... *)
+let rec check_keys_ok (#h:Type) (action_addrs all_addrs:list string) (hs:handler_map h)
+  : Lemma (check_keys action_addrs all_addrs hs == Ok () <==> subset (keys hs) action_addrs)
+  = match hs with
+    | [] -> ()
+    | _ :: rest -> check_keys_ok action_addrs all_addrs rest
+
+(* ... and otherwise refuses the FIRST key, in key order, that is not one — `NotAnActionHole` when
+   the key is a declared hole of another kind, `UnknownActionAddr` naming the declared actions when
+   it is no hole at all. `first_unknown` is the walk `bindArgs` names an undeclared address with. *)
+let rec check_keys_refusal (#h:Type) (action_addrs all_addrs:list string) (hs:handler_map h)
+  : Lemma (match check_keys action_addrs all_addrs hs with
+           | Ok () -> first_unknown action_addrs (keys hs) == None
+           | Error (NotAnActionHole a) ->
+             first_unknown action_addrs (keys hs) == Some a /\ mem a all_addrs
+           | Error (UnknownActionAddr a declared) ->
+             first_unknown action_addrs (keys hs) == Some a /\ not (mem a all_addrs) /\
+             declared == action_addrs
+           | Error _ -> False)
+  = match hs with
+    | [] -> ()
+    | (addr, _) :: rest -> if mem addr action_addrs then check_keys_refusal action_addrs all_addrs rest else ()
+
+(* The hole's bound handler declares more than the hole's ceiling admits. *)
+let exceeds (#h:Type) (hs:handler_map h) (hole:(string & effect_class)) : Tot bool =
+  match assoc (fst hole) hs with
+  | Some hb -> not (covers (snd hole) hb.hb_effect)
+  | None -> false
+
+(* `x` is the FIRST member of `l`, in order, that `bad` holds of. *)
+let rec first_is (#a:Type) (bad:a -> bool) (x:a) (l:list a) : Tot prop =
+  match l with
+  | [] -> False
+  | y :: t -> if bad y then x == y else first_is bad x t
+
+let rec first_is_holds (#a:Type) (bad:a -> bool) (x:a) (l:list a)
+  : Lemma (first_is bad x l ==> (memp x l /\ bad x))
+  = match l with
+    | [] -> ()
+    | y :: t -> if bad y then () else first_is_holds bad x t
+
+(* Check 2 passes exactly when no bound handler exceeds its hole's ceiling, and otherwise refuses
+   the FIRST action hole, in declaration order, whose handler does — naming the address, the
+   ceiling and the handler's own declared effect. *)
+let rec check_effects_exact (#h:Type) (hs:handler_map h) (holes:list (string & effect_class))
+  : Lemma (match check_effects hs holes with
+           | Ok () -> forall (hole:(string & effect_class)). memp hole holes ==> not (exceeds hs hole)
+           | Error (HandlerEffectExceedsCeiling a c e) ->
+             first_is (exceeds hs) (a, c) holes /\
+             (match assoc a hs with
+              | Some hb -> hb.hb_effect == e /\ not (covers c e)
+              | None -> False)
+           | Error _ -> False)
+  = match holes with
+    | [] -> ()
+    | (addr, ceiling) :: rest ->
+      (match assoc addr hs with
+       | Some hb -> if not (covers ceiling hb.hb_effect) then () else check_effects_exact hs rest
+       | None -> check_effects_exact hs rest)
+
+(* Check 3's list is exactly the action addresses no handler is bound to. *)
+let rec unbound_exact (#h:Type) (hs:handler_map h) (addrs:list string) (a:string)
+  : Lemma (mem a (filter (no_handler hs) addrs) = (mem a addrs && not (has_key a hs)))
+  = match addrs with
+    | [] -> ()
+    | _ :: t -> unbound_exact hs t a
+
+let rec memp_hole_key (hole:(string & effect_class)) (holes:list (string & effect_class))
+  : Lemma (memp hole holes ==> mem (fst hole) (keys holes))
+  = match holes with
+    | [] -> ()
+    | _ :: t -> memp_hole_key hole t
+
+let rec has_key_assoc_g (#a:Type) (k:string) (l:list (string & a))
+  : Lemma (has_key k l = Some? (assoc k l))
+  = match l with
+    | [] -> ()
+    | _ :: t -> has_key_assoc_g k t
+
+(* A hole's handler is bound and within the hole's ceiling. *)
+let bound_within (#h:Type) (hs:handler_map h) (hole:(string & effect_class)) : Tot bool =
+  match assoc (fst hole) hs with
+  | Some hb -> covers (snd hole) hb.hb_effect
+  | None -> false
+
+let rec all_bound_filter (#h:Type) (hs:handler_map h) (holes:list (string & effect_class))
+  : Lemma (requires forall (hole:(string & effect_class)). memp hole holes ==> bound_within hs hole)
+          (ensures filter (no_handler hs) (keys holes) == [])
+  = match holes with
+    | [] -> ()
+    | (a, c) :: t ->
+      assert (memp (a, c) holes);
+      assert (bound_within hs (a, c));
+      has_key_assoc_g a hs;
+      all_bound_filter hs t
+
+(* THE TENTH THEOREM (Phase 354), `bind_handlers_exact`. F#: `Function.bindHandlers`.
+
+   ACCEPTANCE. The handlers are accepted exactly when every handler key is a declared action
+   hole's address and every declared action hole has a handler whose declared effect its ceiling
+   covers — and the table handed back is the handlers given, unchanged: each action hole bound to
+   exactly its handler, and no handler for anything else.
+
+   REFUSAL, in the order the checks run. A handler key that is no action hole's address is refused
+   by name, the first such in key order: `NotAnActionHole` when it is a declared hole of another
+   kind, `UnknownActionAddr` — naming every declared action — when it is no hole at all. With
+   every key an action hole's, a handler declaring more than its hole's ceiling is refused
+   `HandlerEffectExceedsCeiling`, the first such hole in declaration order, naming the ceiling and
+   the handler's effect. With every bound handler inside its ceiling, the action holes left without
+   a handler are refused `RequiredActionsUnbound`, naming exactly those addresses. *)
+let bind_handlers_exact (#node #h:Type) (w:witness node) (hs:handler_map h) (n:node)
+  : Lemma (let holes = w.holes n in
+           let ah = action_holes holes in
+           let aa = keys ah in
+           match bind_handlers w hs n with
+           | Ok t ->
+             t.ht_handlers == hs /\ subset (keys hs) aa /\
+             (forall (hole:(string & effect_class)). memp hole ah ==> bound_within hs hole)
+           | Error (NotAnActionHole a) ->
+             first_unknown aa (keys hs) == Some a /\ mem a (map addr_of holes)
+           | Error (UnknownActionAddr a declared) ->
+             first_unknown aa (keys hs) == Some a /\ not (mem a (map addr_of holes)) /\ declared == aa
+           | Error (HandlerEffectExceedsCeiling a c e) ->
+             subset (keys hs) aa /\ first_is (exceeds hs) (a, c) ah /\
+             (match assoc a hs with
+              | Some hb -> hb.hb_effect == e /\ not (covers c e)
+              | None -> False)
+           | Error (RequiredActionsUnbound u) ->
+             subset (keys hs) aa /\
+             (forall (hole:(string & effect_class)). memp hole ah ==> not (exceeds hs hole)) /\
+             Cons? u /\ (forall (a:string). mem a u <==> (mem a aa /\ not (has_key a hs))))
+  = let holes = w.holes n in
+    let ah = action_holes holes in
+    let aa = keys ah in
+    let all = map addr_of holes in
+    check_keys_ok aa all hs;
+    check_keys_refusal aa all hs;
+    match check_keys aa all hs with
+    | Error _ -> ()
+    | Ok () ->
+      check_effects_exact hs ah;
+      (match check_effects hs ah with
+       | Error _ -> ()
+       | Ok () ->
+         FStar.Classical.forall_intro (unbound_exact hs aa);
+         (match filter (no_handler hs) aa with
+          | [] ->
+            let aux (hole:(string & effect_class)) : Lemma (memp hole ah ==> bound_within hs hole) =
+              memp_hole_key hole ah; has_key_assoc_g (fst hole) hs;
+              assert (mem (fst hole) (filter (no_handler hs) aa) = false)
+            in
+            FStar.Classical.forall_intro aux
+          | _ -> ()))
+
+(* ... and the acceptance condition is SUFFICIENT: the Ok arm above reads both ways. *)
+let bind_handlers_complete (#node #h:Type) (w:witness node) (hs:handler_map h) (n:node)
+  : Lemma (requires (let ah = action_holes (w.holes n) in
+                     subset (keys hs) (keys ah) /\
+                     (forall (hole:(string & effect_class)). memp hole ah ==> bound_within hs hole)))
+          (ensures bind_handlers w hs n == Ok ({ ht_handlers = hs }))
+  = let holes = w.holes n in
+    let ah = action_holes holes in
+    let aa = keys ah in
+    check_keys_ok aa (map addr_of holes) hs;
+    check_effects_exact hs ah;
+    (match check_effects hs ah with
+     | Error (HandlerEffectExceedsCeiling a c _) ->
+       first_is_holds (exceeds hs) (a, c) ah;
+       assert (bound_within hs (a, c))
+     | _ -> ());
+    all_bound_filter hs ah
+
+(* THE ELEVENTH THEOREM (Phase 354), `bind_handlers_order_independent`. F#: `Function.bindHandlers`
+   over `Map.ofList`. Two arrivals of the same handlers — distinct addresses, the same bindings, in
+   any order — bind identically: the same table when accepted and the same refusal when not. The
+   comparator premise is the one the capture key's determinism takes (`total_order`), true of the
+   ordinal order an F# `Map<string, _>` keeps its keys in. *)
+let bind_handlers_order_independent (#node #h:Type) (le:string -> string -> bool) (w:witness node)
+                                    (l l':handler_map h) (n:node)
+  : Lemma (requires total_order le /\ distinct (keys l) /\ distinct (keys l') /\
+                    (forall (x:(string & handler_binding h)). memp x l <==> memp x l'))
+          (ensures bind_handlers_of le w l n == bind_handlers_of le w l' n)
+  = map_of_list_order_independent le l l'
+
+(* ======================================================================================
+   15. THE CAPABILITY PIPELINE (Phase 354) — `CapabilityPipeline.typeCheck` as Phase 295
+       strengthened it, the reference evaluator `eval`, the dirty set and the incremental
+       `evalFrom`, clause for clause; then what they compute: an accepted pipeline's declaration
+       order is a topological order of its edges and the verdict does not depend on which such
+       order was written, a refused pipeline runs no body, an accepted one never meets the
+       evaluator's two "unreachable" arms, and `evalFrom` over a prior evaluation equals `eval`.
+   ====================================================================================== *)
+
+(* ---- sets as lists, each naming the F# `Set` function it stands for ---- *)
+
+(* F#: `Set.difference a b`. *)
+let rec diff (a b:list string) : Tot (list string) =
+  match a with
+  | [] -> []
+  | h :: t -> if mem h b then diff t b else h :: diff t b
+
+(* F#: `Set.union a b`, read as membership: `a`, then what `b` adds. *)
+let union (a b:list string) : Tot (list string) = app a (diff b a)
+
+(* A set holds an id once: `Set.ofList`. *)
+let rec dedup (l:list string) : Tot (list string) =
+  match l with
+  | [] -> []
+  | h :: t -> if mem h t then dedup t else h :: dedup t
+
+let rec app_nil (#a:Type) (l:list a) : Lemma (app l [] == l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> app_nil t
+
+let rec mem_app (x:string) (l m:list string) : Lemma (mem x (app l m) == (mem x l || mem x m)) =
+  match l with
+  | [] -> ()
+  | _ :: t -> mem_app x t m
+
+let rec mem_diff (x:string) (a b:list string) : Lemma (mem x (diff a b) == (mem x a && not (mem x b))) =
+  match a with
+  | [] -> ()
+  | _ :: t -> mem_diff x t b
+
+let mem_union (x:string) (a b:list string) : Lemma (mem x (union a b) == (mem x a || mem x b)) =
+  mem_app x a (diff b a);
+  mem_diff x b a
+
+let rec mem_dedup (x:string) (l:list string) : Lemma (mem x (dedup l) == mem x l) =
+  match l with
+  | [] -> ()
+  | _ :: t -> mem_dedup x t
+
+let rec diff_mono (rng a a':list string)
+  : Lemma (requires (forall (y:string). mem y a ==> mem y a')) (ensures len (diff rng a') <= len (diff rng a)) =
+  match rng with
+  | [] -> ()
+  | _ :: t -> diff_mono t a a'
+
+let rec diff_shrink (rng a a':list string) (x:string)
+  : Lemma (requires (forall (y:string). mem y a ==> mem y a') /\ mem x rng /\ not (mem x a) /\ mem x a')
+          (ensures len (diff rng a') < len (diff rng a)) =
+  match rng with
+  | [] -> ()
+  | h :: t -> if h = x then diff_mono t a a' else diff_shrink t a a' x
+
+(* ---- the vocabulary ---- *)
+
+(* F#: `ArgSource`. *)
+type arg_source =
+  | Literal  : value:string -> arg_source
+  | FromNode : node_id:string -> arg_source
+
+(* F#: `PipelineNode`. *)
+type pipeline_node =
+  | Source : id:string -> data_ref:string -> output_type:value_space -> pipeline_node
+  | Invoke : id:string -> capability_id:string -> output_type:value_space ->
+             args:list (string & arg_source) -> pipeline_node
+
+(* F#: `CapabilityPipeline`. *)
+type pipeline = { p_nodes: list pipeline_node }
+
+(* F#: `PipelineError`. *)
+type pipeline_error =
+  | DuplicateNode           : id:string -> pipeline_error
+  | UnknownNode             : id:string -> pipeline_error
+  | PipelineNoSuchCapability: id:string -> known:list string -> pipeline_error
+  | PipelineArgRefused      : at:string -> reason:invoke_error -> pipeline_error
+  | PipelineCycle           : at:string -> cycle:list string -> pipeline_error
+  | EdgeTypeMismatch        : at:string -> addr:string -> producer:string -> consumer:string -> pipeline_error
+  | PipelineForwardEdge     : at:string -> addr:string -> upstream:string -> pipeline_error
+
+(* F#: `PipelineArg<'v>`. *)
+type pipeline_arg (v:Type) =
+  | FromUpstream : v -> pipeline_arg v
+  | LiteralArg   : string -> pipeline_arg v
+
+(* F#: `PipelineEvalError`. *)
+type pipeline_eval_error =
+  | EvalIllTyped  : reason:pipeline_error -> pipeline_eval_error
+  | EvalNodeFailed: at:string -> message:string -> pipeline_eval_error
+  | EvalArgRefused: at:string -> reason:invoke_error -> pipeline_eval_error
+
+(* F#: `CapabilityLookup` — where a pipeline resolves its `Invoke` nodes, and the ids the refusal
+   names. A record of a function and a list, as in production: a hand-built lookup may keep the
+   two out of step, and nothing here assumes it does not. *)
+noeq type capability_lookup = {
+  lk_find:  string -> option capability;
+  lk_known: list string
+}
+
+(* F#: `CapabilityLookup.ofRegistry` — the registry as a lookup. *)
+let lookup_of_registry (r:registry) : Tot capability_lookup =
+  { lk_find = (fun id -> find_cap id r.capabilities); lk_known = ids r.capabilities }
+
+(* The two FLOAT comparisons `Space.subsumes` makes, a parameter for the reason `float_in` is one:
+   the model has no float, and a float range's bounds cross as opaque carriers.
+   `float_within rl rh al ah` — F#: `rl <= al && ah <= rh` over the four carriers' floats.
+   `int_within rl rh al ah`   — F#: `rl <= float al && float ah <= rh`. *)
+noeq type feed_readers = {
+  float_within: string -> string -> string -> string -> bool;
+  int_within:   string -> string -> int -> int -> bool
+}
+
+(* F#: `xs |> List.forall (fun x -> x.Length >= rl && x.Length <= rh)`. *)
+let rec all_len_in (rd:readers) (lo hi:int) (xs:list string) : Tot bool =
+  match xs with
+  | [] -> true
+  | x :: t -> rd.str_len x >= lo && rd.str_len x <= hi && all_len_in rd lo hi t
+
+(* F#: `Space.subsumes required available` (Phase 295) — THE space relation. *)
+let subsumes (fr:feed_readers) (rd:readers) (required available:value_space) : Tot bool =
+  match required, available with
+  | IntRange rl rh, IntRange al ah -> rl <= al && ah <= rh
+  | FloatRange rl rh, FloatRange al ah -> fr.float_within rl rh al ah
+  | FloatRange rl rh, IntRange al ah -> fr.int_within rl rh al ah
+  | StringLen rl rh, StringLen al ah -> rl <= al && ah <= rh
+  | StringLen rl rh, Enum xs -> all_len_in rd rl rh xs
+  | Enum rs, Enum xs -> subset xs rs
+  | AnyString, a -> not (SlotTree? a)
+  | SlotTree None, SlotTree _ -> true
+  | SlotTree (Some rk), SlotTree (Some ak) -> rk = ak
+  | _ -> false
+
+(* F#: `CapabilityPipeline.spaceTag` — the space FAMILY an `EdgeTypeMismatch` names. *)
+let space_tag (s:value_space) : Tot string =
+  match s with
+  | IntRange _ _ -> "int"
+  | FloatRange _ _ -> "float"
+  | StringLen _ _ -> "string"
+  | Enum _ -> "enum"
+  | AnyString -> "anyString"
+  | SlotTree _ -> "slotTree"
+
+(* F#: `CapabilityPipeline.nodeId`. *)
+let node_id (n:pipeline_node) : Tot string =
+  match n with
+  | Source id _ _ -> id
+  | Invoke id _ _ _ -> id
+
+(* F#: `CapabilityPipeline.nodeOutputType`. *)
+let node_output (n:pipeline_node) : Tot value_space =
+  match n with
+  | Source _ _ ty -> ty
+  | Invoke _ _ ty _ -> ty
+
+(* F#: `upstreams`'s `List.choose` — the `FromNode` ids, in argument order. *)
+let rec upstreams_of (a:list (string & arg_source)) : Tot (list string) =
+  match a with
+  | [] -> []
+  | (_, FromNode up) :: t -> up :: upstreams_of t
+  | (_, Literal _) :: t -> upstreams_of t
+
+(* F#: `CapabilityPipeline.upstreams`. *)
+let upstreams (n:pipeline_node) : Tot (list string) =
+  match n with
+  | Source _ _ _ -> []
+  | Invoke _ _ _ a -> upstreams_of a
+
+(* F#: `p.Nodes |> List.map nodeId`. *)
+let rec node_ids (ns:list pipeline_node) : Tot (list string) =
+  match ns with
+  | [] -> []
+  | n :: t -> node_id n :: node_ids t
+
+(* F#: `Map.tryFind id nodeById`. The map is `Map.ofList`, which keeps the LAST node of a repeated
+   id; this is the FIRST. The two agree over distinct ids, and `typeCheck` consults the map only
+   after its duplicate scan has passed. *)
+let rec find_node (id:string) (ns:list pipeline_node) : Tot (option pipeline_node) =
+  match ns with
+  | [] -> None
+  | n :: t -> if node_id n = id then Some n else find_node id t
+
+(* F#: `ids |> List.countBy id |> List.tryPick (fun (k, c) -> if c > 1 then Some k else None)` — the
+   first id, in order of first occurrence, that occurs again. *)
+let rec first_dup (l:list string) : Tot (option string) =
+  match l with
+  | [] -> None
+  | x :: t -> if mem x t then Some x else first_dup t
+
+(* F#: `position.[id]` — the index of a declared id (the list's length for one that is not). *)
+let rec index_of (k:string) (l:list string) : Tot nat =
+  match l with
+  | [] -> 0
+  | x :: t -> if x = k then 0 else 1 + index_of k t
+
+let rec find_node_mem (id:string) (ns:list pipeline_node)
+  : Lemma (Some? (find_node id ns) ==> mem id (node_ids ns))
+  = match ns with
+    | [] -> ()
+    | _ :: t -> find_node_mem id t
+
+(* A visited set only grows. *)
+let superset (seen seen':list string) : Tot prop = forall (x:string). mem x seen ==> mem x seen'
+
+(* F#: `typeCheck`'s local `pathTo`, its `walk` and `tryUps` — the search for a path from `start`
+   back to `target` along `FromNode` edges, each node visited once. Production's recursion
+   terminates because the visited set grows inside a finite pipeline; here that is the checked
+   measure — the declared ids not yet visited — and the refinement on the result is what carries
+   "only grows" from one call to the next. *)
+let rec walk (ns:list pipeline_node) (target:string) (seen:list string) (cur:string)
+  : Tot (r:(list string & option (list string)){superset seen (fst r)})
+        (decreases %[len (diff (node_ids ns) seen); 0; 0])
+  = if mem cur seen then (seen, None)
+    else
+      let seen1 = cur :: seen in
+      match find_node cur ns with
+      | None -> (seen1, None)
+      | Some n ->
+        let ups = upstreams n in
+        if mem target ups then (seen1, Some [cur])
+        else begin
+          find_node_mem cur ns;
+          diff_shrink (node_ids ns) seen seen1 cur;
+          try_ups ns target cur seen1 ups
+        end
+and try_ups (ns:list pipeline_node) (target cur:string) (seen:list string) (ups:list string)
+  : Tot (r:(list string & option (list string)){superset seen (fst r)})
+        (decreases %[len (diff (node_ids ns) seen); 1; len ups])
+  = match ups with
+    | [] -> (seen, None)
+    | u :: rest ->
+      let r = walk ns target seen u in
+      (match snd r with
+       | Some path -> (fst r, Some (cur :: path))
+       | None ->
+         diff_mono (node_ids ns) seen (fst r);
+         try_ups ns target cur (fst r) rest)
+
+(* F#: `pathTo target start`. *)
+let path_to (ns:list pipeline_node) (target start:string) : Tot (option (list string)) =
+  snd (walk ns target [] start)
+
+(* F#: `typeCheck`'s local `edgeFault` — a `FromNode up` edge into an argument of space
+   `arg_space`: the upstream is a declared node, is not the node itself, comes EARLIER in
+   declaration order (a later one closes a cycle or points forward), and its output feeds the
+   argument. *)
+let edge_fault (fr:feed_readers) (rd:readers) (ns:list pipeline_node) (all_ids:list string)
+               (nid addr up:string) (arg_sp:value_space)
+  : Tot (option pipeline_error) =
+  match find_node up ns with
+  | None -> Some (UnknownNode up)
+  | Some up_node ->
+    if up = nid then Some (PipelineCycle nid [nid])
+    else if index_of up all_ids > index_of nid all_ids then
+      (match path_to ns nid up with
+       | Some path -> Some (PipelineCycle nid (nid :: path))
+       | None -> Some (PipelineForwardEdge nid addr up))
+    else if subsumes fr rd arg_sp (node_output up_node) then None
+    else Some (EdgeTypeMismatch nid addr (space_tag (node_output up_node)) (space_tag arg_sp))
+
+(* F#: `Capability.argFault` — the refusal one argument earns on its own, by `validateArgs`'s rules. *)
+let arg_fault (rd:readers) (c:capability) (declared:list string) (addr value:string)
+  : Tot (option invoke_error) =
+  match find_entry addr c.c_signature.sg_holes with
+  | None -> Some (UnknownArg addr declared)
+  | Some h ->
+    match arg_space h with
+    | None -> Some (UninvocableArg addr)
+    | Some space ->
+      if SlotTree? space && None? (rd.kind_of value) then Some (UninvocableArg addr)
+      else if validate rd space value then None
+      else Some (ArgOutOfSpace addr space value)
+
+(* F#: `typeCheck`'s local `argFault` — a literal is refused as the capability refuses it, an edge
+   by the hole it addresses (declared, and taking a value) and then by `edgeFault`. *)
+let pipe_arg_fault (fr:feed_readers) (rd:readers) (ns:list pipeline_node) (all_ids:list string)
+                   (cap:capability) (declared:list string) (nid:string) (b:(string & arg_source))
+  : Tot (option pipeline_error) =
+  let (addr, src) = b in
+  match src with
+  | Literal v ->
+    (match arg_fault rd cap declared addr v with
+     | Some e -> Some (PipelineArgRefused nid e)
+     | None -> None)
+  | FromNode up ->
+    (match find_entry addr cap.c_signature.sg_holes with
+     | None -> Some (PipelineArgRefused nid (UnknownArg addr declared))
+     | Some h ->
+       (match h.s_space with
+        | None -> Some (PipelineArgRefused nid (UninvocableArg addr))
+        | Some sp -> edge_fault fr rd ns all_ids nid addr up sp))
+
+(* F#: `holes |> List.filter (fun h -> h.Required && not (bound.Contains h.Addr)) |> List.map Addr`. *)
+let rec unbound_keys (holes:list sig_entry) (ks:list string) : Tot (list string) =
+  match holes with
+  | [] -> []
+  | h :: t ->
+    if h.s_required && not (mem h.s_addr ks) then h.s_addr :: unbound_keys t ks
+    else unbound_keys t ks
+
+(* F#: one step of `typeCheck`'s local `go` — the refusal a node earns, or none. *)
+let node_fault (fr:feed_readers) (rd:readers) (lk:capability_lookup) (ns:list pipeline_node)
+               (all_ids:list string) (n:pipeline_node)
+  : Tot (option pipeline_error) =
+  match n with
+  | Source _ _ _ -> None
+  | Invoke nid cap_id _ a ->
+    match lk.lk_find cap_id with
+    | None -> Some (PipelineNoSuchCapability cap_id lk.lk_known)
+    | Some cap ->
+      let holes = cap.c_signature.sg_holes in
+      let declared = entry_addrs holes in
+      match repeated [] (keys a) with
+      | d :: _ -> Some (PipelineArgRefused nid (DuplicateArg d))
+      | [] ->
+        match try_pick (pipe_arg_fault fr rd ns all_ids cap declared nid) a with
+        | Some e -> Some e
+        | None ->
+          match unbound_keys holes (keys a) with
+          | [] -> None
+          | u -> Some (PipelineArgRefused nid (RequiredArgsUnbound u))
+
+(* F#: `typeCheck`'s local `go` — the first refusal in declaration order. *)
+let rec go_check (fr:feed_readers) (rd:readers) (lk:capability_lookup) (ns:list pipeline_node)
+                 (all_ids:list string) (rest:list pipeline_node)
+  : Tot (outcome unit pipeline_error) (decreases rest) =
+  match rest with
+  | [] -> Ok ()
+  | n :: t ->
+    match node_fault fr rd lk ns all_ids n with
+    | Some e -> Error e
+    | None -> go_check fr rd lk ns all_ids t
+
+(* F#: `CapabilityPipeline.typeCheck`. *)
+let type_check (fr:feed_readers) (rd:readers) (lk:capability_lookup) (p:pipeline)
+  : Tot (outcome unit pipeline_error) =
+  let all_ids = node_ids p.p_nodes in
+  match first_dup all_ids with
+  | Some d -> Error (DuplicateNode d)
+  | None -> go_check fr rd lk p.p_nodes all_ids p.p_nodes
+
+(* ---- evaluation ---- *)
+
+(* F#: the host `body` — a node and its resolved arguments to a value, or a failure's message. *)
+type node_body (v:Type) = pipeline_node -> list (string & pipeline_arg v) -> outcome v string
+
+(* F#: `c.Signature.Holes |> List.tryPick (fun h -> if h.Addr = addr then h.Space else None)`. *)
+let rec space_of (addr:string) (holes:list sig_entry) : Tot (option value_space) =
+  match holes with
+  | [] -> None
+  | h :: t ->
+    if h.s_addr = addr then
+      (match h.s_space with
+       | Some s -> Some s
+       | None -> space_of addr t)
+    else space_of addr t
+
+(* F#: `runNode`'s local `spaceOf`. *)
+let arg_space_of (lk:capability_lookup) (cap_id addr:string) : Tot (option value_space) =
+  match lk.lk_find cap_id with
+  | Some c -> space_of addr c.c_signature.sg_holes
+  | None -> None
+
+(* F#: `runNode`'s fold over the arguments — each edge resolved to its upstream's realised value,
+   read through `spell` against the space of the hole it feeds; the accumulator is in reverse. *)
+let rec resolve_args (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+                     (results:list (string & v)) (nid cap_id:string)
+                     (a:list (string & arg_source)) (acc:list (string & pipeline_arg v))
+  : Tot (outcome (list (string & pipeline_arg v)) pipeline_eval_error) (decreases a) =
+  match a with
+  | [] -> Ok acc
+  | (addr, src) :: rest ->
+    match src with
+    | Literal s -> resolve_args rd lk spell results nid cap_id rest ((addr, LiteralArg s) :: acc)
+    | FromNode up ->
+      match assoc up results with
+      | None -> Error (EvalIllTyped (PipelineForwardEdge nid addr up))
+      | Some x ->
+        match arg_space_of lk cap_id addr with
+        | None -> Error (EvalIllTyped (PipelineArgRefused nid (UninvocableArg addr)))
+        | Some space ->
+          let spelled = spell x in
+          if validate rd space spelled then
+            resolve_args rd lk spell results nid cap_id rest ((addr, FromUpstream x) :: acc)
+          else Error (EvalArgRefused nid (ArgOutOfSpace addr space spelled))
+
+(* F#: `CapabilityPipeline.runNode` — resolve, then the host body; shared by `eval` and `evalFrom`. *)
+let run_node (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string) (body:node_body v)
+             (results:list (string & v)) (n:pipeline_node)
+  : Tot (outcome v pipeline_eval_error) =
+  let resolved : outcome (list (string & pipeline_arg v)) pipeline_eval_error =
+    match n with
+    | Source _ _ _ -> Ok []
+    | Invoke nid cap_id _ a ->
+      (match resolve_args rd lk spell results nid cap_id a [] with
+       | Ok xs -> Ok (rev xs)
+       | Error e -> Error e)
+  in
+  match resolved with
+  | Error e -> Error e
+  | Ok xs ->
+    match body n xs with
+    | Ok x -> Ok x
+    | Error m -> Error (EvalNodeFailed (node_id n) m)
+
+(* F#: `eval`'s local `go` — the fold in declaration order, threading the `id -> value` map
+   (`Map.add` is the cons: `assoc` reads the latest binding of an id). *)
+let rec eval_go (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string) (body:node_body v)
+                (results:list (string & v)) (ns:list pipeline_node)
+  : Tot (outcome (list (string & v)) pipeline_eval_error) (decreases ns) =
+  match ns with
+  | [] -> Ok results
+  | n :: rest ->
+    match run_node rd lk spell body results n with
+    | Error e -> Error e
+    | Ok x -> eval_go rd lk spell body ((node_id n, x) :: results) rest
+
+(* F#: `CapabilityPipeline.eval` — it type-checks first (Phase 295). *)
+let eval (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+         (body:node_body v) (p:pipeline)
+  : Tot (outcome (list (string & v)) pipeline_eval_error) =
+  match type_check fr rd lk p with
+  | Error e -> Error (EvalIllTyped e)
+  | Ok () -> eval_go rd lk spell body [] p.p_nodes
+
+(* ---- the dirty set: `CapabilityPipeline.dirtySet` ---- *)
+
+(* F#: each node id and the upstream ids it READS — the edges `dirtySet` inverts. *)
+type dmap = list (string & list string)
+
+let rec deps_of (ns:list pipeline_node) : Tot dmap =
+  match ns with
+  | [] -> []
+  | n :: t -> (node_id n, upstreams n) :: deps_of t
+
+(* `n` READS `r`: some entry of the map is `n`'s and holds `r`. *)
+let rec edge (deps:dmap) (n r:string) : Tot bool =
+  match deps with
+  | [] -> false
+  | (k, reads) :: t -> (k = n && mem r reads) || edge t n r
+
+(* F#: `for _, src in args do match src with FromNode up -> yield up, id`. *)
+let rec pairs_of (nd:string) (reads:list string) : Tot (list (string & string)) =
+  match reads with
+  | [] -> []
+  | r :: t -> (r, nd) :: pairs_of nd t
+
+(* F#: `dirtySet`'s list comprehension over the nodes. *)
+let rec pairs (deps:dmap) : Tot (list (string & string)) =
+  match deps with
+  | [] -> []
+  | (nd, reads) :: t -> app (pairs_of nd reads) (pairs t)
+
+(* F#: `List.map fst`. *)
+let rec firsts (ps:list (string & string)) : Tot (list string) =
+  match ps with
+  | [] -> []
+  | (r, _) :: t -> r :: firsts t
+
+(* F#: one group of `List.groupBy fst`, mapped through `List.map snd`. *)
+let rec seconds_for (k:string) (ps:list (string & string)) : Tot (list string) =
+  match ps with
+  | [] -> []
+  | (r, n) :: t -> if r = k then n :: seconds_for k t else seconds_for k t
+
+(* F#: `List.map (fun (k, vs) -> k, vs |> List.map snd |> Set.ofList)` over the group keys. *)
+let rec group_from (ks:list string) (ps:list (string & string)) : Tot dmap =
+  match ks with
+  | [] -> []
+  | k :: t -> (k, dedup (seconds_for k ps)) :: group_from t ps
+
+(* F#: `dirtySet`'s `dependents` — `id -> the ids with an edge from it`. *)
+let dependents (deps:dmap) : Tot dmap =
+  let ps = pairs deps in
+  group_from (dedup (firsts ps)) ps
+
+(* `Map.tryFind node dependents`, an absent id having none. *)
+let dependents_of (d:dmap) (nd:string) : Tot (list string) =
+  match assoc nd d with
+  | Some ds -> ds
+  | None -> []
+
+let rec mem_pair (r n:string) (ps:list (string & string)) : Tot bool =
+  match ps with
+  | [] -> false
+  | (r', n') :: t -> (r = r' && n = n') || mem_pair r n t
+
+let rec mem_pair_app (r n:string) (p q:list (string & string))
+  : Lemma (mem_pair r n (app p q) == (mem_pair r n p || mem_pair r n q)) =
+  match p with
+  | [] -> ()
+  | _ :: t -> mem_pair_app r n t q
+
+let rec mem_pairs_of (r n nd:string) (reads:list string)
+  : Lemma (mem_pair r n (pairs_of nd reads) == (n = nd && mem r reads)) =
+  match reads with
+  | [] -> ()
+  | _ :: t -> mem_pairs_of r n nd t
+
+let rec pairs_edge (deps:dmap) (r n:string) : Lemma (mem_pair r n (pairs deps) == edge deps n r) =
+  match deps with
+  | [] -> ()
+  | (nd, reads) :: t ->
+    mem_pair_app r n (pairs_of nd reads) (pairs t);
+    mem_pairs_of r n nd reads;
+    pairs_edge t r n
+
+let rec seconds_pair (k n:string) (ps:list (string & string))
+  : Lemma (mem n (seconds_for k ps) == mem_pair k n ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t -> seconds_pair k n t
+
+let rec pair_first (r n:string) (ps:list (string & string))
+  : Lemma (requires mem_pair r n ps) (ensures mem r (firsts ps)) =
+  match ps with
+  | [] -> ()
+  | (r', n') :: t -> if r = r' && n = n' then () else pair_first r n t
+
+let rec group_lookup (k:string) (ks:list string) (ps:list (string & string))
+  : Lemma (assoc k (group_from ks ps) == (if mem k ks then Some (dedup (seconds_for k ps)) else None)) =
+  match ks with
+  | [] -> ()
+  | _ :: t -> group_lookup k t ps
+
+(* THE INVERSION IS EXACT: `n` is among `r`'s dependents exactly when `n` reads `r`. *)
+let dependents_edge (deps:dmap) (r n:string)
+  : Lemma (mem n (dependents_of (dependents deps) r) == edge deps n r) =
+  let ps = pairs deps in
+  group_lookup r (dedup (firsts ps)) ps;
+  mem_dedup r (firsts ps);
+  mem_dedup n (seconds_for r ps);
+  seconds_pair r n ps;
+  pairs_edge deps r n;
+  if mem_pair r n ps then pair_first r n ps else ()
+
+(* F#: `(Set.empty, frontier) ||> Set.fold (fun s node -> match Map.tryFind node dependents with
+   | Some deps -> Set.union s deps | None -> s)`. *)
+let rec next_of (d:dmap) (frontier:list string) (s:list string) : Tot (list string) (decreases frontier) =
+  match frontier with
+  | [] -> s
+  | nd :: t ->
+    next_of d t (match assoc nd d with
+                 | Some ds -> union s ds
+                 | None -> s)
+
+let rec any_dep (d:dmap) (frontier:list string) (x:string) : Tot bool =
+  match frontier with
+  | [] -> false
+  | nd :: t -> mem x (dependents_of d nd) || any_dep d t x
+
+let rec next_mem (d:dmap) (frontier s:list string) (x:string)
+  : Lemma (ensures mem x (next_of d frontier s) == (mem x s || any_dep d frontier x)) (decreases frontier) =
+  match frontier with
+  | [] -> ()
+  | nd :: t ->
+    (match assoc nd d with
+     | Some ds -> mem_union x s ds; next_mem d t (union s ds) x
+     | None -> next_mem d t s x)
+
+let rec any_dep_intro (d:dmap) (frontier:list string) (r x:string)
+  : Lemma (requires mem r frontier /\ mem x (dependents_of d r)) (ensures any_dep d frontier x) =
+  match frontier with
+  | [] -> ()
+  | nd :: t -> if r = nd then () else any_dep_intro d t r x
+
+(* Every id a dependents map can ever contribute: the measure `grow` terminates by. *)
+let rec range (d:dmap) : Tot (list string) =
+  match d with
+  | [] -> []
+  | (_, vs) :: t -> app vs (range t)
+
+let rec dependents_in_range (d:dmap) (nd x:string)
+  : Lemma (requires mem x (dependents_of d nd)) (ensures mem x (range d)) =
+  match d with
+  | [] -> ()
+  | (k, vs) :: t ->
+    mem_app x vs (range t);
+    if nd = k then () else dependents_in_range t nd x
+
+let rec any_dep_in_range (d:dmap) (frontier:list string) (x:string)
+  : Lemma (requires any_dep d frontier x) (ensures mem x (range d)) =
+  match frontier with
+  | [] -> ()
+  | nd :: t ->
+    if mem x (dependents_of d nd) then dependents_in_range d nd x else any_dep_in_range d t x
+
+(* WHY THE LOOP STOPS: a round that finds nothing fresh hands on an empty frontier, and a round
+   that finds something strictly shrinks the ids of the map not yet accumulated. *)
+let grow_measure (d:dmap) (frontier acc:list string)
+  : Lemma (ensures (let fresh = diff (next_of d frontier []) acc in
+                    (Nil? fresh ==> union acc fresh == acc) /\
+                    (Cons? fresh ==> len (diff (range d) (union acc fresh)) < len (diff (range d) acc)))) =
+  let next = next_of d frontier [] in
+  let fresh = diff next acc in
+  match fresh with
+  | [] -> app_nil acc
+  | x :: _ ->
+    mem_diff x next acc;
+    next_mem d frontier [] x;
+    any_dep_in_range d frontier x;
+    let aux (y:string) : Lemma (mem y acc ==> mem y (union acc fresh)) = mem_union y acc fresh in
+    FStar.Classical.forall_intro aux;
+    mem_union x acc fresh;
+    diff_shrink (range d) acc (union acc fresh) x
+
+(* F#: `dirtySet`'s local `grow`. *)
+let rec grow (d:dmap) (frontier acc:list string)
+  : Tot (list string) (decreases %[len (diff (range d) acc); len frontier]) =
+  match frontier with
+  | [] -> acc
+  | _ :: _ ->
+    let next = next_of d frontier [] in
+    let fresh = diff next acc in
+    grow_measure d frontier acc;
+    grow d fresh (union acc fresh)
+
+(* F#: `CapabilityPipeline.dirtySet` — `changed` and every node downstream of it. *)
+let dirty_set (changed:list string) (p:pipeline) : Tot (list string) =
+  grow (dependents (deps_of p.p_nodes)) changed changed
+
+(* A set closed under "reads": whoever reads a member is a member. *)
+let closed (deps:dmap) (s:list string) : Tot prop =
+  forall (n r:string). mem r s /\ edge deps n r ==> mem n s
+
+let closed_except (deps:dmap) (acc frontier:list string) : Tot prop =
+  forall (n r:string). mem r acc /\ not (mem r frontier) /\ edge deps n r ==> mem n acc
+
+let grow_step_closed (deps:dmap) (frontier acc:list string) (n r:string)
+  : Lemma (requires closed_except deps acc frontier)
+          (ensures (let fresh = diff (next_of (dependents deps) frontier []) acc in
+                    mem r (union acc fresh) /\ not (mem r fresh) /\ edge deps n r ==> mem n (union acc fresh))) =
+  let d = dependents deps in
+  let next = next_of d frontier [] in
+  let fresh = diff next acc in
+  mem_union r acc fresh;
+  mem_union n acc fresh;
+  mem_diff n next acc;
+  next_mem d frontier [] n;
+  dependents_edge deps r n;
+  if mem r frontier && edge deps n r then any_dep_intro d frontier r n else ()
+
+let rec grow_closed (deps:dmap) (frontier acc:list string)
+  : Lemma (requires closed_except deps acc frontier)
+          (ensures closed deps (grow (dependents deps) frontier acc) /\
+                   (forall (x:string). mem x acc ==> mem x (grow (dependents deps) frontier acc)))
+          (decreases %[len (diff (range (dependents deps)) acc); len frontier]) =
+  match frontier with
+  | [] -> ()
+  | _ :: _ ->
+    let d = dependents deps in
+    let fresh = diff (next_of d frontier []) acc in
+    grow_measure d frontier acc;
+    FStar.Classical.forall_intro_2 (FStar.Classical.move_requires_2 (grow_step_closed deps frontier acc));
+    let aux (x:string) : Lemma (mem x acc ==> mem x (union acc fresh)) = mem_union x acc fresh in
+    FStar.Classical.forall_intro aux;
+    grow_closed deps fresh (union acc fresh)
+
+(* The dirty set CONTAINS the change and is CLOSED downstream: a node with an edge from a dirty
+   node is dirty. *)
+let dirty_closed (changed:list string) (p:pipeline)
+  : Lemma (subset changed (dirty_set changed p) /\ closed (deps_of p.p_nodes) (dirty_set changed p)) =
+  grow_closed (deps_of p.p_nodes) changed changed;
+  subset_intro changed (dirty_set changed p)
+
+(* F#: `evalFrom`'s local `go` — a node that is not dirty and has a prior value reuses it
+   (`not (Set.contains nid dirty) && Map.containsKey nid prior`, then `Map.find nid prior`); every
+   other node runs. *)
+let rec eval_from_go (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string) (body:node_body v)
+                     (prior:list (string & v)) (dirty:list string)
+                     (results:list (string & v)) (ns:list pipeline_node)
+  : Tot (outcome (list (string & v)) pipeline_eval_error) (decreases ns) =
+  match ns with
+  | [] -> Ok results
+  | n :: rest ->
+    let nid = node_id n in
+    match (if mem nid dirty then None else assoc nid prior) with
+    | Some x -> eval_from_go rd lk spell body prior dirty ((nid, x) :: results) rest
+    | None ->
+      match run_node rd lk spell body results n with
+      | Error e -> Error e
+      | Ok x -> eval_from_go rd lk spell body prior dirty ((nid, x) :: results) rest
+
+(* F#: `CapabilityPipeline.evalFrom` — it type-checks first, exactly as `eval` does. *)
+let eval_from (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+              (body:node_body v) (prior:list (string & v)) (changed:list string) (p:pipeline)
+  : Tot (outcome (list (string & v)) pipeline_eval_error) =
+  match type_check fr rd lk p with
+  | Error e -> Error (EvalIllTyped e)
+  | Ok () -> eval_from_go rd lk spell body prior (dirty_set changed p) [] p.p_nodes
+
+(* ---- what `typeCheck` accepts ---- *)
+
+(* DECLARATION ORDER IS A TOPOLOGICAL ORDER of the `FromNode` edges: every node's id is new, and
+   every edge it carries names a node declared strictly EARLIER. *)
+let rec ordered (earlier:list string) (ns:list pipeline_node) : Tot bool (decreases ns) =
+  match ns with
+  | [] -> true
+  | n :: rest ->
+    not (mem (node_id n) earlier) && subset (upstreams n) earlier &&
+    ordered (app earlier [node_id n]) rest
+
+let rec first_dup_distinct (l:list string)
+  : Lemma (first_dup l == None <==> distinct l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> first_dup_distinct t
+
+let rec index_app (k:string) (a b:list string)
+  : Lemma (index_of k (app a b) == (if mem k a then index_of k a else len a + index_of k b))
+  = match a with
+    | [] -> ()
+    | _ :: t -> index_app k t b
+
+let rec index_lt_len (k:string) (a:list string)
+  : Lemma (mem k a ==> index_of k a < len a)
+  = match a with
+    | [] -> ()
+    | _ :: t -> index_lt_len k t
+
+let rec node_ids_app (a b:list pipeline_node)
+  : Lemma (node_ids (app a b) == app (node_ids a) (node_ids b))
+  = match a with
+    | [] -> ()
+    | _ :: t -> node_ids_app t b
+
+let rec distinct_app_mid (a:list string) (x:string) (b:list string)
+  : Lemma (requires distinct (app a (x :: b))) (ensures not (mem x a))
+  = match a with
+    | [] -> ()
+    | h :: t -> mem_app h t (x :: b); distinct_app_mid t x b
+
+let rec app_snoc (#a:Type) (l:list a) (x:a) (m:list a)
+  : Lemma (app (app l [x]) m == app l (x :: m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> app_snoc t x m
+
+(* An accepted argument list's edges all name ids declared before the node. *)
+let rec args_upstreams_earlier (fr:feed_readers) (rd:readers) (ns:list pipeline_node)
+                               (cap:capability) (declared:list string) (nid:string)
+                               (a:list (string & arg_source)) (pre_ids post_ids:list string)
+  : Lemma (requires not (mem nid pre_ids) /\
+                    try_pick (pipe_arg_fault fr rd ns (app pre_ids (nid :: post_ids)) cap declared nid) a == None)
+          (ensures subset (upstreams_of a) pre_ids)
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (_, src) :: rest ->
+      (match src with
+       | Literal _ -> ()
+       | FromNode up ->
+         index_app up pre_ids (nid :: post_ids);
+         index_app nid pre_ids (nid :: post_ids);
+         index_lt_len up pre_ids);
+      args_upstreams_earlier fr rd ns cap declared nid rest pre_ids post_ids
+
+let rec go_check_ordered (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                         (all pre rest:list pipeline_node)
+  : Lemma (requires all == app pre rest /\ distinct (node_ids all) /\
+                    go_check fr rd lk all (node_ids all) rest == Ok ())
+          (ensures ordered (node_ids pre) rest)
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | n :: rest' ->
+      node_ids_app pre rest;
+      distinct_app_mid (node_ids pre) (node_id n) (node_ids rest');
+      (match n with
+       | Source _ _ _ -> ()
+       | Invoke nid cap_id _ a ->
+         (match lk.lk_find cap_id with
+          | Some cap ->
+            args_upstreams_earlier fr rd all cap (entry_addrs cap.c_signature.sg_holes) nid a
+              (node_ids pre) (node_ids rest')
+          | None -> ()));
+      app_snoc pre n rest';
+      node_ids_app pre [n];
+      go_check_ordered fr rd lk all (app pre [n]) rest'
+
+(* An accepted pipeline is in topological order. *)
+let typecheck_ordered (fr:feed_readers) (rd:readers) (lk:capability_lookup) (p:pipeline)
+  : Lemma (requires type_check fr rd lk p == Ok ())
+          (ensures ordered [] p.p_nodes /\ distinct (node_ids p.p_nodes))
+  = first_dup_distinct (node_ids p.p_nodes);
+    go_check_ordered fr rd lk p.p_nodes [] p.p_nodes
+
+(* Two pipelines hold the same nodes. *)
+let same_nodes (ns ns':list pipeline_node) : Tot prop =
+  forall (n:pipeline_node). memp n ns <==> memp n ns'
+
+let rec go_check_all_none (fr:feed_readers) (rd:readers) (lk:capability_lookup) (ns:list pipeline_node)
+                          (all_ids:list string) (rest:list pipeline_node) (n:pipeline_node)
+  : Lemma (requires go_check fr rd lk ns all_ids rest == Ok () /\ memp n rest)
+          (ensures node_fault fr rd lk ns all_ids n == None)
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | m :: t ->
+      FStar.Classical.or_elim #(n == m) #(memp n t) #(fun _ -> node_fault fr rd lk ns all_ids n == None)
+        (fun _ -> ())
+        (fun _ -> go_check_all_none fr rd lk ns all_ids t n)
+
+let rec find_node_some (id:string) (ns:list pipeline_node)
+  : Lemma (match find_node id ns with
+           | Some n -> memp n ns /\ node_id n == id
+           | None -> True)
+  = match ns with
+    | [] -> ()
+    | _ :: t -> find_node_some id t
+
+let rec memp_node_id (n:pipeline_node) (ns:list pipeline_node)
+  : Lemma (memp n ns ==> mem (node_id n) (node_ids ns))
+  = match ns with
+    | [] -> ()
+    | _ :: t -> memp_node_id n t
+
+(* Over distinct ids a member is the one node its id finds. *)
+let rec distinct_find_node (n:pipeline_node) (ns:list pipeline_node)
+  : Lemma ((memp n ns /\ distinct (node_ids ns)) ==> find_node (node_id n) ns == Some n)
+  = match ns with
+    | [] -> ()
+    | _ :: t -> memp_node_id n t; distinct_find_node n t
+
+(* An argument list accepted in one declaration order is accepted in another that also puts its
+   upstreams earlier: with the position test out of the way, every clause reads the node SET. *)
+let rec args_transfer (fr:feed_readers) (rd:readers) (ns ns':list pipeline_node)
+                      (cap:capability) (declared:list string) (nid:string)
+                      (a:list (string & arg_source)) (pre_ids post_ids:list string)
+  : Lemma (requires node_ids ns' == app pre_ids (nid :: post_ids) /\ not (mem nid pre_ids) /\
+                    distinct (node_ids ns') /\ same_nodes ns ns' /\
+                    subset (upstreams_of a) pre_ids /\
+                    try_pick (pipe_arg_fault fr rd ns (node_ids ns) cap declared nid) a == None)
+          (ensures try_pick (pipe_arg_fault fr rd ns' (node_ids ns') cap declared nid) a == None)
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (_, src) :: rest ->
+      (match src with
+       | Literal _ -> ()
+       | FromNode up ->
+         find_node_some up ns;
+         (match find_node up ns with
+          | Some un -> distinct_find_node un ns'
+          | None -> ());
+         index_app up pre_ids (nid :: post_ids);
+         index_app nid pre_ids (nid :: post_ids);
+         index_lt_len up pre_ids);
+      args_transfer fr rd ns ns' cap declared nid rest pre_ids post_ids
+
+let rec go_check_transfer (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                          (ns ns' pre rest:list pipeline_node)
+  : Lemma (requires ns' == app pre rest /\ distinct (node_ids ns') /\ same_nodes ns ns' /\
+                    ordered (node_ids pre) rest /\
+                    (forall (n:pipeline_node). memp n rest ==> node_fault fr rd lk ns (node_ids ns) n == None))
+          (ensures go_check fr rd lk ns' (node_ids ns') rest == Ok ())
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | n :: rest' ->
+      node_ids_app pre rest;
+      assert (memp n rest);
+      (match n with
+       | Source _ _ _ -> ()
+       | Invoke nid cap_id _ a ->
+         (match lk.lk_find cap_id with
+          | Some cap ->
+            args_transfer fr rd ns ns' cap (entry_addrs cap.c_signature.sg_holes) nid a
+              (node_ids pre) (node_ids rest')
+          | None -> ()));
+      app_snoc pre n rest';
+      node_ids_app pre [n];
+      go_check_transfer fr rd lk ns ns' (app pre [n]) rest'
+
+let rec ordered_distinct (earlier:list string) (ns:list pipeline_node)
+  : Lemma (requires ordered earlier ns)
+          (ensures distinct (node_ids ns) /\ (forall (x:string). mem x (node_ids ns) ==> not (mem x earlier)))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: rest ->
+      ordered_distinct (app earlier [node_id n]) rest;
+      let aux (x:string) : Lemma (mem x (app earlier [node_id n]) == (mem x earlier || x = node_id n)) =
+        mem_app x earlier [node_id n]
+      in
+      FStar.Classical.forall_intro aux
+
+(* The verdict does not depend on WHICH topological order was declared: a pipeline `typeCheck`
+   accepts is accepted in every order of the same nodes that puts each edge's upstream first. *)
+let typecheck_order_independent (fr:feed_readers) (rd:readers) (lk:capability_lookup) (p p':pipeline)
+  : Lemma (requires same_nodes p.p_nodes p'.p_nodes /\ type_check fr rd lk p == Ok () /\
+                    ordered [] p'.p_nodes)
+          (ensures type_check fr rd lk p' == Ok ())
+  = first_dup_distinct (node_ids p.p_nodes);
+    ordered_distinct [] p'.p_nodes;
+    first_dup_distinct (node_ids p'.p_nodes);
+    FStar.Classical.forall_intro
+      (FStar.Classical.move_requires
+         (go_check_all_none fr rd lk p.p_nodes (node_ids p.p_nodes) p.p_nodes));
+    go_check_transfer fr rd lk p.p_nodes p'.p_nodes [] p'.p_nodes
+
+(* THE TWELFTH THEOREM (Phase 354), `typecheck_topological`. F#: `CapabilityPipeline.typeCheck`.
+   The check walks the nodes in DECLARATION order and accepts only where that order is a
+   topological order of the `FromNode` edges: ids distinct, every edge naming a node declared
+   strictly earlier — so an accepted pipeline is acyclic and each upstream has run before the node
+   it feeds. And the verdict is a fact about the node SET: of two declarations of the same nodes,
+   each in a topological order, `typeCheck` accepts both or refuses both. (A declaration that is
+   NOT in topological order is refused whatever its nodes are — `PipelineCycle` or
+   `PipelineForwardEdge` — which is the first half read backwards.) *)
+let typecheck_topological (fr:feed_readers) (rd:readers) (lk:capability_lookup) (p p':pipeline)
+  : Lemma ((type_check fr rd lk p == Ok () ==>
+              (ordered [] p.p_nodes /\ distinct (node_ids p.p_nodes))) /\
+           ((same_nodes p.p_nodes p'.p_nodes /\ ordered [] p.p_nodes /\ ordered [] p'.p_nodes) ==>
+              (Ok? (type_check fr rd lk p) == Ok? (type_check fr rd lk p'))))
+  = FStar.Classical.move_requires (typecheck_ordered fr rd lk) p;
+    FStar.Classical.move_requires (typecheck_order_independent fr rd lk p) p';
+    FStar.Classical.move_requires (typecheck_order_independent fr rd lk p') p
+
+(* ---- what the evaluators compute ---- *)
+
+(* A REFUSED PIPELINE RUNS NO BODY. F#: `eval` and `evalFrom` over a pipeline `typeCheck` refuses.
+   Both answer `EvalIllTyped` carrying that refusal, and the answer is the same under EVERY host
+   body, prior evaluation and change set — which is what "never reached" means for a pure
+   function, as `unregistered_refused` says it of a dispatch. *)
+let pipeline_refused_never_evaluated (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                                     (spell:v -> string) (body body':node_body v)
+                                     (prior:list (string & v)) (changed:list string) (p:pipeline)
+                                     (e:pipeline_error)
+  : Lemma (requires type_check fr rd lk p == Error e)
+          (ensures eval fr rd lk spell body p == Error (EvalIllTyped e) /\
+                   eval_from fr rd lk spell body prior changed p == Error (EvalIllTyped e) /\
+                   eval fr rd lk spell body p == eval fr rd lk spell body' p /\
+                   eval_from fr rd lk spell body prior changed p ==
+                     eval_from fr rd lk spell body' prior changed p)
+  = ()
+
+(* With nothing to reuse, the incremental walk IS the reference walk. *)
+let rec eval_from_empty_prior (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+                              (body:node_body v) (dirty:list string)
+                              (results:list (string & v)) (ns:list pipeline_node)
+  : Lemma (ensures eval_from_go rd lk spell body [] dirty results ns == eval_go rd lk spell body results ns)
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: rest ->
+      (match run_node rd lk spell body results n with
+       | Error _ -> ()
+       | Ok x -> eval_from_empty_prior rd lk spell body dirty ((node_id n, x) :: results) rest)
+
+(* `tryFind` on the address, then its space, is what `tryPick` finds — where the first entry at the
+   address carries a space. *)
+let rec space_of_find (addr:string) (holes:list sig_entry)
+  : Lemma (match find_entry addr holes with
+           | Some h -> (Some? h.s_space ==> space_of addr holes == h.s_space)
+           | None -> True)
+  = match holes with
+    | [] -> ()
+    | h :: t -> if h.s_addr = addr then () else space_of_find addr t
+
+(* Over an accepted argument list whose upstreams all have values, resolution never answers the
+   evaluator's two type-check refusals. *)
+let rec resolve_never_ill (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                          (spell:v -> string) (ns:list pipeline_node) (all_ids:list string)
+                          (cap:capability) (declared:list string)
+                          (results:list (string & v)) (nid cap_id:string)
+                          (a:list (string & arg_source)) (acc:list (string & pipeline_arg v))
+  : Lemma (requires lk.lk_find cap_id == Some cap /\
+                    try_pick (pipe_arg_fault fr rd ns all_ids cap declared nid) a == None /\
+                    (forall (up:string). mem up (upstreams_of a) ==> Some? (assoc up results)))
+          (ensures (match resolve_args rd lk spell results nid cap_id a acc with
+                    | Error (EvalIllTyped _) -> False
+                    | _ -> True))
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (addr, src) :: rest ->
+      (match src with
+       | Literal s ->
+         resolve_never_ill fr rd lk spell ns all_ids cap declared results nid cap_id rest
+           ((addr, LiteralArg s) :: acc)
+       | FromNode up ->
+         space_of_find addr cap.c_signature.sg_holes;
+         (match assoc up results with
+          | None -> ()
+          | Some x ->
+            resolve_never_ill fr rd lk spell ns all_ids cap declared results nid cap_id rest
+              ((addr, FromUpstream x) :: acc)))
+
+let run_never_ill (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                  (spell:v -> string) (body:node_body v) (ns:list pipeline_node) (all_ids:list string)
+                  (results:list (string & v)) (n:pipeline_node)
+  : Lemma (requires node_fault fr rd lk ns all_ids n == None /\
+                    (forall (up:string). mem up (upstreams n) ==> Some? (assoc up results)))
+          (ensures (match run_node rd lk spell body results n with
+                    | Error (EvalIllTyped _) -> False
+                    | _ -> True))
+  = match n with
+    | Source _ _ _ -> ()
+    | Invoke nid cap_id _ a ->
+      (match lk.lk_find cap_id with
+       | Some cap ->
+         resolve_never_ill fr rd lk spell ns all_ids cap (entry_addrs cap.c_signature.sg_holes)
+           results nid cap_id a []
+       | None -> ())
+
+let rec go_never_ill (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                     (spell:v -> string) (body:node_body v) (all:list pipeline_node)
+                     (prior:list (string & v)) (dirty earlier:list string)
+                     (results:list (string & v)) (rest:list pipeline_node)
+  : Lemma (requires (forall (n:pipeline_node). memp n rest ==>
+                       node_fault fr rd lk all (node_ids all) n == None) /\
+                    ordered earlier rest /\
+                    (forall (k:string). mem k earlier ==> Some? (assoc k results)))
+          (ensures (match eval_from_go rd lk spell body prior dirty results rest with
+                    | Error (EvalIllTyped _) -> False
+                    | _ -> True))
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | n :: rest' ->
+      let nid = node_id n in
+      assert (memp n rest);
+      let ups (up:string) : Lemma (mem up (upstreams n) ==> Some? (assoc up results)) =
+        if mem up (upstreams n) then subset_mem (upstreams n) earlier up else ()
+      in
+      FStar.Classical.forall_intro ups;
+      run_never_ill fr rd lk spell body all (node_ids all) results n;
+      let step (x:v) : Lemma (match eval_from_go rd lk spell body prior dirty ((nid, x) :: results) rest' with
+                              | Error (EvalIllTyped _) -> False
+                              | _ -> True) =
+        let aux (k:string) : Lemma (mem k (app earlier [nid]) ==> Some? (assoc k ((nid, x) :: results))) =
+          mem_app k earlier [nid]
+        in
+        FStar.Classical.forall_intro aux;
+        go_never_ill fr rd lk spell body all prior dirty (app earlier [nid]) ((nid, x) :: results) rest'
+      in
+      FStar.Classical.forall_intro step
+
+(* THE THIRTEENTH THEOREM (Phase 354), `pipeline_illtyped_iff_refused`. F#: `eval` and `evalFrom`.
+   `EvalIllTyped` is the type check's refusal and nothing else: over a pipeline `typeCheck`
+   ACCEPTS, neither evaluator answers it — the two arms `runNode` marks unreachable (an edge whose
+   upstream has no value yet, an edge into a hole with no space) are unreachable — so what remains
+   is a result, a host body's failure (`EvalNodeFailed`) or an upstream value outside the space of
+   the hole it feeds (`EvalArgRefused`). With `pipeline_refused_never_evaluated` this is an
+   equivalence: an evaluator answers `EvalIllTyped e` exactly when `typeCheck` refuses with `e`. *)
+let pipeline_illtyped_iff_refused (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                                  (spell:v -> string) (body:node_body v)
+                                  (prior:list (string & v)) (changed:list string) (p:pipeline)
+  : Lemma (requires type_check fr rd lk p == Ok ())
+          (ensures (match eval fr rd lk spell body p with
+                    | Error (EvalIllTyped _) -> False
+                    | _ -> True) /\
+                   (match eval_from fr rd lk spell body prior changed p with
+                    | Error (EvalIllTyped _) -> False
+                    | _ -> True))
+  = typecheck_ordered fr rd lk p;
+    FStar.Classical.forall_intro
+      (FStar.Classical.move_requires
+         (go_check_all_none fr rd lk p.p_nodes (node_ids p.p_nodes) p.p_nodes));
+    go_never_ill fr rd lk spell body p.p_nodes prior (dirty_set changed p) [] [] p.p_nodes;
+    go_never_ill fr rd lk spell body p.p_nodes [] [] [] [] p.p_nodes;
+    eval_from_empty_prior rd lk spell body [] [] p.p_nodes
+
+(* A finished walk keeps every value it was handed for an id it did not declare. *)
+let rec eval_go_keeps (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string) (body:node_body v)
+                      (results:list (string & v)) (ns:list pipeline_node) (k:string)
+  : Lemma (requires not (mem k (node_ids ns)))
+          (ensures (match eval_go rd lk spell body results ns with
+                    | Ok final -> assoc k final == assoc k results
+                    | Error _ -> True))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: rest ->
+      (match run_node rd lk spell body results n with
+       | Error _ -> ()
+       | Ok x -> eval_go_keeps rd lk spell body ((node_id n, x) :: results) rest k)
+
+(* Resolution reads the result map only at the argument list's upstreams. *)
+let rec resolve_eq (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+                   (r0 r1:list (string & v)) (nid cap_id:string)
+                   (a:list (string & arg_source)) (acc:list (string & pipeline_arg v))
+  : Lemma (requires forall (up:string). mem up (upstreams_of a) ==> assoc up r0 == assoc up r1)
+          (ensures resolve_args rd lk spell r0 nid cap_id a acc == resolve_args rd lk spell r1 nid cap_id a acc)
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (addr, src) :: rest ->
+      (match src with
+       | Literal s -> resolve_eq rd lk spell r0 r1 nid cap_id rest ((addr, LiteralArg s) :: acc)
+       | FromNode up ->
+         (match assoc up r0 with
+          | None -> ()
+          | Some x -> resolve_eq rd lk spell r0 r1 nid cap_id rest ((addr, FromUpstream x) :: acc)))
+
+(* Two host bodies that agree off the change set: what "only these inputs changed" means. *)
+let agree_off (#v:Type) (body0 body1:node_body v) (changed:list string) : Tot prop =
+  forall (n:pipeline_node) (a:list (string & pipeline_arg v)).
+    not (mem (node_id n) changed) ==> body0 n a == body1 n a
+
+(* A node run against two result maps that agree at its upstreams, by two bodies that agree at the
+   node, answers the same. *)
+let run_node_eq (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+                (body0 body1:node_body v) (r0 r1:list (string & v)) (n:pipeline_node)
+  : Lemma (requires (forall (up:string). mem up (upstreams n) ==> assoc up r0 == assoc up r1) /\
+                    (forall (a:list (string & pipeline_arg v)). body0 n a == body1 n a))
+          (ensures run_node rd lk spell body0 r0 n == run_node rd lk spell body1 r1 n)
+  = match n with
+    | Source _ _ _ -> assert (body0 n [] == body1 n [])
+    | Invoke nid cap_id _ a ->
+      resolve_eq rd lk spell r0 r1 nid cap_id a [];
+      (match resolve_args rd lk spell r0 nid cap_id a [] with
+       | Ok xs -> assert (body0 n (rev xs) == body1 n (rev xs))
+       | Error _ -> ())
+
+let rec deps_edge (ns:list pipeline_node) (n:pipeline_node) (up:string)
+  : Lemma (requires memp n ns /\ mem up (upstreams n))
+          (ensures edge (deps_of ns) (node_id n) up)
+  = match ns with
+    | [] -> ()
+    | m :: t ->
+      FStar.Classical.or_elim #(n == m) #(memp n t) #(fun _ -> edge (deps_of ns) (node_id n) up)
+        (fun _ -> ())
+        (fun _ -> deps_edge t n up)
+
+(* THE INDUCTION. `r0` is the prior evaluation's map so far and `r1` the new one's; they agree at
+   every CLEAN id, the prior evaluation finishes as `prior` from here, and from here the
+   incremental walk and the reference walk under the new body are the same walk. *)
+let rec go_agree (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string)
+                 (body0 body1:node_body v) (all:list pipeline_node) (changed dirty:list string)
+                 (prior r0 r1:list (string & v)) (rest:list pipeline_node)
+  : Lemma (requires (forall (n:pipeline_node). memp n rest ==> memp n all) /\
+                    distinct (node_ids rest) /\
+                    closed (deps_of all) dirty /\ subset changed dirty /\
+                    agree_off body0 body1 changed /\
+                    (forall (k:string). not (mem k dirty) ==> assoc k r1 == assoc k r0) /\
+                    eval_go rd lk spell body0 r0 rest == Ok prior)
+          (ensures eval_from_go rd lk spell body1 prior dirty r1 rest == eval_go rd lk spell body1 r1 rest)
+          (decreases rest)
+  = match rest with
+    | [] -> ()
+    | n :: rest' ->
+      let nid = node_id n in
+      assert (memp n rest);
+      (match run_node rd lk spell body0 r0 n with
+       | Error _ -> ()
+       | Ok v0 ->
+         eval_go_keeps rd lk spell body0 ((nid, v0) :: r0) rest' nid;
+         assert (assoc nid prior == Some v0);
+         if mem nid dirty then
+           (match run_node rd lk spell body1 r1 n with
+            | Error _ -> ()
+            | Ok v1 ->
+              go_agree rd lk spell body0 body1 all changed dirty prior ((nid, v0) :: r0) ((nid, v1) :: r1) rest')
+         else begin
+           (if mem nid changed then subset_mem changed dirty nid else ());
+           let ups (up:string) : Lemma (mem up (upstreams n) ==> assoc up r0 == assoc up r1) =
+             if mem up (upstreams n) then deps_edge all n up else ()
+           in
+           FStar.Classical.forall_intro ups;
+           run_node_eq rd lk spell body0 body1 r0 r1 n;
+           go_agree rd lk spell body0 body1 all changed dirty prior ((nid, v0) :: r0) ((nid, v0) :: r1) rest'
+         end)
+
+(* THE FOURTEENTH THEOREM (Phase 354), `pipeline_evalfrom_agrees`. F#: `evalFrom` against `eval`.
+   Let `prior` be what `eval` answered under a body `body0`, and let `body1` agree with `body0` at
+   every node outside `changed`. Then re-evaluating incrementally — `evalFrom` under `body1`, from
+   `prior` and `changed` — answers EXACTLY what a full `eval` under `body1` answers: the same result
+   map, so at every node the value the whole evaluation assigns it, and the same refusal when a
+   re-run node fails. Reuse is therefore sound: a node `evalFrom` does not re-run would have been
+   handed the same arguments and answered the same value. The prior evaluation having succeeded is
+   the type check having accepted, so nothing else is assumed of the pipeline; the contract on the
+   bodies is `agree_off`, and without it the claim is false — a body that changes at a node the
+   caller did not name is a stale reuse. *)
+let pipeline_evalfrom_agrees (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                             (spell:v -> string) (body0 body1:node_body v)
+                             (prior:list (string & v)) (changed:list string) (p:pipeline)
+  : Lemma (requires eval fr rd lk spell body0 p == Ok prior /\ agree_off body0 body1 changed)
+          (ensures eval_from fr rd lk spell body1 prior changed p == eval fr rd lk spell body1 p /\
+                   (forall (k:string) (final:list (string & v)).
+                      eval fr rd lk spell body1 p == Ok final ==>
+                      (match eval_from fr rd lk spell body1 prior changed p with
+                       | Ok inc -> assoc k inc == assoc k final
+                       | Error _ -> False)))
+  = match type_check fr rd lk p with
+    | Error _ -> ()
+    | Ok () ->
+      first_dup_distinct (node_ids p.p_nodes);
+      dirty_closed changed p;
+      go_agree rd lk spell body0 body1 p.p_nodes changed (dirty_set changed p) prior [] [] p.p_nodes
+
+(* ======================================================================================
+   16. THE CODECS (Phase 354) — `CapabilityCodec` for a `Signature` and a `Capability`, and
+       `CapabilityPipeline`'s for a `PipelineNode` and a pipeline, with the `SpaceCodec` and
+       `EffectCodec` they share, clause for clause AT THE `JVal`: the writers, the lenient readers
+       through the typed decode layer, and the refusal each reader raises as its code and path.
+       Then what they compute: decode after encode, EXACTLY, for every value — the identity on the
+       well-formed ones, a named refusal or a normal form on the others — and every document a
+       reader accepts read as a well-formed value.
+
+       The bytes are not here. `Canon.render` and `Json.parse` are `WireCanon.fst`'s and
+       `JsonParse.fst`'s; what crosses is the `JVal` between them. A refusal's SENTENCE and its
+       `Expected` phrase are not modelled: a refusal is its `DecodeCode` and its path.
+   ====================================================================================== *)
+
+(* F#: `JVal`. A `JFloat`'s payload is an opaque carrier, as a `FloatRange`'s bounds are. *)
+type jval =
+  | JStr   : string -> jval
+  | JInt   : int -> jval
+  | JBool  : bool -> jval
+  | JFloat : string -> jval
+  | JArr   : list jval -> jval
+  | JObj   : list (string & jval) -> jval
+
+(* F#: `PathSegment`. *)
+type path_seg =
+  | Key   : string -> path_seg
+  | Index : nat -> path_seg
+
+(* F#: `DecodeCode` — the closed code set a decode refusal carries. *)
+type decode_code =
+  | InvalidJson
+  | MissingField
+  | WrongKind
+  | UnknownTag
+  | OutOfRange
+  | UndeclaredMember
+  | LimitExceeded
+  | NotAdmitted
+  | SchemaFault
+
+(* F#: `DecodeError`, as its `Code` and `Path`. *)
+type decode_error = { d_code: decode_code; d_path: list path_seg }
+
+(* F#: `Decoder<'T>`. *)
+type decoder (a:Type) = jval -> outcome a decode_error
+
+(* F#: `DecodeError.make` — a refusal at the value itself. *)
+let refuse (c:decode_code) : Tot decode_error = { d_code = c; d_path = [] }
+
+(* F#: `DecodeError.under` — the same refusal one step further from the root. *)
+let under (s:path_seg) (e:decode_error) : Tot decode_error = { e with d_path = s :: e.d_path }
+
+(* The one float read the codecs make: `float i`, the carrier of an integer token read as a
+   number (`Decoder.float` on a `JInt`). A parameter, as every float operation here is. *)
+noeq type codec_readers = { float_of_int: int -> string }
+
+(* F#: `Decoder.tryMember` — the FIRST member of the key, `None` for a non-object. *)
+let member (name:string) (el:jval) : Tot (option jval) =
+  match el with
+  | JObj fields -> assoc name fields
+  | _ -> None
+
+(* F#: `Decoder.str`. *)
+let d_str (el:jval) : Tot (outcome string decode_error) =
+  match el with
+  | JStr s -> Ok s
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `Decoder.int`. *)
+let d_int (el:jval) : Tot (outcome int decode_error) =
+  match el with
+  | JInt i -> Ok i
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `Decoder.bool`. *)
+let d_bool (el:jval) : Tot (outcome bool decode_error) =
+  match el with
+  | JBool b -> Ok b
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `Decoder.float` — a number, whichever constructor the parser chose. *)
+let d_float (cr:codec_readers) (el:jval) : Tot (outcome string decode_error) =
+  match el with
+  | JFloat f -> Ok f
+  | JInt i -> Ok (cr.float_of_int i)
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `Decoder.field` — absent is `MissingField` naming the member, a non-object `WrongKind`. *)
+let field (#a:Type) (name:string) (d:decoder a) (el:jval) : Tot (outcome a decode_error) =
+  match el with
+  | JObj fields ->
+    (match assoc name fields with
+     | Some x ->
+       (match d x with
+        | Ok y -> Ok y
+        | Error e -> Error (under (Key name) e))
+     | None -> Error ({ d_code = MissingField; d_path = [Key name] }))
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `Decoder.optField` — absent is `Ok None`, present-and-refused is the refusal. *)
+let opt_field (#a:Type) (name:string) (d:decoder a) (el:jval) : Tot (outcome (option a) decode_error) =
+  match el with
+  | JObj fields ->
+    (match assoc name fields with
+     | Some x ->
+       (match d x with
+        | Ok y -> Ok (Some y)
+        | Error e -> Error (under (Key name) e))
+     | None -> Ok None)
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `Decoder.mapListIndexed`'s `go` — every item decoded, the first refusal under its index.
+   Written as the direct recursion rather than with production's reversed accumulator: the same
+   first refusal and the same list. *)
+let rec list_from (#a:Type) (d:decoder a) (i:nat) (xs:list jval)
+  : Tot (outcome (list a) decode_error) (decreases xs) =
+  match xs with
+  | [] -> Ok []
+  | x :: rest ->
+    match d x with
+    | Error e -> Error (under (Index i) e)
+    | Ok y ->
+      match list_from d (i + 1) rest with
+      | Ok ys -> Ok (y :: ys)
+      | Error e -> Error e
+
+(* F#: `Decoder.list`. *)
+let d_list (#a:Type) (d:decoder a) (el:jval) : Tot (outcome (list a) decode_error) =
+  match el with
+  | JArr xs -> list_from d 0 xs
+  | _ -> Error (refuse WrongKind)
+
+(* F#: `xs |> List.map JStr`. *)
+let rec strs (xs:list string) : Tot (list jval) =
+  match xs with
+  | [] -> []
+  | x :: t -> JStr x :: strs t
+
+(* ---- the value space: `SpaceCodec` ---- *)
+
+(* F#: `SpaceCodec.toJson` — a wire DOCUMENT, discriminated by `"$type"`. *)
+let space_json (s:value_space) : Tot jval =
+  match s with
+  | IntRange lo hi -> JObj [("$type", JStr "intRange"); ("min", JInt lo); ("max", JInt hi)]
+  | FloatRange lo hi -> JObj [("$type", JStr "floatRange"); ("min", JFloat lo); ("max", JFloat hi)]
+  | StringLen lo hi -> JObj [("$type", JStr "stringLen"); ("min", JInt lo); ("max", JInt hi)]
+  | Enum xs -> JObj [("$type", JStr "enum"); ("values", JArr (strs xs))]
+  | AnyString -> JObj [("$type", JStr "anyString")]
+  | SlotTree c ->
+    JObj (("$type", JStr "slotTree") ::
+          (match c with
+           | Some k -> [("slotKind", JStr k)]
+           | None -> []))
+
+(* F#: `SpaceCodec`'s `cases` under `dispatchOn key` — `Decoder.tagDispatch`: the discriminator read
+   as a string, then the case's decoder over the SAME object; an unknown tag is `UnknownTag` at the
+   discriminator. `len_lo` / `len_hi` are a string length's bound names in the spelling read. *)
+let space_cases (cr:codec_readers) (key len_lo len_hi:string) (el:jval)
+  : Tot (outcome value_space decode_error) =
+  match field key d_str el with
+  | Error e -> Error e
+  | Ok t ->
+    if t = "intRange" then
+      (match field "min" d_int el with
+       | Error e -> Error e
+       | Ok lo ->
+         (match field "max" d_int el with
+          | Error e -> Error e
+          | Ok hi -> Ok (IntRange lo hi)))
+    else if t = "floatRange" then
+      (match field "min" (d_float cr) el with
+       | Error e -> Error e
+       | Ok lo ->
+         (match field "max" (d_float cr) el with
+          | Error e -> Error e
+          | Ok hi -> Ok (FloatRange lo hi)))
+    else if t = "stringLen" then
+      (match field len_lo d_int el with
+       | Error e -> Error e
+       | Ok lo ->
+         (match field len_hi d_int el with
+          | Error e -> Error e
+          | Ok hi -> Ok (StringLen lo hi)))
+    else if t = "enum" then
+      (match field "values" (d_list d_str) el with
+       | Error e -> Error e
+       | Ok xs -> Ok (Enum xs))
+    else if t = "anyString" then Ok AnyString
+    else if t = "slotTree" then
+      (match opt_field "slotKind" d_str el with
+       | Error e -> Error e
+       | Ok c -> Ok (SlotTree c))
+    else Error (under (Key key) (refuse UnknownTag))
+
+(* F#: `SpaceCodec.decoder` — a `"$type"` document as `toJson` writes it; an object with no
+   `"$type"` and a `"kind"` in the descriptor spelling, leniently. *)
+let space_of_j (cr:codec_readers) (el:jval) : Tot (outcome value_space decode_error) =
+  match member "$type" el, member "kind" el with
+  | None, Some _ -> space_cases cr "kind" "minLength" "maxLength" el
+  | _ -> space_cases cr "$type" "min" "max" el
+
+(* ---- the effect class: `EffectCodec` ---- *)
+
+(* F#: `EffectCodec.hostTag`. *)
+let host_tag (h:host_effect) : Tot string =
+  match h with
+  | Pure -> "pure"
+  | ReadsHost -> "readsHost"
+  | WritesHost -> "writesHost"
+
+(* F#: `EffectCodec.hostDecoder`. *)
+let host_of_j (el:jval) : Tot (outcome host_effect decode_error) =
+  match d_str el with
+  | Error e -> Error e
+  | Ok s ->
+    if s = "pure" then Ok Pure
+    else if s = "readsHost" then Ok ReadsHost
+    else if s = "writesHost" then Ok WritesHost
+    else Error (refuse UnknownTag)
+
+(* F#: `EffectCodec.determinismDecoder` — the canonical label only. *)
+let det_of_j (el:jval) : Tot (outcome determinism_source decode_error) =
+  match d_str el with
+  | Error e -> Error e
+  | Ok tag ->
+    (match det_of_tag tag with
+     | Some d -> Ok d
+     | None -> Error (refuse UnknownTag))
+
+(* F#: `EffectCodec.toJson`. *)
+let effect_json (e:effect_class) : Tot jval =
+  JObj [("host", JStr (host_tag e.host)); ("determinism", JStr (determinism_tag e.determinism))]
+
+(* F#: `EffectCodec.decoder`. *)
+let effect_of_j (el:jval) : Tot (outcome effect_class decode_error) =
+  match field "host" host_of_j el with
+  | Error e -> Error e
+  | Ok h ->
+    (match field "determinism" det_of_j el with
+     | Error e -> Error e
+     | Ok d -> Ok ({ host = h; determinism = d }))
+
+(* ---- a signature entry and a signature: `CapabilityCodec` ---- *)
+
+(* F#: `HoleKind.tags`. *)
+let hole_tags : list string = ["value"; "slot"; "repeat"; "action"]
+
+(* F#: `Function.derivedSlotSpace` — a slot entry carrying exactly the space its constraint derives. *)
+let derived_slot_space (e:sig_entry) : Tot bool =
+  e.s_kind = "slot" && e.s_space = Some (SlotTree e.s_slot)
+
+(* F#: `entryJson`'s three conditional member lists. *)
+let space_members (e:sig_entry) : Tot (list (string & jval)) =
+  match e.s_space with
+  | Some s -> if derived_slot_space e then [] else [("space", space_json s)]
+  | None -> []
+
+let slot_members (e:sig_entry) : Tot (list (string & jval)) =
+  match e.s_slot with
+  | Some k -> [("slotKind", JStr k)]
+  | None -> []
+
+let action_members (e:sig_entry) : Tot (list (string & jval)) =
+  match e.s_action with
+  | Some eff -> [("actionEffect", effect_json eff)]
+  | None -> []
+
+let entry_fields (e:sig_entry) : Tot (list (string & jval)) =
+  ("addr", JStr e.s_addr) :: ("name", JStr e.s_name) :: ("kind", JStr e.s_kind) ::
+  ("required", JBool e.s_required) ::
+  app (space_members e) (app (slot_members e) (action_members e))
+
+(* F#: `CapabilityCodec.entryJson`. *)
+let entry_json (e:sig_entry) : Tot jval = JObj (entry_fields e)
+
+(* F#: `tagged "unknown hole kind: " (HoleKind.tags …)` — a string from the closed set. *)
+let kind_of_j (el:jval) : Tot (outcome string decode_error) =
+  match d_str el with
+  | Error e -> Error e
+  | Ok s -> if mem s hole_tags then Ok s else Error (refuse UnknownTag)
+
+(* F#: `CapabilityCodec.entryOf`. A slot entry travels without its derived space (Phase 229), so
+   decoding restores it from the constraint. *)
+let entry_of_j (cr:codec_readers) (el:jval) : Tot (outcome sig_entry decode_error) =
+  match field "addr" d_str el with
+  | Error e -> Error e
+  | Ok addr ->
+  match field "name" d_str el with
+  | Error e -> Error e
+  | Ok name ->
+  match field "kind" kind_of_j el with
+  | Error e -> Error e
+  | Ok kind ->
+  match field "required" d_bool el with
+  | Error e -> Error e
+  | Ok required ->
+  match opt_field "space" (space_of_j cr) el with
+  | Error e -> Error e
+  | Ok sp ->
+  match opt_field "actionEffect" effect_of_j el with
+  | Error e -> Error e
+  | Ok ac ->
+  match opt_field "slotKind" d_str el with
+  | Error e -> Error e
+  | Ok slot ->
+    let sp' : option value_space =
+      match sp with
+      | None -> if kind = "slot" then Some (SlotTree slot) else None
+      | Some s -> Some s
+    in
+    Ok ({ s_addr = addr; s_name = name; s_kind = kind; s_space = sp'; s_slot = slot;
+          s_action = ac; s_required = required })
+
+(* F#: `sg.Holes |> List.map entryJson`. *)
+let rec entries_json (es:list sig_entry) : Tot (list jval) =
+  match es with
+  | [] -> []
+  | e :: t -> entry_json e :: entries_json t
+
+(* F#: `CapabilityCodec.signatureJson`. *)
+let signature_json (sg:signature) : Tot jval =
+  JObj [("name", JStr sg.sg_name); ("effect", effect_json sg.sg_effect);
+        ("holes", JArr (entries_json sg.sg_holes))]
+
+(* F#: `CapabilityCodec.signatureOfDetailed` — since Phase 307 the reader runs the admission check
+   the registries run, and a signature it refuses is `OutOfRange` at `holes`. *)
+let signature_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome signature decode_error) =
+  match field "name" d_str el with
+  | Error e -> Error e
+  | Ok name ->
+  match field "effect" effect_of_j el with
+  | Error e -> Error e
+  | Ok eff ->
+  match field "holes" (d_list (entry_of_j cr)) el with
+  | Error e -> Error e
+  | Ok holes ->
+    let sg = { sg_name = name; sg_holes = holes; sg_effect = eff } in
+    (match validate_signature rd sg with
+     | None -> Ok sg
+     | Some _ -> Error ({ d_code = OutOfRange; d_path = [Key "holes"] }))
+
+(* ---- placement and the capability declaration ---- *)
+
+(* F#: `islandTag`. *)
+let island_tag (k:island_kind) : Tot string =
+  match k with
+  | Pyodide -> "pyodide"
+  | Fable -> "fable"
+  | Js -> "js"
+
+(* F#: `islandOf`. *)
+let island_of_j (el:jval) : Tot (outcome island_kind decode_error) =
+  match d_str el with
+  | Error e -> Error e
+  | Ok s ->
+    if s = "pyodide" then Ok Pyodide
+    else if s = "fable" then Ok Fable
+    else if s = "js" then Ok Js
+    else Error (refuse UnknownTag)
+
+(* F#: `placementJson`. *)
+let placement_json (p:placement) : Tot jval =
+  match p with
+  | BuildTime -> JObj [("$type", JStr "buildTime")]
+  | Server -> JObj [("$type", JStr "server")]
+  | ClientDeclarative -> JObj [("$type", JStr "clientDeclarative")]
+  | Precomputed -> JObj [("$type", JStr "precomputed")]
+  | ClientIsland k -> JObj [("$type", JStr "clientIsland"); ("island", JStr (island_tag k))]
+
+(* F#: `placementOf`. *)
+let placement_of_j (el:jval) : Tot (outcome placement decode_error) =
+  match field "$type" d_str el with
+  | Error e -> Error e
+  | Ok t ->
+    if t = "buildTime" then Ok BuildTime
+    else if t = "server" then Ok Server
+    else if t = "clientDeclarative" then Ok ClientDeclarative
+    else if t = "precomputed" then Ok Precomputed
+    else if t = "clientIsland" then
+      (match field "island" island_of_j el with
+       | Error e -> Error e
+       | Ok k -> Ok (ClientIsland k))
+    else Error (under (Key "$type") (refuse UnknownTag))
+
+(* F#: `CapabilityCodec.encodeJson`. *)
+let capability_json (c:capability) : Tot jval =
+  JObj [("$type", JStr "capability"); ("id", JStr c.c_id); ("signature", signature_json c.c_signature);
+        ("determinism", JStr (determinism_tag c.c_determinism)); ("placement", placement_json c.c_placement)]
+
+(* F#: `tagged "not a capability declaration: " [ "capability", () ]`. *)
+let doc_tag_of_j (el:jval) : Tot (outcome unit decode_error) =
+  match d_str el with
+  | Error e -> Error e
+  | Ok s -> if s = "capability" then Ok () else Error (refuse UnknownTag)
+
+(* F#: the `determinism` member's check (Phase 44) — the wire label must be the one the decoded
+   signature's effect derives; a disagreeing label is `OutOfRange`, never silently corrected. *)
+let det_agrees_j (expected:string) (el:jval) : Tot (outcome unit decode_error) =
+  match d_str el with
+  | Error e -> Error e
+  | Ok wire -> if wire <> expected then Error (refuse OutOfRange) else Ok ()
+
+(* F#: `CapabilityCodec.decodeJsonDetailed`. *)
+let capability_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome capability decode_error) =
+  match field "$type" doc_tag_of_j el with
+  | Error e -> Error e
+  | Ok () ->
+  match field "id" d_str el with
+  | Error e -> Error e
+  | Ok id ->
+  match field "signature" (signature_of_j rd cr) el with
+  | Error e -> Error e
+  | Ok sg ->
+  match field "determinism" (det_agrees_j (determinism_tag sg.sg_effect.determinism)) el with
+  | Error e -> Error e
+  | Ok () ->
+  match field "placement" placement_of_j el with
+  | Error e -> Error e
+  | Ok pl ->
+    Ok ({ c_id = id; c_signature = sg; c_determinism = sg.sg_effect.determinism; c_placement = pl })
+
+(* ---- the pipeline node: `CapabilityPipeline`'s codec ---- *)
+
+(* F#: `argSrcToJ`. *)
+let arg_source_json (s:arg_source) : Tot jval =
+  match s with
+  | Literal x -> JObj [("$type", JStr "literal"); ("value", JStr x)]
+  | FromNode n -> JObj [("$type", JStr "fromNode"); ("node", JStr n)]
+
+(* F#: `argSrcFromJ`. *)
+let arg_source_of_j (el:jval) : Tot (outcome arg_source decode_error) =
+  match field "$type" d_str el with
+  | Error e -> Error e
+  | Ok t ->
+    if t = "literal" then
+      (match field "value" d_str el with
+       | Error e -> Error e
+       | Ok x -> Ok (Literal x))
+    else if t = "fromNode" then
+      (match field "node" d_str el with
+       | Error e -> Error e
+       | Ok n -> Ok (FromNode n))
+    else Error (under (Key "$type") (refuse UnknownTag))
+
+(* F#: `argToJ`. *)
+let arg_json (b:(string & arg_source)) : Tot jval =
+  JObj [("addr", JStr (fst b)); ("source", arg_source_json (snd b))]
+
+(* F#: `argFromJ`. *)
+let arg_of_j (el:jval) : Tot (outcome (string & arg_source) decode_error) =
+  match field "addr" d_str el with
+  | Error e -> Error e
+  | Ok addr ->
+    (match field "source" arg_source_of_j el with
+     | Error e -> Error e
+     | Ok s -> Ok (addr, s))
+
+let rec args_json (a:list (string & arg_source)) : Tot (list jval) =
+  match a with
+  | [] -> []
+  | b :: t -> arg_json b :: args_json t
+
+(* F#: `spaceFromJ` — `SpaceCodec.decoder`, then (Phase 307) the admission check: an output space
+   `Space.wellFormed` refuses is `OutOfRange`. *)
+let out_space_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome value_space decode_error) =
+  match space_of_j cr el with
+  | Error e -> Error e
+  | Ok sp ->
+    (match space_wf rd sp with
+     | None -> Ok sp
+     | Some _ -> Error (refuse OutOfRange))
+
+(* F#: `nodeToJ`. *)
+let node_json (n:pipeline_node) : Tot jval =
+  match n with
+  | Source id dref ty ->
+    JObj [("$type", JStr "source"); ("id", JStr id); ("dataRef", JStr dref); ("outputType", space_json ty)]
+  | Invoke id cap_id ty a ->
+    JObj [("$type", JStr "invoke"); ("id", JStr id); ("capabilityId", JStr cap_id);
+          ("outputType", space_json ty); ("args", JArr (args_json a))]
+
+(* F#: `nodeFromJ`. *)
+let node_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome pipeline_node decode_error) =
+  match field "$type" d_str el with
+  | Error e -> Error e
+  | Ok t ->
+    if t = "source" then
+      (match field "id" d_str el with
+       | Error e -> Error e
+       | Ok id ->
+         (match field "dataRef" d_str el with
+          | Error e -> Error e
+          | Ok dref ->
+            (match field "outputType" (out_space_of_j rd cr) el with
+             | Error e -> Error e
+             | Ok ty -> Ok (Source id dref ty))))
+    else if t = "invoke" then
+      (match field "id" d_str el with
+       | Error e -> Error e
+       | Ok id ->
+         (match field "capabilityId" d_str el with
+          | Error e -> Error e
+          | Ok cap_id ->
+            (match field "outputType" (out_space_of_j rd cr) el with
+             | Error e -> Error e
+             | Ok ty ->
+               (match field "args" (d_list arg_of_j) el with
+                | Error e -> Error e
+                | Ok a -> Ok (Invoke id cap_id ty a)))))
+    else Error (under (Key "$type") (refuse UnknownTag))
+
+let rec nodes_json (ns:list pipeline_node) : Tot (list jval) =
+  match ns with
+  | [] -> []
+  | n :: t -> node_json n :: nodes_json t
+
+(* F#: `CapabilityPipeline.encode`'s `JVal`. *)
+let pipeline_json (p:pipeline) : Tot jval = JObj [("nodes", JArr (nodes_json p.p_nodes))]
+
+(* F#: `CapabilityPipeline.decodeDetailed`, past the parse. *)
+let pipeline_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome pipeline decode_error) =
+  match field "nodes" (d_list (node_of_j rd cr)) el with
+  | Error e -> Error e
+  | Ok ns -> Ok ({ p_nodes = ns })
+
+(* ---- what the codecs compute ---- *)
+
+let rec assoc_app (#a:Type) (k:string) (l m:list (string & a))
+  : Lemma (assoc k (app l m) == (match assoc k l with
+                                 | Some x -> Some x
+                                 | None -> assoc k m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> assoc_app k t m
+
+let rec strs_roundtrip (i:nat) (xs:list string)
+  : Lemma (ensures list_from d_str i (strs xs) == Ok xs) (decreases xs)
+  = match xs with
+    | [] -> ()
+    | _ :: t -> strs_roundtrip (i + 1) t
+
+(* A value space reads back as itself — EVERY space, well-formed or not: the space codec makes no
+   admission check, which is the signature reader's and the pipeline reader's to make. *)
+let space_roundtrip (cr:codec_readers) (s:value_space)
+  : Lemma (space_of_j cr (space_json s) == Ok s)
+  = match s with
+    | Enum xs -> strs_roundtrip 0 xs
+    | _ -> ()
+
+let effect_roundtrip (e:effect_class)
+  : Lemma (effect_of_j (effect_json e) == Ok e)
+  = det_tag_roundtrip e.determinism
+
+let placement_roundtrip (p:placement)
+  : Lemma (placement_of_j (placement_json p) == Ok p)
+  = ()
+
+(* The three conditional members of an entry, looked up through the four fixed ones. *)
+let lk_space (e:sig_entry)
+  : Lemma (assoc "space" (entry_fields e) ==
+           (match e.s_space with
+            | Some s -> if derived_slot_space e then None else Some (space_json s)
+            | None -> None))
+  = assoc_app "space" (space_members e) (app (slot_members e) (action_members e));
+    assoc_app "space" (slot_members e) (action_members e)
+
+let lk_slot (e:sig_entry)
+  : Lemma (assoc "slotKind" (entry_fields e) ==
+           (match e.s_slot with
+            | Some k -> Some (JStr k)
+            | None -> None))
+  = assoc_app "slotKind" (space_members e) (app (slot_members e) (action_members e));
+    assoc_app "slotKind" (slot_members e) (action_members e)
+
+let lk_action (e:sig_entry)
+  : Lemma (assoc "actionEffect" (entry_fields e) ==
+           (match e.s_action with
+            | Some eff -> Some (effect_json eff)
+            | None -> None))
+  = assoc_app "actionEffect" (space_members e) (app (slot_members e) (action_members e));
+    assoc_app "actionEffect" (slot_members e) (action_members e)
+
+(* The entry a decode yields for an entry: its space filled in where it is a slot's derived one
+   (`Function.slotSpaceOf`, `arg_space` here). *)
+let normal_entry (e:sig_entry) : Tot sig_entry = { e with s_space = arg_space e }
+
+(* An entry the codec carries unchanged: its kind is a hole kind's tag, and it is not the spaceless
+   slot a hand-built signature may hold. *)
+let canonical_entry (e:sig_entry) : Tot bool = mem e.s_kind hole_tags && arg_space e = e.s_space
+
+(* DECODE AFTER ENCODE, AN ENTRY, EXACTLY. A kind outside `HoleKind.tags` is refused `UnknownTag`
+   at `kind`; every other entry reads back as its normal form — itself, unless it is the spaceless
+   slot, which reads back with the `SlotTree` of its constraint. *)
+let entry_roundtrip (cr:codec_readers) (e:sig_entry)
+  : Lemma (entry_of_j cr (entry_json e) ==
+           (if mem e.s_kind hole_tags then Ok (normal_entry e)
+            else Error ({ d_code = UnknownTag; d_path = [Key "kind"] })))
+  = lk_space e; lk_slot e; lk_action e;
+    (match e.s_space with
+     | Some s -> space_roundtrip cr s
+     | None -> ());
+    (match e.s_action with
+     | Some eff -> effect_roundtrip eff
+     | None -> ())
+
+(* A decoded entry is canonical — whatever document it was read from. *)
+let entry_decoded_canonical (cr:codec_readers) (el:jval) (e:sig_entry)
+  : Lemma (requires entry_of_j cr el == Ok e) (ensures canonical_entry e)
+  = ()
+
+(* The index of the first entry whose kind is no hole kind's tag, counted from `i`. *)
+let rec first_bad_kind (i:nat) (es:list sig_entry) : Tot (option nat) (decreases es) =
+  match es with
+  | [] -> None
+  | e :: t -> if mem e.s_kind hole_tags then first_bad_kind (i + 1) t else Some i
+
+let rec entries_roundtrip (cr:codec_readers) (i:nat) (es:list sig_entry)
+  : Lemma (ensures list_from (entry_of_j cr) i (entries_json es) ==
+                   (match first_bad_kind i es with
+                    | Some j -> Error ({ d_code = UnknownTag; d_path = [Index j; Key "kind"] })
+                    | None -> Ok (map normal_entry es)))
+          (decreases es)
+  = match es with
+    | [] -> ()
+    | e :: t -> entry_roundtrip cr e; entries_roundtrip cr (i + 1) t
+
+let rec entries_decoded_canonical (cr:codec_readers) (i:nat) (xs:list jval) (es:list sig_entry)
+  : Lemma (requires list_from (entry_of_j cr) i xs == Ok es)
+          (ensures for_all canonical_entry es)
+          (decreases xs)
+  = match xs with
+    | [] -> ()
+    | x :: rest ->
+      (match entry_of_j cr x with
+       | Error _ -> ()
+       | Ok e ->
+         entry_decoded_canonical cr x e;
+         (match list_from (entry_of_j cr) (i + 1) rest with
+          | Ok es' -> entries_decoded_canonical cr (i + 1) rest es'
+          | Error _ -> ()))
+
+(* Normalising changes nothing the admission check reads: a slot's derived space is well-formed. *)
+let rec validate_normal (rd:readers) (seen:list string) (es:list sig_entry)
+  : Lemma (ensures validate_entries rd seen (map normal_entry es) == validate_entries rd seen es)
+          (decreases es)
+  = match es with
+    | [] -> ()
+    | e :: t -> validate_normal rd (e.s_addr :: seen) t
+
+let rec normal_canonical (es:list sig_entry)
+  : Lemma (requires for_all canonical_entry es) (ensures map normal_entry es == es)
+  = match es with
+    | [] -> ()
+    | _ :: t -> normal_canonical t
+
+(* The signature a decode yields for a signature. *)
+let normal_signature (sg:signature) : Tot signature = { sg with sg_holes = map normal_entry sg.sg_holes }
+
+(* A signature the codec carries unchanged: every entry canonical, and one `Signature.validate`
+   admits. *)
+let wf_signature (rd:readers) (sg:signature) : Tot bool =
+  for_all canonical_entry sg.sg_holes && None? (validate_signature rd sg)
+
+(* THE FIFTEENTH THEOREM (Phase 354), `signature_roundtrip`. F#: `CapabilityCodec.signatureOf` after
+   `signatureJson`. DECODE AFTER ENCODE, EXACTLY, for every signature:
+     - an entry whose kind is no hole kind's tag is refused `UnknownTag`, the path naming the first
+       such entry and its `kind`;
+     - otherwise a signature `Signature.validate` refuses is refused `OutOfRange` at `holes` — the
+       reader runs the admission check the registries run;
+     - otherwise it reads back as its normal form: itself, with each spaceless slot entry given the
+       `SlotTree` of its constraint.
+   So on a well-formed signature the round trip is the IDENTITY (`signature_roundtrip_identity`),
+   and the hand-built spaceless slot is the one value that reads back as another. *)
+let signature_roundtrip (rd:readers) (cr:codec_readers) (sg:signature)
+  : Lemma (signature_of_j rd cr (signature_json sg) ==
+           (match first_bad_kind 0 sg.sg_holes with
+            | Some j -> Error ({ d_code = UnknownTag; d_path = [Key "holes"; Index j; Key "kind"] })
+            | None ->
+              (match validate_signature rd sg with
+               | None -> Ok (normal_signature sg)
+               | Some _ -> Error ({ d_code = OutOfRange; d_path = [Key "holes"] }))))
+  = effect_roundtrip sg.sg_effect;
+    entries_roundtrip cr 0 sg.sg_holes;
+    validate_normal rd [] sg.sg_holes
+
+let rec canonical_no_bad_kind (i:nat) (es:list sig_entry)
+  : Lemma (requires for_all canonical_entry es) (ensures first_bad_kind i es == None) (decreases es)
+  = match es with
+    | [] -> ()
+    | _ :: t -> canonical_no_bad_kind (i + 1) t
+
+let signature_roundtrip_identity (rd:readers) (cr:codec_readers) (sg:signature)
+  : Lemma (requires wf_signature rd sg)
+          (ensures signature_of_j rd cr (signature_json sg) == Ok sg)
+  = signature_roundtrip rd cr sg;
+    canonical_no_bad_kind 0 sg.sg_holes;
+    normal_canonical sg.sg_holes
+
+(* EVERY DOCUMENT THE READER ACCEPTS IS A WELL-FORMED SIGNATURE — one a registry could admit on
+   well-formedness, and one that encodes and reads back as itself. *)
+let signature_decoded_wf (rd:readers) (cr:codec_readers) (el:jval) (sg:signature)
+  : Lemma (requires signature_of_j rd cr el == Ok sg)
+          (ensures wf_signature rd sg /\ signature_of_j rd cr (signature_json sg) == Ok sg)
+  = (match el with
+     | JObj fields ->
+       (match assoc "holes" fields with
+        | Some (JArr xs) ->
+          (match list_from (entry_of_j cr) 0 xs with
+           | Ok es -> entries_decoded_canonical cr 0 xs es
+           | Error _ -> ())
+        | _ -> ())
+     | _ -> ());
+    signature_roundtrip_identity rd cr sg
+
+(* A capability the codec carries unchanged: a well-formed signature, and the determinism the
+   signature's effect derives — which production's `Capability` cannot disagree with (the axis is
+   a derived member since Phase 295) and the model's record, which still carries it, can. *)
+let wf_capability (rd:readers) (c:capability) : Tot bool =
+  wf_signature rd c.c_signature && c.c_determinism = c.c_signature.sg_effect.determinism
+
+(* THE SIXTEENTH THEOREM (Phase 354), `capability_roundtrip`. F#: `CapabilityCodec.decodeJson` after
+   `encodeJson`. DECODE AFTER ENCODE, EXACTLY, for every capability: the signature's refusal, under
+   `signature`, where `signature_roundtrip` refuses it; `OutOfRange` at `determinism` where the
+   label written disagrees with the one the signature's effect derives (Phase 44's cross-check);
+   otherwise the capability with its signature in normal form. On a well-formed capability the
+   round trip is the identity. *)
+let capability_roundtrip (rd:readers) (cr:codec_readers) (c:capability)
+  : Lemma (capability_of_j rd cr (capability_json c) ==
+           (match signature_of_j rd cr (signature_json c.c_signature) with
+            | Error e -> Error (under (Key "signature") e)
+            | Ok sg ->
+              if c.c_determinism = c.c_signature.sg_effect.determinism
+              then Ok ({ c with c_signature = sg })
+              else Error ({ d_code = OutOfRange; d_path = [Key "determinism"] })))
+  = signature_roundtrip rd cr c.c_signature;
+    placement_roundtrip c.c_placement;
+    (if determinism_tag c.c_determinism = determinism_tag c.c_signature.sg_effect.determinism
+     then det_tag_injective c.c_determinism c.c_signature.sg_effect.determinism
+     else ())
+
+let capability_roundtrip_identity (rd:readers) (cr:codec_readers) (c:capability)
+  : Lemma (requires wf_capability rd c)
+          (ensures capability_of_j rd cr (capability_json c) == Ok c)
+  = capability_roundtrip rd cr c;
+    signature_roundtrip_identity rd cr c.c_signature
+
+(* Every document the reader accepts is a well-formed capability, and reads back as itself. *)
+let capability_decoded_wf (rd:readers) (cr:codec_readers) (el:jval) (c:capability)
+  : Lemma (requires capability_of_j rd cr el == Ok c)
+          (ensures wf_capability rd c /\ capability_of_j rd cr (capability_json c) == Ok c)
+  = (match el with
+     | JObj fields ->
+       (match assoc "signature" fields with
+        | Some sj ->
+          (match signature_of_j rd cr sj with
+           | Ok sg -> signature_decoded_wf rd cr sj sg
+           | Error _ -> ())
+        | None -> ())
+     | _ -> ());
+    capability_roundtrip_identity rd cr c
+
+let arg_roundtrip (b:(string & arg_source))
+  : Lemma (arg_of_j (arg_json b) == Ok b)
+  = ()
+
+let rec args_roundtrip (i:nat) (a:list (string & arg_source))
+  : Lemma (ensures list_from arg_of_j i (args_json a) == Ok a) (decreases a)
+  = match a with
+    | [] -> ()
+    | b :: t -> arg_roundtrip b; args_roundtrip (i + 1) t
+
+(* THE SEVENTEENTH THEOREM (Phase 354), `node_roundtrip`. F#: `CapabilityPipeline`'s `nodeFromJ`
+   after `nodeToJ`. DECODE AFTER ENCODE, EXACTLY, for every node: a node whose output space
+   `Space.wellFormed` refuses is refused `OutOfRange` at `outputType`, and every other node reads
+   back as itself — its id, its data ref or capability id, its output space and its arguments in
+   order, each edge and each literal. *)
+let node_roundtrip (rd:readers) (cr:codec_readers) (n:pipeline_node)
+  : Lemma (node_of_j rd cr (node_json n) ==
+           (match space_wf rd (node_output n) with
+            | None -> Ok n
+            | Some _ -> Error ({ d_code = OutOfRange; d_path = [Key "outputType"] })))
+  = space_roundtrip cr (node_output n);
+    (match n with
+     | Source _ _ _ -> ()
+     | Invoke _ _ _ a -> args_roundtrip 0 a)
+
+(* Every document the node reader accepts is a node with a well-formed output space, and reads
+   back as itself. *)
+let node_decoded_wf (rd:readers) (cr:codec_readers) (el:jval) (n:pipeline_node)
+  : Lemma (requires node_of_j rd cr el == Ok n)
+          (ensures None? (space_wf rd (node_output n)) /\ node_of_j rd cr (node_json n) == Ok n)
+  = node_roundtrip rd cr n
+
+(* The index of the first node whose output space is not well-formed, counted from `i`. *)
+let rec first_bad_node (rd:readers) (i:nat) (ns:list pipeline_node) : Tot (option nat) (decreases ns) =
+  match ns with
+  | [] -> None
+  | n :: t -> if None? (space_wf rd (node_output n)) then first_bad_node rd (i + 1) t else Some i
+
+let rec nodes_roundtrip (rd:readers) (cr:codec_readers) (i:nat) (ns:list pipeline_node)
+  : Lemma (ensures list_from (node_of_j rd cr) i (nodes_json ns) ==
+                   (match first_bad_node rd i ns with
+                    | Some j -> Error ({ d_code = OutOfRange; d_path = [Index j; Key "outputType"] })
+                    | None -> Ok ns))
+          (decreases ns)
+  = match ns with
+    | [] -> ()
+    | n :: t -> node_roundtrip rd cr n; nodes_roundtrip rd cr (i + 1) t
+
+(* ... and a whole pipeline: refused at the first node with an ill-formed output space, naming it;
+   otherwise the identity, the nodes in declaration order. *)
+let pipeline_roundtrip (rd:readers) (cr:codec_readers) (p:pipeline)
+  : Lemma (pipeline_of_j rd cr (pipeline_json p) ==
+           (match first_bad_node rd 0 p.p_nodes with
+            | Some j -> Error ({ d_code = OutOfRange; d_path = [Key "nodes"; Index j; Key "outputType"] })
+            | None -> Ok p))
+  = nodes_roundtrip rd cr 0 p.p_nodes
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -2433,6 +4919,71 @@ let twins : list twin = [
         [ { s_addr = "a"; s_name = "a"; s_kind = "value"; s_space = Some (IntRange 0 1); s_slot = None;
             s_action = None; s_required = true };
           { s_addr = "a"; s_name = "b"; s_kind = "value"; s_space = Some (IntRange 5 1); s_slot = None;
-            s_action = None; s_required = true } ] = Some (DuplicateHoleAddr "a")) } ]
+            s_action = None; s_required = true } ] = Some (DuplicateHoleAddr "a")) };
+  (* Phase 354 — the handler table, the pipeline and the codecs. *)
+  { tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key";
+    tholds = (fun () ->
+      map_of_list (fun a b -> a = "a" || b = "b") [("b", 1); ("a", 2); ("b", 3)] = [("a", 2); ("b", 3)]) };
+  { tname = "a-handler-key-that-is-no-hole-is-refused-naming-the-declared-actions";
+    tholds = (fun () ->
+      check_keys #int ["go"] ["go"; "title"] [("stop", { hb_handler = 0; hb_effect = pure_deterministic })]
+        = Error (UnknownActionAddr "stop" ["go"])) };
+  { tname = "a-handler-on-a-data-hole-is-not-an-action-hole";
+    tholds = (fun () ->
+      check_keys #int ["go"] ["go"; "title"] [("title", { hb_handler = 0; hb_effect = pure_deterministic })]
+        = Error (NotAnActionHole "title")) };
+  { tname = "a-handler-past-its-ceiling-is-refused-naming-both-effects";
+    tholds = (fun () ->
+      check_effects #int [("go", { hb_handler = 0; hb_effect = { host = WritesHost; determinism = deterministic } })]
+        [("go", pure_deterministic)]
+        = Error (HandlerEffectExceedsCeiling "go" pure_deterministic
+                   ({ host = WritesHost; determinism = deterministic }))) };
+  { tname = "first-dup-is-the-first-id-seen-again";
+    tholds = (fun () -> first_dup ["a"; "b"; "c"; "b"; "a"] = Some "a") };
+  { tname = "an-edge-that-closes-a-cycle-is-named-from-the-node";
+    tholds = (fun () ->
+      edge_fault ({ float_within = (fun _ _ _ _ -> false); int_within = (fun _ _ _ _ -> false) })
+        ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+           kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) })
+        [ Invoke "a" "c" AnyString [("x", FromNode "b")]; Invoke "b" "c" AnyString [("x", FromNode "a")] ]
+        ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineCycle "a" ["a"; "b"])) };
+  { tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge";
+    tholds = (fun () ->
+      edge_fault ({ float_within = (fun _ _ _ _ -> false); int_within = (fun _ _ _ _ -> false) })
+        ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+           kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) })
+        [ Invoke "a" "c" AnyString [("x", FromNode "b")]; Source "b" "ref" AnyString ]
+        ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineForwardEdge "a" "x" "b")) };
+  { tname = "the-dirty-set-is-the-change-and-everything-downstream";
+    tholds = (fun () ->
+      dirty_set ["s"]
+        ({ p_nodes = [ Source "s" "ref" AnyString;
+                       Invoke "a" "c" AnyString [("x", FromNode "s")];
+                       Invoke "b" "c" AnyString [("x", FromNode "a")];
+                       Source "t" "ref" AnyString ] }) = ["s"; "a"; "b"]) };
+  { tname = "an-entry-kind-outside-the-tags-is-refused-at-kind";
+    tholds = (fun () ->
+      entry_of_j ({ float_of_int = (fun _ -> "0") })
+        (entry_json ({ s_addr = "x"; s_name = "x"; s_kind = "int"; s_space = Some AnyString; s_slot = None;
+                       s_action = None; s_required = true }))
+        = Error ({ d_code = UnknownTag; d_path = [Key "kind"] })) };
+  { tname = "a-spaceless-slot-reads-back-with-its-derived-space";
+    tholds = (fun () ->
+      entry_of_j ({ float_of_int = (fun _ -> "0") })
+        (entry_json ({ s_addr = "s"; s_name = "s"; s_kind = "slot"; s_space = None; s_slot = Some "card";
+                       s_action = None; s_required = true }))
+        = Ok ({ s_addr = "s"; s_name = "s"; s_kind = "slot"; s_space = Some (SlotTree (Some "card"));
+                s_slot = Some "card"; s_action = None; s_required = true })) };
+  { tname = "the-descriptor-spelling-of-a-space-is-read-leniently";
+    tholds = (fun () ->
+      space_of_j ({ float_of_int = (fun _ -> "0") })
+        (JObj [("kind", JStr "stringLen"); ("minLength", JInt 1); ("maxLength", JInt 3)]) = Ok (StringLen 1 3)) };
+  { tname = "a-node-with-an-empty-output-space-is-refused-at-outputType";
+    tholds = (fun () ->
+      node_of_j ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+                   kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) })
+        ({ float_of_int = (fun _ -> "0") })
+        (node_json (Source "s" "ref" (IntRange 5 1)))
+        = Error ({ d_code = OutOfRange; d_path = [Key "outputType"] })) } ]
 
 let _ = assert_norm (twins_hold twins == true)
