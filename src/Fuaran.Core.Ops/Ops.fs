@@ -434,6 +434,14 @@ module Footprint =
     /// recording the whole node, so a domain that never calls this folds exactly as before. NOT what
     /// any skeleton op does: an `UpdateNode` rewrites its target whole, and a pure script cannot say
     /// which part of the payload changed, so `Ops.footprint` never records a slot.
+    ///
+    /// Like `contentEdit`, it carries NO unknown-parent write, and the same obligation follows. The
+    /// removal of an ANCESTOR of `id` names neither `id` nor any slot of it, so the two footprints fail
+    /// no clause of `independent`, yet the scripts do not commute: the edit lands in one order and is
+    /// refused in the other. A domain op shaped like this one, which can land under a node a concurrent
+    /// op removes, must fold in what its removal partners destroy itself (`Footprint`'s pinned
+    /// over-approximation (2)) — read `Ops.footprint`'s `UpdateNode` clause, which records the
+    /// unknown-parent write for exactly this pair.
     let slotEdit (id: string) (slot: string) : Footprint =
         { empty with
             SlotReads = Set.singleton (id, slot)

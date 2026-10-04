@@ -2760,6 +2760,87 @@ make the edits named above.
 `FunctionRegistry` and the two widened unions, riding the `0.35.0` slot, whose class (`breaking (source)`)
 they do not exceed: no number moves. The rest is **additive**.
 
+### A policy gate on the invocable registries, an id-scoped write gate, a guarded AI surface, and invocation-keyed capture (Phase 318, DECISIONS.md D118) — BREAKING (binary): `PolicyDecision` moves from `Fuaran.Core.AiSurface` to `Fuaran.Core.Function`, which the surface gate classes `removal` for `Fuaran.Core.AiSurface` (source unchanged); BREAKING (source): `InvokeError` and `QueryError` widened, `CapabilityRegistry` and `QueryRegistry` gain a field; the rest additive; the wire `additive`
+
+The shard declared this phase additive. It is not, in three named places, and each is stated here so a
+consumer reads the edit it makes rather than a class that hides it.
+
+**What moved, for a consumer.**
+
+- **`PolicyDecision` is declared in `Fuaran.Core.Function` (binary).** The type, its cases and its
+  `deny` / `denyWith` constructors moved, unchanged, from `Fuaran.Core.AiSurface` to
+  `Fuaran.Core.Function`, beside the registries' gate. Same namespace, same names: a source that names
+  it compiles unchanged, because `Fuaran.Core.AiSurface` now references `Fuaran.Core.Function` and so
+  brings it in. A binary compiled against `0.34.0`'s `Fuaran.Core.AiSurface` names the type in the old
+  assembly and must be rebuilt — F# emits no type forwarder, so the move cannot be made binary
+  compatible, and the surface gate reports `Fuaran.Core.AiSurface` as `removal` for exactly that reason.
+- **Two package edges (additive for a package consumer).** `Fuaran.Core.AiSurface` depends on
+  `Fuaran.Core.Function`; `Fuaran.Core.Function` depends on `Fuaran.Core.OpStream` (the seams'
+  capturing dispatch journals through the keyed capture journal). Neither closes a cycle;
+  `Fuaran.Core.OpStream` still references nothing.
+- **Union widening (source).** `InvokeError` gains `PolicyRefused of policy * reason * allowed` and
+  `ApprovalRequired of policy`; `QueryError` gains `QueryPolicyRefused` and `QueryApprovalRequired` — the
+  `Query` prefix because an unqualified case name two unions in one namespace share resolves to
+  whichever was declared last. Appended, so every earlier case keeps its tag; an exhaustive `match`
+  adds the arms. Their wire documents are new (`policyRefused`, `approvalRequired`, the wire class
+  `additive`).
+- **Record widening (source).** `CapabilityRegistry` and `QueryRegistry` gain `Policy:
+  RegistryPolicy<…>` — the gates and observers — so a full-literal construction (`{ Capabilities = m }`)
+  no longer compiles; build with `CapabilityRegistry.empty` and `register`, or copy with `{ r with … }`.
+  A registry carrying a policy has CUSTOM equality and no ordering: two registries are equal when they
+  hold the same entries and the same gates and observers by identity (`RegistryPolicy`'s `Equals`), and
+  a registry is no longer `comparison`. `FunctionRegistry` gains the same field behind its opaque
+  representation, which moves nothing for a consumer.
+- **The policy gate (additive).** `PolicyDecision.rank` / `join` / `meet` / `all` / `any` / `guidance`;
+  `PolicyGate` (a named `Decide` over the resolved declaration and its validated arguments),
+  `PolicyDenial`, and `RegistryPolicy` with `none` / `withGate` / `onDenied` / `combine` / `gates` /
+  `decide` / `decideNamed`. On all three registries: `withGate`, `onDenied` and `decide`. `dispatch`
+  (and `dispatchWithArgs`, `dispatchPage`, `FunctionRegistry.dispatch`) resolve, validate, run the gates'
+  JOIN, and only under `Allow` run the body; a `Deny` is `PolicyRefused` naming the deciding gate, a
+  `NeedsApproval` is `ApprovalRequired`, and either reaches every observer before it returns. With no
+  gate, `dispatch` is what it was. `withGate` only adds; `union` runs both sides' gates; `restrict`,
+  `register`, `unregister` and `replace` carry the policy through. Policy CONTENT stays the domain's.
+- **The write gate (additive).** `WriteGate {Locked; Writable}` in `Fuaran.Core.Ops`, keyed by
+  `IdWitness.ToString` as `Footprint` is, with `allowAll` / `lockOnly` / `allowOnly`, `targetsOf` (the
+  op's footprint, plus the subtree a removal destroys), `decide` (a lock on a node locks its subtree, an
+  allowance allows it; a created node has the ancestors it is created under), `applyGated` (the gate
+  before `Ops.apply`) and `guidance`; `WriteDenial` and `GatedApplyFailure`. One deliberate difference
+  from the hand-written domain gates it generalises: removing a node whose subtree holds a locked node
+  is refused, where a gate that read only the removal's target allowed it.
+- **The guarded AI surface (additive; a new FROZEN witness).** `GuardedSurfaceWitness` EMBEDS the
+  frozen `AiSurfaceWitness` and adds `DryRun` (an effect-free check of an op) and `EffectsOf` (the
+  capability invocations an op makes) — the "compose, never grow" route this file's freeze prescribes,
+  and frozen at birth (`Conformance.frozenWitnessFields`). `Proposals.decideGuarded` joins the domain's
+  `Decide` with the registry's `decide` for every invocation `EffectsOf` names, so an op invoking an
+  unregistered capability is denied naming the registered ones; `submitGuarded` / `approveGuarded`
+  refuse a denial first, then DRY-RUN the whole sequence before the first `Apply`, so an `Apply` that
+  performs effects never runs for a sequence a later op refuses, and an inapplicable sequence is never
+  parked. `Proposals.submit` now combines its decisions with `PolicyDecision.all`, which is the rule it
+  applied by hand.
+- **Invocation-keyed capture (additive).** `KeyedCapture`, `CapturePhase` (`Attempted | Completed |
+  Refused`) and `KeyedCaptureFault`; `OpStream.beginEffectKeyed` / `settleEffectKeyed` /
+  `captureEffectKeyed` (each with a `…With` form), `replayEffectKeyed`, `firstKeyedCaptureBreak(With)`
+  and `verifyKeyedCaptures(With)`. An invocation is journalled under its invocation key, attempted before
+  its body runs and settled when it answers — so an asynchronous body settles later, and a failure
+  replays as the same failure — and replay finds it by key, refusing `NoCapture` / `Exhausted` rather
+  than consulting the live source. The effect answers `Result<'v, string> option`, which is
+  `Deferred.settled`'s shape: `Fuaran.Core.OpStream` sits below `Fuaran.Core.Function` and cannot name
+  `Deferred`. The seams' capturing variants — `CapabilityRegistry.dispatchCaptured` /
+  `dispatchReplayed` and `QueryRegistry.dispatchCaptured` / `dispatchPageCaptured` /
+  `dispatchReplayed` — key by `Capability.invocationKey` / `Query.invocationKeyPage`, journal nothing for
+  an invocation refused before its body, and replay a `Network` capability exactly. The positional
+  `captureEffect` and its journal are unchanged.
+- **Laws and proofs.** Four families: `policyLaws` (the lattice; the gate after validation and before
+  the body on all three registries; every refusal reaching every observer once; a gate only tightening),
+  `policyLawsAt` (the no-unapproved-write law over the DOMAIN'S own policy and effects accessor; the dry
+  run agreeing with `Apply`; an inapplicable sequence never applied or parked), `writeGateLaws` (the
+  targets cover what an applied op writes, save a relocation's source parent; the gate before the
+  reducer; a lock covering its subtree; a wider lock never admitting more) and `keyedCaptureLaws`.
+  `proofs/Capability.fst` gains `gate_before_body` and `policy_join_monotone`; `proofs/Chain.fst`
+  section 7d instantiates section 6 at the keyed payload (`intact_keyed_verify`) and proves
+  `missing_key_no_capture`, `replay_skips_other_keys` and `replay_answers_head` — four `proofs.json` rows.
+  Both sections are `noextract_to "FSharp"`; the oracle is unchanged.
+
 ### The tree model gains a frame theorem, and the write gate's cover and lock are proved over it (Phase 362, DECISIONS.md D119) — ADDITIVE: no public surface moves, no emitted byte moves
 
 **What changed.** `proofs/TreeFrame.fst` is new: a checked module over `TreeOps.fst`'s tree, `apply` and
@@ -3028,87 +3109,6 @@ Three lists keep their old names over cases that now live in other files — the
 the topic files share, and the cases that exercise the facade's `certify` rather than one family. Moving
 the domains into topic files would have rewritten every file that names them, which is a different change
 from this one. No assertion changed.
-
-### A policy gate on the invocable registries, an id-scoped write gate, a guarded AI surface, and invocation-keyed capture (Phase 318, DECISIONS.md D118) — BREAKING (binary): `PolicyDecision` moves from `Fuaran.Core.AiSurface` to `Fuaran.Core.Function`, which the surface gate classes `removal` for `Fuaran.Core.AiSurface` (source unchanged); BREAKING (source): `InvokeError` and `QueryError` widened, `CapabilityRegistry` and `QueryRegistry` gain a field; the rest additive; the wire `additive`
-
-The shard declared this phase additive. It is not, in three named places, and each is stated here so a
-consumer reads the edit it makes rather than a class that hides it.
-
-**What moved, for a consumer.**
-
-- **`PolicyDecision` is declared in `Fuaran.Core.Function` (binary).** The type, its cases and its
-  `deny` / `denyWith` constructors moved, unchanged, from `Fuaran.Core.AiSurface` to
-  `Fuaran.Core.Function`, beside the registries' gate. Same namespace, same names: a source that names
-  it compiles unchanged, because `Fuaran.Core.AiSurface` now references `Fuaran.Core.Function` and so
-  brings it in. A binary compiled against `0.34.0`'s `Fuaran.Core.AiSurface` names the type in the old
-  assembly and must be rebuilt — F# emits no type forwarder, so the move cannot be made binary
-  compatible, and the surface gate reports `Fuaran.Core.AiSurface` as `removal` for exactly that reason.
-- **Two package edges (additive for a package consumer).** `Fuaran.Core.AiSurface` depends on
-  `Fuaran.Core.Function`; `Fuaran.Core.Function` depends on `Fuaran.Core.OpStream` (the seams'
-  capturing dispatch journals through the keyed capture journal). Neither closes a cycle;
-  `Fuaran.Core.OpStream` still references nothing.
-- **Union widening (source).** `InvokeError` gains `PolicyRefused of policy * reason * allowed` and
-  `ApprovalRequired of policy`; `QueryError` gains `QueryPolicyRefused` and `QueryApprovalRequired` — the
-  `Query` prefix because an unqualified case name two unions in one namespace share resolves to
-  whichever was declared last. Appended, so every earlier case keeps its tag; an exhaustive `match`
-  adds the arms. Their wire documents are new (`policyRefused`, `approvalRequired`, the wire class
-  `additive`).
-- **Record widening (source).** `CapabilityRegistry` and `QueryRegistry` gain `Policy:
-  RegistryPolicy<…>` — the gates and observers — so a full-literal construction (`{ Capabilities = m }`)
-  no longer compiles; build with `CapabilityRegistry.empty` and `register`, or copy with `{ r with … }`.
-  A registry carrying a policy has CUSTOM equality and no ordering: two registries are equal when they
-  hold the same entries and the same gates and observers by identity (`RegistryPolicy`'s `Equals`), and
-  a registry is no longer `comparison`. `FunctionRegistry` gains the same field behind its opaque
-  representation, which moves nothing for a consumer.
-- **The policy gate (additive).** `PolicyDecision.rank` / `join` / `meet` / `all` / `any` / `guidance`;
-  `PolicyGate` (a named `Decide` over the resolved declaration and its validated arguments),
-  `PolicyDenial`, and `RegistryPolicy` with `none` / `withGate` / `onDenied` / `combine` / `gates` /
-  `decide` / `decideNamed`. On all three registries: `withGate`, `onDenied` and `decide`. `dispatch`
-  (and `dispatchWithArgs`, `dispatchPage`, `FunctionRegistry.dispatch`) resolve, validate, run the gates'
-  JOIN, and only under `Allow` run the body; a `Deny` is `PolicyRefused` naming the deciding gate, a
-  `NeedsApproval` is `ApprovalRequired`, and either reaches every observer before it returns. With no
-  gate, `dispatch` is what it was. `withGate` only adds; `union` runs both sides' gates; `restrict`,
-  `register`, `unregister` and `replace` carry the policy through. Policy CONTENT stays the domain's.
-- **The write gate (additive).** `WriteGate {Locked; Writable}` in `Fuaran.Core.Ops`, keyed by
-  `IdWitness.ToString` as `Footprint` is, with `allowAll` / `lockOnly` / `allowOnly`, `targetsOf` (the
-  op's footprint, plus the subtree a removal destroys), `decide` (a lock on a node locks its subtree, an
-  allowance allows it; a created node has the ancestors it is created under), `applyGated` (the gate
-  before `Ops.apply`) and `guidance`; `WriteDenial` and `GatedApplyFailure`. One deliberate difference
-  from the hand-written domain gates it generalises: removing a node whose subtree holds a locked node
-  is refused, where a gate that read only the removal's target allowed it.
-- **The guarded AI surface (additive; a new FROZEN witness).** `GuardedSurfaceWitness` EMBEDS the
-  frozen `AiSurfaceWitness` and adds `DryRun` (an effect-free check of an op) and `EffectsOf` (the
-  capability invocations an op makes) — the "compose, never grow" route this file's freeze prescribes,
-  and frozen at birth (`Conformance.frozenWitnessFields`). `Proposals.decideGuarded` joins the domain's
-  `Decide` with the registry's `decide` for every invocation `EffectsOf` names, so an op invoking an
-  unregistered capability is denied naming the registered ones; `submitGuarded` / `approveGuarded`
-  refuse a denial first, then DRY-RUN the whole sequence before the first `Apply`, so an `Apply` that
-  performs effects never runs for a sequence a later op refuses, and an inapplicable sequence is never
-  parked. `Proposals.submit` now combines its decisions with `PolicyDecision.all`, which is the rule it
-  applied by hand.
-- **Invocation-keyed capture (additive).** `KeyedCapture`, `CapturePhase` (`Attempted | Completed |
-  Refused`) and `KeyedCaptureFault`; `OpStream.beginEffectKeyed` / `settleEffectKeyed` /
-  `captureEffectKeyed` (each with a `…With` form), `replayEffectKeyed`, `firstKeyedCaptureBreak(With)`
-  and `verifyKeyedCaptures(With)`. An invocation is journalled under its invocation key, attempted before
-  its body runs and settled when it answers — so an asynchronous body settles later, and a failure
-  replays as the same failure — and replay finds it by key, refusing `NoCapture` / `Exhausted` rather
-  than consulting the live source. The effect answers `Result<'v, string> option`, which is
-  `Deferred.settled`'s shape: `Fuaran.Core.OpStream` sits below `Fuaran.Core.Function` and cannot name
-  `Deferred`. The seams' capturing variants — `CapabilityRegistry.dispatchCaptured` /
-  `dispatchReplayed` and `QueryRegistry.dispatchCaptured` / `dispatchPageCaptured` /
-  `dispatchReplayed` — key by `Capability.invocationKey` / `Query.invocationKeyPage`, journal nothing for
-  an invocation refused before its body, and replay a `Network` capability exactly. The positional
-  `captureEffect` and its journal are unchanged.
-- **Laws and proofs.** Four families: `policyLaws` (the lattice; the gate after validation and before
-  the body on all three registries; every refusal reaching every observer once; a gate only tightening),
-  `policyLawsAt` (the no-unapproved-write law over the DOMAIN'S own policy and effects accessor; the dry
-  run agreeing with `Apply`; an inapplicable sequence never applied or parked), `writeGateLaws` (the
-  targets cover what an applied op writes, save a relocation's source parent; the gate before the
-  reducer; a lock covering its subtree; a wider lock never admitting more) and `keyedCaptureLaws`.
-  `proofs/Capability.fst` gains `gate_before_body` and `policy_join_monotone`; `proofs/Chain.fst`
-  section 7d instantiates section 6 at the keyed payload (`intact_keyed_verify`) and proves
-  `missing_key_no_capture`, `replay_skips_other_keys` and `replay_answers_head` — four `proofs.json` rows.
-  Both sections are `noextract_to "FSharp"`; the oracle is unchanged.
 
 ### The F\* target encodes the wire shape it declares, the classifier's rules are one table with `support.json` as an input, and `Codegen.fs` splits behind the `Gen` facade with one type emitter (Phase 293) — BREAKING (source) in `Diff`, inside the slot's standing class; `Gen`'s baseline moves by zero lines; `Gen.fsharpTypes`' OUTPUT changes
 
