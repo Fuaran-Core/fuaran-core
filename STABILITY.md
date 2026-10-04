@@ -38,6 +38,17 @@ and a one-line reason. Removing or renaming an operation reds the stale directio
 The line is a record of what stands behind the operation, not a gate on its design; see
 `proofs/README.md`, "Clause 4".
 
+**A change to rendered bytes names the content-addressed consumers it moves (Phase 360).** A
+content-addressed store keys its ids on bytes this package renders — an op encoder over `Json.render`,
+the actor inside a chain payload or a DAG node id, the tags inside a capture — so a change to those
+bytes is a change to every id such a store holds, whatever class the managed surface reports. The
+entry that records such a change therefore lists, by name, every path that hashes the moved bytes
+(the linear chain, `Dag.nodeId`, the capture chain, `ContentPack.signatureFingerprint`, ...) and, for
+each, the route a store takes across it; and the change ships as a NEW `EncodingProfile` case with
+`EncodingProfile.current` moved to it, never as an edit to what an existing case renders. "No known
+store holds one" is not a bound this document accepts: Phase 287 wrote it, and a downstream store
+whose payload strings carried a newline could not verify its ids on the next release.
+
 ## Public-surface baselines — the class of a move is a gate output, not an argument (Phase 183)
 
 Every packable package carries a committed baseline of its public contract at
@@ -2749,6 +2760,66 @@ make the edits named above.
 `FunctionRegistry` and the two widened unions, riding the `0.35.0` slot, whose class (`breaking (source)`)
 they do not exceed: no number moves. The rest is **additive**.
 
+### Content-addressed stores pin a frozen canonical encoding: `EncodingProfile`, the `0.30.0` rendering as `V1`, and a two-witness rehash (Phase 360, DECISIONS.md, the Phase 360 entry) — ADDITIVE: no default moves, no existing signature changes, no emitted byte moves
+
+**What moved, for a consumer.**
+
+- **New: the profile, and a renderer per profile (`Fuaran.Core.Wire`).** `EncodingProfile` (`V1` |
+  `V2`, closed) with `EncodingProfile.current` (`V2`), `all`, `name` (`v1` / `v2`, the string a store
+  declares) and `tryParse`; `Json.renderWith` and `Json.escapeWith`. `V1` is `0.30.0`'s `Json.render`
+  byte for byte, through a FROZEN copy of that release's escape (`\n`, `\r`, `\t` short), so no later
+  change to the live path moves it; `V2` is `Json.render`. The two differ only in those three
+  characters — number layout, member order and whitespace have not moved since `0.30.0`, measured.
+- **New: the same profile for the pre-images Core builds itself (`Fuaran.Core.OpStream`,
+  `Fuaran.Core.OpStream.Dag`).** `OpStream.EncodingProfile` (the same two cases; DECISIONS.md D2 keeps
+  `OpStream` free of a `Wire` reference, so it is a second type with the same names, held equal by the
+  vectors), `currentProfile`, `profiles`, `profileName`, `tryProfile`, `encodeActorWith` and
+  `configFor` (`legacyEscapeConfig` for `V1`, `canonicalConfig` for `V2`); `Dag.nodeIdWith`,
+  `Dag.firstBreakWith`, `Dag.verifyDagWith`; `OpStream.firstCaptureBreakEncoding`.
+- **New: the two-witness rehash.** `OpStream.rehashEncoding fromCfg fromW toCfg toW` verifies under the
+  OLD config and encoder and re-mints under the NEW, with the old-to-new hash map;
+  `Dag.rehashEncoding fromProfile fromW toProfile toW` the same for a DAG (a lane store carries its lanes
+  across through the id map); `OpStream.rehashCapturesEncoding` for a capture log. Each refuses a source
+  that does not verify under the profile it names, with the first break. Phase 311's `rehashWith`
+  re-mints under a new HASH with one encoder; these re-mint under a new ENCODING with one hash.
+- **New in the kit.** `EncodingProfileVectors` (a fixed vector family, rostered as
+  `EncodingProfileVectors.laws`; committed as `conformance/encoding/encoding-profiles.json`, written by
+  `--emit-encoding`) and `StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`, the family a
+  content-addressed consumer runs against ITS OWN stored corpus: the declaration names a known profile,
+  every stored id recomputes under it, and the two-witness migration to the current profile and back
+  reproduces every id.
+- **Refactor, no byte moved.** `Json`'s iterative writer is generic over the string append (the live
+  path is unchanged); `Dag.rehashWith` and the new rehash share one private re-mint; `Dag.firstBreak`
+  and `firstBreakWith` share one walk.
+
+**Which content-addressed paths the `0.33.0` escaping change moved, and the route across each.** This is
+the list Phase 287's entry should have carried (the versioning policy above now requires it):
+
+| Path | What it hashes | Moved at `0.33.0` for | Route |
+|---|---|---|---|
+| Linear chain (`OpStream.chainHashOf`) | `{seq,actor,op}`: `Actor.encode` + the witness's `Encode` | an actor or an op string with LF/CR/TAB | pin: `configFor V1` + an encoder over `renderWith V1`; migrate: `rehashEncoding` |
+| DAG node id (`Dag.nodeId`) | sorted parents, `Actor.encode` + the witness's `Encode` | the same | pin: `nodeIdWith V1` / `verifyDagWith V1`; migrate: `Dag.rehashEncoding` |
+| Capture chain (`captureEffectWith`) | `{capture,seq,eff,det,value}`, the tags through the escaper | an effect or determinism tag with LF/CR/TAB | pin: `firstCaptureBreakEncoding V1`; migrate: `rehashCapturesEncoding` |
+| `ContentPack.signatureFingerprint` | `Json.render` of `Function.toSchema` | a signature string with LF/CR/TAB | recompute an old fingerprint as `Json.renderWith V1 (Function.toSchema sg) |> Hash.fnv1a`, where `toSchema` itself has not moved (Phases 295 and 307 moved it for some signatures, for other reasons) ||> Hash.fnv1a` |
+
+Not moved, and therefore not profiled: `Canon.render` (it already spelled every control character
+`\u00xx` at `0.30.0`); every `Hash.canonicalFields` key on the roster, including Phase 316's
+`Query.invocationKeyPage` (raw fields and `Canon.canonicalFloat`, no renderer); snapshot and checkpoint
+seals (the consumer's `stateEncode` only). Born after `0.33.0`, so with no `V1` history:
+`OpStream.attestationSubject` (`0.34.0`) and Phase 318's keyed capture journal. Phase 290's
+`Hash.utf8Bytes` change (a lone surrogate hashed as U+FFFD under SHA-256) is a change to a HASH's
+input, not to a rendering; a store crossing it passes its own `HashFn`, the axis `rehashWith` serves.
+
+**What adopting it costs.** Nothing for a consumer that changes no call: every default is the one it
+was, and `V2` is the current rendering. A store that wants its ids to survive later releases declares a
+profile and renders through `Json.renderWith`; a store written before `0.33.0` either pins `V1` or
+migrates once with the two-witness rehash. A rewrite of the live renderer for speed keeps the `V2`
+column of the committed vectors; a deliberate byte change adds a case and moves `current`.
+
+**Class: additive** — every surface addition is new (two closed unions, new functions, two new kit
+modules); no existing signature, default or emitted byte changes. It rides the `0.35.0` slot: no number
+moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the
@@ -5078,9 +5149,19 @@ module). Reading is unchanged: `Json.parse`, `OpStream.fromJsonl` and `Dag.fromJ
   needs the domain's OLD encoder for the verify leg and its new one for the rehash leg; no such
   two-witness rehash ships here, because no known store needs it. That is a stated boundary of this
   entry, recorded in the decision beside it, not an oversight.
+  **Corrected by Phase 360 (`0.35.0`): the bound was wrong.** A downstream content-addressed store
+  whose op payload strings carried a newline could not verify its stored ids on this release; the
+  suite now reproduces that against stores the published `0.30.0` binaries wrote. The route ships:
+  pin `EncodingProfile.V1` (`Json.renderWith`, `OpStream.configFor`), or migrate with
+  `OpStream.rehashEncoding` — see the Phase 360 entry under `0.35.0`.
 - **A DAG node whose actor carries a control character** has a different content id now, and a
   content-addressed DAG has no rehash: its ids are its parent links. No known store holds one; a
   host that does re-appends the history under the new ids.
+  **Corrected by Phase 360 (`0.35.0`):** the same counter-example holds for a DAG, through its op
+  encoding as well as its actors. `Dag.nodeIdWith` / `Dag.verifyDagWith` read such a DAG under `V1`,
+  and `Dag.rehashEncoding` re-mints it under `V2` with the id map (Phase 311's `rehashWith` having
+  since given a DAG a rehash on the hash axis). The capture chain, which this entry did not name,
+  moved too: `OpStream.firstCaptureBreakEncoding` / `rehashCapturesEncoding`.
 - **The shared chain corpus** (`chain/chain-corpus.json`, certified by the UI host and the
   TypeScript twin) gains a record with a control-character actor when its resident emitter — which
   lives in the UI host and folds THIS package's `canonicalConfig.Payload` at the version it pins —

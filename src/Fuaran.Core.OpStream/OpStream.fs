@@ -58,6 +58,62 @@ module OpStream =
     /// chains a record at `Seq` 0.
     let empty: OpRecord<'Op> list = OpStreamChain.empty
 
+    // ---- encoding profiles (Phase 360) ----
+    // A content-addressed store names the encoding its ids were computed under and keeps computing
+    // them that way while the spine's own rendering moves on. `Wire.EncodingProfile` profiles the
+    // renderer a domain's op encoder hashes through; this type profiles the strings this package
+    // spells inside the pre-images it builds itself (the actor in the chain payload and the DAG node
+    // id, the capture's effect and determinism tags). DECISIONS.md D2 keeps this package free of a
+    // `Wire` reference, so the two are separate types with the same cases and the same names.
+
+    /// WHICH spelling of strings this package's own pre-images use (Phase 360) — the mirror of
+    /// `Fuaran.Core.EncodingProfile` in `Fuaran.Core.Wire`, with the same cases and the same
+    /// canonical names (`profileName`), held equal by `EncodingProfileVectors`.
+    [<RequireQualifiedAccess>]
+    type EncodingProfile =
+        /// The spelling of `0.30.0` through `0.32.0`: `\n`, `\r` and `\t` as the short escapes inside
+        /// the actor's strings and the capture's tags. The payloads `legacyEscapeConfig` builds.
+        | V1
+        /// The spelling since `0.33.0` (Phase 287): every control character as lower-case `\u00xx`.
+        /// The payloads `canonicalConfig` builds.
+        | V2
+
+    /// The profile this package's defaults build under — `V2` since `0.33.0`.
+    let currentProfile: EncodingProfile = EncodingProfile.V2
+
+    /// Every profile, oldest first.
+    let profiles: EncodingProfile list = [ EncodingProfile.V1; EncodingProfile.V2 ]
+
+    /// The canonical name a store declares its profile by — `v1` or `v2`, the strings
+    /// `EncodingProfile.name` spells in `Fuaran.Core.Wire`.
+    let profileName (profile: EncodingProfile) : string =
+        match profile with
+        | EncodingProfile.V1 -> "v1"
+        | EncodingProfile.V2 -> "v2"
+
+    /// The profile a canonical name declares, or `None` for any other string (case-sensitive).
+    let tryProfile (name: string) : EncodingProfile option =
+        match name with
+        | "v1" -> Some EncodingProfile.V1
+        | "v2" -> Some EncodingProfile.V2
+        | _ -> None
+
+    /// The actor's pre-image under a profile: `Actor.encode` for `V2`, and for `V1` the same object
+    /// with `\n`, `\r` and `\t` spelled short — the bytes `0.30.0` folded into every chain hash and
+    /// DAG node id.
+    let encodeActorWith (profile: EncodingProfile) (actor: Actor) : string =
+        match profile with
+        | EncodingProfile.V1 -> Actor.encodeWith JsonString.quoteLegacy actor
+        | EncodingProfile.V2 -> Actor.encode actor
+
+    /// The chain configuration a profile names: `legacyEscapeConfig` for `V1`, `canonicalConfig` for
+    /// `V2` — the `{seq,actor,op}` envelope over `encodeActorWith profile`, with the `""` genesis. The
+    /// op's own bytes are the witness's `Encode`, which a store pins with `Json.renderWith`.
+    let configFor (profile: EncodingProfile) : StreamConfig =
+        match profile with
+        | EncodingProfile.V1 -> legacyEscapeConfig
+        | EncodingProfile.V2 -> canonicalConfig
+
     /// THE hash of one chained record (Phase 315): `hashFn prev (cfg.Payload seq actor encodedOp)`,
     /// the value every `append` stores as `Hash` and every verifier recomputes. Public for an adapter
     /// that keeps its own record type, or appends without the domain state (`appendChainOnly`), and
@@ -209,6 +265,41 @@ module OpStream =
         (records: OpRecord<'Op> list)
         : Result<OpRecord<'Op> list, string> =
         OpStreamChain.rehash fromCfg toCfg hashFn w records
+
+    /// The TWO-WITNESS rehash (Phase 360): verify the source under `fromCfg` with `fromW`'s encoder,
+    /// then re-derive every `PrevHash` / `Hash` under `toCfg` with `toW`'s. `tryRehash` re-encodes
+    /// through ONE witness, so it can move the payload envelope and the actor's spelling but never the
+    /// op's own bytes; a store whose op encoder rendered through `Json.render` before `0.33.0` needs
+    /// its OLD encoder to verify and its NEW one to re-mint — `fromW` encoding with `Json.renderWith
+    /// EncodingProfile.V1` beside `configFor EncodingProfile.V1`, `toW` with `V2` beside `configFor
+    /// EncodingProfile.V2`. Only the witnesses' `Encode` is read; the ops, actors and sequence numbers
+    /// are the source of truth and only the hashes change.
+    ///
+    /// `Error` carries the first `ChainBreak` when the source does not verify under the config and
+    /// witness it names — a history that does not verify is not re-blessed. `Ok(records', ids)`, with
+    /// `ids` mapping every old record hash to its new one (for heads, snapshots and attestations a
+    /// host keys by hash). The result verifies under `toCfg` and `toW`, and the rehash back with the
+    /// two sides exchanged is the source again.
+    let rehashEncoding
+        (fromCfg: StreamConfig)
+        (fromW: StreamWitness<'Op, 'State, 'Rej>)
+        (toCfg: StreamConfig)
+        (toW: StreamWitness<'Op, 'State, 'Rej>)
+        (hashFn: HashFn)
+        (records: OpRecord<'Op> list)
+        : Result<OpRecord<'Op> list * Map<string, string>, ChainBreak> =
+        match OpStreamChain.firstChainBreakWith fromCfg hashFn fromW records with
+        | Some b -> Error b
+        | None ->
+            let _, revRecords, ids =
+                records
+                |> List.fold
+                    (fun (prev: string, acc: OpRecord<'Op> list, ids: Map<string, string>) (r: OpRecord<'Op>) ->
+                        let h = hashFn prev (toCfg.Payload r.Seq r.Actor (toW.Encode r.Op))
+                        h, { r with PrevHash = prev; Hash = h } :: acc, Map.add r.Hash h ids)
+                    (toCfg.Genesis, [], Map.empty)
+
+            Ok(List.rev revRecords, ids)
 
     /// Re-apply every op over a base state. Replay is a fold of `Apply` — op-stream
     /// replay is a special case of re-derivation.
@@ -980,6 +1071,85 @@ module OpStream =
     /// is identical and the chain still `verifyCaptures`. Uses the same self-contained, Fable-clean
     /// line scanner as `fromJsonl`; a malformed line is a named `Error`, never an exception.
     let captureFromJsonl (text: string) : Result<EffectCapture list, string> = OpStreamCapture.captureFromJsonl text
+
+    /// The capture pre-image `{capture, seq, eff, det, value}` with the two tags spelled by `quote`
+    /// (Phase 360). A COPY of the payload `captureEffectWith` hashes (Capture.fs), parameterised by the
+    /// spelling: `V1` reads it with the frozen pre-Phase-287 quoter, and `V2` verification goes through
+    /// the live walker rather than through this copy, so `rehashCapturesEncoding`'s laws — its result
+    /// verifies under `firstCaptureBreakWith` — are what hold the copy to the original.
+    let private capturePayloadWith
+        (quote: string -> string)
+        (seq: int)
+        (eff: string)
+        (det: string)
+        (value: string)
+        : string =
+        "{\"capture\":true,\"seq\":"
+        + string seq
+        + ",\"eff\":"
+        + quote eff
+        + ",\"det\":"
+        + quote det
+        + ",\"value\":"
+        + value
+        + "}"
+
+    let private captureQuote (profile: EncodingProfile) : string -> string =
+        match profile with
+        | EncodingProfile.V1 -> JsonString.quoteLegacy
+        | EncodingProfile.V2 -> JsonString.quote
+
+    /// `firstCaptureBreakWith` under a named profile (Phase 360): the first fault in a capture log
+    /// whose hashes were computed with the effect and determinism tags spelled as `profile` spells
+    /// them. `V2` is `firstCaptureBreakWith`; `V1` reads a log `0.30.0` wrote, whose tags carried `\n`,
+    /// `\r` or `\t` short — such a log stopped verifying at `0.33.0`, which no config reached, because
+    /// the capture payload is not the chain config's. The captured `Value` is hashed raw under every
+    /// profile, so its own spelling is whatever the writer's encoder produced.
+    let firstCaptureBreakEncoding
+        (profile: EncodingProfile)
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (captures: EffectCapture list)
+        : ChainBreak option =
+        match profile with
+        | EncodingProfile.V2 -> OpStreamCapture.firstCaptureBreakWith cfg hashFn captures
+        | EncodingProfile.V1 ->
+            OpStreamChain.walkChain
+                hashFn
+                cfg.Genesis
+                0
+                (fun (c: EffectCapture) -> c.Seq)
+                (fun c -> c.PrevHash)
+                (fun c -> c.Hash)
+                (fun c -> capturePayloadWith (captureQuote profile) c.Seq c.Eff c.Determinism c.Value)
+                captures
+
+    /// Re-mint a capture log from one profile to another (Phase 360): verify it under `fromProfile`
+    /// (`firstCaptureBreakEncoding`; a break is `Error`), then re-derive every `PrevHash` / `Hash` with
+    /// the tags spelled as `toProfile` spells them, from `cfg.Genesis`. `Ok(captures', ids)`, with `ids`
+    /// mapping every old capture hash to its new one. The values are carried byte for byte; the result
+    /// verifies under `toProfile`.
+    let rehashCapturesEncoding
+        (fromProfile: EncodingProfile)
+        (toProfile: EncodingProfile)
+        (cfg: StreamConfig)
+        (hashFn: HashFn)
+        (captures: EffectCapture list)
+        : Result<EffectCapture list * Map<string, string>, ChainBreak> =
+        match firstCaptureBreakEncoding fromProfile cfg hashFn captures with
+        | Some b -> Error b
+        | None ->
+            let quote = captureQuote toProfile
+
+            let _, revCaptures, ids =
+                captures
+                |> List.fold
+                    (fun (prev: string, acc: EffectCapture list, ids: Map<string, string>) (c: EffectCapture) ->
+                        let h = hashFn prev (capturePayloadWith quote c.Seq c.Eff c.Determinism c.Value)
+                        h, { c with PrevHash = prev; Hash = h } :: acc, Map.add c.Hash h ids)
+                    (cfg.Genesis, [], Map.empty)
+
+            Ok(List.rev revCaptures, ids)
 
     // ---- the keyed capture journal (Phase 318) (bodies in Capture.fs) ----
     //

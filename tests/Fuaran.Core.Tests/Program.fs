@@ -87,6 +87,14 @@ let main argv =
         StringEscapeTests.EscapeCorpus.write dir
         printfn "Wrote %s" (StringEscapeTests.EscapeCorpus.path dir)
         0
+    // Phase 360 — write the `encoding/` file (the encoding-profile table: what each profile renders and
+    // folds, the V1 column measured against the published 0.30.0 binaries); same target rule:
+    //   dotnet run --project tests/Fuaran.Core.Tests -- --emit-encoding [<dir>]
+    | "--emit-encoding" :: rest ->
+        let dir = emitTarget rest
+        EncodingProfileTests.EncodingCorpus.write dir
+        printfn "Wrote %s" (EncodingProfileTests.EncodingCorpus.path dir)
+        0
     // Phase 184 — write the law-family roster's two generated artefacts (the human-readable
     // `docs/conformance-families.md` and the machine-readable `docs/conformance-families.json`
     // an offline projection reads):

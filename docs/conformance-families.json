@@ -1104,6 +1104,19 @@
       "refusal": "drawn"
     },
     {
+      "id": "EncodingProfileVectors.laws",
+      "module": "EncodingProfileVectors",
+      "entry": "laws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "48",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
       "id": "FoldConfluence.laneFoldLaws",
       "module": "FoldConfluence",
       "entry": "laneFoldLaws",
@@ -1128,6 +1141,45 @@
       "cases": "360",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
+    },
+    {
+      "id": "StoredIdentity.captureLaws",
+      "module": "StoredIdentity",
+      "entry": "captureLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "6",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
+      "id": "StoredIdentity.dagLaws",
+      "module": "StoredIdentity",
+      "entry": "dagLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness"],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "9",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
+      "id": "StoredIdentity.linearLaws",
+      "module": "StoredIdentity",
+      "entry": "linearLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": ["StreamWitness"],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "9",
+      "adequacy": "unconditional",
+      "refusal": "none"
     },
     {
       "id": "StringEscapeVectors.laws",

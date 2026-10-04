@@ -1,5 +1,68 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-04 — D119: a content-addressed store names its encoding; the profile is closed and versioned, `V1` is `0.30.0`'s rendering measured against the published binaries, the profile is carried twice because D2 forbids once, and the migration is a two-witness rehash
+
+**Recorded by Phase 360. `Fuaran.Core.Wire`, `Fuaran.Core.OpStream`, `Fuaran.Core.OpStream.Dag` and the
+kit; additive (STABILITY.md, `0.35.0`); no default, signature or emitted byte moves.**
+
+*The finding, reproduced before anything was built.* Phase 287 (D76) moved the spelling of line feed,
+carriage return and tab in every string Core renders, and bounded the consequence: "no known store needs
+it", "no known store holds one". A downstream content-addressed store whose payload strings carried a
+newline could not verify its stored ids on the next release. The suite now carries the counter-example
+as its regression: a linear store, a four-node DAG and a capture log WRITTEN BY the published `0.30.0`
+binaries (a probe drove the `0.30.0` packages with an op encoder over `Json.render`), each of which fails
+to verify under the current renderer — run red first, on all three — and verifies under `V1`.
+
+*The premises, checked against the tree the phase was cut from.* (1) Every byte change to a rendering
+between `0.30.0` and now is Phase 287's: `Json.render`, `Actor.encode`, `Dag.toJsonl` and the capture
+payload all moved for exactly those three characters. Phase 306 added refusals of ill-formed UTF-16 at the
+guarded renderers and moved no byte; the float layout is byte-identical to `0.30.0`'s (Phase 253 widened
+only the parser); member order and whitespace never moved; `Canon.render` already spelled every control
+character `\u00xx` and did not move. Phase 290's `Hash.utf8Bytes` change is to a hash's INPUT, not to a
+rendering, and stays on the hash axis. (2) The paths that hash moved bytes are the linear chain, the DAG
+node id, the capture chain — which D76 did not name and no config reached — and
+`ContentPack.signatureFingerprint`. No `Hash.canonicalFields` key on the roster hashes a renderer
+(Phase 316's `invocationKeyPage` included); `attestationSubject` and Phase 318's keyed capture were born
+after `0.33.0` and have no `V1` history.
+
+*The ruling.* A store names the encoding its ids were computed under, by a canonical string (`v1`, `v2`),
+and keeps computing them that way. The profile is CLOSED and VERSIONED: a later byte change to `render`
+adds a case and moves `current`, and never edits what an existing case renders. `V1` carries its own
+FROZEN copy of `0.30.0`'s escape rather than calling the live one, because two phases queued behind this
+one rewrite the live escape and parse for speed. `V2` IS the live path, held to its bytes by the
+committed `V2` column rather than by a second copy: a copy of the current rule would be a second place
+for the same rule to live, and the vectors already catch a drift. Neither column is derived from this
+package's code: the `V1` column was MEASURED — the published `0.30.0` binaries rendered every value and
+pre-image of the table, the new `V1` path matched them on all 55 probe outputs and the table on all 47 of
+its rows, and the same probe pointed at `V2` reported the six rows the profiles differ on, so the probe
+can fail.
+
+*One type, or two? D2 again, as in D76.* The shard asked for one `EncodingProfile` on the spine, taken by
+the renderer and by the hashing entry points. `Wire` owns the renderer, `OpStream` and `Dag` own the
+pre-images, and D2 gives `OpStream` no reference to `Wire`, so no single type can be named by both.
+Adding the edge was declined in D76 for reasons that still hold. So the profile is carried twice —
+`EncodingProfile` in `Wire`, `OpStream.EncodingProfile` beside the chain — with the same cases and the
+same canonical names, and `EncodingProfileVectors` holds them equal: the names, the current profile, and
+every byte each folds. One declaration string names both halves of a store's encoding.
+
+*The migration shape.* D76 said the day a store needed it, the shape to build was a two-witness rehash
+and not a third config. It is that: `OpStream.rehashEncoding` takes a config and a witness for each side
+(only `Encode` is read), `Dag.rehashEncoding` a profile and a witness for each side, and
+`OpStream.rehashCapturesEncoding` a profile for each side, each refusing a source that does not verify
+under what it names and returning the old-to-new id map. The DAG's re-mint is shared with Phase 311's
+`rehashWith`, which moves the hash with one encoder; the two axes are separate verbs, composable by
+running both. A lane-store variant was written and withdrawn: the id map carries the lanes, and a verb
+whose only content is that remap is surface without a law of its own.
+
+*The family a consumer runs on its own data.* `StoredIdentity` is the one family in the kit whose
+sample is the CONSUMER'S persisted store rather than one it draws or builds: the declaration names a
+known profile, every stored id recomputes under it, and migrating to the current profile and back
+reproduces every id. A store that runs it in its gate meets the next rendering change at the raise,
+rather than as a chain break on its live data.
+
+*The rule this adds.* STABILITY.md's versioning policy now requires a change to rendered bytes to name
+the content-addressed paths it moves and the route across each, and to ship as a new profile case.
+
 ## 2026-10-03 — D118: the gate's SHAPE is Core's and its CONTENT is the domain's; a gate only tightens; the write gate's targets are the footprint's; a capture is keyed by what was invoked, in two phases; three premises were sharper than written
 
 **Context.** Being registered was being permitted: a registry refused only an id it did not hold, the one

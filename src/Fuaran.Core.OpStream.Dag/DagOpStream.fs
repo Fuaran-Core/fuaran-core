@@ -258,7 +258,11 @@ module Dag =
     /// content-address convergence that is the DAG's whole point. The stored `Parents` list keeps
     /// author order (the head is the primary replay spine); only the hash pre-image is sorted —
     /// exactly the invariant `firstBreak`/`verifyDag` re-derive through this one function.
-    let private nodeHash
+    ///
+    /// `nodeHashAs` is the same pre-image with the actor spelled by `actorText` (Phase 360), so the
+    /// profiled forms (`nodeIdWith`, `firstBreakWith`, `rehashEncoding`) share this one definition.
+    let private nodeHashAs
+        (actorText: Actor -> string)
         (hashFn: HashFn)
         (encode: 'Op -> string)
         (parents: string list)
@@ -268,7 +272,16 @@ module Dag =
         let sorted =
             parents |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
 
-        hashFn (String.concat "," sorted) (Actor.encode actor + "|" + encode op)
+        hashFn (String.concat "," sorted) (actorText actor + "|" + encode op)
+
+    let private nodeHash
+        (hashFn: HashFn)
+        (encode: 'Op -> string)
+        (parents: string list)
+        (actor: Actor)
+        (op: 'Op)
+        : string =
+        nodeHashAs Actor.encode hashFn encode parents actor op
 
     /// The heads — nodes that are no node's parent.
     let heads (dag: T<'Op>) : string list =
@@ -317,16 +330,14 @@ module Dag =
     /// Add the node, refusing an id the DAG already holds for DIFFERENT content (Phase 296). The
     /// same node added twice is one node — content addressing deduplicates by design, and a retry
     /// that re-sends an append converges on the node it already wrote.
-    let private addNode
-        (hashFn: HashFn)
+    let private addNodeAs
+        (id: string)
         (encode: 'Op -> string)
         (actor: Actor)
         (op: 'Op)
         (parents: string list)
         (dag: T<'Op>)
         : Result<string * T<'Op>, DagAppendFault> =
-        let id = nodeHash hashFn encode parents actor op
-
         match Map.tryFind id dag.Nodes with
         | Some existing when sameNode encode existing parents actor op -> Ok(id, dag)
         | Some _ -> Error(DagAppendFault.ContentIdCollision id)
@@ -339,6 +350,17 @@ module Dag =
 
             Ok(id, { Nodes = Map.add id node dag.Nodes })
 
+    /// `addNodeAs` at the id `nodeHash` mints.
+    let private addNode
+        (hashFn: HashFn)
+        (encode: 'Op -> string)
+        (actor: Actor)
+        (op: 'Op)
+        (parents: string list)
+        (dag: T<'Op>)
+        : Result<string * T<'Op>, DagAppendFault> =
+        addNodeAs (nodeHash hashFn encode parents actor op) encode actor op parents dag
+
     /// The content id a node of (`parents`, `actor`, `op`) has (Phase 311) — `nodeHash`, public, so a
     /// consumer that names a node before (or without) building it computes the id this module mints
     /// instead of re-deriving the pre-image: `hashFn (sorted parents joined by ",") (Actor.encode
@@ -347,6 +369,21 @@ module Dag =
     /// recompute ids through this same function.
     let nodeId (hashFn: HashFn) (encode: 'Op -> string) (parents: string list) (actor: Actor) (op: 'Op) : string =
         nodeHash hashFn encode parents actor op
+
+    /// `nodeId` under a named encoding profile (Phase 360): the same pre-image with the actor spelled
+    /// as `profile` spells it (`OpStream.encodeActorWith`). `nodeIdWith OpStream.EncodingProfile.V2` is
+    /// `nodeId`; `V1` is the id `0.30.0` minted. The op's bytes are `encode`'s, so a store pinned to
+    /// `V1` passes an encoder that renders through `Json.renderWith EncodingProfile.V1` — one
+    /// declaration, both halves of the pre-image.
+    let nodeIdWith
+        (profile: OpStream.EncodingProfile)
+        (hashFn: HashFn)
+        (encode: 'Op -> string)
+        (parents: string list)
+        (actor: Actor)
+        (op: 'Op)
+        : string =
+        nodeHashAs (OpStream.encodeActorWith profile) hashFn encode parents actor op
 
     /// Append `op` as a child of EVERY id in `parents` (Phase 311) — the N-parent constructor `append`
     /// (one parent) and `merge` (two) are the cases of. `[]` is a genesis node. The parents are stored
@@ -626,22 +663,19 @@ module Dag =
         |> List.map fst
         |> List.filter (fun id -> not (Set.contains id placedSet))
 
-    /// The first integrity fault in the DAG (Phase 21): a node whose stored id is not the content hash
-    /// of its (parents, actor, op) — a tampered node — or a node naming a parent the DAG does not
-    /// contain. `None` for an intact DAG. Localises what `verifyDag` only reports as a boolean, so
-    /// `fromJsonlVerified` / an operator can say *where*.
-    ///
-    /// **The scan is TOPOLOGICAL since Phase 311** — the whole DAG's drain (`drainBy`, smallest id first
-    /// among the ready nodes), then any node on or below a cycle in id order — so where a DAG holds
-    /// several faults the one named is the EARLIEST in its history, never whichever id sorts first. It
-    /// was the id order until `0.34.0`; which nodes are faulty, and `verifyDag`'s verdict, are unchanged.
-    let firstBreak (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : DagBreak option =
+    /// `firstBreak` with the actor spelled by `actorText` in each recomputed id (Phase 360).
+    let private firstBreakAs
+        (actorText: Actor -> string)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (dag: T<'Op>)
+        : DagBreak option =
         let placed, unplaced = drainBy (fun _ -> 0) dag
 
         placed @ unplaced
         |> List.map (fun id -> id, dag.Nodes.[id])
         |> List.tryPick (fun (id, n) ->
-            let h = nodeHash hashFn w.Encode n.Parents n.Actor n.Op
+            let h = nodeHashAs actorText hashFn w.Encode n.Parents n.Actor n.Op
 
             if id <> h then
                 Some
@@ -659,11 +693,44 @@ module Dag =
                           Got = missing }
                 | None -> None)
 
+    /// The first integrity fault in the DAG (Phase 21): a node whose stored id is not the content hash
+    /// of its (parents, actor, op) — a tampered node — or a node naming a parent the DAG does not
+    /// contain. `None` for an intact DAG. Localises what `verifyDag` only reports as a boolean, so
+    /// `fromJsonlVerified` / an operator can say *where*.
+    ///
+    /// **The scan is TOPOLOGICAL since Phase 311** — the whole DAG's drain (`drainBy`, smallest id first
+    /// among the ready nodes), then any node on or below a cycle in id order — so where a DAG holds
+    /// several faults the one named is the EARLIEST in its history, never whichever id sorts first. It
+    /// was the id order until `0.34.0`; which nodes are faulty, and `verifyDag`'s verdict, are unchanged.
+    let firstBreak (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : DagBreak option =
+        firstBreakAs Actor.encode hashFn w dag
+
+    /// `firstBreak` under a named encoding profile (Phase 360): every id recomputed through `nodeIdWith
+    /// profile`, so a DAG whose ids were minted under `profile` — `0.30.0`'s, for `V1` — verifies for
+    /// what it is. `w.Encode` must render the op as the store declares too (`Json.renderWith`).
+    /// `firstBreakWith OpStream.EncodingProfile.V2` is `firstBreak`.
+    let firstBreakWith
+        (profile: OpStream.EncodingProfile)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (dag: T<'Op>)
+        : DagBreak option =
+        firstBreakAs (OpStream.encodeActorWith profile) hashFn w dag
+
     /// Verify the DAG: every node's id is the content hash of its (parents, actor, op), and
     /// every parent exists — generalises the linear `verifyChain` to a DAG. Re-expressed over
     /// `firstBreak` (Phase 21) so the two share one definition of integrity.
     let verifyDag (hashFn: HashFn) (w: StreamWitness<'Op, 'State, 'Rej>) (dag: T<'Op>) : bool =
         firstBreak hashFn w dag |> Option.isNone
+
+    /// `verifyDag` under a named encoding profile (Phase 360) — `firstBreakWith profile` finds nothing.
+    let verifyDagWith
+        (profile: OpStream.EncodingProfile)
+        (hashFn: HashFn)
+        (w: StreamWitness<'Op, 'State, 'Rej>)
+        (dag: T<'Op>)
+        : bool =
+        firstBreakWith profile hashFn w dag |> Option.isNone
 
     /// The Kahn topological-sort core: returns the emitted order **and** the head's ancestor-closure.
     /// On an acyclic closure `List.length order = Set.count anc`; a cycle leaves the cyclic nodes
@@ -2878,16 +2945,47 @@ module Dag =
     // first. A DAG's ids ARE its hashes, so a change of hash function — the 32-bit FNV-1a default to a
     // host's SHA-256 — re-mints every node, and each child's parent ids with it.
 
-    /// Why `rehashWith` refused (Phase 311).
+    /// Why `rehashWith` (Phase 311) or `rehashEncoding` (Phase 360) refused.
     [<RequireQualifiedAccess>]
     type RehashFault =
-        /// The source does not verify under `fromHash`: its first break. A history that does not verify is
-        /// not re-blessed under a new hash.
+        /// The source does not verify under `fromHash` (or, for `rehashEncoding`, under its profile and
+        /// witness): its first break. A history that does not verify is not re-blessed under a new hash
+        /// or a new encoding.
         | Unverified of DagBreak
         /// Nodes no drain places — a cycle — every one, in id order.
         | Cyclic of unplaced: string list
         /// Two nodes mint one id under `toHash`: the target hash collides, at that id.
         | Collision of nodeId: string
+
+    /// The re-mint both rehashes share (Phase 360 factored it out of Phase 311's `rehashWith`): refuse
+    /// a `sourceBreak`, then rebuild every node in topological order at the id `idOf` mints, each
+    /// parent id replaced by its new one, keyed by `encode` for the collision check.
+    let private remint
+        (sourceBreak: DagBreak option)
+        (idOf: string list -> Actor -> 'Op -> string)
+        (encode: 'Op -> string)
+        (dag: T<'Op>)
+        : Result<T<'Op> * Map<string, string>, RehashFault> =
+        match sourceBreak with
+        | Some b -> Error(RehashFault.Unverified b)
+        | None ->
+            match drainBy (fun _ -> 0) dag with
+            | _, (_ :: _ as unplaced) -> Error(RehashFault.Cyclic unplaced)
+            | order, [] ->
+                let rec go (d: T<'Op>) (ids: Map<string, string>) =
+                    function
+                    | [] -> Ok(d, ids)
+                    | (id: string) :: rest ->
+                        let n = dag.Nodes.[id]
+                        let parents = n.Parents |> List.map (fun p -> ids.[p])
+                        let id' = idOf parents n.Actor n.Op
+
+                        match addNodeAs id' encode n.Actor n.Op parents d with
+                        | Ok(_, d') when Map.count d'.Nodes = Map.count d.Nodes -> Error(RehashFault.Collision id')
+                        | Ok(_, d') -> go d' (Map.add id id' ids) rest
+                        | Error _ -> Error(RehashFault.Collision id')
+
+                go empty Map.empty order
 
     /// Re-mint a DAG under another hash function (Phase 311): verify it under `fromHash` (`firstBreak`;
     /// a break is `Unverified`), then rebuild every node in topological order under `toHash`, each
@@ -2901,26 +2999,7 @@ module Dag =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (dag: T<'Op>)
         : Result<T<'Op> * Map<string, string>, RehashFault> =
-        match firstBreak fromHash w dag with
-        | Some b -> Error(RehashFault.Unverified b)
-        | None ->
-            match drainBy (fun _ -> 0) dag with
-            | _, (_ :: _ as unplaced) -> Error(RehashFault.Cyclic unplaced)
-            | order, [] ->
-                let rec go (d: T<'Op>) (ids: Map<string, string>) =
-                    function
-                    | [] -> Ok(d, ids)
-                    | (id: string) :: rest ->
-                        let n = dag.Nodes.[id]
-                        let parents = n.Parents |> List.map (fun p -> ids.[p])
-                        let id' = nodeHash toHash w.Encode parents n.Actor n.Op
-
-                        match addNode toHash w.Encode n.Actor n.Op parents d with
-                        | Ok(_, d') when Map.count d'.Nodes = Map.count d.Nodes -> Error(RehashFault.Collision id')
-                        | Ok(_, d') -> go d' (Map.add id id' ids) rest
-                        | Error _ -> Error(RehashFault.Collision id')
-
-                go empty Map.empty order
+        remint (firstBreak fromHash w dag) (fun ps a op -> nodeHash toHash w.Encode ps a op) w.Encode dag
 
     /// `rehashWith` over a lane store (Phase 311): the union re-minted, and every node's lane carried to
     /// its new id.
@@ -2939,6 +3018,28 @@ module Dag =
                 |> List.choose (fun (k, l) -> Map.tryFind k ids |> Option.map (fun k' -> k', l))
                 |> Map.ofList },
             ids)
+
+    /// The TWO-WITNESS rehash across encoding profiles (Phase 360): verify the DAG under `fromProfile`
+    /// with `fromW`'s encoder (`firstBreakWith`; a break is `Unverified`), then re-mint every node under
+    /// `toProfile` with `toW`'s — `rehashWith` changes the hash function and keeps one encoder; this
+    /// changes the encoding and keeps one hash function. A store whose op encoder rendered through
+    /// `Json.render` before `0.33.0` passes `fromW` encoding with `Json.renderWith EncodingProfile.V1`
+    /// and `toW` with `V2`. Only the witnesses' `Encode` is read. `Ok(dag', ids)` as for `rehashWith`;
+    /// the result verifies under `toProfile` and `toW`, and the rehash back is the source again. A lane
+    /// store carries its lanes across through `ids`, as `rehashLanes` does for the hash axis.
+    let rehashEncoding
+        (fromProfile: OpStream.EncodingProfile)
+        (fromW: StreamWitness<'Op, 'State, 'Rej>)
+        (toProfile: OpStream.EncodingProfile)
+        (toW: StreamWitness<'Op, 'State, 'Rej>)
+        (hashFn: HashFn)
+        (dag: T<'Op>)
+        : Result<T<'Op> * Map<string, string>, RehashFault> =
+        remint
+            (firstBreakWith fromProfile hashFn fromW dag)
+            (fun ps a op -> nodeIdWith toProfile hashFn toW.Encode ps a op)
+            toW.Encode
+            dag
 
     // ---- attestation (Phase 311) ----
     // The linear stream signs its chain head through `IAttestationSink` (Phase 320). A DAG node's id is a

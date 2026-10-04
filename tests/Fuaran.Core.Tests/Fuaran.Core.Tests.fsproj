@@ -381,6 +381,9 @@
     <Compile Include="..\..\benchmarks\Fuaran.Core.Wire.Benchmarks\Corpus.fs" Link="WireBench/Corpus.fs" />
     <Compile Include="..\..\benchmarks\Fuaran.Core.Wire.Benchmarks\Harness.fs" Link="WireBench/Harness.fs" />
     <Compile Include="WireClockLeg.fs" />
+    <!-- Phase 360 — encoding profiles: the 0.30.0 stores, the frozen V1 renderer and its committed
+         vectors, the two-witness rehash and the stored-id family. Appended (append-only). -->
+    <Compile Include="EncodingProfileTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

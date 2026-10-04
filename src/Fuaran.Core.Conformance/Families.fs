@@ -1039,6 +1039,51 @@ module Families =
                   "a fixed vector corpus: every run evaluates every character and actor vector and the rendered table, so there is no sample that could miss one")
               (NoRefusal, "every vector is an accepted spelling; no refused outcome is read")
 
+          // Phase 360 — the encoding-profile vectors: what each profile renders and folds, the V1
+          // column measured against the published 0.30.0 binaries. A fixed corpus, like the above.
+          f
+              "EncodingProfileVectors"
+              "laws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "a fixed vector corpus: every run evaluates every value, actor and capture vector under both profiles and the rendered table, so there is no sample that could miss one")
+              (NoRefusal, "every vector is an accepted rendering; no refused outcome is read")
+
+          // Phase 360 — stored identity: a content-addressed consumer runs these against ITS OWN
+          // persisted store, so nothing is drawn: the store, walked whole, is the sample.
+          f
+              "StoredIdentity"
+              "linearLaws"
+              [ "StreamWitness" ]
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the consumer's own stored chain, walked whole: every record is recomputed and every hash round-trips, so there is no sample that could miss one")
+              (NoRefusal,
+               "reads a stored chain; a rehash refusal is a red law about that store, not a sampled refused outcome")
+          f
+              "StoredIdentity"
+              "dagLaws"
+              [ "StreamWitness" ]
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the consumer's own stored DAG, walked whole: every node id is recomputed and every id round-trips, so there is no sample that could miss one")
+              (NoRefusal,
+               "reads a stored DAG; a rehash refusal is a red law about that store, not a sampled refused outcome")
+          f
+              "StoredIdentity"
+              "captureLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the consumer's own stored capture log, walked whole: every hash is recomputed and round-trips, so there is no sample that could miss one")
+              (NoRefusal,
+               "reads a stored capture log; a rehash refusal is a red law about that store, not a sampled refused outcome")
+
           // Phase 297 — the null-tolerant read vectors (Phase 102), rostered now that the family
           // answers in `LawResult`s. The corpus is fixed, so the one run is the whole sample.
           f
@@ -1880,8 +1925,26 @@ module Families =
                 "OpStream.tryToJsonl" ] }
           { Family = "Conformance.verifyHonestyLaws"
             Operations = [ "Conformance.verifyFunction"; "Conformance.renderCounterexample" ] }
+          { Family = "EncodingProfileVectors.laws"
+            Operations =
+              [ "Json.renderWith"
+                "Json.escapeWith"
+                "EncodingProfile.name"
+                "EncodingProfile.tryParse"
+                "OpStream.profileName"
+                "OpStream.tryProfile"
+                "OpStream.encodeActorWith"
+                "OpStream.configFor"
+                "Dag.nodeIdWith"
+                "EncodingProfileVectors.lines" ] }
           { Family = "FoldConfluence.laneFoldLaws"
             Operations = [ "FoldConfluence.foldOnce"; "Dag.reconcileMany" ] }
+          { Family = "StoredIdentity.captureLaws"
+            Operations = [ "OpStream.firstCaptureBreakEncoding"; "OpStream.rehashCapturesEncoding" ] }
+          { Family = "StoredIdentity.dagLaws"
+            Operations = [ "Dag.firstBreakWith"; "Dag.verifyDagWith"; "Dag.rehashEncoding" ] }
+          { Family = "StoredIdentity.linearLaws"
+            Operations = [ "OpStream.rehashEncoding" ] }
           { Family = "StringEscapeVectors.laws"
             Operations = [ "StringEscapeVectors.lines" ] }
           { Family = "WireNullTolerance.laws"

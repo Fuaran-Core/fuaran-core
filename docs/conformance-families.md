@@ -63,7 +63,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 (D66) and whose own generated census lists them; every family here ships from
 `Fuaran.Core.Conformance`.
 
-89 families, across `Conformance`, `FoldConfluence`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
+93 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -152,7 +152,11 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.witnessLaws` | `Fuaran.Core.Conformance` | base run | — | `NodeWitness`, `IdWitness`, `OpGen` | `lawful-abstract-witness` | 500 | `unconditional` | `none` |
 | `Conformance.witnessSurfaceLaws` | `Fuaran.Core.Conformance` | opt-in | `no-witness-to-certify` | — | — | 17 | `unconditional` | `none` |
 | `Conformance.writeGateLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1200 | `guarded-reached` | `drawn` |
+| `EncodingProfileVectors.laws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 48 | `unconditional` | `none` |
 | `FoldConfluence.laneFoldLaws` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
 | `FoldConfluence.laneFoldLawsWith` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `StreamWitness`, `LaneGen` | — | 360 | `guarded-reached` | `drawn` |
+| `StoredIdentity.captureLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 6 | `unconditional` | `none` |
+| `StoredIdentity.dagLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | `StreamWitness` | — | 9 | `unconditional` | `none` |
+| `StoredIdentity.linearLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | `StreamWitness` | — | 9 | `unconditional` | `none` |
 | `StringEscapeVectors.laws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 39 | `unconditional` | `none` |
 | `WireNullTolerance.laws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 15 | `unconditional` | `built` |

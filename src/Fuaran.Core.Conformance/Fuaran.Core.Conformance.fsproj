@@ -67,6 +67,11 @@
          OpStream and OpStream.Dag byte-identical to the original. A vector family with a runner
          (the WireNullTolerance shape), not a `LawResult` family, so it carries no roster row. -->
     <Compile Include="StringEscapeVectors.fs" />
+    <!-- Phase 360 — the encoding-profile vectors (the frozen V1 renderer pinned against the published
+         0.30.0 bytes, V2 against the live path) and the stored-identity family a content-addressed
+         consumer runs against its own corpus. Appended (append-only). -->
+    <Compile Include="EncodingProfileVectors.fs" />
+    <Compile Include="StoredIdentity.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />

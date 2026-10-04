@@ -458,6 +458,16 @@
     },
     {
       "members": [
+        "EncodingProfileVectors.check",
+        "EncodingProfileVectors.run",
+        "EncodingProfileVectors.runVector"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Committed vector sets and their runners (Phase 360); the vectors are committed for the other hosts and the runners are exercised over them.",
+      "standIn": "tests/Fuaran.Core.Tests/EncodingProfileTests.fs"
+    },
+    {
+      "members": [
         "WireNullTolerance.check",
         "WireNullTolerance.runVector"
       ],

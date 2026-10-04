@@ -260,6 +260,59 @@ module FloatLayout =
         else finite f
 
 
+/// WHICH canonical rendering a content-addressed store's ids were computed under (Phase 360). A
+/// store that hashes `Json.render` output — an op encoder, a node pre-image — keys its ids on the
+/// rendered BYTES, so a change to those bytes is a change to every id it holds. A store names its
+/// profile and renders through `Json.renderWith`, and its ids keep recomputing while the spine's own
+/// rendering moves on. Closed and versioned: a later byte change to `Json.render` adds a case and
+/// moves `EncodingProfile.current`; it never changes what an existing case renders.
+///
+/// The profiles differ in exactly one respect today, measured against the published binaries
+/// (DECISIONS.md, the Phase 360 entry): how a string spells line feed, carriage return and tab. Number layout, member
+/// order and whitespace are the same under both. `Canon.render` is not profiled: its bytes have not
+/// moved since `0.30.0`.
+///
+/// `Fuaran.Core.OpStream` carries the same two cases as `OpStream.EncodingProfile` for the pre-images
+/// it builds itself (DECISIONS.md D2 keeps that package free of a reference here); both spell a
+/// profile by the same `name`.
+[<RequireQualifiedAccess>]
+type EncodingProfile =
+    /// The rendering of `0.30.0` through `0.32.0`: `\n`, `\r` and `\t` as the short escapes, every
+    /// other control character as lower-case `\u00xx`, `"` and `\` escaped, nothing else.
+    | V1
+    /// The rendering since `0.33.0` (Phase 287): every control character `U+0000`–`U+001F` as
+    /// lower-case `\u00xx`, with no short form; `"` and `\` escaped, nothing else.
+    | V2
+
+/// The `EncodingProfile` companions (Phase 360): the current default, the closed set, and the
+/// canonical name a store declares its profile by.
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module EncodingProfile =
+
+    /// The profile `Json.render` renders under — `V2` since `0.33.0`. It moves only when the
+    /// spine's rendering does, and a store pinned to a named profile does not move with it.
+    let current: EncodingProfile = EncodingProfile.V2
+
+    /// Every profile, oldest first.
+    let all: EncodingProfile list = [ EncodingProfile.V1; EncodingProfile.V2 ]
+
+    /// The canonical name a store declares its profile by: `v1` or `v2`. The same strings
+    /// `OpStream.profileName` spells, so one declaration names both halves of a store's encoding.
+    let name (profile: EncodingProfile) : string =
+        match profile with
+        | EncodingProfile.V1 -> "v1"
+        | EncodingProfile.V2 -> "v2"
+
+    /// The profile a canonical name declares, or `None` for any other string (case-sensitive:
+    /// `name >> tryParse` is `Some`, and nothing else is).
+    let tryParse (name: string) : EncodingProfile option =
+        match name with
+        | "v1" -> Some EncodingProfile.V1
+        | "v2" -> Some EncodingProfile.V2
+        | _ -> None
+
+
 /// Fable-clean encode helpers + the wire-envelope discipline + a portable
 /// (FSharp.Core-only) parser. Per-kind cases stay domain-side; the core owns the
 /// envelope shape, the combinators, and the parser. `render` and `parse` are inverses
@@ -303,14 +356,22 @@ module Json =
         | Items of rest: JVal list * first: bool
         | Members of rest: (string * JVal) list * first: bool
 
-    /// Write `v` with `floatText` as the float layout and object members in Ordinal key order
-    /// (`sortKeys`) or as authored. The bytes are the ones the recursive renderers wrote.
-    let internal writeWith (sortKeys: bool) (floatText: float -> string) (v: JVal) : string =
+    /// The writer, generic over how a string's body is appended (Phase 360): `writeWith` appends
+    /// through the live `escape`, and `EncodingProfile.V1` through its own frozen copy, so a later
+    /// rewrite of the live escape cannot move a `V1` byte.
+    let private writeCore
+        (appendEscaped: System.Text.StringBuilder -> string -> unit)
+        (sortKeys: bool)
+        (floatText: float -> string)
+        (v: JVal)
+        : string =
         let sb = System.Text.StringBuilder()
         let mutable stack = [ Value v ]
 
         let quoted (s: string) =
-            sb.Append('"').Append(escape s).Append('"') |> ignore
+            sb.Append('"') |> ignore
+            appendEscaped sb s
+            sb.Append('"') |> ignore
 
         while not stack.IsEmpty do
             match stack with
@@ -362,6 +423,27 @@ module Json =
 
         sb.ToString()
 
+    /// Write `v` with `floatText` as the float layout and object members in Ordinal key order
+    /// (`sortKeys`) or as authored. The bytes are the ones the recursive renderers wrote.
+    let internal writeWith (sortKeys: bool) (floatText: float -> string) (v: JVal) : string =
+        writeCore (fun sb s -> sb.Append(escape s) |> ignore) sortKeys floatText v
+
+    /// `EncodingProfile.V1`'s string escape, FROZEN (Phase 360): the body `Json.escape` had in
+    /// `0.30.0`, kept as its own copy rather than written in terms of the live `escape`, so no later
+    /// change to the live path — a rewrite for speed, a further byte change — can move a `V1` byte.
+    /// `EncodingProfileVectors` pins its output for every character it escapes against bytes the
+    /// published `0.30.0` binary produced.
+    let private appendEscapedV1 (sb: System.Text.StringBuilder) (s: string) : unit =
+        for ch in s do
+            match ch with
+            | '"' -> sb.Append("\\\"") |> ignore
+            | '\\' -> sb.Append("\\\\") |> ignore
+            | '\n' -> sb.Append("\\n") |> ignore
+            | '\r' -> sb.Append("\\r") |> ignore
+            | '\t' -> sb.Append("\\t") |> ignore
+            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
+            | c -> sb.Append(c) |> ignore
+
     /// Render a `JVal` in author order with the round-trip float layout. TOTAL AGAINST THE MACHINE
     /// (Phase 306): iterative, so a value of any nesting depth renders — the text of one nested past
     /// `defaultMaxDepth` is text `parse` then refuses by name, which is the read side's cap doing
@@ -373,6 +455,34 @@ module Json =
     /// `render` of a negative zero is therefore not a fixed point of `parse >> render`; every later
     /// one is. The bytes are left as they are because chain pre-images are built from this renderer.
     let render (v: JVal) : string = writeWith false FloatLayout.roundTrip v
+
+    /// `escape` under a named profile (Phase 360): the body of the JSON string literal `s` renders
+    /// as, quotes excluded, under `profile`. `escapeWith EncodingProfile.V2` is `escape`;
+    /// `escapeWith EncodingProfile.V1` is the frozen `0.30.0` spelling. For a consumer that builds a
+    /// hash pre-image by hand and must spell its strings as its store declares.
+    let escapeWith (profile: EncodingProfile) (s: string) : string =
+        match profile with
+        | EncodingProfile.V1 ->
+            let sb = System.Text.StringBuilder()
+            appendEscapedV1 sb s
+            sb.ToString()
+        | EncodingProfile.V2 -> escape s
+
+    /// `render` under a named profile (Phase 360) — the renderer a content-addressed store hashes
+    /// through, so its stored ids recompute on every later release. Author member order and the
+    /// round-trip float layout under every profile, exactly as `render`; the profiles differ only in
+    /// the string escape (`escapeWith`).
+    ///
+    /// - `V1` reproduces `0.30.0`'s `Json.render` byte for byte, through a FROZEN copy of that
+    ///   release's escape; `EncodingProfileVectors` pins it against bytes the published `0.30.0`
+    ///   binary produced, for every escaping case and for numbers, order and nesting.
+    /// - `V2` IS `render` — the live path. Its committed vector column is what holds a later rewrite
+    ///   of that path to these bytes; a deliberate byte change to `render` is a new profile, never a
+    ///   change to `V2`.
+    let renderWith (profile: EncodingProfile) (v: JVal) : string =
+        match profile with
+        | EncodingProfile.V1 -> writeCore appendEscapedV1 false FloatLayout.roundTrip v
+        | EncodingProfile.V2 -> render v
 
     /// One step of a path into a value, innermost first while a scan holds it.
     type private Step =

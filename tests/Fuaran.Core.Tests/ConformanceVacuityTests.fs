@@ -69,6 +69,45 @@ let secondConfig: StreamConfig =
     { Genesis = "phase-349-genesis"
       Payload = fun seq actor encoded -> "v2|" + OpStream.canonicalConfig.Payload seq actor encoded }
 
+/// Phase 360 — the stores the stored-identity families' reference runs read: three ops whose strings
+/// carry a line feed, a tab and a carriage return, written by the ordinary append under the CURRENT
+/// profile, so each run declares `v2`. (The published `0.30.0` stores, declared `v1`, are
+/// `EncodingProfileTests`'.)
+let private storedIdentityWitness: StreamWitness<JVal, unit, string> =
+    { Apply = fun _ s -> Ok s
+      Encode = Json.render
+      Decode = Json.parse }
+
+let private storedIdentityOps =
+    [ JStr "a\nb"; JObj [ "t", JStr "c\td" ]; JStr "e\rf" ]
+
+let private storedIdentityLinear =
+    storedIdentityOps
+    |> List.fold
+        (fun recs op ->
+            match OpStream.append OpStream.defaultHash storedIdentityWitness (Human "a\nb") op () recs with
+            | Ok(_, recs') -> recs'
+            | Error e -> failwith e)
+        OpStream.empty
+
+let private storedIdentityDag =
+    storedIdentityOps
+    |> List.fold
+        (fun (parent, d) op ->
+            match Dag.append OpStream.defaultHash storedIdentityWitness (Human "a\tb") op parent d with
+            | Ok(id, d') -> id, d'
+            | Error e -> failwithf "%A" e)
+        ("", Dag.empty)
+    |> snd
+
+let private storedIdentityCaptures =
+    [ "x\ny"; "z" ]
+    |> List.fold
+        (fun caps eff ->
+            OpStream.captureEffect OpStream.defaultHash id "io\twall" eff (fun () -> "\"v\"") caps
+            |> snd)
+        []
+
 /// Every law family the kit ships, run once. Evaluated at most once per process: several of these
 /// are three-hundred-iteration property runs.
 let private runs =
@@ -590,7 +629,32 @@ let private runs =
            // one run is the whole sample.
            run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ())
            run "StringEscapeVectors.laws" 1 (StringEscapeVectors.laws ())
-           run "Conformance.sanitizeLaws" 200 (Conformance.sanitizeLaws SanitizeWitness.core 349 200) ]
+           run "Conformance.sanitizeLaws" 200 (Conformance.sanitizeLaws SanitizeWitness.core 349 200)
+           // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
+           // each at a store the ordinary append wrote: the store, walked whole, is the sample.
+           run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())
+           run
+               "StoredIdentity.linearLaws"
+               3
+               (StoredIdentity.linearLaws
+                   "v2"
+                   OpStream.defaultHash
+                   storedIdentityWitness
+                   storedIdentityWitness
+                   storedIdentityLinear)
+           run
+               "StoredIdentity.dagLaws"
+               3
+               (StoredIdentity.dagLaws
+                   "v2"
+                   OpStream.defaultHash
+                   storedIdentityWitness
+                   storedIdentityWitness
+                   storedIdentityDag)
+           run
+               "StoredIdentity.captureLaws"
+               2
+               (StoredIdentity.captureLaws "v2" OpStream.defaultHash storedIdentityCaptures) ]
         : Run list)
 
 /// The family's own adequacy class, which is what decides how its run is read. Looked up rather

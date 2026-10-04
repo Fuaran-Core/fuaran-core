@@ -956,22 +956,22 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
-| `Fuaran.Core.Conformance` | 139 | 1 | 93 | 2 | 6 | 0 | 0 | 37 |
+| `Fuaran.Core.Conformance` | 147 | 1 | 98 | 2 | 6 | 0 | 0 | 40 |
 | `Fuaran.Core.Function` | 149 | 33 | 64 | 6 | 0 | 5 | 0 | 41 |
 | `Fuaran.Core.Idl` | 61 | 0 | 6 | 1 | 1 | 0 | 0 | 53 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 53 | 8 | 0 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Observer` | 20 | 0 | 8 | 2 | 2 | 0 | 5 | 3 |
-| `Fuaran.Core.OpStream` | 134 | 10 | 47 | 3 | 1 | 19 | 2 | 52 |
-| `Fuaran.Core.OpStream.Dag` | 81 | 24 | 33 | 0 | 0 | 0 | 0 | 24 |
+| `Fuaran.Core.OpStream` | 141 | 10 | 54 | 3 | 1 | 19 | 2 | 52 |
+| `Fuaran.Core.OpStream.Dag` | 85 | 24 | 37 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 73 | 22 | 28 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
 | `Fuaran.Core.Query` | 45 | 13 | 14 | 0 | 0 | 0 | 0 | 18 |
 | `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
-| `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 1084 | 139 | 356 | 29 | 14 | 24 | 8 | 514 |
+| `Fuaran.Core.Wire` | 128 | 10 | 10 | 1 | 2 | 0 | 0 | 105 |
+| **Total** | 1107 | 139 | 376 | 29 | 14 | 24 | 8 | 517 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
