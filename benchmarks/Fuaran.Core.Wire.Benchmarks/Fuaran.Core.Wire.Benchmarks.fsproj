@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The wire layer's timing harness (Phase 364): escape, render, canonical render and parse over four
+    fixed corpora, timed by the wall clock, one program for both hosts. FSharp.Core and the spine's own
+    Wire and Tree sources only - no timing library, no JavaScript binding - so the program compiled by
+    Fable and run under node is the same measurement as on .NET. ../run.ps1 runs it on both.
+
+    Not in Fuaran.Core.slnx: the gate never runs it. Its corpus and its timing module ARE compiled by
+    the gate, because the suite's clock leg (tests/Fuaran.Core.Tests/WireClockLeg.fs) compiles both.
+    Not packable, and it carries no Fable.Core reference of its own (DECISIONS.md D55).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+    <!-- Under Fable the entry project's properties govern the whole transpiled graph. Nullness off,
+         so the program compiles the way a consumer that RUNS under node compiles. -->
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Corpus.fs" />
+    <Compile Include="Harness.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Fuaran.Core.Tree\Fuaran.Core.Tree.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>

@@ -373,6 +373,13 @@
     <Compile Include="RefusalCornersIdl.fs" />
     <Compile Include="RefusalCornersGenerated.fs" />
     <Compile Include="IdlRefusalHostTests.fs" />
+
+    <!-- Phase 364 — the wire layer's clock leg and the freeze of the benchmark corpus. The corpus and
+         its timing module are the harness's own files (benchmarks/), compiled here so the gate
+         builds them and the leg times the corpus the tables time. Appended (append-only). -->
+    <Compile Include="..\..\benchmarks\Fuaran.Core.Wire.Benchmarks\Corpus.fs" Link="WireBench/Corpus.fs" />
+    <Compile Include="..\..\benchmarks\Fuaran.Core.Wire.Benchmarks\Harness.fs" Link="WireBench/Harness.fs" />
+    <Compile Include="WireClockLeg.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
