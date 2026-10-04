@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-04 — D119: a content-addressed store names its encoding; the profile is closed and versioned, `V1` is `0.30.0`'s rendering measured against the published binaries, the profile is carried twice because D2 forbids once, and the migration is a two-witness rehash
+## 2026-10-04 — D120: a content-addressed store names its encoding; the profile is closed and versioned, `V1` is `0.30.0`'s rendering measured against the published binaries, the profile is carried twice because D2 forbids once, and the migration is a two-witness rehash
 
 **Recorded by Phase 360. `Fuaran.Core.Wire`, `Fuaran.Core.OpStream`, `Fuaran.Core.OpStream.Dag` and the
 kit; additive (STABILITY.md, `0.35.0`); no default, signature or emitted byte moves.**
@@ -62,6 +62,80 @@ rather than as a chain break on its live data.
 
 *The rule this adds.* STABILITY.md's versioning policy now requires a change to rendered bytes to name
 the content-addressed paths it moves and the route across each, and to ship as a new profile case.
+
+## 2026-10-04 — D119: the frame is read against the tree; "written" is the entry at an id; the footprint alone bounds only a script that relocates nothing; a lock is proved over its subtree, and the allow-list is not
+
+**Context.** The footprint is what arbitration, the independence diamond and the write gate all read,
+and the model proved one thing about it: two ops with disjoint footprints commute. Nothing proved that
+the footprint is where the writes are. Phase 318 shipped the write gate's reading of it as a sampled
+law (D118.5) and left the theorem to Phase 362. The phase checked its premises against the tree first.
+
+**D119.1 — the premises, each with its verdict.**
+
+- *`proofs/TreeOps.fst` holds no frame theorem under another name* — HELD, and SHARPENED: its raw
+  material already existed elsewhere. `Preservation.fst` section 11 has the per-node view of every edit
+  (`ins_view`, `rem_view`, `move_view`, `reorder_view`, `upd_view`), and `PropagationOps.kind_kept` is
+  the content half of a frame for survivors. Neither is tied to the footprint's write sets.
+- *The model's footprint is the one production's `Ops.footprint` is held to* — HELD. `op_fp` is `ofOp`
+  clause for clause, six sets since Phase 340, and the two slot sets are empty for every skeleton op.
+- *`WriteGate.targetsOf` and the destroyed-subtree clause are as Phase 318 landed them* — HELD.
+- *The cover law states the property to prove* — SHARPENED. The law compares each id's CHILD LIST
+  before and after, and accepts a written id that is the source parent of a target. It does not sample
+  content, and it has no clause for an id's own position.
+- *"Every written id is in the footprint's write sets, including the subtree a removal destroys"* —
+  REFUTED as written. See D119.3.
+- *A ladder row cites the sampled cover law and is to be re-pointed* — REFUTED: no row of `proofs.json`
+  named the write gate. The rows are new, and the law is cited by the bridge row.
+
+**D119.2 — "written" is what the witness shows AT an id.** `written x t t'`: the id's presence, its
+content or its ordered child ids differ. The shard's wording gave an id's parent and its position among
+its siblings as clauses of their own. They are not separate facts: both are the PARENT's child list,
+which is how the footprint (`StructureWrites` names parents) and the cover law already read them, and
+`placement_is_the_parents_entry` proves nothing is lost — an id whose parent or sibling order differs
+has a written parent. Under the per-id reading the gate's theorems would be false for a reason that is
+not a defect: reordering an unlocked parent moves a locked child's index. That boundary is kept as a
+witness (`lock_does_not_pin_sibling_place`) rather than hidden by the definition.
+
+**D119.3 — the frame is read against the tree, and the pure-footprint form is false for a relocating
+op.** A removal destroys descendants its footprint does not name and rewrites a parent it does not
+name; a move rewrites its source parent. Both are `Ops.footprint`'s pinned over-approximations (1) and
+(2), documented since Phase 78 and proved necessary by Phase 143, so this is the shard's premise that
+is wrong and not the footprint: `Ops.independent` serialises every relocating op for exactly this
+reason, and `WriteGate.targetsOf` adds the destroyed subtree from the tree. No production code moves.
+The theorem is therefore stated in two halves, and neither is a weakening of the other. With the tree:
+every write is named, or is the source parent or destroyed subtree of an unknown-parent write at the
+tree the op lands on (`apply_frame`, `batch_frame`). Without it: a script whose footprint carries no
+unknown-parent write writes only what the footprint names (`named_frame`). The refutation of the pure
+form for relocating ops is kept as two evaluated witnesses, as section 18 of `TreeOps.fst` keeps its
+own.
+
+**D119.4 — a new module, because the dependency runs one way.** The view lemmas live in
+`Preservation.fst`, which opens `TreeOps.fst`; a frame inside `TreeOps.fst` would have to re-prove them
+or invert that. `TreeFrame.fst` opens both, adds no algebra, and keeps a 3,000-line module's query
+context out of forty new lemmas.
+
+**D119.5 — checked, not extracted; the law is the bridge.** The frame is about `apply` and `op_fp`,
+which the oracle already holds to production. The gate model is new, and `Conformance.writeGateLaws`
+already holds production's gate to the statements proved here at a domain's witnesses, so a second
+differential would test the same sentence twice. The model-to-code step is an `assumed` row
+(`write-gate-model-bridge`, `unscheduled`), closable by extracting the gate model.
+
+**D119.6 — the lock theorem is about the subtree.** "No locked id was written" is true and is the weak
+form: `WriteGate` promises that a lock on a node locks its subtree. `gated_apply_respects_lock` proves
+that `find_in l` answers the same before and after for every locked `l` — the whole subtree is the
+subtree it was — and `nothing_under_a_lock_is_written` reads it at each id.
+
+**D119.7 — no allow-list theorem, and why.** The source parent of a removed or moved node is the one
+written id the targets do not name. For a lock that costs nothing: the parent is on the removed node's
+chain. For an allow-list it is a real gap in what could be claimed: an actor allowed to write `a` may
+remove `a`, which rewrites the child list of a parent the list does not cover
+(`allow_list_does_not_cover_the_source_parent`). Whether removing a node should need its parent to be
+writable is a question about `WriteGate`'s contract. It is recorded here and not decided; the model
+states only what the gate does.
+
+**Consequences.** The footprint is a proved upper bound on an op's writes when read with the tree, and
+by itself for a script that relocates nothing; the write gate's cover and its lock stand on a theorem.
+`Ops.footprint`, `Dag` conflict detection, the diamond and `Ops.WriteGate` do not move.
 
 ## 2026-10-03 — D118: the gate's SHAPE is Core's and its CONTENT is the domain's; a gate only tightens; the write gate's targets are the footprint's; a capture is keyed by what was invoked, in two phases; three premises were sharper than written
 

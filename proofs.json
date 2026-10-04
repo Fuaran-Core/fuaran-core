@@ -3928,6 +3928,83 @@
           "Dag.loadLanes"
         ]
       }
+    },
+    {
+      "id": "tree-apply-frame",
+      "level": "proved",
+      "claim": "THE FRAME OF ONE OP (Phase 362). Over `TreeOps.fst`'s tree, `apply` and `op_fp` — `Ops.apply` and `Ops.footprint` clause for clause — an id is WRITTEN by an apply when what the witness shows at it differs between the tree before and the tree after: its presence, its content (the kind tag) or its ordered child ids (`written`, defined over the model's own tree with no parameter; an id's parent and its place among its siblings are its parent's child list, and `placement_is_the_parents_entry` proves an id whose parent or sibling order differs has a written parent). For every op and every well-formed tree at which it applies, every written id is an address the footprint names — a structure, content or unknown-parent write, or a slot write's node — or is one of the two tree facts an unknown-parent write stands for, at the tree the op lands on: the source parent of a removed or moved node, or an id of the subtree a removal destroys (`unnamed`; `unnamed_is_resolved` ties each to an id the footprint carries as an unknown-parent write). Every op kind the model carries: the graft an insert introduces is named, the subtree a removal destroys is not and is read from the tree. Not conditional on a parameter. What this row does NOT say: that the footprint alone bounds the writes of a relocating op — `tree-named-frame` proves where that holds and where it fails. Measured red with the insert's content writes dropped from the model's footprint.",
+      "phase": "fuaran-core#362",
+      "evidence": {
+        "theorem": "apply_frame",
+        "model": "proofs/TreeFrame.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Ops.apply",
+          "Ops.footprint"
+        ]
+      }
+    },
+    {
+      "id": "tree-batch-frame",
+      "level": "proved",
+      "claim": "THE FRAME OF A SCRIPT (Phase 362). The same statement for a `Batch`, at any depth, by the fold the footprint is defined by: every id written between the tree a script starts from and the tree it reaches is named by the union of its ops' footprints (`fp_all`), or is the source parent or destroyed subtree of an unknown-parent write of one of its ops, resolved at the tree THAT op landed on (`unnamed_all` threads `apply` as `fp_all` folds `op_fp`). Well-formedness of the intermediate trees is `apply_preserves_wf`'s. A write one step makes and a later step undoes is not a write of the script; `written` composes (`written_trans`). Measured red with the unnamed half left unthreaded.",
+      "phase": "fuaran-core#362",
+      "evidence": {
+        "theorem": "batch_frame",
+        "model": "proofs/TreeFrame.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "tree-named-frame",
+      "level": "proved",
+      "claim": "THE PURE-FOOTPRINT FRAME, WHERE IT HOLDS (Phase 362). An op whose footprint carries no unknown-parent write — inserts, reorders and nests of them — writes ONLY at addresses its footprint names, with no tree read: the bound a consumer that holds footprints and no tree may use. For a relocating op the pure form is FALSE and the module proves it with witnesses at one well-formed tree: a removal destroys a descendant its footprint does not name and rewrites the child list of a parent it does not name (`pure_frame_fails_for_a_remove`), and a move rewrites its source parent's (`pure_frame_fails_for_a_move`). These are `Ops.footprint`'s two pinned over-approximations, which `Ops.independent` already serialises; the row records that the footprint is not, by itself, an upper bound on a relocating op's writes.",
+      "phase": "fuaran-core#362",
+      "evidence": {
+        "theorem": "named_frame",
+        "model": "proofs/TreeFrame.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "write-gate-targets-cover-written",
+      "level": "proved",
+      "claim": "THE WRITE GATE'S TARGETS COVER THE WRITES (Phase 362). `targets_of` is `WriteGate.targetsOf` clause for clause — the footprint of the one-op script (structure, content and unknown-parent writes and the slot writes' nodes) plus the subtree a `RemoveNode` destroys, read from the tree; a `Batch` flattened onto the work list and taken op by op over the tree the ops before it produced, stopping at the first op that does not apply. For every op `apply` accepts on a well-formed tree, `Batch` included at any depth, every written id — created, destroyed, rewritten, or its child list changed — is a target, or is the parent, in the tree the op was applied to, of a target. The second case is the source parent of a removed or moved node, the one written id `targetsOf` does not name. This is the statement `Conformance.writeGateLaws`' cover law samples at a domain's witnesses, with content added. Measured red with the destroyed-subtree clause dropped from the model.",
+      "phase": "fuaran-core#362",
+      "evidence": {
+        "theorem": "targets_cover_written",
+        "model": "proofs/TreeFrame.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "WriteGate.targetsOf"
+        ]
+      }
+    },
+    {
+      "id": "write-gate-respects-lock",
+      "level": "proved",
+      "claim": "A GATED APPLY LEAVES EVERY LOCKED SUBTREE AS IT WAS (Phase 362). `decide_one`, `decide` and `apply_gated` are `WriteGate.decideOne`, `decide` and `applyGated` clause for clause, with `chain_of` for `chainOf` and `path_in` for `Tree.path`; the model decides the verdict, and which of several offending targets is named first is production's `Set` order. When `apply_gated` succeeds on a well-formed tree, for every locked id `find_in` answers the same before and after: a locked node the tree held is still there with its whole subtree unchanged — nothing in it rewritten, reordered, added to, moved out or removed, on its own or inside a subtree a removal destroyed — and a locked id the tree did not hold was not created (`nothing_under_a_lock_is_written` is the reading at each id under a lock). What this row does NOT say, each proved as a witness: a lock does not pin the locked node's place under an UNLOCKED parent, whose child order is the parent's state (`lock_does_not_pin_sibling_place`); and no such theorem is stated for an allow-list, because removing or moving an allowed node rewrites the child list of a source parent the list does not cover (`allow_list_does_not_cover_the_source_parent`). Measured red with the gate not consulted.",
+      "phase": "fuaran-core#362",
+      "evidence": {
+        "theorem": "gated_apply_respects_lock",
+        "model": "proofs/TreeFrame.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "WriteGate.decide",
+          "WriteGate.applyGated"
+        ]
+      }
+    },
+    {
+      "id": "write-gate-model-bridge",
+      "level": "assumed",
+      "claim": "THE MODEL-TO-CODE STEP FOR `TreeFrame.fst` (Phase 362). The module is checked and not extracted (`proofs/check.ps1`'s `$proofOnly`, on `PropagationOps`'s footing). Its frame theorems are about `TreeOps.fst`'s `apply` and `op_fp`, which ARE extracted and held to `Ops.apply` and `Ops.footprint` by the oracle's differential; what is assumed here is that `WriteGate.targetsOf`, `decide` and `applyGated` compute what `targets_of`, `decide` and `apply_gated` compute, read through the witness. The evidence is the law that holds production to the theorem's statement directly: `Conformance.writeGateLaws` checks, at a domain's tree witnesses and op generator, that every id an applied op creates, destroys or whose child list it changes is a target or the source parent of one, that `applyGated` is `Denied` exactly when `decide` refuses, and that a lock refuses every op with a target in the locked subtree. Closable by extracting the gate model beside `TreeOps` and running it against `WriteGate`, which nobody has taken.",
+      "phase": "fuaran-core#362",
+      "class": "model-bridge",
+      "closes": "unscheduled",
+      "evidence": {
+        "assumption": "WriteGate.targetsOf, decide and applyGated compute what TreeFrame.fst's targets_of, decide and apply_gated compute, read through the witness — sampled by Conformance.writeGateLaws"
+      }
     }
   ]
 }

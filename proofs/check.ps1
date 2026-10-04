@@ -173,6 +173,14 @@ $ErrorActionPreference = 'Stop'
 #                and every reader of a removed id, Batch included at any depth). Opens DagFold and
 #                TreeOps and cites Propagation's closure, so it follows all three. Checked but not
 #                extracted — see the Phase 308 paragraph below the exemption list.
+#   TreeFrame  — Phase 362, the frame of the tree algebra: an applied op writes only where its
+#                footprint names, or at the source parent or destroyed subtree of one of its
+#                unknown-parent writes (`apply_frame`, `batch_frame`), and `WriteGate.targetsOf`,
+#                `decide` and `applyGated` clause for clause, with the targets proved to cover the
+#                writes and a gated apply proved to leave every locked subtree as it was. Opens
+#                DagFold, TreeOps and Preservation and cites TreeDiff's `tree_ext` and
+#                `apply_all_app`, so it follows all four. Checked but not extracted — see the Phase
+#                362 paragraph below the exemption list.
 #
 #   ColumnOps and Pipeline — the compute strand's two models (Phases 176 and 154/234) — left this
 #                repository with `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops` in Phase 258
@@ -183,7 +191,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
@@ -243,7 +251,14 @@ $modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse
 # over generated trees and every op kind, a nested Batch included, computing from the two trees
 # the set `changed_for_op_complete` says is named — and the ladder records the model-to-code step
 # as assumed (`propagation-ops-model-bridge`), with that differential as its evidence.
-$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8', 'VocabularyVectors', 'PropagationOps')
+#
+# Phase 362 adds `TreeFrame` on PropagationOps's footing. Its theorems are about `Ops.apply` and
+# `Ops.footprint`, which TreeOps already extracts and the oracle already runs; what is new is the
+# model of the write gate, and production's gate reads a tree through the witness where the model
+# reads its own. `Conformance.writeGateLaws` already holds production's `targetsOf` to the
+# STATEMENT of `targets_cover_written` at a domain's witnesses, so the ladder records the
+# model-to-code step as assumed (`write-gate-model-bridge`) with that law as its evidence.
+$proofOnly = @('Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Utf8', 'VocabularyVectors', 'PropagationOps', 'TreeFrame')
 
 # The host step, in this order. Separate invocations rather than one prefix filter, so each failure
 # reads as what it is rather than as one red suite.

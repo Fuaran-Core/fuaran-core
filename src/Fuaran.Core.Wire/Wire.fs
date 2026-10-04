@@ -268,7 +268,7 @@ module FloatLayout =
 /// moves `EncodingProfile.current`; it never changes what an existing case renders.
 ///
 /// The profiles differ in exactly one respect today, measured against the published binaries
-/// (DECISIONS.md, the Phase 360 entry): how a string spells line feed, carriage return and tab. Number layout, member
+/// (DECISIONS.md D120): how a string spells line feed, carriage return and tab. Number layout, member
 /// order and whitespace are the same under both. `Canon.render` is not profiled: its bytes have not
 /// moved since `0.30.0`.
 ///

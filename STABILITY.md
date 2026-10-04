@@ -2760,7 +2760,35 @@ make the edits named above.
 `FunctionRegistry` and the two widened unions, riding the `0.35.0` slot, whose class (`breaking (source)`)
 they do not exceed: no number moves. The rest is **additive**.
 
-### Content-addressed stores pin a frozen canonical encoding: `EncodingProfile`, the `0.30.0` rendering as `V1`, and a two-witness rehash (Phase 360, DECISIONS.md, the Phase 360 entry) — ADDITIVE: no default moves, no existing signature changes, no emitted byte moves
+### The tree model gains a frame theorem, and the write gate's cover and lock are proved over it (Phase 362, DECISIONS.md D119) — ADDITIVE: no public surface moves, no emitted byte moves
+
+**What changed.** `proofs/TreeFrame.fst` is new: a checked module over `TreeOps.fst`'s tree, `apply` and
+footprint. It proves where an applied op writes (`apply_frame`, `batch_frame`, `named_frame`), that
+`WriteGate.targetsOf` contains those writes up to the source parent of a removed or moved node
+(`targets_cover_written`), and that a successful `WriteGate.applyGated` leaves every locked node's whole
+subtree as it was (`gated_apply_respects_lock`). No source file under `src/` is edited.
+
+**What a consumer may now rely on, and what it may not.**
+
+- `Ops.footprint` read WITH the tree is an upper bound on what an op writes: every id whose presence,
+  content or child list changes is named by the footprint, or is the source parent or destroyed subtree
+  of one of its unknown-parent writes.
+- `Ops.footprint` read WITHOUT the tree is an upper bound only for a script with no unknown-parent
+  write. For a removal or a move it is not, by the two pinned over-approximations of "Op-script footprint
+  + independence"; that entry is unchanged and is now proved from both sides.
+- A lock covers its subtree, as `WriteGate` documents. It does not pin the locked node's index under an
+  unlocked parent.
+- Nothing is promised about an allow-list beyond what `Conformance.writeGateLaws` samples: removing an
+  allowed node rewrites the child list of a parent the list need not cover.
+
+**The ladder.** Five `proved` rows and one `assumed` row (`proofs.json`): `tree-apply-frame`,
+`tree-batch-frame`, `tree-named-frame`, `write-gate-targets-cover-written`, `write-gate-respects-lock`
+and the bridge `write-gate-model-bridge`. `WriteGate.targetsOf`, `decide` and `applyGated` are on the
+ladder as well as under their law family.
+
+**Class: additive**, riding the `0.35.0` slot: no number moves.
+
+### Content-addressed stores pin a frozen canonical encoding: `EncodingProfile`, the `0.30.0` rendering as `V1`, and a two-witness rehash (Phase 360, DECISIONS.md D120) — ADDITIVE: no default moves, no existing signature changes, no emitted byte moves
 
 **What moved, for a consumer.**
 

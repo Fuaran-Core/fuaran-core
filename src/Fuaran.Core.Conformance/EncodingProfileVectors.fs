@@ -13,7 +13,7 @@ namespace Fuaran.Core
 //
 //  The `V1` column is not derived from this package's code. It was measured: the published
 //  `0.30.0` binaries rendered every value and every pre-image below, and these are their bytes
-//  (DECISIONS.md, the Phase 360 entry, records the probe). The `V2` column is the live renderer's
+//  (DECISIONS.md D120, records the probe). The `V2` column is the live renderer's
 //  bytes, so a rewrite of that path for speed is held to them too.
 //
 //  Drawn from every escaping case — every control character U+0000–U+001F, the quotation mark,
