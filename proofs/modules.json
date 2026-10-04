@@ -329,6 +329,17 @@
       "floorPhase": "fuaran-core#308",
       "phase": "fuaran-core#308",
       "note": "Phase 308 — `touchedBy` and the diff-based `changedForOp` over TreeOps' tree and `apply`, with `changed_for_op_complete` and the step lemma under it (`kinds_kept`: content moves only where the op content-writes, threaded through a Batch). Some twenty list and tree inductions at the default rlimit, no scoped option; carries `--ext context_pruning` as TreeOps does, because it opens TreeOps and meets its whole membership algebra. Seeded from TWO cold observations in `-Since HEAD` cone passes, 7s and 9s, so 2x9 sits under the 20s minimum. The first pass was CONTENDED and is named so: DagFold measured 98s against its recorded 78s and Propagation 29s against its recorded 4s, with another proof worker on the machine and 2.2 GB free (the contention factor was NOT COMPUTED, two untouched voters short of the three it needs). The FLOOR is 0 rather than the 3s `floorSeeding` would give 7s, because a contended run is not a fastest run: halving a figure the machine inflated would set a floor a quiet machine could breach, the false red the floor's own rule warns against. The next quiet seeding sets it."
+    },
+    {
+      "module": "TreeFrame",
+      "packages": [ "Fuaran.Core.Ops" ],
+      "budgetSeconds": 70,
+      "measuredSeconds": 32,
+      "floorSeconds": 7,
+      "fastestSeconds": 31,
+      "floorPhase": "fuaran-core#362",
+      "phase": "fuaran-core#362",
+      "note": "Phase 362 — the frame of the tree algebra over TreeOps' tree, `apply` and `op_fp`: `written` (what the witness shows at an id: presence, kind, ordered child ids), `apply_frame` / `batch_frame` (a written id is named by the footprint, or is the source parent or destroyed subtree of an unknown-parent write at the tree the op lands on), `named_frame` with its two refutation witnesses, `WriteGate.targetsOf` / `decide` / `applyGated` clause for clause, `targets_cover_written` and `gated_apply_respects_lock` (a locked node's whole subtree is unchanged, through TreeDiff's `tree_ext`). Opens DagFold, TreeOps and Preservation, cites TreeDiff's `tree_ext` and `apply_all_app`, and carries `--ext context_pruning` as TreeOps does. Fuel is fixed at `--fuel 0 --ifuel 1` and raised per block to 1 or 2; no scoped rlimit. Every query passes 3/3 under `--quake 3` at the leg's rlimit of 40, and the slowest (`parent_step`, one case per op kind over the per-node view lemmas) uses 5.4 units of it. SEEDED from two cold `--quake 3` checks of this module alone with its four dependencies already cached, 32s and 31s, taken while another session was building on the machine: budget 2 x 32 rounded up. The FLOOR is 7s rather than the 15s `floorSeeding` gives 31s, for the reason PropagationOps's entry gives: a contended run is not a fastest run, and a floor seeded from one is a floor a quiet machine could breach. The next quiet seeding sets it."
     }
   ]
 }

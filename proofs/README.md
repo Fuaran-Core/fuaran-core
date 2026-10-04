@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 291 claims — 211 proved across 27 models, 46 tested, 32 assumed (6 `domain-obligation`, 20 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 297 claims — 216 proved across 28 models, 46 tested, 33 assumed (6 `domain-obligation`, 21 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -650,7 +650,7 @@ any domain's rule family.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 32 assumed rows across these ladders are three different kinds of thing
+is not enough, because the 33 assumed rows across these ladders are three different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of three, and this section is that classification in one
 place together with the contract it implies.
@@ -666,7 +666,7 @@ place together with the contract it implies.
   proved, a walk order the model is handed rather than derives, an abstract reader the model is
   handed rather than models. Nothing a domain does closes one. Each names a **`closes`**: a
   `fuaran-core#NNN` phase where one has been taken, `permanent` where nothing could close it, and
-  `unscheduled` where something could and nobody has. 20 rows.
+  `unscheduled` where something could and nobody has. 21 rows.
 - **`premise` — what nobody discharges, ever.** The trusted base: a hash that does not collide,
   an extractor and a compiler that are correct, a witness surface that reports every node it holds.
   No kit run touches these and no phase closes them; they are what the rest of the ladder stands
@@ -720,6 +720,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `capability-pipeline-body-total` | `premise` | — |
 | `propagation-ops-model-bridge` | `model-bridge` | `unscheduled` |
 | `propagation-evaluator-total` | `premise` | — |
+| `write-gate-model-bridge` | `model-bridge` | `unscheduled` |
 
 **Why `unscheduled` is a value rather than a rounding to `permanent`.** Three of the bridges can be
 closed and nobody has taken the work, and recording them as `permanent` would assert the opposite
@@ -964,14 +965,14 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Observer` | 20 | 0 | 8 | 2 | 2 | 0 | 5 | 3 |
 | `Fuaran.Core.OpStream` | 134 | 10 | 47 | 3 | 1 | 19 | 2 | 52 |
 | `Fuaran.Core.OpStream.Dag` | 81 | 24 | 33 | 0 | 0 | 0 | 0 | 24 |
-| `Fuaran.Core.Ops` | 73 | 22 | 28 | 6 | 0 | 0 | 0 | 17 |
+| `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
 | `Fuaran.Core.Query` | 45 | 13 | 14 | 0 | 0 | 0 | 0 | 18 |
 | `Fuaran.Core.Tree` | 62 | 9 | 8 | 0 | 1 | 0 | 0 | 44 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 124 | 10 | 6 | 1 | 2 | 0 | 0 | 105 |
-| **Total** | 1084 | 139 | 356 | 29 | 14 | 24 | 8 | 514 |
+| **Total** | 1084 | 142 | 353 | 29 | 14 | 24 | 8 | 514 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -6406,6 +6407,94 @@ one whatever it collapses on the way down (`push_len`), and a `Batch` contribute
    between them is left alone by design. Anything about a script that does NOT apply, beyond the
    counterexample above. Anything about `Ops.normalize`'s cost, beyond `ContentDiffTests`' scale
    test — linearity is measured there, not proved here.
+
+## Theorem 18 — the frame: where an op writes, and what the write gate stands on (Phase 362)
+
+_(This directory's eighteenth. Theorem 2 proves that two ops with disjoint footprints commute, and
+until this phase nothing proved that a footprint is where the writes ARE: a footprint that
+under-reported a write would have left the diamond true and every reader of the footprint wrong.
+Phase 318's write gate reads the footprint as the ids an op writes and shipped that reading as a
+sampled law, because there was no frame theorem for it to be a corollary of.)_
+
+`TreeFrame.fst` adds no algebra. The tree, the ops, `apply` and `op_fp` are theorem 2's, and the
+per-node view of each edit (`ins_view`, `rem_view`, `move_view`, `reorder_view`, `upd_view`) is
+theorem 5's module's; the frame is those views read against the footprint.
+
+**What "written" means.** `written x t t'` — what the witness shows AT the id `x` differs between
+the two trees: its presence, its content (the kind tag) or its ordered child ids. It is the entry
+`Conformance.writeGateLaws`' cover law compares, with content added, and it takes no parameter. An
+id's parent and its place among its siblings are not clauses of their own: they are the PARENT's
+child list, and **`placement_is_the_parents_entry`** proves the reading loses nothing — an id whose
+parent or sibling order differs has a written parent.
+
+**`apply_frame`, `batch_frame`** — for every op, a `Batch` at any depth, and every well-formed tree
+at which it applies, a written id is an address the footprint NAMES (`named_writes`: structure,
+content and unknown-parent writes, and the slot writes' nodes) or is one of the two tree facts an
+unknown-parent write stands for, resolved at the tree the op lands on (`unnamed`): the source parent
+of a removed or moved node, or an id of the subtree a removal destroys. `unnamed_is_resolved` ties
+each unnamed write to an id the footprint does carry, as an unknown-parent write. A batch threads
+`apply` for the unnamed half exactly as `fp_all` folds `op_fp` for the named half.
+
+**The finding: the footprint alone is not a bound, and where it is.** The statement "every written
+id is in the footprint's write sets" is FALSE for a relocating op, and the module proves it rather
+than working round it. `pure_frame_fails_for_a_remove`: removing `x` destroys a descendant the
+footprint does not name and rewrites the child list of a parent it does not name.
+`pure_frame_fails_for_a_move`: a move rewrites its source parent's. These are `Ops.footprint`'s two
+pinned over-approximations, which `Ops.independent` serialises and theorem 2's section 18 proves
+necessary; they are not a defect, and no code moves. What is new is the positive half:
+**`named_frame`** — an op whose footprint carries NO unknown-parent write writes only at addresses
+the footprint names, with no tree read. That is the bound a reader holding footprints and no tree
+may use, and the frame theorem is the bound for one that holds the tree.
+
+**`targets_cover_written`** — `targets_of` is `WriteGate.targetsOf` clause for clause: the one-op
+footprint's four write sets plus the subtree a `RemoveNode` destroys, a `Batch` flattened onto the
+work list and each op taken over the tree the ops before it produced. Every id an applied op writes
+is a target, or is the parent — in the tree the op was applied to — of a target. The second case is
+the source parent, the one written id `targetsOf` documents it does not name; the proof carries
+the invariant that every parent link in an intermediate tree was in the starting tree or hangs off
+a target (`parent_inv`).
+
+**`gated_apply_respects_lock`** — `decide_one`, `decide` and `apply_gated` are the gate clause for
+clause, `chain_of` is `chainOf` and `path_in` is `Tree.path`. When `apply_gated` succeeds, `find_in
+l` answers the same before and after for every locked `l`: a locked node the tree held is still
+there with its whole subtree unchanged, and a locked id it did not hold was not created
+(`nothing_under_a_lock_is_written` is the reading at each id under a lock). The source parent needs
+no target of its own because it is on the removed node's chain (`chain_has_parent`), and every id
+in a locked subtree has the lock on its chain (`ancestor_on_path`); the subtree is then the same
+subtree by `TreeDiff.tree_ext`.
+
+**Two boundaries, proved as witnesses.** `lock_does_not_pin_sibling_place`: a lock is on the node's
+entry, not on its index under an unlocked parent — reordering that parent is allowed and moves it.
+`allow_list_does_not_cover_the_source_parent`: under an ALLOW-LIST, removing an allowed node is
+allowed and rewrites the child list of a parent the list does not cover. A lock on a source parent
+reaches the removed node; an allowance on the removed node does not reach its parent. So no
+allow-list theorem is stated, and whether the allow-list should ask for the source parent is a
+question about `WriteGate`, not about this model.
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** `apply_frame`, `batch_frame`, `named_frame`,
+   `targets_cover_written`, `gated_apply_respects_lock` and the lemmas named above, with the four
+   witnesses. F\* 2026.09.06, Z3 4.13.3, every query 3/3 under `--quake 3` at the leg's rlimit of
+   40, `--report_assumes error` on, no `assume`, no `admit`. Fuel is fixed at `--fuel 0 --ifuel 1`
+   and raised per block to 1 or 2; the slowest query (`parent_step`) uses 5.4 of the 40 units.
+   Opens `DagFold`, `TreeOps` and `Preservation`; cites `TreeDiff.tree_ext` and
+   `TreeDiff.apply_all_app`. Each theorem was measured red under one perturbation, one per prover
+   run: the insert's content writes dropped from the model's footprint (`apply_frame`, at its
+   insert case), the unnamed half left unthreaded (`batch_frame`), the destroyed-subtree clause
+   dropped from the targets (`targets_cover_written`, at its leaf case) and the gate not consulted
+   (`gated_apply_respects_lock`).
+2. **Tested.** Nothing new here. `Conformance.writeGateLaws` (Phase 318) holds production's
+   `targetsOf`, `decide` and `applyGated` to these statements at a domain's witnesses, and theorem
+   2's differential holds `Ops.apply` and `Ops.footprint` to `apply` and `op_fp`.
+3. **Assumed, and stated as such.** **`write-gate-model-bridge`** — the module is checked and not
+   extracted, so that `WriteGate` computes what the gate model computes is assumed, with the law as
+   its evidence. It inherits theorem 2's **`tree-algebra-well-formed-states`**,
+   **`sets-are-lists`** and **`lawful-abstract-witness`** unchanged.
+4. **Not claimed.** Which of several offending targets a denial names (production's `Set` order).
+   Anything about an allow-list beyond the witness above. Slot writes: no skeleton op writes one,
+   and the clause is carried only because `targetsOfOne` carries it. Keyed positions and container
+   capability, as for theorem 2.
 
 ## Next
 
