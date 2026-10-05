@@ -237,6 +237,24 @@ module FloatLayout =
 
     /// A FINITE double in .NET's round-trip (`"R"`) layout, on either pipeline. `-0.0` keeps its
     /// sign here — collapsing it is `Canon.canonicalFloat`'s wire rule, not the layout's.
+    ///
+    /// Under Fable, a double of magnitude in [1e-4, 1e17) is written by JS's own `toString`, with no
+    /// re-lay, because there the two layouts are the same characters (Phase 373). Write the shortest
+    /// round-trip digits as d1..dk with point position p, so the value is 0.d1..dk × 10^p and dk is not
+    /// zero. `reLay` recovers the same digits and sets its exponent to p - 1, then writes FIXED point
+    /// exactly when p - 1 is in [-4, 16]: the digits with the point after p of them, or padded with
+    /// p - k zeros when k <= p, or `0.` then -p zeros then the digits when p <= 0. ECMAScript's
+    /// Number::toString writes those same three shapes for every p in [-5, 21]. So for p in [-3, 17]
+    /// both write identical characters, and a negative value is `-` and the same characters on both.
+    /// p >= -3 is |n| >= 1e-4, and p <= 17 is |n| < 1e17, compared as doubles: both bounds are
+    /// shortest-digit values, and rounding to nearest is monotone, so a double below either bound
+    /// cannot have shortest digits at or above it, and one at or above it cannot have digits below
+    /// it. Outside the band the layouts differ — `1E-05` against `0.00001`, `1E+17` against
+    /// `100000000000000000` — and the re-lay runs. This band contains Phase 367's [2^53, 1e17), so the
+    /// parser's canonical-integer check (`Json.parseNumber`, Phase 253) skips the re-lay through this
+    /// branch too. The `floatLayout/band-*` and `jsonParse/*` parity vectors sit on each side of
+    /// each edge; Core's own gate never compiles Fable (D55), so those vectors, run under node by the
+    /// Fable consumer's parity leg, are what sees this branch.
     let finite (n: float) : string =
 #if FABLE_COMPILER
         if n = 0.0 then
@@ -244,29 +262,14 @@ module FloatLayout =
             // and `1.0 / n` is the only way to read the sign of a JS negative zero.
             (if 1.0 / n < 0.0 then "-0" else "0")
         else
-            reLay n
+            let m = abs n
+
+            if m >= 1e-4 && m < 1e17 then
+                jsNumberToString n
+            else
+                reLay n
 #else
         n.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
-#endif
-
-    /// `finite n = tok`, exactly, for every `n` and `tok` — the question `Json.parseNumber` asks of an
-    /// integer token past 2^53 (Phase 253) — answered under Fable without the re-lay where the re-lay
-    /// is the identity (Phase 367). Every double of magnitude in [2^53, 1e17) is whole, and for it JS's
-    /// `toString` already writes the integer digits with no exponent and no point; `reLay` finds the
-    /// base-10 exponent at 15 or 16, inside the fixed-point range, and writes the same characters back.
-    /// So in that band the layout IS `toString`, and the comparison skips the string work. (Measured:
-    /// the re-lay was about a tenth of a node parse of the benchmark's `floats` corpus.) Outside the
-    /// band, and on .NET, where "R" is already the shortest digits, it is `finite n = tok` itself.
-    let internal isFiniteLayout (n: float) (tok: string) : bool =
-#if FABLE_COMPILER
-        let m = abs n
-
-        if m >= 9007199254740992.0 && m < 1e17 then
-            jsNumberToString n = tok
-        else
-            finite n = tok
-#else
-        finite n = tok
 #endif
 
     /// The full `"{0:R}"` rendering, non-finite tokens included (`NaN` / `Infinity` / `-Infinity`,
@@ -1172,7 +1175,7 @@ module Json =
                         with
                         | true, v when
                             not (System.Double.IsNaN v || System.Double.IsInfinity v)
-                            && FloatLayout.isFiniteLayout v tok
+                            && FloatLayout.finite v = tok
                             ->
                             v
                         | _ ->

@@ -3,10 +3,12 @@ module Fuaran.Core.Tests.FloatLayoutCheckTests
 // Phase 367 — the parsed-float check, measured and narrowed. `parseNumber` admits an integer token
 // past 2^53 exactly when it is the canonical float layout of the double it reads as (Phase 253:
 // `FloatLayout.finite v = tok`). Under Fable that comparison re-laid every such value through
-// `reLay`; it now asks `FloatLayout.isFiniteLayout`, which in the band [2^53, 1e17) compares JS's
-// own `toString` and skips the re-lay, because there the re-lay is the identity. On .NET the
-// question is still `finite v = tok`, so this suite pins the .NET half; the node half was compared
-// before and after under Fable over the same pool (benchmarks/results, the Phase 367 file).
+// `reLay`; Phase 367 skipped the re-lay in the band [2^53, 1e17), where it is the identity, and
+// Phase 373 moved that skip into `FloatLayout.finite` itself, over the wider band [1e-4, 1e17), so
+// the parser asks `finite v = tok` again and the band lives in one place. On .NET the question is
+// still `finite v = tok`, so this suite pins the .NET half; the node half was compared before and
+// after under Fable over the same pool (benchmarks/results, the Phase 367 and 373 files), and the
+// `jsonParse/*` parity vectors sit on each side of both edges for the consumer's node leg.
 //
 // The reference is `Reference.decideWith`, the reader's decision as it stood before the phase,
 // clause for clause, with the Phase-253 question a parameter: the reference passes the pre-367

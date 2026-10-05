@@ -128,6 +128,32 @@ let private expected: (string * string) list =
       "floatLayout/finite-e-7", "1E-07"
       "floatLayout/finite-neg-third", "-0.3333333333333333"
       "floatLayout/round-trip-non-finite", "NaN,Infinity,-Infinity"
+      // Phase 373 - both edges of the Fable toString band [1e-4, 1e17), and of the parser's
+      // canonical-integer check band [2^53, 1e17), each side of each edge.
+      "floatLayout/band-below-1e-4", "9.999999999999999E-05"
+      "floatLayout/band-at-1e-4", "0.0001"
+      "floatLayout/band-above-1e-4", "0.00010000000000000002"
+      "floatLayout/band-neg-at-1e-4", "-0.0001"
+      "floatLayout/band-neg-below-1e-4", "-9.999999999999999E-05"
+      "floatLayout/band-17-digits", "0.00012345678901234567"
+      "floatLayout/band-below-1e17", "99999999999999980"
+      "floatLayout/band-at-1e17", "1E+17"
+      "floatLayout/band-above-1e17", "1.0000000000000002E+17"
+      "floatLayout/band-neg-below-1e17", "-99999999999999980"
+      "jsonParse/2-53-minus-1", "f:9007199254740991"
+      "jsonParse/2-53", "f:9007199254740992"
+      "jsonParse/2-53-plus-1",
+      "refused:not valid JSON: integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: 9007199254740993 at position 16"
+      "jsonParse/2-53-plus-2", "f:9007199254740994"
+      "jsonParse/neg-2-53-plus-2", "f:-9007199254740994"
+      "jsonParse/below-1e17", "f:99999999999999980"
+      "jsonParse/below-1e17-exact-digits",
+      "refused:not valid JSON: integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: 99999999999999984 at position 17"
+      "jsonParse/1e17-integer",
+      "refused:not valid JSON: integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: 100000000000000000 at position 18"
+      "jsonParse/1e17-exponent", "f:1E+17"
+      "jsonParse/above-1e17-integer",
+      "refused:not valid JSON: integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: 100000000000000020 at position 18"
       "cellToken/floats", "f:NaN f:Inf f:-Inf f:0 f:0 f:0.1 f:1E+21"
       "cellToken/scalars", "i:-3 b:1 s:s d:2026-10-01 n:"
       "cellToken/decimal-canonical", "m:1.5"
@@ -265,6 +291,7 @@ let private families =
       "sha256Hash/"
       "fnv1a32/"
       "floatLayout/"
+      "jsonParse/"
       "cellToken/"
       "cellCompare/"
       "decimal/"
@@ -439,4 +466,23 @@ let tests =
                   ParityVectors.vectors
                   |> List.find (fun (k, _) -> k = "decimalAggregate/sum-past-float")
 
-              Expect.equal (snd row) (Hash.sha256Hex ("m:1" + String.replicate 399 "0" + ".5")) "1e399 + 0.5, exactly" ]
+              Expect.equal (snd row) (Hash.sha256Hex ("m:1" + String.replicate 399 "0" + ".5")) "1e399 + 0.5, exactly"
+
+          // Phase 373: the band vectors are worth something only if their inputs ARE the doubles
+          // either side of each edge, so the literals in the table are held to the adjacent doubles.
+          testCase "the band vectors sit on the adjacent doubles at each edge"
+          <| fun _ ->
+              let r (x: float) = FloatLayout.finite x
+
+              let row label =
+                  ParityVectors.vectors |> List.find (fun (k, _) -> k = label) |> snd
+
+              Expect.equal (row "floatLayout/band-below-1e-4") (r (System.Math.BitDecrement 1e-4)) "below 1e-4"
+              Expect.equal (row "floatLayout/band-above-1e-4") (r (System.Math.BitIncrement 1e-4)) "above 1e-4"
+              Expect.equal (row "floatLayout/band-below-1e17") (r (System.Math.BitDecrement 1e17)) "below 1e17"
+              Expect.equal (row "floatLayout/band-above-1e17") (r (System.Math.BitIncrement 1e17)) "above 1e17"
+              // the parser's band: 2^53 + 1 reads as 2^53, 2^53 + 2 is the next double, and the
+              // largest double below 1e17 is 99999999999999984, written 99999999999999980
+              Expect.equal (System.Math.BitIncrement 9007199254740992.0) 9007199254740994.0 "2^53 + 2"
+              Expect.equal (System.Math.BitDecrement 1e17) 99999999999999984.0 "below 1e17"
+              Expect.equal (System.Math.BitIncrement 1e17) 100000000000000016.0 "above 1e17" ]

@@ -261,6 +261,14 @@ let private decimalEncode (cells: Cell list) : string =
     | Ok text -> "ok:" + text
     | Error e -> "refused:" + columnErrorClass e
 
+/// `Json.parse` of one bare token: `i:` or `f:` and the value re-rendered, or `refused:<message>`.
+let private jsonParse (token: string) : string =
+    match Json.parse token with
+    | Ok(JInt _ as v) -> "i:" + Json.render v
+    | Ok(JFloat _ as v) -> "f:" + Json.render v
+    | Ok v -> "other:" + Json.render v
+    | Error e -> "refused:" + e
+
 /// `ColumnCodec.decode` of a one-column decimal document whose `values` array is `values` (raw JSON),
 /// re-encoded: `ok:<canonical bytes>`, or `refused:<class>`.
 let private decimalDecode (values: string) : string =
@@ -480,6 +488,34 @@ let vectors: (string * string) list =
           [ FloatLayout.roundTrip nan
             FloatLayout.roundTrip infinity
             FloatLayout.roundTrip -infinity ]
+      // Phase 373 — the edges of the band where Fable writes JS's own `toString` with no re-lay,
+      // [1e-4, 1e17): the adjacent doubles each side of each edge, one negative, and a 17-digit value
+      // inside. Below 1e-4 and from 1e17 up the two layouts differ, so a band edge moved by one double
+      // either way changes one of these rows under node.
+      "floatLayout/band-below-1e-4", FloatLayout.finite 9.999999999999999e-5
+      "floatLayout/band-at-1e-4", FloatLayout.finite 1e-4
+      "floatLayout/band-above-1e-4", FloatLayout.finite 0.00010000000000000002
+      "floatLayout/band-neg-at-1e-4", FloatLayout.finite -1e-4
+      "floatLayout/band-neg-below-1e-4", FloatLayout.finite -9.999999999999999e-5
+      "floatLayout/band-17-digits", FloatLayout.finite 0.00012345678901234567
+      "floatLayout/band-below-1e17", FloatLayout.finite 99999999999999984.0
+      "floatLayout/band-at-1e17", FloatLayout.finite 1e17
+      "floatLayout/band-above-1e17", FloatLayout.finite 100000000000000016.0
+      "floatLayout/band-neg-below-1e17", FloatLayout.finite -99999999999999984.0
+      // Phase 367 / 373 — the parser's canonical-integer check (Phase 253) at both edges of the band
+      // it asks it in, [2^53, 1e17): an integer token is read there exactly when it is the float
+      // layout of the double it reads as. Below 2^53 the int53 guard admits it without the check; at
+      // 1e17 the layout is `1E+17`, so the integer spelling is refused and the exponent one is read.
+      "jsonParse/2-53-minus-1", jsonParse "9007199254740991"
+      "jsonParse/2-53", jsonParse "9007199254740992"
+      "jsonParse/2-53-plus-1", jsonParse "9007199254740993"
+      "jsonParse/2-53-plus-2", jsonParse "9007199254740994"
+      "jsonParse/neg-2-53-plus-2", jsonParse "-9007199254740994"
+      "jsonParse/below-1e17", jsonParse "99999999999999980"
+      "jsonParse/below-1e17-exact-digits", jsonParse "99999999999999984"
+      "jsonParse/1e17-integer", jsonParse "100000000000000000"
+      "jsonParse/1e17-exponent", jsonParse "1E+17"
+      "jsonParse/above-1e17-integer", jsonParse "100000000000000020"
       // `Cell.token` and `Cell.compare` — NaN one token and last in the order, -0 and 0 one value,
       // a decimal at its canonical text.
       "cellToken/floats",

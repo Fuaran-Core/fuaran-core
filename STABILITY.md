@@ -3135,6 +3135,36 @@ is level, a long integer token reads about twice as fast, and a small one about 
 **Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
 `0.35.0` slot: no number moves.
 
+### A float renders without the re-lay where the layouts agree, and both Fable-only float branches have parity vectors at their edges (Phase 373) — NO SURFACE CHANGE: faster under node, the same bytes; twenty parity vectors added
+
+**What moved, for a consumer.** Nothing but speed under Fable. For a double of magnitude in [1e-4, 1e17),
+`FloatLayout.finite` under Fable now returns JavaScript's own `toString` without the re-lay. In that band
+the two layouts are the same characters (the derivation is on `finite` and in the results file). Outside
+the band, and on .NET, nothing changed. The band contains Phase 367's [2^53, 1e17). So 367's internal
+`FloatLayout.isFiniteLayout` is removed, and the parser asks `FloatLayout.finite v = tok` again. It is
+internal, so no consumer sees it go.
+
+**Added to the conformance kit.** Twenty rows in `ParityVectors.vectors`. The ten `floatLayout/band-*`
+rows sit on the doubles either side of 1e-4 and of 1e17. The ten `jsonParse/*` rows sit on integer tokens
+either side of 2^53 and of 1e17. Every row is pinned on .NET. A host that byte-compares the table should
+expect twenty more lines. The Fable consumer's parity leg runs them under node.
+
+**Not moved.** Every rendered float, every decoded value and every refusal. The Fable output before and
+after, and .NET, gave byte-identical layouts for 2,387,628 generated doubles, 867,190 of them in the band.
+A band moved by one double at either edge differs on two of them. The three also gave identical parse
+outcome listings for Phase 367's 1,770,849 number inputs. Under node, the parity table with the band moved
+changes the edge rows.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-373.md`). The re-lay was 66 to 68 per cent
+of a node `floats` render. In one process, the node `floats` render and canonical render are about 1.9
+times faster, against a 1.04 to 1.08 control. The harness's node to .NET ratio for them falls from about
+6 to about 3.1. The parse is level, and .NET does not move.
+
+**What adopting it costs.** Nothing.
+
+**Class: none.** No signature, default, emitted byte, decoded value or refusal changes. The parity table
+grows by twenty rows. It rides the `0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the
