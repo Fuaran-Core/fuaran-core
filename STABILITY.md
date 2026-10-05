@@ -3041,6 +3041,36 @@ the first, in its own phase after the cohort raise.
 default, emitted byte, decoded value or refusal changes. The api baseline moves by the reader's lines
 only. It rides the `0.35.0` slot: no number moves.
 
+### An op-stream line is decoded by runs, not characters (Phase 369) — NO SURFACE CHANGE: faster store load and verify, the same values and the same refusals
+
+**What moved, for a consumer.** Nothing but speed. The line scanner's string decoder (inside
+`OpStream.Jsonl`, behind `parseLine`, `topFields`, `unquote`, `stringField`, `stringsField` and
+`actorField`, and so behind every record reader: `fromJsonl`, `fromJsonlVerified`, the snapshot and
+attributed readers, `Dag`'s node reader) used to append a token one character at a time. It now returns
+an escape-free body whole, by one `Substring` of the line (the token is no longer copied out first), and
+otherwise copies each escape-free run by one ranged `Append`, decoding only the escapes. A `\uXXXX`
+still appends its own code unit, so a surrogate pair spelled as two escapes, or a raw half beside an
+escaped one, decodes unit for unit as before.
+
+**Not moved.** Every decoded value, and every refusal, its `JsonlFaultReason` and its `Position`: the
+refusals are `skipString`'s, which is unchanged and still runs before any decode. The suite pins every
+public route to the decoder against the pre-369 one-unit decoder, kept as a reference, over every
+sequence of up to four run-boundary tokens (245,411 inputs), and states each fault at the start, middle
+and end of a run and across a run/escape boundary with its position (`JsonlDecodeRunTests.fs`). The
+Phase 296 scanner laws, the chain and `Dag` suites and every emitted vector are unchanged; no hash moves.
+The Fable output before and after, and .NET, gave identical outcome listings over 137,561 inputs.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-369.md`). Under node, loading a
+2,000-record stream is 21 to 30 per cent faster and loading with chain verification 12 to 20 per cent
+faster. On .NET a load allocates 22 to 26 per cent less; the wall clock is 12 to 13 per cent faster on
+the corpus whose actor carries escapes, and within the run-to-run spread on the plain one, where the
+collector dominates the timing.
+
+**What adopting it costs.** Nothing.
+
+**Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
+`0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

@@ -396,6 +396,11 @@
          corpus (reads RefusalVectorTests.fs), the wire benchmark corpora (reads WireBench/Corpus.fs)
          and a generated pool. Appended (append-only). -->
     <Compile Include="JsonReaderTests.fs" />
+    <!-- Phase 369 — the op-stream line decoder reads by runs: every public route to
+         Jsonl.decodeString pinned against the pre-369 one-unit decoder, each skipString fault
+         and its position at run boundaries, and a go-red. Depends on nothing here. Appended
+         (append-only). -->
+    <Compile Include="JsonlDecodeRunTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

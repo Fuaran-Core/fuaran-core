@@ -275,19 +275,42 @@ module internal OpStreamJsonl =
 
             i
 
-        /// Decode a string token `skipString` has already accepted (quotes included).
-        let private decodeString (token: string) : string =
-            let sb = System.Text.StringBuilder()
-            let last = token.Length - 1
-            let mutable i = 1
+        /// Decode the string token `skipString` has already accepted in `s`, from its opening quote at
+        /// `start` to just past its closing quote at `stop` (Phase 369: by runs, not characters). The
+        /// token is valid, so nothing here refuses — every fault and its position is `skipString`'s.
+        /// A body with no backslash is returned whole, by one `Substring`; otherwise each escape-free
+        /// run is copied by one ranged `Append` and only the escapes are decoded one by one, exactly as
+        /// before: a `\uXXXX` appends its code unit, so a surrogate pair spelled as two escapes (or a
+        /// raw half beside an escaped one) is carried through unit for unit, across runs and escapes.
+        let private decodeString (s: string) (start: int) (stop: int) : string =
+            let first = start + 1
+            // The closing quote: the body is `s.[first .. last - 1]`.
+            let last = stop - 1
 
-            while i < last do
-                let c = token.[i]
+            // The index of the first backslash in `s.[from .. last - 1]`, or `last` when there is none.
+            // A loop, not `IndexOf(char, int, int)`: Fable maps no count argument.
+            let runEnd (from: int) =
+                let mutable j = from
 
-                if c = '\\' then
-                    match token.[i + 1] with
+                while j < last && s.[j] <> '\\' do
+                    j <- j + 1
+
+                j
+
+            let firstEscape = runEnd first
+
+            if firstEscape >= last then
+                s.Substring(first, last - first)
+            else
+                let sb = System.Text.StringBuilder(last - first)
+                sb.Append(s, first, firstEscape - first) |> ignore
+                // `i` is always at a backslash, or at `last`.
+                let mutable i = firstEscape
+
+                while i < last do
+                    match s.[i + 1] with
                     | 'u' ->
-                        sb.Append(char (unicodeAt token i)) |> ignore
+                        sb.Append(char (unicodeAt s i)) |> ignore
                         i <- i + 6
                     | e ->
                         (match e with
@@ -300,11 +323,15 @@ module internal OpStreamJsonl =
                         |> ignore
 
                         i <- i + 2
-                else
-                    sb.Append(c) |> ignore
-                    i <- i + 1
 
-            sb.ToString()
+                    let e = runEnd i
+
+                    if e > i then
+                        sb.Append(s, i, e - i) |> ignore
+
+                    i <- e
+
+                sb.ToString()
 
         /// A bare value's token held to the literal grammar: `true`, `false`, `null`, or a JSON number
         /// (`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`).
@@ -484,7 +511,7 @@ module internal OpStreamJsonl =
                         with JsonlScanFault(p, r) ->
                             fail (at p) r
 
-                    let key = decodeString (s.Substring(i, ks - i))
+                    let key = decodeString s i ks
                     i <- ks
                     skipWs ()
 
@@ -560,7 +587,7 @@ module internal OpStreamJsonl =
             else
                 try
                     if skipString raw 0 = raw.Length then
-                        Ok(decodeString raw)
+                        Ok(decodeString raw 0 raw.Length)
                     else
                         Error(JsonlFaultReason.ExpectedString "")
                 with JsonlScanFault(_, r) ->
@@ -666,7 +693,7 @@ module internal OpStreamJsonl =
                                         with JsonlScanFault _ ->
                                             n
 
-                                    items.Add(decodeString (v.Substring(i, e - i)))
+                                    items.Add(decodeString v i e)
                                     i <- e
                                     expectItem <- false
                                 else
