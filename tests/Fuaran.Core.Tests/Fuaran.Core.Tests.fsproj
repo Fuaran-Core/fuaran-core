@@ -401,6 +401,11 @@
          and its position at run boundaries, and a go-red. Depends on nothing here. Appended
          (append-only). -->
     <Compile Include="JsonlDecodeRunTests.fs" />
+    <!-- Phase 372 - Json.readInt32 refuses a token past ten significant digits before the platform
+         reader: pinned against the pre-372 reader verbatim over the Int32 and int53 edges, leading
+         zeros and generated tokens, with two go-red references. Reads WireBench/Corpus.fs. Appended
+         (append-only). -->
+    <Compile Include="ReadInt32DigitCountTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

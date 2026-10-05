@@ -741,6 +741,14 @@ module Json =
     /// `tryRender` under the `encode` name — the total, guarded encode entry point.
     let tryEncode (v: JVal) : Result<string, string> = tryRender v
 
+    /// The index of the first digit of `tok` from `k` on that is not `0` (or `tok.Length`): where
+    /// `readInt32`'s significant digits begin (Phase 372).
+    let rec private firstSignificant (tok: string) (k: int) : int =
+        if k < tok.Length && tok.[k] = '0' then
+            firstSignificant tok (k + 1)
+        else
+            k
+
     /// THE integer reader of the wire (Phase 299): `Int32.TryParse` under the INVARIANT culture with
     /// `NumberStyles.AllowLeadingSign` and nothing else — no white space, no separators, no culture's
     /// own minus sign. The bare `Int32.TryParse tok` it replaces read under the CURRENT culture, so
@@ -755,6 +763,16 @@ module Json =
     /// The parser never hands it such a token (the scanner collects digits, and the grammar check
     /// refuses a `+`), but this function is public and the profile grammar reads through it — so
     /// the shape is checked here, where every caller gets it.
+    ///
+    /// A TOKEN TOO LONG FOR INT32 IS REFUSED BY ITS DIGIT COUNT (Phase 372), counting SIGNIFICANT
+    /// digits: the run after its leading zeros, which the reader has always accepted (`007` is 7).
+    /// More than ten cannot fit, because Int32's extremes are ten digits each way, so the value's
+    /// magnitude is at least 10^10 and the platform reader answers `None` on every host. Asking it
+    /// anyway cost an exception per token under Fable, whose `Int32.tryParse` throws and catches on
+    /// overflow: a third of a node decode where whole doubles past 2^53 were one number in eight,
+    /// and every millisecond timestamp paid it. Ten digits or fewer still go to the platform
+    /// reader, which alone decides the ten-digit edge. Both hosts run this one path, so the suite
+    /// holds the branch the node measurement depends on.
     let readInt32 (tok: string) : int option =
         let digitsFrom =
             if tok.Length > 0 && (tok.[0] = '-' || tok.[0] = '+') then
@@ -769,6 +787,12 @@ module Json =
                 shaped <- false
 
         if not shaped then
+            None
+        // Counted only when the digit run is longer than ten, so a short token pays one comparison.
+        elif
+            tok.Length - digitsFrom > 10
+            && tok.Length - firstSignificant tok digitsFrom > 10
+        then
             None
         else
             match

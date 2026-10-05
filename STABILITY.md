@@ -3106,6 +3106,35 @@ regenerating moves no wire byte, so not adopting costs only speed.
 **Class: none.** No signature, default or emitted wire byte changes, and only the generated source text
 of one function moves. It rides the `0.35.0` slot: no number moves.
 
+### An integer past Int32 is parsed without an exception under node (Phase 372) — NO SURFACE CHANGE: faster under node, the same values and the same refusals
+
+**What moved, for a consumer.** Nothing but speed. `Json.readInt32` now returns `None` for a token
+with more than ten significant digits (the digits after any leading zeros, which the reader has always
+accepted) without calling the platform's `Int32.TryParse`. Such a value cannot fit in Int32, and the
+platform reader returned `None` for it on both hosts. Under Fable that reader throws and catches an
+exception on overflow, so every whole double past 2^53 and every epoch-millisecond integer used to
+cost one exception. Tokens of ten significant digits or fewer still go to the platform reader. Both
+hosts run the same path. `firstSignificant`, the helper the reader uses, is private.
+
+**Not moved.** Every answer of `readInt32`, every decoded value and its case, and every refusal's
+`JsonErrorKind`, message and `Position`. The suite compares production with the pre-372 reader, kept
+as a reference, over 26,031 tokens around the Int32 edges, leading zeros, `-0` and the int53 edge
+(`ReadInt32DigitCountTests.fs`). Two wrong readers are shown to fail. The Fable output before and after,
+and .NET, gave identical outcome listings over 161,622 tokens (646,488 lines). The `JsonParse` F\*
+model, whose `int32_fits` already decides by the digits after their leading zeros, its extraction and
+the oracle differential are unchanged and green.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-372.md`). Under node, `readInt32` fell
+from 35 to 36 per cent of a `floats` parse to under 3 per cent. The `floats` parse is 34 to 38 per cent
+faster. A copy of the op-stream corpus with epoch-millisecond timestamps parses 8 to 14 per cent faster.
+The committed op-stream corpus carries its timestamps as strings, so it does not move. On .NET a parse
+is level, a long integer token reads about twice as fast, and a small one about 4 ns slower.
+
+**What adopting it costs.** Nothing.
+
+**Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
+`0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the
