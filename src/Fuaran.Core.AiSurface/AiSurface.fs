@@ -131,7 +131,7 @@ module RejectionCodec =
         let many (xs: 'Id list) = JArr(xs |> List.map one)
 
         match r with
-        | UnknownNode(target, addressable) ->
+        | Rejection.UnknownNode(target, addressable) ->
             Canon.typed "unknownNode" [ "target", one target; "addressable", many addressable ]
         | DuplicateId d -> Canon.typed "duplicateId" [ "id", one d ]
         | CannotRemoveRoot -> Canon.typed "cannotRemoveRoot" []
