@@ -2594,6 +2594,20 @@
     },
     {
       "members": [
+        "Json.Reader.floats",
+        "Json.Reader.ints",
+        "Json.Reader.items",
+        "Json.Reader.members",
+        "Json.Reader.read",
+        "Json.Reader.strings",
+        "Json.Reader.value"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed reading of a document (Phase 368) runs the parser's own scanner, so the modelled grammar is the parser's; what the reader adds is typed collection and shape checks, held to parseDetailed refusal for refusal (kind, message, position) by a differential over the codec refusal corpus, the wire benchmark corpora and a generated pool.",
+      "standIn": "tests/Fuaran.Core.Tests/JsonReaderTests.fs"
+    },
+    {
+      "members": [
         "RowCodec.decodeRows",
         "RowCodec.encodeRows"
       ],

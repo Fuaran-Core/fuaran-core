@@ -34,6 +34,8 @@ field Fuaran.Core.JVal+Tags.JFloat : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JInt : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JObj : System.Int32 (literal)
 field Fuaran.Core.JVal+Tags.JStr : System.Int32 (literal)
+field Fuaran.Core.Json+ReadError+Tags.Malformed : System.Int32 (literal)
+field Fuaran.Core.Json+ReadError+Tags.Mismatch : System.Int32 (literal)
 field Fuaran.Core.Json.defaultMaxDepth : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.BadEscape : System.Int32 (literal)
 field Fuaran.Core.JsonErrorKind+Tags.BadHexDigit : System.Int32 (literal)
@@ -147,6 +149,13 @@ method Fuaran.Core.FloatLayout.roundTrip(System.Double) : System.String
 method Fuaran.Core.JValModule.asFloat(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Double>
 method Fuaran.Core.JValModule.kindName(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.JValModule.nonFiniteToken(System.Double) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+method Fuaran.Core.Json+ReaderModule.floats(Fuaran.Core.Json+Reader) : System.Double[]
+method Fuaran.Core.Json+ReaderModule.ints(Fuaran.Core.Json+Reader) : System.Int32[]
+method Fuaran.Core.Json+ReaderModule.items(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Json+Reader, Microsoft.FSharp.Core.Unit>, Fuaran.Core.Json+Reader) : System.Void
+method Fuaran.Core.Json+ReaderModule.members(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Json+Reader, Microsoft.FSharp.Core.Unit>>, Fuaran.Core.Json+Reader) : System.Void
+method Fuaran.Core.Json+ReaderModule.read`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Json+Reader, !!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.Json+ReadError>
+method Fuaran.Core.Json+ReaderModule.strings(Fuaran.Core.Json+Reader) : System.String[]
+method Fuaran.Core.Json+ReaderModule.value(Fuaran.Core.Json+Reader) : Fuaran.Core.JVal
 method Fuaran.Core.Json.encode(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.escape(System.String) : System.String
 method Fuaran.Core.Json.escapeInto(System.Text.StringBuilder, System.String) : System.Void
@@ -254,6 +263,12 @@ type Fuaran.Core.JVal+JStr (type)
 type Fuaran.Core.JVal+Tags (type)
 type Fuaran.Core.JValModule (module)
 type Fuaran.Core.Json (module)
+type Fuaran.Core.Json+ReadError (union)
+type Fuaran.Core.Json+ReadError+Malformed (type)
+type Fuaran.Core.Json+ReadError+Mismatch (type)
+type Fuaran.Core.Json+ReadError+Tags (type)
+type Fuaran.Core.Json+Reader (type)
+type Fuaran.Core.Json+ReaderModule (module)
 type Fuaran.Core.JsonError (record)
 type Fuaran.Core.JsonErrorKind (union)
 type Fuaran.Core.JsonErrorKind+Tags (type)
@@ -302,6 +317,8 @@ union-case Fuaran.Core.JVal.NewJFloat #3(Item: System.Double)
 union-case Fuaran.Core.JVal.NewJInt #1(Item: System.Int32)
 union-case Fuaran.Core.JVal.NewJObj #5(Item: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>)
 union-case Fuaran.Core.JVal.NewJStr #0(Item: System.String)
+union-case Fuaran.Core.Json+ReadError.NewMalformed #0(Item: Fuaran.Core.JsonError)
+union-case Fuaran.Core.Json+ReadError.NewMismatch #1(position: System.Int32, expected: System.String)
 union-case Fuaran.Core.JsonErrorKind.BadEscape #6()
 union-case Fuaran.Core.JsonErrorKind.BadHexDigit #7()
 union-case Fuaran.Core.JsonErrorKind.ExpectedToken #2()

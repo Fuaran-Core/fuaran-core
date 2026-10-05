@@ -392,6 +392,10 @@
     <!-- Phase 360 — encoding profiles: the 0.30.0 stores, the frozen V1 renderer and its committed
          vectors, the two-witness rehash and the stored-id family. Appended (append-only). -->
     <Compile Include="EncodingProfileTests.fs" />
+    <!-- Phase 368 — Json.Reader held to parseDetailed refusal for refusal, over the codec refusal
+         corpus (reads RefusalVectorTests.fs), the wire benchmark corpora (reads WireBench/Corpus.fs)
+         and a generated pool. Appended (append-only). -->
+    <Compile Include="JsonReaderTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

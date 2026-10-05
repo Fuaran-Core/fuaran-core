@@ -3007,6 +3007,40 @@ to 20 per cent faster, against a ±6 per cent control. Nothing else moves.
 **Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
 `0.35.0` slot: no number moves.
 
+### A typed reader over the parser's own grammar: `Json.Reader` (Phase 368, DECISIONS.md D121) — ADDITIVE: `Json.Reader`, `Json.ReadError` and the `Json.Reader` functions; `parse` keeps every value and every refusal
+
+**What moved, for a consumer.**
+
+- **New: `Json.Reader.read (reading: Json.Reader -> 'a) (input: string) : Result<'a, Json.ReadError>`**
+  (`Fuaran.Core.Wire`), with the readings `value` (a `JVal`, as `parse` builds it), `strings`
+  (`string[]`), `floats` (`float[]`, the `JInt` and `JFloat` items, as `JVal.asFloat` reads them), `ints`
+  (`int[]`, the `JInt` items), `items` (an array, one callback per element) and `members` (an object,
+  one callback per member in authored order). A reading reads exactly one value where one is due;
+  reading none, or two, raises `InvalidOperationException`.
+- **New: `Json.ReadError`** (`[<RequireQualifiedAccess>]`): `Malformed of JsonError`, exactly
+  `Json.parseDetailed`'s refusal of the document, whatever the reading asked for; and
+  `Mismatch of position * expected`, only for a document `parseDetailed` accepts, when a value is not
+  the shape asked for. A grammar refusal anywhere in the document outranks a mismatch.
+- **New: `Json.Reader`**, the opaque cursor a reading is handed.
+- **Not moved.** `Json.parseDetailedWithPolicy` now runs an internal scanner class that the reader
+  shares, so the two have one grammar. Every decoded value, and every refusal's kind, message and
+  position, is unchanged: the full suite, the `JsonParse` F\* leg and the parser oracle differential are
+  green, and the wire benchmark's twenty case fingerprints are identical before and after on both hosts.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-368.md`). Reading the 20,000-token state
+corpus with `tokens` as a `string[]` costs 33 to 38 per cent less time than `parse` plus a typing pass
+on .NET, and 20 to 22 per cent less under node; it allocates 2.12 MB where they allocated 3.40 MB. A
+10,000-float array reads 44 to 48 per cent faster on .NET and 13 to 15 per cent under node. `parse`
+itself is no slower on either host.
+
+**What adopting it costs.** Nothing for a consumer that keeps `parse`. A consumer of a large
+homogeneous array rewrites its decode as a reading; the compute repository's incremental-state decode is
+the first, in its own phase after the cohort raise.
+
+**Class: additive.** One new type, one new closed union and seven new functions; no existing signature,
+default, emitted byte, decoded value or refusal changes. The api baseline moves by the reader's lines
+only. It rides the `0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

@@ -843,12 +843,16 @@ module Json =
     [<Literal>]
     let defaultMaxDepth = 512
 
-    /// `parseDetailed` under an explicit nesting cap **and an explicit `NullPolicy`** — the core
-    /// parser every other entry point is a wrapper over. Under `RejectNull` (the default every
-    /// pre-existing entry point passes) it is the parser as it has always been, byte-for-byte.
-    /// Returns a structured `JsonError` on failure; the `parseWith` family are the string-error
-    /// wrappers.
-    let parseDetailedWithPolicy (policy: NullPolicy) (maxDepth: int) (input: string) : Result<JVal, JsonError> =
+    /// The ONE grammar (Phase 368): the scanner `parseDetailedWithPolicy` reads a document with, and
+    /// the only one `Reader` reads with. Every routine below is the parser's own: the whitespace and
+    /// value-start rule, the string reader (by runs, Phase 366), the number reader (the JSON number
+    /// grammar, the int53 guard and the Phase 253 canonical-float admission), and the array and
+    /// object loops with their depth cap and their `,` / closing expectations. `parse` builds a
+    /// `JVal` through them; `Reader` reads typed values through the SAME members, so there is no
+    /// second copy of any rule for the two to drift apart on, and a refusal is raised at the same
+    /// position with the same kind and message whichever of them asked. One scanner per document.
+    [<Sealed>]
+    type internal Scanner(policy: NullPolicy, maxDepth: int, input: string) =
         let tolerateMemberNull =
             match policy with
             | RejectNull -> false
@@ -873,6 +877,16 @@ module Json =
         let skipWs () =
             while i < n && isWs input.[i] do
                 i <- i + 1
+
+        // Where a value is due: whitespace skipped, end of input refused, and the character a value
+        // must start with returned unconsumed.
+        let valueStart () : char =
+            skipWs ()
+
+            if i >= n then
+                fail UnexpectedEndOfInput "unexpected end of input"
+
+            input.[i]
 
         let expect (c: char) =
             if i < n && input.[i] = c then
@@ -1011,7 +1025,14 @@ module Json =
         // The token is SCANNED as it always was — an optional sign, then digits, point, digits,
         // exponent, each optional — so a refusal reports the token and position it always did; it
         // is then held to the JSON number grammar (`isJsonNumber`) before anything reads it.
-        let parseNumber () : JVal =
+        // The number reader returns the double and records, in `numIsInt` / `numInt`, whether the
+        // token is the integer `parse` reads as `JInt` (Phase 368: so `Reader` takes a number into a
+        // typed buffer through this same routine, with no `JVal` case built).
+        let mutable numIsInt = false
+        let mutable numInt = 0
+
+        let scanNumber () : float =
+            numIsInt <- false
             let start = i
             let mutable isFloat = false
 
@@ -1064,7 +1085,7 @@ module Json =
                         MalformedNumber
                         ("number outside the finite double range; it cannot round-trip on the wire: "
                          + tok)
-                | true, v -> JFloat v
+                | true, v -> v
                 | _ -> fail MalformedNumber ("malformed number: " + tok)
 
             if isFloat then
@@ -1080,7 +1101,10 @@ module Json =
                 // below), which no reading can corrupt. (Fable-clean: Int32.TryParse +
                 // Double.TryParse + the shared `FloatLayout` only.)
                 match readInt32 tok with
-                | Some v -> JInt v
+                | Some v ->
+                    numIsInt <- true
+                    numInt <- v
+                    float v
                 | None ->
                     // Safety is judged on the TOKEN, not on a parsed double: 2^53 + 1
                     // rounds to 2^53 as a double, so a range check on the value would
@@ -1103,7 +1127,7 @@ module Json =
                                 System.Globalization.CultureInfo.InvariantCulture
                             )
                         with
-                        | true, v -> JFloat v
+                        | true, v -> v
                         | _ -> fail MalformedNumber ("malformed number: " + tok)
                     else
                         // Phase 253 — past 2^53 the token is admitted EXACTLY when it is the
@@ -1126,20 +1150,86 @@ module Json =
                             not (System.Double.IsNaN v || System.Double.IsInfinity v)
                             && FloatLayout.isFiniteLayout v tok
                             ->
-                            JFloat v
+                            v
                         | _ ->
                             fail
                                 MalformedNumber
                                 ("integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: "
                                  + tok)
 
-        let rec parseValue (depth: int) : JVal =
+        let parseNumber () : JVal =
+            let v = scanNumber ()
+            if numIsInt then JInt numInt else JFloat v
+
+        // The array loop: the depth cap, `[`, then `item` once per element (it reads one value from
+        // the next value position), each followed by `,` or `]`.
+        let arrayLoop (depth: int) (item: unit -> unit) : unit =
+            if depth >= maxDepth then
+                fail MaxDepthExceeded ("max nesting depth " + string maxDepth + " exceeded")
+
+            expect '['
             skipWs ()
 
-            if i >= n then
-                fail UnexpectedEndOfInput "unexpected end of input"
+            if peek () = ']' then
+                i <- i + 1
+            else
+                let mutable go = true
 
-            match input.[i] with
+                while go do
+                    item ()
+                    skipWs ()
+
+                    match peek () with
+                    | ',' -> i <- i + 1
+                    | ']' ->
+                        i <- i + 1
+                        go <- false
+                    | _ -> fail ExpectedToken "expected ',' or ']'"
+
+        // The object loop: the depth cap, `{`, then per member its key, `:`, and `onMember key` (it
+        // reads the member's value), each followed by `,` or `}`.
+        //
+        // The one behavioural fork of `EraseMemberNull`, and the only place in the parser that can
+        // erase anything: a member whose value is exactly the `null` token is consumed and
+        // `onMember` is NOT called, so the object reads as though the member had been omitted.
+        // Nothing malformed is absorbed: a truncated near-miss (`nul`) fails this test and falls
+        // through to the value reader, which names it exactly as the strict policy does, and a
+        // trailing-garbage one (`nullish`) is caught by the ',' / '}' expectation below. Under
+        // `RejectNull` the test is never taken and the member path is the pre-existing one.
+        let objectLoop (depth: int) (onMember: string -> unit) : unit =
+            if depth >= maxDepth then
+                fail MaxDepthExceeded ("max nesting depth " + string maxDepth + " exceeded")
+
+            expect '{'
+            skipWs ()
+
+            if peek () = '}' then
+                i <- i + 1
+            else
+                let mutable go = true
+
+                while go do
+                    skipWs ()
+                    let key = parseString ()
+                    skipWs ()
+                    expect ':'
+                    skipWs ()
+
+                    let erased = tolerateMemberNull && i + 4 <= n && input.Substring(i, 4) = "null"
+
+                    if erased then i <- i + 4 else onMember key
+
+                    skipWs ()
+
+                    match peek () with
+                    | ',' -> i <- i + 1
+                    | '}' ->
+                        i <- i + 1
+                        go <- false
+                    | _ -> fail ExpectedToken "expected ',' or '}'"
+
+        let rec parseValue (depth: int) : JVal =
+            match valueStart () with
             | '"' -> JStr(parseString ())
             | '{' -> parseObject depth
             | '[' -> parseArray depth
@@ -1169,95 +1259,59 @@ module Json =
                 fail ExpectedToken ("expected '" + lit + "'")
 
         and parseObject (depth: int) : JVal =
-            if depth >= maxDepth then
-                fail MaxDepthExceeded ("max nesting depth " + string maxDepth + " exceeded")
-
-            expect '{'
-            skipWs ()
             let fields = ResizeArray<string * JVal>()
-
-            if peek () = '}' then
-                i <- i + 1
-            else
-                let mutable go = true
-
-                while go do
-                    skipWs ()
-                    let key = parseString ()
-                    skipWs ()
-                    expect ':'
-                    skipWs ()
-
-                    // The one behavioural fork of `EraseMemberNull`, and the only place in the
-                    // parser that can erase anything: a member whose value is exactly the `null`
-                    // token is consumed and NOT added, so the object reads as though the member had
-                    // been omitted. Nothing malformed is absorbed: a truncated near-miss (`nul`)
-                    // fails this test and falls through to `parseValue`, which names it exactly as
-                    // the strict policy does, and a trailing-garbage one (`nullish`) is caught by
-                    // the ',' / '}' expectation below. Under `RejectNull` the test is never taken
-                    // and the member path is the pre-existing one, unchanged.
-                    let erased = tolerateMemberNull && i + 4 <= n && input.Substring(i, 4) = "null"
-
-                    if erased then
-                        i <- i + 4
-                    else
-                        let v = parseValue (depth + 1)
-                        fields.Add((key, v))
-
-                    skipWs ()
-
-                    match peek () with
-                    | ',' -> i <- i + 1
-                    | '}' ->
-                        i <- i + 1
-                        go <- false
-                    | _ -> fail ExpectedToken "expected ',' or '}'"
-
+            objectLoop depth (fun key -> fields.Add((key, parseValue (depth + 1))))
             JObj(List.ofSeq fields)
 
         and parseArray (depth: int) : JVal =
-            if depth >= maxDepth then
-                fail MaxDepthExceeded ("max nesting depth " + string maxDepth + " exceeded")
-
-            expect '['
-            skipWs ()
             let items = ResizeArray<JVal>()
-
-            if peek () = ']' then
-                i <- i + 1
-            else
-                let mutable go = true
-
-                while go do
-                    let v = parseValue (depth + 1)
-                    items.Add v
-                    skipWs ()
-
-                    match peek () with
-                    | ',' -> i <- i + 1
-                    | ']' ->
-                        i <- i + 1
-                        go <- false
-                    | _ -> fail ExpectedToken "expected ',' or ']'"
-
+            arrayLoop depth (fun () -> items.Add(parseValue (depth + 1)))
             JArr(List.ofSeq items)
 
-        try
-            let v = parseValue 0
-            skipWs ()
+        member _.Length = n
+        member _.MaxDepth = maxDepth
 
-            if i <> n then
+        member _.Pos
+            with get () = i
+            and set (v: int) = i <- v
+
+        member _.SkipWs() = skipWs ()
+        member _.Fail(kind: JsonErrorKind, msg: string) : 'a = fail kind msg
+        member _.ValueStart() : char = valueStart ()
+        member _.String() : string = parseString ()
+        member _.Number() : float = scanNumber ()
+        member _.NumberIsInt = numIsInt
+        member _.NumberInt = numInt
+        member _.Value(depth: int) : JVal = parseValue depth
+        member _.Array(depth: int, item: unit -> unit) : unit = arrayLoop depth item
+        member _.Object(depth: int, onMember: string -> unit) : unit = objectLoop depth onMember
+
+        /// The whole document as `parse` reads it: one value, then nothing but whitespace.
+        member _.Document() : Result<JVal, JsonError> =
+            try
+                let v = parseValue 0
+                skipWs ()
+
+                if i <> n then
+                    Error
+                        { Position = i
+                          Message = "trailing characters"
+                          Kind = TrailingCharacters }
+                else
+                    Ok v
+            with JsonParseError(kind, msg, pos) ->
                 Error
-                    { Position = i
-                      Message = "trailing characters"
-                      Kind = TrailingCharacters }
-            else
-                Ok v
-        with JsonParseError(kind, msg, pos) ->
-            Error
-                { Position = pos
-                  Message = msg
-                  Kind = kind }
+                    { Position = pos
+                      Message = msg
+                      Kind = kind }
+
+    /// `parseDetailed` under an explicit nesting cap **and an explicit `NullPolicy`** — the core
+    /// parser every other entry point is a wrapper over. Under `RejectNull` (the default every
+    /// pre-existing entry point passes) it is the parser as it has always been, byte-for-byte.
+    /// Returns a structured `JsonError` on failure; the `parseWith` family are the string-error
+    /// wrappers.
+    let parseDetailedWithPolicy (policy: NullPolicy) (maxDepth: int) (input: string) : Result<JVal, JsonError> =
+        Scanner(policy, maxDepth, input).Document()
 
     /// `parseDetailed` under an explicit nesting cap (Phases 10 + 22) — the strict parser. Returns a
     /// structured `JsonError` on failure; `parseWith` / `parse` are the string-error wrappers.
@@ -1316,6 +1370,189 @@ module Json =
     /// rejections keep `Kind = NullNotRepresentable`; the `Message` names the missing absence).
     let parseDetailedTolerantOfNull (input: string) : Result<JVal, JsonError> =
         parseDetailedWithPolicy EraseMemberNull defaultMaxDepth input
+
+    /// Why `Reader.read` refused a document (Phase 368).
+    [<RequireQualifiedAccess>]
+    type ReadError =
+        /// The text is not a document `parseDetailed` reads, and this is exactly the refusal
+        /// `parseDetailed` gives it — kind, message and position — whatever the reading asked for.
+        | Malformed of JsonError
+        /// The text IS a document `parseDetailed` reads, and the value starting at `position` is
+        /// not the shape the reading asked for there (`expected` names it: "an array", "a string").
+        | Mismatch of position: int * expected: string
+
+    /// Internal signal for a shape mismatch; never escapes `Reader.read`.
+    exception private ReadMismatch of int * string
+
+    /// A cursor over one document, handed to the reading function `Reader.read` runs (Phase 368).
+    /// Each `Reader` function reads exactly ONE value where one is due; reading none, or two, where
+    /// one is due is a programming error and raises `InvalidOperationException`.
+    [<Sealed>]
+    type Reader internal (scan: Scanner) =
+        let mutable due = true
+        let mutable depth = 0
+        member internal _.Scan = scan
+
+        member internal _.Due
+            with get () = due
+            and set (v: bool) = due <- v
+
+        member internal _.Depth
+            with get () = depth
+            and set (v: int) = depth <- v
+
+    /// A reader for a large document whose consumer wants typed values, not the `JVal` tree
+    /// (Phase 368). `parse` builds a `JVal` for every value and a list cell for every element, and
+    /// a consumer then walks the tree a second time to type it; for a large homogeneous array that
+    /// is most of the decode's allocation (DECISIONS.md D121). A reading here takes such an array
+    /// straight into a `string[]` / `float[]` / `int[]`, and takes any other value as the `JVal`
+    /// `parse` would have built for it.
+    ///
+    /// It is the SAME grammar as `parse`, not a second one: every token, structure, depth and
+    /// end-of-input rule is the scanner `parseDetailedWithPolicy` runs (strict `RejectNull`, the cap
+    /// `defaultMaxDepth`). The refusals agree exactly: a document `parseDetailed` refuses is refused
+    /// with `ReadError.Malformed` carrying `parseDetailed`'s own error, whatever the reading asked
+    /// for, and a document it accepts is refused only with `ReadError.Mismatch`, when a value is not
+    /// the shape asked for. A reading that succeeds returns what typing `parseDetailed`'s tree the
+    /// same way would.
+    [<RequireQualifiedAccess>]
+    module Reader =
+        let private take (r: Reader) =
+            if not r.Due then
+                invalidOp "Json.Reader: a value was read where none was due (a reading reads exactly one value)"
+
+            r.Due <- false
+
+        // A container where one is due: the value's start, which must be `opening`, else a mismatch
+        // at that position (a character no value starts with is the grammar's to refuse: the
+        // mismatch defers to `parseDetailed`, which names it).
+        let private opening (r: Reader) (c: char) (expected: string) : Scanner =
+            take r
+            let s = r.Scan
+
+            if s.ValueStart() <> c then
+                raise (ReadMismatch(s.Pos, expected))
+
+            s
+
+        // Run `f` where exactly one value is due, one level deeper.
+        let private nested (r: Reader) (f: unit -> unit) =
+            let d = r.Depth
+            r.Due <- true
+            r.Depth <- d + 1
+            f ()
+
+            if r.Due then
+                invalidOp "Json.Reader: a member or item was not read (a reading reads exactly one value)"
+
+            r.Depth <- d
+
+        // A homogeneous array, each element taken by `element` at its value start.
+        let private arrayOf (r: Reader) (element: Scanner -> unit) =
+            let s = opening r '[' "an array"
+            s.Array(r.Depth, (fun () -> element s))
+
+        /// Any value, as `parse` builds it.
+        let value (r: Reader) : JVal =
+            take r
+            r.Scan.Value r.Depth
+
+        /// An array of strings, into a `string[]`.
+        let strings (r: Reader) : string[] =
+            let acc = ResizeArray<string>()
+
+            arrayOf r (fun s ->
+                if s.ValueStart() <> '"' then
+                    raise (ReadMismatch(s.Pos, "a string"))
+
+                acc.Add(s.String()))
+
+            acc.ToArray()
+
+        /// An array of numbers — the `JInt` and `JFloat` items of `parse`, read as `JVal.asFloat`
+        /// reads them — into a `float[]`.
+        let floats (r: Reader) : float[] =
+            let acc = ResizeArray<float>()
+
+            arrayOf r (fun s ->
+                let c = s.ValueStart()
+
+                if not (c = '-' || (c >= '0' && c <= '9')) then
+                    raise (ReadMismatch(s.Pos, "a number"))
+
+                acc.Add(s.Number()))
+
+            acc.ToArray()
+
+        /// An array of the integers `parse` reads as `JInt` (an integer token within Int32), into an
+        /// `int[]`. Any other number is a mismatch, as it would be a `JFloat` in the tree.
+        let ints (r: Reader) : int[] =
+            let acc = ResizeArray<int>()
+
+            arrayOf r (fun s ->
+                let c = s.ValueStart()
+                let at = s.Pos
+
+                if not (c = '-' || (c >= '0' && c <= '9')) then
+                    raise (ReadMismatch(at, "an Int32 integer"))
+
+                s.Number() |> ignore
+
+                if not s.NumberIsInt then
+                    raise (ReadMismatch(at, "an Int32 integer"))
+
+                acc.Add s.NumberInt)
+
+            acc.ToArray()
+
+        /// An array, calling `item` once per element in order; `item` reads the element.
+        let items (item: Reader -> unit) (r: Reader) : unit =
+            let s = opening r '[' "an array"
+            s.Array(r.Depth, (fun () -> nested r (fun () -> item r)))
+
+        /// An object, calling `onMember key` once per member in AUTHORED order, a repeated key as
+        /// often as it is written; `onMember` reads the member's value.
+        let members (onMember: string -> Reader -> unit) (r: Reader) : unit =
+            let s = opening r '{' "an object"
+            s.Object(r.Depth, (fun key -> nested r (fun () -> onMember key r)))
+
+        /// Read `input` with `reading`, which reads exactly one value (the document's), then require
+        /// nothing but whitespace after it — the document `parseDetailed` reads, read typed.
+        let read (reading: Reader -> 'a) (input: string) : Result<'a, ReadError> =
+            let s = Scanner(RejectNull, defaultMaxDepth, input)
+            let r = Reader(s)
+
+            try
+                let a = reading r
+
+                if r.Due then
+                    invalidOp "Json.Reader.read: the reading read no value"
+
+                s.SkipWs()
+
+                if s.Pos <> s.Length then
+                    Error(
+                        ReadError.Malformed
+                            { Position = s.Pos
+                              Message = "trailing characters"
+                              Kind = TrailingCharacters }
+                    )
+                else
+                    Ok a
+            with
+            | JsonParseError(kind, msg, pos) ->
+                Error(
+                    ReadError.Malformed
+                        { Position = pos
+                          Message = msg
+                          Kind = kind }
+                )
+            | ReadMismatch(pos, expected) ->
+                // A grammar refusal anywhere in the document outranks a shape mismatch, so a
+                // document `parseDetailed` refuses is refused with its error whatever was asked.
+                match parseDetailed input with
+                | Error e -> Error(ReadError.Malformed e)
+                | Ok _ -> Error(ReadError.Mismatch(pos, expected))
 
 /// The canonical `$type` wire discipline — the single
 /// platform-wide canonical-JSON convention `Fuaran.Core` and `Fuaran.UI` share, so a value

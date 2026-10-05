@@ -1,5 +1,68 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-05 — D121: the value tree is a third of a large-array decode, so a typed reader ships; it is the parser's own scanner, a grammar refusal is always `parse`'s, and a shape mismatch is reported only for a document `parse` accepts
+
+**Recorded by Phase 368. `Fuaran.Core.Wire`; additive (STABILITY.md, `0.35.0`); no value, refusal or
+emitted byte moves.**
+
+*The question, and the bar set before measuring.* After 365 to 367 removed the per-character costs, is
+building the `JVal` tree a material share of decoding a large homogeneous array, the shape of the compute
+repository's incremental state? The threshold was written down before any timing. MATERIAL meant: on the
+`state` corpus (20,000 short strings in one array), the tree's share is at least 20 per cent on at least
+one host in both runs, beyond an A/A control of the same method, with the typed outputs checked equal
+first. 20 per cent, not Phase 367's 5, because a reader is new public surface with a permanent obligation:
+its refusals must equal `parse`'s on two hosts, inside the `JsonParse` proof cone. A reader that buys
+less than 365 to 367 each bought (16 to 20 per cent on their cells) does not pay for that.
+
+*How the tree's share was measured.* A scratch copy of `Wire.fs` gained a probe that reads the same text
+with the parser's own string and number routines straight into a `string[]` / `float[]`: no `JVal`, no
+element list, no typing pass. That is the upper bound of any reader, because it keeps every cost a
+reader must still pay. It was timed interleaved against `Json.parse` plus the best-case typing pass a
+consumer makes today (one tail-recursive walk into a pre-sized array), two runs on each host. The share
+on `state` was 37.8 / 24.7 per cent on .NET and 33.3 / 32.3 under node (A/A within ±16 and ±2 per cent).
+On 10,000 floats it was 37 to 47 per cent on .NET and 17 to 18 under node; on 20,000 small ints, 53 to
+54 and 11 to 19. On .NET the tree is 1.28 MB of the 3.40 MB a `state` decode allocates. MATERIAL on both
+hosts, so the reader ships.
+
+*One grammar, by construction.* `parseDetailedWithPolicy`'s closures became an internal class,
+`Json.Scanner`, whose members are the same routines: the value-start rule, the string reader by runs, the
+number reader (which now returns the double and records whether the token is a `JInt`, so the reader
+fills a `float[]` without building a case), and the array and object loops with the depth cap, the
+`,` / closing expectations and the null-erasure fork. `parse` builds a `JVal` through them, and
+`Json.Reader` reads typed values through the same members. There is no second copy of any rule. A
+refusal the reader meets while scanning is therefore raised by the same code, at the same position, with
+the same kind and message.
+
+*A grammar refusal outranks a shape mismatch.* A typed reading can meet a value of the wrong shape
+before it meets a syntax error later in the document. Reporting the mismatch would make the reader's
+refusals depend on what it was asked, so a mismatch is only provisional: the reader asks `parseDetailed`
+about the whole document and reports `parse`'s refusal if there is one. This costs a second parse on
+the failure path only. The contract is short. A document `parse` refuses is refused with exactly
+`parse`'s error, whatever the reading. A document it accepts reads to what typing its tree gives, or
+is refused with `Mismatch` exactly when that typing fails. Mismatch is a new case on a new union, not a
+`JsonErrorKind` case, because widening that closed union would break every exhaustive match on it.
+
+*The checks.* `JsonReaderTests` runs eight readings over the codec refusal corpus's json vectors, the
+five benchmark corpora and a generated pool of 4,000 documents, each also padded, truncated, cut and
+spliced with a grammar character: 28,031 inputs. That is 224,248 (reading, input) outcomes, compared with `parseDetailed` plus typing
+as the value or the refusal's kind, message and position, and none disagree. The same program compiled
+by Fable gave the identical outcome listing under node. The comparison is shown able to fail. In the
+suite, the outcomes with every refusal position moved by one disagree on every refusal. A reader built
+without the precedence rule disagreed on 17,919 inputs of the `strings` reading in the suite, and on
+109,521 outcomes under node; it was then reverted. Of the API, only the reader's lines moved. The `JsonParse` F\* leg was re-run green;
+neither the model nor the oracle moved.
+
+*What it buys* (`benchmarks/results/2026-10-05-i7-9700-phase-368.md`). Reading `state` with `tokens` as
+a `string[]`: 33 to 38 per cent faster than parse plus typing on .NET, 20 to 22 per cent under node,
+2.12 MB allocated instead of 3.40 MB. The node figure is below the probe's upper bound because the
+scanner refactor made `parse` itself 4 to 9 per cent faster under node on the same corpora. `parse` is
+nowhere slower: interleaved in one process, after/before is 0.88 to 1.02 under node and 0.58 to 1.00 on
+.NET, against A/A controls of 0.98 to 1.21.
+
+*Not done here.* The compute repository's state decode is the first consumer, adopted in its own phase
+on that repository after the cohort raise. No tolerant-null or custom-depth reading was added: no
+consumer asks for one, and `read` takes the strict policy and the default cap, as `parse` does.
+
 ## 2026-10-04 — D120: a content-addressed store names its encoding; the profile is closed and versioned, `V1` is `0.30.0`'s rendering measured against the published binaries, the profile is carried twice because D2 forbids once, and the migration is a two-witness rehash
 
 **Recorded by Phase 360. `Fuaran.Core.Wire`, `Fuaran.Core.OpStream`, `Fuaran.Core.OpStream.Dag` and the
