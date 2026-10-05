@@ -332,7 +332,7 @@
          (union widening), and `CapabilityPipeline.nodeInvocationKey` puts the node kind in its
          pre-image, so every journalled pipeline key moves. Pre-1.0 a breaking change is a MINOR
          bump. See STABILITY.md "0.35.0 — DRAFT". -->
-    <Version>0.35.0</Version>
+    <Version>0.35.1</Version>
     <Authors>Andrew J. Willshire</Authors>
     <Company>Diametrical Ltd</Company>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

@@ -2402,7 +2402,12 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.35.0 — DRAFT
+## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
+
+**Moved number (2026-10-06).** `0.35.0` was packed as a draft with an earlier public surface than the
+release commit's, and a released version names one contract, so the slot advances to
+`0.35.1` and `0.35.0` is never released. Every entry below that says it rides the `0.35.0` slot ships in
+`0.35.1`; nothing else changes.
 
 **Slot class: breaking (source).** Opened over the tagged `0.34.0` by Phase 307, whose first edit widens
 three closed unions. Each entry below names its own class and the edit a consumer makes; the wire classes
