@@ -486,3 +486,193 @@ let tests =
               match OpStream.Attributed.decodeEnvelope sw.Decode text with
               | Ok back -> Expect.equal back a "round-trip"
               | Error e -> failtestf "decodeEnvelope: %s" e ]
+
+/// Phase 370 — the generated TypeScript codecs carry a FOURTH copy of the rule: the emitted `encStr`
+/// (`Emit/TypeScript.fs`), which gained Phase 365's fast path — one regex test for an escapable
+/// character, and the input returned whole between quotes when there is none. These cases run the
+/// function the emitter actually writes, under node, against the .NET escaper.
+module EmittedEncStr =
+
+    open Fuaran.Core.Idl
+
+    /// The fast-path line the emitter writes, as it appears in the emitted source.
+    let fastPath = """  if (!/["\\\u0000-\u001f]/.test(s)) return '"' + s + '"';"""
+
+    /// The emitted module of a one-kind vocabulary: its prelude is every generated codec's prelude.
+    let emitted () : string =
+        let f n t =
+            { Name = n
+              Type = t
+              Opt = Required
+              Annotations = Annotations.Empty }
+
+        let idl: Idl =
+            { Kinds =
+                [ { Tag = "Note"
+                    Category = "leaf"
+                    Annotations = Annotations.Empty
+                    Fields = [ f "label" TStr ] } ]
+              Unions = []
+              Enums = []
+              Records = []
+              Defaults = []
+              NodeFields = []
+              Ops = []
+              Wire = WireShape.Default
+              Harden = HardenPolicy.Undeclared }
+
+        match Gen.typescriptModule idl [ "Note" ] with
+        | Ok src -> src
+        | Error e -> failtestf "TypeScript codegen refused a one-string vocabulary: %s" (CodegenError.describe e)
+
+    /// The emitted `encStr` declaration, exactly as written into the module.
+    let encStrBlock (src: string) : string =
+        let start = src.IndexOf "const encStr = (s) => {"
+
+        if start < 0 then
+            failtest "the emitted module declares no encStr"
+
+        let stop = src.IndexOf("\n};\n", start)
+
+        if stop < 0 then
+            failtest "the emitted encStr declaration has no end"
+
+        src.Substring(start, stop + 4 - start)
+
+    /// The inputs: the run-boundary corpus (clean, escape-only, first/last position, every control
+    /// character alone and inside runs, surrogate pairs beside escapes), the conformance family's
+    /// escape alphabet, and lone surrogates, which neither host treats as escapable.
+    let inputs: (string * string) list =
+        RunBoundaries.inputs
+        @ [ for v in StringEscapeVectors.vectors -> "vector " + v.Name, v.Input ]
+        @ [ "a lone high surrogate", "a\uD800b"
+            "a lone low surrogate", "\uDC00"
+            "lone surrogates beside escapes", "\uDFFF\"\n\uD800"
+            "a reversed surrogate pair", "\uDC00\uD800" ]
+
+    /// Runs `encStr` and `__broken` (when `broken` is given, a mutated copy of the declaration) over
+    /// every input under node. Each line out is the output's UTF-16 code units, comma-separated, so
+    /// no console encoding sits between the two hosts. `None` when node is not on PATH.
+    let runUnderNode (broken: string option) : (string list * string list) option =
+        let src = emitted ()
+
+        let codes (s: string) =
+            "[" + (s |> Seq.map (fun c -> string (int c)) |> String.concat ",") + "]"
+
+        let harness =
+            src
+            + "\n"
+            + (broken |> Option.defaultValue "const __broken = encStr;\n")
+            + "const __inputs = ["
+            + (inputs |> List.map (snd >> codes) |> String.concat ",")
+            + "].map((cs) => String.fromCharCode(...cs));\n"
+            + "const __codes = (s) => Array.from({ length: s.length }, (_, i) => s.charCodeAt(i)).join(',');\n"
+            + "for (const s of __inputs) console.log(__codes(encStr(s)) + '|' + __codes(__broken(s)));\n"
+
+        let tmp =
+            System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                sprintf "fuaran-encstr-%s.mjs" (System.Guid.NewGuid().ToString "N")
+            )
+
+        System.IO.File.WriteAllText(tmp, harness)
+
+        try
+            let proc =
+                try
+                    Some(System.Diagnostics.Process.Start(ChildProcess.redirected "node" ("\"" + tmp + "\"")))
+                with _ ->
+                    None
+
+            match proc with
+            | None -> None
+            | Some p ->
+                let stdout = p.StandardOutput.ReadToEnd()
+                let stderr = p.StandardError.ReadToEnd()
+                p.WaitForExit()
+
+                if p.ExitCode <> 0 then
+                    failtestf "node failed running the emitted encStr: %s" stderr
+
+                let rows =
+                    stdout.Replace("\r\n", "\n").Split('\n')
+                    |> Array.filter (fun l -> l <> "")
+                    |> Array.map (fun l ->
+                        let decode (cs: string) =
+                            if cs = "" then
+                                ""
+                            else
+                                System.String(cs.Split(',') |> Array.map (int >> char))
+
+                        match l.Split('|') with
+                        | [| a; b |] -> decode a, decode b
+                        | _ -> failtestf "an unreadable harness line: %s" l)
+                    |> List.ofArray
+
+                Some(List.map fst rows, List.map snd rows)
+        finally
+            try
+                System.IO.File.Delete tmp
+            with _ ->
+                ()
+
+    /// Every input whose emitted bytes differ from the .NET escaper's, with what each host wrote.
+    let mismatches (got: string list) : string list =
+        if List.length got <> List.length inputs then
+            failtestf "node answered %d inputs of %d" (List.length got) (List.length inputs)
+
+        List.zip inputs got
+        |> List.choose (fun ((name, s), out) ->
+            let want = Json.render (JStr s)
+
+            if out = want then
+                None
+            else
+                Some(sprintf "%s: .NET %A, emitted %A" name want out))
+
+[<Tests>]
+let emittedEncStrTests =
+    testList
+        "StringEscape.emitted TypeScript encStr (Phase 370)"
+        [ testCase "the emitted encStr carries the fast path above the unchanged escaping loop"
+          <| fun _ ->
+              let block = EmittedEncStr.encStrBlock (EmittedEncStr.emitted ())
+              Expect.stringContains block EmittedEncStr.fastPath "the clean-string test is emitted"
+
+              Expect.isLessThan
+                  (block.IndexOf EmittedEncStr.fastPath)
+                  (block.IndexOf "for (const ch of s)")
+                  "and it runs before the per-character loop, which is still there"
+
+          testCase "under node, the emitted encStr writes the .NET escaper's bytes for every input"
+          <| fun _ ->
+              Expect.isGreaterThan EmittedEncStr.inputs.Length 80 "the corpus is the one written"
+
+              match EmittedEncStr.runUnderNode None with
+              | None -> skiptest "node not on PATH — the emitted encStr cannot run"
+              | Some(got, _) ->
+                  Expect.equal (EmittedEncStr.mismatches got) [] "no input's bytes differ between the hosts"
+
+                  for (_, s), out in List.zip EmittedEncStr.inputs got do
+                      Expect.equal out ("\"" + RunBoundaries.oracle s + "\"") "and every output is the oracle's"
+
+          testCase "the check can go red: a fast path that misses the control characters is caught"
+          <| fun _ ->
+              let block = EmittedEncStr.encStrBlock (EmittedEncStr.emitted ())
+
+              let broken =
+                  block.Replace("const encStr =", "const __broken =").Replace("""/["\\\u0000-\u001f]/""", """/["\\]/""")
+
+              Expect.notEqual broken (block.Replace("const encStr =", "const __broken =")) "the mutation landed"
+
+              match EmittedEncStr.runUnderNode (Some broken) with
+              | None -> skiptest "node not on PATH — the emitted encStr cannot run"
+              | Some(_, got) ->
+                  let red = EmittedEncStr.mismatches got
+                  Expect.isNonEmpty red "an unescaped control character is reported"
+
+                  Expect.exists red (fun m -> m.StartsWith "vector U+000A:") "the line feed is among the inputs caught"
+
+                  Expect.isFalse
+                      (red |> List.exists (fun m -> m.StartsWith "escape-only: one quote:"))
+                      "a quote still takes the escaping branch, so it is not reported" ]

@@ -1145,9 +1145,15 @@ const dFormat = (format, v) => {
         // rule 6: only " and \ and control chars as \u00xx — NO \n/\r/\t shortcuts),
         // and object-field order is author order (Canon.render does not sort keys),
         // so the bytes match the F# host across ALL strings (incl. control chars).
+        // Phase 370 — `encStr` mirrors Phase 365's fast path: one regex test for an escapable
+        // character (`"`, `\`, U+0000–U+001F, matched per UTF-16 code unit, so a lone surrogate
+        // is never escapable on either host) and the input returned whole between quotes when
+        // there is none. The escaping loop below it is unchanged, so the bytes are too
+        // (`StringEscapeTests` runs the emitted function against the .NET escaper under node).
         let prelude =
             """// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen (Phase 317 increment 8 — TS backend). Do not edit by hand.
 const encStr = (s) => {
+  if (!/["\\\u0000-\u001f]/.test(s)) return '"' + s + '"';
   let out = '"';
   for (const ch of s) {
     const code = ch.codePointAt(0);

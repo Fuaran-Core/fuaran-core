@@ -3071,6 +3071,41 @@ collector dominates the timing.
 **Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
 `0.35.0` slot: no number moves.
 
+### Generated TypeScript codecs write clean strings whole (Phase 370) — NO SURFACE CHANGE: the emitted `encStr` source gains one line; no wire byte moves
+
+**What moved, for a consumer.** The TypeScript the IDL generator emits (`Gen.typescriptModule`,
+`Fuaran.Core.Idl.Codegen`) carries a prelude `encStr` that wrote every string one character at a time.
+It now runs one regex test first, `/["\\\u0000-\u001f]/`, and returns a string with no escapable character
+whole between quotes. This is Phase 365's fast path, applied to the generated code. The escaping loop
+below the test is unchanged. The test matches UTF-16 code units, so a lone surrogate is never escapable,
+which is also true on .NET.
+
+**Not moved.** No byte an emitted codec writes, and no emitted declaration other than `encStr`'s body.
+No F# signature changes. The existing TypeScript-backend corpus tests (encode byte-identity and decode
+round trip) and the three-host differential are unchanged and green. A new list,
+`StringEscapeTests` "emitted TypeScript encStr (Phase 370)", runs the function the emitter writes under
+node against `Json.render` and the one-character oracle. Its inputs are the run-boundary corpus (clean,
+escape-only, first and last position, every control character alone and inside runs, surrogate pairs
+beside escapes), the `StringEscapeVectors` alphabet, and lone and reversed surrogates. A mutated fast
+path that misses the control characters is shown to go red.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-370.md`, under node, over Phase 364's two
+string corpora). On clean strings `encStr` is 10.1 to 10.5 times faster, and a whole emitted
+`encodeNode` is 3.1 to 3.6 times faster. On the escape-heavy corpus both are within the run-to-run
+spread. Phase 364's node leg times the Fable-compiled wire harness, which never reaches the emitted
+codec, so the emitted module is timed directly. The results file gives the method and the script.
+
+**What adopting it costs.** A checked-in generated module keeps the old body until it is regenerated
+by a Core that carries this phase. That needs a version cut of this slot (or later) and a raised
+generator pin in the consumer (DECISIONS.md D2, D76, D55). A grep for the old body on 2026-10-05 found
+one emitted copy, a downstream consumer's worked example (`host-ts/generated.mjs`, emitted by
+`Fuaran.Core.Idl.Cli` 0.30.0). It also found hand-written copies of the same loop in `fuaran-ts` and
+`fuaran-live`, which no regeneration reaches. The results file names them. None is edited here, and
+regenerating moves no wire byte, so not adopting costs only speed.
+
+**Class: none.** No signature, default or emitted wire byte changes, and only the generated source text
+of one function moves. It rides the `0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the
