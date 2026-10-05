@@ -2959,6 +2959,30 @@ call `escapeInto` in place of `Append(Json.escape s)`.
 **Class: additive.** One new function; no existing signature, default or emitted byte changes. It rides
 the `0.35.0` slot: no number moves.
 
+### A string is parsed by runs, not characters (Phase 366) — NO SURFACE CHANGE: faster, the same values and the same refusals
+
+**What moved, for a consumer.** Nothing but speed. The string reader inside
+`Json.parseDetailedWithPolicy` (and so every `parse*` entry point, `Decode.parse` included) walks each
+escape-free stretch up to the next `"` or `\`, checking the surrogate pairing of each unit as it passes
+(Phase 299), and takes the stretch whole: one `Substring` when the closing quote ends it, one ranged
+`Append` around an escape. The pairing state is carried across stretches and escapes exactly as before,
+so a pair may still be split between a raw half and a `\u` half.
+
+**Not moved.** Every decoded value, and every refusal's `JsonErrorKind`, message and `Position`. The
+suite pins this against the one-unit-at-a-time reader kept as a reference, over every sequence of up to
+four run-boundary tokens (177,482 inputs) and nineteen named refusals at the start, middle and end of a
+run and across a run/escape boundary (`StringParseRunTests.fs`); the `JsonParse` F* model, its committed
+extraction and the parser oracle differential are unchanged and green.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-366.md`). Under node, parse is 2.9 to 3.5
+times faster on the escape-free, op-stream and state corpora; on .NET it allocates 41 to 57 per cent less
+there and the escape-free parse is 2.5 times faster. Escape-heavy text is level.
+
+**What adopting it costs.** Nothing.
+
+**Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
+`0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

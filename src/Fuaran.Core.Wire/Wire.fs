@@ -877,67 +877,113 @@ module Json =
         // encoders each substitute their own replacement). Both spellings are refused as
         // `BadEscape`, the kind that already names "this string's content is not well-formed",
         // rather than a new kind every exhaustive match would have to learn.
+        //
+        // The string is read by RUNS (Phase 366): `scanRun` walks an escape-free stretch up to the
+        // next `"` or `\`, checking the pairing of each unit as it passes and advancing `i` before
+        // the check exactly as the one-unit-at-a-time reader did, so every refusal keeps its kind,
+        // message and position; the stretch is then taken whole — by one `Substring` when the
+        // closing quote ends the first run (the common string, with no builder at all), or by one
+        // ranged `Append` into the builder an escape made necessary. The pairing state is carried
+        // across runs and escapes alike, so a pair may be split between the two spellings.
         let parseString () : string =
             expect '"'
-            let sb = System.Text.StringBuilder()
-            let mutable fin = false
-            // The last unit appended was a high surrogate still waiting for its low half.
+            // The last unit taken was a high surrogate still waiting for its low half.
             let mutable pendingHigh = false
 
-            let append (u: int) =
+            let check (u: int) =
                 if pendingHigh && not (isLowSurrogate u) then
                     fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
                 elif not pendingHigh && isLowSurrogate u then
                     fail BadEscape "ill-formed string: a low surrogate with no high surrogate before it"
 
                 pendingHigh <- isHighSurrogate u
-                sb.Append(char u) |> ignore
 
-            while not fin do
-                if i >= n then
-                    fail UnterminatedString "unterminated string"
+            // Advance `i` over an escape-free run; it stops AT the `"` or `\` that ends it, or at `n`.
+            let scanRun () =
+                let mutable go = true
 
-                let c = input.[i]
+                while go && i < n do
+                    let c = input.[i]
+
+                    if c = '"' || c = '\\' then
+                        go <- false
+                    else
+                        i <- i + 1
+                        check (int c)
+
+            let start = i
+            scanRun ()
+
+            if i >= n then
+                fail UnterminatedString "unterminated string"
+
+            if input.[i] = '"' then
                 i <- i + 1
 
-                match c with
-                | '"' ->
-                    if pendingHigh then
-                        fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
+                if pendingHigh then
+                    fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
 
-                    fin <- true
-                | '\\' ->
+                input.Substring(start, i - 1 - start)
+            else
+                let sb = System.Text.StringBuilder()
+                sb.Append(input, start, i - start) |> ignore
+
+                let append (u: int) =
+                    check u
+                    sb.Append(char u) |> ignore
+
+                let mutable fin = false
+
+                while not fin do
+                    // `i` is at the `"` or `\` that ended the last run, or at `n`.
                     if i >= n then
-                        fail UnterminatedEscape "unterminated escape"
+                        fail UnterminatedString "unterminated string"
 
-                    let e = input.[i]
+                    let c = input.[i]
                     i <- i + 1
 
-                    match e with
-                    | '"' -> append (int '"')
-                    | '\\' -> append (int '\\')
-                    | '/' -> append (int '/')
-                    | 'n' -> append (int '\n')
-                    | 'r' -> append (int '\r')
-                    | 't' -> append (int '\t')
-                    | 'b' -> append (int '\b')
-                    | 'f' -> append (int '\f')
-                    | 'u' ->
-                        if i + 4 > n then
-                            fail TruncatedUnicodeEscape "truncated \\u escape"
+                    if c = '"' then
+                        if pendingHigh then
+                            fail BadEscape "ill-formed string: a high surrogate not followed by a low surrogate"
 
-                        let code =
-                            (hexDigit input.[i] <<< 12)
-                            + (hexDigit input.[i + 1] <<< 8)
-                            + (hexDigit input.[i + 2] <<< 4)
-                            + hexDigit input.[i + 3]
+                        fin <- true
+                    else
+                        if i >= n then
+                            fail UnterminatedEscape "unterminated escape"
 
-                        i <- i + 4
-                        append code
-                    | _ -> fail BadEscape ("bad escape '\\" + string e + "'")
-                | _ -> append (int c)
+                        let e = input.[i]
+                        i <- i + 1
 
-            sb.ToString()
+                        match e with
+                        | '"' -> append (int '"')
+                        | '\\' -> append (int '\\')
+                        | '/' -> append (int '/')
+                        | 'n' -> append (int '\n')
+                        | 'r' -> append (int '\r')
+                        | 't' -> append (int '\t')
+                        | 'b' -> append (int '\b')
+                        | 'f' -> append (int '\f')
+                        | 'u' ->
+                            if i + 4 > n then
+                                fail TruncatedUnicodeEscape "truncated \\u escape"
+
+                            let code =
+                                (hexDigit input.[i] <<< 12)
+                                + (hexDigit input.[i + 1] <<< 8)
+                                + (hexDigit input.[i + 2] <<< 4)
+                                + hexDigit input.[i + 3]
+
+                            i <- i + 4
+                            append code
+                        | _ -> fail BadEscape ("bad escape '\\" + string e + "'")
+
+                        let s = i
+                        scanRun ()
+
+                        if i > s then
+                            sb.Append(input, s, i - s) |> ignore
+
+                sb.ToString()
 
         let isDigitAt (k: int) =
             k < n && input.[k] >= '0' && input.[k] <= '9'
