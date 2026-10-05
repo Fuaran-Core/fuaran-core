@@ -3,7 +3,7 @@
 `Fuaran.Core.Wire` is timed in this repository in two ways (Phase 364):
 
 - **The timing harness** (`benchmarks/`) produces the speed figures: escape, render, canonical render
-  and parse over four fixed corpora, on .NET and under node, with the node ÷ .NET ratio per case. It
+  and parse over five fixed corpora, on .NET and under node, with the node ÷ .NET ratio per case. It
   is run by hand. Its tables are committed under `benchmarks/results/`.
 - **The clock leg** (`tests/Fuaran.Core.Tests/WireClockLeg.fs`) checks the shape of the code, not its
   speed. It runs inside the ordinary suite, so `verify.ps1` runs it on every gate. It fails when escape,
@@ -24,6 +24,7 @@ same values:
 | `escape-heavy` | the same count and length, about one character in four a quote, a backslash or a control character |
 | `op-stream` | 500 op-stream-shaped records: a kind tag, ids, a Lamport clock, a nested actor, a path array, short text, a non-whole float, a timestamp, a digest |
 | `state` | the shape of the compute repository's incremental state: a scheme tag, 20,000 short tokens and a packed text of 20,000 integers |
+| `floats` | 10,000 floats (Phase 367): fractions, negatives, small and large numbers in the `E` layout, and one in eight a whole double past 2^53, written as a 16- or 17-digit integer token. Those integer tokens are the only numbers whose parse re-renders the value it read (Phase 253's check) |
 
 Each corpus is timed under four cases:
 

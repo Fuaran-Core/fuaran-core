@@ -117,7 +117,7 @@ if ($node) {
 
     $corpora = @($netRows.Keys | ForEach-Object { ($_ -split ' ')[0] } | Select-Object -Unique)
     $cases = @('escape', 'render', 'canon', 'parse')
-    $order = @('escape-free', 'escape-heavy', 'op-stream', 'state') | Where-Object { $corpora -contains $_ }
+    $order = @('escape-free', 'escape-heavy', 'op-stream', 'state', 'floats') | Where-Object { $corpora -contains $_ }
     Write-Host ''
     Write-Host 'node / .NET, per case:'
     Write-Host "| corpus | $($cases -join ' | ') |"

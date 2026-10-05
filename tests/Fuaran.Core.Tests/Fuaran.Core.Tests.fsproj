@@ -385,6 +385,10 @@
     <Compile Include="..\..\benchmarks\Fuaran.Core.Wire.Benchmarks\Corpus.fs" Link="WireBench/Corpus.fs" />
     <Compile Include="..\..\benchmarks\Fuaran.Core.Wire.Benchmarks\Harness.fs" Link="WireBench/Harness.fs" />
     <Compile Include="WireClockLeg.fs" />
+    <!-- Phase 367 — the parsed-float check narrowed under Fable: every number outcome pinned against
+         the pre-367 reader (value, or refusal kind, message and position), with a go-red. Depends on
+         nothing here. Appended (append-only). -->
+    <Compile Include="FloatLayoutCheckTests.fs" />
     <!-- Phase 360 — encoding profiles: the 0.30.0 stores, the frozen V1 renderer and its committed
          vectors, the two-witness rehash and the stored-id family. Appended (append-only). -->
     <Compile Include="EncodingProfileTests.fs" />

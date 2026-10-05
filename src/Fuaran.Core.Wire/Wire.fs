@@ -249,6 +249,26 @@ module FloatLayout =
         n.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
 #endif
 
+    /// `finite n = tok`, exactly, for every `n` and `tok` — the question `Json.parseNumber` asks of an
+    /// integer token past 2^53 (Phase 253) — answered under Fable without the re-lay where the re-lay
+    /// is the identity (Phase 367). Every double of magnitude in [2^53, 1e17) is whole, and for it JS's
+    /// `toString` already writes the integer digits with no exponent and no point; `reLay` finds the
+    /// base-10 exponent at 15 or 16, inside the fixed-point range, and writes the same characters back.
+    /// So in that band the layout IS `toString`, and the comparison skips the string work. (Measured:
+    /// the re-lay was about a tenth of a node parse of the benchmark's `floats` corpus.) Outside the
+    /// band, and on .NET, where "R" is already the shortest digits, it is `finite n = tok` itself.
+    let internal isFiniteLayout (n: float) (tok: string) : bool =
+#if FABLE_COMPILER
+        let m = abs n
+
+        if m >= 9007199254740992.0 && m < 1e17 then
+            jsNumberToString n = tok
+        else
+            finite n = tok
+#else
+        finite n = tok
+#endif
+
     /// The full `"{0:R}"` rendering, non-finite tokens included (`NaN` / `Infinity` / `-Infinity`,
     /// the invariant-culture spellings). `Json.render`'s float case: those tokens are not valid
     /// JSON, which is exactly why `Json.tryRender` exists to name them, so the layout keeps
@@ -1104,7 +1124,7 @@ module Json =
                         with
                         | true, v when
                             not (System.Double.IsNaN v || System.Double.IsInfinity v)
-                            && FloatLayout.finite v = tok
+                            && FloatLayout.isFiniteLayout v tok
                             ->
                             JFloat v
                         | _ ->

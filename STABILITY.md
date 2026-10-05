@@ -2983,6 +2983,30 @@ there and the escape-free parse is 2.5 times faster. Escape-heavy text is level.
 **Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
 `0.35.0` slot: no number moves.
 
+### The parsed-float check skips the re-lay under Fable (Phase 367) — NO SURFACE CHANGE: faster under node, the same values and the same refusals
+
+**What moved, for a consumer.** Nothing but speed under Fable. The parser re-renders a number only for
+an integer token past 2^53, which Phase 253 admits exactly when it is the canonical layout of the double
+it reads as. Fractional floats never paid for this check. Under Fable, for a double of magnitude in
+[2^53, 1e17), that layout is JS's own `toString`, so the comparison no longer runs `reLay`. The new
+`FloatLayout.isFiniteLayout` is internal. On .NET the comparison is `FloatLayout.finite v = tok`, as it
+was.
+
+**Not moved.** Every decoded value, and every refusal's `JsonErrorKind`, message and `Position`. The
+suite compares production with the pre-367 reader, kept as a reference, over 39,432 number tokens and
+the boundary named on both sides of 2^53 and of 1e17 (`FloatLayoutCheckTests.fs`). The Fable output
+before and after, and .NET, gave identical outcome listings over 1,770,849 number inputs. The `JsonParse`
+F\* model, its extraction and the oracle differential are unchanged and green.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-367.md`). On the new `floats` corpus, where
+one number in eight is such a token, the check was 9 to 14 per cent of a node parse. The node parse is 16
+to 20 per cent faster, against a ±6 per cent control. Nothing else moves.
+
+**What adopting it costs.** Nothing.
+
+**Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
+`0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

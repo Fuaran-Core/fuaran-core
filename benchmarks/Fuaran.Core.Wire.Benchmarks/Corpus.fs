@@ -1,6 +1,6 @@
-/// The wire benchmark's fixed corpora (Phase 364): four values, each built by a deterministic
-/// generator that reads no clock, no random source and no host setting, so .NET and node build the
-/// SAME value and every case renders the same bytes on both. The harness (Program.fs, run by
+/// The wire benchmark's fixed corpora (Phase 364; the fifth, `floats`, Phase 367): five values, each
+/// built by a deterministic generator that reads no clock, no random source and no host setting, so
+/// .NET and node build the SAME value and every case renders the same bytes on both. The harness (Program.fs, run by
 /// ../run.ps1) and the suite's clock leg (tests/Fuaran.Core.Tests/WireClockLeg.fs) compile this one
 /// file, so the clock leg times the corpus the tables time.
 ///
@@ -131,12 +131,50 @@ let stateOf (n: int) : JVal =
 
 let state () : JVal = stateOf stateTokens
 
-/// The four corpora, in table order, by name.
+/// How many numbers the float corpus holds.
+let floatCount = 10_000
+
+/// One float of the float corpus, the `i`th, from the draw `x` in [0, 65521). Eight layouts in turn:
+/// short and long fractions, a negative, a small number and a large one in the `E` layout, and - one
+/// in eight - a WHOLE double past 2^53, which the float layout writes as a 16- or 17-digit integer
+/// token. That last shape is the only number token whose parse re-renders the value it read
+/// (`parseNumber`'s Phase 253 check, `FloatLayout.finite v = tok`); every token with a `.` or an `E`
+/// is read without one. No other value is whole, because a whole double below 2^53 renders as an
+/// integer token and would parse back as a `JInt`.
+let private floatAt (i: int) (x: int) : float =
+    let h = float x + 0.5
+
+    match i % 8 with
+    | 0 -> h / 64.0
+    | 1 -> h / 7.0
+    | 2 -> -(h / 3.0)
+    | 3 -> h * 1e-9 / 7.0
+    | 4 -> float (x + 1) * 1e20 / 3.0
+    | 5 -> float (x % 100) + 0.5
+    | 6 ->
+        if x % 2 = 0 then
+            1e16 + 2.0 * float x
+        else
+            9.1e15 + 2.0 * float x
+    | _ -> h * 1e-3
+
+/// (e) Float-heavy (Phase 367): an array of `floatCount` floats, every one a `JFloat`, so a parse of
+/// it is almost entirely number tokens.
+let floats () : JVal =
+    let mutable x = 31
+
+    JArr
+        [ for i in 1..floatCount do
+              x <- next x
+              yield JFloat(floatAt i x) ]
+
+/// The five corpora, in table order, by name.
 let corpora: (string * (unit -> JVal)) list =
     [ "escape-free", escapeFree
       "escape-heavy", escapeHeavy
       "op-stream", opStream
-      "state", state ]
+      "state", state
+      "floats", floats ]
 
 /// Every string the value carries, keys included, in document order: what the `escape` case escapes.
 let strings (v: JVal) : string[] =
@@ -221,7 +259,12 @@ let pinned: (string * string * string) list =
       "state", "escape", "217865:399f0f5e"
       "state", "render", "257879:21383ec8"
       "state", "canon", "257879:a6d6a37e"
-      "state", "parse", "257879:21383ec8" ]
+      "state", "parse", "257879:21383ec8"
+      // Phase 367: the float corpus, pinned when it was added. The other corpora did not move.
+      "floats", "escape", "0:811c9dc5"
+      "floats", "render", "147049:0b5f9622"
+      "floats", "canon", "147049:0b5f9622"
+      "floats", "parse", "147049:0b5f9622" ]
 
 /// The agreements every case must hold BEFORE it is timed, on the host that times it, short of the
 /// pins: escape reads back, render round-trips, and the canonical text is a fixed point. `Error`

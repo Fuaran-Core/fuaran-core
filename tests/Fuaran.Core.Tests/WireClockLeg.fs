@@ -305,6 +305,17 @@ let corpusFrozen =
                       Expect.equal (Corpus.laws name p) (Ok()) "the corpus laws hold on .NET"
                       Expect.equal (Corpus.unpinned name p) [] "every case's fingerprint is the pinned one"
                   }
+          // `unpinned` compares the pins a corpus HAS, so a corpus added with none would pass the
+          // test above having compared nothing (Phase 367, which added `floats`).
+          yield
+              test "every corpus pins every case" {
+                  let want =
+                      [ for (name, _) in Corpus.corpora do
+                            for (case, _) in Corpus.cases -> name, case ]
+
+                  let have = Corpus.pinned |> List.map (fun (c, k, _) -> c, k)
+                  Expect.equal have want "one pin per corpus and case, in table order"
+              }
           yield
               test "the clock leg's inventory is the list it runs" {
                   let cases = clockLeg |> Test.toTestCodeList |> List.length
