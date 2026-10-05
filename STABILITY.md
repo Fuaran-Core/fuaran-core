@@ -3135,6 +3135,34 @@ is level, a long integer token reads about twice as fast, and a small one about 
 **Class: none.** No signature, default, emitted byte, decoded value or refusal changes. It rides the
 `0.35.0` slot: no number moves.
 
+### `Column.aggregate` reads its aggregate and column type by pattern, not by union equality (Phase 353) — NO SURFACE CHANGE: faster under node, the same answers and the same refusals
+
+**What moved, for a consumer.** Nothing but speed. `Column.aggregate` used to test its `AggFn` and
+its column's `ColumnType` with `=` about a dozen times per call (`col.Type = IntType`, `fn = Sum`, …)
+and twice more per present cell (`fn = CountDistinct`, `fn = Min`), and `ColumnType.widens`, which the
+aggregate's admission asks once per present cell, compared with `=` three times. Under Fable a union's
+`=` is a call to a structural-equality helper, not a tag test: the compute layer's node profile of a
+pivot that aggregates one-cell lists (Phase 326) put 16 per cent of its time there. Each test is now a
+pattern match. `widens` compares through a private `ordinal` whose match is exhaustive, so a type added
+later cannot silently fail to widen into itself (an incomplete match is an error in this repository).
+
+**Not moved.** Every answer and every refusal of `aggregate` and `widens`, and their order of
+precedence. The suite's aggregate and widening tests run unchanged. A probe over `Sum`, `Mean`,
+`Median`, `StdDev`, `Count`, `CountDistinct`, `Min`, `Max`, `First` and `Last`, each over 100 float
+columns of one and of twenty cells, printed the same answers before and after, under node and under
+.NET.
+
+**The figures** (`fuaran-core-compute` `benchmarks/results/2026-10-05-i7-9700-phase-353.md`, Fable
+5.0.0, node v25.9.0). 5,000 calls over one-cell float columns: `Sum` from 5.3 to 0.85 ms, `Count`
+from 4.0 to 0.75 ms, `Max` from 4.0 to 0.7 ms, `Median` from 5.0 to 1.9 ms. 500 calls over
+twenty-cell columns: `Sum` from 1.95 to 0.55 ms. On .NET the same calls are level within the timer's
+noise.
+
+**What adopting it costs.** Nothing.
+
+**Class: none.** No signature, default, emitted byte, answer or refusal changes. It rides the
+`0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

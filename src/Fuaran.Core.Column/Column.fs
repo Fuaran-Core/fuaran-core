@@ -395,6 +395,17 @@ module ColumnType =
         | TimestampType -> "timestamp"
         | DecimalType -> "decimal"
 
+    /// The type's position in `all` — the identity `widens` compares by, as an integer (Phase 353).
+    let private ordinal (t: ColumnType) : int =
+        match t with
+        | IntType -> 0
+        | FloatType -> 1
+        | BoolType -> 2
+        | StringType -> 3
+        | DateType -> 4
+        | TimestampType -> 5
+        | DecimalType -> 6
+
     /// The full closed set of valid type tags — the `UnknownType` enumeration (and the encode order).
     let all =
         [ IntType
@@ -423,10 +434,14 @@ module ColumnType =
     /// same way: `ColumnCodec.decodeCell` decodes a JSON int into a `DecimalType` column. `Float →
     /// Decimal` is NOT a widening, in either direction: a float is an approximation and a decimal is
     /// a statement of digits, so a retype between them changes what the column claims.
+    ///
+    /// Read by pattern, not by `=` (Phase 353): a union's `=` is a structural-equality call under
+    /// Fable, and `Column.aggregate` asks this once per cell. The identity is `ordinal`'s, whose
+    /// match is exhaustive, so a new type cannot silently fail to widen into itself.
     let widens (from: ColumnType) (target: ColumnType) : bool =
-        from = target
-        || (from = IntType && target = FloatType)
-        || (from = IntType && target = DecimalType)
+        match from, target with
+        | IntType, (FloatType | DecimalType) -> true
+        | _ -> ordinal from = ordinal target
 
 /// Cell construction and THE cell identity and order: `decimal` canonicalises, `token` is the
 /// key every consumer partitions on, and `compare` the order every consumer sorts by.
@@ -666,7 +681,11 @@ module Column =
     let private admit (col: Column) (c: Cell) : Result<Cell, AggregateError> =
         match c with
         | Null -> Ok Null
-        | Decimal s when col.Type = DecimalType ->
+        | Decimal s when
+            (match col.Type with
+             | DecimalType -> true
+             | _ -> false)
+            ->
             match DecimalText.tryCanonical s with
             | Some canonical -> Ok(Decimal canonical)
             | None ->
@@ -780,19 +799,39 @@ module Column =
     /// `StdDev` IS THE POPULATION FORM: the square root of the mean squared deviation, dividing by
     /// the count `n`, not the sample form's `n - 1`. One value has a standard deviation of `0`.
     let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
-        let isNumeric = col.Type = IntType || col.Type = FloatType || col.Type = DecimalType
+        // The aggregate and the column type are read by PATTERN, never by `=` (Phase 353): a union's
+        // `=` is a structural-equality call under Fable, and these tests ran a dozen of them per call
+        // and two more per cell — 16% of a node pivot that calls this once per (group, on-value) pair.
+        let isInt, isFloat, isDecimal =
+            match col.Type with
+            | IntType -> true, false, false
+            | FloatType -> false, true, false
+            | DecimalType -> false, false, true
+            | BoolType
+            | StringType
+            | DateType
+            | TimestampType -> false, false, false
+
+        let isNumeric = isInt || isFloat || isDecimal
 
         // Which accumulator this aggregate folds into. The three `Sum`s differ by column type; the
         // float-valued aggregates share the float fold.
-        let decimalSum = fn = Sum && col.Type = DecimalType
-        let intSum = fn = Sum && col.Type = IntType
+        let isSum, isMin, countDistinct, keepsNumbers, ordered, floatValued =
+            match fn with
+            | Sum -> true, false, false, false, false, false
+            | Mean -> false, false, false, false, false, true
+            | StdDev
+            | Median -> false, false, false, true, false, true
+            | Min -> false, true, false, false, true, false
+            | Max -> false, false, false, false, true, false
+            | CountDistinct -> false, false, true, false, false, false
+            | Count
+            | First
+            | Last -> false, false, false, false, false, false
 
-        let floatFold =
-            isNumeric
-            && (fn = Mean || fn = StdDev || fn = Median || (fn = Sum && col.Type = FloatType))
-
-        let keepsNumbers = fn = StdDev || fn = Median
-        let ordered = fn = Min || fn = Max
+        let decimalSum = isSum && isDecimal
+        let intSum = isSum && isInt
+        let floatFold = isNumeric && (floatValued || (isSum && isFloat))
 
         // A refusal of a cell outside the column's type stops the pass; the first decimal past the
         // float range is remembered, and the pass goes on looking for the refusal that outranks it.
@@ -831,7 +870,7 @@ module Column =
                 | _ ->
                     count <- count + 1
 
-                    if fn = CountDistinct then
+                    if countDistinct then
                         distinct.Add(Cell.token cell) |> ignore
                     elif ordered then
                         if count = 1 then
@@ -839,7 +878,7 @@ module Column =
                         else
                             match Cell.compare best cell with
                             | Some c ->
-                                if (fn = Min) <> (c <= 0) then
+                                if isMin <> (c <= 0) then
                                     best <- cell
                             | None -> ()
                     elif decimalSum then
