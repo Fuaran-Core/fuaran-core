@@ -1127,6 +1127,12 @@ module Dag =
     // object per node; the `op` value is the witness's own Encode output embedded raw (preserved
     // byte-for-byte); nodes are emitted in id-sorted order so output is stable for a fixed DAG.
 
+    /// The `\u00xx` spelling of each control character `U+0000`–`U+001F`, lower-case hex, built
+    /// once (Phase 365) — the copy of `Wire.Json`'s table that `jstr` spells from.
+    let private jstrControlEscapes: string[] =
+        let hex = "0123456789abcdef"
+        Array.init 0x20 (fun c -> "\\u00" + string hex.[c >>> 4] + string hex.[c &&& 0xF])
+
     /// JSON string spelling for the node line — the spine's one escaping rule (Phase 287): `"`,
     /// `\`, and every control character `U+0000`–`U+001F` as lower-case `\u00xx`, with NO short
     /// form for `\n` / `\r` / `\t`. A DELIBERATE COPY of `Wire.Json.escape`, for the reason the
@@ -1135,19 +1141,48 @@ module Dag =
     /// pins `toJsonl`'s bytes for a node id carrying a control character against
     /// `Wire.Json.escape`'s — so the copy cannot drift quietly. (The `actor` member is spelled by
     /// `Actor.encode`, the linear package's copy of the same rule.) Fable-clean.
+    ///
+    /// The fast path of `Wire.Json.escape` (Phase 365), copied with it: a string with nothing to
+    /// escape is quoted whole, and otherwise each clean run is one ranged append and each control
+    /// character is spelled from a table built once.
     let private jstr (s: string) : string =
-        let sb = System.Text.StringBuilder()
-        sb.Append('"') |> ignore
+        let mutable first = 0
+        let mutable clean = true
 
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
+        while clean && first < s.Length do
+            let code = int s.[first]
 
-        sb.Append('"') |> ignore
-        sb.ToString()
+            if code < 0x20 || code = 0x22 || code = 0x5C then
+                clean <- false
+            else
+                first <- first + 1
+
+        if clean then
+            "\"" + s + "\""
+        else
+            let sb = System.Text.StringBuilder(s.Length + 18)
+            sb.Append('"').Append(s, 0, first) |> ignore
+            let mutable start = first
+
+            for i in first .. s.Length - 1 do
+                let code = int s.[i]
+
+                if code < 0x20 || code = 0x22 || code = 0x5C then
+                    if i > start then
+                        sb.Append(s, start, i - start) |> ignore
+
+                    (if code = 0x22 then sb.Append("\\\"")
+                     elif code = 0x5C then sb.Append("\\\\")
+                     else sb.Append(jstrControlEscapes.[code]))
+                    |> ignore
+
+                    start <- i + 1
+
+            if s.Length > start then
+                sb.Append(s, start, s.Length - start) |> ignore
+
+            sb.Append('"') |> ignore
+            sb.ToString()
 
     /// One JSON object per node, in deterministic id-sorted order. The `op` is embedded as raw
     /// JSON (the witness's own Encode output), so a round-trip preserves it byte-for-byte.

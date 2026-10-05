@@ -34,8 +34,9 @@ open Fuaran.Core.WireBench
 let private small = 20_000
 let private sizeRatio = 8
 
-/// The bound on each case's large/small ratio: 20, PROPOSED from the Phase 364 readings and the
-/// operator's to set (docs/wire-performance.md, "The clock leg's bound", carries every reading).
+/// The bound on each case's large/small ratio: 20, proposed from the Phase 364 readings and SET by
+/// the operator on 2026-10-05 (docs/wire-performance.md, "The clock leg's bound", carries every
+/// reading and the ruling).
 /// Linear reads 8. On the reference machine, with the collector held off, 36 quiet readings across
 /// Debug and Release read 7.99 to 10.35 (render the highest: its buffer grows by doubling), and 37
 /// readings under an all-core burner read up to 16.24, a burner-starved large size outgrowing the

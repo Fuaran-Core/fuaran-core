@@ -2929,6 +2929,36 @@ column of the committed vectors; a deliberate byte change adds a case and moves 
 modules); no existing signature, default or emitted byte changes. It rides the `0.35.0` slot: no number
 moves.
 
+### A string with nothing to escape is written whole: the escape scans before it copies, and the writer escapes into its own builder (Phase 365) — ADDITIVE: `Json.escapeInto`; no emitted byte moves
+
+**What moved, for a consumer.**
+
+- **New: `Json.escapeInto (sb: StringBuilder) (s: string) : unit`** (`Fuaran.Core.Wire`). It appends
+  `Json.escape s` to a builder the caller already holds, with no intermediate string.
+- **Faster, the same bytes.** `Json.escape` scans for the first `"`, `\` or control character below
+  `U+0020`. A string with none is returned as it is, the same reference. Otherwise each clean run is
+  appended with one ranged append, and each control character is spelled from a table built once, not
+  formatted. Under Fable the scan is one native regex search. `Json.render`, `Canon.render`,
+  `Canon.renderOrdered` and both `tryRender`s write each string with `escapeInto`. The two D2 copies of
+  the rule are rewritten the same way: `JsonString.quote` in `Fuaran.Core.OpStream`, which every op-stream
+  append and verify calls, and `jstr` in `Fuaran.Core.OpStream.Dag`.
+- **Not moved.** No emitted byte changes. `StringEscapeVectors`, the committed `conformance/escape/`
+  table, `EncodingProfileVectors` and the chain corpus are unchanged. The frozen `EncodingProfile.V1`
+  escape (Phase 360) and `quoteLegacy` keep their one-character-at-a-time bodies, so a rewrite of the
+  live path cannot move a `V1` byte.
+
+**The figures** (`benchmarks/results/2026-10-05-i7-9700-phase-365.md`, two runs before and after on one
+machine; each range is the faster "before" over the slower "after", per corpus). On .NET, escape is 2.4
+to 5.5 times faster and render 1.25 to 2.7 times faster, and one render allocates about half the bytes it
+did (the 20,000-token state: 6.6 MB to 3.5 MB). Under node, escape is 4.7 to 21 times faster and render
+2.8 to 7.3 times faster. Parse does not move.
+
+**What adopting it costs.** Nothing. A consumer that builds a document in its own `StringBuilder` can
+call `escapeInto` in place of `Append(Json.escape s)`.
+
+**Class: additive.** One new function; no existing signature, default or emitted byte changes. It rides
+the `0.35.0` slot: no number moves.
+
 ## 0.34.0 — released 2026-10-02 as `v0.34.0`
 
 **Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-02 the

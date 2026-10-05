@@ -118,8 +118,8 @@ results file records it: most of .NET's `state` parse time is the collector.
 
 ## The clock leg's bound
 
-**Proposed: 20** on the large ÷ small ratio, for all three cases. The operator sets it; the readings
-it rests on follow. They were taken on an i7-9700, 8 logical processors, on 2026-10-04, six
+**20** on the large ÷ small ratio, for all three cases. Phase 364 proposed it; the operator SET it on
+2026-10-05. The readings it rests on follow. They were taken on an i7-9700, 8 logical processors, on 2026-10-04, six
 processes per configuration, each running the leg once.
 
 | reading | escape | render | parse |

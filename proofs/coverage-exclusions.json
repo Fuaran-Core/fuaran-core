@@ -2545,6 +2545,14 @@
     },
     {
       "members": [
+        "Json.escapeInto"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "JSON reading and writing beside the modelled parser and canonical renderer: policy-parameterised parses, the non-canonical renderer, escaping and the well-formedness scans; the wire tests and the parse corpus stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+    },
+    {
+      "members": [
         "Json.parseTolerantOfNullWith"
       ],
       "class": "measured-elsewhere",

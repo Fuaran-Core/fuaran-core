@@ -85,11 +85,152 @@ module EscapeCorpus =
 
         System.IO.File.WriteAllText(path dir, render ())
 
+/// Phase 365 — the escape's fast path scans for the first escapable character and copies clean runs
+/// whole. These are the inputs whose run boundaries it can get wrong, checked on every copy of the
+/// rule against a one-character-at-a-time oracle written from the rule's statement.
+module RunBoundaries =
+
+    /// The rule, one character at a time: the shape the escape had before Phase 365.
+    let oracle (s: string) : string =
+        let sb = System.Text.StringBuilder()
+
+        for ch in s do
+            match ch with
+            | '"' -> sb.Append("\\\"") |> ignore
+            | '\\' -> sb.Append("\\\\") |> ignore
+            | c when int c < 0x20 -> sb.Append(sprintf "\\u%04x" (int c)) |> ignore
+            | c -> sb.Append(c) |> ignore
+
+        sb.ToString()
+
+    let private controls = [ for c in 0..0x1F -> string (char c) ]
+
+    /// Clean strings, escape-only strings, an escape first and last, runs between escapes, every
+    /// control character alone and inside runs, and surrogate pairs beside escapes.
+    let inputs: (string * string) list =
+        [ "empty", ""
+          "one clean character", "a"
+          "clean ASCII", "plain text, digits 0123456789 and / punctuation!"
+          "clean non-ASCII", "é ü 中文   \u007f"
+          "a surrogate pair alone", "\U0001F600"
+          "surrogate pairs in clean text", "a\U0001F600b\U0001D11Ec"
+          "a surrogate pair beside escapes", "\"\U0001F600\\\n\U0001F600\u0001"
+          "escape-only: one quote", "\""
+          "escape-only: one backslash", "\\"
+          "escape-only: every escaped class", "\"\\\u0000\u001f\n\r\t"
+          "escape-only: every control character", String.concat "" controls
+          "an escape at the first position", "\"abc"
+          "an escape at the last position", "abc\\"
+          "escapes at both ends", "\nabc\t"
+          "runs between escapes", "ab\"cd\\ef\ngh\u0000ij"
+          "single-character runs", "a\"b\\c\nd"
+          "adjacent escapes inside a run", "abc\"\"\\\\\n\ndef"
+          "a long clean run", String.replicate 300 "x" + "\"" + String.replicate 300 "y" ]
+        @ [ for c in 0..0x1F -> sprintf "U+%04X inside a run" c, "ab" + string (char c) + "cd" ]
+
+    /// The checks one input makes against `escaped` — every copy of the rule, in its own wrapping.
+    let checks (escaped: string -> string) (s: string) : (string * string * string) list =
+        let body = oracle s
+        let q = "\"" + body + "\""
+
+        let into =
+            let sb = System.Text.StringBuilder("<")
+            Json.escapeInto sb s
+            sb.Append(">").ToString()
+
+        let dag: Dag.T<unit> =
+            { Nodes =
+                Map.ofList
+                    [ s,
+                      { Id = s
+                        Parents = [ s ]
+                        Actor = Human s
+                        Op = () } ] }
+
+        let human = "{\"kind\":\"human\",\"id\":" + q + "}"
+
+        [ "Json.escape", body, escaped s
+          "Json.escapeInto", "<" + body + ">", into
+          "Json.render", q, Json.render (JStr s)
+          "Canon.render", "{" + q + ":" + q + "}", Canon.render (JObj [ s, JStr s ])
+          "Actor.encode", human, Actor.encode (Human s)
+          "Dag.toJsonl",
+          "{\"node\":true,\"id\":"
+          + q
+          + ",\"parents\":["
+          + q
+          + "],\"actor\":"
+          + human
+          + ",\"op\":{}}",
+          Dag.toJsonl (fun () -> "{}") dag ]
+
+    /// Every (input, copy) pair whose bytes differ from the oracle's, under `escaped` as `Json.escape`.
+    let mismatches (escaped: string -> string) : string list =
+        [ for name, s in inputs do
+              for copy, expected, got in checks escaped s do
+                  if got <> expected then
+                      yield sprintf "%s / %s: expected %A, got %A" name copy expected got ]
+
+    /// A deliberately broken run boundary: the clean run BEFORE each escape is appended one character
+    /// short. Exists only to show the check above can go red.
+    let brokenRunBoundary (s: string) : string =
+        let sb = System.Text.StringBuilder()
+        let mutable start = 0
+
+        for i in 0 .. s.Length - 1 do
+            let code = int s.[i]
+
+            if code < 0x20 || code = 0x22 || code = 0x5C then
+                if i - start > 1 then
+                    sb.Append(s, start, i - start - 1) |> ignore
+
+                sb.Append(oracle (string s.[i])) |> ignore
+                start <- i + 1
+
+        if s.Length > start then
+            sb.Append(s, start, s.Length - start) |> ignore
+
+        sb.ToString()
+
 [<Tests>]
 let tests =
     testList
         "StringEscape"
-        [ testCase "the committed conformance/escape/ file is what this kit renders, and parses back to the lines"
+        [ testCase "run boundaries (Phase 365): every copy of the rule agrees with the one-character oracle"
+          <| fun _ ->
+              Expect.isGreaterThan RunBoundaries.inputs.Length 40 "the boundary corpus is the one written"
+              Expect.equal (RunBoundaries.mismatches Json.escape) [] "no input, no copy differs from the oracle"
+
+          testCase "run boundaries (Phase 365): a deliberately broken run boundary is red"
+          <| fun _ ->
+              let red = RunBoundaries.mismatches RunBoundaries.brokenRunBoundary
+              Expect.isNonEmpty red "a run appended one character short is caught"
+
+              Expect.exists
+                  red
+                  (fun m -> m.StartsWith "runs between escapes / Json.escape:")
+                  "and it is caught on the runs-between-escapes input"
+
+              Expect.isFalse
+                  (red |> List.exists (fun m -> m.StartsWith "escape-only"))
+                  "an escape-only input has no run to break, and is not reported"
+
+          testCase "a string with nothing to escape is returned as it is (Phase 365)"
+          <| fun _ ->
+              for s in [ ""; "plain"; "é \U0001F600   /" ] do
+                  Expect.isTrue (obj.ReferenceEquals(Json.escape s, s)) (sprintf "%A is not copied" s)
+
+              let s = "needs \"one\""
+              Expect.isFalse (obj.ReferenceEquals(Json.escape s, s)) "a string with an escape is"
+
+          testCase "Json.escapeInto appends after what the builder holds and equals Json.escape (Phase 365)"
+          <| fun _ ->
+              for _, s in RunBoundaries.inputs do
+                  let sb = System.Text.StringBuilder("prefix|")
+                  Json.escapeInto sb s
+                  Expect.equal (sb.ToString()) ("prefix|" + Json.escape s) (sprintf "%A" s)
+
+          testCase "the committed conformance/escape/ file is what this kit renders, and parses back to the lines"
           <| fun _ ->
               let file = EscapeCorpus.path (OwnedConformance.root ())
 

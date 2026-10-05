@@ -149,6 +149,7 @@ method Fuaran.Core.JValModule.kindName(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.JValModule.nonFiniteToken(System.Double) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Json.encode(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Json.escape(System.String) : System.String
+method Fuaran.Core.Json.escapeInto(System.Text.StringBuilder, System.String) : System.Void
 method Fuaran.Core.Json.escapeWith(Fuaran.Core.EncodingProfile, System.String) : System.String
 method Fuaran.Core.Json.firstIllFormedString(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.String, System.String>>
 method Fuaran.Core.Json.firstIllFormedUnit(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>

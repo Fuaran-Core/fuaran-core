@@ -42,20 +42,60 @@ type ActorInvalid =
 /// nothing writes it.
 module internal JsonString =
 
-    /// `"` + the escaped body + `"` — the canonical spelling of `s` as a JSON string literal.
+    /// The `\u00xx` spelling of each control character `U+0000`–`U+001F`, lower-case hex, built
+    /// once (Phase 365) — the copy of `Wire.Json`'s table.
+    let private controlEscapes: string[] =
+        let hex = "0123456789abcdef"
+        Array.init 0x20 (fun c -> "\\u00" + string hex.[c >>> 4] + string hex.[c &&& 0xF])
+
+    /// The index of the first character of `s` the rule escapes, or `-1` (Phase 365) — the copy of
+    /// `Wire.Json`'s scan.
+    let private firstEscapable (s: string) : int =
+        let mutable i = 0
+        let mutable found = -1
+
+        while found < 0 && i < s.Length do
+            let code = int s.[i]
+
+            if code < 0x20 || code = 0x22 || code = 0x5C then
+                found <- i
+            else
+                i <- i + 1
+
+        found
+
+    /// `"` + the escaped body + `"` — the canonical spelling of `s` as a JSON string literal. The
+    /// fast path of `Wire.Json.escape` (Phase 365), copied: a string with nothing to escape is
+    /// quoted whole, and otherwise each clean run is one ranged append.
     let quote (s: string) : string =
-        let sb = System.Text.StringBuilder()
-        sb.Append('"') |> ignore
+        let first = firstEscapable s
 
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
+        if first < 0 then
+            "\"" + s + "\""
+        else
+            let sb = System.Text.StringBuilder(s.Length + 18)
+            sb.Append('"').Append(s, 0, first) |> ignore
+            let mutable start = first
 
-        sb.Append('"') |> ignore
-        sb.ToString()
+            for i in first .. s.Length - 1 do
+                let code = int s.[i]
+
+                if code < 0x20 || code = 0x22 || code = 0x5C then
+                    if i > start then
+                        sb.Append(s, start, i - start) |> ignore
+
+                    (if code = 0x22 then sb.Append("\\\"")
+                     elif code = 0x5C then sb.Append("\\\\")
+                     else sb.Append(controlEscapes.[code]))
+                    |> ignore
+
+                    start <- i + 1
+
+            if s.Length > start then
+                sb.Append(s, start, s.Length - start) |> ignore
+
+            sb.Append('"') |> ignore
+            sb.ToString()
 
     /// The pre-Phase-287 spelling: `\n` / `\r` / `\t` short, every other control character
     /// `\u00xx`. Verification and migration only.

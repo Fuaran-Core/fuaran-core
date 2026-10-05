@@ -319,6 +319,69 @@ module EncodingProfile =
 /// over canonical wire JSON.
 module Json =
 
+    // ---- THE ESCAPE'S FAST PATH (Phase 365) ----
+    // Most strings a document carries have nothing to escape, so the escape scans before it copies:
+    // `firstEscapable` finds the first character the rule touches, and a string with none is used
+    // whole. When there is one, `appendEscapedFrom` appends each clean run with ONE ranged append
+    // and spells only the escaped characters, from a table rather than a format call. The bytes
+    // are the rule's, unchanged; `StringEscapeVectors` and `StringEscapeTests` hold them.
+
+    /// The `\u00xx` spelling of each control character `U+0000`–`U+001F`, lower-case hex, built
+    /// once so that no escape formats a number.
+    let private controlEscapes: string[] =
+        let hex = "0123456789abcdef"
+        Array.init 0x20 (fun c -> "\\u00" + string hex.[c >>> 4] + string hex.[c &&& 0xF])
+
+    /// The index of the first character of `s` the rule escapes — `"`, `\` or a control character
+    /// below `U+0020` — or `-1` when there is none. Under Fable it is one native regex search,
+    /// which the Phase 365 harness measured faster under node than the loop on long clean strings
+    /// (the `escape-free` escape case, 0.21 ms to 0.12 ms) and no slower elsewhere; the class is
+    /// the same three, code unit by code unit, so the index is the loop's.
+#if FABLE_COMPILER
+    [<Fable.Core.Emit("$0.search(/[\"\\\\\\u0000-\\u001f]/)")>]
+    let private firstEscapable (s: string) : int = Fable.Core.Util.jsNative
+#else
+    let private firstEscapable (s: string) : int =
+        let mutable i = 0
+        let mutable found = -1
+
+        while found < 0 && i < s.Length do
+            let code = int s.[i]
+
+            if code < 0x20 || code = 0x22 || code = 0x5C then
+                found <- i
+            else
+                i <- i + 1
+
+        found
+#endif
+
+    /// Append the escaped body of `s` to `sb`, given that `first` is the index of its first
+    /// escapable character: the clean prefix and every later clean run as one ranged append each.
+    let private appendEscapedFrom (sb: System.Text.StringBuilder) (s: string) (first: int) : unit =
+        if first > 0 then
+            sb.Append(s, 0, first) |> ignore
+
+        // `start` is where the clean run not yet appended begins.
+        let mutable start = first
+
+        for i in first .. s.Length - 1 do
+            let code = int s.[i]
+
+            if code < 0x20 || code = 0x22 || code = 0x5C then
+                if i > start then
+                    sb.Append(s, start, i - start) |> ignore
+
+                (if code = 0x22 then sb.Append("\\\"")
+                 elif code = 0x5C then sb.Append("\\\\")
+                 else sb.Append(controlEscapes.[code]))
+                |> ignore
+
+                start <- i + 1
+
+        if s.Length > start then
+            sb.Append(s, start, s.Length - start) |> ignore
+
     /// THE string escape of the spine (Phase 287; DECISIONS.md "the spine owns the string-escaping
     /// rule"). Exactly three classes are escaped and nothing else: `"` as `\"`, `\` as `\\`, and
     /// every control character `U+0000`–`U+001F` as `\u00xx` with LOWER-CASE hex — including `\n`,
@@ -329,17 +392,30 @@ module Json =
     /// `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — D2 forbids them a reference here) are held
     /// value-identical to it by `StringEscapeVectors` in the conformance kit. The parser accepts
     /// both the short and the `\u` spelling, so nothing changes on read.
+    ///
+    /// A string with nothing to escape is returned AS IT IS (Phase 365): the scan finds the first
+    /// escapable character, and only a string that has one is copied — its clean runs appended
+    /// whole, one ranged append each, and only the escaped characters spelled one at a time.
     let escape (s: string) : string =
-        let sb = System.Text.StringBuilder()
+        let first = firstEscapable s
 
-        for ch in s do
-            match ch with
-            | '"' -> sb.Append("\\\"") |> ignore
-            | '\\' -> sb.Append("\\\\") |> ignore
-            | c when int c < 0x20 -> sb.AppendFormat("\\u{0:x4}", int c) |> ignore
-            | c -> sb.Append(c) |> ignore
+        if first < 0 then
+            s
+        else
+            let sb = System.Text.StringBuilder(s.Length + 16)
+            appendEscapedFrom sb s first
+            sb.ToString()
 
-        sb.ToString()
+    /// `escape s` appended to `sb` (Phase 365) — the same bytes, written into the caller's own
+    /// builder, so a writer that is already building a document makes no intermediate string per
+    /// value. A string with nothing to escape is appended whole.
+    let escapeInto (sb: System.Text.StringBuilder) (s: string) : unit =
+        let first = firstEscapable s
+
+        if first < 0 then
+            sb.Append(s) |> ignore
+        else
+            appendEscapedFrom sb s first
 
     // ---- THE WRITER (Phase 306) ----
     // One iterative writer stands behind `Json.render`, `Canon.render`, `Canon.renderOrdered` and
@@ -424,9 +500,11 @@ module Json =
         sb.ToString()
 
     /// Write `v` with `floatText` as the float layout and object members in Ordinal key order
-    /// (`sortKeys`) or as authored. The bytes are the ones the recursive renderers wrote.
+    /// (`sortKeys`) or as authored. The bytes are the ones the recursive renderers wrote. Each string
+    /// is escaped straight into the writer's builder (`escapeInto`, Phase 365), never through an
+    /// intermediate string.
     let internal writeWith (sortKeys: bool) (floatText: float -> string) (v: JVal) : string =
-        writeCore (fun sb s -> sb.Append(escape s) |> ignore) sortKeys floatText v
+        writeCore escapeInto sortKeys floatText v
 
     /// `EncodingProfile.V1`'s string escape, FROZEN (Phase 360): the body `Json.escape` had in
     /// `0.30.0`, kept as its own copy rather than written in terms of the live `escape`, so no later
