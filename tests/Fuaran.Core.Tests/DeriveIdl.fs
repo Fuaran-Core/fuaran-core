@@ -22,7 +22,9 @@ open Fuaran.Core.Idl
 //   - a fully defaulted kind (`Note`) and record (`Owner`), and kinds that are not.
 //
 // `DeriveGenerated.fs` is the F# emitted from it with every derivation requested, committed and
-// checked for drift by `IdlDeriveTests`.
+// checked for drift by `IdlDeriveTests`. Since Phase 377 that includes the collecting decoders and
+// the public per-spec entries (`Gen.Derivation.SpecDecoders`), whose field-shape laws
+// `IdlSpecDecoderTests` holds over this module.
 // ---------------------------------------------------------------------------
 
 let private field name ty opt =
@@ -145,7 +147,8 @@ let derivations: Gen.Derivation list =
       Gen.Derivation.Projections("Trigger", [ "owner" ])
       Gen.Derivation.Projections("Measure", [ "amount" ])
       Gen.Derivation.DefaultRecords
-      Gen.Derivation.VocabularyConstants ]
+      Gen.Derivation.VocabularyConstants
+      Gen.Derivation.SpecDecoders ]
 
 /// The module text the generator emits for this vocabulary with every derivation requested.
 let generate () : Result<string, CodegenError> =

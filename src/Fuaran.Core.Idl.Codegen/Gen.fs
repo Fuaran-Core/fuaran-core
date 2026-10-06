@@ -151,20 +151,32 @@ module Gen =
         /// `kindCategories`, `kindFieldNames`, `envelopeFieldNames` and `opFieldNames` as `Set`
         /// values.
         | VocabularyConstants
+        /// Phase 377 — a COLLECTING decoder beside every short-circuiting one, answering every
+        /// defect as a `DecodeError list` in a stated order (field declaration order, each
+        /// member's nested defects at its position; list items by index; map entries in document
+        /// order — the order is written above the collecting prelude), and the public entries
+        /// over them: per kind `decode<Tag>Spec` (the first defect) and `decode<Tag>SpecAll`
+        /// (every defect), per node `decodeNodeJson`, `decodeNodeJsonAll` and `decodeNodeAll`.
+        /// A collecting decoder's first defect is its short-circuiting twin's defect.
+        | SpecDecoders
 
-    let private toRequest (d: Derivation) : FSharpDerive.Request =
+    let private toRequest (d: Derivation) : FSharpDerive.Request option =
         match d with
-        | Derivation.StructuralAccess -> FSharpDerive.Request.StructuralAccess
-        | Derivation.KeyedPositions -> FSharpDerive.Request.KeyedPositions
-        | Derivation.SlotsOf t -> FSharpDerive.Request.SlotsOf t
-        | Derivation.MapMsg -> FSharpDerive.Request.MapMsg
-        | Derivation.Fold u -> FSharpDerive.Request.Fold u
-        | Derivation.Projections(u, fs) -> FSharpDerive.Request.Projections(u, fs)
-        | Derivation.DefaultRecords -> FSharpDerive.Request.DefaultRecords
-        | Derivation.VocabularyConstants -> FSharpDerive.Request.VocabularyConstants
+        | Derivation.StructuralAccess -> Some FSharpDerive.Request.StructuralAccess
+        | Derivation.KeyedPositions -> Some FSharpDerive.Request.KeyedPositions
+        | Derivation.SlotsOf t -> Some(FSharpDerive.Request.SlotsOf t)
+        | Derivation.MapMsg -> Some FSharpDerive.Request.MapMsg
+        | Derivation.Fold u -> Some(FSharpDerive.Request.Fold u)
+        | Derivation.Projections(u, fs) -> Some(FSharpDerive.Request.Projections(u, fs))
+        | Derivation.DefaultRecords -> Some FSharpDerive.Request.DefaultRecords
+        | Derivation.VocabularyConstants -> Some FSharpDerive.Request.VocabularyConstants
+        // The decoders are the codec emitter's own, not a structural derivation's.
+        | Derivation.SpecDecoders -> None
 
-    /// `fsharpModuleWith` plus the requested structural derivations (Phase 374), appended after
-    /// the module's existing members. The empty list emits exactly what `fsharpModuleWith` does.
+    /// `fsharpModuleWith` plus the requested structural derivations (Phase 374) and, under
+    /// `Derivation.SpecDecoders`, the collecting decoders and public per-spec entries (Phase 377),
+    /// appended after the module's existing members. The empty list emits exactly what
+    /// `fsharpModuleWith` does.
     let fsharpModuleDerived
         (sup: GenSupport)
         (derivations: Derivation list)
@@ -172,7 +184,13 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        FSharpCodec.fsharpModuleDerived (toSupport sup) (derivations |> List.map toRequest) moduleName idl kindTags
+        FSharpCodec.fsharpModuleDerived
+            (toSupport sup)
+            (derivations |> List.choose toRequest)
+            (derivations |> List.contains Derivation.SpecDecoders)
+            moduleName
+            idl
+            kindTags
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.

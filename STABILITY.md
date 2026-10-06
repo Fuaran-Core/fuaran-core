@@ -2457,6 +2457,43 @@ No `CodegenError` case was added.
 generator configuration beside the IDL, not a wire fact — so there is no wire-versioning verdict to
 quote. The TypeScript emitter does not gain these members in this slot; that is a successor phase.
 
+### The generator emits defect-collecting, per-spec decoders (Phase 377) — ADDITIVE; the wire `none`
+
+**What moved, for a consumer.** Nothing, unless it asks. `Gen.Derivation` gains one case,
+`SpecDecoders`; requested through `Gen.fsharpModuleDerived`, it appends — after every other member — a
+COLLECTING decoder beside each short-circuiting one and the public entries over both. A module that does
+not request it is byte-identical to what it was: of the committed generated modules here only
+`DeriveGenerated.fs`, whose vocabulary requests every derivation, moved, and a test holds the emission
+without the request to be a prefix of the emission with it on every vocabulary here. The case lands in
+the draft slot that introduced `Gen.Derivation` (Phase 374), so no released contract matches over it.
+
+**New, additive** (in the generated module, under the request):
+
+- Per kind, `decode<Tag>Spec : JVal -> Result<<Tag>Spec, DecodeError>` (the first defect — the existing
+  private decoder made public) and `decode<Tag>SpecAll : JVal -> Result<<Tag>Spec, DecodeError list>`
+  (every defect), over the kind's object, so a consumer delegates one kind at a time.
+- Per node, `decodeNodeJson` / `decodeNodeJsonAll` over a parsed value and `decodeNodeAll` over text
+  (a parser refusal is its one defect).
+- **The defect order**, written above the collecting prelude in the generated module: an object's
+  members in field declaration order (a node: `id`, its kind, then its envelope fields), each member's
+  defects at its position with its nested defects (depth-first); list items in index order; map entries
+  in document order. A leaf, a value of the wrong kind and an absent or unknown discriminator report
+  one defect. **A collecting decoder's first defect is its short-circuiting twin's defect, and on a clean
+  input both answer the same value** — `IdlSpecDecoderTests` holds that over every single and paired
+  mutation of a document reaching every field shape, beside one multi-defect input per shape (missing,
+  wrong type, nested, list element, map key) asserting the full list and its order.
+- Codes and paths are Core's `DecodeError` (the nine-code vocabulary, `PathSegment` paths). A consumer
+  whose specification orders or names defects differently re-orders and maps them at its own seam; the
+  substrate learns no domain's ordering and gains no mapping hook (rule of three).
+
+**Limits, stated.** A host projection (`GenSupport.KindProjections`) supplies only a short-circuiting
+decoder, so its kind's collecting entry reports that decoder's one defect; a case refine is consulted
+only once every member of its case decoded, as before, and adds at most one defect. The TypeScript
+emitter does not gain collecting decoders in this slot.
+
+**Not changed.** The short-circuiting decoders, `decodeNode`, the IDL model and the `idl.json` artefact.
+No `CodegenError` case was added.
+
 ## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
 
 **Moved number (2026-10-06).** `0.35.0` was packed as a draft with an earlier public surface than the

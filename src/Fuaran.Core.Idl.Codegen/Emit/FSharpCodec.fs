@@ -659,6 +659,413 @@ let private encFloat (f: float) : JVal =
                 (objParams msg r.Name [])
                 (bindChain "    " binders ("Ok " + recordLit r.Name assigns) 1))
 
+    // -----------------------------------------------------------------------
+    // Phase 377 — the COLLECTING decoders and the public per-spec entries, emitted on request
+    // (`Gen.Derivation.SpecDecoders`). Each `dec*` decoder above is a `Result.bind` chain and
+    // reports ONE defect; its `col*` twin walks the same positions in the same order and answers
+    // every defect as a `DecodeError list`. Mirroring the walk is what makes the twin a
+    // conservative extension: its first defect is the short-circuiting decoder's defect, and on a
+    // clean input both answer the same value — which `IdlSpecDecoderTests` holds.
+    //
+    // A LEAF — a scalar, an enum, a sentinel, a hosted slot, verbatim JSON — reports at most one
+    // defect, so its collecting form is its short-circuiting decoder lifted (`cLift` / `cOne`). Only
+    // an object, a list and a map have independent positions to collect over.
+    // -----------------------------------------------------------------------
+
+    /// Whether a type has independent positions a collecting decoder walks (an object, a list, a
+    /// map, a type parameter's codec); every other type is a leaf.
+    let collectsOver (t: IdlType) : bool =
+        match t with
+        | TList _
+        | TMap _
+        | TRecord _
+        | TUnion _
+        | TNode
+        | TVar _ -> true
+        | _ -> false
+
+    /// The collecting decoder expression for a type — a `JVal -> Result<'T, DecodeError list>`.
+    /// Mirrors [[decFn]] arm for arm; a leaf is [[decFn]]'s decoder, lifted.
+    let rec colFn (t: IdlType) : Result<string, CodegenError> =
+        match t with
+        | TVar v -> Ok("col" + v)
+        | TUnion(n, []) -> Ok("col" + n)
+        | TUnion(n, args) ->
+            args
+            |> List.map colFn
+            |> concatR " "
+            |> Result.map (fun a -> "(col" + n + " " + a + ")")
+        | TNode -> Ok "colNode"
+        | TList inner -> colFn inner |> Result.map (sprintf "(cList %s)")
+        | TMap vt -> colFn vt |> Result.map (sprintf "(cMap %s)")
+        | TRecord n -> Ok("col" + n)
+        | _ -> decFn t |> Result.map (sprintf "(cLift %s)")
+
+    /// Reading one field back out under [[decField]]'s presence rules, collecting. A leaf field (and
+    /// a host-only one, which reads nothing) is [[decField]]'s expression lifted, so its presence
+    /// rules are the short-circuiting decoder's by construction.
+    let colField (idl: Idl) (f: IdlField) : Result<string, CodegenError> =
+        let name = SourceLit.fsString f.Name
+
+        match f.Opt with
+        | HostOnly -> decField idl f |> Result.map (sprintf "cOne (%s)")
+        | _ when not (collectsOver f.Type) -> decField idl f |> Result.map (sprintf "cOne (%s)")
+        | Required -> colFn f.Type |> Result.map (sprintf "cReq %s __fs %s" name)
+        | Optional -> colFn f.Type |> Result.map (sprintf "cOpt %s __fs %s" name)
+        | OmitDefault d ->
+            fsDefaultLit idl f.Type d
+            |> Result.bind (fun dexpr ->
+                colFn f.Type
+                |> Result.map (fun c -> sprintf "cDef %s __fs %s (%s)" name c dexpr))
+
+    let colBinders (idl: Idl) (fs: IdlField list) : Result<(string * string) list, CodegenError> =
+        fs
+        |> List.map (fun f -> colField idl f |> Result.map (fun e -> ident f.Name, e))
+        |> sequenceR
+
+    /// Read every member (in declaration order — the order the defects are reported in), then
+    /// build `final` when all of them decoded, else answer every member's defects, concatenated in
+    /// that order. `bindNames` binds each member to its field name for `final`; a final that
+    /// re-reads the object (a refined case) binds none.
+    let collectAll (indent: string) (binders: (string * string) list) (bindNames: bool) (final: string) : string =
+        match binders with
+        | [] -> indent + final
+        | _ ->
+            let count = List.length binders
+            let slot (i: int) = sprintf "__c%d" i
+
+            [ yield! binders |> List.mapi (fun i (_, e) -> sprintf "%slet %s = %s" indent (slot i) e)
+              yield sprintf "%smatch %s with" indent (List.init count slot |> String.concat ", ")
+              yield
+                  sprintf
+                      "%s| %s ->"
+                      indent
+                      (binders
+                       |> List.map (fun (v, _) -> if bindNames then "Ok " + v else "Ok _")
+                       |> String.concat ", ")
+              yield sprintf "%s    %s" indent final
+              yield
+                  sprintf
+                      "%s| _ -> Error(List.concat [ %s ])"
+                      indent
+                      (List.init count (fun i -> "cErrs " + slot i) |> String.concat "; ") ]
+            |> String.concat "\n"
+
+    /// A union's collecting decoder: the discriminator, then the case's members collected. A case
+    /// with a declared REFINE (Phase 945) collects its members and, when every one decoded, answers
+    /// what the short-circuiting decoder does on the same object — the refine is a sentence over
+    /// the decoded members, so it adds at most one defect and only once they all decoded.
+    let colUnionDecoder
+        (refines: Map<string, string>)
+        (tokens: HardenPolicy)
+        (msg: Set<string>)
+        (idl: Idl)
+        (u: IdlUnion)
+        : Result<string, CodegenError> =
+        let colArgs =
+            u.Params
+            |> List.map (fun p -> sprintf " (col%s: JVal -> Result<'%s, DecodeError list>)" p p)
+            |> String.concat ""
+
+        let declArgs =
+            if List.isEmpty u.Params then
+                ""
+            else
+                "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
+
+        let tyArgs = objParams msg u.Name u.Params
+
+        // The short-circuiting twin, handed each collecting codec's first defect.
+        let decApplied =
+            "dec"
+            + u.Name
+            + (u.Params
+               |> List.map (fun p -> sprintf " (fun __j -> cFirst (col%s __j))" p)
+               |> String.concat "")
+
+        let ctor (c: IdlUnionCase) =
+            match c.Fields with
+            | [] -> sprintf "%s.%s" u.Name c.Tag
+            | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
+
+        let arm (c: IdlUnionCase) =
+            if List.isEmpty c.Fields then
+                Ok(sprintf "        | %s -> Ok %s" (SourceLit.fsString c.Tag) (ctor c))
+            else
+                colBinders idl c.Fields
+                |> Result.map (fun binders ->
+                    let body =
+                        match refines.TryFind(u.Name + "." + c.Tag) with
+                        | Some _ -> collectAll "            " binders false (sprintf "cOne (%s j)" decApplied)
+                        | None -> collectAll "            " binders true (sprintf "Ok(%s)" (ctor c))
+
+                    sprintf "        | %s ->\n%s" (SourceLit.fsString c.Tag) body)
+
+        let transparent: Result<string option, CodegenError> =
+            match TransparentUnion.tag tokens u with
+            | Some ttag ->
+                match u.Cases |> List.tryFind (fun c -> c.Tag = ttag) with
+                | Some c when c.Fields.Length = 1 ->
+                    let f = c.Fields.Head
+
+                    colFn f.Type
+                    |> Result.map (fun cfn ->
+                        Some(
+                            sprintf
+                                "    | __bare ->\n        %s __bare |> Result.bind (fun %s -> Ok(%s))"
+                                cfn
+                                (ident f.Name)
+                                (ctor c)
+                        ))
+                | _ -> Ok None
+            | None -> Ok None
+
+        let taggedR =
+            u.Cases
+            |> List.map arm
+            |> concatR "\n"
+            |> Result.map (fun arms ->
+                sprintf
+                    "    | JObj __fs ->\n        dTag __fs |> cOne |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> cOne (dUnknown %s (%s + __other)))"
+                    arms
+                    (SourceLit.fsString (oneOf (u.Cases |> List.map (fun c -> c.Tag))))
+                    (SourceLit.fsString ("unknown " + u.Name + " case: ")))
+
+        let fallthrough =
+            transparent
+            |> Result.map (function
+                | Some t -> t
+                | None ->
+                    sprintf
+                        "    | _ -> cOne (dFail DecodeCode.WrongKind \"object\" %s)"
+                        (SourceLit.fsString ("expected a " + u.Name + " object")))
+
+        taggedR
+        |> Result.bind (fun tagged ->
+            fallthrough
+            |> Result.map (fun fall ->
+                sprintf
+                    "and private col%s%s%s (j: JVal) : Result<%s%s, DecodeError list> =\n    match j with\n%s\n%s"
+                    u.Name
+                    declArgs
+                    colArgs
+                    u.Name
+                    tyArgs
+                    tagged
+                    fall))
+
+    /// An object's collecting decoder — a kind's spec record or a declared record.
+    let colObjectDecoder
+        (decName: string)
+        (typeName: string)
+        (msg: Set<string>)
+        (idl: Idl)
+        (fields: IdlField list)
+        : Result<string, CodegenError> =
+        let assigns =
+            fields |> List.map (fun f -> sprintf "%s = %s" (pascal f.Name) (ident f.Name))
+
+        colBinders idl fields
+        |> Result.map (fun binders ->
+            sprintf
+                "and private col%s (j: JVal) : Result<%s%s, DecodeError list> =\n    cObj j |> Result.bind (fun __fs ->\n%s)"
+                decName
+                typeName
+                (objParams msg typeName [])
+                (collectAll "        " binders true ("Ok " + recordLit typeName assigns)))
+
+    /// The collecting prelude, emitted once per module that requests the collecting decoders. It
+    /// states the defect order, which a test pins.
+    let collectingHelpers: string =
+        """// ---------------------------------------------------------------------------
+// Phase 377 — COLLECTING DECODERS. Beside every short-circuiting `dec*` decoder above, a `col*`
+// decoder answers EVERY defect it finds, as a `DecodeError list`, in one deterministic order:
+//   - an object's members in FIELD DECLARATION ORDER (a node: `id`, its kind, then its envelope
+//     fields), each member's defects at that member's position, its nested defects included
+//     (depth-first);
+//   - a list's items in index order, and a map's entries in document order;
+//   - a leaf (a scalar, an enum, a sentinel, a hosted slot, verbatim JSON) reports at most one
+//     defect, and so does a value of the wrong kind or an absent or unknown discriminator, whose
+//     members are never read.
+// The first defect of a collecting decoder is the defect its short-circuiting twin reports, and on
+// a clean input both answer the same value. A case refine and a host projection supply only a
+// short-circuiting decoder, so each adds at most one defect of its own. Codes and paths are Core's
+// `DecodeError`; a consumer whose specification orders or names defects differently maps them at
+// its own seam.
+// ---------------------------------------------------------------------------
+let private cOne (r: Result<'T, DecodeError>) : Result<'T, DecodeError list> =
+    match r with
+    | Ok v -> Ok v
+    | Error e -> Error [ e ]
+
+let private cLift (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T, DecodeError list> = cOne (dec j)
+
+let private cErrs (r: Result<'T, DecodeError list>) : DecodeError list =
+    match r with
+    | Ok _ -> []
+    | Error es -> es
+
+// One step further from the root, for every defect a member or an item answered.
+let private cUnder (step: PathSegment) (r: Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
+    match r with
+    | Ok v -> Ok v
+    | Error es -> Error(es |> List.map (DecodeError.under step))
+
+// The first defect — how a short-circuiting decoder is handed a collecting codec.
+let private cFirst (r: Result<'T, DecodeError list>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error(e :: _) -> Error e
+    | Error [] -> dFail DecodeCode.SchemaFault "a refusal" "a collecting decoder answered no defect and no value"
+
+let private cObj (j: JVal) : Result<(string * JVal) list, DecodeError list> = cOne (dObj j)
+
+let private cList (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<'T list, DecodeError list> =
+    match j with
+    | JArr xs ->
+        let results = xs |> List.mapi (fun i x -> dec x |> cUnder (PathSegment.Index i))
+
+        match results |> List.collect cErrs with
+        | [] -> Ok(results |> List.choose (function Ok v -> Some v | Error _ -> None))
+        | errors -> Error errors
+    | _ -> cOne (dFail DecodeCode.WrongKind "array" "expected an array")
+
+// Every entry is checked, in document order; a repeated key keeps its FIRST value, as `dMap` does.
+let private cMap (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<Map<string, 'T>, DecodeError list> =
+    match j with
+    | JObj fs ->
+        let results = fs |> List.map (fun (k, v) -> k, (dec v |> cUnder (PathSegment.Key k)))
+
+        match results |> List.collect (snd >> cErrs) with
+        | [] ->
+            (Map.empty, results)
+            ||> List.fold (fun items (k, r) ->
+                match r with
+                | Ok d when not (Map.containsKey k items) -> Map.add k d items
+                | _ -> items)
+            |> Ok
+        | errors -> Error errors
+    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected an object")
+
+// An absent required member is `dReq`'s refusal, sentence and path included.
+let private cReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
+    | None -> cOne (dReq name fs (fun _ -> dFail DecodeCode.SchemaFault "never read" "never read"))
+
+let private cOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T option, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name) |> Result.map Some
+    | None -> Ok None
+
+let private cDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) (dflt: 'T) : Result<'T, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
+    | None -> Ok dflt"""
+
+    /// Phase 377 — the collecting prelude, the collecting decoder group (mirroring the decoder
+    /// group: node kind, node, unions, records, specs) and the public entries: per kind
+    /// `decode<Tag>Spec` (short-circuiting) and `decode<Tag>SpecAll` (collecting) over the kind's
+    /// object, and per node `decodeNodeJson` / `decodeNodeJsonAll` over a parsed value and
+    /// `decodeNodeAll` over text.
+    let collectingDecl
+        (sup: Support)
+        (idl: Idl)
+        (msg: Set<string>)
+        (kinds: IdlKind list)
+        (unions: IdlUnion list)
+        (records: IdlRecord list)
+        : Result<string, CodegenError> =
+        let nodeTy = objParams msg "Node" []
+
+        let colNodeKindDecl =
+            let arms =
+                kinds
+                |> List.map (fun k ->
+                    sprintf "    | %s -> col%sSpec j |> Result.map NodeKind.%s" (SourceLit.fsString k.Tag) k.Tag k.Tag)
+                |> String.concat "\n"
+
+            sprintf
+                "let rec private colNodeKind (j: JVal) : Result<NodeKind%s, DecodeError list> =\n"
+                (objParams msg "NodeKind" [])
+            + "    cObj j |> Result.bind (fun __fs ->\n"
+            + "    dTag __fs |> cOne |> Result.bind (fun __t ->\n"
+            + "    match __t with\n"
+            + arms
+            + sprintf
+                "\n    | __other -> cOne (dUnknown %s (\"unknown node kind: \" + __other))))"
+                (SourceLit.fsString (oneOf (kinds |> List.map (fun k -> k.Tag))))
+
+        let colNodeDecl =
+            let envelopeAssigns =
+                idl.NodeFields
+                |> List.map (fun f -> sprintf "; %s = %s" (pascal f.Name) (ident f.Name))
+                |> String.concat ""
+
+            let final = sprintf "Ok { Id = id; Kind = kind%s }" envelopeAssigns
+
+            let kindBinder =
+                match idl.Wire.NodeEnvelope with
+                | NodeEnvelopeShape.NestedKind -> "cReq \"kind\" __fs colNodeKind"
+                | NodeEnvelopeShape.FlatKind -> "colNodeKind j"
+
+            colBinders idl idl.NodeFields
+            |> Result.map (fun envelopeBinders ->
+                let binders =
+                    [ "id", "cOne (dReq \"id\" __fs dStr)"; "kind", kindBinder ] @ envelopeBinders
+
+                sprintf "and private colNode (j: JVal) : Result<Node%s, DecodeError list> =\n" nodeTy
+                + "    cObj j |> Result.bind (fun __fs ->\n"
+                + collectAll "        " binders true final
+                + ")")
+
+        let specDecl (k: IdlKind) =
+            // A projected kind's decoder is the projection's short-circuiting one, lifted.
+            if sup.KindProjections.ContainsKey k.Tag then
+                Ok(sprintf "and private col%sSpec (j: JVal) =\n    cOne (dec%sSpec j)" k.Tag k.Tag)
+            else
+                colObjectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg idl k.Fields
+
+        let groupR =
+            (Ok colNodeKindDecl
+             :: colNodeDecl
+             :: (unions |> List.map (colUnionDecoder sup.CaseRefines idl.Harden msg idl))
+             @ (records |> List.map (fun r -> colObjectDecoder r.Name r.Name msg idl r.Fields))
+             @ (kinds |> List.map specDecl))
+            |> concatR "\n\n"
+
+        let entries =
+            [ yield
+                  "/// Phase 377 — the public per-spec decoders. `decode<Tag>Spec` reads one kind's object and\n/// answers its FIRST defect; `decode<Tag>SpecAll` reads the same object and answers EVERY defect,\n/// in the order stated above the collecting prelude. A consumer delegates one kind at a time."
+              for k in kinds do
+                  if sup.KindProjections.ContainsKey k.Tag then
+                      yield sprintf "let decode%sSpec (j: JVal) = dec%sSpec j" k.Tag k.Tag
+                      yield sprintf "let decode%sSpecAll (j: JVal) = col%sSpec j" k.Tag k.Tag
+                  else
+                      let ty = k.Tag + "Spec" + objParams msg (k.Tag + "Spec") []
+
+                      yield sprintf "let decode%sSpec (j: JVal) : Result<%s, DecodeError> = dec%sSpec j" k.Tag ty k.Tag
+
+                      yield
+                          sprintf
+                              "let decode%sSpecAll (j: JVal) : Result<%s, DecodeError list> = col%sSpec j"
+                              k.Tag
+                              ty
+                              k.Tag
+              yield
+                  sprintf
+                      "/// The whole node over a parsed value: the first defect, or every defect.\nlet decodeNodeJson (j: JVal) : Result<Node%s, DecodeError> = decNode j"
+                      nodeTy
+              yield sprintf "let decodeNodeJsonAll (j: JVal) : Result<Node%s, DecodeError list> = colNode j" nodeTy
+              yield
+                  sprintf
+                      "/// `decodeNode`'s collecting twin: a parser refusal is the one defect, else every defect.\nlet decodeNodeAll (s: string) : Result<Node%s, DecodeError list> =\n    Decoder.parse s |> cOne |> Result.bind colNode"
+                      nodeTy ]
+            |> String.concat "\n"
+
+        groupR
+        |> Result.map (fun group -> [ collectingHelpers; group; entries ] |> String.concat "\n\n")
+
     /// The decode-side helper prelude, emitted once per module. `dTag` reads the
     /// DECLARED discriminator (Phase 108) — `"$type"` interpolates to exactly the
     /// pre-declarable bytes.
@@ -1061,6 +1468,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     let fsharpModuleUnnormalised
         (sup: Support)
         (requests: FSharpDerive.Request list)
+        (decoders: bool)
         (moduleName: string)
         (idl: Idl)
         (kindTags: string list)
@@ -1300,6 +1708,14 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         let witnessAndDerived =
             witnessDecl publicAccess msg kinds
             |> Result.bind (fun w -> FSharpDerive.derivedDecl derivedCtx requests |> Result.map (fun ds -> w, ds))
+            // Phase 377 — the collecting decoders and the public per-spec entries, on request, after
+            // every other member (they compose with the decoder group and nothing reads them).
+            |> Result.bind (fun (w, ds) ->
+                if decoders then
+                    collectingDecl sup idl msg kinds unions records
+                    |> Result.map (fun c -> w, ds @ [ c ])
+                else
+                    Ok(w, ds))
 
         // Phase 124 — the encoder and decoder groups joined the two declarations that could
         // already refuse. Every leg that renders a declared default now reports the same typed
@@ -1433,17 +1849,19 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup [] moduleName idl kindTags
+        fsharpModuleUnnormalised sup [] false moduleName idl kindTags
         |> Result.map normalizeEol
 
     /// Phase 374 — `fsharpModuleWith` plus the requested structural derivations
-    /// ([[FSharpDerive]]). The empty request list IS `fsharpModuleWith`, byte for byte.
+    /// ([[FSharpDerive]]), and (Phase 377) the collecting decoders and public per-spec entries
+    /// when `decoders` is set. No request and no decoders IS `fsharpModuleWith`, byte for byte.
     let fsharpModuleDerived
         (sup: Support)
         (requests: FSharpDerive.Request list)
+        (decoders: bool)
         (moduleName: string)
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup requests moduleName idl kindTags
+        fsharpModuleUnnormalised sup requests decoders moduleName idl kindTags
         |> Result.map normalizeEol

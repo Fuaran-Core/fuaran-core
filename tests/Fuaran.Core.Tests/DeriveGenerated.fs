@@ -666,3 +666,293 @@ module Measure =
         match v with
         | Measure.Hours(__v) -> __v
         | Measure.Days(__v) -> __v
+
+// ---------------------------------------------------------------------------
+// Phase 377 — COLLECTING DECODERS. Beside every short-circuiting `dec*` decoder above, a `col*`
+// decoder answers EVERY defect it finds, as a `DecodeError list`, in one deterministic order:
+//   - an object's members in FIELD DECLARATION ORDER (a node: `id`, its kind, then its envelope
+//     fields), each member's defects at that member's position, its nested defects included
+//     (depth-first);
+//   - a list's items in index order, and a map's entries in document order;
+//   - a leaf (a scalar, an enum, a sentinel, a hosted slot, verbatim JSON) reports at most one
+//     defect, and so does a value of the wrong kind or an absent or unknown discriminator, whose
+//     members are never read.
+// The first defect of a collecting decoder is the defect its short-circuiting twin reports, and on
+// a clean input both answer the same value. A case refine and a host projection supply only a
+// short-circuiting decoder, so each adds at most one defect of its own. Codes and paths are Core's
+// `DecodeError`; a consumer whose specification orders or names defects differently maps them at
+// its own seam.
+// ---------------------------------------------------------------------------
+let private cOne (r: Result<'T, DecodeError>) : Result<'T, DecodeError list> =
+    match r with
+    | Ok v -> Ok v
+    | Error e -> Error [ e ]
+
+let private cLift (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<'T, DecodeError list> = cOne (dec j)
+
+let private cErrs (r: Result<'T, DecodeError list>) : DecodeError list =
+    match r with
+    | Ok _ -> []
+    | Error es -> es
+
+// One step further from the root, for every defect a member or an item answered.
+let private cUnder (step: PathSegment) (r: Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
+    match r with
+    | Ok v -> Ok v
+    | Error es -> Error(es |> List.map (DecodeError.under step))
+
+// The first defect — how a short-circuiting decoder is handed a collecting codec.
+let private cFirst (r: Result<'T, DecodeError list>) : Result<'T, DecodeError> =
+    match r with
+    | Ok v -> Ok v
+    | Error(e :: _) -> Error e
+    | Error [] -> dFail DecodeCode.SchemaFault "a refusal" "a collecting decoder answered no defect and no value"
+
+let private cObj (j: JVal) : Result<(string * JVal) list, DecodeError list> = cOne (dObj j)
+
+let private cList (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<'T list, DecodeError list> =
+    match j with
+    | JArr xs ->
+        let results = xs |> List.mapi (fun i x -> dec x |> cUnder (PathSegment.Index i))
+
+        match results |> List.collect cErrs with
+        | [] -> Ok(results |> List.choose (function Ok v -> Some v | Error _ -> None))
+        | errors -> Error errors
+    | _ -> cOne (dFail DecodeCode.WrongKind "array" "expected an array")
+
+// Every entry is checked, in document order; a repeated key keeps its FIRST value, as `dMap` does.
+let private cMap (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<Map<string, 'T>, DecodeError list> =
+    match j with
+    | JObj fs ->
+        let results = fs |> List.map (fun (k, v) -> k, (dec v |> cUnder (PathSegment.Key k)))
+
+        match results |> List.collect (snd >> cErrs) with
+        | [] ->
+            (Map.empty, results)
+            ||> List.fold (fun items (k, r) ->
+                match r with
+                | Ok d when not (Map.containsKey k items) -> Map.add k d items
+                | _ -> items)
+            |> Ok
+        | errors -> Error errors
+    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected an object")
+
+// An absent required member is `dReq`'s refusal, sentence and path included.
+let private cReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
+    | None -> cOne (dReq name fs (fun _ -> dFail DecodeCode.SchemaFault "never read" "never read"))
+
+let private cOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T option, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name) |> Result.map Some
+    | None -> Ok None
+
+let private cDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) (dflt: 'T) : Result<'T, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
+    | None -> Ok dflt
+
+let rec private colNodeKind (j: JVal) : Result<NodeKind<obj>, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+    dTag __fs |> cOne |> Result.bind (fun __t ->
+    match __t with
+    | "Section" -> colSectionSpec j |> Result.map NodeKind.Section
+    | "Choice" -> colChoiceSpec j |> Result.map NodeKind.Choice
+    | "Task" -> colTaskSpec j |> Result.map NodeKind.Task
+    | "Note" -> colNoteSpec j |> Result.map NodeKind.Note
+    | __other -> cOne (dUnknown "one of 'Section', 'Choice', 'Task', 'Note'" ("unknown node kind: " + __other))))
+
+and private colNode (j: JVal) : Result<Node<obj>, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cOne (dReq "id" __fs dStr)
+        let __c1 = cReq "kind" __fs colNodeKind
+        let __c2 = cOpt "annotation" __fs colNode
+        match __c0, __c1, __c2 with
+        | Ok id, Ok kind, Ok annotation ->
+            Ok { Id = id; Kind = kind; Annotation = annotation }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2 ]))
+
+and private colRule (j: JVal) : Result<Rule, DecodeError list> =
+    match j with
+    | JObj __fs ->
+        dTag __fs |> cOne |> Result.bind (fun __t ->
+        match __t with
+        | "Always" -> Ok Rule.Always
+        | "Equals" ->
+            let __c0 = cOne (dReq "key" __fs dStr)
+            let __c1 = cOne (dReq "value" __fs dStr)
+            match __c0, __c1 with
+            | Ok key, Ok value ->
+                Ok(Rule.Equals(key, value))
+            | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ])
+        | "AllOf" ->
+            let __c0 = cReq "rules" __fs (cList colRule)
+            match __c0 with
+            | Ok rules ->
+                Ok(Rule.AllOf(rules))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | "Not" ->
+            let __c0 = cReq "rule" __fs colRule
+            match __c0 with
+            | Ok rule ->
+                Ok(Rule.Not(rule))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | "Maybe" ->
+            let __c0 = cOpt "inner" __fs colRule
+            match __c0 with
+            | Ok inner ->
+                Ok(Rule.Maybe(inner))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | "Guarded" ->
+            let __c0 = cReq "guard" __fs colGuard
+            match __c0 with
+            | Ok guard ->
+                Ok(Rule.Guarded(guard))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | "Named" ->
+            let __c0 = cReq "rules" __fs (cMap colRule)
+            match __c0 with
+            | Ok rules ->
+                Ok(Rule.Named(rules))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | __other -> cOne (dUnknown "one of 'Always', 'Equals', 'AllOf', 'Not', 'Maybe', 'Guarded', 'Named'" ("unknown Rule case: " + __other)))
+    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected a Rule object")
+
+and private colTrigger (j: JVal) : Result<Trigger<obj>, DecodeError list> =
+    match j with
+    | JObj __fs ->
+        dTag __fs |> cOne |> Result.bind (fun __t ->
+        match __t with
+        | "Timer" ->
+            let __c0 = cReq "owner" __fs colOwner
+            let __c1 = cOne (dReq "every" __fs dInt)
+            let __c2 = cOne (dReq "fire" __fs (fun (__j: JVal) -> dSentinel "<closure>" __j |> Result.map (fun () -> (fun (_: int) -> box "<closure>"))))
+            match __c0, __c1, __c2 with
+            | Ok owner, Ok every, Ok fire ->
+                Ok(Trigger.Timer(owner, every, fire))
+            | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2 ])
+        | "Signal" ->
+            let __c0 = cReq "owner" __fs colOwner
+            let __c1 = cOne (dReq "name" __fs dStr)
+            let __c2 = cOne (dReq "fire" __fs (fun (__j: JVal) -> dSentinel "<closure>" __j |> Result.map (fun () -> (fun (_: string) -> box "<closure>"))))
+            match __c0, __c1, __c2 with
+            | Ok owner, Ok name, Ok fire ->
+                Ok(Trigger.Signal(owner, name, fire))
+            | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2 ])
+        | "Manual" ->
+            let __c0 = cOne (dReq "label" __fs dStr)
+            match __c0 with
+            | Ok label ->
+                Ok(Trigger.Manual(label))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | __other -> cOne (dUnknown "one of 'Timer', 'Signal', 'Manual'" ("unknown Trigger case: " + __other)))
+    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected a Trigger object")
+
+and private colMeasure (j: JVal) : Result<Measure, DecodeError list> =
+    match j with
+    | JObj __fs ->
+        dTag __fs |> cOne |> Result.bind (fun __t ->
+        match __t with
+        | "Hours" ->
+            let __c0 = cOne (dReq "amount" __fs dFloat)
+            match __c0 with
+            | Ok amount ->
+                Ok(Measure.Hours(amount))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | "Days" ->
+            let __c0 = cOne (dReq "amount" __fs dFloat)
+            match __c0 with
+            | Ok amount ->
+                Ok(Measure.Days(amount))
+            | _ -> Error(List.concat [ cErrs __c0 ])
+        | __other -> cOne (dUnknown "one of 'Hours', 'Days'" ("unknown Measure case: " + __other)))
+    | _ -> cOne (dFail DecodeCode.WrongKind "object" "expected a Measure object")
+
+and private colOwner (j: JVal) : Result<Owner, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cOne (dOpt "name" __fs dStr)
+        let __c1 = cOne (dDef "priority" __fs decPriority (Priority.Normal))
+        match __c0, __c1 with
+        | Ok name, Ok priority ->
+            Ok { Name = name; Priority = priority }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ]))
+
+and private colBranch (j: JVal) : Result<Branch<obj>, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cOne (dReq "label" __fs dStr)
+        let __c1 = cReq "body" __fs colNode
+        match __c0, __c1 with
+        | Ok label, Ok body ->
+            Ok { Label = label; Body = body }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ]))
+
+and private colGuard (j: JVal) : Result<Guard, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cReq "rule" __fs colRule
+        let __c1 = cOne (dOpt "note" __fs dStr)
+        match __c0, __c1 with
+        | Ok rule, Ok note ->
+            Ok { Rule = rule; Note = note }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ]))
+
+and private colSectionSpec (j: JVal) : Result<SectionSpec<obj>, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cOne (dReq "title" __fs dStr)
+        let __c1 = cReq "children" __fs (cList colNode)
+        let __c2 = cOpt "owner" __fs colOwner
+        let __c3 = cOpt "estimate" __fs colMeasure
+        match __c0, __c1, __c2, __c3 with
+        | Ok title, Ok children, Ok owner, Ok estimate ->
+            Ok { Title = title; Children = children; Owner = owner; Estimate = estimate }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2; cErrs __c3 ]))
+
+and private colChoiceSpec (j: JVal) : Result<ChoiceSpec<obj>, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cReq "branches" __fs (cList colBranch)
+        let __c1 = cReq "otherwise" __fs colNode
+        let __c2 = cReq "rule" __fs colRule
+        match __c0, __c1, __c2 with
+        | Ok branches, Ok otherwise, Ok rule ->
+            Ok { Branches = branches; Otherwise = otherwise; Rule = rule }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2 ]))
+
+and private colTaskSpec (j: JVal) : Result<TaskSpec<obj>, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cOne (dReq "name" __fs dStr)
+        let __c1 = cReq "due" __fs colRule
+        let __c2 = cReq "trigger" __fs colTrigger
+        let __c3 = cOpt "hint" __fs colNode
+        let __c4 = cReq "extras" __fs (cMap colNode)
+        let __c5 = cReq "owner" __fs colOwner
+        match __c0, __c1, __c2, __c3, __c4, __c5 with
+        | Ok name, Ok due, Ok trigger, Ok hint, Ok extras, Ok owner ->
+            Ok { Name = name; Due = due; Trigger = trigger; Hint = hint; Extras = extras; Owner = owner }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1; cErrs __c2; cErrs __c3; cErrs __c4; cErrs __c5 ]))
+
+and private colNoteSpec (j: JVal) : Result<NoteSpec, DecodeError list> =
+    cObj j |> Result.bind (fun __fs ->
+        let __c0 = cOne (dReq "text" __fs dStr)
+        let __c1 = cOne (dDef "priority" __fs decPriority (Priority.Normal))
+        match __c0, __c1 with
+        | Ok text, Ok priority ->
+            Ok { Text = text; Priority = priority }
+        | _ -> Error(List.concat [ cErrs __c0; cErrs __c1 ]))
+
+/// Phase 377 — the public per-spec decoders. `decode<Tag>Spec` reads one kind's object and
+/// answers its FIRST defect; `decode<Tag>SpecAll` reads the same object and answers EVERY defect,
+/// in the order stated above the collecting prelude. A consumer delegates one kind at a time.
+let decodeSectionSpec (j: JVal) : Result<SectionSpec<obj>, DecodeError> = decSectionSpec j
+let decodeSectionSpecAll (j: JVal) : Result<SectionSpec<obj>, DecodeError list> = colSectionSpec j
+let decodeChoiceSpec (j: JVal) : Result<ChoiceSpec<obj>, DecodeError> = decChoiceSpec j
+let decodeChoiceSpecAll (j: JVal) : Result<ChoiceSpec<obj>, DecodeError list> = colChoiceSpec j
+let decodeTaskSpec (j: JVal) : Result<TaskSpec<obj>, DecodeError> = decTaskSpec j
+let decodeTaskSpecAll (j: JVal) : Result<TaskSpec<obj>, DecodeError list> = colTaskSpec j
+let decodeNoteSpec (j: JVal) : Result<NoteSpec, DecodeError> = decNoteSpec j
+let decodeNoteSpecAll (j: JVal) : Result<NoteSpec, DecodeError list> = colNoteSpec j
+/// The whole node over a parsed value: the first defect, or every defect.
+let decodeNodeJson (j: JVal) : Result<Node<obj>, DecodeError> = decNode j
+let decodeNodeJsonAll (j: JVal) : Result<Node<obj>, DecodeError list> = colNode j
+/// `decodeNode`'s collecting twin: a parser refusal is the one defect, else every defect.
+let decodeNodeAll (s: string) : Result<Node<obj>, DecodeError list> =
+    Decoder.parse s |> cOne |> Result.bind colNode

@@ -214,6 +214,14 @@ let main argv =
             printfn "regenerated %s" DeriveIdl.generatedFile
         | Error e -> failwithf "codegen %s: %A" DeriveIdl.generatedFile e
 
+        // Phase 377 — the reference vocabulary with the collecting decoders requested, so every
+        // support channel a collecting decoder routes around is COMPILED by the suite.
+        match SpecDecodersIdl.generate () with
+        | Ok src ->
+            System.IO.File.WriteAllText(Snapshots.repoFile SpecDecodersIdl.generatedFile, src)
+            printfn "regenerated %s" SpecDecodersIdl.generatedFile
+        | Error e -> failwithf "codegen %s: %A" SpecDecodersIdl.generatedFile e
+
         0
     // Phase 127 — rewrite the committed `idl.json` fixtures the repository gate runs
     // the `fuaran-core-idl` command over:
