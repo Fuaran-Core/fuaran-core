@@ -206,6 +206,14 @@ let main argv =
             RefusalCornersIdl.idl
             (RefusalCornersIdl.idl.Kinds |> List.map (fun k -> k.Tag))
 
+        // Phase 374 — the derivations vocabulary, with every structural derivation requested, so
+        // each one is COMPILED by the suite and held to its laws over the compiled module.
+        match DeriveIdl.generate () with
+        | Ok src ->
+            System.IO.File.WriteAllText(Snapshots.repoFile DeriveIdl.generatedFile, src)
+            printfn "regenerated %s" DeriveIdl.generatedFile
+        | Error e -> failwithf "codegen %s: %A" DeriveIdl.generatedFile e
+
         0
     // Phase 127 — rewrite the committed `idl.json` fixtures the repository gate runs
     // the `fuaran-core-idl` command over:

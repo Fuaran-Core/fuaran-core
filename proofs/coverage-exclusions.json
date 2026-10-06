@@ -1217,6 +1217,14 @@
     },
     {
       "members": [
+        "Idl.Gen.fsharpModuleDerived"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The F# module plus the requested structural derivations; the committed derived module's drift guard, its compile, and the laws held over it (the keyed walk certified by the kit) stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlDeriveTests.fs"
+    },
+    {
+      "members": [
         "Idl.SupportArtifact.parse",
         "Idl.SupportArtifact.render"
       ],

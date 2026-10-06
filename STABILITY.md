@@ -2402,6 +2402,61 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.35.2 — DRAFT
+
+**Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a
+consumer's contract, so nothing rides it; the work opening this slot is additive, which makes it a
+PATCH slot. The surface gate classes every member below `additive` (`api/Fuaran.Core.Idl.Codegen.txt`
+gains lines and loses none). A member of a higher class advances the slot rather than riding it.
+
+### The generator emits the structural derivations a domain otherwise writes by hand (Phase 374) — ADDITIVE; the wire `none`
+
+**What moved, for a consumer.** Nothing, unless it asks. `Gen.fsharpModuleDerived sup derivations
+moduleName idl kindTags` is `fsharpModuleWith` plus the members each requested `Gen.Derivation` names,
+appended after the module's existing members; the empty list emits `fsharpModuleWith`'s bytes, and
+`fsharpModuleWith` / `fsharpModule` emit exactly what they did (every committed generated module in this
+repository regenerates unchanged, and a test holds the empty request to it on every vocabulary here).
+
+**New, additive.** `Gen.Derivation`, a closed request union — a request is a case, not a record field,
+so the set can grow without a consumer's record literal breaking (FS0764):
+
+- `StructuralAccess` — public `wireTag`, `allWireTags`, `children`, `withChildren` (kids first:
+  `withChildren (children n) n = n`); `nodeWitness` is built on them and the three private witness helpers
+  are not emitted. A child is a node or node list a kind always carries; an OPTIONAL node is a keyed
+  position, since it is not an ordered list a structural edit may rebuild.
+- `KeyedPositions` (implies `StructuralAccess`) — `keyedChildren`, `withKeyedChildren` (arity-preserving)
+  and `keyedWitness : KeyedWitness<Node, string>` over every node position that is not a structural
+  child: an optional node, a node in a record, a union case, a list or a map, and the node envelope. Its
+  `IdsUnique` is the generated full walk over both surfaces; `PlaceKeyedChild` re-ids the first occupied
+  keyed position. This closes, at the source, the generated `nodeWitness` dropping a case table's
+  entries: the kit's `keyedChildrenLaws` certify the generated witness.
+- `SlotsOf typeName` — `slotsOf<T> : Node -> (string * T) list`, every kind and envelope field declared
+  at `T` (direct, optional or in a list) by wire name; `(string * obj) list` for a generic union.
+- `MapMsg` — `mapMsg : ('Msg -> 'Msg2) -> Node<'Msg> -> Node<'Msg2>` over every declaration
+  `msgCarrying` marks. A `TFn` slot maps by its declared signature when the message parameter is only
+  covariant in it (the message itself, an arrow's result, an option or list of those, or a generated
+  type applied to `'Msg`).
+- `Fold unionName` — `<Union>.fold`, a preorder fold over a self-recursive union, descending lists,
+  options, maps and records.
+- `Projections (unionName, fieldNames)` — `<Union>.<field>`: `U -> T` where every case carries the
+  field at one type, `U -> T option` where only some do.
+- `DefaultRecords` — `default<Tag>Spec` / `default<Record>` for every kind and record whose every field
+  has a value without the caller, from the one field-value rule the `mk<Kind>` constructors also use.
+- `VocabularyConstants` — `kindCategories`, `kindFieldNames`, `envelopeFieldNames`, `opFieldNames`.
+
+**Refusals (typed, never approximated).** A request the vocabulary cannot honour is
+`CodegenError.UnsupportedConstruct` naming the construct: a fold over a union that does not recurse, or
+recurses through another union or at other type arguments; a projection no case carries, or whose
+cases disagree on its type; a slot enumerator over an undeclared or unheld type; a message map over a
+vocabulary with no message parameter, through a contravariant signature, through a type argument, or
+over a projected kind (whose record is host source the generator cannot construct); a node held
+through a generic union's type argument; default records where no kind or record is fully defaulted.
+No `CodegenError` case was added.
+
+**Not changed.** The IDL model, the `idl.json` artefact and its schema are untouched — the opt-in is
+generator configuration beside the IDL, not a wire fact — so there is no wire-versioning verdict to
+quote. The TypeScript emitter does not gain these members in this slot; that is a successor phase.
+
 ## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
 
 **Moved number (2026-10-06).** `0.35.0` was packed as a draft with an earlier public surface than the

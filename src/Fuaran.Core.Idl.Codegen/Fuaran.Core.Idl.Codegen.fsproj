@@ -30,6 +30,7 @@
     <Compile Include="Emit/Annotations.fs" />
     <Compile Include="Emit/FSharpTypes.fs" />
     <Compile Include="Emit/FSharpDefaults.fs" />
+    <Compile Include="Emit/FSharpDerive.fs" />
     <Compile Include="Emit/FSharpCodec.fs" />
     <Compile Include="Emit/JsonSchema.fs" />
     <Compile Include="Emit/TypeScript.fs" />

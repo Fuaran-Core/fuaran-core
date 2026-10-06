@@ -115,6 +115,65 @@ module Gen =
         : Result<string, CodegenError> =
         FSharpCodec.fsharpModuleWith (toSupport sup) moduleName idl kindTags
 
+    /// Phase 374 — a STRUCTURAL DERIVATION the F# module emits on request: a member that follows
+    /// mechanically from what the generator already knows about every kind (which fields hold
+    /// nodes, which hold a given declared type, which declarations carry the message parameter,
+    /// what each field defaults to, what each kind is tagged with) and that a consuming domain
+    /// would otherwise write by hand. Requesting none is `fsharpModuleWith`, byte for byte. A
+    /// request the vocabulary cannot honour is refused as a typed `UnsupportedConstruct`.
+    [<RequireQualifiedAccess>]
+    type Derivation =
+        /// Public `wireTag`, `allWireTags`, `children` and `withChildren` (kids first:
+        /// `withChildren (children n) n = n`), with `nodeWitness` built on them. A child is a
+        /// node or node list a kind always carries; an optional node is a keyed position.
+        | StructuralAccess
+        /// `keyedChildren`, `withKeyedChildren` (arity-preserving) and `keyedWitness`, a
+        /// `KeyedWitness` over every node position that is not a structural child: an optional
+        /// node, a node inside a record, a union case, a list or a map, and the node envelope.
+        /// Implies `StructuralAccess`.
+        | KeyedPositions
+        /// `slotsOf<T> : Node -> (string * T) list` — every kind and envelope field declared at
+        /// the named enum, record or union `T` (directly, optional or in a list), by wire field
+        /// name; `(string * obj) list` when `T` is a generic union.
+        | SlotsOf of typeName: string
+        /// `mapMsg : ('Msg -> 'Msg2) -> Node<'Msg> -> Node<'Msg2>`, rebuilding every declaration
+        /// generic in the message parameter.
+        | MapMsg
+        /// `<Union>.fold : ('S -> U -> 'S) -> 'S -> U -> 'S` over a self-recursive union: the
+        /// value and every nested value of its own type, in preorder.
+        | Fold of unionName: string
+        /// `<Union>.<field>` for each named field: `U -> T` where every case carries it at one
+        /// type, `U -> T option` where only some do.
+        | Projections of unionName: string * fieldNames: string list
+        /// `default<Tag>Spec` / `default<Record>` for every kind and record whose every field has
+        /// a value without the caller — the values the `mk<Kind>` constructors fill.
+        | DefaultRecords
+        /// `kindCategories`, `kindFieldNames`, `envelopeFieldNames` and `opFieldNames` as `Set`
+        /// values.
+        | VocabularyConstants
+
+    let private toRequest (d: Derivation) : FSharpDerive.Request =
+        match d with
+        | Derivation.StructuralAccess -> FSharpDerive.Request.StructuralAccess
+        | Derivation.KeyedPositions -> FSharpDerive.Request.KeyedPositions
+        | Derivation.SlotsOf t -> FSharpDerive.Request.SlotsOf t
+        | Derivation.MapMsg -> FSharpDerive.Request.MapMsg
+        | Derivation.Fold u -> FSharpDerive.Request.Fold u
+        | Derivation.Projections(u, fs) -> FSharpDerive.Request.Projections(u, fs)
+        | Derivation.DefaultRecords -> FSharpDerive.Request.DefaultRecords
+        | Derivation.VocabularyConstants -> FSharpDerive.Request.VocabularyConstants
+
+    /// `fsharpModuleWith` plus the requested structural derivations (Phase 374), appended after
+    /// the module's existing members. The empty list emits exactly what `fsharpModuleWith` does.
+    let fsharpModuleDerived
+        (sup: GenSupport)
+        (derivations: Derivation list)
+        (moduleName: string)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        FSharpCodec.fsharpModuleDerived (toSupport sup) (derivations |> List.map toRequest) moduleName idl kindTags
+
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.
     let fsharpModule (moduleName: string) (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =

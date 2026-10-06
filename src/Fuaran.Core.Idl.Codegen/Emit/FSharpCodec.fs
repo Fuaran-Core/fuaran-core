@@ -898,8 +898,21 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// fields (`ReplaceChildren` not generable — GP4/GP5) rather than emitting a runtime
     /// throwing guard; kinds whose node-bearing fields are all single `Node` are generated
     /// with positional re-assignment.
-    let witnessDecl (msg: Set<string>) (kinds: IdlKind list) : Result<string, CodegenError> =
+    ///
+    /// Phase 374 — `publicAccess` is the derived structural-access emission: the same arms as
+    /// PUBLIC functions (`wireTag`, `allWireTags`, `children`, `withChildren`, kids first so
+    /// `withChildren (children n) n = n` reads as written) with `nodeWitness` built on them, and
+    /// an OPTIONAL node field is a keyed position rather than a child (it is not an ordered list
+    /// a structural edit may rebuild). `false` is the emission every module had before, byte for
+    /// byte.
+    let witnessDecl (publicAccess: bool) (msg: Set<string>) (kinds: IdlKind list) : Result<string, CodegenError> =
         let nodeArgs = declParams msg "Node" []
+
+        let nodeBearing =
+            if publicAccess then
+                FSharpDerive.structuralField
+            else
+                nodeBearing
 
         let childBearing =
             kinds
@@ -960,31 +973,63 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             |> sequenceR
             |> Result.map (fun arms -> (arms @ (if allBearing then [] else [ "    | _ -> n" ])) |> String.concat "\n")
 
-        replaceArms
-        |> Result.map (fun replaceArmsStr ->
+        let publicDecl (replaceArmsStr: string) =
             String.concat
                 "\n"
-                [ sprintf "let private witnessKindTag (n: Node%s) : string =" nodeArgs
+                [ "/// The kind's wire tag — the discriminator it is encoded under."
+                  sprintf "let wireTag (n: Node%s) : string =" nodeArgs
                   "    match n.Kind with"
                   kindTagArms
                   ""
-                  sprintf "let private witnessChildren (n: Node%s) : Node%s list =" nodeArgs nodeArgs
+                  "/// Every wire tag this module's kinds are encoded under, in declaration order."
+                  sprintf
+                      "let allWireTags: string list = [ %s ]"
+                      (kinds |> List.map (fun k -> SourceLit.fsString k.Tag) |> String.concat "; ")
+                  ""
+                  "/// The node's ordered structural children, in field order."
+                  sprintf "let children (n: Node%s) : Node%s list =" nodeArgs nodeArgs
                   "    match n.Kind with"
                   childArms
                   ""
-                  sprintf
-                      "let private witnessReplaceChildren (n: Node%s) (kids: Node%s list) : Node%s ="
-                      nodeArgs
-                      nodeArgs
-                      nodeArgs
+                  "/// The node with exactly this structural child list, its id and kind kept."
+                  sprintf "let withChildren (kids: Node%s list) (n: Node%s) : Node%s =" nodeArgs nodeArgs nodeArgs
                   "    match n.Kind with"
                   replaceArmsStr
                   ""
                   sprintf "let nodeWitness: NodeWitness<Node%s, string> =" nodeArgs
                   "    { Id = fun n -> n.Id"
-                  "      KindTag = witnessKindTag"
-                  "      Children = witnessChildren"
-                  "      ReplaceChildren = witnessReplaceChildren }" ])
+                  "      KindTag = wireTag"
+                  "      Children = children"
+                  "      ReplaceChildren = fun n kids -> withChildren kids n }" ]
+
+        replaceArms
+        |> Result.map (fun replaceArmsStr ->
+            if publicAccess then
+                publicDecl replaceArmsStr
+            else
+                String.concat
+                    "\n"
+                    [ sprintf "let private witnessKindTag (n: Node%s) : string =" nodeArgs
+                      "    match n.Kind with"
+                      kindTagArms
+                      ""
+                      sprintf "let private witnessChildren (n: Node%s) : Node%s list =" nodeArgs nodeArgs
+                      "    match n.Kind with"
+                      childArms
+                      ""
+                      sprintf
+                          "let private witnessReplaceChildren (n: Node%s) (kids: Node%s list) : Node%s ="
+                          nodeArgs
+                          nodeArgs
+                          nodeArgs
+                      "    match n.Kind with"
+                      replaceArmsStr
+                      ""
+                      sprintf "let nodeWitness: NodeWitness<Node%s, string> =" nodeArgs
+                      "    { Id = fun n -> n.Id"
+                      "      KindTag = witnessKindTag"
+                      "      Children = witnessChildren"
+                      "      ReplaceChildren = witnessReplaceChildren }" ])
 
     // -----------------------------------------------------------------------
     // Phase 317 increment 6 — the validator-rule-scaffold leg. Emit a
@@ -1015,6 +1060,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// entry point, which is this composed with it.
     let fsharpModuleUnnormalised
         (sup: Support)
+        (requests: FSharpDerive.Request list)
         (moduleName: string)
         (idl: Idl)
         (kindTags: string list)
@@ -1234,12 +1280,33 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
              @ (sup.DecodeSplice |> Option.toList |> List.map Ok))
             |> concatR "\n\n"
 
+        // Phase 374 — the requested structural derivations. Keyed positions are defined against
+        // the PUBLIC structural children, so requesting them requests the structural access too.
+        // An empty request list leaves the witness private and appends nothing.
+        let publicAccess =
+            requests
+            |> List.exists (fun r ->
+                r = FSharpDerive.Request.StructuralAccess
+                || r = FSharpDerive.Request.KeyedPositions)
+
+        let derivedCtx: FSharpDerive.Ctx =
+            { Idl = idl
+              Msg = msg
+              Kinds = kinds
+              Unions = unions
+              Records = records
+              Projected = sup.KindProjections |> Map.toList |> List.map fst |> Set.ofList }
+
+        let witnessAndDerived =
+            witnessDecl publicAccess msg kinds
+            |> Result.bind (fun w -> FSharpDerive.derivedDecl derivedCtx requests |> Result.map (fun ds -> w, ds))
+
         // Phase 124 — the encoder and decoder groups joined the two declarations that could
         // already refuse. Every leg that renders a declared default now reports the same typed
         // `UnsupportedDefault` here, so there is no remaining path on which an unrenderable
         // default produces a module instead of a refusal.
-        match witnessDecl msg kinds, defaultsDecl sup.KindProjections msg idl kinds, recGroup, decGroup, typeGroup with
-        | Ok witness, Ok defaults, Ok recGroup, Ok decGroup, Ok typeGroup ->
+        match witnessAndDerived, defaultsDecl sup.KindProjections msg idl kinds, recGroup, decGroup, typeGroup with
+        | Ok(witness, derived), Ok defaults, Ok recGroup, Ok decGroup, Ok typeGroup ->
             [ [ header ]
               enums |> List.map (rqaEnum doc)
               [ typeGroup ]
@@ -1282,7 +1349,8 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
                     (objParams msg "Node" []) ]
               [ witness ]
               [ validatorDecl msg ]
-              [ defaults ] ]
+              [ defaults ]
+              derived ]
             |> List.concat
             |> String.concat "\n\n"
             |> fun text ->
@@ -1365,4 +1433,17 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        fsharpModuleUnnormalised sup moduleName idl kindTags |> Result.map normalizeEol
+        fsharpModuleUnnormalised sup [] moduleName idl kindTags
+        |> Result.map normalizeEol
+
+    /// Phase 374 — `fsharpModuleWith` plus the requested structural derivations
+    /// ([[FSharpDerive]]). The empty request list IS `fsharpModuleWith`, byte for byte.
+    let fsharpModuleDerived
+        (sup: Support)
+        (requests: FSharpDerive.Request list)
+        (moduleName: string)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        fsharpModuleUnnormalised sup requests moduleName idl kindTags
+        |> Result.map normalizeEol

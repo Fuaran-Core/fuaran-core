@@ -200,6 +200,21 @@ module internal FSharpDefaults =
     /// could fill a `TStr` default the encoder's omit test could not spell, and (the direction
     /// that mattered) neither could spell a value-carrying union. One contract, one renderer, so
     /// the smart constructor, the encoder's omit test and the decoder's restore cannot come apart.
+    /// Phase 374 — the value a field takes when the CALLER passes none, or `None` when it has no
+    /// such value and must be passed (a `Required` field with no declared default). This is the
+    /// one rule both the `mk<Kind>` smart constructors and the derived default records apply, so a
+    /// default record and a constructor called with the same arguments cannot disagree.
+    let fieldValue (idl: Idl) (declared: IdlValue option) (f: IdlField) : Result<string, CodegenError> option =
+        match declared, f.Opt with
+        | Some v, Required -> Some(fsDefaultLit idl f.Type v)
+        | Some v, Optional -> Some(fsDefaultLit idl f.Type v |> Result.map (fun e -> "Some(" + e + ")"))
+        | None, Required -> None
+        | None, Optional -> Some(Ok "None")
+        // HostOnly: not a ctor param either — the field takes its placeholder.
+        | _, HostOnly -> Some(hostOnlyLit f)
+        // OmitDefault: not a ctor param — the field takes its identity default.
+        | _, OmitDefault d -> Some(fsDefaultLit idl f.Type d)
+
     /// Emit the smart constructors (`mk<Kind>`) over the generated `Node`. `Error` on a kind whose
     /// IDL-declared default has no code emission (`fsDefaultLit` — GP4/GP5).
     let defaultsDecl
@@ -273,15 +288,9 @@ module internal FSharpDefaults =
                 |> Result.map (fun ps -> "(id: string)" :: ps |> String.concat " ")
 
             let fieldExpr (f: IdlField) : Result<string, CodegenError> =
-                match defaultFor k.Tag f.Name, f.Opt with
-                | Some v, Required -> fsDefaultLit idl f.Type v
-                | Some v, Optional -> fsDefaultLit idl f.Type v |> Result.map (fun e -> "Some(" + e + ")")
-                | None, Required -> Ok(ident f.Name)
-                | None, Optional -> Ok "None"
-                // HostOnly: not a ctor param either — the field takes its placeholder.
-                | _, HostOnly -> hostOnlyLit f
-                // OmitDefault: not a ctor param — the field takes its identity default.
-                | _, OmitDefault d -> fsDefaultLit idl f.Type d
+                match fieldValue idl (defaultFor k.Tag f.Name) f with
+                | Some e -> e
+                | None -> Ok(ident f.Name)
 
             k.Fields
             |> List.map (fun f -> fieldExpr f |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
