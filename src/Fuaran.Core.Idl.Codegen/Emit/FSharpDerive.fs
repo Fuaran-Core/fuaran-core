@@ -79,8 +79,9 @@ module internal FSharpDerive =
     // -----------------------------------------------------------------------
 
     /// The record / union names that hold a node at any depth (not through a type argument —
-    /// a node held through one is refused where it is met).
-    let private nodeHolders (ctx: Ctx) : Set<string> =
+    /// a node held through one is refused where it is met). Host-neutral: the TypeScript
+    /// emitter reads it too (Phase 380).
+    let nodeHolders (ctx: Ctx) : Set<string> =
         let rec holds (hs: Set<string>) (t: IdlType) =
             match t with
             | TNode -> true
@@ -111,7 +112,8 @@ module internal FSharpDerive =
 
         fix Set.empty
 
-    let rec private holdsIn (hs: Set<string>) (t: IdlType) =
+    /// Whether a value of type `t` holds a node, given the [[nodeHolders]] set.
+    let rec holdsIn (hs: Set<string>) (t: IdlType) =
         match t with
         | TNode -> true
         | TList i
@@ -804,7 +806,7 @@ module internal FSharpDerive =
     // -----------------------------------------------------------------------
 
     /// Whether `t` reaches the union `target` at any depth, through any declaration.
-    let private reaches (ctx: Ctx) (target: string) (t: IdlType) : bool =
+    let reaches (ctx: Ctx) (target: string) (t: IdlType) : bool =
         let rec go (seen: Set<string>) (t: IdlType) =
             match t with
             | TUnion(n, args) ->
@@ -827,36 +829,40 @@ module internal FSharpDerive =
 
         go Set.empty t
 
-    let private foldDecl (ctx: Ctx) (u: IdlUnion) : Result<string, CodegenError> =
-        let selfArgs = u.Params |> List.map TVar
-
-        let rec selfIn (seen: Set<string>) (t: IdlType) : Result<bool, CodegenError> =
-            match t with
-            | TUnion(n, args) when n = u.Name ->
-                if args = selfArgs then
-                    Ok true
-                else
-                    refuse
-                        (sprintf "a fold over '%s', which recurses at other type arguments" u.Name)
-                        "the fold visits nested values of the union's own instantiation"
-                        "recurse at the declared type parameters, or do not request the fold"
-            | TUnion(n, _) when reaches ctx u.Name t ->
+    /// Whether a value of type `t` holds a value of the union `u`'s own instantiation — the
+    /// positions a fold over `u` descends — refusing a recursion the fold cannot follow (at other
+    /// type arguments, or through another union). `seen` is the records already entered.
+    /// Host-neutral: the TypeScript fold reads the same analysis (Phase 380).
+    let rec foldSelfIn (ctx: Ctx) (u: IdlUnion) (seen: Set<string>) (t: IdlType) : Result<bool, CodegenError> =
+        match t with
+        | TUnion(n, args) when n = u.Name ->
+            if args = (u.Params |> List.map TVar) then
+                Ok true
+            else
                 refuse
-                    (sprintf "a fold over '%s', which recurses through the union '%s'" u.Name n)
-                    "the fold descends lists, options, maps and records, and a recursion through another union would leave the nested values it holds unvisited"
-                    "recurse through a list, an option, a map or a record, or do not request the fold"
-            | TList i
-            | TMap i -> selfIn seen i
-            | TRecord n when not (seen.Contains n) ->
-                ctx.Records
-                |> List.tryFind (fun r -> r.Name = n)
-                |> Option.map (fun r ->
-                    r.Fields
-                    |> List.map (fun f -> selfIn (seen.Add n) f.Type)
-                    |> sequenceR
-                    |> Result.map (List.exists id))
-                |> Option.defaultValue (Ok false)
-            | _ -> Ok false
+                    (sprintf "a fold over '%s', which recurses at other type arguments" u.Name)
+                    "the fold visits nested values of the union's own instantiation"
+                    "recurse at the declared type parameters, or do not request the fold"
+        | TUnion(n, _) when reaches ctx u.Name t ->
+            refuse
+                (sprintf "a fold over '%s', which recurses through the union '%s'" u.Name n)
+                "the fold descends lists, options, maps and records, and a recursion through another union would leave the nested values it holds unvisited"
+                "recurse through a list, an option, a map or a record, or do not request the fold"
+        | TList i
+        | TMap i -> foldSelfIn ctx u seen i
+        | TRecord n when not (seen.Contains n) ->
+            ctx.Records
+            |> List.tryFind (fun r -> r.Name = n)
+            |> Option.map (fun r ->
+                r.Fields
+                |> List.map (fun f -> foldSelfIn ctx u (seen.Add n) f.Type)
+                |> sequenceR
+                |> Result.map (List.exists id))
+            |> Option.defaultValue (Ok false)
+        | _ -> Ok false
+
+    let private foldDecl (ctx: Ctx) (u: IdlUnion) : Result<string, CodegenError> =
+        let selfIn = foldSelfIn ctx u
 
         let ut = declT ctx u.Name u.Params
 

@@ -207,6 +207,23 @@ module Gen =
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         TypeScript.typescriptModule idl kindTags
 
+    /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
+    /// `fsharpModuleDerived`: the same requests, appended after the module's members with one
+    /// further `export` naming them. The empty list emits exactly what `typescriptModule` does. A
+    /// request is admitted exactly when the F# path admits it, and refused with the F# path's
+    /// error. `MapMsg` emits nothing here: this host holds a handler slot as its sentinel's `null`
+    /// and carries no message type, so there is nothing to map.
+    let typescriptModuleDerived
+        (derivations: Derivation list)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        TypeScript.typescriptModuleDerived
+            (derivations |> List.choose toRequest)
+            (derivations |> List.contains Derivation.SpecDecoders)
+            idl
+            kindTags
+
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         TypeScript.typescriptValue idl t v

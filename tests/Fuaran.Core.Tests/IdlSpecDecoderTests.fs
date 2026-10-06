@@ -462,3 +462,182 @@ let tests =
                              | Error e, Error(h :: _) when e = h -> None
                              | a, b -> Some(sprintf "%A / %A" a b))
                             "and the short-circuit agrees") ] ]
+
+// ---------------------------------------------------------------------------
+// Phase 380 — the collecting decoders in the TypeScript host (`Gen.typescriptModuleDerived` under
+// `Gen.Derivation.SpecDecoders`), held to the compiled F# module above, under node: every
+// multi-defect input above, the valid sample, and every single and paired mutation of it answer
+// the SAME defect list — codes, paths and what each position expected — in the SAME order, and the
+// same tree on success. Each TypeScript answer also carries the host's own law: its first defect is
+// its short-circuiting twin's, and both agree on success.
+// ---------------------------------------------------------------------------
+
+/// A defect as data both hosts print: its code, its path as JSON, and what the position expected.
+let private defectText (e: DecodeError) =
+    DecodeError.codeName e.Code
+    + "\u0002"
+    + Canon.render (DecodePath.toJson e.Path)
+    + "\u0002"
+    + e.Expected
+
+let private defectsText (es: DecodeError list) =
+    es |> List.map defectText |> String.concat "\u0003"
+
+/// The multi-defect inputs above, by the kind whose per-spec entry reads them (`node` reads text).
+let private multiDefectInputs: (string * string * string) list =
+    [ "missing", "Task", """{"$type":"Task"}"""
+      "wrong type", "Task", """{"$type":"Task","name":1,"due":"x","trigger":true,"extras":[],"owner":5}"""
+      "nested",
+      "Section",
+      """{"$type":"Section","children":[],"owner":{"name":1,"priority":"Urgent"},"estimate":{"$type":"Hours","amount":"x"}}"""
+      "list element",
+      "Choice",
+      """{"$type":"Choice","branches":[{"label":1,"body":{"id":"b","kind":{"$type":"Note","text":"t"}}},{"body":5},"oops"],"otherwise":{"id":"o","kind":{"$type":"Note","text":"t"}},"rule":{"$type":"AllOf","rules":[{"$type":"Always"},{"$type":"Nope"},{"$type":"Equals"}]}}"""
+      "map key",
+      "Task",
+      """{"$type":"Task","name":"n","due":{"$type":"Named","rules":{"a":{"$type":"Always"},"b":7,"c":{"$type":"Not"}}},"trigger":{"$type":"Manual","label":"go"},"extras":{"x":{"id":"x","kind":{"$type":"Note","text":"t"}},"y":1,"z":{"kind":{"$type":"Note","text":2}}},"owner":{}}"""
+      "node", "node", """{"kind":{"$type":"Note","text":1},"annotation":5}"""
+      "parser refusal", "node", "{\"id\":" ]
+
+/// What the compiled F# module answers for one case, in the TypeScript harness's format.
+let private fsharpAnswer (mode: string) (text: string) : string =
+    let spec (all: Result<'T, DecodeError list>) =
+        match all with
+        | Ok _ -> "ok"
+        | Error es -> defectsText es
+
+    let body =
+        match mode with
+        | "node" ->
+            match decodeNodeAll text with
+            | Ok n -> "ok\u0002" + encodeNode n
+            | Error es -> defectsText es
+        | "Section" -> spec (decodeSectionSpecAll (parse text))
+        | "Choice" -> spec (decodeChoiceSpecAll (parse text))
+        | "Task" -> spec (decodeTaskSpecAll (parse text))
+        | "Note" -> spec (decodeNoteSpecAll (parse text))
+        | other -> failtestf "no per-spec entry for '%s'" other
+
+    body + "\u0004law-ok"
+
+let private tsDecoderHarness (cases: (string * string * string) list) =
+    let spec =
+        DeriveIdl.deriveIdl.Kinds
+        |> List.map (fun k -> sprintf "%s: [decode%sSpec, decode%sSpecAll]" k.Tag k.Tag k.Tag)
+        |> String.concat ", "
+
+    let caseJson =
+        cases
+        |> List.map (fun (l, m, t) -> [| l; m; t |])
+        |> List.toArray
+        |> System.Text.Json.JsonSerializer.Serialize
+
+    """const __spec = { __SPEC__ };
+const __cases = __CASES__;
+const __defects = (es) => es.map((e) => e.code + '\u0002' + JSON.stringify(e.path) + '\u0002' + e.expected).join('\u0003');
+const __same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+for (const [label, mode, text] of __cases) {
+  let first;
+  let all;
+  if (mode === 'node') {
+    first = decodeNode(text);
+    all = decodeNodeAll(text);
+  } else {
+    const j = dParse(text);
+    first = __spec[mode][0](j);
+    all = __spec[mode][1](j);
+  }
+  const body = all.ok ? (mode === 'node' ? 'ok\u0002' + encodeNode(all.value) : 'ok') : __defects(all.errors);
+  const law = all.ok
+    ? (first.ok && (mode !== 'node' || encodeNode(first.value) === encodeNode(all.value)))
+    : (!first.ok && __same(first.error, all.errors[0]));
+  console.log(label + '\u0001' + body + '\u0004' + (law ? 'law-ok' : 'law-broken'));
+}
+"""
+        .Replace("__SPEC__", spec)
+        .Replace("__CASES__", caseJson)
+
+[<Tests>]
+let typescriptTests =
+    testList
+        "Phase 380 - collecting decoders in the TypeScript host"
+        [ testCase "the defect order is stated in the emitted TypeScript module" (fun _ ->
+              let text =
+                  match
+                      Gen.typescriptModuleDerived
+                          [ Gen.Derivation.SpecDecoders ]
+                          DeriveIdl.deriveIdl
+                          (DeriveIdl.deriveIdl.Kinds |> List.map _.Tag)
+                  with
+                  | Ok s -> s
+                  | Error e -> failtestf "TypeScript codegen refused: %A" e
+
+              for phrase in
+                  [ "in FIELD DECLARATION ORDER"
+                    "a list's items in index order, and a map's entries in document order"
+                    "The first defect of a collecting decoder is the defect its short-circuiting twin reports" ] do
+                  Expect.stringContains text phrase phrase)
+
+          testCase
+              "every input answers the F# module's defects, in order, and the F# module's tree, under node"
+              (fun _ ->
+                  let doc = parse sampleText
+                  let paths = positions doc |> List.toArray
+
+                  let render (j: JVal) = Canon.renderOrdered j
+
+                  let mutations: (string * (JVal -> JVal option)) list =
+                      [ "int", (fun _ -> Some(JInt 7))
+                        "string", (fun _ -> Some(JStr "x"))
+                        "array", (fun _ -> Some(JArr []))
+                        "object", (fun _ -> Some(JObj []))
+                        "removed", (fun _ -> None) ]
+
+                  let singles =
+                      [ for i in 0 .. paths.Length - 1 do
+                            for name, m in mutations do
+                                yield sprintf "single %d %s" i name, "node", render (rewrite paths[i] m doc) ]
+
+                  let pairs =
+                      [ for a in 0 .. paths.Length - 1 do
+                            for b in a + 1 .. paths.Length - 1 do
+                                let pa, pb = paths[a], paths[b]
+
+                                if not (isPrefix pa pb) && not (isPrefix pb pa) then
+                                    let mutated =
+                                        doc |> rewrite pa (fun _ -> Some(JInt 7)) |> rewrite pb (fun _ -> Some(JInt 7))
+
+                                    yield sprintf "pair %d %d" a b, "node", render mutated ]
+
+                  let cases = multiDefectInputs @ [ "sample", "node", sampleText ] @ singles @ pairs
+
+                  let tsModule =
+                      match
+                          Gen.typescriptModuleDerived
+                              DeriveIdl.derivations
+                              DeriveIdl.deriveIdl
+                              (DeriveIdl.deriveIdl.Kinds |> List.map _.Tag)
+                      with
+                      | Ok s -> s
+                      | Error e -> failtestf "TypeScript codegen refused: %A" e
+
+                  match IdlDeriveTests.runTsModule tsModule (tsDecoderHarness cases) with
+                  | None -> skiptest "node not on PATH — the executed TypeScript agreement is skipped"
+                  | Some lines ->
+                      let actual = IdlDeriveTests.lineMap lines
+                      Expect.equal actual.Count cases.Length "one answer per input"
+
+                      let multi = actual |> Map.filter (fun _ v -> v.Contains "\u0003") |> Map.count
+
+                      Expect.isGreaterThan multi 1000 "the inputs exercise multi-defect refusals, not only single ones"
+
+                      let failures =
+                          [ for label, mode, text in cases do
+                                let expected = fsharpAnswer mode text
+
+                                match actual.TryFind label with
+                                | Some a when a = expected -> ()
+                                | Some a -> yield sprintf "%s: F# %s / TypeScript %s" label expected a
+                                | None -> yield sprintf "%s: no TypeScript answer" label ]
+
+                      Expect.isEmpty (List.truncate 5 failures) (sprintf "%d inputs disagree" failures.Length)) ]

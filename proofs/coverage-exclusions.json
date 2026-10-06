@@ -1225,6 +1225,14 @@
     },
     {
       "members": [
+        "Idl.Gen.typescriptModuleDerived"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The TypeScript module plus the requested derivations; the empty request held to typescriptModule byte for byte, admissibility held to the F# path's, and the generated TypeScript run under node and compared as data with the compiled F# derivations module stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlDeriveTests.fs"
+    },
+    {
+      "members": [
         "Idl.SupportArtifact.parse",
         "Idl.SupportArtifact.render"
       ],

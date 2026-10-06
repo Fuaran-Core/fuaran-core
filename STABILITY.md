@@ -2455,7 +2455,8 @@ No `CodegenError` case was added.
 
 **Not changed.** The IDL model, the `idl.json` artefact and its schema are untouched — the opt-in is
 generator configuration beside the IDL, not a wire fact — so there is no wire-versioning verdict to
-quote. The TypeScript emitter does not gain these members in this slot; that is a successor phase.
+quote. The TypeScript emitter does not gain these members in this phase; Phase 380, below, adds them
+in this same slot.
 
 ### The generator emits defect-collecting, per-spec decoders (Phase 377) — ADDITIVE; the wire `none`
 
@@ -2489,10 +2490,70 @@ the draft slot that introduced `Gen.Derivation` (Phase 374), so no released cont
 **Limits, stated.** A host projection (`GenSupport.KindProjections`) supplies only a short-circuiting
 decoder, so its kind's collecting entry reports that decoder's one defect; a case refine is consulted
 only once every member of its case decoded, as before, and adds at most one defect. The TypeScript
-emitter does not gain collecting decoders in this slot.
+emitter does not gain collecting decoders in this phase; Phase 380, below, adds them in this same slot.
 
 **Not changed.** The short-circuiting decoders, `decodeNode`, the IDL model and the `idl.json` artefact.
 No `CodegenError` case was added.
+
+### The TypeScript emitter gains the structural derivations and the collecting decoders (Phase 380) — ADDITIVE; the wire `none`
+
+**What moved, for a consumer.** Nothing, unless it asks. `Gen.typescriptModuleDerived derivations idl
+kindTags` is the TypeScript host's `fsharpModuleDerived`: it takes the same `Gen.Derivation` requests and
+appends, after `typescriptModule`'s members, the members each names, with one further `export { … }`
+naming them. The empty list emits `typescriptModule`'s bytes, and `typescriptModule` emits exactly what
+it did; a test holds both on every vocabulary here (the repository commits no generated TypeScript
+module, so the generator's own plain emission is the oracle). `api/Fuaran.Core.Idl.Codegen.txt` gains
+one line and loses none.
+
+**Admissibility is the F# path's.** The requests are run through the F# derivation first and its
+refusal is this path's refusal — the same `CodegenError`, never an approximation — so the two hosts
+accept and refuse exactly the same requests. The analysis is the F# emitter's, lifted rather than
+re-derived: `FSharpDerive.nodeHolders`, `holdsIn`, `reaches` and the fold's recursion check
+(`foldSelfIn`, lifted out of the fold emitter) are now read by both hosts; the F# emission is
+byte-identical (`DeriveGenerated.fs` is unchanged).
+
+**New, additive** (in the generated module, under the request). The JS host holds a value in its wire
+shape, so each member reads and rebuilds that shape; a map is walked in Ordinal key order, as the F#
+host's `Map` iterates:
+
+- `StructuralAccess` — `wireTag`, `allWireTags`, `children`, `withChildren(kids, n)`, and `nodeWitness`
+  as a plain object carrying Core's `NodeWitness` members (`id`, `kindTag`, `children`,
+  `replaceChildren`) — this host has no Core runtime to type it.
+- `KeyedPositions` — `keyedChildren`, `withKeyedChildren(kids, n)` (arity-preserving) and `keyedWitness`
+  (`surface`, `keyedChildren`, `replaceKeyedChildren`, `placeKeyedChild` — `undefined` where there is
+  no keyed position — and `idsUnique`, the full walk).
+- `SlotsOf T` — `slotsOf<T>(n)`, an array of `[field name, value]` pairs, kind fields first.
+- `Fold U` and `Projections (U, fields)` — the members of one object exported as `U` (`Rule.fold(folder,
+  state, v)`, `Trigger.owner(v)`), declared `U$` inside the module so a union named like a global the
+  module reads shadows nothing. A projection answers `undefined` where the case does not carry the field;
+  where a carrying case holds the field OPTIONALLY, its absence is `undefined` too — the F# host's
+  `Some None` and `None` are one value in a host whose option is presence.
+- `DefaultRecords` — `default<Tag>Spec` / `default<Record>` in the shape the generated decoder
+  produces: an omitted-at-default member filled as the decoder refills it, a declared default rendered
+  as `typescriptValue` renders it, an absent optional and a host-only member absent.
+- `VocabularyConstants` — `kindCategories`, `kindFieldNames`, `opFieldNames` as `Map`s of `Set`s and
+  `envelopeFieldNames` as a `Set`, in Ordinal order.
+- `SpecDecoders` — a collecting `col*` decoder beside every short-circuiting one, and the public
+  entries: per kind `decode<Tag>Spec(j)` / `decode<Tag>SpecAll(j)` over a parsed value, per node
+  `decodeNodeJson(j)` / `decodeNodeJsonAll(j)` and `decodeNodeAll(s)` over text. A short-circuiting
+  entry answers `decodeNode`'s `{ ok, value }` / `{ ok: false, error }`; a collecting one answers
+  `{ ok: false, errors }`, each defect `{ code, path, expected, message }`. The defect order is the F#
+  host's (written above the collecting prelude in the emitted module), and a test holds the two hosts to
+  the same defect list — codes, paths and what each position expected, in order — and the same tree,
+  over every multi-defect input of Phase 377 and every single and paired mutation of its sample, under
+  node.
+
+**No TypeScript counterpart, stated.** `MapMsg` emits nothing: this host holds a handler slot (`TFn`)
+as its sentinel's `null` and declares no message type, so a message map has nothing to rewrite. The
+request is still checked, so a vocabulary the F# path refuses it over is refused here too.
+
+**Limits, stated, not widened.** The F# limits carry over: a case refine and a host projection supply
+only a short-circuiting decoder on the F# side; the TypeScript path takes no declared support at all
+(`typescriptModule` never has), so neither arises here. `typescriptDeclarations` does not declare the
+derived members; it is unchanged.
+
+**Not changed.** The IDL model, the `idl.json` artefact, `typescriptModule`, `typescriptDeclarations`
+and every F# emission. No `CodegenError` case was added.
 
 ## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
 
