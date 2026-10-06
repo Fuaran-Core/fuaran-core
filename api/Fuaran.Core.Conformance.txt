@@ -163,6 +163,7 @@ method Fuaran.Core.EncodingProfileVectors.laws() : Microsoft.FSharp.Collections.
 method Fuaran.Core.EncodingProfileVectors.lines() : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.EncodingProfileVectors.run() : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
 method Fuaran.Core.EncodingProfileVectors.runVector(Fuaran.Core.EncodingProfileVectors+Vector) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Outcome>
+method Fuaran.Core.EncodingProfileVectors.storedCodecLaws`1(System.String, Fuaran.Core.Codec`1<!!0>, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Families.adequacyToken(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>, System.String) : System.String
 method Fuaran.Core.Families.adequacyTokenOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+Roster>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.CaseCount>>, System.String) : System.String
 method Fuaran.Core.Families.censusOf(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Families+LawFamily>) : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.AdequacyClass>>

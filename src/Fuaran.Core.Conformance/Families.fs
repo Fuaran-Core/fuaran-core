@@ -1051,6 +1051,20 @@ module Families =
                   "a fixed vector corpus: every run evaluates every value, actor and capture vector under both profiles and the rendered table, so there is no sample that could miss one")
               (NoRefusal, "every vector is an accepted rendering; no refused outcome is read")
 
+          // Phase 379 — the stored-codec family: a content-addressed consumer runs it against ITS OWN
+          // corpus of canonical texts written through a `Codec<'T>`; the store, walked whole, is the
+          // sample, as for the stored-identity families below.
+          f
+              "EncodingProfileVectors"
+              "storedCodecLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the consumer's own stored texts, walked whole: every text is read, re-rendered under the declared profile and under every other, so there is no sample that could miss one")
+              (NoRefusal,
+               "reads a stored corpus; a defect in a stored text is a red law about that store, not a sampled refused outcome")
+
           // Phase 360 — stored identity: a content-addressed consumer runs these against ITS OWN
           // persisted store, so nothing is drawn: the store, walked whole, is the sample.
           f
@@ -1936,7 +1950,12 @@ module Families =
                 "OpStream.encodeActorWith"
                 "OpStream.configFor"
                 "Dag.nodeIdWith"
-                "EncodingProfileVectors.lines" ] }
+                "EncodingProfileVectors.lines"
+                "Canonical.write"
+                "Canonical.tryWrite"
+                "Canonical.isCanonical" ] }
+          { Family = "EncodingProfileVectors.storedCodecLaws"
+            Operations = [ "Canonical.read"; "Codec.read"; "Codec.write" ] }
           { Family = "FoldConfluence.laneFoldLaws"
             Operations = [ "FoldConfluence.foldOnce"; "Dag.reconcileMany" ] }
           { Family = "StoredIdentity.captureLaws"

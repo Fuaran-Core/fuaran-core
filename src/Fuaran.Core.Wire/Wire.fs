@@ -2421,7 +2421,7 @@ type Row = Map<string, obj>
 /// different seconds on two servers; and an `int64` is widened to a double, so every value past
 /// 2^53 is silently a different number. And it is a boxed `Map<string, obj>` row — a UI-tier
 /// representation — in the spine.
-[<System.Obsolete("RowCodec is obsolete and is removed at the next breaking draft. Its bytes carry two hazards: a DateTime of Unspecified kind is encoded through ToUniversalTime(), so the Unix seconds depend on the machine's time zone; and an int64 is widened to a double, so any value past 2^53 is silently a different number. Carry rows as a Fuaran.Core.Column DataSource (ColumnCodec), or host a row codec in the UI tier.")>]
+[<System.Obsolete("RowCodec is obsolete and is removed at the next breaking draft. Its bytes carry two hazards: a DateTime of Unspecified kind is encoded through ToUniversalTime(), so the Unix seconds depend on the machine's time zone; and an int64 is widened to a double, so any value past 2^53 is silently a different number. Carry rows as a Fuaran.Core.Column DataSource (ColumnCodec), declare a typed row as a Fuaran.Core.Codec<'T>, or host a row codec in the UI tier.")>]
 module RowCodec =
 
     /// The residual-opaque sentinel the rows slot carried before the typed encoding.
@@ -3216,3 +3216,417 @@ module Corpus =
                     | None -> go (i + 1)
 
         go 0
+
+// ============================================================================
+//  Phase 379 — `Canonical` and `Codec<'T>`: one canonical writer and reader over a NAMED profile,
+//  and one declaration that yields an encoder, a strict decoder and a schema (DECISIONS.md D122).
+//
+//  Neither renders anything new. `Canonical.write` IS `Json.renderWith`, so its bytes are the
+//  profile's and are held by `EncodingProfileVectors`; a `Codec<'T>` writes a `JVal`, so the bytes
+//  a declaration produces are `Canonical.write`'s of that value. What the two add is the part every
+//  consumer was writing for itself: a guarded write under a profile, a canonicity check, and a codec
+//  whose three faces cannot drift apart because they are built from one declaration.
+// ============================================================================
+
+/// The canonical JSON writer and reader under a NAMED `EncodingProfile` (Phase 379). A
+/// content-addressed consumer names the profile its ids were computed under and reads and writes
+/// through here; nothing about the bytes is the caller's to choose. Key order, number layout and
+/// whitespace are the profile's: under every profile that exists today the member order is the
+/// order the value was BUILT in (a codec's declaration order, never a sort the caller asks for),
+/// numbers take the round-trip layout and there is no whitespace. A profile that changed any of
+/// that would be a new profile, per `EncodingProfile`'s own rule.
+[<RequireQualifiedAccess>]
+module Canonical =
+
+    /// The canonical text of `v` under `profile` — exactly `Json.renderWith profile v`. Total, and
+    /// UNGUARDED in the way `Json.render` is: a non-finite float or an ill-formed string renders,
+    /// as text that does not mean `v`. `tryWrite` is the form whose output may be hashed.
+    let write (profile: EncodingProfile) (v: JVal) : string = Json.renderWith profile v
+
+    /// `write`, GUARDED: the canonical text of `v` under `profile`, or the first non-finite float
+    /// or ill-formed string in document order, named with its path. Over a value carrying neither
+    /// it is exactly `Ok (write profile v)`. The refusal is the reason two values would otherwise
+    /// share bytes, so a consumer that digests canonical text digests this function's `Ok`.
+    let tryWrite (profile: EncodingProfile) (v: JVal) : Result<string, string> =
+        match Json.firstNonFinite v with
+        | Some(path, tok) -> Error("non-finite float has no canonical rendering of its own: " + tok + " at " + path)
+        | None ->
+            match Json.firstIllFormedString v with
+            | Some(path, what) ->
+                Error(
+                    "ill-formed string has no canonical rendering of its own: "
+                    + what
+                    + " at "
+                    + path
+                )
+            | None -> Ok(write profile v)
+
+    /// Read canonical text — or any JSON text — as a value, the refusal typed as a `DecodeError` at
+    /// the root. It accepts BOTH escaping spellings of a control character (`\n` and `\u000a`), so
+    /// text written under any profile reads back as the one value it encodes; the profile is a
+    /// fact about writing, never about reading.
+    let read (text: string) : Result<JVal, DecodeError> = Decoder.parse text
+
+    /// `true` exactly when `text` is the canonical text, under `profile`, of the value it reads
+    /// as: it parses, the value has a guarded rendering, and that rendering is `text` byte for
+    /// byte. False for whitespace, a `-0` (it reads as the integer `0`, whose text is `0`), and any
+    /// spelling of a control character `profile` does not write. A store whose texts are all
+    /// canonical under its profile has ids that recompute from the values alone.
+    let isCanonical (profile: EncodingProfile) (text: string) : bool =
+        match Json.parse text with
+        | Error _ -> false
+        | Ok v ->
+            match tryWrite profile v with
+            | Ok t -> t = text
+            | Error _ -> false
+
+/// A value's codec (Phase 379): its encoder, its COLLECTING decoder and its schema, built from one
+/// declaration by the `Codec` combinators so the three cannot disagree about a member's name,
+/// whether it is required, or the kind of value it holds.
+///
+/// `ReadAll` answers every defect it finds, in the order the generator's collecting decoders use
+/// (Phase 377): for an object, its undeclared members first in authored order (the strict reader
+/// checks them first too), then its declared members in declaration order, each member's own
+/// defects depth-first; a list's items in index order; a leaf, a wrong kind or an unknown
+/// discriminator one defect. Its first defect is the one the strict reader `Codec.decoder`
+/// reports, and on a clean input the two answer one value. The codes and paths are
+/// `DecodeError`'s, the vocabulary every reader on the spine shares.
+type Codec<'T> =
+    {
+        /// The value as the `JVal` it is written as. Total over every value the declaration covers.
+        Write: 'T -> JVal
+        /// The value a `JVal` reads as, or every defect found in it.
+        ReadAll: JVal -> Result<'T, DecodeError list>
+        /// The JSON Schema (2020-12 vocabulary) of what `Write` produces and `ReadAll` accepts:
+        /// `type`, `items`, `properties`, `required`, `additionalProperties`, `enum`, `const`,
+        /// `oneOf`. Descriptive: the decoder, not the schema, is the authority on acceptance.
+        Schema: JVal
+    }
+
+/// The members of an object codec still being declared (Phase 379): `'R` is the value written,
+/// `'C` what remains of its constructor. Built by `Codec.record` and `Codec.field` /
+/// `Codec.optField`, closed by `Codec.build` or used as a union case by `Codec.case`.
+type CodecFields<'R, 'C> =
+    private
+        { WriteFields: 'R -> (string * JVal) list
+          ReadFields: (string * JVal) list -> Result<'C, DecodeError list>
+          Properties: (string * JVal) list
+          Required: string list
+          Names: string list }
+
+/// One case of a discriminated codec (Phase 379), built by `Codec.case` and closed by
+/// `Codec.union`.
+type CodecCase<'T> =
+    private
+        { Tag: string
+          TryWrite: 'T -> (string * JVal) list option
+          ReadCase: (string * JVal) list -> Result<'T, DecodeError list>
+          CaseProperties: (string * JVal) list
+          CaseRequired: string list
+          CaseNames: string list }
+
+/// The `Codec<'T>` combinators (Phase 379). Every codec they build writes members in DECLARATION
+/// order and reads STRICTLY: an undeclared member is `UndeclaredMember`, an absent required one
+/// `MissingField`, never a default. A declaration that cannot be written consistently — a member
+/// or a case tag named twice, a discriminator that is also a member — is refused when the codec
+/// is BUILT, with `ArgumentException`, never when a value is written.
+[<RequireQualifiedAccess>]
+module Codec =
+
+    let private one (r: Result<'T, DecodeError>) : Result<'T, DecodeError list> = Result.mapError List.singleton r
+
+    let private under (step: PathSegment) (r: Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
+        Result.mapError (List.map (DecodeError.under step)) r
+
+    let private both
+        (f: Result<'A -> 'B, DecodeError list>)
+        (a: Result<'A, DecodeError list>)
+        : Result<'B, DecodeError list> =
+        match f, a with
+        | Ok f, Ok a -> Ok(f a)
+        | Error e, Ok _
+        | Ok _, Error e -> Error e
+        | Error e1, Error e2 -> Error(e1 @ e2)
+
+    let private schemaOf (kind: string) : JVal = JObj [ "type", JStr kind ]
+
+    let private memberOf (name: string) (members: (string * JVal) list) : JVal option =
+        members |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+
+    let private firstRepeat (names: string list) : string option =
+        names |> List.countBy id |> List.tryFind (fun (_, n) -> n > 1) |> Option.map fst
+
+    let private strictObject
+        (names: string list)
+        (j: JVal)
+        (read: (string * JVal) list -> Result<'T, DecodeError list>)
+        : Result<'T, DecodeError list> =
+        match j with
+        | JObj members ->
+            match Decoder.undeclared names j, read members with
+            | [], r -> r
+            | u, Ok _ -> Error u
+            | u, Error e -> Error(u @ e)
+        | other -> Error [ Decoder.wrongKind "object" other ]
+
+    let private objectSchema
+        (extra: (string * JVal) list)
+        (properties: (string * JVal) list)
+        (required: string list)
+        : JVal =
+        JObj
+            [ "type", JStr "object"
+              "properties", JObj(extra @ properties)
+              "required", JArr(required |> List.map JStr)
+              "additionalProperties", JBool false ]
+
+    /// A codec from its three faces, for a type the combinators do not reach. The caller owns their
+    /// agreement; everything built from the combinators below has it by construction.
+    let make (write: 'T -> JVal) (readAll: JVal -> Result<'T, DecodeError list>) (schema: JVal) : Codec<'T> =
+        { Write = write
+          ReadAll = readAll
+          Schema = schema }
+
+    /// A codec over a short-circuiting `Decoder<'T>`, whose one refusal is its one defect.
+    let ofDecoder (write: 'T -> JVal) (read: Decoder<'T>) (schema: JVal) : Codec<'T> = make write (read >> one) schema
+
+    /// The strict reader: the codec's first defect, or its value — `Decoder`'s shape, for a caller
+    /// on the short-circuiting layer.
+    let decoder (c: Codec<'T>) : Decoder<'T> =
+        fun j ->
+            match c.ReadAll j with
+            | Ok v -> Ok v
+            | Error(e :: _) -> Error e
+            | Error [] ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.SchemaFault
+                        "a refusal"
+                        "a collecting decoder answered no defect and no value"
+                )
+
+    // ---- leaves ----
+
+    /// Any value, verbatim; its schema admits everything.
+    let json: Codec<JVal> = make id Ok (JObj [])
+
+    /// A string (`Decoder.str`).
+    let string: Codec<string> = ofDecoder JStr Decoder.str (schemaOf "string")
+
+    /// An `int` (`Decoder.int`, the strict integer read).
+    let int: Codec<int> = ofDecoder JInt Decoder.int (schemaOf "integer")
+
+    /// A `float` written as `JFloat` and read from either number constructor (`Decoder.float`). A
+    /// whole-valued float writes as an integer token, per the wire's one number population.
+    let float: Codec<float> = ofDecoder JFloat Decoder.float (schemaOf "number")
+
+    /// A `bool` (`Decoder.bool`).
+    let bool: Codec<bool> = ofDecoder JBool Decoder.bool (schemaOf "boolean")
+
+    /// A closed set of values spelled as strings: written by the spelling of the FIRST case equal
+    /// to the value, read by `Decoder.oneOf` (an unknown spelling is `UnknownTag`). Refused when
+    /// built if a spelling repeats.
+    let enum (cases: (string * 'T) list) : Codec<'T> =
+        match firstRepeat (List.map fst cases) with
+        | Some s -> invalidArg "cases" ("the spelling '" + s + "' names two cases")
+        | None ->
+            let write (v: 'T) =
+                match cases |> List.tryFind (fun (_, x) -> x = v) with
+                | Some(s, _) -> JStr s
+                | None -> invalidArg "value" "the value is not one of the codec's declared cases"
+
+            ofDecoder write (Decoder.oneOf cases) (JObj [ "enum", JArr(cases |> List.map (fst >> JStr)) ])
+
+    // ---- composition ----
+
+    /// A list, every item through `c`; every item's defects are reported, at its index.
+    let list (c: Codec<'T>) : Codec<'T list> =
+        let readAll (j: JVal) =
+            match j with
+            | JArr xs ->
+                let results =
+                    xs |> List.mapi (fun i x -> c.ReadAll x |> under (PathSegment.Index i))
+
+                let errors =
+                    results
+                    |> List.collect (fun r ->
+                        match r with
+                        | Ok _ -> []
+                        | Error es -> es)
+
+                if List.isEmpty errors then
+                    Ok(
+                        results
+                        |> List.choose (fun r ->
+                            match r with
+                            | Ok v -> Some v
+                            | Error _ -> None)
+                    )
+                else
+                    Error errors
+            | other -> Error [ Decoder.wrongKind "array" other ]
+
+        make (List.map c.Write >> JArr) readAll (JObj [ "type", JStr "array"; "items", c.Schema ])
+
+    /// The codec of a type isomorphic to `'T`: `there` after reading, `back` before writing.
+    let map (there: 'T -> 'U) (back: 'U -> 'T) (c: Codec<'T>) : Codec<'U> =
+        make (back >> c.Write) (c.ReadAll >> Result.map there) c.Schema
+
+    /// The codec of a REFINEMENT of `'T`: `check` admits a read value or refuses it with a
+    /// sentence, reported as `OutOfRange` with `expected` as what the position admits. `back` is
+    /// total — every refined value has a representation. The schema is the base codec's.
+    let refine (expected: string) (check: 'T -> Result<'U, string>) (back: 'U -> 'T) (c: Codec<'T>) : Codec<'U> =
+        let readAll (j: JVal) =
+            c.ReadAll j
+            |> Result.bind (fun v ->
+                match check v with
+                | Ok u -> Ok u
+                | Error why -> Error [ DecodeError.make DecodeCode.OutOfRange expected why ])
+
+        make (back >> c.Write) readAll c.Schema
+
+    // ---- objects ----
+
+    /// Begin an object declaration with its constructor, curried over the members in the order
+    /// they will be declared: `Codec.record (fun a b -> { A = a; B = b })`.
+    let record (ctor: 'C) : CodecFields<'R, 'C> =
+        { WriteFields = fun _ -> []
+          ReadFields = fun _ -> Ok ctor
+          Properties = []
+          Required = []
+          Names = [] }
+
+    /// Declare a REQUIRED member: written from `get`, read through `c`; absent is `MissingField`.
+    let field (name: string) (get: 'R -> 'A) (c: Codec<'A>) (fs: CodecFields<'R, 'A -> 'C>) : CodecFields<'R, 'C> =
+        { WriteFields = fun r -> fs.WriteFields r @ [ name, c.Write(get r) ]
+          ReadFields =
+            fun members ->
+                let this =
+                    match memberOf name members with
+                    | Some v -> c.ReadAll v |> under (PathSegment.Key name)
+                    | None -> Error [ Decoder.missing name ]
+
+                both (fs.ReadFields members) this
+          Properties = fs.Properties @ [ name, c.Schema ]
+          Required = fs.Required @ [ name ]
+          Names = fs.Names @ [ name ] }
+
+    /// Declare an OPTIONAL member: written only when `get` answers `Some`, read as `None` when
+    /// absent. The wire has no null, so absence is the only spelling of `None`.
+    let optField
+        (name: string)
+        (get: 'R -> 'A option)
+        (c: Codec<'A>)
+        (fs: CodecFields<'R, 'A option -> 'C>)
+        : CodecFields<'R, 'C> =
+        { WriteFields =
+            fun r ->
+                match get r with
+                | Some a -> fs.WriteFields r @ [ name, c.Write a ]
+                | None -> fs.WriteFields r
+          ReadFields =
+            fun members ->
+                let this =
+                    match memberOf name members with
+                    | Some v -> c.ReadAll v |> under (PathSegment.Key name) |> Result.map Some
+                    | None -> Ok None
+
+                both (fs.ReadFields members) this
+          Properties = fs.Properties @ [ name, c.Schema ]
+          Required = fs.Required
+          Names = fs.Names @ [ name ] }
+
+    /// Close an object declaration: every member declared, the constructor fully applied. Read
+    /// strictly — the undeclared members are reported first, then each declared member's defects.
+    /// Refused when built if a member name repeats.
+    let build (fs: CodecFields<'R, 'R>) : Codec<'R> =
+        match firstRepeat fs.Names with
+        | Some n -> invalidArg "fs" ("the member '" + n + "' is declared twice")
+        | None ->
+            make
+                (fs.WriteFields >> JObj)
+                (fun j -> strictObject fs.Names j fs.ReadFields)
+                (objectSchema [] fs.Properties fs.Required)
+
+    // ---- discriminated unions ----
+
+    /// One case of a union: the values `project` recognises, written as the members `fs` declares
+    /// under the discriminator `tag`, read back through `inject`. Refused when built if a member
+    /// name repeats.
+    let case (tag: string) (project: 'T -> 'P option) (inject: 'P -> 'T) (fs: CodecFields<'P, 'P>) : CodecCase<'T> =
+        match firstRepeat fs.Names with
+        | Some n -> invalidArg "fs" ("the member '" + n + "' is declared twice in case '" + tag + "'")
+        | None ->
+            { Tag = tag
+              TryWrite = fun v -> project v |> Option.map fs.WriteFields
+              ReadCase = fun members -> fs.ReadFields members |> Result.map inject
+              CaseProperties = fs.Properties
+              CaseRequired = fs.Required
+              CaseNames = fs.Names }
+
+    /// A discriminated union under the member `key`: written as the first case whose `project`
+    /// recognises the value, its tag first; read by `Decoder.tagDispatch`'s rule (an absent or
+    /// non-string discriminator, or an unknown tag, is the one defect), then the case's members
+    /// strictly. Refused when built if a tag repeats or a case declares a member named `key`; a
+    /// value no case recognises is refused when written, which an exhaustive declaration never
+    /// reaches.
+    let union (key: string) (cases: CodecCase<'T> list) : Codec<'T> =
+        match firstRepeat (cases |> List.map (fun c -> c.Tag)) with
+        | Some t -> invalidArg "cases" ("the tag '" + t + "' names two cases")
+        | None ->
+            match cases |> List.tryFind (fun c -> List.contains key c.CaseNames) with
+            | Some c -> invalidArg "cases" ("case '" + c.Tag + "' declares the discriminator '" + key + "' as a member")
+            | None ->
+                let write (v: 'T) =
+                    let written =
+                        cases
+                        |> List.tryPick (fun c ->
+                            c.TryWrite v |> Option.map (fun fields -> JObj((key, JStr c.Tag) :: fields)))
+
+                    match written with
+                    | Some j -> j
+                    | None -> invalidArg "value" "no case of the union recognises the value"
+
+                let dispatch: Decoder<CodecCase<'T>> =
+                    Decoder.tagDispatch key [ for c in cases -> c.Tag, (fun _ -> Ok c) ]
+
+                let readAll (j: JVal) =
+                    match dispatch j with
+                    | Error e -> Error [ e ]
+                    | Ok c -> strictObject (key :: c.CaseNames) j c.ReadCase
+
+                let schema =
+                    JObj
+                        [ "oneOf",
+                          JArr
+                              [ for c in cases ->
+                                    objectSchema
+                                        [ key, JObj [ "const", JStr c.Tag ] ]
+                                        c.CaseProperties
+                                        (key :: c.CaseRequired) ] ]
+
+                make write readAll schema
+
+    // ---- text ----
+
+    /// The canonical text of `v` under `profile`: `Canonical.write profile (c.Write v)`.
+    let write (profile: EncodingProfile) (c: Codec<'T>) (v: 'T) : string = Canonical.write profile (c.Write v)
+
+    /// The value JSON `text` reads as, or every defect: a parse refusal is the one defect, at the
+    /// root. Either escaping spelling reads.
+    let read (c: Codec<'T>) (text: string) : Result<'T, DecodeError list> =
+        match Canonical.read text with
+        | Error e -> Error [ e ]
+        | Ok j -> c.ReadAll j
+
+    /// The codec as the conformance corpus's `Corpus.Codec`, writing canonical text under
+    /// `profile` and reading with the strict reader's sentence — so a declaration is held to the
+    /// round-trip and reject laws `Corpus` already runs.
+    let corpus (profile: EncodingProfile) (c: Codec<'T>) : Corpus.Codec<'T> =
+        { Encode = write profile c
+          Decode =
+            fun text ->
+                match read c text with
+                | Ok v -> Ok v
+                | Error(e :: _) -> Error(DecodeError.render e)
+                | Error [] -> Error "a collecting decoder answered no defect and no value" }

@@ -633,6 +633,12 @@ let private runs =
            // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
            // each at a store the ordinary append wrote: the store, walked whole, is the sample.
            run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())
+           // Phase 379 — the stored-codec family at a two-text store written under `v2` through the
+           // identity codec, one text carrying a line feed so the positive control has a text to move.
+           run
+               "EncodingProfileVectors.storedCodecLaws"
+               2
+               (EncodingProfileVectors.storedCodecLaws "v2" Codec.json [ "{\"a\":\"x\\u000a\"}"; "[1,2]" ])
            run
                "StoredIdentity.linearLaws"
                3

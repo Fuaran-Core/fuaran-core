@@ -212,6 +212,47 @@ module EncodingProfileVectors =
         [ for p in EncodingProfile.all do
               let tag = v.Name + " / " + EncodingProfile.name p
               expect (tag + " / Json.renderWith") "Json.renderWith" (column p v.V1 v.V2) (Json.renderWith p v.Value)
+              // Phase 379: the canonical writer IS the profile's renderer, guarded or not
+              expect (tag + " / Canonical.write") "Canonical.write" (column p v.V1 v.V2) (Canonical.write p v.Value)
+
+              expect
+                  (tag + " / Canonical.tryWrite")
+                  "Canonical.tryWrite"
+                  (column p v.V1 v.V2)
+                  (match Canonical.tryWrite p v.Value with
+                   | Ok t -> t
+                   | Error e -> "refused: " + e)
+
+              // the positive control: where the columns differ, the OTHER profile moves a byte of
+              // this profile's text and does not accept it as canonical
+              if v.V1 <> v.V2 then
+                  let other =
+                      match p with
+                      | EncodingProfile.V1 -> EncodingProfile.V2
+                      | EncodingProfile.V2 -> EncodingProfile.V1
+
+                  let name =
+                      tag
+                      + " / positive control: "
+                      + EncodingProfile.name other
+                      + " moves a byte and refuses this text as canonical"
+
+                  let mine = column p v.V1 v.V2
+
+                  if
+                      Canonical.write other v.Value <> mine
+                      && Canonical.isCanonical p mine
+                      && not (Canonical.isCanonical other mine)
+                  then
+                      pass name
+                  else
+                      fail
+                          name
+                          (sprintf
+                              "%s rendered %s over %s"
+                              (EncodingProfile.name other)
+                              (Canonical.write other v.Value)
+                              mine)
 
               match v.Value with
               | JStr s ->
@@ -382,3 +423,100 @@ module EncodingProfileVectors =
         (vectors |> List.map (fun v -> verdict v.Name (runVector v)))
         @ (actorVectors |> List.map (fun a -> verdict ("actor " + a.Name) (runActor a)))
         @ [ verdict "the shared checks" (runShared ()); format.Result ]
+
+    /// The stored-codec family (Phase 379) — the one a content-addressed consumer runs against ITS
+    /// OWN persisted corpus of canonical texts, `StoredIdentity`'s posture for a store written
+    /// through a `Codec<'T>` rather than an op stream. `declared` is the profile's canonical name,
+    /// the string the store persists beside its data; `stored` is every text it holds, walked whole.
+    /// A content id over a text recomputes exactly when the text does, so the laws are stated over
+    /// the bytes and hold for whatever digest the consumer keys on them:
+    ///   - the declaration names a profile this Core knows;
+    ///   - every stored text reads through the codec with no defect;
+    ///   - every stored text IS the codec's canonical text, under the declared profile, of the value
+    ///     it reads as — byte for byte, through the guarded writer — so every id recomputes;
+    ///   - the positive control: re-rendering each value under every OTHER profile moves its bytes
+    ///     exactly when it carries a line feed, carriage return or tab — the one respect the
+    ///     profiles differ in (D120) — so a store that carries one is shown to depend on its
+    ///     declaration, and a store that carries none is shown not to. A profile added later states
+    ///     its own difference here.
+    let storedCodecLaws (declared: string) (codec: Codec<'T>) (stored: string list) : LawResult list =
+        let known =
+            LawKit.LawCell "stored codec: the store declares an encoding profile this Core knows"
+
+        let reads =
+            LawKit.LawCell "stored codec: every stored text reads through the codec with no defect"
+
+        let recomputes =
+            LawKit.LawCell
+                "stored codec: every stored text is the codec's canonical text of its value under the declared profile, byte for byte"
+
+        let control =
+            LawKit.LawCell
+                "stored codec: re-rendering under every other profile moves exactly the texts whose value carries a character the profiles spell differently"
+
+        let profile = EncodingProfile.tryParse declared
+
+        known.Check(
+            profile.IsSome,
+            fun () ->
+                sprintf
+                    "the store declares %A, which names no profile (known: %s)"
+                    declared
+                    (EncodingProfile.all |> List.map EncodingProfile.name |> String.concat ", ")
+        )
+
+        match profile with
+        | None ->
+            for cell in [ reads; recomputes; control ] do
+                cell.Fail "not evaluated: the declaration names no profile"
+        | Some p ->
+            let decoded = stored |> List.mapi (fun i t -> i, t, Codec.read codec t)
+
+            let firstDefect =
+                decoded
+                |> List.tryPick (fun (i, _, r) ->
+                    match r with
+                    | Ok _ -> None
+                    | Error(e :: _) -> Some(sprintf "stored text %d: %s" i (DecodeError.render e))
+                    | Error [] -> Some(sprintf "stored text %d: refused with no defect" i))
+
+            reads.Check(firstDefect.IsNone, (fun () -> Option.defaultValue "" firstDefect))
+
+            let values =
+                decoded
+                |> List.choose (fun (i, t, r) ->
+                    match r with
+                    | Ok v -> Some(i, t, v)
+                    | Error _ -> None)
+
+            let stray =
+                values
+                |> List.tryPick (fun (i, t, v) ->
+                    match Canonical.tryWrite p (codec.Write v) with
+                    | Ok w when w = t -> None
+                    | Ok w -> Some(sprintf "stored text %d is %s; its value's canonical text is %s" i t w)
+                    | Error e -> Some(sprintf "stored text %d has no canonical text: %s" i e))
+
+            recomputes.Check(stray.IsNone, (fun () -> Option.defaultValue "" stray))
+
+            let wrong =
+                [ for i, _, v in values do
+                      let j = codec.Write v
+
+                      for o in EncodingProfile.all do
+                          if o <> p then
+                              let moved = Canonical.write o j <> Canonical.write p j
+
+                              if moved <> carriesShortForm j then
+                                  yield
+                                      sprintf
+                                          "stored text %d: under %s its bytes %s, but its value %s a line feed, carriage return or tab"
+                                          i
+                                          (EncodingProfile.name o)
+                                          (if moved then "move" else "do not move")
+                                          (if moved then "carries no" else "carries") ]
+                |> List.tryHead
+
+            control.Check(wrong.IsNone, (fun () -> Option.defaultValue "" wrong))
+
+        [ known.Result; reads.Result; recomputes.Result; control.Result ]

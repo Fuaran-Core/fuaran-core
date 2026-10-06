@@ -2604,6 +2604,62 @@ same consumer.
 **Not changed.** The IDL model, the `idl.json` artefact, `typescriptModule`, `typescriptDeclarations`,
 `typescriptModuleDerived`'s output and every F# emission. No `CodegenError` case was added.
 
+### `Canonical` and `Codec<'T>` on the spine; `Digest` proposed and held for a placement ruling (Phase 379) — ADDITIVE; the wire `none`
+
+**What moved, for a consumer.** Nothing, unless it asks. `Fuaran.Core.Wire` gains two modules and three
+types beside its existing surface; no existing member, default, or rendered byte changes. The committed
+encoding-profile table (`conformance/encoding/encoding-profiles.json`) is unchanged: the new checks read
+it, they do not add rows to it. DECISIONS.md D122 records the three proposals and their placements.
+
+**New, additive — `Canonical` (in `Fuaran.Core.Wire`).** The canonical writer and reader under a NAMED
+`EncodingProfile`, so a content-addressed store states its profile once and has no rendering knob left:
+
+- `Canonical.write profile v` — exactly `Json.renderWith profile v`; its bytes are the profile's and the
+  `EncodingProfileVectors.laws` table pins them under every profile.
+- `Canonical.tryWrite profile v` — the guarded form: the first non-finite float or ill-formed string, by
+  path, as a refusal; otherwise exactly `Ok (write profile v)`. The form a consumer digests.
+- `Canonical.read text` — `Decoder.parse`: either spelling of a control character reads as one value.
+- `Canonical.isCanonical profile text` — whether `text` is, byte for byte, the guarded canonical text of
+  the value it reads as under `profile`.
+
+Member order, number layout and whitespace are the profile's. Under `V1` and `V2` the member order is
+the order a value was BUILT in — there is no sort to ask for, because a sort would move every stored id
+whose pre-image is author-ordered.
+
+**New, additive — `Codec<'T>`, `CodecFields<'R, 'C>`, `CodecCase<'T>` and the `Codec` module (in
+`Fuaran.Core.Wire`).** One declaration yields the encoder (`Write`), a COLLECTING decoder (`ReadAll`,
+every defect as a `DecodeError list`, in the order the generator's collecting decoders use since Phase
+377) and a JSON Schema (`Schema`). `Codec.decoder` is the strict, first-defect reader on the `Decoder<'T>`
+layer, so the codes, paths and sentences are the ones every reader on the spine already returns.
+Combinators: `make`, `ofDecoder`, `json`, `string`, `int`, `float`, `bool`, `enum`, `list`, `map`,
+`refine`, the object builder `record` / `field` / `optField` / `build`, the union builder `case` /
+`union`, and over text `write`, `read` and `corpus` (the declaration as a `Corpus.Codec<'T>`, so the
+corpus round-trip and reject runners take it). Objects are written in declaration order and read
+strictly — an undeclared member is `UndeclaredMember`, an absent required one `MissingField`. A
+declaration that could not be written consistently (a member or tag named twice, a discriminator that is
+also a member) raises `ArgumentException` when the codec is BUILT. `CodecFields` and `CodecCase` are
+opaque: their representation is private, so it can change without a consumer's construction breaking.
+
+`RowCodec`'s obsolescence message now names `Codec<'T>` as the route for a typed row, beside the
+`Column` route it already named.
+
+**New, additive — the stored-codec family (in `Fuaran.Core.Conformance`).**
+`EncodingProfileVectors.storedCodecLaws declared codec stored` is the family a content-addressed consumer
+runs against ITS OWN stored corpus of texts written through a codec: the declaration names a known
+profile; every stored text reads with no defect; every stored text is the codec's canonical text of its
+value under the declared profile, byte for byte (so every id keyed on those bytes recomputes); and,
+as the positive control, re-rendering under every other profile moves exactly the texts whose value
+carries one of the characters the profiles spell differently. It is opt-in
+(`seam-not-every-domain-has`), on the `StoredIdentity` families' posture: the store, walked whole, is the
+sample. `EncodingProfileVectors.laws` gains, per value vector and profile, `Canonical.write` and
+`Canonical.tryWrite` against the committed column and a positive control (where the columns differ, the
+other profile moves a byte and refuses the text as canonical); its law count is unchanged.
+
+**Not added — `Digest`.** A typed digest constructed over canonical bytes under a named profile needs the
+renderer (`Fuaran.Core.Wire`) and the SHA-256 (`Fuaran.Core.Tree`'s `Hash`) in one place, and D2 makes
+`Wire` standalone. Its placement is an open question in D122 and nothing ships for it here; no hashing
+entry point, digest or id moves.
+
 ## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
 
 **Moved number (2026-10-06).** `0.35.0` was packed as a draft with an earlier public surface than the

@@ -1117,6 +1117,19 @@
       "refusal": "none"
     },
     {
+      "id": "EncodingProfileVectors.storedCodecLaws",
+      "module": "EncodingProfileVectors",
+      "entry": "storedCodecLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "8",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
       "id": "FoldConfluence.laneFoldLaws",
       "module": "FoldConfluence",
       "entry": "laneFoldLaws",

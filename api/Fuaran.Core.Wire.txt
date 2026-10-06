@@ -4,6 +4,7 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+ctor Fuaran.Core.Codec`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.JVal>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal)
 ctor Fuaran.Core.Corpus+Case..ctor(System.String, Fuaran.Core.Corpus+CaseKind, System.String, System.String)
 ctor Fuaran.Core.Corpus+Codec`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)
 ctor Fuaran.Core.Corpus+Outcome..ctor(System.String, System.Boolean, System.String)
@@ -67,6 +68,26 @@ method Fuaran.Core.Canon.render(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Canon.renderOrdered(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Canon.tryRender(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
 method Fuaran.Core.Canon.typed(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>) : Fuaran.Core.JVal
+method Fuaran.Core.Canonical.isCanonical(Fuaran.Core.EncodingProfile, System.String) : System.Boolean
+method Fuaran.Core.Canonical.read(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.DecodeError>
+method Fuaran.Core.Canonical.tryWrite(Fuaran.Core.EncodingProfile, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+method Fuaran.Core.Canonical.write(Fuaran.Core.EncodingProfile, Fuaran.Core.JVal) : System.String
+method Fuaran.Core.Codec.build`1(Fuaran.Core.CodecFields`2<!!0, !!0>) : Fuaran.Core.Codec`1<!!0>
+method Fuaran.Core.Codec.case`2(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpOption`1<!!1>>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!0>, Fuaran.Core.CodecFields`2<!!1, !!1>) : Fuaran.Core.CodecCase`1<!!0>
+method Fuaran.Core.Codec.corpus`1(Fuaran.Core.EncodingProfile, Fuaran.Core.Codec`1<!!0>) : Fuaran.Core.Corpus+Codec`1<!!0>
+method Fuaran.Core.Codec.decoder`1(Fuaran.Core.Codec`1<!!0>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>
+method Fuaran.Core.Codec.enum`1(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, !!0>>) : Fuaran.Core.Codec`1<!!0>
+method Fuaran.Core.Codec.field`3(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!1>, Fuaran.Core.Codec`1<!!1>, Fuaran.Core.CodecFields`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!2>>) : Fuaran.Core.CodecFields`2<!!0, !!2>
+method Fuaran.Core.Codec.list`1(Fuaran.Core.Codec`1<!!0>) : Fuaran.Core.Codec`1<Microsoft.FSharp.Collections.FSharpList`1<!!0>>
+method Fuaran.Core.Codec.make`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal) : Fuaran.Core.Codec`1<!!0>
+method Fuaran.Core.Codec.map`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!0>, Fuaran.Core.Codec`1<!!0>) : Fuaran.Core.Codec`1<!!1>
+method Fuaran.Core.Codec.ofDecoder`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Fuaran.Core.Codec`1<!!0>
+method Fuaran.Core.Codec.optField`3(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpOption`1<!!1>>, Fuaran.Core.Codec`1<!!1>, Fuaran.Core.CodecFields`2<!!0, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.FSharpOption`1<!!1>, !!2>>) : Fuaran.Core.CodecFields`2<!!0, !!2>
+method Fuaran.Core.Codec.read`1(Fuaran.Core.Codec`1<!!0>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
+method Fuaran.Core.Codec.record`2(!!0) : Fuaran.Core.CodecFields`2<!!1, !!0>
+method Fuaran.Core.Codec.refine`2(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Core.FSharpResult`2<!!1, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, !!0>, Fuaran.Core.Codec`1<!!0>) : Fuaran.Core.Codec`1<!!1>
+method Fuaran.Core.Codec.union`1(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.CodecCase`1<!!0>>) : Fuaran.Core.Codec`1<!!0>
+method Fuaran.Core.Codec.write`1(Fuaran.Core.EncodingProfile, Fuaran.Core.Codec`1<!!0>, !!0) : System.String
 method Fuaran.Core.Corpus.codecLaws`1(Fuaran.Core.Corpus+Codec`1<!!0>, Microsoft.FSharp.Core.FSharpFunc`2<System.Int32, !!0>, System.Int32, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.Corpus.coverageGate(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Corpus+Case>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
 method Fuaran.Core.Corpus.fuzzRoundTrip(System.Int32, System.Int32, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, System.String>
@@ -198,10 +219,18 @@ method Fuaran.Core.Versioning.reencode`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0,
 method Fuaran.Core.Versioning.render(Fuaran.Core.Versioning+Envelope) : System.String
 method Fuaran.Core.Versioning.tryBump(Fuaran.Core.Versioning+Profile, Fuaran.Core.Versioning+Evolution) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Versioning+Profile, System.String>
 method Fuaran.Core.Versioning.tryRender(Fuaran.Core.Versioning+Envelope) : Microsoft.FSharp.Core.FSharpResult`2<System.String, System.String>
+property Fuaran.Core.Codec.bool : Fuaran.Core.Codec`1<System.Boolean> { get }
+property Fuaran.Core.Codec.float : Fuaran.Core.Codec`1<System.Double> { get }
+property Fuaran.Core.Codec.int : Fuaran.Core.Codec`1<System.Int32> { get }
+property Fuaran.Core.Codec.json : Fuaran.Core.Codec`1<Fuaran.Core.JVal> { get }
+property Fuaran.Core.Codec.string : Fuaran.Core.Codec`1<System.String> { get }
 property Fuaran.Core.DecodeErrorModule.codes : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeCode> { get }
 property Fuaran.Core.EncodingProfileModule.all : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.EncodingProfile> { get }
 property Fuaran.Core.EncodingProfileModule.current : Fuaran.Core.EncodingProfile { get }
 property Fuaran.Core.Versioning+ProfileModule.coreV1 : Fuaran.Core.Versioning+Profile { get }
+record-field Fuaran.Core.Codec`1.ReadAll #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>
+record-field Fuaran.Core.Codec`1.Schema #2 : Fuaran.Core.JVal
+record-field Fuaran.Core.Codec`1.Write #0 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.JVal>
 record-field Fuaran.Core.Corpus+Case.Json #2 : System.String
 record-field Fuaran.Core.Corpus+Case.Kind #1 : Fuaran.Core.Corpus+CaseKind
 record-field Fuaran.Core.Corpus+Case.Name #0 : System.String
@@ -231,6 +260,11 @@ record-field Fuaran.Core.Versioning+UnknownKind.Kind #0 : System.String
 record-field Fuaran.Core.Versioning+UnknownKind.Payload #1 : Fuaran.Core.JVal
 record-field Fuaran.Core.Versioning+UnknownKind.RequiredProfile #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Versioning+Profile>
 type Fuaran.Core.Canon (module)
+type Fuaran.Core.Canonical (module)
+type Fuaran.Core.Codec (module)
+type Fuaran.Core.CodecCase`1 (record)
+type Fuaran.Core.CodecFields`2 (record)
+type Fuaran.Core.Codec`1 (record)
 type Fuaran.Core.Corpus (module)
 type Fuaran.Core.Corpus+Case (record)
 type Fuaran.Core.Corpus+CaseKind (union)

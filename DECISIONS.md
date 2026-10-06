@@ -1,5 +1,93 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-06 — D122: `Canonical` and `Codec<'T>` join the spine in `Wire`; `Digest` is proposed and its placement is an open question, because the renderer and the hash live in two packages D2 keeps apart
+
+**Recorded by Phase 379. `Fuaran.Core.Wire` and the conformance kit; additive (STABILITY.md, `0.35.2`);
+no default, signature or rendered byte moves.**
+
+*The proposal.* Three shared kits were asked of the substrate, so that consumers stop carrying their own:
+a canonical JSON writer and reader (`Canonical`), a typed digest (`Digest`), and codec combinators that
+derive an encoder, a strict decoder and a schema from one declaration (`Codec<'T>`). Each was to enter
+only if it meets the membership rule (D51: genericity over the witness and plausible cross-domain use,
+never a present consumer count) and to have its placement recorded — the spine, a hub, or declined. A
+kit placed outside the spine stops at the record.
+
+*The premises, checked against the tree the phase was cut from (`e04551e`).* What the spine already
+provides: the versioned profile and its renderer (`EncodingProfile` `V1` / `V2`, `Json.renderWith`,
+`Json.escapeWith`, D120); `Canon.render` (sorted keys, the canonical float, not profiled) and
+`Canon.renderOrdered`; the typed decode layer (`Decoder<'T>`, `DecodeError`, D99) beside its string twin
+`Decode`; `Corpus.Codec` (an encode and decode PAIR, no schema, string errors); the obsolete `RowCodec`;
+SHA-256 in `Fuaran.Core.Tree`'s `Hash` with a value-identical copy in `Fuaran.Core.OpStream` (D2); the
+`canonicalFields` key roster and the Phase 314 digest maps, all lowercase hex STRINGS with no algorithm
+named; the two rehash verbs (Phases 311, 360) and the `StoredIdentity` families. What consumers carry
+instead, counted across the downstream repositories that pin this spine (a coordination plane and its
+three companion libraries, an application-composition library, and the UI host): about forty-five private
+SHA-256 helper definitions, thirteen of them prefixing `sha256:` by hand and several truncating the hex
+to an ad-hoc width; a frozen copy of the `0.30.0` renderer that one plane renders every store through,
+and two ledger twins of its escape in sibling libraries; one application-composition codec whose
+specification REQUIRES the short escapes; nine further JSON string escapers; two hash chains outside
+`OpStream`'s. The typed decode layer is used by exactly one consumer family, through generated code; the
+string `Decode` layer by about ten; `Corpus.Codec` by four.
+
+One premise was sharper than written. The proposal asked that key order, number layout and whitespace
+be "the profile's, never the caller's". Under both profiles that exist, the member order IS the order the
+value was built in: `Json.renderWith` does not sort, and every content-addressed pre-image a consumer
+holds (the op payload `{seq, actor, op}` among them) is author-ordered. A `Canonical` that sorted would
+move every such id. So the rule as built is that `Canonical` offers NO order, layout or whitespace
+parameter — those are fixed by the named profile — and the order the profile fixes is "as built", which
+a `Codec<'T>` makes declaration order. A sorted canonical form would be a new profile, by D120's rule.
+
+*`Canonical` — admitted, placed on the spine in `Fuaran.Core.Wire`.* Shape: `write profile`,
+`tryWrite profile`, `read`, `isCanonical profile`. Membership: it is generic over every value and every
+host — it is the profile's renderer under the name a store reasons with, plus the two things every
+store re-derives: the guarded write under a NAMED profile (`Json.tryRender` guards only the current
+one) and the canonicity check. It closes the frozen-renderer copies and their twins (a store that writes
+under `V1` gets `0.30.0`'s bytes from `Canonical.write V1`; the envelope each wraps them in is the
+consumer's and stays there) and every escaper that reproduces one of the two rules. It does NOT close
+the application-composition codec's escaper unless its specification's spelling is `V1`'s exactly, nor
+any envelope, chain or digest helper.
+
+*`Codec<'T>` — admitted, placed on the spine in `Fuaran.Core.Wire`.* Shape: a record of `Write`,
+`ReadAll` (collecting) and `Schema`, built by `Codec` combinators — leaves, `enum`, `list`, `map`,
+`refine`, the object builder `record` / `field` / `optField` / `build`, the union builder `case` /
+`union` — with `decoder` (the strict reader on the `Decoder<'T>` layer), `write` / `read` over text and
+`corpus` (the bridge to `Corpus.Codec`). Membership: generic over `'T`, with no vocabulary of its own; it
+is the hand-composed counterpart of the generator's per-vocabulary codecs (Phases 374, 377) for a type
+that has no IDL declaration, and it SHARES their decode vocabulary rather than adding one: the codes and
+paths are `DecodeError`'s and the collecting order is Phase 377's — undeclared members first (the strict
+reader checks them first, so the first defect agrees), then members in declaration order, depth-first.
+It closes the hand-written encoder-and-decoder pairs on the string layer and the schema nobody writes. It
+does NOT replace the generator for a type that has a declaration, and its schema is a structural subset
+(`type`, `items`, `properties`, `required`, `additionalProperties`, `enum`, `const`, `oneOf`) held to an
+independent validator, not a second acceptance authority. `RowCodec`'s obsolescence message names it as
+the typed-row route.
+
+*`Digest` — proposed, placement OPEN; nothing ships.* Shape proposed: a typed digest (algorithm plus
+bytes, `sha256:<hex>` on the wire) with one constructor over canonical bytes under a named profile, so a
+consumer cannot hash a rendering it did not pin, and the Phase 314 digests and `canonicalFields` keys
+expressed through it where their bytes are unchanged. Membership is not in doubt — it is generic, and it
+is the largest single source of copies counted above. Its PLACEMENT is a ruling this phase does not have:
+the constructor needs the renderer (`Wire`) and the hash (`Tree`) together, and D2 makes `Wire`
+standalone so a wire-only consumer pays for nothing else (D76 and D120 both declined the analogous edge
+from `OpStream`). The routes, each with what it costs:
+
+- **A — `Wire` references `Tree`.** The type and its hashing constructors in `Tree`'s `Hash`, so the
+  Phase 314 maps are expressed through it in place; the profile-pinned constructor in `Wire`. Cheapest:
+  `Tree` is FSharp.Core-only and Fable-clean, and of the first-party packages only `Column` and the IDL
+  engine's three reach `Wire` without already reaching `Tree`. It amends D2 for `Wire`, and a published package edge is hard to take back.
+- **B — a new package referencing both** (`Wire` and `Tree`), holding the profile-pinned constructor; the
+  type in `Tree`, its bytes-level constructor not public, so only the new package and `Tree`'s own digests
+  can mint one. D2 stands; one more packable package, its baseline and its roster rows are the cost.
+- **C — a SHA-256 copy in `Wire`**, on the copy precedent D2 already uses for `OpStream`. Rejected as a
+  route: the type would live in `Wire`, which `Tree` cannot see, so the Phase 314 digests could never be
+  expressed through it — the proposal's own acceptance fails.
+
+**The rule this adds.** A kit proposed to the spine records its placement before it ships, and a
+placement that needs a package edge D2 forbids is an operator's ruling, not a phase's. The byte-stability
+gate for an admitted kit is D120's: committed vectors under every profile, a positive control that
+re-renders under the other profile and requires a byte to move, and a family a content-addressed
+consumer runs against its own stored corpus (`EncodingProfileVectors.storedCodecLaws`).
+
 ## 2026-10-05 — D121: the value tree is a third of a large-array decode, so a typed reader ships; it is the parser's own scanner, a grammar refusal is always `parse`'s, and a shape mismatch is reported only for a document `parse` accepts
 
 **Recorded by Phase 368. `Fuaran.Core.Wire`; additive (STABILITY.md, `0.35.0`); no value, refusal or

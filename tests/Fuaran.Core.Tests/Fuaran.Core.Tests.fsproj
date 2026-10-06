@@ -421,6 +421,11 @@
     <Compile Include="SpecDecodersIdl.fs" />
     <Compile Include="SpecDecodersGenerated.fs" />
     <Compile Include="IdlSpecDecoderTests.fs" />
+    <!-- Phase 379 - Canonical and Codec<'T>: the committed bytes a declaration writes under each
+         profile and the positive control, the collecting order and paths, the build-time refusals,
+         the schema held to an independent validator, and the stored-codec family green and red.
+         Depends on nothing here. Appended (append-only). -->
+    <Compile Include="CodecTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

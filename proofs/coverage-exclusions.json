@@ -2689,6 +2689,33 @@
       "reason": "Profile-name validity; `isValid` is it over the parsed name.",
       "through": "Profile.isValid",
       "standIn": "tests/Fuaran.Core.Tests/TotalityTests.fs"
+    },
+    {
+      "members": [
+        "Codec.record",
+        "Codec.field",
+        "Codec.optField",
+        "Codec.build",
+        "Codec.case",
+        "Codec.union",
+        "Codec.enum",
+        "Codec.list",
+        "Codec.map",
+        "Codec.refine",
+        "Codec.decoder",
+        "Codec.corpus"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The Codec<'T> combinators (Phase 379): what a declaration writes, its collecting order and paths, its build-time refusals and its schema's agreement with an independent validator are pinned by example; the stored-codec family certifies a consumer's codec over its own store, not the combinators.",
+      "standIn": "tests/Fuaran.Core.Tests/CodecTests.fs"
+    },
+    {
+      "members": [
+        "Codec.make",
+        "Codec.ofDecoder"
+      ],
+      "class": "trivial",
+      "reason": "Record builders: a codec from its three faces, or from a short-circuiting decoder whose one refusal becomes its one defect."
     }
   ]
 }
