@@ -1233,6 +1233,14 @@
     },
     {
       "members": [
+        "Idl.Gen.typescriptDeclarationsDerived"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The TypeScript declarations plus one declaration per derived member; the empty request held to typescriptDeclarations byte for byte, refusals held to typescriptModuleDerived's, the declared names held to the derived module's exported names over every request each test vocabulary admits, and (with a TypeScript compiler) the declarations compiled and a typed consumer checked against them stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlDeriveTests.fs"
+    },
+    {
+      "members": [
         "Idl.SupportArtifact.parse",
         "Idl.SupportArtifact.render"
       ],

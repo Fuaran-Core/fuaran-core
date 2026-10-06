@@ -2550,10 +2550,59 @@ request is still checked, so a vocabulary the F# path refuses it over is refused
 **Limits, stated, not widened.** The F# limits carry over: a case refine and a host projection supply
 only a short-circuiting decoder on the F# side; the TypeScript path takes no declared support at all
 (`typescriptModule` never has), so neither arises here. `typescriptDeclarations` does not declare the
-derived members; it is unchanged.
+derived members; it is unchanged. Phase 381, below, adds `typescriptDeclarationsDerived`, which does,
+in this same slot.
 
 **Not changed.** The IDL model, the `idl.json` artefact, `typescriptModule`, `typescriptDeclarations`
 and every F# emission. No `CodegenError` case was added.
+
+### The TypeScript declarations type the derived members (Phase 381) — ADDITIVE; the wire `none`
+
+**What moved, for a consumer.** Nothing, unless it asks. `Gen.typescriptDeclarationsDerived derivations
+idl kindTags` is `typescriptDeclarations` plus one declaration per member `typescriptModuleDerived`
+exports under the same requests, appended after the file's own declarations, with a header line saying
+so. The empty list emits `typescriptDeclarations`' bytes, and `typescriptDeclarations` emits exactly what
+it did; a test holds both on every vocabulary here and on 377's spec-decoder vocabulary.
+`api/Fuaran.Core.Idl.Codegen.txt` gains one line and loses none.
+
+**The module and its declarations agree, by construction and under a test.** Both entries read one
+internal plan: each requested emission is built once, carrying its module text, the names its `export`
+names and the declarations of those names, so a member cannot be emitted without being declared or
+declared without being emitted. A request is admitted and refused exactly as `typescriptModuleDerived`
+admits and refuses it (the F# path's error). A test holds the module's exported names and the file's
+declared value names to the same set — none declared twice — for every request each test vocabulary
+admits singly (each general request, a `SlotsOf` per declared type, a `Fold` and a single-field
+projection per union) and for all general requests at once, on every vocabulary `IdlDeriveTests`
+generates (374's derivations vocabulary among them) and on 377's spec-decoder vocabulary; a refused
+request is refused by both with the same typed error.
+
+**The declared types** are the file's own: `Node`, `<Tag>Spec`, the vocabulary's records, unions and
+enums, and `DecodeRefusal`. `wireTag(n: Node)` answers the union of the kinds' wire tags, and
+`allWireTags` is a `ReadonlyArray` of it; `children` / `keyedChildren` answer `Array<Node>`;
+`withChildren` / `withKeyedChildren(kids, n)` answer `Node`; `nodeWitness` and `keyedWitness` are
+declared as objects of their members (`placeKeyedChild` answers `Node | undefined`). `slotsOf<T>(n)`
+answers `Array<[string, T]>` — `unknown` for a generic union, the F# host's `obj`, for the same reason.
+A union's exported object declares `fold<S>(folder: (state: S, v: U) => S, state: S, v: U): S` and per
+projected field `T` where every case carries it and none optionally, `T | undefined` otherwise (a
+generic union's parameters are each method's own). `default<N>` is declared at the type `N`. The
+constants are `ReadonlyMap`s of `ReadonlySet`s keyed and valued by wire tag where the value is a tag,
+and `envelopeFieldNames` a `ReadonlySet<string>`. The collecting decoders answer `{ ok: true; value }
+| { ok: false; errors: Array<DecodeRefusal> }`, their short-circuiting twins `decodeNode`'s
+`{ ok: false; error: DecodeRefusal }`; a spec decoder and `decodeNodeJson*` take the parsed value as
+`unknown`, `decodeNodeAll` the text.
+
+**Not declared, stated.** `mapMsg`: the module exports nothing for `MapMsg` (Phase 380), so the file
+declares nothing for it; under the request, the file's header comment says why.
+
+**A compiler, where one is supplied.** This repository carries no JavaScript dependency, so the gate has
+no TypeScript compiler and the name-agreement test is the gate. Where `FUARAN_CORE_TSC` names one (as
+Phase 348's leg reads it), every vocabulary's derived declarations compile under `--strict`, and a typed
+consumer of every derived member of the derivations vocabulary checks against them — including
+`@ts-expect-error` lines a looser declaration would let through — while the plain declarations fail the
+same consumer.
+
+**Not changed.** The IDL model, the `idl.json` artefact, `typescriptModule`, `typescriptDeclarations`,
+`typescriptModuleDerived`'s output and every F# emission. No `CodegenError` case was added.
 
 ## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
 

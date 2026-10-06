@@ -760,3 +760,347 @@ let typescriptTests =
               match tsDerive [] DeriveIdl.deriveIdl, tsDerive [ Gen.Derivation.MapMsg ] DeriveIdl.deriveIdl with
               | Ok plain, Ok mapped -> Expect.equal mapped plain "an admitted MapMsg adds no member"
               | p, m -> failtestf "plain %A, mapped %A" p m) ]
+
+// ---------------------------------------------------------------------------
+// Phase 381 — the declaration file types the derived members. The derived module and its derived
+// declarations are held to EXACTLY the same names, mechanically, over every request each test
+// vocabulary admits; with a TypeScript compiler (`FUARAN_CORE_TSC`), the declarations also compile
+// and a typed consumer of every derived member checks against them.
+// ---------------------------------------------------------------------------
+
+let private tsDeclare (ds: Gen.Derivation list) (idl: Idl) =
+    Gen.typescriptDeclarationsDerived ds idl (tags idl)
+
+/// Every name the module's `export { … }` statements name, as a consumer imports it (`U$ as U`
+/// is `U`), in order.
+let private exportedNames (moduleText: string) : string list =
+    moduleText.Split('\n')
+    |> Array.filter (fun l -> l.StartsWith("export { ", System.StringComparison.Ordinal))
+    |> Array.collect (fun l ->
+        l.Substring(9, l.Length - 9 - 3).Split(", ")
+        |> Array.map (fun n ->
+            match n.IndexOf " as " with
+            | -1 -> n
+            | i -> n.Substring(i + 4)))
+    |> List.ofArray
+
+/// Every VALUE name the declaration file declares (`export declare function|const <name>`), in
+/// order. Types are not values: a module exports no type, so a type declares no export.
+let private declaredNames (declarations: string) : string list =
+    let m =
+        System.Text.RegularExpressions.Regex.Matches(
+            declarations,
+            @"^export declare (?:function|const) ([A-Za-z_$][A-Za-z0-9_$]*)",
+            System.Text.RegularExpressions.RegexOptions.Multiline
+        )
+
+    [ for x in m -> x.Groups[1].Value ]
+
+/// Every request a vocabulary could be asked for: each general request, a `SlotsOf` per declared
+/// type, a `Fold` and a projection of every field per union, singly — the admitted ones are what
+/// the agreement test covers, and refusal parity covers the rest.
+let private candidateRequests (idl: Idl) : Gen.Derivation list list =
+    let general =
+        [ Gen.Derivation.StructuralAccess
+          Gen.Derivation.KeyedPositions
+          Gen.Derivation.MapMsg
+          Gen.Derivation.DefaultRecords
+          Gen.Derivation.VocabularyConstants
+          Gen.Derivation.SpecDecoders ]
+
+    let typeNames =
+        (idl.Enums |> List.map _.Name)
+        @ (idl.Records |> List.map _.Name)
+        @ (idl.Unions |> List.map _.Name)
+
+    let perUnion =
+        idl.Unions
+        |> List.collect (fun u ->
+            [ yield Gen.Derivation.Fold u.Name
+              for f in u.Cases |> List.collect _.Fields |> List.map _.Name |> List.distinct do
+                  yield Gen.Derivation.Projections(u.Name, [ f ]) ])
+
+    (general @ (typeNames |> List.map Gen.Derivation.SlotsOf) @ perUnion
+     |> List.map List.singleton)
+    @ [ general ]
+
+/// The vocabularies the agreement runs over here: every one this file generates, 374's derivations
+/// vocabulary among them. 377's spec-decoder vocabulary is held by `IdlSpecDecoderTests`, which
+/// compiles after it, through the same two functions below.
+let private declarationVocabularies () : (string * Idl) list =
+    [ for name, _, idl in vocabularies () -> name, idl ]
+
+/// Phase 381 — hold one vocabulary's derived module and derived declarations to EXACTLY the same
+/// names over every candidate request: an admitted request declares every name the module exports
+/// and exports every name it declares, none twice; a refused one is refused by both with the same
+/// typed error. Answers how many requests were admitted.
+let declarationsAgreeOver (vocab: string) (idl: Idl) : int =
+    let mutable admitted = 0
+
+    for ds in candidateRequests idl do
+        let label = sprintf "%s %A" vocab ds
+
+        match tsDerive ds idl, tsDeclare ds idl with
+        | Ok m, Ok d ->
+            admitted <- admitted + 1
+            let exported = exportedNames m
+            let declared = declaredNames d
+
+            Expect.equal (List.distinct declared) declared (label + ": no name is declared twice")
+
+            Expect.equal
+                (Set.ofList declared)
+                (Set.ofList exported)
+                (label + ": every exported name is declared, every declared name exported")
+        | Error me, Error de -> Expect.equal de me (label + ": the same typed refusal")
+        | m, d -> failtestf "%s: module %A, declarations %A" label (Result.isOk m) d
+
+    admitted
+
+/// The TypeScript compiler `FUARAN_CORE_TSC` names (`tsc.js`), as Phase 348's leg reads it.
+let tscJs () : string option =
+    match System.Environment.GetEnvironmentVariable "FUARAN_CORE_TSC" with
+    | null
+    | "" -> None
+    | p when File.Exists p -> Some p
+    | p -> failtestf "FUARAN_CORE_TSC names %s, which does not exist" p
+
+/// `tsc --noEmit --strict` over `consumer.mts` beside `generated.mjs` / `generated.d.mts`, in a
+/// fresh directory: the exit code and the compiler's output, or `None` without node.
+let tscCheck (tsc: string) (files: (string * string) list) : (int * string) option =
+    let dir =
+        Path.Combine(Path.GetTempPath(), sprintf "fuaran-381-%s" (System.Guid.NewGuid().ToString "N"))
+
+    Directory.CreateDirectory dir |> ignore
+
+    try
+        for name, text in files do
+            File.WriteAllText(Path.Combine(dir, name), text)
+
+        let psi =
+            ChildProcess.redirected
+                "node"
+                (sprintf
+                    "\"%s\" --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext consumer.mts"
+                    tsc)
+
+        psi.WorkingDirectory <- dir
+
+        match
+            (try
+                Some(System.Diagnostics.Process.Start psi)
+             with _ ->
+                 None)
+        with
+        | None -> None
+        | Some p ->
+            let stdout = p.StandardOutput.ReadToEndAsync()
+            let stderr = p.StandardError.ReadToEnd()
+            p.WaitForExit()
+            Some(p.ExitCode, stdout.Result + stderr)
+    finally
+        try
+            Directory.Delete(dir, true)
+        with _ ->
+            ()
+
+/// Phase 381 — under `tsc`, the derived module and declarations of one vocabulary, every request
+/// it admits at once, beside a consumer importing the whole module: the declarations compile.
+let derivedDeclarationsCompile (tsc: string) (vocab: string) (idl: Idl) : unit =
+    let admitted =
+        candidateRequests idl
+        |> List.concat
+        |> List.distinct
+        |> List.filter (fun d -> Result.isOk (tsDerive [ d ] idl))
+
+    match tsDerive admitted idl, tsDeclare admitted idl with
+    | Ok m, Ok d ->
+        let consumer =
+            "import * as G from './generated.mjs';\nconsole.log(Object.keys(G));\n"
+
+        match tscCheck tsc [ "generated.mjs", m; "generated.d.mts", d; "consumer.mts", consumer ] with
+        | None -> skiptest "node not on PATH"
+        | Some(code, out) -> Expect.equal code 0 (sprintf "%s: tsc accepts the declarations: %s" vocab out)
+    | m, d -> failtestf "%s: module %A, declarations %A" vocab (Result.isOk m) d
+
+/// A consumer of every derived member of the derivations vocabulary, typed: each binding states
+/// the type the declaration must give, and each `@ts-expect-error` line must NOT compile.
+let private typedConsumer =
+    String.concat
+        "\n"
+        [ "import { decodeNode, wireTag, allWireTags, children, withChildren, nodeWitness, keyedChildren, withKeyedChildren, keyedWitness, slotsOfRule, slotsOfOwner, Rule, Trigger, Measure, defaultNoteSpec, defaultOwner, kindCategories, kindFieldNames, envelopeFieldNames, opFieldNames, decodeNoteSpec, decodeNoteSpecAll, decodeNodeJson, decodeNodeJsonAll, decodeNodeAll, type Node, type NoteSpec, type Owner, type DecodeRefusal } from './generated.mjs';"
+          "const r = decodeNode('{}');"
+          "if (r.ok) {"
+          "  const n: Node = r.value;"
+          "  const tag: 'Section' | 'Choice' | 'Task' | 'Note' = wireTag(n);"
+          "  const tags: ReadonlyArray<string> = allWireTags;"
+          "  const kids: Node[] = children(n);"
+          "  const same: Node = withChildren(kids, n);"
+          "  const viaWitness: Node[] = nodeWitness.children(nodeWitness.replaceChildren(n, kids));"
+          "  const id: string = nodeWitness.id(n);"
+          "  const keyed: Node[] = keyedChildren(withKeyedChildren(keyedChildren(n), n));"
+          "  const placed: Node | undefined = keyedWitness.placeKeyedChild(n, 'x');"
+          "  const unique: boolean = keyedWitness.idsUnique(n);"
+          "  const surface: string = keyedWitness.surface;"
+          "  const rules: Array<[string, Rule]> = slotsOfRule(n);"
+          "  const owners: Array<[string, Owner]> = slotsOfOwner(n);"
+          "  const depth: number = rules.length === 0 ? 0 : Rule.fold((s: number, _v: Rule) => s + 1, 0, rules[0][1]);"
+          "  const owner: Owner | undefined = n.kind.$type === 'Task' ? Trigger.owner(n.kind.trigger) : undefined;"
+          "  const hours: number = n.kind.$type === 'Section' && n.kind.estimate !== undefined ? Measure.amount(n.kind.estimate) : 0;"
+          "  // @ts-expect-error - a projection some case does not carry may be undefined"
+          "  const ownerAlways: Owner = n.kind.$type === 'Task' ? Trigger.owner(n.kind.trigger) : defaultOwner;"
+          "  // @ts-expect-error - children are nodes, not strings"
+          "  const wrong: string[] = children(n);"
+          "  console.log(tag, tags, same, viaWitness, id, keyed, placed, unique, surface, owners, depth, owner, hours, ownerAlways, wrong);"
+          "}"
+          "const note: NoteSpec = defaultNoteSpec;"
+          "const owner0: Owner = defaultOwner;"
+          "const cats: ReadonlyMap<string, ReadonlySet<string>> = kindCategories;"
+          "const fields: ReadonlySet<string> | undefined = kindFieldNames.get('Note');"
+          "const env: ReadonlySet<string> = envelopeFieldNames;"
+          "const ops: ReadonlyMap<string, ReadonlySet<string>> = opFieldNames;"
+          "const one = decodeNoteSpec({});"
+          "const every = decodeNoteSpecAll({});"
+          "if (!one.ok) { const e: DecodeRefusal = one.error; console.log(e.code); }"
+          "if (!every.ok) { const es: DecodeRefusal[] = every.errors; console.log(es.length); }"
+          "else { const v: NoteSpec = every.value; console.log(v.text); }"
+          "const j = decodeNodeJson(JSON.parse('{}'));"
+          "const ja = decodeNodeJsonAll(JSON.parse('{}'));"
+          "const t = decodeNodeAll('{}');"
+          "if (!t.ok) { const es: DecodeRefusal[] = t.errors; console.log(es); }"
+          "// @ts-expect-error - a collecting decoder answers every defect, never one"
+          "if (!ja.ok) { const e: DecodeRefusal = ja.errors; console.log(e); }"
+          "console.log(note, owner0, cats, fields, env, ops, j);"
+          "" ]
+
+[<Tests>]
+let declarationTests =
+    testList
+        "Phase 381 - the TypeScript declarations type the derived members"
+        [ testCase "requesting nothing emits typescriptDeclarations byte for byte, on every vocabulary here" (fun _ ->
+              for name, idl in declarationVocabularies () do
+                  Expect.equal (tsDeclare [] idl) (Gen.typescriptDeclarations idl (tags idl)) name)
+
+          testCase
+              "the derived module and its declarations name exactly the same members, for every admitted request"
+              (fun _ ->
+                  let admitted =
+                      declarationVocabularies ()
+                      |> List.sumBy (fun (vocab, idl) -> declarationsAgreeOver vocab idl)
+
+                  Expect.isGreaterThanOrEqual admitted 60 "the agreement covers the admitted requests")
+
+          testCase "the derivations vocabulary with every request agrees, and declares a member of every kind" (fun _ ->
+              match
+                  tsDerive DeriveIdl.derivations DeriveIdl.deriveIdl,
+                  tsDeclare DeriveIdl.derivations DeriveIdl.deriveIdl
+              with
+              | Ok m, Ok d ->
+                  Expect.equal (Set.ofList (declaredNames d)) (Set.ofList (exportedNames m)) "the same names"
+
+                  for name in
+                      [ "wireTag"
+                        "allWireTags"
+                        "children"
+                        "withChildren"
+                        "nodeWitness"
+                        "keyedChildren"
+                        "withKeyedChildren"
+                        "keyedWitness"
+                        "slotsOfRule"
+                        "slotsOfOwner"
+                        "Rule"
+                        "Trigger"
+                        "Measure"
+                        "defaultNoteSpec"
+                        "defaultOwner"
+                        "kindCategories"
+                        "kindFieldNames"
+                        "envelopeFieldNames"
+                        "opFieldNames"
+                        "decodeNoteSpec"
+                        "decodeNoteSpecAll"
+                        "decodeNodeJson"
+                        "decodeNodeJsonAll"
+                        "decodeNodeAll" ] do
+                      Expect.contains (declaredNames d) name (name + " is declared")
+
+                  Expect.stringContains
+                      d
+                      "export declare function decodeNodeAll(s: string): { ok: true; value: Node } | { ok: false; errors: Array<DecodeRefusal> };"
+                      "a collecting decoder answers DecodeRefusal[]"
+
+                  Expect.stringContains
+                      d
+                      "  owner(v: Trigger): Owner | undefined;"
+                      "a projection some case lacks is undefined there"
+
+                  Expect.stringContains d "  amount(v: Measure): number;" "a projection every case carries is total"
+              | m, d -> failtestf "module %A, declarations %A" m d)
+
+          testCase "the declarations are the plain declarations plus a header note and appended members" (fun _ ->
+              match
+                  Gen.typescriptDeclarations DeriveIdl.deriveIdl (tags DeriveIdl.deriveIdl),
+                  tsDeclare DeriveIdl.derivations DeriveIdl.deriveIdl
+              with
+              | Ok plain, Ok derived ->
+                  let unheaded =
+                      derived.Split('\n')
+                      |> Array.filter (fun l ->
+                          not (
+                              l.StartsWith("// Phase 381", System.StringComparison.Ordinal)
+                              || l.StartsWith("// `mapMsg`", System.StringComparison.Ordinal)
+                          ))
+                      |> String.concat "\n"
+
+                  Expect.isTrue
+                      (unheaded.StartsWith(plain.TrimEnd('\n') + "\n\n", System.StringComparison.Ordinal))
+                      "the plain declarations are a prefix once the header note is set aside"
+              | p, d -> failtestf "plain %A, derived %A" p d)
+
+          testCase "the message map is not declared, and the header comment says why" (fun _ ->
+              match tsDeclare [ Gen.Derivation.MapMsg ] DeriveIdl.deriveIdl with
+              | Ok d ->
+                  Expect.isFalse (declaredNames d |> List.contains "mapMsg") "mapMsg is not declared"
+                  let header = d.Substring(0, d.IndexOf "\n\n")
+                  Expect.stringContains header "`mapMsg` is not declared" "the header states it"
+                  Expect.stringContains header "carries no message type" "and why"
+              | Error e -> failtestf "refused: %A" e)
+
+          testCase "with a TypeScript compiler, every vocabulary's derived declarations compile" (fun _ ->
+              match tscJs () with
+              | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+              | Some tsc ->
+                  for vocab, idl in declarationVocabularies () do
+                      derivedDeclarationsCompile tsc vocab idl)
+
+          testCase
+              "with a TypeScript compiler, a typed consumer of every derived member checks, and a mistyped one does not"
+              (fun _ ->
+                  match tscJs () with
+                  | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+                  | Some tsc ->
+                      match
+                          tsDerive DeriveIdl.derivations DeriveIdl.deriveIdl,
+                          tsDeclare DeriveIdl.derivations DeriveIdl.deriveIdl
+                      with
+                      | Ok m, Ok d ->
+                          let run (decls: string) =
+                              tscCheck
+                                  tsc
+                                  [ "generated.mjs", m; "generated.d.mts", decls; "consumer.mts", typedConsumer ]
+
+                          match run d with
+                          | None -> skiptest "node not on PATH"
+                          | Some(code, out) ->
+                              Expect.equal code 0 (sprintf "tsc accepts the typed consumer: %s" out)
+
+                              // The falsifier: the plain declarations (Phase 380's state) fail the same consumer.
+                              match Gen.typescriptDeclarations DeriveIdl.deriveIdl (tags DeriveIdl.deriveIdl) with
+                              | Ok plain ->
+                                  match run plain with
+                                  | Some(code, _) ->
+                                      Expect.notEqual code 0 "the undeclared members fail the same consumer"
+                                  | None -> ()
+                              | Error e -> failtestf "plain refused: %A" e
+                      | m, d -> failtestf "module %A, declarations %A" (Result.isOk m) d) ]

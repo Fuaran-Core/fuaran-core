@@ -232,6 +232,23 @@ module Gen =
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         TypeScript.typescriptDeclarations idl kindTags
 
+    /// Phase 381 — `typescriptDeclarations` plus one declaration per member
+    /// `typescriptModuleDerived` exports under the same requests, so the derived module and its
+    /// declaration file agree: every exported name is declared and every declared name exported.
+    /// The empty list emits exactly what `typescriptDeclarations` does; a request is admitted and
+    /// refused exactly as `typescriptModuleDerived` admits and refuses it. `MapMsg` declares
+    /// nothing, as the module exports nothing for it, and the file's header comment says why.
+    let typescriptDeclarationsDerived
+        (derivations: Derivation list)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        TypeScript.typescriptDeclarationsDerived
+            (derivations |> List.choose toRequest)
+            (derivations |> List.contains Derivation.SpecDecoders)
+            idl
+            kindTags
+
     /// An authored value as compilable F# source — the scaffold leg.
     let fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> = Scaffold.fsharpValue idl t v
 

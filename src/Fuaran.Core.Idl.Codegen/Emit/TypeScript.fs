@@ -1609,6 +1609,38 @@ const plain = (pairs) =>
            |> String.concat " | ")
         + "; path: Array<string | number>; expected: string; message: string };"
 
+    /// The declared TypeScript type of an IDL type, as the declaration file spells it: a declared
+    /// enum, record or union by its own name, a node as `Node`, and a sentinel, JSON or undeclared
+    /// hosted slot as `unknown`. Shared by [[typescriptDeclarations]] and the derived members'
+    /// declarations (Phase 381), so a member's type is spelled exactly as the file's own types are.
+    let rec private tsDeclType (t: IdlType) : Result<string, CodegenError> =
+        match t with
+        | TStr -> Ok "string"
+        | TInt
+        | TFloat -> Ok "number"
+        | TBool -> Ok "boolean"
+        | TEnum n
+        | TRecord n
+        | TUnion(n, []) -> Ok n
+        | TUnion(n, args) ->
+            args
+            |> List.map tsDeclType
+            |> concatR ", "
+            |> Result.map (fun a -> n + "<" + a + ">")
+        | TVar v -> Ok v
+        | TNode -> Ok "Node"
+        | TList inner -> tsDeclType inner |> Result.map (fun s -> "Array<" + s + ">")
+        | TMap vt -> tsDeclType vt |> Result.map (fun s -> "{ [key: string]: " + s + " }")
+        // A hosted slot that declares its wire form IS that type on this side.
+        | THosted { Wire = Some w } -> tsDeclType w
+        | TJson
+        | THosted _
+        | TClosure
+        | TFn _
+        | TOpaque -> Ok "unknown"
+        | TKind
+        | TOp -> Error(opVocabularySlot "the TypeScript declaration backend" t)
+
     /// Phase 252 — TypeScript TYPE DECLARATIONS for the module [[typescriptModule]] emits
     /// over the same kinds: one declaration per enum, record, union and kind spec the
     /// module reaches, the `Node` type, and the signatures of `encodeNode` / `decodeNode`.
@@ -1634,34 +1666,7 @@ const plain = (pairs) =>
 
         let enums, unions, records = referenced idl kinds
         let disc = tsDiscKey idl.Wire.Discriminator
-
-        let rec tsType (t: IdlType) : Result<string, CodegenError> =
-            match t with
-            | TStr -> Ok "string"
-            | TInt
-            | TFloat -> Ok "number"
-            | TBool -> Ok "boolean"
-            | TEnum n
-            | TRecord n
-            | TUnion(n, []) -> Ok n
-            | TUnion(n, args) ->
-                args
-                |> List.map tsType
-                |> concatR ", "
-                |> Result.map (fun a -> n + "<" + a + ">")
-            | TVar v -> Ok v
-            | TNode -> Ok "Node"
-            | TList inner -> tsType inner |> Result.map (fun s -> "Array<" + s + ">")
-            | TMap vt -> tsType vt |> Result.map (fun s -> "{ [key: string]: " + s + " }")
-            // A hosted slot that declares its wire form IS that type on this side.
-            | THosted { Wire = Some w } -> tsType w
-            | TJson
-            | THosted _
-            | TClosure
-            | TFn _
-            | TOpaque -> Ok "unknown"
-            | TKind
-            | TOp -> Error(opVocabularySlot "the TypeScript declaration backend" t)
+        let tsType = tsDeclType
 
         let memberDecl (f: IdlField) : Result<string, CodegenError> =
             tsType f.Type
@@ -2760,6 +2765,265 @@ const cEveryOf = (read) => {
         group
         |> Result.map (fun g -> [ tsCollectingPrelude; g; entries ] |> String.concat "\n\n", names)
 
+    // ---- Phase 381 — the derived members' DECLARATIONS ----
+
+    /// One derived emission: the module text, the names its `export` names, and one declaration
+    /// per exported name, for the declaration file. Built in ONE place for both files, so a member
+    /// the module emits and the declaration the file writes for it are chosen by the same request
+    /// and typed from the same analysis.
+    type private DerivedPart =
+        { Text: string
+          Names: string list
+          Decls: string list }
+
+    /// The union of a kind list's wire tags as TypeScript string-literal types, `never` for none.
+    let private tsTagUnion (kinds: IdlKind list) =
+        match kinds with
+        | [] -> "never"
+        | _ -> kinds |> List.map (fun k -> SourceLit.tsString k.Tag) |> String.concat " | "
+
+    /// `<A, B>` for a declaration's type parameters, or nothing.
+    let private tsGeneric (ps: string list) =
+        match ps with
+        | [] -> ""
+        | _ -> "<" + String.concat ", " ps + ">"
+
+    /// `StructuralAccess` — the four access members and the witness object over them.
+    let private structuralDecls (kinds: IdlKind list) : string list =
+        let tag = tsTagUnion kinds
+
+        [ "export declare function wireTag(n: Node): " + tag + ";"
+          "export declare const allWireTags: ReadonlyArray<" + tag + ">;"
+          "export declare function children(n: Node): Array<Node>;"
+          "export declare function withChildren(kids: Array<Node>, n: Node): Node;"
+          "export declare const nodeWitness: { id(n: Node): string; kindTag(n: Node): "
+          + tag
+          + "; children(n: Node): Array<Node>; replaceChildren(n: Node, kids: Array<Node>): Node };" ]
+
+    /// `KeyedPositions` — the keyed walk and its witness object.
+    let private keyedDecls: string list =
+        [ "export declare function keyedChildren(n: Node): Array<Node>;"
+          "export declare function withKeyedChildren(kids: Array<Node>, n: Node): Node;"
+          "export declare const keyedWitness: { surface: string; keyedChildren(n: Node): Array<Node>; replaceKeyedChildren(n: Node, kids: Array<Node>): Node; placeKeyedChild(n: Node, id: string): Node | undefined; idsUnique(root: Node): boolean };" ]
+
+    /// `SlotsOf T` — the pairs hold a `T`; a generic union's instantiations differ field by field,
+    /// so its pairs hold `unknown`, the F# host's `obj`, for the same reason.
+    let private slotsDecls (ctx: FSharpDerive.Ctx) (typeName: string) : string list =
+        let generic =
+            ctx.Unions
+            |> List.exists (fun u -> u.Name = typeName && not (List.isEmpty u.Params))
+
+        let elem = if generic then "unknown" else typeName
+
+        [ sprintf "export declare function slotsOf%s(n: Node): Array<[string, %s]>;" typeName elem ]
+
+    /// `Fold U` / `Projections (U, fields)` — the object they are exported as: `fold<S>(folder,
+    /// state, v)` and one method per projected field, `T` where every case carries the field and
+    /// none optionally, `T | undefined` otherwise. A generic union's parameters are each method's.
+    let private unionModuleDecls (u: IdlUnion) (folds: bool) (fields: string list) : Result<string list, CodegenError> =
+        let self = u.Name + tsGeneric u.Params
+
+        let rec stateName (s: string) =
+            if List.contains s u.Params then stateName (s + "_") else s
+
+        let st = stateName "S"
+
+        let foldDecl =
+            sprintf
+                "  fold%s(folder: (state: %s, v: %s) => %s, state: %s, v: %s): %s;"
+                (tsGeneric (st :: u.Params))
+                st
+                self
+                st
+                st
+                self
+                st
+
+        let projectionDecl (field: string) =
+            let carried =
+                u.Cases
+                |> List.choose (fun c -> c.Fields |> List.tryFind (fun f -> f.Name = field))
+
+            let alwaysPresent =
+                List.length carried = List.length u.Cases
+                && carried
+                   |> List.forall (fun f ->
+                       match f.Opt with
+                       | Optional
+                       | HostOnly -> false
+                       | Required
+                       | OmitDefault _ -> true)
+
+            // The F# path refused a projection no case carries before this is reached.
+            let ty =
+                match carried with
+                | f :: _ -> tsDeclType f.Type
+                | [] -> Ok "never"
+
+            ty
+            |> Result.map (fun ty ->
+                sprintf
+                    "  %s%s(v: %s): %s;"
+                    (SourceLit.tsKey field)
+                    (tsGeneric u.Params)
+                    self
+                    (if alwaysPresent then ty else ty + " | undefined"))
+
+        (if folds then [ Ok foldDecl ] else []) @ (fields |> List.map projectionDecl)
+        |> sequenceR
+        |> Result.map (fun members ->
+            [ sprintf "export declare const %s: {\n%s\n};" u.Name (String.concat "\n" members) ])
+
+    /// `VocabularyConstants` — `Map`s of `Set`s and a `Set`, declared read-only.
+    let private constantsDecls (kinds: IdlKind list) : string list =
+        let tag = tsTagUnion kinds
+
+        [ "export declare const kindCategories: ReadonlyMap<string, ReadonlySet<"
+          + tag
+          + ">>;"
+          "export declare const kindFieldNames: ReadonlyMap<"
+          + tag
+          + ", ReadonlySet<string>>;"
+          "export declare const envelopeFieldNames: ReadonlySet<string>;"
+          "export declare const opFieldNames: ReadonlyMap<string, ReadonlySet<string>>;" ]
+
+    /// `SpecDecoders` — the public decoders' answers: the first defect as `decodeNode`'s `error`,
+    /// or every defect, in order, as `errors`.
+    let private collectingDecls (kinds: IdlKind list) : string list =
+        let first v =
+            "{ ok: true; value: " + v + " } | { ok: false; error: " + refusalTypeName + " }"
+
+        let every v =
+            "{ ok: true; value: "
+            + v
+            + " } | { ok: false; errors: Array<"
+            + refusalTypeName
+            + "> }"
+
+        [ for k in kinds do
+              yield sprintf "export declare function decode%sSpec(j: unknown): %s;" k.Tag (first (k.Tag + "Spec"))
+              yield sprintf "export declare function decode%sSpecAll(j: unknown): %s;" k.Tag (every (k.Tag + "Spec"))
+          yield "export declare function decodeNodeJson(j: unknown): " + first "Node" + ";"
+          yield "export declare function decodeNodeJsonAll(j: unknown): " + every "Node" + ";"
+          yield "export declare function decodeNodeAll(s: string): " + every "Node" + ";" ]
+
+    /// Phase 380/381 — the requested derivations as parts, admitted exactly when the F# path
+    /// admits them. `None` when nothing is requested: the plain module and the plain declarations.
+    let private tsDerivedParts
+        (requests: FSharpDerive.Request list)
+        (decoders: bool)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<DerivedPart list option, CodegenError> =
+        if List.isEmpty requests && not decoders then
+            Ok None
+        else
+            let kinds =
+                kindTags
+                |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+
+            let _, unions, records = referenced idl kinds
+            let msg = msgCarrying idl
+            let disc = idl.Wire.Discriminator
+            let flat = idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
+
+            let ctx: FSharpDerive.Ctx =
+                { Idl = idl
+                  Msg = msg
+                  Kinds = kinds
+                  Unions = unions
+                  Records = records
+                  Projected = Set.empty }
+
+            let has r = List.contains r requests
+
+            let publicAccess =
+                has FSharpDerive.Request.StructuralAccess
+                || has FSharpDerive.Request.KeyedPositions
+
+            // The F# path decides admissibility: its structural witness (which refuses a kind
+            // mixing a node list with other children) and its derivations, texts discarded.
+            let admitted =
+                (if publicAccess then
+                     FSharpCodec.witnessDecl true msg kinds |> Result.map ignore
+                 else
+                     Ok())
+                |> Result.bind (fun () -> FSharpDerive.derivedDecl ctx requests |> Result.map ignore)
+
+            let slots =
+                requests
+                |> List.choose (fun r ->
+                    match r with
+                    | FSharpDerive.Request.SlotsOf t -> Some t
+                    | _ -> None)
+                |> List.distinct
+
+            let part (text: string, names: string list) (decls: string list) =
+                { Text = text
+                  Names = names
+                  Decls = decls }
+
+            // `tsUnionModulesDecl` answers one entry per requested union, in this same order.
+            let unionModules () =
+                let named =
+                    requests
+                    |> List.choose (fun r ->
+                        match r with
+                        | FSharpDerive.Request.Fold n -> Some n
+                        | FSharpDerive.Request.Projections(n, _) -> Some n
+                        | _ -> None)
+                    |> List.distinct
+                    |> List.choose (fun name -> ctx.Unions |> List.tryFind (fun u -> u.Name = name))
+
+                let fieldsOf (u: IdlUnion) =
+                    requests
+                    |> List.collect (fun r ->
+                        match r with
+                        | FSharpDerive.Request.Projections(n, fs) when n = u.Name -> fs
+                        | _ -> [])
+                    |> List.distinct
+
+                List.zip named (tsUnionModulesDecl ctx requests)
+                |> List.map (fun (u, emitted) ->
+                    unionModuleDecls u (has (FSharpDerive.Request.Fold u.Name)) (fieldsOf u)
+                    |> Result.map (part emitted))
+
+            // `default<N>` is a value of the declared type `N`: a `<Tag>Spec` or a record.
+            let defaultDecls (names: string list) =
+                names
+                |> List.map (fun n -> sprintf "export declare const %s: %s;" n (n.Substring "default".Length))
+
+            admitted
+            |> Result.bind (fun () ->
+                [ (if publicAccess then
+                       [ Ok(part (tsStructuralDecl disc flat kinds) (structuralDecls kinds)) ]
+                   else
+                       [])
+                  (if has FSharpDerive.Request.KeyedPositions then
+                       [ Ok(part (tsKeyedDecl disc flat ctx) keyedDecls) ]
+                   else
+                       [])
+                  slots
+                  |> List.map (fun t -> Ok(part (tsSlotsDecl disc flat ctx t) (slotsDecls ctx t)))
+                  (if has FSharpDerive.Request.DefaultRecords then
+                       [ tsDefaultRecordsDecl idl disc ctx
+                         |> Result.map (fun (text, names) -> part (text, names) (defaultDecls names)) ]
+                   else
+                       [])
+                  (if has FSharpDerive.Request.VocabularyConstants then
+                       [ Ok(part (tsConstantsDecl ctx) (constantsDecls kinds)) ]
+                   else
+                       [])
+                  unionModules ()
+                  (if decoders then
+                       [ tsCollectingDecl idl disc flat kinds unions records
+                         |> Result.map (fun emitted -> part emitted (collectingDecls kinds)) ]
+                   else
+                       []) ]
+                |> List.concat
+                |> sequenceR
+                |> Result.map Some)
+
     /// Phase 380 — `typescriptModule` plus the requested derivations, appended after its members
     /// with one further `export` naming them; no request and no decoders IS `typescriptModule`,
     /// byte for byte. A request the F# path refuses is refused here with the F# path's error.
@@ -2771,81 +3035,61 @@ const cEveryOf = (read) => {
         : Result<string, CodegenError> =
         typescriptModule idl kindTags
         |> Result.bind (fun baseText ->
-            if List.isEmpty requests && not decoders then
-                Ok baseText
-            else
-                let kinds =
-                    kindTags
-                    |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+            tsDerivedParts requests decoders idl kindTags
+            |> Result.map (fun parts ->
+                match parts with
+                | None -> baseText
+                | Some parts ->
+                    let texts = parts |> List.map _.Text
 
-                let _, unions, records = referenced idl kinds
-                let msg = msgCarrying idl
-                let disc = idl.Wire.Discriminator
-                let flat = idl.Wire.NodeEnvelope = NodeEnvelopeShape.FlatKind
+                    let exported =
+                        match parts |> List.collect _.Names with
+                        | [] -> []
+                        | names -> [ "export { " + String.concat ", " names + " };" ]
 
-                let ctx: FSharpDerive.Ctx =
-                    { Idl = idl
-                      Msg = msg
-                      Kinds = kinds
-                      Unions = unions
-                      Records = records
-                      Projected = Set.empty }
+                    String.concat "\n\n" ((baseText :: texts) @ exported) |> normalizeEol))
 
-                let has r = List.contains r requests
+    /// Phase 381 — `typescriptDeclarations` plus one declaration per member the derived module
+    /// exports, appended after the file's own; no request and no decoders IS
+    /// `typescriptDeclarations`, byte for byte, and a request is refused exactly as
+    /// [[typescriptModuleDerived]] refuses it. The parts are the module's own, so the members the
+    /// module exports and the members this file declares are chosen by one request list.
+    ///
+    /// A requested `MapMsg` is not declared, because the module exports nothing for it; the file's
+    /// header comment says why.
+    let typescriptDeclarationsDerived
+        (requests: FSharpDerive.Request list)
+        (decoders: bool)
+        (idl: Idl)
+        (kindTags: string list)
+        : Result<string, CodegenError> =
+        typescriptDeclarations idl kindTags
+        |> Result.bind (fun baseText ->
+            tsDerivedParts requests decoders idl kindTags
+            |> Result.map (fun parts ->
+                match parts with
+                | None -> baseText
+                | Some parts ->
+                    let header =
+                        [ yield
+                              "// Phase 381 — the derived members the module was generated with are declared after its own, one declaration per exported name."
+                          if List.contains FSharpDerive.Request.MapMsg requests then
+                              yield
+                                  "// `mapMsg` is not declared: the module emits no `mapMsg`, because this host holds a handler slot as its sentinel's `null` and carries no message type, so a message map has nothing to rewrite." ]
+                        |> String.concat "\n"
 
-                let publicAccess =
-                    has FSharpDerive.Request.StructuralAccess
-                    || has FSharpDerive.Request.KeyedPositions
+                    // The base file's first line is its header comment; the derived lines join it.
+                    let firstBreak = baseText.IndexOf '\n'
 
-                // The F# path decides admissibility: its structural witness (which refuses a kind
-                // mixing a node list with other children) and its derivations, texts discarded.
-                let admitted =
-                    (if publicAccess then
-                         FSharpCodec.witnessDecl true msg kinds |> Result.map ignore
-                     else
-                         Ok())
-                    |> Result.bind (fun () -> FSharpDerive.derivedDecl ctx requests |> Result.map ignore)
+                    let headed =
+                        baseText.Substring(0, firstBreak)
+                        + "\n"
+                        + header
+                        + baseText.Substring firstBreak
 
-                let slots =
-                    requests
-                    |> List.choose (fun r ->
-                        match r with
-                        | FSharpDerive.Request.SlotsOf t -> Some t
-                        | _ -> None)
-                    |> List.distinct
+                    let decls =
+                        parts
+                        |> List.map (fun p -> String.concat "\n" p.Decls)
+                        |> List.filter (fun s -> s <> "")
 
-                admitted
-                |> Result.bind (fun () ->
-                    [ (if publicAccess then
-                           [ Ok(tsStructuralDecl disc flat kinds) ]
-                       else
-                           [])
-                      (if has FSharpDerive.Request.KeyedPositions then
-                           [ Ok(tsKeyedDecl disc flat ctx) ]
-                       else
-                           [])
-                      slots |> List.map (fun t -> Ok(tsSlotsDecl disc flat ctx t))
-                      (if has FSharpDerive.Request.DefaultRecords then
-                           [ tsDefaultRecordsDecl idl disc ctx ]
-                       else
-                           [])
-                      (if has FSharpDerive.Request.VocabularyConstants then
-                           [ Ok(tsConstantsDecl ctx) ]
-                       else
-                           [])
-                      tsUnionModulesDecl ctx requests |> List.map Ok
-                      (if decoders then
-                           [ tsCollectingDecl idl disc flat kinds unions records ]
-                       else
-                           []) ]
-                    |> List.concat
-                    |> sequenceR
-                    |> Result.map (fun parts ->
-                        let texts = parts |> List.map fst
-
-                        let exported =
-                            match parts |> List.collect snd with
-                            | [] -> []
-                            | names -> [ "export { " + String.concat ", " names + " };" ]
-
-                        String.concat "\n\n" ((baseText :: texts) @ exported) |> normalizeEol)))
+                    String.concat "\n\n" (headed.TrimEnd '\n' :: decls) + "\n" |> normalizeEol))

@@ -641,3 +641,50 @@ let typescriptTests =
                                 | None -> yield sprintf "%s: no TypeScript answer" label ]
 
                       Expect.isEmpty (List.truncate 5 failures) (sprintf "%d inputs disagree" failures.Length)) ]
+
+// ---------------------------------------------------------------------------
+// Phase 381 — 377's spec-decoder vocabulary: its derived declarations agree with its derived
+// module, name for name, over every request it admits (the collecting decoders among them), and
+// with a TypeScript compiler they compile.
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let declarationTests =
+    testList
+        "Phase 381 - the spec-decoder vocabulary's declarations type its derived members"
+        [ testCase "requesting nothing emits typescriptDeclarations byte for byte" (fun _ ->
+              Expect.equal
+                  (Gen.typescriptDeclarationsDerived [] SpecDecodersIdl.idl (tags SpecDecodersIdl.idl))
+                  (Gen.typescriptDeclarations SpecDecodersIdl.idl (tags SpecDecodersIdl.idl))
+                  "the empty request")
+
+          testCase
+              "the derived module and its declarations name exactly the same members, for every admitted request"
+              (fun _ ->
+                  let admitted =
+                      IdlDeriveTests.declarationsAgreeOver "spec-decoders" SpecDecodersIdl.idl
+
+                  Expect.isGreaterThanOrEqual admitted 5 "the agreement covers the admitted requests")
+
+          testCase "the collecting decoders are declared with DecodeRefusal[] results" (fun _ ->
+              match
+                  Gen.typescriptDeclarationsDerived
+                      [ Gen.Derivation.SpecDecoders ]
+                      SpecDecodersIdl.idl
+                      (tags SpecDecodersIdl.idl)
+              with
+              | Ok d ->
+                  for k in SpecDecodersIdl.idl.Kinds do
+                      Expect.stringContains
+                          d
+                          (sprintf
+                              "export declare function decode%sSpecAll(j: unknown): { ok: true; value: %sSpec } | { ok: false; errors: Array<DecodeRefusal> };"
+                              k.Tag
+                              k.Tag)
+                          k.Tag
+              | Error e -> failtestf "refused: %A" e)
+
+          testCase "with a TypeScript compiler, the derived declarations compile" (fun _ ->
+              match IdlDeriveTests.tscJs () with
+              | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+              | Some tsc -> IdlDeriveTests.derivedDeclarationsCompile tsc "spec-decoders" SpecDecodersIdl.idl) ]
