@@ -1007,9 +1007,13 @@ let internal assemblyFor (root: string) (projectFile: string) (packageId: string
         | best :: _ -> Ok best
         | [] ->
             let inConfiguration =
-                ownConfiguration () |> Option.map (sprintf " in the %s configuration") |> Option.defaultValue ""
+                ownConfiguration ()
+                |> Option.map (sprintf " in the %s configuration")
+                |> Option.defaultValue ""
 
-            Error(sprintf "%s: no %s.dll under %s%s — build the solution first" packageId packageId binDir inConfiguration)
+            Error(
+                sprintf "%s: no %s.dll under %s%s — build the solution first" packageId packageId binDir inConfiguration
+            )
 
 let private repoRoot () : string = Snapshots.repoFile ""
 
@@ -1065,7 +1069,9 @@ let tests =
               | None -> ()
               | Some own ->
                   let other = if own = "Release" then "Debug" else "Release"
-                  let root = Path.Combine(Path.GetTempPath(), "fuaran-core-assemblyFor-" + Guid.NewGuid().ToString("N"))
+
+                  let root =
+                      Path.Combine(Path.GetTempPath(), "fuaran-core-assemblyFor-" + Guid.NewGuid().ToString("N"))
 
                   let place (config: string) =
                       let dir = Path.Combine(root, "src", "Fuaran.Core.Probe", "bin", config, "net10.0")
