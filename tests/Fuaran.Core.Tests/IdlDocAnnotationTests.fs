@@ -364,8 +364,8 @@ let tests =
 
               // Regeneration escape hatch, the IdlSpikeTests convention: FUARAN_REGEN=1
               // rewrites the committed file instead of asserting.
-              if Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
-                  File.WriteAllText(path, generated)
+              Approval.write Approval.Regen Approval.Regenerated.DocAnnotated path generated
+              |> ignore
 
               Expect.equal
                   generated

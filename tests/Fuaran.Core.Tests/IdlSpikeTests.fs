@@ -292,8 +292,7 @@ let tests =
                   // rewrites the committed file instead of asserting, so a deliberate
                   // generator change is a one-command update, not a hand-edit of
                   // generated code.
-                  if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
-                      File.WriteAllText(path, generated)
+                  Approval.write Approval.Regen Approval.Regenerated.Mini path generated |> ignore
 
                   // BYTE-FOR-BYTE (D30). The committed artefact must be exactly what the
                   // generator emits — not merely the same modulo whitespace. The normaliser
@@ -327,8 +326,12 @@ let tests =
               if not (File.Exists path) then
                   skiptest "snapshots/spike.json not on disk — byte guard skipped"
               else
-                  if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
-                      File.WriteAllText(path, Snapshots.render "spike" miniIdl cases)
+                  Approval.write
+                      Approval.Regen
+                      Approval.Regenerated.Spike
+                      path
+                      (Snapshots.render "spike" miniIdl cases)
+                  |> ignore
 
                   Expect.equal
                       (Snapshots.render "spike" miniIdl cases)

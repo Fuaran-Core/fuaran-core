@@ -55,8 +55,9 @@ module Fuaran.Core.Tests.WireSurfaceTests
 // ---- regenerating ----------------------------------------------------------------------
 //
 //   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
+//   CORE_APPROVE_WIRE=Fuaran.Core.Query dotnet run --project tests/Fuaran.Core.Tests   (one package, or a comma list)
 //
-// It rewrites every drifted wire baseline and writes, into each one's header, the class of its
+// Approval.fs reads the value (Phase 396). It rewrites every drifted wire baseline (or the named ones) and writes, into each one's header, the class of its
 // move since the newest `vX.Y.Z` tag. A separate test holds that stated class to a
 // recomputation against the tag it names, so a baseline cannot move without a class, and the
 // class it states cannot be wrong.
@@ -476,10 +477,6 @@ let internal renderPackage (package: string) : WireDoc list =
 let internal wirePackages () : string list =
     roots |> List.map packageOf |> List.distinct |> List.sort
 
-let private approving () =
-    match Environment.GetEnvironmentVariable "CORE_APPROVE_WIRE" with
-    | null -> false
-    | v -> v.Trim() <> "" && v.Trim() <> "0"
 
 let internal wireDir () : string =
     Snapshots.repoFile (Path.Combine("api", "wire"))
@@ -756,7 +753,13 @@ let tests =
           test "every wire baseline is what the encoders emit today" {
               let packages = wirePackages ()
 
-              if approving () then
+              // A filter naming no package with wire roots is red by name, never a quiet no-op.
+              if Approval.requested Approval.Wire then
+                  Approval.requireMatched Approval.Wire packages
+
+              let selected = packages |> List.filter (Approval.admits Approval.Wire)
+
+              if not (List.isEmpty selected) then
                   Directory.CreateDirectory(wireDir ()) |> ignore
 
                   let tag =
@@ -770,23 +773,23 @@ let tests =
                   printfn ""
                   printfn "==== wire surface: regenerating, class stated since %s" tag
 
-                  for p in packages do
+                  for p in selected do
                       let docs = renderPackage p
-                      let path = wirePath p
                       let stated = statedClassAt tag p docs
                       let text = renderBaseline p (tag + ": " + stated) docs
-                      let old = if File.Exists path then File.ReadAllText path else ""
 
-                      if old <> text then
-                          File.WriteAllText(path, text)
+                      if Approval.write Approval.Wire p (wirePath p) text then
                           printfn "  %-28s %-16s (%d documents)  rewritten" p stated docs.Length
                       else
                           printfn "  %-28s %-16s (%d documents)" p stated docs.Length
 
                   printfn "==== stage the wire baselines you meant to move BY NAME, and state the class in the commit"
-              else
-                  let failures =
-                      [ for p in packages do
+
+              // Every package the switch did not admit is held to its baseline as usual, so a
+              // filter never hides the drift of the baselines it left alone.
+              let failures =
+                  [ for p in packages do
+                        if not (List.contains p selected) then
                             let path = wirePath p
 
                             if not (File.Exists path) then
@@ -805,21 +808,21 @@ let tests =
                                     if moves.Length > 12 then
                                         yield sprintf "      ... and %d more" (moves.Length - 12) ]
 
-                  if not (List.isEmpty failures) then
-                      failtestf
-                          "the canonical bytes moved and their wire baseline did not:\n%s\n       Remedy: if the move is intended, regenerate with `CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests`, which writes the class into the baseline's header; stage the baselines BY NAME and state that class in the commit (STABILITY.md, \"The wire surface\")."
-                          (String.concat "\n" failures)
+              if not (List.isEmpty failures) then
+                  failtestf
+                      "the canonical bytes moved and their wire baseline did not:\n%s\n       Remedy: if the move is intended, regenerate with `CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests` (or `CORE_APPROVE_WIRE=<package id>` for one), which writes the class into the baseline's header; stage the baselines BY NAME and state that class in the commit (STABILITY.md, \"The wire surface\")."
+                      (String.concat "\n" failures)
 
-                  let orphans =
-                      if Directory.Exists(wireDir ()) then
-                          Directory.GetFiles(wireDir (), "*.txt")
-                          |> Array.map Path.GetFileNameWithoutExtension
-                          |> Array.filter (fun f -> not (List.contains f packages))
-                          |> Array.toList
-                      else
-                          []
+              let orphans =
+                  if Directory.Exists(wireDir ()) then
+                      Directory.GetFiles(wireDir (), "*.txt")
+                      |> Array.map Path.GetFileNameWithoutExtension
+                      |> Array.filter (fun f -> not (List.contains f packages))
+                      |> Array.toList
+                  else
+                      []
 
-                  Expect.isEmpty orphans "these wire baselines name no package with wire roots"
+              Expect.isEmpty orphans "these wire baselines name no package with wire roots"
           }
 
           test "every wire baseline states its class, and the class it states is true" {

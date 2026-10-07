@@ -9,6 +9,9 @@
     <WarningsAsErrors>$(WarningsAsErrors);FS3390</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Phase 396 - the ONE reading of the approval switches (CORE_APPROVE_*, FUARAN_REGEN). Registered first:
+         every family below that regenerates a committed artefact reads it, and it reads nothing here. -->
+    <Compile Include="Approval.fs" />
     <Compile Include="Reference.fs" />
     <Compile Include="Reference2.fs" />
     <!-- Phase 257 — the law-family roster as the suite reads it (one share since Phase 258 moved
@@ -61,6 +64,8 @@
     <Compile Include="RegistryLifecycleTests.fs" />
     <Compile Include="SeamModelTests.fs" />
     <Compile Include="Snapshots.fs" />
+    <!-- Phase 396 - the sweep holding every approval site to Approval.fs. Reads Snapshots.fs for the repository root. -->
+    <Compile Include="ApprovalTests.fs" />
     <!-- Pins the UTF-8 decoding of a redirected child's stdout, so the cross-host
          suites below do not depend on the console code page the runner inherited.
          Before its first consumer; it references nothing here. -->

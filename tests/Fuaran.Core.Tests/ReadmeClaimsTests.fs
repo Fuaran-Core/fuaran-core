@@ -436,11 +436,14 @@ let tests =
                   let readme = File.ReadAllText(readmePath ())
                   let floor = fst releases.Head
 
+                  Approval.validate Approval.Readme
+
                   match stampReadme (arrivalOf releases current standing) floor readme with
                   | Error why -> failtestf "the README's generated parts could not be located: %s" why
                   | Ok derived when derived = readme.Replace("\r\n", "\n") -> ()
-                  | Ok derived when Environment.GetEnvironmentVariable "CORE_APPROVE_README" = "1" ->
-                      File.WriteAllText(readmePath (), derived)
+                  | Ok derived when Approval.admits Approval.Readme Approval.Files.Readme ->
+                      Approval.write Approval.Readme Approval.Files.Readme (readmePath ()) derived
+                      |> ignore
                   | Ok derived ->
                       failtestf
                           "README.md's version stamps are not the derivation's — %s\nRe-run with CORE_APPROVE_README=1 and commit the README."
