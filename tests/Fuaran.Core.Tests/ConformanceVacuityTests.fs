@@ -273,6 +273,16 @@ let private runs =
                    1890
                    200)
            run
+               "Conformance.keyedApplyLawsAt"
+               300
+               (Conformance.keyedApplyLawsAt
+                   ConformanceTests.keyw
+                   ConformanceTests.knodew
+                   idw
+                   KeyedApplyTests.deepGen
+                   2860
+                   300)
+           run
                "Conformance.keyedApplyLaws"
                300
                (Conformance.keyedApplyLaws
@@ -283,6 +293,17 @@ let private runs =
                    2860
                    300)
            // Phase 247 — arbitration over containers and keyed positions, both built arms reached.
+           run
+               "Conformance.keyedArbitrationLawsAt"
+               200
+               (Conformance.keyedArbitrationLawsAt
+                   ConformanceTests.keyw
+                   ConformanceTests.knodew
+                   idw
+                   KeyedArbitrationTests.containedKGen
+                   KeyedArbitrationTests.encK
+                   2470
+                   200)
            run
                "Conformance.keyedArbitrationLaws"
                200
@@ -404,6 +425,17 @@ let private runs =
                    4242
                    200)
            run
+               "Conformance.attestationLawsAt"
+               200
+               (Conformance.attestationLawsAt
+                   ConformanceTests.sw
+                   ConformanceTests.streamGen
+                   sink
+                   OpStream.defaultHash
+                   4242
+                   200)
+
+           run
                "Conformance.attestationLaws"
                200
                (Conformance.attestationLaws
@@ -416,9 +448,25 @@ let private runs =
 
            // ---- artifact-witness opt-ins ----
            run
+               "Conformance.compositionLawsAt"
+               200
+               (Conformance.compositionLawsAt artw artw id ConformanceTests.genComposition 4242 200)
+           run
                "Conformance.compositionLaws"
                200
                (Conformance.compositionLaws artw artw id ConformanceTests.genComposition 4242 200)
+           run
+               "Conformance.compositionPilotAt"
+               200
+               (Conformance.compositionPilotAt
+                   artw
+                   artw2
+                   embedToR
+                   encNode
+                   encNode2
+                   ConformanceTests.genComposition2
+                   4242
+                   200)
            run
                "Conformance.compositionPilot"
                200
@@ -432,9 +480,29 @@ let private runs =
                    4242
                    200)
            run
+               "Conformance.memoLawsAt"
+               200
+               (Conformance.memoLawsAt artw encNode ConformanceTests.genMemo OpStream.defaultHash 4242 200)
+           run
                "Conformance.memoLaws"
                200
                (Conformance.memoLaws artw encNode ConformanceTests.genMemo OpStream.defaultHash 4242 200)
+           run
+               "Conformance.memoSoundnessLawsAt"
+               50
+               (let underDeclared =
+                   { RNode.node
+                         "ud"
+                         "template"
+                         [ { RNode.hole "c" "field" "count" (ValueHole(IntRange(0, 5))) with
+                               Eff =
+                                   { Host = Pure
+                                     Determinism = Effect.clock } } ] with
+                       Eff = Effect.pureDeterministic }
+
+                let underDeclaredArgs = Map.ofList [ "ud/c", ValueArg "3" ]
+
+                Conformance.memoSoundnessLawsAt artw encNode underDeclared underDeclaredArgs 4242 50)
            run
                "Conformance.memoSoundnessLaws"
                50
@@ -452,6 +520,17 @@ let private runs =
 
                 Conformance.memoSoundnessLaws artw encNode underDeclared underDeclaredArgs 4242 50)
            run
+               "Conformance.functionVerifyLawsAt"
+               200
+               (Conformance.functionVerifyLawsAt
+                   artw
+                   (ConformanceTests.tplCount (0, 5))
+                   (ConformanceTests.tplCount (0, 10))
+                   ConformanceTests.countReg
+                   ConformanceTests.genParamsFor
+                   777
+                   200)
+           run
                "Conformance.functionVerifyLaws"
                200
                (Conformance.functionVerifyLaws
@@ -462,6 +541,25 @@ let private runs =
                    ConformanceTests.genParamsFor
                    777
                    200)
+           run
+               "Conformance.verifyHonestyLawsAt"
+               200
+               (let mkSoundDet (d: DeterminismSource) =
+                   { ConformanceTests.tplCount (0, 5) with
+                       Eff = { Host = Pure; Determinism = d } }
+
+                let mkBrokenDet (d: DeterminismSource) =
+                    { ConformanceTests.tplCount (0, 10) with
+                        Eff = { Host = Pure; Determinism = d } }
+
+                Conformance.verifyHonestyLawsAt
+                    artw
+                    mkSoundDet
+                    mkBrokenDet
+                    ConformanceTests.countReg
+                    ConformanceTests.genParamsFor
+                    777
+                    200)
            run
                "Conformance.verifyHonestyLaws"
                200
@@ -481,6 +579,11 @@ let private runs =
                     ConformanceTests.genParamsFor
                     777
                     200)
+           run
+               "Conformance.encoderInjectivityLawsAt"
+               200
+               (Conformance.encoderInjectivityLawsAt artw encNode ConformanceTests.genTree 4242 200)
+
            run
                "Conformance.encoderInjectivityLaws"
                200
@@ -528,6 +631,15 @@ let private runs =
                200
                (Conformance.aiSurfaceLaws
                    AiSurfaceTests.policedWitness
+                   AiSurfaceTests.genNoteOp
+                   AiSurfaceTests.state0
+                   1234
+                   200)
+           run
+               "Conformance.aiSurfaceKitPolicyLawsAt"
+               200
+               (Conformance.aiSurfaceKitPolicyLawsAt
+                   AiSurfaceTests.witness
                    AiSurfaceTests.genNoteOp
                    AiSurfaceTests.state0
                    1234
@@ -640,6 +752,17 @@ let private runs =
            run "Conformance.witnessSurfaceLaws" 1 (Conformance.witnessSurfaceLaws ())
 
            // ---- the families outside `Conformance` ----
+           run
+               "FoldConfluence.laneFoldLawsAt"
+               120
+               (FoldConfluence.laneFoldLawsAt
+                   FoldConfluenceTests.treeW
+                   FoldConfluenceTests.treeFootprint
+                   FoldConfluenceTests.treeHash
+                   FoldConfluenceTests.treeLaneGen
+                   3
+                   1000
+                   120)
            run
                "FoldConfluence.laneFoldLaws"
                120
@@ -864,7 +987,7 @@ let vacuityTests =
               // laws assert nothing — and every one of them reports green, which is exactly what a
               // census cell used to render as "adopted".
               let results =
-                  Conformance.attestationLaws
+                  Conformance.attestationLawsAt
                       ConformanceTests.sw
                       ConformanceTests.streamGen
                       OpStream.noAttestation
@@ -875,14 +998,18 @@ let vacuityTests =
               let subject =
                   results
                   |> List.filter (fun r ->
-                      not (r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.attestationLaws")))
+                      not (r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.attestationLawsAt")))
 
               Expect.isTrue
                   (subject |> List.forall (fun r -> r.Passed))
                   "the five subject laws are green under the no-op sink — which is the problem, not the fix"
 
               let measured =
-                  SampleAdequacy.cases "Conformance.attestationLaws" (classOf "Conformance.attestationLaws") 200 results
+                  SampleAdequacy.cases
+                      "Conformance.attestationLawsAt"
+                      (classOf "Conformance.attestationLawsAt")
+                      200
+                      results
 
               Expect.isTrue (SampleAdequacy.isVacuous measured) "the run is vacuous"
 
@@ -1086,8 +1213,8 @@ let vacuityTests =
               let tree0, _ = ConformanceTests.genTree (ConfRng.ofSeed 1)
 
               let degenerate =
-                  [ "Conformance.encoderInjectivityLaws",
-                    Conformance.encoderInjectivityLaws artw encNode (fun r -> tree0, r) 4242 200
+                  [ "Conformance.encoderInjectivityLawsAt",
+                    Conformance.encoderInjectivityLawsAt artw encNode (fun r -> tree0, r) 4242 200
                     "Conformance.attributedLaws",
                     Conformance.attributedLaws ConformanceTests.sw refusedOps OpStream.defaultHash 4242 200
                     "Conformance.dagLaws",
@@ -1752,3 +1879,84 @@ let vectorFamilyTests =
 
               Expect.isNonEmpty (Directory.GetFiles(dir, "*.fs")) "the scan read the kit's sources"
               Expect.isEmpty offenders "a literal-true check is `Saw()` in disguise" ]
+
+// ---- Phase 390 — the naming rule, held to the roster ----
+//
+// D78's rule as Phase 390 applies it (DECISIONS.md D127): a family that takes a witness capability
+// the base contract does not (`NeedsWitnessCapability`) is spelled `…At`, and its configured form is
+// `…With` — the `…At` family with one more parameter, last before the seed, never `…AtWith`. A bare
+// spelling survives only as an `[<Obsolete>]` forward until `1.0.0`. This is what keeps a family added
+// before or after `1.0` from reintroducing the exception the rule exists to remove.
+
+/// Whether the kit's public entry `Module.Entry` carries `[<Obsolete>]` — read by reflection, so a
+/// forward is recognised by what it IS rather than by a list kept here.
+let private isObsoleteEntry (m: string) (entry: string) : bool =
+    let t = typeof<LawResult>.Assembly.GetType("Fuaran.Core." + m)
+
+    not (isNull t)
+    && t.GetMethods()
+       |> Array.exists (fun mi ->
+           mi.Name = entry
+           && not (isNull (System.Attribute.GetCustomAttribute(mi, typeof<System.ObsoleteAttribute>))))
+
+/// Every way a roster breaks the rule, named. Pure over its inputs so the go-red below can plant one.
+let private namingDefects (families: Families.LawFamily list) (obsolete: string -> string -> bool) : string list =
+    let live = families |> List.filter (fun f -> not (obsolete f.Module f.Entry))
+    let ids = families |> List.map (fun f -> f.Id) |> set
+
+    [ for f in live do
+          let witnessTaking = f.Reason = Some Families.NeedsWitnessCapability
+
+          if f.Entry.Contains "AtWith" then
+              yield sprintf "%s: a double suffix — the configured form of an …At family is …With" f.Id
+
+          if witnessTaking && not (f.Entry.EndsWith "At" || f.Entry.EndsWith "With") then
+              yield sprintf "%s takes a witness capability and is spelled neither …At nor …With" f.Id
+
+          if witnessTaking && f.Entry.EndsWith "With" then
+              let at = f.Module + "." + f.Entry.Substring(0, f.Entry.Length - 4) + "At"
+
+              if not (Set.contains at ids) then
+                  yield sprintf "%s is a configured form with no %s beside it" f.Id at
+
+          if f.Entry.EndsWith "At" && List.isEmpty f.Witness then
+              yield sprintf "%s is spelled …At and takes no witness" f.Id ]
+
+[<Tests>]
+let namingRuleTests =
+    testList
+        "Conformance.NamingRule (Phase 390)"
+        [ testCase "every live witness-taking family is …At or …With, every …With has its …At, and no …AtWith"
+          <| fun _ -> Expect.isEmpty (namingDefects Families.families isObsoleteEntry) "the roster follows the rule"
+
+          testCase "the obsolete reading sees the forwards it exempts"
+          <| fun _ ->
+              for m, e in
+                  [ "Conformance", "keyedApplyLaws"
+                    "FoldConfluence", "laneFoldLaws"
+                    "Conformance", "sanitizeLaws" ] do
+                  Expect.isTrue (isObsoleteEntry m e) (sprintf "%s.%s is an obsolete forward" m e)
+
+              Expect.isFalse (isObsoleteEntry "Conformance" "keyedApplyLawsAt") "the …At form is live"
+
+          testCase "go-red: a planted bare witness-taking family, a double suffix and an orphaned …With are each named"
+          <| fun _ ->
+              let template =
+                  Families.families |> List.find (fun f -> f.Id = "Conformance.keyedApplyLawsAt")
+
+              let plant entry =
+                  { template with
+                      Id = "Conformance." + entry
+                      Entry = entry }
+
+              let defects =
+                  namingDefects [ plant "plantedLaws"; plant "plantedLawsAtWith"; plant "orphanLawsWith" ] (fun _ _ ->
+                      false)
+
+              for fragment in
+                  [ "plantedLaws takes"
+                    "plantedLawsAtWith: a double suffix"
+                    "orphanLawsWith is a configured form" ] do
+                  Expect.isTrue
+                      (defects |> List.exists (fun d -> d.Contains fragment))
+                      (sprintf "%s is named: %A" fragment defects) ]

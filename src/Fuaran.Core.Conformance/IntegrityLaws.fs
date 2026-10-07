@@ -206,7 +206,11 @@ module internal IntegrityLaws =
     /// law passes green; the guard beside it counts the distinct trees the draw produced and how
     /// many of them were compared against a prior distinct tree, and is red when no distinct pair
     /// was ever compared. The search stops at the first collision, as it always did.
-    let encoderInjectivityLaws
+    ///
+    /// `family` is the roster id the guard is labelled with — `Conformance.encoderInjectivityLawsAt`, or
+    /// the bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    let encoderInjectivityLawsAt
+        (family: string)
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
         (gen: ConfRng.T -> 'Node * ConfRng.T)
@@ -250,11 +254,7 @@ module internal IntegrityLaws =
                     seen <- Map.add h tree seen)
 
         LawKit.results [ collision ]
-        @ [ SampleAdequacy.reached
-                "Conformance.encoderInjectivityLaws"
-                "distinct tree"
-                seed
-                [ "seen", distinct; "compared", compared ] ]
+        @ [ SampleAdequacy.reached family "distinct tree" seed [ "seen", distinct; "compared", compared ] ]
 
     // ---- op-codec injectivity (Phase 145) ----
     // The fourth premise of the content-id theorem, and the one that is a DOMAIN's rather than this
@@ -407,7 +407,11 @@ module internal IntegrityLaws =
     /// than green. Adopting the kit still never forces a sink on a host: a host with none runs
     /// `noAttestationVacuityLaws` instead.
     /// Opt-in like `snapshotLaws` / `dagLaws`. `'State` needs equality (replay-equivalence).
-    let attestationLaws
+    ///
+    /// `family` is the roster id the guard is labelled with — `Conformance.attestationLawsAt`, or the
+    /// bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    let attestationLawsAt
+        (family: string)
         (sw: StreamWitness<'Op, 'State, 'Rej>)
         (gen: StreamGen<'Op, 'State>)
         (sink: IAttestationSink)
@@ -564,7 +568,7 @@ module internal IntegrityLaws =
         // should be running. Phase 297 folds the op-tamper count into the same guard (the
         // family's result count is pinned) rather than emitting a second one.
         @ [ SampleAdequacy.reached
-                "Conformance.attestationLaws"
+                family
                 "signing outcome and op tamper"
                 seed
                 [ "signed", signed

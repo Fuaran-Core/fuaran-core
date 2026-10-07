@@ -2801,28 +2801,36 @@ each says why at its head: F# compiles one module from one file, and both module
 nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
 consumer of these packages sees no change from any of this.
 
-### One entry story for the conformance kit: every family answers `LawResult list` and is rostered, a vector family handed nothing is red by name, and six witness-taking families take `…At` (Phase 390, DECISIONS.md D126) — `additive`; BREAKING (behavioural): an empty store reds the stored families; six bare names `[<Obsolete>]` until `1.0.0`; the wire `none`
+### One entry story for the conformance kit: every family answers `LawResult list` and is rostered, a vector family handed nothing is red by name, and every witness-taking family takes `…At` (Phase 390, DECISIONS.md D127) — `additive`; BREAKING (behavioural): an empty store reds the stored families; eighteen bare names `[<Obsolete>]` until `1.0.0`; the wire `none`
 
-**The class, from the gate.** `Fuaran.Core.Conformance` prints eleven **`additive`** moves and nothing
-else: `Conformance.keyedChildrenLawsAt`, `referenceLawsAt`, `propagationEvaluatorLawsAt`,
-`projectionLawsAt`, `observerLawsAt`, `sanitizeLawsAt`; `WireNullTolerance.lawsWith`,
-`StringEscapeVectors.lawsWith`, `EncodingProfileVectors.lawsWith`; `ParityVectors.laws` and
-`ParityVectors.lawsWith`. Marking a member `[<Obsolete>]` moves no signature, so the six forwards below
-are not a surface move. No wire byte, `api/wire/` baseline, `ParityVectors` row, committed vector file
-(`conformance/escape/*`, `conformance/encoding/*`) or `lines ()` output moves: the hosts that diff the
-vector families read exactly what they read before.
+**The class, from the gate.** `Fuaran.Core.Conformance` prints twenty-three **`additive`** moves and
+nothing else: eighteen `…At` spellings — `Conformance.keyedChildrenLawsAt`, `referenceLawsAt`,
+`propagationEvaluatorLawsAt`, `projectionLawsAt`, `observerLawsAt`, `sanitizeLawsAt`,
+`attestationLawsAt`, `compositionLawsAt`, `compositionPilotAt`, `memoLawsAt`, `memoSoundnessLawsAt`,
+`functionVerifyLawsAt`, `verifyHonestyLawsAt`, `encoderInjectivityLawsAt`, `keyedApplyLawsAt`,
+`keyedArbitrationLawsAt`, `aiSurfaceKitPolicyLawsAt` and `FoldConfluence.laneFoldLawsAt` — and
+`WireNullTolerance.lawsWith`, `StringEscapeVectors.lawsWith`, `EncodingProfileVectors.lawsWith`,
+`ParityVectors.laws` and `ParityVectors.lawsWith`. Marking a member `[<Obsolete>]` moves no signature, so
+the forwards below are not a surface move. No wire byte, `api/wire/` baseline, `ParityVectors` row,
+committed vector file (`conformance/escape/*`, `conformance/encoding/*`) or `lines ()` output moves: the
+hosts that diff the vector families read exactly what they read before.
 
-**The `…At` rule, applied (operator ruling, D126).** `keyedChildrenLaws`, `referenceLaws`,
-`propagationEvaluatorLaws`, `projectionLaws`, `observerLaws` and `sanitizeLaws` each gain an `…At`
-spelling — same parameters, same order, the witness first — and the bare name becomes an
-`[<Obsolete>]` forward naming its replacement, **removed on the `1.0.0` slot by Phase 386's
-`OneDotZero` sweep**. Each forward stays a roster row under its own id (and, where the family is
-guarded, its own guard label), so a census or a pin that names it does not move today. The ladder row
-`propagation-change-set-and-prior` is discharged by `Conformance.propagationEvaluatorLawsAt` now, and the
-operation roster and the coverage exclusions name the `…At` ids, so the sweep moves no discharge. The
-sweep also re-stamps the two `README.md` sentences that still name `keyedChildrenLaws` and
-`propagationEvaluatorLaws` with their arrival versions. Eleven further bare-named witness-taking families
-are NOT renamed here; D126 records them and why the call is escalated.
+**The `…At` rule covers every witness-taking family (two rulings, D127).** A family that
+takes a witness capability the base contract does not is spelled `…At`; its configured form is `…With`,
+the `…At` family with one more parameter last before the seed, never `…AtWith` — which is what
+`propagationEvaluatorLawsWith`, `keyedArbitrationLawsWith` and `laneFoldLawsWith` already were, so no
+`…With` moves. The eighteen bare spellings it replaced (`keyedChildrenLaws`, `referenceLaws`,
+`propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`, `sanitizeLaws`, `attestationLaws`,
+`compositionLaws`, `compositionPilot`, `memoLaws`, `memoSoundnessLaws`, `functionVerifyLaws`,
+`verifyHonestyLaws`, `encoderInjectivityLaws`, `keyedApplyLaws`, `keyedArbitrationLaws`,
+`aiSurfaceLawsUnderKitPolicy`, `FoldConfluence.laneFoldLaws`) are `[<Obsolete>]` forwards — same
+parameters, same order — **removed on the `1.0.0` slot by Phase 386's `OneDotZero` sweep**. Each stays a
+roster row under its own id and its own guard label, so a census or a pin that names it does not move
+today. The ladder rows `propagation-change-set-and-prior` and `witness-surface-scope` are discharged by
+the `…At` ids now, and the operation roster and the coverage exclusions name the `…At` ids, so the sweep
+moves no discharge. The sweep also re-stamps the `README.md` sentences that still name a bare spelling
+with its arrival version. A roster test holds the rule: a live witness-taking family spelled outside it
+is red by name.
 
 **Every family is rostered, and an empty sample is red by name.** `ParityVectors.laws ()` is a law
 family now (printable ASCII, one space-free label per row, every sanitiser row `ok`, the `VEC`

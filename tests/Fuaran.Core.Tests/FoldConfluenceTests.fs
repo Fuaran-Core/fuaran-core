@@ -389,7 +389,7 @@ let foldConfluenceTests =
           testCase "the reference witness certifies fold + halt determinism, classification and sample adequacy"
           <| fun _ ->
               let results =
-                  FoldConfluence.laneFoldLaws treeW treeFootprint treeHash treeLaneGen 3 1000 120
+                  FoldConfluence.laneFoldLawsAt treeW treeFootprint treeHash treeLaneGen 3 1000 120
 
               Expect.equal (List.length results) 4 "three invariance laws + the sample-adequacy guard reported"
               expectGreen "the reference witness's laneFoldLaws" results
@@ -397,8 +397,8 @@ let foldConfluenceTests =
           testCase "the reference certification is seed-replayable"
           <| fun _ ->
               Expect.equal
-                  (FoldConfluence.laneFoldLaws treeW treeFootprint treeHash treeLaneGen 3 1000 60)
-                  (FoldConfluence.laneFoldLaws treeW treeFootprint treeHash treeLaneGen 3 1000 60)
+                  (FoldConfluence.laneFoldLawsAt treeW treeFootprint treeHash treeLaneGen 3 1000 60)
+                  (FoldConfluence.laneFoldLawsAt treeW treeFootprint treeHash treeLaneGen 3 1000 60)
                   "the same seed reproduces the same report"
 
           testCase "the reference witness certifies green under a different lane count"
@@ -406,21 +406,21 @@ let foldConfluenceTests =
               // 4 lanes is still exhaustively enumerated (4! = 24 = permutationBound).
               expectGreen
                   "laneFoldLaws at 4 lanes"
-                  (FoldConfluence.laneFoldLaws treeW treeFootprint treeHash treeLaneGen 4 2200 60)
+                  (FoldConfluence.laneFoldLawsAt treeW treeFootprint treeHash treeLaneGen 4 2200 60)
 
           // ---- the second, non-tree domain ----
 
           testCase "the work-plan domain certifies green — witness-generic, non-tree state, own footprint"
           <| fun _ ->
               let results =
-                  FoldConfluence.laneFoldLaws planW planFootprint planHash planLaneGen 3 4100 150
+                  FoldConfluence.laneFoldLawsAt planW planFootprint planHash planLaneGen 3 4100 150
 
               expectGreen "the work-plan domain's laneFoldLaws" results
 
           testCase "the work-plan sample exercises BOTH the folding and the halting path"
           <| fun _ ->
               let results =
-                  FoldConfluence.laneFoldLaws planW planFootprint planHash planLaneGen 3 4100 150
+                  FoldConfluence.laneFoldLawsAt planW planFootprint planHash planLaneGen 3 4100 150
 
               // One guard, both counts: Phase 121 moved this pack's two hand-written coverage laws
               // onto the kit's shared adequacy guard, which reports every verdict it demanded and
@@ -453,7 +453,7 @@ let foldConfluenceTests =
           testCase "an order-sensitive witness with a blind footprint makes the fold law bite"
           <| fun _ ->
               let results =
-                  FoldConfluence.laneFoldLaws appendW blindFootprint id appendLaneGen 3 7 20
+                  FoldConfluence.laneFoldLawsAt appendW blindFootprint id appendLaneGen 3 7 20
 
               let fold = lawNamed "lane-fold determinism" results
               Expect.isFalse fold.Passed "an order-sensitive reducer cannot fold order-independently"
@@ -475,7 +475,7 @@ let foldConfluenceTests =
           testCase "the reported counterexample is SHRUNK to two lanes of one op"
           <| fun _ ->
               let results =
-                  FoldConfluence.laneFoldLaws appendW blindFootprint id appendLaneGen 3 7 20
+                  FoldConfluence.laneFoldLawsAt appendW blindFootprint id appendLaneGen 3 7 20
 
               let cx =
                   match (lawNamed "lane-fold determinism" results).Counterexample with
@@ -702,7 +702,7 @@ let rejectedLaneTests =
         [ testCase "go-red: a sample of only rejected lanes is starved, and the adequacy line names the rejections"
           <| fun _ ->
               let results =
-                  FoldConfluence.laneFoldLaws rejectW blindFootprint id appendLaneGen 3 7 20
+                  FoldConfluence.laneFoldLawsAt rejectW blindFootprint id appendLaneGen 3 7 20
 
               Expect.isTrue
                   (results
@@ -726,6 +726,6 @@ let rejectedLaneTests =
               // rejection is the domain's business, and a guard that DEMANDED one would starve every
               // domain whose reducer accepts what its footprint lets through.
               let results =
-                  FoldConfluence.laneFoldLaws planW planFootprint planHash planLaneGen 3 4100 150
+                  FoldConfluence.laneFoldLawsAt planW planFootprint planHash planLaneGen 3 4100 150
 
               Expect.isTrue (lawNamed "sample adequacy" results).Passed "the guard does not demand a rejection" ]

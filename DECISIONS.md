@@ -1,40 +1,54 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-07 — D126: the kit has one entry story — every family answers `LawResult list` and is rostered, a vector family handed no vectors is red by name, and the `…At` rule is APPLIED to the six bare witness-taking families (operator ruling), with their bare names forwarded until `1.0.0`
+## 2026-10-07 — D127: the kit has one entry story — every family answers `LawResult list` and is rostered, a vector family handed no vectors is red by name, and the `…At` rule covers EVERY witness-taking family (two rulings), with the bare names forwarded until `1.0.0`
 
 **Recorded by Phase 390. `Fuaran.Core.Conformance`; rides the `0.36.0` draft (STABILITY.md, "One
-entry story for the conformance kit"). Amends D78's naming rule by applying it, not by restating it.**
+entry story for the conformance kit"). Amends D78's naming rule by applying it, not by restating it.
+(Filed as D126 on the phase branch; Phase 394 took D126 first.)**
 
-*The `…At` question — the operator's ruling, recorded.* D78 wrote the rule (a bare name is the family
-at its default; `…At` is the domain-witness form; `…With` pins one more parameter, last before the
-seed) and applied `…At` to the families that HAD a default beside the witness form. Six families take a
-domain witness and carry a bare name with the witness first: `keyedChildrenLaws`, `referenceLaws`,
-`propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`, `sanitizeLaws`. The phase offered two
-closures: apply the rule (an `…At` spelling for each, the bare name forwarded), or restate D78 as "the
-`At` suffix marks the seam families whose bare name is the kit-default form". **Ruled 2026-10-07 by the
-operator: APPLY it.** The restatement would freeze an exception an adopter has to learn at `1.0`; a
-forward costs one draft. So each of the six gains its `…At` spelling with the witness first (the
-position every `…At` entry already takes) and the same parameters in the same order; the bare name is
-an `[<Obsolete>]` forward naming its replacement and `1.0.0`, kept as a roster row under its own id —
-and, where the family is guarded, its own guard label — exactly as D78's forwards were, so nothing that
-pins it moves on the day the rule lands. The forwards are on the record for Phase 386's `1.0.0` removal
-sweep. The claims-ladder row `propagation-change-set-and-prior` moves its `dischargedBy` to
-`Conformance.propagationEvaluatorLawsAt`, and the operation roster and the coverage exclusions name the
-`…At` ids, so the sweep removes the forwards without moving a discharge. `propagationEvaluatorLawsWith`
-keeps its name: it is the `…At` family with the prior-aware evaluator pinned last before the seed, which
-is the rule's `…With`.
+*The rule, as it now stands with no exception.* D78 wrote it: a bare name is the family at its default;
+`…At` is the domain-witness form; `…With` is the same laws with a pinned parameter injected, last
+before the seed. Phase 390 makes it total and checkable:
 
-*What the ruling does NOT yet reach — a finding, routed rather than decided here.* The six were the
-evaluate-design pass's enumeration, and the roster shows more. Eleven further bare-named families take a
-witness capability the base contract does not (`NeedsWitnessCapability`): `attestationLaws`,
-`compositionLaws`, `compositionPilot`, `memoLaws`, `memoSoundnessLaws`, `functionVerifyLaws`,
-`verifyHonestyLaws`, `encoderInjectivityLaws`, `keyedApplyLaws`, `keyedArbitrationLaws` (and its
-`…With`), and `FoldConfluence.laneFoldLaws` (and its `…With`). Under the rule as applied, each is a
-domain-witness form with no default, exactly the six's shape — `keyedApplyLaws` takes the very
-`KeyedWitness` `keyedChildrenLawsAt` does. So "one rule, no exceptions" at `1.0` needs them brought under
-it too, and two of them raise a question the six did not: what a `…With` of an `…At` family is called.
-That is a naming decision with a public cost on the `1.0` slot, so it is escalated as a successor phase
-rather than taken silently inside this one.
+- **Every family that takes a witness capability the base contract does not** (roster reason
+  `NeedsWitnessCapability` — an `ArtifactWitness`, a `KeyedWitness`, an attestation sink, a lane
+  generator, an evaluator, observer, projection, sanitiser or AI-surface witness, a seam witness) **is
+  spelled `…At`.** The base-contract families over `NodeWitness` / `StreamWitness` alone keep bare
+  names: they are the kit's default run, which is what a bare name means.
+- **A configured form is `…With`, never `…AtWith`.** The `…With` of a witness-taking family is the
+  `…At` family taking its configuration as a further parameter, last before the seed, and an `…At`
+  sibling always stands beside it. That is what the three existing precedents already were
+  (`propagationEvaluatorLawsWith`, `keyedArbitrationLawsWith`, `FoldConfluence.laneFoldLawsWith`), so no
+  `…With` name moves; the rule names what they already did.
+- **A family whose stem is not `…Laws` keeps its stem** (`compositionPilot` → `compositionPilotAt`), and
+  a family that is a different law SET over the same witness says so in its stem, not in a suffix the
+  rule does not have: `aiSurfaceLawsUnderKitPolicy` (the proposal plumbing under the kit's policy, at the
+  domain's witness) is `aiSurfaceKitPolicyLawsAt`.
+- **Aggregates are not families.** `certify`, `certifyStream` and `FoldConfluence.certifyFold` answer a
+  `ConformanceReport`, are not rostered, and are outside the rule.
+
+`ConformanceVacuityTests`' "naming rule" list holds the roster to it — every live witness-taking family
+`…At` or `…With`, every `…With` with its `…At`, no `…AtWith`, no `…At` without a witness — and plants a
+violating roster to show it goes red.
+
+*The rulings, recorded.* The phase offered two closures for the six bare witness-taking families the
+evaluate-design pass named: apply the rule, or restate D78 as "the `At` suffix marks the seam families
+whose bare name is the kit-default form". **Ruled 2026-10-07 by the operator: APPLY it** — the
+restatement would freeze an exception an adopter has to learn at `1.0`, and a forward costs one draft.
+Checking the roster found eleven more (`attestationLaws`, `compositionLaws`, `compositionPilot`,
+`memoLaws`, `memoSoundnessLaws`, `functionVerifyLaws`, `verifyHonestyLaws`, `encoderInjectivityLaws`,
+`keyedApplyLaws`, `keyedArbitrationLaws`, `FoldConfluence.laneFoldLaws`), and the rule's test found a
+twelfth (`aiSurfaceLawsUnderKitPolicy`). **Ruled the same day, as a second ruling: bring all of them
+under the rule in this phase**, choosing the `…With` reading above from D78's text and the existing
+precedents. Each gains its `…At` spelling with the same parameters in the same order, witness first; the
+bare name is an `[<Obsolete>]` forward naming its replacement and `1.0.0`, kept as a roster row under
+its own id and its own guard label, exactly as D78's forwards were, so nothing that pins it moves on the
+day the rule lands. **All eighteen forwards are on the record for Phase 386's `1.0.0` removal sweep.**
+The claims-ladder rows move their `dischargedBy` to the `…At` ids (`propagation-change-set-and-prior` to
+`propagationEvaluatorLawsAt`, `witness-surface-scope` to `keyedApplyLawsAt`); the operation roster and
+the coverage exclusions name the `…At` ids (the `Fuaran.Core.AiSurface` exclusion also leaves Phase 297's
+own obsolete `aiSurfaceLaws` for `aiSurfaceLawsAt`), so the sweep removes the forwards without moving a
+discharge.
 
 *Every family answers `LawResult list` and is rostered — the vector families included.* The pass found
 five vector families answering `Corpus.Outcome list`, `Result<unit, string>` or `string list` and said the
@@ -3594,6 +3608,7 @@ one that disappears. Three `…With` entries whose pinned parameter is not last 
 (`snapshotLawsWith`, `concurrencyLawsWith`, `laneFoldLawsWith`) cannot take a forward under the name
 the rule gives them; they are reordered together, in one breaking change, rather than one at a time.
 (Closed on this draft: reordered with no forward — see "the kit's last three `…With` entries are reordered with no forward".)
+(Amended by D127, Phase 390, `0.36.0` draft: the rule now covers EVERY family that takes a witness capability the base contract does not — each is spelled `…At`, its configured form is `…With` (the `…At` family with one more parameter, last before the seed, never `…AtWith`), and the eighteen bare spellings it replaced are obsolete forwards removed at `1.0.0`. A roster test holds it.)
 
 **Declined here, and why.** Widening `LawResult` to carry a passing guard's reached counts is a
 recorded open decision and is not taken by this phase: the runner makes it a one-module change

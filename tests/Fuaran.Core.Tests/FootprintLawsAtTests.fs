@@ -193,7 +193,7 @@ let tests =
                                 lanes, r }
 
                     let pack =
-                        FoldConfluence.laneFoldLaws keyedW surfaceFootprint keyedHash laneGen 3 2491 60
+                        FoldConfluence.laneFoldLawsAt keyedW surfaceFootprint keyedHash laneGen 3 2491 60
 
                     Expect.isEmpty (failed pack) (sprintf "the pack cannot see it: %A" (failed pack))
 

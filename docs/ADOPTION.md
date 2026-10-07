@@ -116,11 +116,18 @@ evaluated at least one vector`; a stored family over an empty store fails too. S
 unreachable run cannot pass as an adopted one.
 
 **The names follow one rule.** A bare name is the family at its default (`capabilityLaws` over the
-kit's own fixtures); `…At` is the same family at YOUR witness; `…With` is the same laws with one more
-parameter pinned, last before the seed (`propagationEvaluatorLawsWith`'s prior-aware evaluator,
-`lawsWith`'s vector set). The bare spellings of the six witness-taking families renamed by Phase 390
+kit's own fixtures); every family that takes a witness capability your domain supplies is spelled
+`…At` (`keyedApplyLawsAt`, `memoLawsAt`, `FoldConfluence.laneFoldLawsAt`, …); and `…With` is the
+`…At` family — or a bare one — with one more parameter, last before the seed
+(`propagationEvaluatorLawsWith`'s prior-aware evaluator, `keyedArbitrationLawsWith`'s footprint and
+admission pair, `laneFoldLawsWith`'s `HashFn`, `lawsWith`'s vector set). There is no `…AtWith`. Phase
+390 brought every witness-taking family under the rule; the bare spellings it replaced
 (`keyedChildrenLaws`, `referenceLaws`, `propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`,
-`sanitizeLaws`) are obsolete forwards removed at `1.0.0` — call the `…At` form.
+`sanitizeLaws`, `attestationLaws`, `compositionLaws`, `compositionPilot`, `memoLaws`,
+`memoSoundnessLaws`, `functionVerifyLaws`, `verifyHonestyLaws`, `encoderInjectivityLaws`,
+`keyedApplyLaws`, `keyedArbitrationLaws`, `aiSurfaceLawsUnderKitPolicy` — now
+`aiSurfaceKitPolicyLawsAt` — and `FoldConfluence.laneFoldLaws`) are obsolete forwards removed at
+`1.0.0`; call the `…At` form.
 
 ## 3. Re-express the op-stream
 

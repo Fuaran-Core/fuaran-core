@@ -478,7 +478,7 @@ let private aiSurfaceTests =
               let w = surface (fun _ _ -> PolicyDecision.Allow) [ "{anything}" ]
 
               let red =
-                  Conformance.aiSurfaceLawsUnderKitPolicy w (fun r -> Put "x", r) [] 1 4
+                  Conformance.aiSurfaceKitPolicyLawsAt w (fun r -> Put "x", r) [] 1 4
                   |> List.filter (fun r -> not r.Passed)
                   |> List.choose (fun r -> r.Counterexample)
 

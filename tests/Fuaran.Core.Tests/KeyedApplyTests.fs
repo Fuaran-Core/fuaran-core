@@ -337,17 +337,17 @@ let tests =
                         "the keyed walk can" ]
 
           testList
-              "Conformance.keyedApplyLaws"
+              "Conformance.keyedApplyLawsAt"
               [ testCase "the keyed reference witness passes, with every built arm reached"
                 <| fun _ ->
-                    let results = Conformance.keyedApplyLaws keyw knodew idw deepGen 2860 300
+                    let results = Conformance.keyedApplyLawsAt keyw knodew idw deepGen 2860 300
 
                     match failed results with
                     | [] -> ()
                     | bad -> failtestf "%A" bad
 
                 testCase "the shallow reference generator passes too"
-                <| fun _ -> Expect.isEmpty (failed (Conformance.keyedApplyLaws keyw knodew idw kGen 2861 300)) "green"
+                <| fun _ -> Expect.isEmpty (failed (Conformance.keyedApplyLawsAt keyw knodew idw kGen 2861 300)) "green"
 
                 testCase "a declaration that hides a position the domain walks FAILS the agreement law"
                 <| fun _ ->
@@ -366,7 +366,7 @@ let tests =
                                         { n with
                                             Cases = n.Cases @ [ id, leaf id ] } }
 
-                    let results = Conformance.keyedApplyLaws partial knodew idw deepGen 2862 300
+                    let results = Conformance.keyedApplyLawsAt partial knodew idw deepGen 2862 300
 
                     Expect.isTrue
                         (results
@@ -375,7 +375,7 @@ let tests =
 
                 testCase "a witness that hides its keyed positions and still places into them FAILS the agreement law"
                 <| fun _ ->
-                    let results = Conformance.keyedApplyLaws noKeyedK knodew idw deepGen 2866 300
+                    let results = Conformance.keyedApplyLawsAt noKeyedK knodew idw deepGen 2866 300
 
                     Expect.isTrue
                         (results
@@ -388,7 +388,7 @@ let tests =
                         { keyw with
                             ReplaceKeyedChildren = fun n _ -> n }
 
-                    let results = Conformance.keyedApplyLaws ignoring knodew idw deepGen 2863 300
+                    let results = Conformance.keyedApplyLawsAt ignoring knodew idw deepGen 2863 300
 
                     Expect.isTrue
                         (results
@@ -403,7 +403,7 @@ let tests =
                         { noKeyedK with
                             PlaceKeyedChild = fun _ _ -> None }
 
-                    let results = Conformance.keyedApplyLaws declaresNone knodew idw kGen 2864 300
+                    let results = Conformance.keyedApplyLawsAt declaresNone knodew idw kGen 2864 300
                     Expect.isEmpty (failed results) "green"
 
                     Expect.isTrue
@@ -420,4 +420,4 @@ let tests =
                           PlaceKeyedChild = fun _ _ -> None
                           IdsUnique = fun t -> Tree.isWellFormed nodew idw t }
 
-                    Expect.isEmpty (failed (Conformance.keyedApplyLaws none nodew idw opGen 2865 400)) "green" ] ]
+                    Expect.isEmpty (failed (Conformance.keyedApplyLawsAt none nodew idw opGen 2865 400)) "green" ] ]
