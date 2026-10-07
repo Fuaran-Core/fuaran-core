@@ -8,8 +8,9 @@ surface friction. Once adopted, the witness contracts harden.
 
 ## Versioning policy
 
-Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Published to the
-`fuaran-ui` GitHub Packages NuGet feed. The publish workflow uses `--skip-duplicate`;
+Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Published to nuget.org by the
+tag workflow [`RELEASING.md`](RELEASING.md) describes (its gates, the Trusted Publishing policy, the
+post-push registry probe). The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
 **Every version cut cites a green run of the Core Fable gate against the candidate (Phase 217,

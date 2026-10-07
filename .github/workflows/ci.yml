@@ -77,11 +77,23 @@ jobs:
   # Phase 131 — the proof leg. proofs/DagFold.fst is checked by the PINNED F*/Z3 three times
   # from a cold cache (exit criterion 1: reproducible), the committed F# oracle is held to a fresh
   # extraction, and the Proofs.Oracle differential family runs the extracted model beside the
-  # production fold (exit criterion 2: agrees). Windows because that is the release the pin
-  # names; the prover is cached by the pin file's hash so a push that does not move the pin
-  # downloads nothing. The corpus is checked out for the family's ops/ leg, as in `verify`.
+  # production fold (exit criterion 2: agrees). The prover is cached by the pin file's hash, per
+  # OS, so a push that does not move the pin downloads nothing. The corpus is checked out for the
+  # family's ops/ leg, as in `verify`.
+  #
+  # Phase 393 — on TWO operating systems. The pin carries a `windows` and a `linux` entry for the
+  # same release, and the kit resolves the one for the runner's OS and refuses an OS with none by
+  # name; running both is what keeps the second entry true. A pin bump that moved only one entry,
+  # or a leg change that only works on one OS, is red here on the push that made it, not on the day
+  # someone first needs the other runner. publish-packages.yml runs the same leg on the tagged
+  # commit before it packs.
   proofs:
-    runs-on: windows-latest
+    name: proofs (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Check out the wire-format conformance corpus

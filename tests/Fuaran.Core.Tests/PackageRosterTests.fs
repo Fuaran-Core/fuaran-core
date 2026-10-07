@@ -29,6 +29,8 @@ module Fuaran.Core.Tests.PackageRosterTests
 //   5. Every release TAG at or above a declared floor has an entry header naming it.
 //   6. The README states no bare count of tests (Phase 233) — a figure nothing asserts is a
 //      claim the document cannot keep true; the suite's own census is docs/conformance-families.md.
+//   7. The post-push registry probe (`.github/scripts/probe-registry.ps1`, Phase 393) derives the
+//      same roster — it asks nuget.org about exactly the ids property 1 holds the README to.
 //
 // Property 5 is Phase 205, and it exists because property 3 structurally cannot see what
 // it caught. Property 3 quantifies over the STANDING `<Version>` — one number — so a slot
@@ -319,6 +321,42 @@ let private withRoot (f: string -> unit) =
 let private fileLines (path: string) =
     File.ReadAllText(path).Replace("\r\n", "\n").Split('\n') |> Array.toList
 
+// ---- the registry probe's roster (Phase 393) ------------------------------
+
+/// The roster `.github/scripts/probe-registry.ps1 -ListRoster` derives from `root`, run the way
+/// the publish workflow runs it, or why it could not be read. The probe asks nuget.org about
+/// exactly these ids after a push, so a probe whose derivation drifted from `packableProjects`
+/// would verify a different list than the one the README table is gated on.
+let private probeRoster (repo: string) (root: string) : Result<string list, string> =
+    try
+        let psi = ChildProcess.redirected "pwsh" ""
+
+        for a in
+            [ "-NoProfile"
+              "-NonInteractive"
+              "-File"
+              Path.Combine(repo, ".github", "scripts", "probe-registry.ps1")
+              "-ListRoster"
+              "-Root"
+              root ] do
+            psi.ArgumentList.Add a
+
+        use p = Process.Start psi
+        let out = p.StandardOutput.ReadToEndAsync()
+        let err = p.StandardError.ReadToEndAsync()
+        p.WaitForExit()
+
+        if p.ExitCode <> 0 then
+            Error(sprintf "the probe's -ListRoster exited %d: %s" p.ExitCode ((err.Result + out.Result).Trim()))
+        else
+            out.Result.Split('\n')
+            |> Array.toList
+            |> List.map (fun l -> l.Trim())
+            |> List.filter (fun l -> l <> "")
+            |> Ok
+    with e ->
+        Error("`pwsh` could not be run: " + e.Message)
+
 // ---- the Fable-surface cross-check ---------------------------------------
 
 /// The package ids `fable-exclusions.json` declares (Phase 185; at the repository
@@ -416,6 +454,72 @@ let tests =
                           "%d project(s) outside src/ are packable, so the README roster derivation cannot see them: %s\n       Remedy: declare `<IsPackable>false</IsPackable>`, or move the project under src/ and add its README row."
                           packable.Length
                           (String.concat ", " packable))
+          }
+
+          test "the registry probe derives the same roster as the README gate" {
+              // Phase 393. The post-push probe in publish-packages.yml runs without the suite, so
+              // it carries its own derivation in PowerShell; this holds the two to one set.
+              withRoot (fun root ->
+                  let packable = packableProjects root |> List.map _.PackageId |> Set.ofList
+
+                  match probeRoster root root with
+                  | Error e -> failtest e
+                  | Ok probed ->
+                      Expect.isNonEmpty probed "the probe listed at least one id"
+
+                      Expect.equal
+                          (Set.ofList probed)
+                          packable
+                          "the registry probe's roster is the packable set — edit .github/scripts/probe-registry.ps1 to match `packableProjects`, never the reverse")
+          }
+
+          test "the registry probe's derivation agrees on the edge cases (go-red over a synthetic tree)" {
+              // The live case reads a tree in which every project declares IsPackable and
+              // PackageId explicitly, so it cannot see the fallbacks. This tree exercises each:
+              // the Directory.Build.props fallback (False, any case, excludes), an explicit true
+              // overriding it, a C# project, a PackageId differing from the file name, and the
+              // file name standing in for an absent PackageId.
+              withRoot (fun repo ->
+                  let dir =
+                      Path.Combine(Path.GetTempPath(), sprintf "probe-roster-%d" Environment.ProcessId)
+
+                  try
+                      let write (rel: string) (text: string) =
+                          let path = Path.Combine(dir, rel)
+                          Directory.CreateDirectory(Path.GetDirectoryName path) |> ignore
+                          File.WriteAllText(path, text)
+
+                      write
+                          "Directory.Build.props"
+                          "<Project><PropertyGroup><IsPackable>False</IsPackable></PropertyGroup></Project>"
+
+                      write "src/Hidden/Hidden.fsproj" "<Project></Project>"
+
+                      write
+                          "src/Named/Named.fsproj"
+                          "<Project><PropertyGroup><IsPackable>true</IsPackable><PackageId>Other.Id</PackageId></PropertyGroup></Project>"
+
+                      write
+                          "src/Bare/Bare.csproj"
+                          "<Project><PropertyGroup><IsPackable>true</IsPackable></PropertyGroup></Project>"
+
+                      write
+                          "tests/Outside/Outside.fsproj"
+                          "<Project><PropertyGroup><IsPackable>true</IsPackable></PropertyGroup></Project>"
+
+                      let expected = set [ "Bare"; "Other.Id" ]
+
+                      Expect.equal
+                          (packableProjects dir |> List.map _.PackageId |> Set.ofList)
+                          expected
+                          "packableProjects over the synthetic tree"
+
+                      match probeRoster repo dir with
+                      | Error e -> failtest e
+                      | Ok probed -> Expect.equal (Set.ofList probed) expected "the probe over the synthetic tree"
+                  finally
+                      if Directory.Exists dir then
+                          Directory.Delete(dir, true))
           }
 
           test "STABILITY.md carries an entry header naming the standing <Version>" {

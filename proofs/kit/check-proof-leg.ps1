@@ -134,9 +134,16 @@
 # from <ProofsDir>/.fstar/ (a previous install by this script), else DOWNLOADED from the pinned
 # GitHub release, hash-verified, and unpacked there. Both directories, and <WorkDir>, are expected
 # to be gitignored by the adopting repository.
-# Only the Windows release is pinned by the pin file's shape — the leg runs on the Windows CI
-# runner and the Windows dev machines; on another OS set FSTAR_HOME to a matching release and the
-# pin's version check still applies.
+# The pin file carries ONE ENTRY PER OPERATING SYSTEM (Phase 393: `windows` and `linux`), every
+# entry the same release. The download path resolves the entry by `$IsWindows` / `$IsLinux` /
+# `$IsMacOS`, REFUSES an OS with no entry by name (exit 2), and refuses an entry that is incomplete
+# or names a different release than the pin's `fstar` — an entry left behind by a pin bump would
+# otherwise fetch, hash-verify and run the OLD prover on that OS only. The archive is unpacked by its
+# own extension (`.zip` or `.tar.gz`); every release lays out `fstar/bin/fstar.exe` with the bundled
+# Z3 under `fstar/lib/fstar/z3-<v>/`, on every OS. FSTAR_HOME still overrides the download on any
+# OS, and the pin's version check still applies to whatever it names. `-ResolveOnly` prints the
+# entry this host would fetch and stops before any download, so the resolution is testable without
+# a prover; `-Platform` names the OS to resolve for instead of the host's.
 #
 # Public behaviour is the contract. Every line this script prints, and every exit code it returns,
 # is what the pre-kit `check.ps1` printed and returned — a repository's tests may parse them.
@@ -179,7 +186,13 @@ param(
     [switch] $Strict,
     [switch] $NoFloor,
     [string] $CacheDir,
-    [int]    $Runs = 1
+    [int]    $Runs = 1,
+    # Phase 393 — the OS whose pin entry is resolved; defaults to the host's. Naming another OS is
+    # only meaningful with -ResolveOnly: a prover built for one OS does not run on another.
+    [ValidateSet('windows', 'linux', 'macos')][string] $Platform,
+    # Print the pin entry the download path would fetch for -Platform, then exit 0 — or refuse it,
+    # exactly as the download path would. Downloads nothing, runs nothing.
+    [switch] $ResolveOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -188,7 +201,8 @@ $ErrorActionPreference = 'Stop'
 # refutation returns the PROVER's code, which is 1 in practice; these two are the leg's, so a
 # caller — a CI job, a wrapper, a post-mortem grep — can tell "the model is wrong" from "the
 # prover died" and from "the leg's machinery broke" without reading a line of output. 2 is already
-# taken (no FSTAR_HOME on a non-Windows machine), so these start at 3.
+# taken (no prover can be resolved for this OS: the pin has no usable entry for it and FSTAR_HOME is
+# unset), so these start at 3.
 $ExitAbort = 3
 $ExitApparatus = 4
 
@@ -250,6 +264,48 @@ $pinnedVersion = $pin.fstar.TrimStart('v')
 
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
+# The OS this run resolves a pin entry for (Phase 393): -Platform when named, else the host's.
+# An OS PowerShell does not name (none today) resolves to '' and is refused below like any other
+# OS without an entry.
+$pinPlatform = if ($Platform) { $Platform }
+elseif ($IsWindows) { 'windows' }
+elseif ($IsLinux) { 'linux' }
+elseif ($IsMacOS) { 'macos' }
+else { '' }
+
+# The pin entry for $pinPlatform, or a refusal NAMING the OS (exit 2, the "no prover for this OS"
+# code). An entry must be complete and must name the pin's own release in both its asset and its
+# url: the hash alone cannot catch an entry left behind by a pin bump, because it is the right hash
+# for the wrong release.
+function Resolve-PinEntry {
+    $pinName = Split-Path $PinFile -Leaf
+    $declared = @($pin.PSObject.Properties.Name | Where-Object { $pin.$_ -is [pscustomobject] -and $null -ne $pin.$_.asset })
+    $osName = if ($pinPlatform) { $pinPlatform } else { 'this operating system' }
+    $entry = if ($pinPlatform) { $pin.$pinPlatform } else { $null }
+    if ($null -eq $entry) {
+        Fail "$pinName pins no '$osName' release of F* $($pin.fstar) (it pins: $($declared -join ', ')); add a '$osName' entry (asset, url, sha256) for the same release, or set FSTAR_HOME to an F* $($pin.fstar) release" 2
+    }
+    $missing = @('asset', 'url', 'sha256' | Where-Object { -not $entry.$_ })
+    if ($missing.Count -gt 0) {
+        Fail "$pinName's '$osName' entry is incomplete: it has no $($missing -join ', ')" 2
+    }
+    foreach ($field in 'asset', 'url') {
+        if (-not ([string]$entry.$field).Contains($pin.fstar)) {
+            Fail "$pinName's '$osName' entry names a different release than the pin ($($pin.fstar)): its $field is '$($entry.$field)'" 2
+        }
+    }
+    if ($entry.sha256 -notmatch '^[0-9a-f]{64}$') {
+        Fail "$pinName's '$osName' sha256 is not 64 lowercase hex digits: '$($entry.sha256)'" 2
+    }
+    $entry
+}
+
+if ($ResolveOnly) {
+    $entry = Resolve-PinEntry
+    Write-Host "==== proofs: the pinned prover for $pinPlatform is $($entry.asset) (sha256 $($entry.sha256))" -ForegroundColor Green
+    exit 0
+}
+
 function Resolve-FStar {
     if ($env:FSTAR_HOME) {
         $exe = Join-Path $env:FSTAR_HOME 'bin/fstar.exe'
@@ -257,31 +313,39 @@ function Resolve-FStar {
         return $exe
     }
 
+    # Every release, on every OS, lays the prover out as fstar/bin/fstar.exe (the release's own
+    # packaging adds that top-level directory), so one local path serves both entries.
     $local = Join-Path $ProofsDir '.fstar/fstar/bin/fstar.exe'
     if (Test-Path $local) { return $local }
 
-    if (-not $IsWindows) {
-        Fail "no FSTAR_HOME and this is not Windows — only the Windows release is pinned ($(Split-Path $PinFile -Leaf)); set FSTAR_HOME to an F* $($pin.fstar) release" 2
-    }
-
-    $asset = $pin.windows.asset
+    $entry = Resolve-PinEntry
+    $asset = $entry.asset
     $dir = Join-Path $ProofsDir '.fstar'
     New-Item -ItemType Directory -Force $dir | Out-Null
-    $zip = Join-Path $dir $asset
+    $archive = Join-Path $dir $asset
 
-    if (-not (Test-Path $zip)) {
+    if (-not (Test-Path $archive)) {
         Write-Host "==== proofs: downloading the pinned prover $($pin.fstar) ($asset)" -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $pin.windows.url -OutFile $zip
+        Invoke-WebRequest -Uri $entry.url -OutFile $archive
     }
 
-    $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-    if ($hash -ne $pin.windows.sha256) {
-        Remove-Item $zip -Force
-        Fail "the downloaded $asset does not match the pinned sha256 (got $hash, pinned $($pin.windows.sha256)); it was deleted — re-run to fetch again"
+    $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+    if ($hash -ne $entry.sha256) {
+        Remove-Item $archive -Force
+        Fail "the downloaded $asset does not match the pinned sha256 (got $hash, pinned $($entry.sha256)); it was deleted — re-run to fetch again"
     }
 
     Write-Host "==== proofs: unpacking $asset" -ForegroundColor Cyan
-    Expand-Archive -Path $zip -DestinationPath $dir -Force
+    if ($asset.EndsWith('.zip')) {
+        Expand-Archive -Path $archive -DestinationPath $dir -Force
+    }
+    elseif ($asset.EndsWith('.tar.gz')) {
+        # tar keeps the executable bits a .zip cannot carry; it is on every runner image and on
+        # Windows 10+ alike.
+        & tar -xzf $archive -C $dir
+        if ($LASTEXITCODE -ne 0) { Fail "tar could not unpack $asset into $dir (exit $LASTEXITCODE)" }
+    }
+    else { Fail "$asset is neither a .zip nor a .tar.gz; the leg does not know how to unpack it" }
     if (-not (Test-Path $local)) { Fail "unpacked $asset but found no fstar/bin/fstar.exe under $dir" }
     return $local
 }
@@ -413,7 +477,8 @@ function Get-RefutationExitCode([int] $code) {
 # running at that instant.
 function Get-ResourceSnapshot {
     $provers = 0
-    try { $provers = @(Get-Process -Name 'fstar' -ErrorAction SilentlyContinue).Count } catch { $provers = -1 }
+    # `fstar` is the Windows process name of fstar.exe; on Linux the name keeps its `.exe`.
+    try { $provers = @(Get-Process -Name 'fstar', 'fstar.exe' -ErrorAction SilentlyContinue).Count } catch { $provers = -1 }
     $free = 'unknown'
     try {
         if ($IsWindows) {

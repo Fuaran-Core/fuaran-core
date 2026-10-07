@@ -249,8 +249,9 @@ pins (the compiler's whenever the receiving gate's checkout is present).
 an F\* model of `Dag.reconcileMany` and the replay with fold confluence proved as a theorem, and
 `proofs/oracle/DagFold.fs` is that model extracted to F# and run by the suite beside the production
 fold as a differential oracle. What the theorem covers, what it assumes and how to run the leg are
-in [`proofs/README.md`](proofs/README.md); `./verify.ps1 -Proofs` (and CI's `proofs` job) installs
-the pinned prover and checks it.
+in [`proofs/README.md`](proofs/README.md); `./verify.ps1 -Proofs` (and CI's `proofs` job, on Windows
+and Linux) installs the pinned prover and checks it, and a release tag runs the same leg before
+anything is packed.
 
 The conformance suite exercises every layer against an in-repo reference witness (a tiny
 string-id domain) — proving the generics work **without depending on any domain
@@ -285,4 +286,7 @@ the four-witness recipe + the caveats a real adoption surfaced — with the runn
 Pre-1.0 — the released version is single-sourced from `<Version>` in
 `Directory.Build.props`. The witness-record contracts (especially `IdWitness` and
 `NodeWitness`) are the stability-critical surfaces — see [`STABILITY.md`](STABILITY.md).
-Design log in [`DECISIONS.md`](DECISIONS.md).
+Design log in [`DECISIONS.md`](DECISIONS.md). A release follows the sequence in
+[`STABILITY.md`, "Versioning policy"](STABILITY.md#versioning-policy) and is published by the tag
+workflow [`RELEASING.md`](RELEASING.md) describes — its gates, the Trusted Publishing policy, and the
+post-push registry probe.
