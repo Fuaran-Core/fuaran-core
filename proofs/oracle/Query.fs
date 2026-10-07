@@ -360,48 +360,262 @@ let __proj__Mkquery_param__item__p_required : query_param  ->  Prims.bool = (fun
      p_required
      end))
 
-type query = {q_id : Prims.string; q_params : Prims.list<query_param>; q_schema : Prims.list<(Prims.string * column_type)>; q_effect : effect_class; q_source : Prims.string; q_timeout_ms : FStar_Pervasives_Native.option<Prims.int>; q_page_size : FStar_Pervasives_Native.option<Prims.int>}
+type predicate =
+| EqualTo of Prims.string * cell
+| GreaterThan of Prims.string * cell
+| AtLeast of Prims.string * cell
+| LessThan of Prims.string * cell
+| AtMost of Prims.string * cell
+| Contains of Prims.string * Prims.string
+| IsNull of Prims.string
+| IsNotNull of Prims.string
+
+
+let uu___is_EqualTo : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| EqualTo (column, value) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__EqualTo__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| EqualTo (column, value) -> begin
+     column
+     end))
+
+
+let __proj__EqualTo__item__value : predicate  ->  cell = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| EqualTo (column, value) -> begin
+     value
+     end))
+
+
+let uu___is_GreaterThan : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| GreaterThan (column, value) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__GreaterThan__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| GreaterThan (column, value) -> begin
+     column
+     end))
+
+
+let __proj__GreaterThan__item__value : predicate  ->  cell = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| GreaterThan (column, value) -> begin
+     value
+     end))
+
+
+let uu___is_AtLeast : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| AtLeast (column, value) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__AtLeast__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| AtLeast (column, value) -> begin
+     column
+     end))
+
+
+let __proj__AtLeast__item__value : predicate  ->  cell = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| AtLeast (column, value) -> begin
+     value
+     end))
+
+
+let uu___is_LessThan : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| LessThan (column, value) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__LessThan__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| LessThan (column, value) -> begin
+     column
+     end))
+
+
+let __proj__LessThan__item__value : predicate  ->  cell = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| LessThan (column, value) -> begin
+     value
+     end))
+
+
+let uu___is_AtMost : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| AtMost (column, value) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__AtMost__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| AtMost (column, value) -> begin
+     column
+     end))
+
+
+let __proj__AtMost__item__value : predicate  ->  cell = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| AtMost (column, value) -> begin
+     value
+     end))
+
+
+let uu___is_Contains : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| Contains (column, text) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Contains__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| Contains (column, text) -> begin
+     column
+     end))
+
+
+let __proj__Contains__item__text : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| Contains (column, text) -> begin
+     text
+     end))
+
+
+let uu___is_IsNull : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| IsNull (column) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__IsNull__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| IsNull (column) -> begin
+     column
+     end))
+
+
+let uu___is_IsNotNull : predicate  ->  Prims.bool = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| IsNotNull (column) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__IsNotNull__item__column : predicate  ->  Prims.string = (fun ( projectee  :  predicate ) -> (match (projectee) with
+| IsNotNull (column) -> begin
+     column
+     end))
+
+type sort_direction =
+| Ascending
+| Descending
+
+
+let uu___is_Ascending : sort_direction  ->  Prims.bool = (fun ( projectee  :  sort_direction ) -> (match (projectee) with
+| Ascending -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Descending : sort_direction  ->  Prims.bool = (fun ( projectee  :  sort_direction ) -> (match (projectee) with
+| Descending -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+type sort_key = {k_column : Prims.string; k_direction : sort_direction}
+
+
+let __proj__Mksort_key__item__k_column : sort_key  ->  Prims.string = (fun ( projectee  :  sort_key ) -> (match (projectee) with
+| {k_column = k_column; k_direction = k_direction} -> begin
+     k_column
+     end))
+
+
+let __proj__Mksort_key__item__k_direction : sort_key  ->  sort_direction = (fun ( projectee  :  sort_key ) -> (match (projectee) with
+| {k_column = k_column; k_direction = k_direction} -> begin
+     k_direction
+     end))
+
+type query = {q_id : Prims.string; q_params : Prims.list<query_param>; q_schema : Prims.list<(Prims.string * column_type)>; q_effect : effect_class; q_source : Prims.string; q_timeout_ms : FStar_Pervasives_Native.option<Prims.int>; q_page_size : FStar_Pervasives_Native.option<Prims.int>; q_where : Prims.list<predicate>; q_order_by : Prims.list<sort_key>}
 
 
 let __proj__Mkquery__item__q_id : query  ->  Prims.string = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_id
      end))
 
 
 let __proj__Mkquery__item__q_params : query  ->  Prims.list<query_param> = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_params
      end))
 
 
 let __proj__Mkquery__item__q_schema : query  ->  Prims.list<(Prims.string * column_type)> = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_schema
      end))
 
 
 let __proj__Mkquery__item__q_effect : query  ->  effect_class = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_effect
      end))
 
 
 let __proj__Mkquery__item__q_source : query  ->  Prims.string = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_source
      end))
 
 
 let __proj__Mkquery__item__q_timeout_ms : query  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_timeout_ms
      end))
 
 
 let __proj__Mkquery__item__q_page_size : query  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( projectee  :  query ) -> (match (projectee) with
-| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size} -> begin
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_page_size
+     end))
+
+
+let __proj__Mkquery__item__q_where : query  ->  Prims.list<predicate> = (fun ( projectee  :  query ) -> (match (projectee) with
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
+     q_where
+     end))
+
+
+let __proj__Mkquery__item__q_order_by : query  ->  Prims.list<sort_key> = (fun ( projectee  :  query ) -> (match (projectee) with
+| {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
+     q_order_by
      end))
 
 type query_error =
@@ -415,6 +629,11 @@ type query_error =
 | Timeout
 | RequiredParamsNull of Prims.list<Prims.string>
 | DuplicateParam of Prims.string
+| UnknownColumn of Prims.string * Prims.list<Prims.string>
+| PredicateTypeMismatch of Prims.string * column_type * column_type
+| PredicateNotApplicable of Prims.string * Prims.string * column_type
+| IllFormedLiteral of Prims.string * Prims.string
+| DuplicateSortColumn of Prims.string
 
 
 let uu___is_NoSuchQuery : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
@@ -591,6 +810,117 @@ let __proj__DuplicateParam__item__name : query_error  ->  Prims.string = (fun ( 
      end))
 
 
+let uu___is_UnknownColumn : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| UnknownColumn (name, declared) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__UnknownColumn__item__name : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| UnknownColumn (name, declared) -> begin
+     name
+     end))
+
+
+let __proj__UnknownColumn__item__declared : query_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| UnknownColumn (name, declared) -> begin
+     declared
+     end))
+
+
+let uu___is_PredicateTypeMismatch : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateTypeMismatch (column, expected, got) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__PredicateTypeMismatch__item__column : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateTypeMismatch (column, expected, got) -> begin
+     column
+     end))
+
+
+let __proj__PredicateTypeMismatch__item__expected : query_error  ->  column_type = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateTypeMismatch (column, expected, got) -> begin
+     expected
+     end))
+
+
+let __proj__PredicateTypeMismatch__item__got : query_error  ->  column_type = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateTypeMismatch (column, expected, got) -> begin
+     got
+     end))
+
+
+let uu___is_PredicateNotApplicable : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateNotApplicable (predicate1, column, column_type1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__PredicateNotApplicable__item__predicate : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateNotApplicable (predicate1, column, column_type1) -> begin
+     predicate1
+     end))
+
+
+let __proj__PredicateNotApplicable__item__column : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateNotApplicable (predicate1, column, column_type1) -> begin
+     column
+     end))
+
+
+let __proj__PredicateNotApplicable__item__column_type : query_error  ->  column_type = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| PredicateNotApplicable (predicate1, column, column_type1) -> begin
+     column_type1
+     end))
+
+
+let uu___is_IllFormedLiteral : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| IllFormedLiteral (column, reason) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__IllFormedLiteral__item__column : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| IllFormedLiteral (column, reason) -> begin
+     column
+     end))
+
+
+let __proj__IllFormedLiteral__item__reason : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| IllFormedLiteral (column, reason) -> begin
+     reason
+     end))
+
+
+let uu___is_DuplicateSortColumn : query_error  ->  Prims.bool = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| DuplicateSortColumn (column) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__DuplicateSortColumn__item__column : query_error  ->  Prims.string = (fun ( projectee  :  query_error ) -> (match (projectee) with
+| DuplicateSortColumn (column) -> begin
+     column
+     end))
+
+
 type arguments = Prims.list<(Prims.string * cell)>
 
 
@@ -661,36 +991,48 @@ if d.has_network then begin
 
 let determinism_tag_of : query  ->  Prims.string = (fun ( q  :  query ) -> (determinism_tag q.q_effect.determinism))
 
-type renderers = {render_int : Prims.int  ->  Prims.string; render_float : Prims.string  ->  Prims.string; hash : Prims.string  ->  Prims.string; name_le : Prims.string  ->  Prims.string  ->  Prims.bool; field : Prims.string  ->  Prims.string}
+type renderers = {render_int : Prims.int  ->  Prims.string; render_float : Prims.string  ->  Prims.string; hash : Prims.string  ->  Prims.string; name_le : Prims.string  ->  Prims.string  ->  Prims.bool; field : Prims.string  ->  Prims.string; render_where : Prims.list<predicate>  ->  Prims.string; render_order : Prims.list<sort_key>  ->  Prims.string}
 
 
 let __proj__Mkrenderers__item__render_int : renderers  ->  Prims.int  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
      render_int
      end))
 
 
 let __proj__Mkrenderers__item__render_float : renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
      render_float
      end))
 
 
 let __proj__Mkrenderers__item__hash : renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
      hash
      end))
 
 
 let __proj__Mkrenderers__item__name_le : renderers  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
      name_le
      end))
 
 
 let __proj__Mkrenderers__item__field : renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
-| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field} -> begin
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
      field
+     end))
+
+
+let __proj__Mkrenderers__item__render_where : renderers  ->  Prims.list<predicate>  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
+     render_where
+     end))
+
+
+let __proj__Mkrenderers__item__render_order : renderers  ->  Prims.list<sort_key>  ->  Prims.string = (fun ( projectee  :  renderers ) -> (match (projectee) with
+| {render_int = render_int; render_float = render_float; hash = hash; name_le = name_le; field = field; render_where = render_where; render_order = render_order} -> begin
+     render_order
      end))
 
 
@@ -809,7 +1151,31 @@ let rec fields : renderers  ->  Prims.list<Prims.string>  ->  Prims.string = (fu
 let canonical : renderers  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( l  :  arguments ) -> (fields rn (arg_fields rn l)))
 
 
-let invocation_key : renderers  ->  query  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical rn (sort_args rn a))))))
+let order_fields : renderers  ->  Prims.list<sort_key>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( o  :  Prims.list<sort_key> ) ( rest  :  Prims.list<Prims.string> ) -> (match (o) with
+| [] -> begin
+     rest
+     end
+| (uu___)::uu___1 -> begin
+     ("")::("o")::((rn.render_order o))::rest
+     end))
+
+
+let shape_fields : renderers  ->  Prims.list<predicate>  ->  Prims.list<sort_key>  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( w  :  Prims.list<predicate> ) ( o  :  Prims.list<sort_key> ) ( rest  :  Prims.list<Prims.string> ) -> (match (w) with
+| [] -> begin
+     (order_fields rn o rest)
+     end
+| (uu___)::uu___1 -> begin
+     ("")::("w")::((rn.render_where w))::(order_fields rn o rest)
+     end))
+
+
+let key_fields : renderers  ->  query  ->  arguments  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( q  :  query ) ( l  :  arguments ) -> (shape_fields rn q.q_where q.q_order_by (arg_fields rn l)))
+
+
+let canonical_key : renderers  ->  query  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( l  :  arguments ) -> (fields rn (key_fields rn q l)))
+
+
+let invocation_key : renderers  ->  query  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical_key rn q (sort_args rn a))))))
 
 
 let rec find_param : Prims.string  ->  Prims.list<query_param>  ->  FStar_Pervasives_Native.option<query_param> = (fun ( name  :  Prims.string ) ( ps  :  Prims.list<query_param> ) -> (match (ps) with
@@ -1044,16 +1410,179 @@ let rec ids : Prims.list<query>  ->  Prims.list<Prims.string> = (fun ( qs  :  Pr
      end))
 
 
+let rec schema_type : Prims.string  ->  Prims.list<(Prims.string * column_type)>  ->  FStar_Pervasives_Native.option<column_type> = (fun ( c  :  Prims.string ) ( s  :  Prims.list<(Prims.string * column_type)> ) -> (match (s) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((n, t))::r -> begin
+      
+if (Prims.op_Equals n c) then begin
+     FStar_Pervasives_Native.Some (t)
+     end else begin
+     (schema_type c r)
+     end
+     end))
+
+
+let predicate_column : predicate  ->  Prims.string = (fun ( p  :  predicate ) -> (match (p) with
+| EqualTo (c, uu___) -> begin
+     c
+     end
+| GreaterThan (c, uu___) -> begin
+     c
+     end
+| AtLeast (c, uu___) -> begin
+     c
+     end
+| LessThan (c, uu___) -> begin
+     c
+     end
+| AtMost (c, uu___) -> begin
+     c
+     end
+| Contains (c, uu___) -> begin
+     c
+     end
+| IsNull (c) -> begin
+     c
+     end
+| IsNotNull (c) -> begin
+     c
+     end))
+
+
+let predicate_literal : predicate  ->  FStar_Pervasives_Native.option<cell> = (fun ( p  :  predicate ) -> (match (p) with
+| EqualTo (uu___, v) -> begin
+     FStar_Pervasives_Native.Some (v)
+     end
+| GreaterThan (uu___, v) -> begin
+     FStar_Pervasives_Native.Some (v)
+     end
+| AtLeast (uu___, v) -> begin
+     FStar_Pervasives_Native.Some (v)
+     end
+| LessThan (uu___, v) -> begin
+     FStar_Pervasives_Native.Some (v)
+     end
+| AtMost (uu___, v) -> begin
+     FStar_Pervasives_Native.Some (v)
+     end
+| Contains (uu___, uu___1) -> begin
+     FStar_Pervasives_Native.None
+     end
+| IsNull (uu___) -> begin
+     FStar_Pervasives_Native.None
+     end
+| IsNotNull (uu___) -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let null_literal_reason : Prims.string = "a null literal compares with nothing; test for absence with isNull"
+
+
+let predicate_fault : Prims.list<(Prims.string * column_type)>  ->  predicate  ->  FStar_Pervasives_Native.option<query_error> = (fun ( s  :  Prims.list<(Prims.string * column_type)> ) ( p  :  predicate ) -> (
+
+let c = (predicate_column p)
+in (match ((schema_type c s)) with
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.Some (UnknownColumn (c, (keys s)))
+     end
+| FStar_Pervasives_Native.Some (ty) -> begin
+     (match (p) with
+| Contains (uu___, uu___1) -> begin
+      
+if (Prims.op_Equals ty StringType) then begin
+     FStar_Pervasives_Native.None
+     end else begin
+     FStar_Pervasives_Native.Some (PredicateNotApplicable ("contains", c, ty))
+     end
+     end
+| uu___ -> begin
+     (match ((predicate_literal p)) with
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end
+| FStar_Pervasives_Native.Some (Null) -> begin
+     FStar_Pervasives_Native.Some (IllFormedLiteral (c, null_literal_reason))
+     end
+| FStar_Pervasives_Native.Some (v) -> begin
+     (match ((cell_type v)) with
+| FStar_Pervasives_Native.Some (got) -> begin
+      
+if (Prims.op_Equals got ty) then begin
+     FStar_Pervasives_Native.None
+     end else begin
+     FStar_Pervasives_Native.Some (PredicateTypeMismatch (c, ty, got))
+     end
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end)
+     end)
+     end)))
+
+
+let rec where_fault : Prims.list<(Prims.string * column_type)>  ->  Prims.list<predicate>  ->  FStar_Pervasives_Native.option<query_error> = (fun ( s  :  Prims.list<(Prims.string * column_type)> ) ( w  :  Prims.list<predicate> ) -> (match (w) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (p)::r -> begin
+     (match ((predicate_fault s p)) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     FStar_Pervasives_Native.Some (e)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (where_fault s r)
+     end)
+     end))
+
+
+let rec order_fault : Prims.list<(Prims.string * column_type)>  ->  Prims.list<Prims.string>  ->  Prims.list<sort_key>  ->  FStar_Pervasives_Native.option<query_error> = (fun ( s  :  Prims.list<(Prims.string * column_type)> ) ( seen  :  Prims.list<Prims.string> ) ( o  :  Prims.list<sort_key> ) -> (match (o) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (k)::r -> begin
+      
+if (not ((mem k.k_column (keys s)))) then begin
+     FStar_Pervasives_Native.Some (UnknownColumn (k.k_column, (keys s)))
+     end else begin
+      
+if (mem k.k_column seen) then begin
+     FStar_Pervasives_Native.Some (DuplicateSortColumn (k.k_column))
+     end else begin
+     (order_fault s ((k.k_column)::seen) r)
+     end
+     end
+     end))
+
+
+let admission_fault : query  ->  FStar_Pervasives_Native.option<query_error> = (fun ( q  :  query ) -> (match ((repeated [] (param_names q.q_params))) with
+| (d)::uu___ -> begin
+     FStar_Pervasives_Native.Some (DuplicateParam (d))
+     end
+| [] -> begin
+     (match ((where_fault q.q_schema q.q_where)) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     FStar_Pervasives_Native.Some (e)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (order_fault q.q_schema [] q.q_order_by)
+     end)
+     end))
+
+
 let register : query  ->  registry  ->  outcome<registry, query_error> = (fun ( q  :  query ) ( r  :  registry ) -> (match ((find_query q.q_id r.queries)) with
 | FStar_Pervasives_Native.Some (uu___) -> begin
      Error (DuplicateQuery (q.q_id))
      end
 | FStar_Pervasives_Native.None -> begin
-     (match ((repeated [] (param_names q.q_params))) with
-| (d)::uu___ -> begin
-     Error (DuplicateParam (d))
+     (match ((admission_fault q)) with
+| FStar_Pervasives_Native.Some (e) -> begin
+     Error (e)
      end
-| [] -> begin
+| FStar_Pervasives_Native.None -> begin
      Ok ({queries = (q)::r.queries})
      end)
      end))
@@ -1184,19 +1713,19 @@ let rec params_distinct : Prims.list<query>  ->  Prims.bool = (fun ( qs  :  Prim
      end))
 
 
-let page_fields : renderers  ->  FStar_Pervasives_Native.option<Prims.string>  ->  arguments  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( l  :  arguments ) -> (match (tok) with
+let page_fields : renderers  ->  FStar_Pervasives_Native.option<Prims.string>  ->  query  ->  arguments  ->  Prims.list<Prims.string> = (fun ( rn  :  renderers ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( q  :  query ) ( l  :  arguments ) -> (match (tok) with
 | FStar_Pervasives_Native.None -> begin
-     (arg_fields rn l)
+     (key_fields rn q l)
      end
 | FStar_Pervasives_Native.Some (t) -> begin
-     ("")::("p")::(t)::(arg_fields rn l)
+     ("")::("p")::(t)::(key_fields rn q l)
      end))
 
 
-let canonical_page : renderers  ->  FStar_Pervasives_Native.option<Prims.string>  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( l  :  arguments ) -> (fields rn (page_fields rn tok l)))
+let canonical_page : renderers  ->  FStar_Pervasives_Native.option<Prims.string>  ->  query  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( q  :  query ) ( l  :  arguments ) -> (fields rn (page_fields rn tok q l)))
 
 
-let invocation_key_page : renderers  ->  query  ->  arguments  ->  FStar_Pervasives_Native.option<Prims.string>  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical_page rn tok (sort_args rn a))))))
+let invocation_key_page : renderers  ->  query  ->  arguments  ->  FStar_Pervasives_Native.option<Prims.string>  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical_page rn tok q (sort_args rn a))))))
 
 
 let invoke_page = (fun ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (invoke q a (fun ( q1  :  query ) -> (resolve q1 tok))))
@@ -1306,16 +1835,19 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twin_query : query = {q_id = "q"; q_params = ({p_name = "region"; p_type = StringType; p_required = true})::[]; q_schema = ((("n"), (StringType)))::[]; q_effect = {host = Pure; determinism = {has_clock = false; has_random = false; has_network = false}}; q_source = "src"; q_timeout_ms = FStar_Pervasives_Native.None; q_page_size = FStar_Pervasives_Native.None}
+let twin_query : query = {q_id = "q"; q_params = ({p_name = "region"; p_type = StringType; p_required = true})::[]; q_schema = ((("n"), (StringType)))::[]; q_effect = {host = Pure; determinism = {has_clock = false; has_random = false; has_network = false}}; q_source = "src"; q_timeout_ms = FStar_Pervasives_Native.None; q_page_size = FStar_Pervasives_Native.None; q_where = []; q_order_by = []}
 
 
 let twin_param : query_param = {p_name = "region"; p_type = StringType; p_required = true}
 
 
-let twin_rn : renderers = {render_int = (fun ( uu___  :  Prims.int ) -> ""); render_float = (fun ( x  :  Prims.string ) -> x); hash = (fun ( x  :  Prims.string ) -> x); name_le = (fun ( uu___  :  Prims.string ) ( uu___1  :  Prims.string ) -> true); field = (fun ( x  :  Prims.string ) -> x)}
+let twin_rn : renderers = {render_int = (fun ( uu___  :  Prims.int ) -> ""); render_float = (fun ( x  :  Prims.string ) -> x); hash = (fun ( x  :  Prims.string ) -> x); name_le = (fun ( uu___  :  Prims.string ) ( uu___1  :  Prims.string ) -> true); field = (fun ( x  :  Prims.string ) -> x); render_where = (fun ( uu___  :  Prims.list<predicate> ) -> "W"); render_order = (fun ( uu___  :  Prims.list<sort_key> ) -> "O")}
 
 
-let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) []) (("")::("p")::("t")::[])))})::[]
+let twin_shaped : query = {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "eu"))::[]; q_order_by = ({k_column = "n"; k_direction = Descending})::[]}
+
+
+let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None twin_query (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_query []) (("")::("p")::("t")::[])))})::({tname = "a-shaped-declaration-leads-with-its-filter-then-its-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_shaped (((("a"), (Str ("x"))))::[])) (("")::("p")::("t")::("")::("w")::("W")::("")::("o")::("O")::("a")::("s")::("x")::[])))})::({tname = "an-order-alone-adds-only-its-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (key_fields twin_rn {q_id = twin_shaped.q_id; q_params = twin_shaped.q_params; q_schema = twin_shaped.q_schema; q_effect = twin_shaped.q_effect; q_source = twin_shaped.q_source; q_timeout_ms = twin_shaped.q_timeout_ms; q_page_size = twin_shaped.q_page_size; q_where = []; q_order_by = twin_shaped.q_order_by} []) (("")::("o")::("O")::[])))})::({tname = "register-admits-a-well-formed-filter-and-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_shaped empty) (Ok ({queries = (twin_shaped)::[]}))))})::({tname = "register-refuses-an-undeclared-filter-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (IsNull ("x"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (UnknownColumn ("x", ("n")::[])))))})::({tname = "register-refuses-contains-on-a-column-that-is-not-a-string"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("n"), (IntType)))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "1"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateNotApplicable ("contains", "n", IntType)))))})::({tname = "register-refuses-a-null-literal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (EqualTo ("n", Null))::[]; q_order_by = twin_query.q_order_by} empty) (Error (IllFormedLiteral ("n", null_literal_reason)))))})::({tname = "register-refuses-a-literal-of-another-type"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("n", Int ((Prims.parse_int "3"))))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("n", StringType, IntType)))))})::({tname = "register-refuses-an-order-naming-a-column-twice"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = ({k_column = "n"; k_direction = Ascending})::({k_column = "n"; k_direction = Descending})::[]} empty) (Error (DuplicateSortColumn ("n")))))})::[]
 
 
 

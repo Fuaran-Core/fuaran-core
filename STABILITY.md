@@ -2844,8 +2844,10 @@ widening rides this draft as the earlier record-widenings on it did.
 - **The capture key.** `Query.invocationKey` and `invocationKeyPage` add the filter's and the order's
   canonical text to the pre-image, each behind an empty name and its own tag (`w`, `o`). A declaration
   with neither keys exactly as before, so every journal written before this draft still replays.
-  `proofs/Query.fst` models the key without the two members (D126 records it): for such declarations
-  the model and production agree, and the oracle compares only those.
+  `proofs/Query.fst` models both members and the key over them: theorem four reads the id and the
+  shape, `invocation_key_unshaped` proves the unshaped key unchanged, and the injectivity theorems
+  cover the shape and the page token (D126). The oracle is re-extracted and draws shaped
+  declarations. The `Query` proof module's budget moves from 40s to 110s (`proofs/modules.json`).
 - **The law.** `queryLaws` gains its thirteenth law (the declared filter and order: reaches the
   resolver, keys apart, round-trips, one gate, a refusal by name, live and on replay), counted once per
   iteration and drawn after every earlier draw, so the twelve laws before it keep their samples.

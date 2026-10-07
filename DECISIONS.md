@@ -55,14 +55,25 @@ predicates — and a non-empty `OrderBy` the same with `o`. Neither tag is a cel
 `QueryRegistry.replace` swapping one filter for another under the same id would replay the first
 filter's rows for the second.
 
-*Recorded: the F\* model of the key states the declaration without the new members.*
-`proofs/Query.fst` models `invocationKey` over the id and the arguments, and its fourth theorem reads
-the declaration "through its id alone". For a declaration whose `Where` and `OrderBy` are empty —
-every declaration before this phase, and every one the oracle draws — production computes exactly the
-model's key, so every proved statement still holds of it. For a declaration carrying either, the
-pre-image gains the fields above, which the model does not state; their separation is argued above
-and certified by `queryLaws`, not proved. Stating them in the model is its own phase (the proofs, their
-extraction and the oracle move together), proposed with this one.
+*Decided (driver ruling, closed in this phase): the F\* model states the new members, concretely.*
+As first written the phase left `proofs/Query.fst` modelling `invocationKey` over the id and the
+arguments, with a fourth theorem reading the declaration "through its id alone". That is false of
+production for a declaration that filters or orders, so the proof row overclaimed. The gap is CLOSED
+here rather than handed to a successor. The model carries `predicate`, `sort_direction` and `sort_key`
+as closed types (every F# case, no type parameter) and `q_where` / `q_order_by` on the declaration. It
+models the admission (`where_fault`, `order_fault`, `admission_fault`, with `register_refuses_shape`)
+and the shape fields (`shape_fields`, `key_fields`). Theorem four is restated over the id AND the shape
+(`invocation_key_deterministic`, `invocation_key_reads_id_and_shape`). The compatibility claim is its
+own lemma (`invocation_key_unshaped`: an empty filter and order key exactly as the pre-398 key). The
+injectivity theorems cover (filter and order, page token, arguments) (`invocation_key_injective`,
+`invocation_key_page_injective`, `distinct_shapes_distinct_preimages`). What the shape spends is two
+renderer premises in `key_premises`, beside the int and float renderers': the filter's and the order's
+canonical text are injective. The oracle measures both on the shipped codec through the declaration
+round trip. Two things are stated as outside the model rather than modelled: the column layer's
+literal-carriability clause (`Table.validate`'s, which `DecimalText.fst` and `WireColumn.fst` own), and
+the typed resolver's two refusals (the model carries the untyped resolver, as before). The oracle is
+re-extracted, and the differential draws filtered and ordered declarations, comparing the admission's
+five refusals and the shaped key byte for byte.
 
 *Decided: operands are literals, not parameter references.* A declaration states its own fixed
 filter; a value that varies per call is a parameter, which the resolver already receives typed. A
