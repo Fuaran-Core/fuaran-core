@@ -10154,6 +10154,8 @@ let private prodQueryErrRender (e: QueryError) : string =
     // Phase 318 — the gate's refusals; never raised by the ungated model, rendered to stay total.
     | QueryPolicyRefused(p, r, xs) -> sprintf "PolicyRefused(%s;%s;%s)" p r (String.concat "," xs)
     | QueryApprovalRequired p -> sprintf "ApprovalRequired(%s)" p
+    // Phase 385 — the argument reader's refusal; no dispatch raises it, rendered to stay total.
+    | UnreadableArgs e -> sprintf "UnreadableArgs(%s)" e.Message
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -10184,6 +10186,7 @@ let private queryErrClass (e: QueryError) : string =
     | DuplicateParam _ -> "DuplicateParam"
     | QueryPolicyRefused _ -> "PolicyRefused"
     | QueryApprovalRequired _ -> "ApprovalRequired"
+    | UnreadableArgs _ -> "UnreadableArgs"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with

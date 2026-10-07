@@ -478,6 +478,12 @@ module internal SeamLaws =
     /// encoding's own symbols), the first page keys as `invocationKey`, and a journal captured page
     /// by page replays page n from page n's capture under strict replay — and that the registry
     /// refuses a declaration naming a parameter twice, by name.
+    ///
+    /// Since Phase 385 it also certifies that the TYPED resolver reaches the capture and replay
+    /// dispatchers: a `ResolveFault` answered through `QueryRegistry.dispatchPageCapturedWith` /
+    /// `dispatchCapturedWith` replays through `dispatchReplayedWith` as exactly the refusal
+    /// `dispatchPageWith` answers live, page by page. Every iteration builds a refusal on its first
+    /// page, and the law is counted per refusal page.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
         let validation =
             LawKit.LawCell
@@ -514,6 +520,10 @@ module internal SeamLaws =
 
         let registration =
             LawKit.LawCell "the registry refuses a declaration naming a parameter twice (DuplicateParam), by name"
+
+        let typedReach =
+            LawKit.LawCell
+                "a typed resolver's fault is captured, paged and replayed as the refusal it was answered live"
 
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
@@ -831,6 +841,112 @@ module internal SeamLaws =
                      typedFault.Saw()
                  | a, b, c -> typedFault.Check(false, fun () -> at (sprintf "typed faults: %A / %A / %A" a b c)))
 
+                // ---- Phase 385: the typed resolver reaches capture, paging and replay ----
+                // One answer per page token: the first page a typed fault (each of the three
+                // `ResolveFault` cases in turn, so every iteration BUILDS a refusal), the rest drawn
+                // between a result and the three faults. Captured page by page through
+                // `dispatchPageCapturedWith` and replayed through `dispatchReplayedWith`, each page's
+                // answer must be exactly what `dispatchPageWith` answers live — a refusal replays as
+                // the refusal, never as a re-worded `ExecutionFailed` — and the unpaged
+                // `dispatchCapturedWith` must capture the first page as its paged twin does.
+                let faultAt (k: int) : Result<Deferred<QueryResult>, ResolveFault> =
+                    match k with
+                    | 0 -> Error(ResolveFault.SourceMissing("src-" + string i))
+                    | 1 -> Error ResolveFault.TimedOut
+                    | _ -> Error(ResolveFault.Failed("busy-" + string i, [ "p0" ]))
+
+                let answers =
+                    tokens
+                    |> List.mapi (fun n _ ->
+                        if n = 0 then
+                            faultAt (i % 3)
+                        else
+                            match rng.IntBelow 4 with
+                            | 3 -> Ok(Ready(pageOf n))
+                            | k -> faultAt k)
+
+                let typedResolver (_: Query) (token: string option) (_: (string * Cell) list) =
+                    match List.tryFindIndex ((=) token) tokens with
+                    | Some n -> List.item n answers
+                    | None -> Ok(Failed "no such page")
+
+                let live =
+                    tokens
+                    |> List.map (fun t -> QueryRegistry.dispatchPageWith reg q.Id goodArgs t typedResolver)
+
+                let capturedTyped, typedJournal =
+                    tokens
+                    |> List.fold
+                        (fun (acc, j) t ->
+                            let answer, _, j' =
+                                QueryRegistry.dispatchPageCapturedWith
+                                    hashFn
+                                    encodeV
+                                    reg
+                                    q.Id
+                                    goodArgs
+                                    t
+                                    typedResolver
+                                    j
+
+                            acc @ [ answer ], j')
+                        ([], [])
+
+                let replayFrom (journal: KeyedCapture list) (t: string option) (cursor: Map<string, int>) =
+                    QueryRegistry.dispatchReplayedWith
+                        decodeV
+                        reg
+                        q.Id
+                        goodArgs
+                        t
+                        (fun _ _ _ -> Ok(Ready(pageOf 99)))
+                        cursor
+                        journal
+
+                let replayedTyped =
+                    tokens
+                    |> List.fold
+                        (fun (acc, cursor) t ->
+                            match replayFrom typedJournal t cursor with
+                            | Ok(answer, cursor') -> acc @ [ Some answer ], cursor'
+                            | Error _ -> acc @ [ None ], cursor)
+                        ([], Map.empty)
+                    |> fst
+
+                let unpaged, _, unpagedJournal =
+                    QueryRegistry.dispatchCapturedWith
+                        hashFn
+                        encodeV
+                        reg
+                        q.Id
+                        goodArgs
+                        (fun q' a -> typedResolver q' None a)
+                        []
+
+                let unpagedReplay = replayFrom unpagedJournal None Map.empty |> Result.map fst
+
+                // Counted per refusal page, where the refusal is built.
+                List.zip3 live capturedTyped replayedTyped
+                |> List.iteri (fun n (l, c, rp) ->
+                    match l with
+                    | Error _ ->
+                        typedReach.Check(
+                            c = l && rp = Some l && (n > 0 || (unpaged = l && unpagedReplay = Ok l)),
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "page %d (token %A): live %A, captured %A, replayed %A; unpaged %A / %A"
+                                        n
+                                        (List.item n tokens)
+                                        l
+                                        c
+                                        rp
+                                        unpaged
+                                        unpagedReplay
+                                )
+                        )
+                    | Ok _ -> ())
+
                 // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
                 match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
                 | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> typedFailure.Saw()
@@ -851,7 +967,8 @@ module internal SeamLaws =
               relation
               typedFault
               paging
-              registration ]
+              registration
+              typedReach ]
 
     /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`

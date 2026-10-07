@@ -209,28 +209,29 @@ module Capability =
           Signature = sg
           Placement = placement }
 
-    /// The entries that make the signature non-total (Phase 295): a repeat over an unbounded count
+    /// The entries that make a signature non-total (Phase 295): a repeat over an unbounded count
     /// space, or an entry that projects to no hole kind. Empty exactly when `Function.isTotal`.
-    let internal nonTotalAddrs (c: Capability) : string list =
-        c.Signature.Holes
-        |> List.filter (fun e -> not (Function.isTotal { c.Signature with Holes = [ e ] }))
+    let internal nonTotalAddrs (sg: Signature) : string list =
+        sg.Holes
+        |> List.filter (fun e -> not (Function.isTotal { sg with Holes = [ e ] }))
         |> List.map (fun e -> e.Addr)
 
-    /// The registration refusal a non-total capability earns, or `None` (Phase 295).
-    let internal totalityFault (c: Capability) : InvokeError option =
-        match nonTotalAddrs c with
-        | [] -> None
-        | addrs -> Some(NonTotalCapability(c.Id, addrs))
-
-    /// THE admission gate both registries run (Phase 307): totality first (`NonTotalCapability`),
-    /// then well-formedness (`Signature.validate`, refused `IllFormedCapability`). `None` admits.
-    let internal admissionFault (c: Capability) : InvokeError option =
-        match totalityFault c with
-        | Some e -> Some e
-        | None ->
-            match Signature.validate c.Signature with
+    /// THE admission gate (Phase 307; one function since Phase 385, D111): totality first
+    /// (`NonTotalCapability`, naming the non-total entries), then well-formedness
+    /// (`Signature.validate`, refused `IllFormedCapability`), for a declaration under `id`. `None`
+    /// admits. Both registries run it through `admissionFault`, and `CapabilityCodec`'s capability
+    /// reader runs it over the signature it has just read, so a reader never admits what a registry
+    /// refuses and refuses it with the registry's own error.
+    let internal admissionOf (id: string) (sg: Signature) : InvokeError option =
+        match nonTotalAddrs sg with
+        | _ :: _ as addrs -> Some(NonTotalCapability(id, addrs))
+        | [] ->
+            match Signature.validate sg with
             | Ok() -> None
-            | Error fault -> Some(IllFormedCapability(c.Id, fault))
+            | Error fault -> Some(IllFormedCapability(id, fault))
+
+    /// `admissionOf` over a built capability — what both registries run at `register` / `replace`.
+    let internal admissionFault (c: Capability) : InvokeError option = admissionOf c.Id c.Signature
 
     /// The space an argument for this entry is checked against: its own, or — for a slot entry built
     /// by hand before Phase 229, which carries none — the `SlotTree` of its constraint, so the
@@ -879,31 +880,36 @@ module CapabilityCodec =
               "effect", EffectCodec.toJson sg.Effect
               "holes", JArr(sg.Holes |> List.map entryJson) ]
 
-    let private signatureOfDetailed (el: JVal) : Result<Signature, DecodeError> =
+    /// A signature's members, read with no admission check (Phase 385): the capability reader runs
+    /// the registries' whole gate (`Capability.admissionOf`) over the signature it reads, and
+    /// the bare signature reader runs well-formedness over this.
+    let private signatureFieldsOf (el: JVal) : Result<Signature, DecodeError> =
         Decoder.field "name" Decoder.str el
         |> Result.bind (fun name ->
             Decoder.field "effect" EffectCodec.decoder el
             |> Result.bind (fun eff ->
                 Decoder.field "holes" (Decoder.list entryOf) el
-                |> Result.bind (fun holes ->
-                    let sg =
-                        { Name = name
-                          Holes = holes
-                          Effect = eff }
+                |> Result.map (fun holes ->
+                    { Name = name
+                      Holes = holes
+                      Effect = eff })))
 
-                    // Phase 307: the reader runs the admission check the registries run, so a
-                    // declaration that decodes is one a registry could admit on well-formedness.
-                    match Signature.validate sg with
-                    | Ok() -> Ok sg
-                    | Error fault ->
-                        Error(
-                            DecodeError.under
-                                (PathSegment.Key "holes")
-                                (DecodeError.make
-                                    DecodeCode.OutOfRange
-                                    "a well-formed declaration"
-                                    ("ill-formed signature: " + DeclarationFault.describe fault))
-                        ))))
+    let private signatureOfDetailed (el: JVal) : Result<Signature, DecodeError> =
+        signatureFieldsOf el
+        |> Result.bind (fun sg ->
+            // Phase 307: the reader runs the well-formedness check the registries run, so a
+            // signature that decodes is one a registry could admit on well-formedness.
+            match Signature.validate sg with
+            | Ok() -> Ok sg
+            | Error fault ->
+                Error(
+                    DecodeError.under
+                        (PathSegment.Key "holes")
+                        (DecodeError.make
+                            DecodeCode.OutOfRange
+                            "a well-formed declaration"
+                            ("ill-formed signature: " + DeclarationFault.describe fault))
+                ))
 
     /// Read a signature object (`name`, `effect`, `holes`) leniently, refusing a hole-kind tag
     /// outside `HoleKind.tags` and a signature `Signature.validate` refuses (Phase 307); a slot
@@ -966,7 +972,25 @@ module CapabilityCodec =
         Decoder.field "$type" (tagged "not a capability declaration: " [ "capability", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
-            Decoder.field "signature" signatureOfDetailed el
+            Decoder.field "signature" signatureFieldsOf el
+            |> Result.bind (fun sg ->
+                // Phase 385: THE admission gate the registries run (D111) — totality, then
+                // well-formedness — over the signature just read, where Phase 307's reader ran the
+                // well-formedness half alone. A declaration that decodes is one `register` admits,
+                // and a refused one is refused at `signature.holes` with the registry's own error.
+                match Capability.admissionOf id sg with
+                | Some e ->
+                    Error(
+                        DecodeError.under
+                            (PathSegment.Key "signature")
+                            (DecodeError.under
+                                (PathSegment.Key "holes")
+                                (DecodeError.make
+                                    DecodeCode.OutOfRange
+                                    "a declaration the registries admit"
+                                    (InvokeError.describe e)))
+                    )
+                | None -> Ok sg)
             |> Result.bind (fun sg ->
                 // Cross-check the wire `determinism` tag against the signature's effect determinism
                 // (Phase 44). The tag is written on encode but was previously ignored on decode, so a
@@ -1001,6 +1025,8 @@ module CapabilityCodec =
 
     /// Read a capability declaration leniently. The wire `determinism` must equal the label the
     /// decoded signature's effect derives; a disagreeing tag is refused, never silently corrected.
+    /// A declaration the registries' admission gate refuses (`NonTotalCapability`,
+    /// `IllFormedCapability`) is refused with that error's sentence (Phase 385).
     let decodeJson (el: JVal) : Result<Capability, string> =
         Decoder.describing decodeJsonDetailed el
 

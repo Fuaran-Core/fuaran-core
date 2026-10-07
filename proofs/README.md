@@ -969,11 +969,11 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
-| `Fuaran.Core.Query` | 45 | 13 | 14 | 0 | 0 | 0 | 0 | 18 |
+| `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 158 | 10 | 16 | 3 | 2 | 0 | 0 | 127 |
-| **Total** | 1148 | 142 | 380 | 32 | 15 | 24 | 8 | 547 |
+| **Total** | 1153 | 142 | 384 | 32 | 15 | 24 | 8 | 548 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -5196,7 +5196,8 @@ the three types as an IDL vocabulary and let the F\* target generate `rt_<T>` â€
 them, and `../DECISIONS.md` records why: each reader does something a structural vocabulary cannot
 say (a slot entry's space is omitted on write and restored from its constraint on read; the
 signature reader runs `Signature.validate`; the capability reader cross-checks the determinism
-label against the signature it has just read; the node reader runs `Space.wellFormed`). So the
+label against the signature it has just read, and since Phase 385 runs the registries' totality
+check over it; the node reader runs `Space.wellFormed`). So the
 lemmas are stated by hand, and stated EXACTLY: `signature_roundtrip`, `capability_roundtrip` and
 `node_roundtrip` each give decode-after-encode for EVERY value â€” the identity on the well-formed
 ones, a named refusal (code and path) or a normal form on the others. The normal form is a finding

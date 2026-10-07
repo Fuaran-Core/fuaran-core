@@ -131,8 +131,8 @@ type QueryError =
     /// The resolver could not resolve the query's `Ref` source (`ResolveFault.SourceMissing`).
     | SourceNotResolved of ref: string
     /// The resolver ran and failed; `recoverable` names the arguments a retry may change, and
-    /// is empty when the resolver answered an untyped `Deferred.Failed`. `QueryCodec.decodeArgs`
-    /// also answers this case, with a `decode:` / `parse:` detail, for input it cannot read at all.
+    /// is empty when the resolver answered an untyped `Deferred.Failed`. Only a resolver that ran
+    /// answers it: since Phase 385 input `QueryCodec.decodeArgs` cannot read is `UnreadableArgs`.
     | ExecutionFailed of detail: string * recoverable: string list
     /// The resolver ran out of time (`ResolveFault.TimedOut`); the seam itself never times a fetch.
     | Timeout
@@ -155,6 +155,13 @@ type QueryError =
     /// The registry's policy answered `NeedsApproval` (Phase 318): the gate named `policy` will not
     /// let the query run until an approval is given. No resolver ran.
     | QueryApprovalRequired of policy: string
+    /// The arguments could not be read at all (Phase 385): `QueryCodec.decodeArgs` was handed text
+    /// that is not JSON, a document that is not one object keyed by parameter name, or a parameter
+    /// value of a JSON kind no column type spells (an array or an object). `error` is the decode
+    /// refusal: its code, the path to the value at fault within the argument document, and its
+    /// sentence. No resolver ran. Before Phase 385 these were answered `ExecutionFailed`, a refusal
+    /// of a fetch that never ran.
+    | UnreadableArgs of error: DecodeError
 
 /// A resolver's typed failure (Phase 295) — what `Query.invokeWithArgs`'s resolver answers when the
 /// fetch cannot complete, so the refusals the resolver alone can know of reach the caller as the
@@ -252,11 +259,148 @@ module QueryError =
             "Refused: the policy '"
             + policy
             + "' requires an approval before this query runs."
+        | UnreadableArgs error ->
+            "Refused: the arguments could not be read at "
+            + DecodePath.render error.Path
+            + ": "
+            + error.Message
+            + ". Send one JSON object keyed by parameter name."
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Query.validateParamsAll`'s answer.
     let describeAll (es: QueryError list) : string =
         es |> List.map describe |> String.concat "\n"
+
+/// The `QueryError` wire form, below the registry that journals it (Phase 385). The keyed capture
+/// records a resolver's refusal as this document and its replay reads it back, so a replayed refusal
+/// is the refusal that was answered live; `QueryCodec`'s public error codec is this module. Internal:
+/// the published spellings are `QueryCodec.queryErrorJson` / `queryErrorOf` and their text forms.
+module internal QueryErrorWire =
+
+    /// A string from a closed set; a miss is `UnknownTag`, in the query codec's sentence
+    /// `<what><value>`.
+    let tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> =
+        Decoder.str
+        |> Decoder.andThen (fun s ->
+            match cases |> List.tryFind (fun (k, _) -> k = s) with
+            | Some(_, v) -> Ok v
+            | None ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.UnknownTag
+                        ("one of "
+                         + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "))
+                        (what + s)
+                ))
+
+    /// A column type, spelled by `ColumnType.tag`.
+    let colTypeOf: Decoder<ColumnType> =
+        tagged "unknown column type: " (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
+
+    let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
+
+    /// The decode refusal an `UnreadableArgs` carries, read back from `DecodeError.toJson`'s form.
+    let private decodeErrorOf: Decoder<DecodeError> =
+        Decoder.field
+            "code"
+            (tagged "unknown decode code: " (DecodeError.codes |> List.map (fun c -> DecodeError.codeName c, c)))
+        |> Decoder.bind (fun code ->
+            Decoder.field "path" (fun el ->
+                match DecodePath.ofJson el with
+                | Some path -> Ok path
+                | None ->
+                    Error(
+                        DecodeError.make
+                            DecodeCode.WrongKind
+                            "an array of member names and item indices"
+                            "not a decode path"
+                    ))
+            |> Decoder.bind (fun path ->
+                Decoder.field "expected" Decoder.str
+                |> Decoder.bind (fun expected ->
+                    Decoder.field "message" Decoder.str
+                    |> Decoder.map (fun message ->
+                        { Code = code
+                          Path = path
+                          Expected = expected
+                          Message = message }))))
+
+    /// A `QueryError` as its wire document: one `"$type"` per case, in camelCase.
+    let toJson (e: QueryError) : JVal =
+        match e with
+        | NoSuchQuery(id, known) -> Canon.typed "noSuchQuery" [ "id", JStr id; "known", strs known ]
+        | DuplicateQuery id -> Canon.typed "duplicateQuery" [ "id", JStr id ]
+        | UnknownParam(name, declared) -> Canon.typed "unknownParam" [ "name", JStr name; "declared", strs declared ]
+        | ParamTypeMismatch(name, expected, got) ->
+            Canon.typed
+                "paramTypeMismatch"
+                [ "name", JStr name
+                  "expected", JStr(ColumnType.tag expected)
+                  "got", JStr(ColumnType.tag got) ]
+        | RequiredParamsUnbound names -> Canon.typed "requiredParamsUnbound" [ "names", strs names ]
+        | SourceNotResolved r -> Canon.typed "sourceNotResolved" [ "ref", JStr r ]
+        | ExecutionFailed(detail, recoverable) ->
+            Canon.typed "executionFailed" [ "detail", JStr detail; "recoverable", strs recoverable ]
+        | Timeout -> Canon.typed "timeout" []
+        | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
+        | DuplicateParam name -> Canon.typed "duplicateParam" [ "name", JStr name ]
+        | QueryPolicyRefused(policy, reason, allowed) ->
+            Canon.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
+        | QueryApprovalRequired policy -> Canon.typed "approvalRequired" [ "policy", JStr policy ]
+        | UnreadableArgs error -> Canon.typed "unreadableArgs" [ "error", DecodeError.toJson error ]
+
+    /// The reader of `toJson`'s documents; an unknown `"$type"` keeps the codec's sentence.
+    let decoder: Decoder<QueryError> =
+        let str name = Decoder.field name Decoder.str
+
+        let strList name =
+            Decoder.field name (Decoder.list Decoder.str)
+
+        let both (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> QueryError) : Decoder<QueryError> =
+            a |> Decoder.bind (fun x -> b |> Decoder.map (f x))
+
+        let cases =
+            [ "noSuchQuery", both (str "id") (strList "known") (fun id known -> NoSuchQuery(id, known))
+              "duplicateQuery", str "id" |> Decoder.map DuplicateQuery
+              "unknownParam", both (str "name") (strList "declared") (fun name d -> UnknownParam(name, d))
+              "paramTypeMismatch",
+              str "name"
+              |> Decoder.bind (fun name ->
+                  both (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
+                      ParamTypeMismatch(name, exp, got)))
+              "requiredParamsUnbound", strList "names" |> Decoder.map RequiredParamsUnbound
+              "sourceNotResolved", str "ref" |> Decoder.map SourceNotResolved
+              "executionFailed", both (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
+              "timeout", Decoder.succeed Timeout
+              "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull
+              "duplicateParam", str "name" |> Decoder.map DuplicateParam
+              "policyRefused",
+              str "policy"
+              |> Decoder.bind (fun policy ->
+                  both (str "reason") (strList "allowed") (fun reason allowed ->
+                      QueryPolicyRefused(policy, reason, allowed)))
+              "approvalRequired", str "policy" |> Decoder.map QueryApprovalRequired
+              "unreadableArgs", Decoder.field "error" decodeErrorOf |> Decoder.map UnreadableArgs ]
+
+        // The dispatch's own miss keeps this codec's sentence.
+        fun el ->
+            Decoder.tagDispatch "$type" cases el
+            |> Result.mapError (fun e ->
+                match e.Code, e.Path, Decoder.tryMember "$type" el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
+                    { e with
+                        Message = "unknown query error: " + other }
+                | _ -> e)
+
+    /// A refusal as the text the keyed capture journals for it.
+    let render (e: QueryError) : string = Canon.render (toJson e)
+
+    /// The refusal a journalled reason records, or `None` for a reason that is not a query-error
+    /// document (a journal written before Phase 385 recorded `QueryError.describe`'s sentence).
+    let ofReason (reason: string) : QueryError option =
+        match Decoder.parse reason |> Result.bind decoder with
+        | Ok e -> Some e
+        | Error _ -> None
 
 /// The data-acquisition surface: typed registry (populate + enumerate + dispatch), the
 /// param-validation contract, the Phase 27 capture keying. Additive over `Column`/`Function`;
@@ -501,20 +645,19 @@ module Query =
 
         if List.isEmpty all then Ok() else Error all
 
-    /// `invoke`, with the resolver handed the validated argument list — typed, as `Cell`s, the list
-    /// `validateParams` checked, each cell at its parameter's declared type (an `int` filling a
-    /// `float` parameter arrives as a `float`) — so a resolver reads its arguments instead of closing
-    /// over the caller's list. The same three outcomes as `invoke`, and a resolver's `Failed m` is
-    /// projected into `ExecutionFailed` exactly as there.
-    ///
-    /// Since Phase 295 the resolver answers a TYPED failure beside the envelope (`ResolveFault`), so
+    /// `invokePage` with the typed resolver (Phase 385): the resolver is handed the declaration, the
+    /// page token and the validated argument list — typed, as `Cell`s, the list `validateParams`
+    /// checked, each cell at its parameter's declared type (an `int` filling a `float` parameter
+    /// arrives as a `float`) — and answers a TYPED failure beside the envelope (`ResolveFault`), so
     /// the refusals only it can know of reach the caller by name: `SourceMissing` is
     /// `SourceNotResolved`, `TimedOut` is `Timeout`, and `Failed(detail, recoverable)` is
-    /// `ExecutionFailed(detail, recoverable)` with the arguments a retry may change.
-    let invokeWithArgs
+    /// `ExecutionFailed(detail, recoverable)` with the arguments a retry may change; an untyped
+    /// `Failed m` is `ExecutionFailed(m, [])`. The same three outcomes as `invoke`.
+    let invokePageWithArgs
         (q: Query)
         (args: (string * Cell) list)
-        (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
+        (pageToken: string option)
+        (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
         validateParams q args
         |> Result.bind (fun () ->
@@ -525,13 +668,31 @@ module Query =
                     | Some p -> name, promote p.Type cell
                     | None -> name, cell)
 
-            match resolve q typed with
+            match resolve q pageToken typed with
             | Ok(Ready r) -> Ok(Ready r)
             | Ok Pending -> Ok Pending
             | Ok(Failed m) -> Error(ExecutionFailed(m, []))
             | Error(ResolveFault.SourceMissing r) -> Error(SourceNotResolved r)
             | Error ResolveFault.TimedOut -> Error Timeout
             | Error(ResolveFault.Failed(detail, recoverable)) -> Error(ExecutionFailed(detail, recoverable)))
+
+    /// `invoke`, with the resolver handed the validated argument list — typed, as `Cell`s, the list
+    /// `validateParams` checked, each cell at its parameter's declared type (an `int` filling a
+    /// `float` parameter arrives as a `float`) — so a resolver reads its arguments instead of closing
+    /// over the caller's list. The same three outcomes as `invoke`, and a resolver's `Failed m` is
+    /// projected into `ExecutionFailed` exactly as there.
+    ///
+    /// Since Phase 295 the resolver answers a TYPED failure beside the envelope (`ResolveFault`), so
+    /// the refusals only it can know of reach the caller by name: `SourceMissing` is
+    /// `SourceNotResolved`, `TimedOut` is `Timeout`, and `Failed(detail, recoverable)` is
+    /// `ExecutionFailed(detail, recoverable)` with the arguments a retry may change. It is
+    /// `invokePageWithArgs q args None (fun q _ typed -> resolve q typed)` (Phase 385).
+    let invokeWithArgs
+        (q: Query)
+        (args: (string * Cell) list)
+        (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        invokePageWithArgs q args None (fun q _ typed -> resolve q typed)
 
     /// The text an exact decimal is written as: the grammar `DecimalText` READS, which is exactly
     /// the set of strings the codec decodes into a `Decimal` cell (and canonicalises: `12.50` is
@@ -612,7 +773,10 @@ module QueryRegistry =
     /// bind such a declaration's repeated name sensibly (`validateParams` refuses the second binding),
     /// and `proofs/Query.fst` states its exact all-`Null` refusal over distinct names, so registration
     /// is where the premise is discharged rather than assumed (`register_refuses_duplicate_params`).
-    let private admissionFault (q: Query) : QueryError option =
+    /// Since Phase 385 it is THE gate of the seam (D111): `register`, `replace` and
+    /// `QueryCodec`'s declaration reader all run this one function, so a reader never admits what
+    /// the registry refuses.
+    let internal admissionFault (q: Query) : QueryError option =
         match Capability.repeatedAddrs (q.Params |> List.map (fun p -> p.Name, ())) with
         | dup :: _ -> Some(DuplicateParam dup)
         | [] -> None
@@ -722,6 +886,21 @@ module QueryRegistry =
         | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
         | Some q -> gated r q args (fun () -> Query.invokePage q args pageToken resolve)
 
+    /// `dispatchPage` with the typed resolver (Phase 385): resolve the id (default-deny), validate,
+    /// admit through the policy, then `Query.invokePageWithArgs` — so a resolver answering a
+    /// `ResolveFault` pages through the registry. `dispatchWithArgs r id args resolve` is
+    /// `dispatchPageWith r id args None (fun q _ typed -> resolve q typed)`.
+    let dispatchPageWith
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
+        : Result<Deferred<QueryResult>, QueryError> =
+        match Map.tryFind id r.Queries with
+        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
+        | Some q -> gated r q args (fun () -> Query.invokePageWithArgs q args pageToken resolve)
+
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
     /// Remove the query registered under `id` — refused `NoSuchQuery(id, known)` when the registry
@@ -755,6 +934,12 @@ module QueryRegistry =
               Policy = RegistryPolicy.combine a.Policy b.Policy })
 
     // ---- invocation-keyed capture (Phase 318) ----
+    // Since Phase 385 a refusal the resolver answered is journalled as its `QueryError` wire document
+    // (`QueryErrorWire`) and replayed back as that error, so a replayed refusal is the refusal that
+    // was answered live — a `Timeout` replays as `Timeout`, an `ExecutionFailed` with its
+    // `recoverable` arguments — exactly as a `Ready` result replays as itself. A reason that is not a
+    // query-error document (a journal written before 0.36.0 recorded `QueryError.describe`'s
+    // sentence) replays as `ExecutionFailed(reason, [])`, as it always did.
 
     /// The keyed capture of one admitted invocation: journal the attempt under `key` and the query's
     /// determinism label, run `run`, settle with its answer. A deterministic query journals nothing.
@@ -784,19 +969,38 @@ module QueryRegistry =
 
                         match answered with
                         | Ok d -> Deferred.settled d
-                        | Error e -> Some(Error(QueryError.describe e)))
+                        | Error e -> Some(Error(QueryErrorWire.render e)))
                     journal
 
             answered, Some(key, occ), journal'
+
+    /// Resolve the id, validate, admit through the policy, then capture `run` under `keyOf q` — the
+    /// order every captured dispatch keeps. A refusal before the resolver journals nothing.
+    let private dispatchCapturedAt
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (keyOf: Query -> string)
+        (run: Query -> Result<Deferred<QueryResult>, QueryError>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        match Map.tryFind id r.Queries with
+        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), None, journal
+        | Some q ->
+            match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
+            | Error e -> Error e, None, journal
+            | Ok() -> captured hashFn encode q (keyOf q) (fun () -> run q) journal
 
     /// `dispatch`, journalling the invocation in the KEYED capture journal under
     /// `Query.invocationKey` (Phase 318): the attempt after the id resolved, the parameters validated
     /// and the policy admitted it, before the resolver runs; a `Ready` result settles it `Completed`
     /// (through `encode`, `QueryCodec.encodeResult` for the canonical form), a refusal from the
-    /// resolver settles it `Refused` with
-    /// `QueryError.describe`'s sentence, and `Pending` leaves it open with the returned ticket. A
-    /// refusal before the resolver journals nothing; a deterministic query journals nothing. The
-    /// result is exactly `dispatch`'s.
+    /// resolver settles it `Refused` with the refusal's wire document (`QueryCodec.encodeQueryError`;
+    /// `QueryError.describe`'s sentence before Phase 385), and `Pending` leaves it open with the
+    /// returned ticket. A refusal before the resolver journals nothing; a deterministic query
+    /// journals nothing. The result is exactly `dispatch`'s.
     let dispatchCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -806,13 +1010,15 @@ module QueryRegistry =
         (resolve: Query -> Deferred<QueryResult>)
         (journal: KeyedCapture list)
         : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
-        match Map.tryFind id r.Queries with
-        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), None, journal
-        | Some q ->
-            match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
-            | Error e -> Error e, None, journal
-            | Ok() ->
-                captured hashFn encode q (Query.invocationKey q args) (fun () -> Query.invoke q args resolve) journal
+        dispatchCapturedAt
+            hashFn
+            encode
+            r
+            id
+            args
+            (fun q -> Query.invocationKey q args)
+            (fun q -> Query.invoke q args resolve)
+            journal
 
     /// `dispatchPage`, journalled under `Query.invocationKeyPage` (Phase 318), so every page of a
     /// non-deterministic query has its own capture and replays from it.
@@ -826,35 +1032,71 @@ module QueryRegistry =
         (resolve: Query -> string option -> Deferred<QueryResult>)
         (journal: KeyedCapture list)
         : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
-        match Map.tryFind id r.Queries with
-        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), None, journal
-        | Some q ->
-            match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
-            | Error e -> Error e, None, journal
-            | Ok() ->
-                captured
-                    hashFn
-                    encode
-                    q
-                    (Query.invocationKeyPage q args pageToken)
-                    (fun () -> Query.invokePage q args pageToken resolve)
-                    journal
+        dispatchCapturedAt
+            hashFn
+            encode
+            r
+            id
+            args
+            (fun q -> Query.invocationKeyPage q args pageToken)
+            (fun q -> Query.invokePage q args pageToken resolve)
+            journal
 
-    /// REPLAY a query invocation from the keyed journal instead of resolving it (Phase 318). The id,
-    /// the parameters and the policy run exactly as `dispatchPage` (a refusal there is answered as
-    /// `dispatchPage` answers it, consulting no journal); then a non-deterministic query is answered by
-    /// its invocation key — `invocationKeyPage`, which for `None` is `invocationKey` — a completion as
-    /// `Ready` (through `decode`, `QueryCodec.decodeResult` for the canonical form), a recorded
-    /// refusal as `ExecutionFailed` with the
-    /// recorded sentence, an unsettled attempt as `Pending`. A deterministic query resolves live. A
-    /// journal that cannot answer is the `KeyedCaptureFault`, never a live fetch.
-    let dispatchReplayed
+    /// `dispatchCaptured` with the typed resolver (Phase 385): `dispatchWithArgs`, journalled under
+    /// `Query.invocationKey`, so a `ResolveFault` is captured as the refusal it names
+    /// (`SourceNotResolved`, `Timeout`, `ExecutionFailed` with its `recoverable`) and
+    /// `dispatchReplayedWith` answers it back unchanged. The result is exactly `dispatchWithArgs`'s.
+    let dispatchCapturedWith
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        dispatchCapturedAt
+            hashFn
+            encode
+            r
+            id
+            args
+            (fun q -> Query.invocationKey q args)
+            (fun q -> Query.invokeWithArgs q args resolve)
+            journal
+
+    /// `dispatchPageCaptured` with the typed resolver (Phase 385): `dispatchPageWith`, journalled
+    /// under `Query.invocationKeyPage`, so each page's answer — a result or a `ResolveFault` — is
+    /// captured under that page's key. The result is exactly `dispatchPageWith`'s.
+    let dispatchPageCapturedWith
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
+        (journal: KeyedCapture list)
+        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        dispatchCapturedAt
+            hashFn
+            encode
+            r
+            id
+            args
+            (fun q -> Query.invocationKeyPage q args pageToken)
+            (fun q -> Query.invokePageWithArgs q args pageToken resolve)
+            journal
+
+    /// Resolve the id, validate, admit through the policy, then answer from the journal under
+    /// `invocationKeyPage` — or, for a deterministic query, `live q`.
+    let private dispatchReplayedAt
         (decode: string -> Result<QueryResult, string>)
         (r: QueryRegistry)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
-        (resolve: Query -> string option -> Deferred<QueryResult>)
+        (live: Query -> Result<Deferred<QueryResult>, QueryError>)
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
         : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
@@ -867,7 +1109,7 @@ module QueryRegistry =
                 let det = Query.determinismTag q
 
                 if det = OpStream.deterministicTag then
-                    Ok(Query.invokePage q args pageToken resolve, cursor)
+                    Ok(live q, cursor)
                 else
                     OpStream.replayEffectKeyed
                         decode
@@ -880,10 +1122,66 @@ module QueryRegistry =
                         let outcome =
                             match answer with
                             | Some(Ok v) -> Ok(Ready v)
-                            | Some(Error m) -> Error(ExecutionFailed(m, []))
+                            | Some(Error reason) ->
+                                match QueryErrorWire.ofReason reason with
+                                | Some e -> Error e
+                                | None -> Error(ExecutionFailed(reason, []))
                             | None -> Ok Pending
 
                         outcome, cursor')
+
+    /// REPLAY a query invocation from the keyed journal instead of resolving it (Phase 318). The id,
+    /// the parameters and the policy run exactly as `dispatchPage` (a refusal there is answered as
+    /// `dispatchPage` answers it, consulting no journal); then a non-deterministic query is answered by
+    /// its invocation key — `invocationKeyPage`, which for `None` is `invocationKey` — a completion as
+    /// `Ready` (through `decode`, `QueryCodec.decodeResult` for the canonical form), a recorded
+    /// refusal as the `QueryError` it records (Phase 385; a reason that is no query-error document,
+    /// from a journal written before 0.36.0, as `ExecutionFailed` with the recorded text), an
+    /// unsettled attempt as `Pending`. A deterministic query resolves live. A journal that cannot
+    /// answer is the `KeyedCaptureFault`, never a live fetch.
+    let dispatchReplayed
+        (decode: string -> Result<QueryResult, string>)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> Deferred<QueryResult>)
+        (cursor: Map<string, int>)
+        (journal: KeyedCapture list)
+        : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
+        dispatchReplayedAt
+            decode
+            r
+            id
+            args
+            pageToken
+            (fun q -> Query.invokePage q args pageToken resolve)
+            cursor
+            journal
+
+    /// `dispatchReplayed` with the typed resolver (Phase 385): the journal is read exactly as there,
+    /// so a `ResolveFault` captured by `dispatchCapturedWith` / `dispatchPageCapturedWith` replays as
+    /// the refusal it was answered live; a deterministic query resolves live through
+    /// `Query.invokePageWithArgs`.
+    let dispatchReplayedWith
+        (decode: string -> Result<QueryResult, string>)
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
+        (cursor: Map<string, int>)
+        (journal: KeyedCapture list)
+        : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
+        dispatchReplayedAt
+            decode
+            r
+            id
+            args
+            pageToken
+            (fun q -> Query.invokePageWithArgs q args pageToken resolve)
+            cursor
+            journal
 
 /// The canonical wire codec for a `Query` declaration + a `QueryResult`. Round-trips the typed
 /// params, the result schema, the effect class, the source (via `ColumnCodec`), and the paging
@@ -901,22 +1199,9 @@ module QueryCodec =
     // has always carried.
 
     /// A string from a closed set; a miss is `UnknownTag`, in this codec's sentence `<what><value>`.
-    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> =
-        Decoder.str
-        |> Decoder.andThen (fun s ->
-            match cases |> List.tryFind (fun (k, _) -> k = s) with
-            | Some(_, v) -> Ok v
-            | None ->
-                Error(
-                    DecodeError.make
-                        DecodeCode.UnknownTag
-                        ("one of "
-                         + (cases |> List.map (fun (k, _) -> "'" + k + "'") |> String.concat ", "))
-                        (what + s)
-                ))
+    let private tagged (what: string) (cases: (string * 'T) list) : Decoder<'T> = QueryErrorWire.tagged what cases
 
-    let private colTypeOf: Decoder<ColumnType> =
-        tagged "unknown column type: " (ColumnType.all |> List.map (fun t -> ColumnType.tag t, t))
+    let private colTypeOf: Decoder<ColumnType> = QueryErrorWire.colTypeOf
 
     // The effect class is `EffectCodec`'s (Phase 295), the capability codec's reader and writer.
 
@@ -994,8 +1279,20 @@ module QueryCodec =
             (PathSegment.Key memberName)
             (DecodeError.make DecodeCode.OutOfRange what (memberName + ": not " + what + " the column codec reads"))
 
+    /// A refusal from the registry's admission gate, carried as a decode refusal at `memberName`
+    /// with the registry's own sentence (Phase 385).
+    let private admissionRefused (memberName: string) (e: QueryError) : DecodeError =
+        DecodeError.under
+            (PathSegment.Key memberName)
+            (DecodeError.make DecodeCode.OutOfRange "a declaration the registry admits" (QueryError.describe e))
+
+    // Phase 385: the readers check the document's tag (D104), and the declaration reader runs THE
+    // admission gate the registry runs (`QueryRegistry.admissionFault`, D111) — so a declaration
+    // that decodes is one `register` admits, and a refused one is refused with the registry's error.
+
     let internal queryOf (el: JVal) : Result<Query, DecodeError> =
-        Decoder.field "id" Decoder.str el
+        Decoder.field "$type" (tagged "not a query declaration: " [ "query", () ]) el
+        |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
             Decoder.field "params" (Decoder.list paramOf) el
             |> Result.bind (fun ps ->
@@ -1012,14 +1309,18 @@ module QueryCodec =
                                     match ColumnCodec.decodeJson srcEl with
                                     | Error _ -> Error(columnRefused "source" "a data source")
                                     | Ok src ->
-                                        Ok
+                                        let q =
                                             { Id = id
                                               Params = ps
                                               ResultSchema = sch
                                               Effect = eff
                                               Source = src
                                               TimeoutMs = tmo
-                                              PageSize = pg })))))))
+                                              PageSize = pg }
+
+                                        match QueryRegistry.admissionFault q with
+                                        | Some e -> Error(admissionRefused "params" e)
+                                        | None -> Ok q)))))))
 
     // ---- query result ----
 
@@ -1042,7 +1343,8 @@ module QueryCodec =
     let encodeResult (qr: QueryResult) : string = Canon.render (resultJson qr)
 
     let internal resultOf (el: JVal) : Result<QueryResult, DecodeError> =
-        Decoder.field "rows" Decoder.json el
+        Decoder.field "$type" (tagged "not a query result: " [ "queryResult", () ]) el
+        |> Result.bind (fun () -> Decoder.field "rows" Decoder.json el)
         |> Result.bind (fun rowsEl ->
             match ColumnCodec.decodeJson rowsEl with
             | Error _ -> Error(columnRefused "rows" "a table")
@@ -1081,82 +1383,21 @@ module QueryCodec =
 
     // ---- typed refusal (Phase 251) ----
     // `CapabilityCodec.invokeErrorJson`'s twin: one `$type` per case, in camelCase, and a column
-    // type by its tag. The sentence a model reads is `QueryError.describe`.
-
-    let private strs (xs: string list) : JVal = JArr(xs |> List.map JStr)
+    // type by its tag. The sentence a model reads is `QueryError.describe`. Since Phase 385 the
+    // codec lives below the registry (`QueryErrorWire`), so the keyed capture journals a refusal in
+    // this form and replays it back; these are its published spellings.
 
     /// Encode a `QueryError` to a `JVal` (`"$type"` is the case: `noSuchQuery`, `paramTypeMismatch`, …).
-    let queryErrorJson (e: QueryError) : JVal =
-        match e with
-        | NoSuchQuery(id, known) -> Canon.typed "noSuchQuery" [ "id", JStr id; "known", strs known ]
-        | DuplicateQuery id -> Canon.typed "duplicateQuery" [ "id", JStr id ]
-        | UnknownParam(name, declared) -> Canon.typed "unknownParam" [ "name", JStr name; "declared", strs declared ]
-        | ParamTypeMismatch(name, expected, got) ->
-            Canon.typed
-                "paramTypeMismatch"
-                [ "name", JStr name
-                  "expected", JStr(colTypeStr expected)
-                  "got", JStr(colTypeStr got) ]
-        | RequiredParamsUnbound names -> Canon.typed "requiredParamsUnbound" [ "names", strs names ]
-        | SourceNotResolved r -> Canon.typed "sourceNotResolved" [ "ref", JStr r ]
-        | ExecutionFailed(detail, recoverable) ->
-            Canon.typed "executionFailed" [ "detail", JStr detail; "recoverable", strs recoverable ]
-        | Timeout -> Canon.typed "timeout" []
-        | RequiredParamsNull names -> Canon.typed "requiredParamsNull" [ "names", strs names ]
-        | DuplicateParam name -> Canon.typed "duplicateParam" [ "name", JStr name ]
-        | QueryPolicyRefused(policy, reason, allowed) ->
-            Canon.typed "policyRefused" [ "policy", JStr policy; "reason", JStr reason; "allowed", strs allowed ]
-        | QueryApprovalRequired policy -> Canon.typed "approvalRequired" [ "policy", JStr policy ]
+    let queryErrorJson (e: QueryError) : JVal = QueryErrorWire.toJson e
 
     /// `queryErrorJson` as canonical JSON text — the wire form; `QueryError.describe` is the
     /// sentence a model reads.
-    let encodeQueryError (e: QueryError) : string = Canon.render (queryErrorJson e)
-
-    let private queryErrorOfDetailed: Decoder<QueryError> =
-        let str name = Decoder.field name Decoder.str
-
-        let strList name =
-            Decoder.field name (Decoder.list Decoder.str)
-
-        let both (a: Decoder<'A>) (b: Decoder<'B>) (f: 'A -> 'B -> QueryError) : Decoder<QueryError> =
-            a |> Decoder.bind (fun x -> b |> Decoder.map (f x))
-
-        let cases =
-            [ "noSuchQuery", both (str "id") (strList "known") (fun id known -> NoSuchQuery(id, known))
-              "duplicateQuery", str "id" |> Decoder.map DuplicateQuery
-              "unknownParam", both (str "name") (strList "declared") (fun name d -> UnknownParam(name, d))
-              "paramTypeMismatch",
-              str "name"
-              |> Decoder.bind (fun name ->
-                  both (Decoder.field "expected" colTypeOf) (Decoder.field "got" colTypeOf) (fun exp got ->
-                      ParamTypeMismatch(name, exp, got)))
-              "requiredParamsUnbound", strList "names" |> Decoder.map RequiredParamsUnbound
-              "sourceNotResolved", str "ref" |> Decoder.map SourceNotResolved
-              "executionFailed", both (str "detail") (strList "recoverable") (fun d r -> ExecutionFailed(d, r))
-              "timeout", Decoder.succeed Timeout
-              "requiredParamsNull", strList "names" |> Decoder.map RequiredParamsNull
-              "duplicateParam", str "name" |> Decoder.map DuplicateParam
-              "policyRefused",
-              str "policy"
-              |> Decoder.bind (fun policy ->
-                  both (str "reason") (strList "allowed") (fun reason allowed ->
-                      QueryPolicyRefused(policy, reason, allowed)))
-              "approvalRequired", str "policy" |> Decoder.map QueryApprovalRequired ]
-
-        // The dispatch's own miss keeps this codec's sentence.
-        fun el ->
-            Decoder.tagDispatch "$type" cases el
-            |> Result.mapError (fun e ->
-                match e.Code, e.Path, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
-                    { e with
-                        Message = "unknown query error: " + other }
-                | _ -> e)
+    let encodeQueryError (e: QueryError) : string = QueryErrorWire.render e
 
     /// Decode a `QueryError` from a `JVal`. The error side is a plain `string`: a refusal that
     /// cannot be read is not itself a refusal of the query.
     let queryErrorOf (el: JVal) : Result<QueryError, string> =
-        Decoder.describing queryErrorOfDetailed el
+        Decoder.describing QueryErrorWire.decoder el
 
     /// `queryErrorOf` over text. A parse failure or an unknown `$type` is the `Error` sentence,
     /// never a `QueryError`.
@@ -1191,15 +1432,21 @@ module QueryCodec =
             match sentType v with
             | Some got -> Error(ParamTypeMismatch(name, ty, got))
             | None ->
+                // Phase 385: a value of a kind no column type spells is unreadable input, not a
+                // fetch that ran — a decode refusal at the member, carried as `UnreadableArgs`.
                 Error(
-                    ExecutionFailed(
-                        "decode: parameter '"
-                        + name
-                        + "' takes a "
-                        + colTypeStr ty
-                        + " value, not a JSON "
-                        + JVal.kindName v,
-                        []
+                    UnreadableArgs(
+                        DecodeError.under
+                            (PathSegment.Key name)
+                            (DecodeError.make
+                                DecodeCode.WrongKind
+                                ("a " + colTypeStr ty + " value")
+                                ("parameter '"
+                                 + name
+                                 + "' takes a "
+                                 + colTypeStr ty
+                                 + " value, not a JSON "
+                                 + JVal.kindName v))
                     )
                 )
 
@@ -1211,7 +1458,9 @@ module QueryCodec =
     /// argument list, answering with EVERY refusal: an unknown member is `UnknownParam` naming the
     /// declared parameters (whatever the read policy: a parameter the query does not declare is never
     /// read past), and a value its parameter's type cannot read is `ParamTypeMismatch` naming the JSON
-    /// type that was sent. Required-ness is not checked here; `Query.validateParams` /
+    /// type that was sent. A value of a kind no column type spells (an array, an object), and a
+    /// document that is not an object at all, is `UnreadableArgs` carrying the decode refusal (Phase
+    /// 385). Required-ness is not checked here; `Query.validateParams` /
     /// `validateParamsAll` take the list this returns.
     let decodeArgsJson (q: Query) (el: JVal) : Result<(string * Cell) list, QueryError list> =
         match el with
@@ -1246,16 +1495,19 @@ module QueryCodec =
             | errors -> Error errors
         | other ->
             Error
-                [ ExecutionFailed(
-                      "decode: a query's arguments are one JSON object keyed by parameter name, not a JSON "
-                      + JVal.kindName other,
-                      []
+                [ UnreadableArgs(
+                      DecodeError.make
+                          DecodeCode.WrongKind
+                          "object"
+                          ("a query's arguments are one JSON object keyed by parameter name, not a JSON "
+                           + JVal.kindName other)
                   ) ]
 
-    /// `decodeArgsJson` over text.
+    /// `decodeArgsJson` over text. Text that is not JSON is `UnreadableArgs` carrying the parser's
+    /// refusal at the root (Phase 385).
     let decodeArgs (q: Query) (s: string) : Result<(string * Cell) list, QueryError list> =
-        match Decode.parse s with
-        | Error m -> Error [ ExecutionFailed("parse: " + m, []) ]
+        match Decoder.parse s with
+        | Error e -> Error [ UnreadableArgs e ]
         | Ok el -> decodeArgsJson q el
 
     // ---- strict read policy (Phase 251) ----

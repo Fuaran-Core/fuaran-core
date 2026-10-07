@@ -210,7 +210,17 @@ let private queryErrors: QueryError list =
       // Phase 318 — the policy gate's two refusals.
       QueryPolicyRefused("tenant-scope", "the station belongs to another tenant", [ "harbour" ])
       QueryPolicyRefused("budget", "the daily query budget is spent", [])
-      QueryApprovalRequired "export-review" ]
+      QueryApprovalRequired "export-review"
+      // Phase 385 — the argument reader's refusal, carrying the decode refusal and its path.
+      UnreadableArgs(
+          DecodeError.under
+              (PathSegment.Key "station")
+              (DecodeError.make
+                  DecodeCode.WrongKind
+                  "a string value"
+                  "parameter 'station' takes a string value, not a JSON array")
+      )
+      UnreadableArgs(DecodeError.make DecodeCode.InvalidJson "JSON text" "unexpected end of input") ]
     @ [ for expected in
             [ IntType
               FloatType
@@ -921,12 +931,16 @@ let tests =
                         (Ok [ "amount", Decimal "7"; "day", Date "2026-09-01" ])
                         "an integer token is an exact decimal; a canonical date reads"
 
+                    // Phase 385: unreadable input is `UnreadableArgs` carrying the decode refusal —
+                    // `ExecutionFailed` is reserved for a resolver that ran.
                     match QueryCodec.decodeArgs invoices "[1]" with
-                    | Error [ ExecutionFailed(_, []) ] -> ()
+                    | Error [ UnreadableArgs e ] -> Expect.equal e.Path [] "a shape refusal, at the root"
                     | other -> failtestf "expected a shape refusal, got %A" other
 
                     match QueryCodec.decodeArgs invoices "{\"amount\":[\"1\"]}" with
-                    | Error [ ExecutionFailed(m, []) ] -> Expect.stringContains m "'amount'" "names the parameter"
+                    | Error [ UnreadableArgs e ] ->
+                        Expect.stringContains e.Message "'amount'" "names the parameter"
+                        Expect.equal e.Path [ PathSegment.Key "amount" ] "at the parameter"
                     | other -> failtestf "expected a shape refusal, got %A" other
 
                 testCase "a date and a timestamp project their canonical shapes"

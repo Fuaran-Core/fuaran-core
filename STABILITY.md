@@ -2616,6 +2616,75 @@ stack-traced. Each is one line on stderr and exit 2. An invocation that read bef
 report and exits the same code. `README.md`'s package row states the full regime: `classify` 0 / 3 / 4,
 or 0 / 1 under `--expect`; `spike-proposal` 0 / 1; 2 for every refusal.
 
+### One admission gate at every reader, on the query side too; the typed resolver reaches paging, capture and replay (Phase 385) — BREAKING-SOURCE: `QueryError` gains `UnreadableArgs` (`union-widening`); the rest `additive`; the wire `additive`
+
+**The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Query`
+**`union-widening`**: the appended case `QueryError.UnreadableArgs of error: DecodeError`. Its other
+moves are `additive`: `Query.invokePageWithArgs` and the `QueryRegistry` entry points
+`dispatchPageWith`, `dispatchCapturedWith`, `dispatchPageCapturedWith` and `dispatchReplayedWith`.
+`Fuaran.Core.Function` and `Fuaran.Core.Conformance` do not move their managed baselines; their
+changes are internal or behavioural, and this entry states them. The wire baseline
+`api/wire/Fuaran.Core.Query.txt` is `additive`: the `unreadableArgs` query-error document is new,
+and no existing document's bytes move. The capability and query codecs emit the same bytes they did.
+
+**What moved, for a consumer.**
+
+- **The query readers check their tag and run the registry's gate (D104, D111).** `QueryCodec`'s
+  declaration reader refuses a document whose `"$type"` is not `query`, with `UnknownTag` at `$type`
+  ("not a query declaration: <tag>"), or `MissingField` when the tag is absent. The result reader
+  does the same for `queryResult`. The declaration reader then runs `QueryRegistry.admissionFault`.
+  This is the one function `register` and `replace` run. A declaration naming a parameter twice is
+  refused `OutOfRange` at `params`, with the sentence of the registry's `DuplicateParam`. Before
+  this, the reader admitted declarations the registry then refused, and read a document of any tag.
+  **Cost:** a hand-written query or result document without its `"$type"` no longer reads.
+  `encode` and `encodeResult` always wrote it.
+- **The capability reader runs the WHOLE gate.** `CapabilityCodec`'s capability reader runs
+  `Capability.admissionOf` over the signature it has just read. This is the one gate both
+  registries run, through `admissionFault`, in the same order: totality, then well-formedness. A
+  non-total declaration (a repeat over a non-count space) is refused `OutOfRange` at
+  `signature.holes`, with the sentence of the registry's `NonTotalCapability`. Before this it was
+  read, and `register` refused it. An ill-formed declaration is refused at the same path as before,
+  and its sentence is now the registry's `IllFormedCapability` sentence. It used to read
+  "ill-formed signature: …". The bare `signatureOf` keeps its well-formedness check and its
+  sentence. The F* model moves with it: `proofs/Capability.fst`'s `capability_of_j` refuses a
+  non-total signature, `wf_capability` requires totality, and `capability_roundtrip` states the
+  refusal. All three theorems re-verified, and the oracle was re-extracted.
+- **`decodeArgs` answers a parse with a decode refusal.** The new `UnreadableArgs` carries the
+  `DecodeError`: its code, its path within the argument document and its sentence. It covers text
+  that is not JSON, a document that is not an object, and a parameter value of a kind no column
+  type spells (an array or an object, at that parameter's path). These were
+  `ExecutionFailed("decode: …" / "parse: …")`. Now no path that ran no resolver answers
+  `ExecutionFailed`. **Cost:** an exhaustive `match` over `QueryError` gains an arm.
+- **The typed resolver reaches the dispatchers.** `Query.invokePageWithArgs` is `invokePage` with
+  the typed resolver. The resolver gets the token and the validated, promoted arguments, and answers
+  a `ResolveFault` beside the envelope. `invokeWithArgs` is its first page. `QueryRegistry` gains
+  `dispatchPageWith`, `dispatchCapturedWith`, `dispatchPageCapturedWith` and `dispatchReplayedWith`.
+  These are the typed twins of `dispatchPage`, `dispatchCaptured`, `dispatchPageCaptured` and
+  `dispatchReplayed`. Every existing spelling is unchanged.
+- **A refusal replays as the refusal (behavioural, every captured dispatcher).** The keyed capture
+  journal now records a resolver's refusal as its canonical query-error document
+  (`QueryCodec.encodeQueryError`). Replay reads it back as that `QueryError`. A captured `Timeout`
+  replays as `Timeout`, and an `ExecutionFailed` replays with its `recoverable` arguments. This
+  matches how a `Ready` result replays as itself. Before, the journal recorded
+  `QueryError.describe`'s sentence, and replay answered `ExecutionFailed(sentence, [])` for every
+  refusal. So a replayed refusal disagreed with the live one even on the untyped path. A recorded
+  reason that is not a query-error document comes from a journal written before this draft. It
+  still replays as `ExecutionFailed(reason, [])`, so old journals read as they did. **Cost:** the
+  `Value` of a query capture's `Refused` record is now that document, not a sentence. A 0.35.x
+  reader replaying a journal written by this draft answers `ExecutionFailed(<document>, [])`. The
+  error codec moved below the registry (an internal `QueryErrorWire` module) so the registry can
+  write it. `QueryCodec.queryErrorJson`, `encodeQueryError`, `queryErrorOf` and
+  `decodeQueryError` are unchanged spellings over it.
+
+**Plants.** `Conformance.queryLaws` gains "a typed resolver's fault is captured, paged and replayed
+as the refusal it was answered live". Every iteration builds a typed fault on its first page, and
+the law is counted per refusal page, where the refusal is built (D100). It reds when the journal
+records the sentence again. `QueryTests` plants the wrong tag on both documents, the repeated
+parameter at the reader, each `UnreadableArgs` shape, and capture and replay of all three faults
+through the new entry points. It also plants a pre-0.36 journal. `FunctionTests` plants every
+`probes307` declaration the encoder can write. The reader's refusal must equal `register`'s sentence
+on both halves of the gate.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

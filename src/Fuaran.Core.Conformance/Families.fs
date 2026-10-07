@@ -858,7 +858,7 @@ module Families =
               []
               (Unconditional "each iteration exercises accept, type-mismatch and unknown-param on a built declaration")
               (Built,
-               "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built, and so is a declaration naming a parameter twice")
+               "type mismatch, unknown param, NoSuchQuery and ExecutionFailed are built, and so is a declaration naming a parameter twice and a typed resolver fault on every iteration's first page")
           c
               "registryLaws"
               none
@@ -1797,7 +1797,12 @@ module Families =
                 "QueryRegistry.enumerate"
                 "Query.invokePage"
                 "Query.invocationKeyPage"
-                "QueryRegistry.dispatchPage" ] }
+                "QueryRegistry.dispatchPage"
+                // Phase 385 — the typed resolver through paging, capture and replay.
+                "QueryRegistry.dispatchPageWith"
+                "QueryRegistry.dispatchCapturedWith"
+                "QueryRegistry.dispatchPageCapturedWith"
+                "QueryRegistry.dispatchReplayedWith" ] }
           { Family = "Conformance.queryLawsAt"
             Operations = [ "QueryRegistry.enumerate"; "QueryRegistry.tryFind"; "Query.validateParams" ] }
           { Family = "Conformance.reachLaws"
