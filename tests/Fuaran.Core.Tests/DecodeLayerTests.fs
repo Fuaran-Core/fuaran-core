@@ -484,6 +484,33 @@ let tests =
                         (DecodeCode.MissingField, [ key "a"; key "missing" ])
                         "a missing member is named"
 
+                testCase
+                    "tagDispatchWith words an unknown tag in the caller's sentence and changes nothing else (Phase 388)"
+                <| fun _ ->
+                    let cases = [ "a", Decoder.field "n" Decoder.int ]
+                    let d = Decoder.tagDispatchWith "unknown thing: " "$type" cases
+                    let plain = Decoder.tagDispatch "$type" cases
+
+                    Expect.equal (d (parse """{"$type":"a","n":1}""")) (Ok 1) "a known tag dispatches"
+
+                    let miss = parse """{"$type":"b"}"""
+
+                    match d miss, plain miss with
+                    | Error e, Error p ->
+                        Expect.equal e.Message "unknown thing: b" "the miss is in the caller's sentence"
+
+                        Expect.equal
+                            (e.Code, e.Path, e.Expected)
+                            (p.Code, p.Path, p.Expected)
+                            "and is otherwise tagDispatch's"
+                    | other -> failtestf "an unknown tag must be refused by both: %A" other
+
+                    for doc in [ """{"n":1}"""; """{"$type":1}"""; """{"$type":"a","n":"x"}""" ] do
+                        Expect.equal
+                            (d (parse doc))
+                            (plain (parse doc))
+                            (doc + ": every other refusal is tagDispatch's")
+
                 testCase "at navigates and refuses where a step names nothing"
                 <| fun _ ->
                     let doc = parse """{"xs":[10,20]}"""

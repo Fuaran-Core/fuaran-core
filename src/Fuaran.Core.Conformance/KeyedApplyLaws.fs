@@ -2,7 +2,7 @@ namespace Fuaran.Core
 
 // The keyed-apply family (Phase 286): the engine's own refusal over a domain's keyed positions,
 // held to the domain's own check. Its own topic file because it is a NEW family; the keyed-id
-// family it builds on (Phase 189's `keyedChildrenLaws`) stays in `TreeLaws.fs`, which owns it.
+// family it builds on (Phase 189's `keyedChildrenLaws`) stays in `AlgebraTreeLaws.fs`, which owns it.
 
 module internal KeyedApplyLaws =
 

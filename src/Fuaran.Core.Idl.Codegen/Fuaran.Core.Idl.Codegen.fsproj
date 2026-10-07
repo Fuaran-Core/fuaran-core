@@ -33,7 +33,9 @@
     <Compile Include="Emit/FSharpDerive.fs" />
     <Compile Include="Emit/FSharpCodec.fs" />
     <Compile Include="Emit/JsonSchema.fs" />
-    <Compile Include="Emit/TypeScript.fs" />
+    <Compile Include="Emit/TypeScriptCodec.fs" />
+    <Compile Include="Emit/TypeScriptDeclarations.fs" />
+    <Compile Include="Emit/TypeScriptDerived.fs" />
     <Compile Include="Emit/Scaffold.fs" />
     <Compile Include="Gen.fs" />
     <!-- Phase 114 - the declared-support record + host-prelude declaration as a

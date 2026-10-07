@@ -490,7 +490,7 @@ let tests =
               | Error e -> failtestf "decodeEnvelope: %s" e ]
 
 /// Phase 370 — the generated TypeScript codecs carry a FOURTH copy of the rule: the emitted `encStr`
-/// (`Emit/TypeScript.fs`), which gained Phase 365's fast path — one regex test for an escapable
+/// (`Emit/TypeScriptCodec.fs`), which gained Phase 365's fast path — one regex test for an escapable
 /// character, and the input returned whole between quotes when there is none. These cases run the
 /// function the emitter actually writes, under node, against the .NET escaper.
 module EmittedEncStr =

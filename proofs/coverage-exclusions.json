@@ -2470,6 +2470,7 @@
         "Decoder.str",
         "Decoder.succeed",
         "Decoder.tagDispatch",
+        "Decoder.tagDispatchWith",
         "Decoder.tryMember",
         "Decoder.undeclared",
         "Decoder.wrongKind"

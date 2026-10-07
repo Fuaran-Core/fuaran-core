@@ -37,6 +37,15 @@ open Fuaran.Core.Idl.Emit.Core
 // wire is not JSON, an op or a bare kind slot) is a `CodegenError.UnmodellableInFStar`
 // naming the construct and where it was reached — never a silently dropped member, which
 // would make the theorem a statement about a document nobody sends.
+//
+// ONE FILE, OVER TWO THOUSAND LINES, DELIBERATELY (Phase 388, DECISIONS.md D125). The banners
+// below (the model and its walk, the vocabulary emitter, the proofs emitter, the vectors) are
+// the four files this would split into, and the split cannot keep the public surface: F#
+// compiles one module from one file, and `FStarTarget`'s public types (`Slot`, `Verdict`,
+// `Provenance`, `VectorModel`) are NESTED in it, while every section is written over `Slot`. A
+// file ahead of this one cannot see them, and a file after it cannot be called by it; moving
+// them out renames each in the `api/` baseline. The split waits for a surface move that has its
+// own reason.
 // ---------------------------------------------------------------------------
 
 /// The F* proof-model backend. `Gen` emits source a consumer compiles and ships; this
