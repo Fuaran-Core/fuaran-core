@@ -90,13 +90,13 @@ module internal Scaffold =
             fsDefaultLit idl t v
             |> Result.mapError (fun _ -> valueMismatch "a non-finite float, which has no F# literal")
         | TEnum name, VEnum wire ->
-            match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
+            match IdlLookup.tryEnum idl name with
             | None -> Error(valueMismatch (sprintf "a value of the undeclared enum '%s'" name))
             | Some e when (e.CaseOf wire).IsNone ->
                 Error(valueMismatch (sprintf "the wire string %A, which enum '%s' does not admit" wire name))
             | Some _ -> fsDefaultLit idl t v
         | TUnion(name, args), VUnion(tag, fields) ->
-            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
+            match IdlLookup.tryUnion idl name with
             | None -> Error(valueMismatch (sprintf "a value of the undeclared union '%s'" name))
             | Some u when List.length u.Params <> List.length args ->
                 Error(valueMismatch (sprintf "union '%s' applied to %d type arguments" name (List.length args)))
@@ -121,13 +121,13 @@ module internal Scaffold =
                         | [] -> name + "." + tag
                         | ps -> sprintf "%s.%s(%s)" name tag (String.concat ", " ps))
         | TRecord name, VRecord fields ->
-            match idl.Records |> List.tryFind (fun r -> r.Name = name) with
+            match IdlLookup.tryRecord idl name with
             | None -> Error(valueMismatch (sprintf "a value of the undeclared record '%s'" name))
             | Some r ->
                 fsAssignments hosted idl ("record '" + name + "'") r.Fields fields
                 |> Result.map (recordLit name)
         | TNode, VNode(id, kindTag, fields) ->
-            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            match IdlLookup.tryKind idl kindTag with
             | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
             | Some k ->
                 fsAssignments hosted idl ("kind '" + kindTag + "'") k.Fields fields
@@ -142,7 +142,7 @@ module internal Scaffold =
         // both go through the SAME `fsAssignments`, so the presence rules cannot
         // drift between the two halves of a node.
         | TNode, VNodeEnv(id, envelope, kindTag, fields) ->
-            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            match IdlLookup.tryKind idl kindTag with
             | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
             | Some k ->
                 match

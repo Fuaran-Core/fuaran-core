@@ -44,49 +44,26 @@ module ConfRng =
             State: uint32
         }
 
-    /// The xorshift32 step (Marsaglia 2003): three shift/XOR rounds, full period over the
-    /// 2^32 - 1 non-zero states.
-    ///
-    /// **Shifts and XOR, never a 32-bit multiply — and that is the whole point of this
-    /// function existing.** A `uint32` product is the one arithmetic shape Fable cannot
-    /// carry: it is formed on a double, so `state * 1664525u` reaches ~7e15 and loses its
-    /// low bits INSIDE the operation, before any mask could recover them (`Hash.mul32`
-    /// documents the same defect on the FNV multiply). Until 0.20.0 this generator was an
-    /// LCG built on exactly that product, and under Fable every draw after the first
-    /// collapsed to zero — so a domain certifying in a browser drew a degenerate sample from
-    /// a seed that behaved perfectly on .NET. Nothing in a .NET suite could see it; the
-    /// cross-pipeline `confRng/*` vectors in `ParityVectors` (this package) are what
-    /// buys it, and they redden on a reverted multiply.
-    ///
-    /// State 0 is xorshift's fixed point — it maps to itself, and every draw from it is 0 —
-    /// so it must never be reached. It cannot be produced from a non-zero state (the step is
-    /// a bijection on GF(2)^32), which leaves `ofSeed` as the only place that has to rule it
-    /// out.
-    let private step (x: uint32) : uint32 =
-        let a = x ^^^ (x <<< 13)
-        let b = a ^^^ (a >>> 17)
-        b ^^^ (b <<< 5)
+    // The kernel — the step, the seed's warm-up, the top-31-bit draw and the high-bit rejection —
+    // is `Xorshift32`'s (Phase 388; `Fuaran.Core.Idl`, through its `InternalsVisibleTo`), the one
+    // body the IDL sampler draws through too. Its header says why it is shifts and XOR and never a
+    // 32-bit multiply: until 0.20.0 this generator was an LCG on exactly that product, and under
+    // Fable every draw after the first collapsed to zero. The cross-pipeline `confRng/*` vectors in
+    // `ParityVectors` (this package) are what buy it, and they redden on a reverted multiply.
 
-    /// Seed to initial state. Non-zero by construction (see `step`), and warmed by three
+    /// Seed to initial state. Non-zero by construction (see `Xorshift32.step`), and warmed by three
     /// rounds so that adjacent seeds start far apart rather than one shift-and-XOR apart —
     /// a kit that certifies over a seed SWEEP would otherwise draw near-identical samples
     /// from consecutive seeds.
-    let ofSeed (seed: int) : T =
-        let mixed = uint32 seed ^^^ 0x9E3779B9u
-        let s0 = if mixed = 0u then 0x6D2B79F5u else mixed
-        { State = step (step (step s0)) }
+    let ofSeed (seed: int) : T = { State = Xorshift32.seeded seed }
 
     /// A non-negative int (the top 31 bits of the advanced state) and that state.
     ///
     /// Value-identical on .NET and under Fable, which is the constraint `intBelow` documents
-    /// below and this function did not honour until 0.20.0 — see `step`.
+    /// below and this function did not honour until 0.20.0 — see `Xorshift32.step`.
     let next (r: T) : int * T =
-        let s = step r.State
-        int (s >>> 1), { State = s }
-
-    /// The number of bits needed to represent `v` (0 for 0, 31 for `Int32.MaxValue`).
-    let rec private bitWidth (acc: int) (v: int) : int =
-        if v = 0 then acc else bitWidth (acc + 1) (v >>> 1)
+        let s = Xorshift32.step r.State
+        Xorshift32.value s, { State = s }
 
     /// A value in `[0, n)` (0 when `n <= 0`).
     ///
@@ -103,26 +80,8 @@ module ConfRng =
     /// Built from shifts and comparisons alone: no `uint64` (JavaScript cannot carry one
     /// exactly) and no 32-bit multiply (which does not wrap identically on both pipelines), so
     /// the kit stays value-identical under Fable. `next` honours that same constraint since
-    /// 0.20.0, having been an LCG that did not — see `step` above, and `Hash.fs`.
-    let intBelow (n: int) (r: T) : int * T =
-        if n <= 0 then
-            0, r
-        elif n = 1 then
-            // Still one draw, so a stream advances at the same rate whatever `n` is.
-            let _, r' = next r
-            0, r'
-        else
-            // `next` yields the top 31 bits of the state; this drops all but the top `bits`.
-            let shift = 31 - bitWidth 0 (n - 1)
-            let mutable rng = r
-            let mutable candidate = n
-
-            while candidate >= n do
-                let v, r' = next rng
-                rng <- r'
-                candidate <- v >>> shift
-
-            candidate, rng
+    /// 0.20.0, having been an LCG that did not — see `Xorshift32`, and `Hash.fs`.
+    let intBelow (n: int) (r: T) : int * T = Xorshift32.below next n r
 
     /// A uniformly chosen element of `xs` (index drawn by `intBelow`) and the advanced state.
     ///

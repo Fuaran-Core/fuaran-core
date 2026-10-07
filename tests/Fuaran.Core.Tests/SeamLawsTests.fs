@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.SeamLawsTests
 
-// Phase 331 — the tests of the kit's seam laws (`SeamLaws.fs`): capability, query, registry, pack loading
+// Phase 331 — the tests of the kit's seam laws (`SeamLaws.fs`; the six `*SeamLaws.fs` files since Phase 388): capability, query, registry, pack loading
 // and the column aggregate's null-skip semantics, moved verbatim from `ConformanceTests.fs`.
 
 open Expecto

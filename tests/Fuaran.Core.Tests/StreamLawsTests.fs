@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.StreamLawsTests
 
-// Phase 331 — the tests of the kit's stream laws (`StreamLaws.fs`): capture / replay, compare-and-swap,
+// Phase 331 — the tests of the kit's stream laws (`StreamLaws.fs`; the three `*StreamLaws.fs` files since Phase 388): capture / replay, compare-and-swap,
 // the reducer's refusal guard and the stream sample-adequacy guards, moved verbatim from
 // `ConformanceTests.fs`. The list names are the ones the cases carried there, so every test name is
 // unchanged.

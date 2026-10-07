@@ -115,6 +115,7 @@ method Fuaran.Core.OpStream+Jsonl.intField(System.String, Fuaran.Core.JsonlLine)
 method Fuaran.Core.OpStream+Jsonl.lineNumber(Fuaran.Core.JsonlLine) : System.Int32
 method Fuaran.Core.OpStream+Jsonl.lineText(Fuaran.Core.JsonlLine) : System.String
 method Fuaran.Core.OpStream+Jsonl.parseLine(System.Int32, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JsonlLine, Fuaran.Core.JsonlFault>
+method Fuaran.Core.OpStream+Jsonl.quote(System.String) : System.String
 method Fuaran.Core.OpStream+Jsonl.rawField(System.String, Fuaran.Core.JsonlLine) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.JsonlFault>
 method Fuaran.Core.OpStream+Jsonl.rawSpan(System.String, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.FSharpOption`1<System.String>, Fuaran.Core.JsonlFault>
 method Fuaran.Core.OpStream+Jsonl.refuse(Fuaran.Core.JsonlLine, System.String) : Fuaran.Core.JsonlFault

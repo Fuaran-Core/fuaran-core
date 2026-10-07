@@ -1074,21 +1074,31 @@ module TransparentUnion =
         policy.TransparentUnions
         |> List.tryPick (fun (name, case) -> if name = u.Name then Some case else None)
 
+/// The declaration lookups (Phase 388): a vocabulary's enum, union or record by its name, and a
+/// kind by its tag — the first declaration that matches, in declaration order. The one body of
+/// each: `Encode` and `Decode` here, and the code generator's emitters (through this package's
+/// `InternalsVisibleTo`), each used to declare or inline its own.
+module internal IdlLookup =
+
+    /// The enum declared as `name`.
+    let tryEnum (idl: Idl) (name: string) : IdlEnum option =
+        idl.Enums |> List.tryFind (fun e -> e.Name = name)
+
+    /// The union declared as `name`.
+    let tryUnion (idl: Idl) (name: string) : IdlUnion option =
+        idl.Unions |> List.tryFind (fun u -> u.Name = name)
+
+    /// The kind declared under the tag `tag`.
+    let tryKind (idl: Idl) (tag: string) : IdlKind option =
+        idl.Kinds |> List.tryFind (fun k -> k.Tag = tag)
+
+    /// The record declared as `name`.
+    let tryRecord (idl: Idl) (name: string) : IdlRecord option =
+        idl.Records |> List.tryFind (fun r -> r.Name = name)
+
 /// The schema-driven encoder: an authored `IdlValue`, validated against the IDL,
 /// becomes a canonical `JVal`; `Canon.render` then gives the wire bytes.
 module Encode =
-
-    let private findEnum (name: string) (idl: Idl) =
-        idl.Enums |> List.tryFind (fun e -> e.Name = name)
-
-    let private findUnion (name: string) (idl: Idl) =
-        idl.Unions |> List.tryFind (fun u -> u.Name = name)
-
-    let private findKind (tag: string) (idl: Idl) =
-        idl.Kinds |> List.tryFind (fun k -> k.Tag = tag)
-
-    let private findRecord (name: string) (idl: Idl) =
-        idl.Records |> List.tryFind (fun r -> r.Name = name)
 
     /// [[Canon.typed]] under the DECLARED discriminator key (Phase 108) — the
     /// default key reproduces `Canon.typed` byte-for-byte.
@@ -1130,7 +1140,7 @@ module Encode =
         | TFloat, VFloat f -> Ok(JFloat f)
         | TFloat, VInt i -> Ok(JFloat(float i))
         | TEnum name, VEnum case ->
-            match findEnum name idl with
+            match IdlLookup.tryEnum idl name with
             | None -> Error(sprintf "unknown enum '%s'" name)
             // `VEnum` carries the WIRE string, exactly as `VUnion` carries the wire
             // `$type` tag — so an enum that declares a case↔wire mapping is checked
@@ -1138,7 +1148,7 @@ module Encode =
             | Some e when List.contains case e.WireCases -> Ok(JStr case)
             | Some _ -> Error(sprintf "enum '%s' has no case '%s'" name case)
         | TUnion(name, args), VUnion(tag, fields) ->
-            match findUnion name idl with
+            match IdlLookup.tryUnion idl name with
             | None -> Error(sprintf "unknown union '%s'" name)
             | Some u ->
                 match TypeParams.bind u args, u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
@@ -1187,7 +1197,7 @@ module Encode =
         // form (Phase 252) is checked on DECODE, the direction a document arrives from.
         | THosted _, VJson j -> verbatim j
         | TRecord name, VRecord fields ->
-            match findRecord name idl with
+            match IdlLookup.tryRecord idl name with
             | None -> Error(sprintf "unknown record '%s'" name)
             | Some r -> encodeFields idl r.Fields fields |> Result.map JObj
         | TMap vt, VMap entries ->
@@ -1214,7 +1224,7 @@ module Encode =
         // structurally what a union case is — so `VUnion` carries them, and the wire
         // difference is only which vocabulary the tag resolves against.
         | TKind, VUnion(tag, fields) ->
-            match findKind tag idl with
+            match IdlLookup.tryKind idl tag with
             | None -> Error(sprintf "unknown kind '%s'" tag)
             | Some k ->
                 encodeFields idl k.Fields fields
@@ -1290,7 +1300,7 @@ module Encode =
     /// ill-formed string. An unknown kind tag, a field the kind does not declare, or an absent
     /// `Required` field is an `Error` naming it.
     and encodeNode (idl: Idl) (id: string) (kindTag: string) (fields: (string * IdlValue) list) : Result<JVal, string> =
-        match findKind kindTag idl with
+        match IdlLookup.tryKind idl kindTag with
         | None -> Error(sprintf "unknown kind '%s'" kindTag)
         | Some k ->
             encodeFields idl k.Fields fields
@@ -1317,7 +1327,7 @@ module Encode =
         (kindTag: string)
         (fields: (string * IdlValue) list)
         : Result<JVal, string> =
-        match findKind kindTag idl with
+        match IdlLookup.tryKind idl kindTag with
         | None -> Error(sprintf "unknown kind '%s'" kindTag)
         | Some k ->
             match encodeFields idl k.Fields fields with
@@ -1501,7 +1511,7 @@ module Decode =
         // untouched (the encoder refuses a non-finite float inside a verbatim value, Phase 292).
         | TFloat, JStr(FloatToken.NonFinite f) -> Ok(VFloat f)
         | TEnum name, JStr s ->
-            match idl.Enums |> List.tryFind (fun e -> e.Name = name) with
+            match IdlLookup.tryEnum idl name with
             | Some e when List.contains s e.WireCases -> Ok(VEnum s)
             | Some e ->
                 err
@@ -1511,7 +1521,7 @@ module Decode =
                     (sprintf "enum '%s' has no case '%s'" name s)
             | None -> err DecodeCode.SchemaFault ("a declared enum '" + name + "'") (sprintf "unknown enum '%s'" name)
         | TUnion(name, args), JObj fs ->
-            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
+            match IdlLookup.tryUnion idl name with
             | None -> err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "unknown union '%s'" name)
             | Some u ->
                 match TypeParams.bind u args with
@@ -1540,7 +1550,7 @@ module Decode =
              | JObj _ -> false
              | _ -> true)
             ->
-            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
+            match IdlLookup.tryUnion idl name with
             | None -> err DecodeCode.SchemaFault ("a declared union '" + name + "'") (sprintf "unknown union '%s'" name)
             | Some u ->
                 match TransparentUnion.tag idl.Harden u with
@@ -1595,7 +1605,7 @@ module Decode =
                             ("a '" + fmt + "' string")
                             (sprintf "hosted value is not a '%s' string" fmt))
         | TRecord name, JObj fs ->
-            match idl.Records |> List.tryFind (fun r -> r.Name = name) with
+            match IdlLookup.tryRecord idl name with
             | None ->
                 err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "unknown record '%s'" name)
             | Some r -> decodeFields idl r.Fields fs |> Result.map VRecord
@@ -1613,7 +1623,7 @@ module Decode =
         | TKind, JObj fs ->
             dollarType idl fs
             |> Result.bind (fun tag ->
-                match idl.Kinds |> List.tryFind (fun k -> k.Tag = tag) with
+                match IdlLookup.tryKind idl tag with
                 | None -> unknownTag idl (idl.Kinds |> List.map (fun k -> k.Tag)) (sprintf "unknown kind '%s'" tag)
                 | Some k -> decodeFields idl k.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
         | TOp, JObj fs ->
@@ -1707,7 +1717,7 @@ module Decode =
                 dollarType idl kindFs
                 |> under (PathSegment.Key "kind")
                 |> Result.bind (fun kindTag ->
-                    match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+                    match IdlLookup.tryKind idl kindTag with
                     | None ->
                         unknownTag idl (idl.Kinds |> List.map (fun k -> k.Tag)) (sprintf "unknown kind '%s'" kindTag)
                         |> under (PathSegment.Key "kind")
@@ -1739,7 +1749,7 @@ module Decode =
         | JObj fs, NodeEnvelopeShape.FlatKind ->
             match field "id" fs, dollarType idl fs with
             | Some(JStr id), Ok kindTag ->
-                match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+                match IdlLookup.tryKind idl kindTag with
                 | None -> unknownTag idl (idl.Kinds |> List.map (fun k -> k.Tag)) (sprintf "unknown kind '%s'" kindTag)
                 | Some k ->
                     decodeFields idl k.Fields fs
@@ -2112,8 +2122,7 @@ module Declare =
         let enumNames = idl.Enums |> List.map (fun e -> e.Name) |> Set.ofList
         let recordNames = idl.Records |> List.map (fun r -> r.Name) |> Set.ofList
 
-        let unionOf (n: string) =
-            idl.Unions |> List.tryFind (fun u -> u.Name = n)
+        let unionOf (n: string) = IdlLookup.tryUnion idl n
 
         let transparentField (u: IdlUnion) : IdlField option =
             match TransparentUnion.tag idl.Harden u with

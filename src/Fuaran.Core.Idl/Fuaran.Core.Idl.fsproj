@@ -22,6 +22,7 @@
   <ItemGroup>
     <Compile Include="Idl.fs" />
     <Compile Include="Sanitize.fs" />
+    <Compile Include="Xorshift32.fs" />
     <Compile Include="Sample.fs" />
     <Compile Include="Artifact.fs" />
     <!-- Phase 702 — the vocabulary-change PROPOSAL document: its reader, its
@@ -34,6 +35,13 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 388: the declaration lookups (`IdlLookup`) are the code generator's too, and the
+         xorshift32 kernel (`Xorshift32`) is the conformance kit's `ConfRng` too — one body each,
+         read by the packages above this one rather than copied into them. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Idl.Codegen" />
+    <InternalsVisibleTo Include="Fuaran.Core.Conformance" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

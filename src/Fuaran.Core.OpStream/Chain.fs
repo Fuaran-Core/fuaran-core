@@ -548,21 +548,29 @@ module internal OpStreamChain =
 
     let empty: OpRecord<'Op> list = []
 
-    /// The stream's length and last hash in ONE walk (Phase 296). `append` used to walk the list three
-    /// times per call (`List.length`, `List.tryLast`, then the copy `@` makes) and `appendIf` four.
-    let private tip (records: OpRecord<'Op> list) : int * string option =
+    /// A hash-chained log's length and tip hash in ONE walk (Phase 296) — `genesis` when the log
+    /// is empty. The one body every log in this package reads its tip through (Phase 388): the op
+    /// stream, the compacted tail (from the snapshot's hash), and both capture journals. `append`
+    /// used to walk the list three times per call (`List.length`, `List.tryLast`, then the copy `@`
+    /// makes) and `appendIf` four.
+    let inline tipOf ([<InlineIfLambda>] hashOf: 'R -> string) (genesis: string) (records: 'R list) : int * string =
         // A plain loop: a recursive walk carrying an option per record, or compiled to `.tail`
-        // calls, cost more than the three library walks it replaced (measured, Phase 296).
+        // calls, cost more than the three library walks it replaced (measured, Phase 296). Inline,
+        // so the projection is the field read it names rather than a closure call per record.
         let mutable n = 0
-        let mutable last = ""
+        let mutable last = genesis
         let mutable rest = records
 
         while not rest.IsEmpty do
-            last <- rest.Head.Hash
+            last <- hashOf rest.Head
             n <- n + 1
             rest <- rest.Tail
 
-        if n = 0 then n, None else n, Some last
+        n, last
+
+    /// `tipOf` over an op stream chained from `cfg`'s genesis.
+    let private tip (cfg: StreamConfig) (records: OpRecord<'Op> list) : int * string =
+        tipOf (fun (r: OpRecord<'Op>) -> r.Hash) cfg.Genesis records
 
     let chainHashOf
         (cfg: StreamConfig)
@@ -617,9 +625,9 @@ module internal OpStreamChain =
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, 'Rej> =
-        let n, last = tip records
+        let n, last = tip cfg records
 
-        match chainOps cfg hashFn w actor n (defaultArg last cfg.Genesis) [ op ] state with
+        match chainOps cfg hashFn w actor n last [ op ] state with
         | Ok(state', added) -> Ok(state', records @ added)
         | Error(_, e) -> Error e
 
@@ -642,9 +650,9 @@ module internal OpStreamChain =
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list, int * 'Rej> =
-        let n, last = tip records
+        let n, last = tip cfg records
 
-        chainOps cfg hashFn w actor n (defaultArg last cfg.Genesis) ops state
+        chainOps cfg hashFn w actor n last ops state
         |> Result.map (fun (state', added) -> state', records @ added)
 
     let appendMany
@@ -664,8 +672,7 @@ module internal OpStreamChain =
         (op: 'Op)
         (records: OpRecord<'Op> list)
         : OpRecord<'Op> list =
-        let n, last = tip records
-        let prev = defaultArg last canonicalConfig.Genesis
+        let n, prev = tip canonicalConfig records
 
         records
         @ [ { Seq = n
@@ -836,8 +843,7 @@ module internal OpStreamChain =
 
     // ---- the chain head (Phase 296; what an attestation signs, Phase 320) ----
 
-    let headWith (cfg: StreamConfig) (records: OpRecord<'Op> list) : string =
-        defaultArg (snd (tip records)) cfg.Genesis
+    let headWith (cfg: StreamConfig) (records: OpRecord<'Op> list) : string = snd (tip cfg records)
 
     let head (records: OpRecord<'Op> list) : string = headWith canonicalConfig records
 
@@ -855,8 +861,7 @@ module internal OpStreamChain =
         (state: 'State)
         (records: OpRecord<'Op> list)
         : Result<'State * OpRecord<'Op> list * EntryRef, AppendRejection<'Rej>> =
-        let n, last = tip records
-        let actualHead = defaultArg last cfg.Genesis
+        let n, actualHead = tip cfg records
 
         match expectedHead with
         | Some expected when expected <> actualHead -> Error(AppendRejection.StaleHead(expected, actualHead))

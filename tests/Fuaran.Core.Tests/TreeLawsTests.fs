@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.TreeLawsTests
 
-// Phase 331 — the tests of the kit's tree laws (`TreeLaws.fs`): the op algebra, the diff laws, the
+// Phase 331 — the tests of the kit's tree laws (`TreeLaws.fs`; the three `*TreeLaws.fs` files since Phase 388): the op algebra, the diff laws, the
 // contained diff laws and the keyed-children laws, moved verbatim from `ConformanceTests.fs`. The shared
 // reference domains and generators they run against stay in `ConformanceTests.fs`.
 

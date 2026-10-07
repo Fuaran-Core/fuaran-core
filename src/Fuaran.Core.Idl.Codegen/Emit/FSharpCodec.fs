@@ -1496,9 +1496,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             consulted.Add path |> ignore
             sup.Docs.TryFind path |> Option.map (fun lines -> lines |> String.concat "\n")
 
-        let kinds =
-            kindTags
-            |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+        let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
 
         let enums, unions, records = referenced idl kinds
 

@@ -174,7 +174,7 @@ module internal FSharpTypes =
             | TNode -> declCapable granted visiting "Node"
             | TUnion(n, args) ->
                 args |> List.forall (capable granted visiting)
-                && (match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+                && (match IdlLookup.tryUnion idl n with
                     | Some u when not (msg.Contains n) && not (Set.contains ("U:" + n) visiting) ->
                         u.Cases
                         |> List.forall (fun c ->

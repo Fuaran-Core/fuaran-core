@@ -28,7 +28,11 @@ type ActorInvalid =
 /// into `OpStream` below, and for the same reason it is held VALUE-IDENTICAL rather than trusted —
 /// `StringEscapeVectors` in the conformance kit compares every byte this module emits for a
 /// control character against `Wire.Json.escape`'s, so a copy that drifts is caught rather than
-/// discovered as a chain that verifies on one host and not another.
+/// discovered as a chain that verifies on one host and not another. This is the one copy D2
+/// demands, and the only one there is (Phase 388): the package's writers spell through it
+/// (`OpStreamJsonl.jstr`), and it is public as `OpStream.Jsonl.quote`, which is how
+/// `Fuaran.Core.OpStream.Dag` — a package that references this one — spells its node lines
+/// rather than carrying a third body.
 ///
 /// The rule: exactly three classes are escaped and nothing else — `"` as `\"`, `\` as `\\`, and
 /// every control character `U+0000`–`U+001F` as `\u00xx` with LOWER-CASE hex. `\n`, `\r` and `\t`

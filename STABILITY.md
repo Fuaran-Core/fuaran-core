@@ -2761,6 +2761,46 @@ no file outside `Approval.fs` reads a `CORE_APPROVE_*` or `FUARAN_REGEN` variabl
 pattern is itself pinned against both call spellings, so it cannot go blind. Class: no package's public
 surface moved, and no wire baseline moved.
 
+### The copies D2 does not justify collapse into one body each, and three of the five long files split along their banners (Phase 388, DECISIONS.md D125) — `additive` (`OpStream.Jsonl.quote`, `Decoder.tagDispatchWith`); the wire `none`
+
+**The class, from the gate.** The surface family prints two moves, both **`additive`**:
+`Fuaran.Core.OpStream` gains `OpStream.Jsonl.quote` (the package's one JSON string escaper, public
+beside `checkRaw`) and `Fuaran.Core.Wire` gains `Decoder.tagDispatchWith` (`tagDispatch` with an
+unknown tag refused in the caller's own sentence). Nothing else in any `api/` baseline moves, and no
+wire byte, digest, `api/wire/` baseline, `ParityVectors` row, `StoredIdentity` vector or committed
+corpus copy moves either: every collapse below is a refactor whose answers the existing baselines
+already pinned.
+
+**One body where there were several.** `Dag.toJsonl` spells its node lines through `OpStream.Jsonl.quote`
+— the DAG package references `OpStream`, so its byte-identical third escaper (`Dag.jstr`) is gone; the
+`Actor.fs` copy of `Wire.Json.escape` stays, being the one D2 demands. `OpStreamChain.tipOf` is the one
+length-and-tip walk under the op stream, the compacted tail and both capture journals. The DAG has one
+Kahn drain (`topoCoreMany` drains the closure through the whole-DAG drain) and one closure walk, and
+`mergeBase` / `commonBase` now size only the MAXIMAL common ancestors of an acyclic history — the same
+answer, because only a maximal member can have the largest closure — where they sized every common
+ancestor; a cyclic, hand-built DAG is still sized member by member, so its answer is unchanged too.
+`CapabilityCodec` and `QueryCodec` share one internal `SeamCodec` (`quoteAll`, `tagOf`, `members`,
+`within`, `each`), the four `Deferred` projections are `InvokeError.settle`, and the five re-worded
+dispatches are `Decoder.tagDispatchWith` (the pipeline's value-space sentence through
+`SpaceCodec.decoderSaying`, internal). `Diff`'s readers (`indexOf`, `childKeysOf`, `shellOf`, the
+grammar refusal) are hoisted out of the entries that each declared them. `Cell.asDecimal` is the one
+exact-decimal reading (`aggAsDecimal` deleted), and `Column.aggregate` is one admission pass driving one
+fold record per `AggFn` — still one walk of the column, and every answer the same value to the bit. The
+three vector families share an internal `VectorKit`, the IDL's `find*` lookups are one internal
+`IdlLookup`, and the xorshift32 kernel `ConfRng` and the IDL sampler both draw through is one internal
+`Xorshift32` in `Fuaran.Core.Idl`, read by `Fuaran.Core.Conformance` and `Fuaran.Core.Idl.Codegen`
+through `InternalsVisibleTo` (the `Function` → `Query` precedent).
+
+**The splits.** `SeamLaws.fs` is six files (`CapabilitySeamLaws`, `QuerySeamLaws`, `RegistrySeamLaws`,
+`ColumnarSeamLaws`, `PipelineSeamLaws`, `PolicySeamLaws`), `StreamLaws.fs` three (`ChainStreamLaws`,
+`DagStreamLaws`, `CaptureStreamLaws`) and `TreeLaws.fs` three (`AlgebraTreeLaws`, `PlacementTreeLaws`,
+`ValidityTreeLaws`), each along its own banners, and the internal TypeScript backend three
+(`TypeScriptCodec`, `TypeScriptDeclarations`, `TypeScriptDerived`). All fifteen are internal: the laws'
+public face is `Conformance`, whose forwards and roster ids did not move, and the backend's is `Gen`. `Diff.fs` and `FStar.fs` are NOT split, and
+each says why at its head: F# compiles one module from one file, and both modules' public types are
+nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
+consumer of these packages sees no change from any of this.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

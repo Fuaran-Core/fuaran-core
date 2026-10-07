@@ -29,6 +29,8 @@ namespace Fuaran.Core
 /// The encoding-profile conformance vectors + their runner (Phase 360).
 module EncodingProfileVectors =
 
+    open VectorKit
+
     /// One value with the exact bytes each profile renders it as.
     type Vector =
         {
@@ -54,8 +56,6 @@ module EncodingProfileVectors =
             /// `OpStream.encodeActorWith V2` of `Actor` — `Actor.encode` since `0.33.0`.
             V2: string
         }
-
-    let private quoted (body: string) : string = "\"" + body + "\""
 
     /// Every value the table renders, oldest escaping rule first: the 32 control characters (the
     /// three `V1` spells short, and the 29 the profiles agree on), then the composite cases.
@@ -159,10 +159,6 @@ module EncodingProfileVectors =
     /// bytes a node id or a capture hash is computed over.
     let private reveal: HashFn = fun prev payload -> prev + "#" + payload
 
-    /// `{"seq":0,"actor":<actor>,"op":{}}` — the linear chain pre-image for one actor.
-    let private payload (actor: string) : string =
-        "{\"seq\":0,\"actor\":" + actor + ",\"op\":{}}"
-
     /// The genesis node's pre-image for one actor and the empty op, under `reveal`.
     let private nodePreimage (actor: string) : string = "#" + actor + "|{}"
 
@@ -178,22 +174,6 @@ module EncodingProfileVectors =
             p
             """{"capture":true,"seq":0,"eff":"read\tline","det":"io\nwall","value":"v"}"""
             """{"capture":true,"seq":0,"eff":"read\u0009line","det":"io\u000awall","value":"v"}"""
-
-    let private pass (name: string) : Corpus.Outcome =
-        { Name = name
-          Passed = true
-          Detail = "ok" }
-
-    let private fail (name: string) (detail: string) : Corpus.Outcome =
-        { Name = name
-          Passed = false
-          Detail = detail }
-
-    let private expect (name: string) (what: string) (expected: string) (got: string) : Corpus.Outcome =
-        if got = expected then
-            pass name
-        else
-            fail name (what + " emitted " + got + ", expected " + expected)
 
     /// `true` when some string or member key inside `v` carries a line feed, carriage return or tab —
     /// the three characters the profiles spell differently.

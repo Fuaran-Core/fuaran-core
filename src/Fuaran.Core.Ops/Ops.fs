@@ -2512,6 +2512,55 @@ module Diff =
             Kind: ChangeKind<'Id>
         }
 
+    // ---- the readers every entry shares (Phase 388) ----
+    // `emitWith`, `changes` and the grammar entries read two trees the same way; these are the one
+    // body of each, where every entry used to declare its own.
+
+    /// The tree's index, a repeated id refused as `DuplicateIdInTree` naming it (Phase 139) — Core's
+    /// named structural predicate, read through `Tree.Index.tryBuild` since Phase 305 so the index the
+    /// passes read is built in the same pass that refuses a malformed tree. This was a `groupBy` of its
+    /// own until Phase 139, and the retirement is the point: a diff refusing a malformed tree and an
+    /// insert refusing a malformed graft are the same notion of malformed.
+    ///
+    /// ONE OBSERVABLE CHANGE at Phase 139, and it is which id is NAMED, never whether the tree is
+    /// refused. The `groupBy` form reported the first id whose GROUP had more than one member, in
+    /// first-appearance order of the keys; `Tree.wellFormed` reports the first id at its SECOND
+    /// occurrence in preorder. For `[a; b; b; a]` the old form said `a` and the new says `b`. The new
+    /// answer is the one `Rejection.DuplicateId` already gave on the accept path, so the two paths name
+    /// the same offender for the same tree. Recorded in STABILITY.md.
+    let private indexOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (root: 'Node) =
+        match Tree.Index.tryBuild w idw root with
+        | Ok ix -> Ok ix
+        | Error(Tree.RepeatedId d) -> Error(DuplicateIdInTree d)
+        | Error Tree.Structural -> Ok(Tree.Index.build w idw root) // unreachable: `tryBuild` refuses only a repeat
+
+    /// A node's children, as their id keys, in order.
+    let private childKeysOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (n: 'Node) : string list =
+        w.Children n |> List.map (fun c -> idw.ToString(w.Id c))
+
+    /// A node's content as the encoder sees it: its SHELL, the node with its children emptied
+    /// (Phase 305) — so a survivor whose children alone changed is not a content change.
+    let private shellOf (encode: 'Node -> string) (w: NodeWitness<'Node, 'Id>) (n: 'Node) : string =
+        encode (w.ReplaceChildren n [])
+
+    /// The grammar entries' second refusal, after the script is found: the first parent/child pair
+    /// of `after` the grammar forbids (`Ops.illegalChildren`) as `IllegalChildInTree`, else the script.
+    let private grammarChecked
+        (allowedChildren: string -> string list option)
+        (w: NodeWitness<'Node, 'Id>)
+        (after: 'Node)
+        (script: Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>>)
+        : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
+        match script with
+        | Error e -> Error e
+        | Ok ops ->
+            match Ops.illegalChildren allowedChildren w after with
+            | (p, c) :: _ ->
+                let pk = w.KindTag p
+
+                Error(IllegalChildInTree(w.Id c, w.KindTag c, w.Id p, pk, allowedChildren pk |> Option.defaultValue []))
+            | [] -> Ok ops
+
     // ---- the one emitter behind every entry (Phase 305) ----
     // The four structural passes are Phase 245's, and are what `proofs/TreeDiff.fst` models
     // clause for clause; Phase 305 changed one clause of step 4 (the settled-order drop, below).
@@ -2546,26 +2595,8 @@ module Diff =
 
         let key (i: 'Id) = idw.ToString i
 
-        // First duplicated id in a tree (by key), if any — Core's named structural predicate
-        // (Phase 139), read through `Tree.Index.tryBuild` since Phase 305 so the index the passes
-        // read is built in the same pass that refuses a malformed tree. This was a `groupBy` of its
-        // own until Phase 139, and the retirement is the point: a diff refusing a malformed tree
-        // and an insert refusing a malformed graft are the same notion of malformed.
-        //
-        // ONE OBSERVABLE CHANGE at Phase 139, and it is which id is NAMED, never whether the tree is
-        // refused. The `groupBy` form reported the first id whose GROUP had more than one member,
-        // in first-appearance order of the keys; `Tree.wellFormed` reports the first id at its
-        // SECOND occurrence in preorder. For `[a; b; b; a]` the old form said `a` and the new says
-        // `b`. The new answer is the one `Rejection.DuplicateId` already gave on the accept path, so
-        // the two paths name the same offender for the same tree. Recorded in STABILITY.md.
-        let index (root: 'Node) =
-            match Tree.Index.tryBuild w idw root with
-            | Ok ix -> Ok ix
-            | Error(Tree.RepeatedId d) -> Error(DuplicateIdInTree d)
-            | Error Tree.Structural -> Ok(Tree.Index.build w idw root) // unreachable: `tryBuild` refuses only a repeat
-
-        let childKeysOf (n: 'Node) =
-            w.Children n |> List.map (fun c -> key (w.Id c))
+        let index = indexOf w idw
+        let childKeysOf = childKeysOf w idw
 
         if key (w.Id before) <> key (w.Id after) then
             Error(RootIdMismatch(w.Id before, w.Id after))
@@ -2795,8 +2826,8 @@ module Diff =
         (before: 'Node)
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        let shell (n: 'Node) = encode (w.ReplaceChildren n [])
-        let differs (b: 'Node) (a: 'Node) = shell b <> shell a
+        let differs (b: 'Node) (a: 'Node) =
+            shellOf encode w b <> shellOf encode w a
 
         match Ops.firstUncontained canHold w after with
         | Some p -> Error(TargetNotAContainer(w.Id p, w.KindTag p))
@@ -2834,15 +2865,8 @@ module Diff =
         (before: 'Node)
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        match toOpsContained canHold w idw before after with
-        | Error e -> Error e
-        | Ok ops ->
-            match Ops.illegalChildren allowedChildren w after with
-            | (p, c) :: _ ->
-                let pk = w.KindTag p
-
-                Error(IllegalChildInTree(w.Id c, w.KindTag c, w.Id p, pk, allowedChildren pk |> Option.defaultValue []))
-            | [] -> Ok ops
+        toOpsContained canHold w idw before after
+        |> grammarChecked allowedChildren w after
 
     /// `toOpsGrammar` over the content-aware `toOpsContainedWith` (Phase 305): the same two
     /// refusals in the same order, and a script that carries the survivors' content changes.
@@ -2855,15 +2879,8 @@ module Diff =
         (before: 'Node)
         (after: 'Node)
         : Result<SkeletonOp<'Node, 'Id> list, DiffError<'Id>> =
-        match toOpsContainedWith canHold encode w idw before after with
-        | Error e -> Error e
-        | Ok ops ->
-            match Ops.illegalChildren allowedChildren w after with
-            | (p, c) :: _ ->
-                let pk = w.KindTag p
-
-                Error(IllegalChildInTree(w.Id c, w.KindTag c, w.Id p, pk, allowedChildren pk |> Option.defaultValue []))
-            | [] -> Ok ops
+        toOpsContainedWith canHold encode w idw before after
+        |> grammarChecked allowedChildren w after
 
     /// The rank of a change kind in the canonical order: declaration order, so an id's entries read
     /// added, removed, moved, kind, content, reordered.
@@ -2897,16 +2914,9 @@ module Diff =
         (after: 'Node)
         : Result<Change<'Id> list, DiffError<'Id>> =
         let key (i: 'Id) = idw.ToString i
-        let shell (n: 'Node) = encode (w.ReplaceChildren n [])
-
-        let index (root: 'Node) =
-            match Tree.Index.tryBuild w idw root with
-            | Ok ix -> Ok ix
-            | Error(Tree.RepeatedId d) -> Error(DuplicateIdInTree d)
-            | Error Tree.Structural -> Ok(Tree.Index.build w idw root)
-
-        let childKeysOf (n: 'Node) =
-            w.Children n |> List.map (fun c -> key (w.Id c))
+        let shell = shellOf encode w
+        let index = indexOf w idw
+        let childKeysOf = childKeysOf w idw
 
         if key (w.Id before) <> key (w.Id after) then
             Error(RootIdMismatch(w.Id before, w.Id after))
