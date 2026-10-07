@@ -1168,6 +1168,103 @@ let trustBoundary =
               | Error m -> failtestf "scaffold failed: %s" m) ]
 
 // ---------------------------------------------------------------------------
+// Phase 387 — the escaper's guarantee STOPS at host source (DECISIONS.md D124,
+// amending D95).
+//
+// D95 and the `SourceLit` module doc once said a vocabulary built in code "still
+// cannot put a byte of source into a generated module". That over-claimed: a
+// `THosted` slot's `FSharp` / `Encode` / `Decode`, a `TFn` slot's `ClosureSig`, and
+// every `support.json` entry are HOST SOURCE, spliced verbatim by design — escaping
+// them would turn code into a string. The guarantee is scoped to IDL-authored
+// text, and this test is why that scope is a measured fact rather than a sentence:
+// it plants a hosted body that would be unsafe if it were spliced as DATA (a quote,
+// a backslash, and a line break that starts a live source line) and asserts it
+// reaches the generated module byte-for-byte, unescaped, while `Declare.errors`
+// accepts it. The same text as IDL-authored prose (a kind's category) reaches no
+// source line. If someone routes host source through the escaper, or starts
+// validating it as data, this goes red and the trust boundary is re-decided in
+// DECISIONS — never drifted.
+// ---------------------------------------------------------------------------
+
+/// The planted line: live source when it arrives as host source, a comment line when it
+/// arrives as IDL-authored text.
+let private plantedLine = "let planted387 = ()"
+
+/// A hosted body that `SourceLit` would rewrite if it were data: a double quote, a
+/// backslash, and a line break after which [[plantedLine]] is no longer covered by the `//`.
+let private plantedHostBody =
+    "(fun (d: System.DateOnly) -> JStr(d.ToString \"yyyy-MM-dd\")) // a backslash \\ then a break\n"
+    + plantedLine
+
+/// Whether some line of `src`, leading whitespace aside, BEGINS with the planted line —
+/// i.e. it is source rather than the tail of a comment.
+let private plantIsLive (src: string) =
+    src.Split('\n')
+    |> Array.exists (fun l -> l.TrimStart().StartsWith(plantedLine, StringComparison.Ordinal))
+
+/// The probe vocabulary with one required hosted slot whose ENCODE expression is the plant.
+let private hostedPlantIdl: Idl =
+    { probeIdl with
+        Kinds =
+            [ oneKind
+                  [ field "text" TStr Required
+                    field
+                        "when"
+                        (THosted
+                            { FSharp = "System.DateOnly"
+                              Encode = plantedHostBody
+                              Decode = "(fun _ -> Error \"planted decoder\")"
+                              Wire = None
+                              Format = None })
+                        Required ] ] }
+
+[<Tests>]
+let hostedSourceTrustBoundary =
+    testList
+        "Phase 387 — hosted source is trusted host code, outside the escaper"
+        [ testCase "Declare.errors validates IDL-authored text, not host source: the plant is accepted" (fun _ ->
+              Expect.isEmpty
+                  (Declare.errors hostedPlantIdl)
+                  "a hosted body is host source; validating it as data would be a different trust boundary, and D124 records this one")
+
+          testCase "the plant reaches the generated F# module verbatim and live, never escaped" (fun _ ->
+              match Gen.fsharpModule "Phase387.Hosted" hostedPlantIdl (probeTags hostedPlantIdl) with
+              | Error e -> failtestf "codegen refused the hosted plant: %A" e
+              | Ok src ->
+                  Expect.stringContains
+                      src
+                      plantedHostBody
+                      "host source is spliced verbatim: the module carries the planted body byte-for-byte"
+
+                  Expect.isFalse
+                      (src.Contains(SourceLit.fsString plantedHostBody))
+                      "the plant must not have passed through the escaper: host source is code, not a string"
+
+                  Expect.isTrue
+                      (plantIsLive src)
+                      "the planted line is a live source line, exactly as its supplier wrote it")
+
+          testCase "the same text as IDL-authored prose reaches no source line" (fun _ ->
+              // The control half: D95's guarantee still holds for what the IDL authors. A category
+              // is spliced into a comment; built in code, it bypasses `Declare.errors`' single-line
+              // rule, so only the escaper stands between its line break and a live source line.
+              let idl =
+                  { probeIdl with
+                      Kinds =
+                          [ { oneKind [ field "text" TStr Required ] with
+                                Category = "content\n" + plantedLine } ] }
+
+              match Gen.fsharpModule "Phase387.Control" idl (probeTags idl) with
+              | Error e -> failtestf "codegen refused the control vocabulary: %A" e
+              | Ok src ->
+                  Expect.stringContains
+                      src
+                      "planted387"
+                      "the category reached the module (else the control is vacuous)"
+
+                  Expect.isFalse (plantIsLive src) "IDL-authored text never becomes a live source line") ]
+
+// ---------------------------------------------------------------------------
 // Phase 125 — the GENERATIVE property over declared defaults.
 //
 // Phase 124 gave the two backends a payload-carrying union default and a typed

@@ -315,6 +315,126 @@ let private agreement (f: string -> string) (g: string -> string) : string =
     | None -> "agrees:" + string (List.length exportCorpus)
     | Some i -> "diverges@" + string i
 
+// ---- Phase 387 — the IDL sampler (D124) ----
+// `Fuaran.Core.Idl.Sample` claims "same seed, same vectors, on any host and any runtime", and the
+// package is Fable-shipped. These rows are what make that a measured claim: the draws a sampler
+// makes are pinned through a vocabulary whose every choice is visible in its output, and the sampled
+// node sets of a vocabulary reaching every slot shape are pinned through their canonical encoding.
+
+/// One field of a sampler vocabulary.
+let private sField (name: string) (t: Fuaran.Core.Idl.IdlType) (opt: Fuaran.Core.Idl.Optionality) =
+    ({ Name = name
+       Type = t
+       Opt = opt
+       Annotations = Fuaran.Core.Idl.Annotations.Empty }
+    : Fuaran.Core.Idl.IdlField)
+
+/// One kind of a sampler vocabulary.
+let private sKind (tag: string) (fields: Fuaran.Core.Idl.IdlField list) =
+    ({ Tag = tag
+       Category = "content"
+       Fields = fields
+       Annotations = Fuaran.Core.Idl.Annotations.Empty }
+    : Fuaran.Core.Idl.IdlKind)
+
+/// A vocabulary declaring only kinds and enums.
+let private sVocab (kinds: Fuaran.Core.Idl.IdlKind list) (enums: Fuaran.Core.Idl.IdlEnum list) =
+    ({ Kinds = kinds
+       Unions = []
+       Enums = enums
+       Records = []
+       Defaults = []
+       NodeFields = []
+       Ops = []
+       Wire = Fuaran.Core.Idl.WireShape.Default
+       Harden = Fuaran.Core.Idl.HardenPolicy.Undeclared }
+    : Fuaran.Core.Idl.Idl)
+
+/// The DRAW vocabulary: one kind whose one field is a seven-case enum, and no envelope. A sampled
+/// node is exactly two choices — its id from the sampler's four-id pool, then the enum case — so the
+/// encoded nodes spell the draws out, and seven (not a power of two) is a size where a draw by
+/// rejection and a draw by modulo choose differently.
+let private drawVocab: Fuaran.Core.Idl.Idl =
+    sVocab
+        [ sKind "K" [ sField "e" (Fuaran.Core.Idl.TEnum "Seven") Fuaran.Core.Idl.Required ] ]
+        [ Fuaran.Core.Idl.Declare.enumOf "Seven" [ "c0"; "c1"; "c2"; "c3"; "c4"; "c5"; "c6" ] ]
+
+/// A vocabulary whose one kind requires an enum that declares no case — the sampler's typed refusal.
+let private emptyEnumVocab: Fuaran.Core.Idl.Idl =
+    sVocab
+        [ sKind "K" [ sField "e" (Fuaran.Core.Idl.TEnum "Nothing") Fuaran.Core.Idl.Required ] ]
+        [ Fuaran.Core.Idl.Declare.enumOf "Nothing" [] ]
+
+/// The SHAPE vocabulary: every slot shape the sampler draws differently — scalars, an enum, a list
+/// of nodes (recursion and the depth floor), a map of JSON, a record with an optional field, a
+/// generic union applied to an argument, a hosted slot with a declared format, both presence rules,
+/// and a node envelope.
+let private shapeVocab: Fuaran.Core.Idl.Idl =
+    let opt = Fuaran.Core.Idl.Optional
+    let req = Fuaran.Core.Idl.Required
+
+    { sVocab
+          [ sKind
+                "Leaf"
+                [ sField "text" Fuaran.Core.Idl.TStr req
+                  sField "n" Fuaran.Core.Idl.TInt req
+                  sField "ratio" Fuaran.Core.Idl.TFloat req
+                  sField "on" Fuaran.Core.Idl.TBool (Fuaran.Core.Idl.OmitDefault(Fuaran.Core.Idl.VBool false))
+                  sField "tone" (Fuaran.Core.Idl.TEnum "Tone") req ]
+            sKind
+                "Panel"
+                [ sField "children" (Fuaran.Core.Idl.TList Fuaran.Core.Idl.TNode) req
+                  sField "meta" (Fuaran.Core.Idl.TMap Fuaran.Core.Idl.TJson) opt
+                  sField "at" (Fuaran.Core.Idl.TRecord "Point") req
+                  sField "held" (Fuaran.Core.Idl.TUnion("Box", [ Fuaran.Core.Idl.TFloat ])) req
+                  sField
+                      "when"
+                      (Fuaran.Core.Idl.THosted
+                          { FSharp = "System.DateOnly"
+                            Encode = "encDate"
+                            Decode = "decDate"
+                            Wire = Some Fuaran.Core.Idl.TStr
+                            Format = Some "date" })
+                      opt ] ]
+          [ Fuaran.Core.Idl.Declare.enumOf "Tone" [ "Low"; "Mid"; "High" ] ] with
+        Records =
+            [ { Name = "Point"
+                Fields =
+                  [ sField "x" Fuaran.Core.Idl.TFloat req
+                    sField "label" Fuaran.Core.Idl.TStr opt ] } ]
+        Unions =
+            [ { Name = "Box"
+                Params = [ "T" ]
+                Cases =
+                  [ { Tag = "Empty"
+                      Fields = []
+                      Annotations = Fuaran.Core.Idl.Annotations.Empty }
+                    { Tag = "Full"
+                      Fields = [ sField "value" (Fuaran.Core.Idl.TVar "T") req ]
+                      Annotations = Fuaran.Core.Idl.Annotations.Empty } ] } ]
+        NodeFields = [ sField "hint" Fuaran.Core.Idl.TStr opt ] }
+
+/// `Sample.trySampleNodes` then each node's canonical encoding — or the refusal, as one line.
+let private sampledLines (idl: Fuaran.Core.Idl.Idl) (seed: int) (count: int) : string list =
+    match Fuaran.Core.Idl.Sample.trySampleNodes idl (idl.Kinds |> List.map (fun k -> k.Tag)) seed count with
+    | Error refusal -> [ "refused:" + refusal.Describe ]
+    | Ok nodes ->
+        nodes
+        |> List.map (fun v ->
+            match Fuaran.Core.Idl.Encode.encode idl v with
+            | Ok text -> text
+            | Error _ -> "<unencodable>")
+
+/// The draw vocabulary's eight nodes from `seed`, `|`-joined: ASCII by construction (the id pool
+/// and the enum cases are), so the draws are readable in a divergence report.
+let private sampleDraws (seed: int) : string =
+    sampledLines drawVocab seed 8 |> String.concat "|"
+
+/// The shape vocabulary's twelve nodes from `seed`, as the SHA-256 of their encodings: the string
+/// pools are adversarial and not ASCII, so the set leaves as a digest.
+let private sampleNodes (seed: int) : string =
+    sampledLines shapeVocab seed 12 |> String.concat "\n" |> Hash.sha256Hex
+
 /// The named table: `(label, value)` pairs, each value computed by calling a public surface
 /// and ASCII by construction. Only the first part of what `lines` emits — the hash and
 /// sanitiser sweeps follow it there — and its order is part of the comparison.
@@ -660,7 +780,21 @@ let vectors: (string * string) list =
       "space/int/leading-space", intCanon " 5"
       "space/int/leading-plus", intCanon "+5"
       "space/int/exponent", intCanon "1e999"
-      "space/int/leading-zero", intCanon "05" ]
+      "space/int/leading-zero", intCanon "05"
+
+      // ---- Phase 387 — the IDL sampler (D124). Appended, so every earlier row keeps its place.
+      // Until 0.36.0 the sampler was a uint64 LCG — a 64-bit multiply, the shape `ConfRng` was
+      // re-based off at 0.20.0 because Fable cannot carry it — choosing by `% n`, and no row here
+      // measured it. It is `ConfRng`'s xorshift32 with draws by rejection now, and these rows are
+      // the cross-pipeline half of that claim: `draws/*` spell out each choice, `nodes/*` pin a
+      // sampled set over every slot shape, and `refusal/*` the typed refusal's text.
+      "sample/draws/seed-0", sampleDraws 0
+      "sample/draws/seed-1", sampleDraws 1
+      "sample/draws/seed-neg-1", sampleDraws -1
+      "sample/draws/seed-1488", sampleDraws 1488
+      "sample/nodes/seed-0", sampleNodes 0
+      "sample/nodes/seed-1488", sampleNodes 1488
+      "sample/refusal/empty-enum", sampledLines emptyEnumVocab 0 1 |> String.concat "|" ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

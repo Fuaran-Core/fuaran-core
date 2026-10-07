@@ -21,76 +21,76 @@ module S = ScoreVocabulary
 module R = Vocabulary
 
 let d_v0 : D.node int string =
-  (D.C__node__Document "a\"b" (Some "tab\there") (D.C__e_locale__EnGB) (D.C__e_numbering__LegalNumbering) ([(D.C__node__Footnote "node-1" ([]))]))
+  (D.C__node__Document "a\"b" (Some "back\\slash") (D.C__e_locale__EnUS) (D.C__e_numbering__DecimalNumbering) ([(D.C__node__Table "node-1" None ([(D.C__node__Row "a\"b" (true) ([]))]))]))
 
 let d_e0 : jval int string =
-  (JObj [("kind", (JStr "Document")); ("id", (JStr "a\"b")); ("title", (JStr "tab\there")); ("locale", (JStr "EnGB")); ("numbering", (JStr "LegalNumbering")); ("children", (JArr [(JObj [("kind", (JStr "Footnote")); ("id", (JStr "node-1")); ("children", (JArr []))])]))])
+  (JObj [("kind", (JStr "Document")); ("id", (JStr "a\"b")); ("title", (JStr "back\\slash")); ("locale", (JStr "EnUS")); ("numbering", (JStr "DecimalNumbering")); ("children", (JArr [(JObj [("kind", (JStr "Table")); ("id", (JStr "node-1")); ("children", (JArr [(JObj [("kind", (JStr "Row")); ("id", (JStr "a\"b")); ("isHeader", (JBool true)); ("children", (JArr []))])]))])]))])
 
 let d_v1 : D.node int string =
-  (D.C__node__Section "n" ([]) (D.C__e_heading_depth__H5) ([(D.C__node__Figure "" ("</script>") ([])); (D.C__node__Cell "" ([(D.C__u_run__Text ("back\\slash")); (D.C__u_run__InlineVariable ("plain"))]))]))
+  (D.C__node__Section "a\"b" ([(D.C__u_run__Strong ([]))]) (D.C__e_heading_depth__H5) ([(D.C__node__Cell "a\"b" ([(D.C__u_run__Emphasis ([]))])); (D.C__node__Section "node-1" ([]) (D.C__e_heading_depth__H4) ([]))]))
 
 let d_e1 : jval int string =
-  (JObj [("kind", (JStr "Section")); ("id", (JStr "n")); ("heading", (JArr [])); ("depth", (JStr "H5")); ("children", (JArr [(JObj [("kind", (JStr "Figure")); ("id", (JStr "")); ("source", (JStr "</script>")); ("children", (JArr []))]); (JObj [("kind", (JStr "Cell")); ("id", (JStr "")); ("runs", (JArr [(JObj [("kind", (JStr "Text")); ("value", (JStr "back\\slash"))]); (JObj [("kind", (JStr "InlineVariable")); ("field", (JStr "plain"))])]))])]))])
+  (JObj [("kind", (JStr "Section")); ("id", (JStr "a\"b")); ("heading", (JArr [(JObj [("kind", (JStr "Strong")); ("runs", (JArr []))])])); ("depth", (JStr "H5")); ("children", (JArr [(JObj [("kind", (JStr "Cell")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "Emphasis")); ("runs", (JArr []))])]))]); (JObj [("kind", (JStr "Section")); ("id", (JStr "node-1")); ("heading", (JArr [])); ("depth", (JStr "H4")); ("children", (JArr []))])]))])
 
 let d_v2 : D.node int string =
-  (D.C__node__Paragraph "n" ([]))
+  (D.C__node__Paragraph "n" ([(D.C__u_run__InlineRef ("new\nline")); (D.C__u_run__Code (""))]))
 
 let d_e2 : jval int string =
-  (JObj [("kind", (JStr "Paragraph")); ("id", (JStr "n")); ("runs", (JArr []))])
+  (JObj [("kind", (JStr "Paragraph")); ("id", (JStr "n")); ("runs", (JArr [(JObj [("kind", (JStr "InlineRef")); ("target", (JStr "new\nline"))]); (JObj [("kind", (JStr "Code")); ("value", (JStr ""))])]))])
 
 let d_v3 : D.node int string =
-  (D.C__node__ListBlock "node-1" (D.C__e_list_style__Bulleted) ([]))
+  (D.C__node__ListBlock "a\"b" (D.C__e_list_style__Numbered) ([(D.C__node__Paragraph "a\"b" ([(D.C__u_run__Link ("quote\" inside") ("quote\" inside"))])); (D.C__node__Caption "" ([(D.C__u_run__Strong ([])); (D.C__u_run__Strong ([]))]))]))
 
 let d_e3 : jval int string =
-  (JObj [("kind", (JStr "ListBlock")); ("id", (JStr "node-1")); ("style", (JStr "Bulleted")); ("children", (JArr []))])
+  (JObj [("kind", (JStr "ListBlock")); ("id", (JStr "a\"b")); ("style", (JStr "Numbered")); ("children", (JArr [(JObj [("kind", (JStr "Paragraph")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "Link")); ("text", (JStr "quote\" inside")); ("url", (JStr "quote\" inside"))])]))]); (JObj [("kind", (JStr "Caption")); ("id", (JStr "")); ("runs", (JArr [(JObj [("kind", (JStr "Strong")); ("runs", (JArr []))]); (JObj [("kind", (JStr "Strong")); ("runs", (JArr []))])]))])]))])
 
 let d_v4 : D.node int string =
-  (D.C__node__ListItem "n" ([]))
+  (D.C__node__ListItem "n" ([(D.C__node__Cell "node-1" ([(D.C__u_run__Code ("quote\" inside"))]))]))
 
 let d_e4 : jval int string =
-  (JObj [("kind", (JStr "ListItem")); ("id", (JStr "n")); ("children", (JArr []))])
+  (JObj [("kind", (JStr "ListItem")); ("id", (JStr "n")); ("children", (JArr [(JObj [("kind", (JStr "Cell")); ("id", (JStr "node-1")); ("runs", (JArr [(JObj [("kind", (JStr "Code")); ("value", (JStr "quote\" inside"))])]))])]))])
 
 let d_v5 : D.node int string =
-  (D.C__node__Table "n" None ([(D.C__node__Paragraph "node-1" ([])); (D.C__node__Caption "n" ([(D.C__u_run__InlineRef ("accent-é")); (D.C__u_run__Strong ([]))]))]))
+  (D.C__node__Table "n" (Some [(D.C__u_run__Link ("new\nline") ("new\nline"))]) ([(D.C__node__Caption "a\"b" ([(D.C__u_run__Code ("</script>"))])); (D.C__node__Caption "" ([]))]))
 
 let d_e5 : jval int string =
-  (JObj [("kind", (JStr "Table")); ("id", (JStr "n")); ("children", (JArr [(JObj [("kind", (JStr "Paragraph")); ("id", (JStr "node-1")); ("runs", (JArr []))]); (JObj [("kind", (JStr "Caption")); ("id", (JStr "n")); ("runs", (JArr [(JObj [("kind", (JStr "InlineRef")); ("target", (JStr "accent-é"))]); (JObj [("kind", (JStr "Strong")); ("runs", (JArr []))])]))])]))])
+  (JObj [("kind", (JStr "Table")); ("id", (JStr "n")); ("caption", (JArr [(JObj [("kind", (JStr "Link")); ("text", (JStr "new\nline")); ("url", (JStr "new\nline"))])])); ("children", (JArr [(JObj [("kind", (JStr "Caption")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "Code")); ("value", (JStr "</script>"))])]))]); (JObj [("kind", (JStr "Caption")); ("id", (JStr "")); ("runs", (JArr []))])]))])
 
 let d_v6 : D.node int string =
-  (D.C__node__Row "" (true) ([(D.C__node__Footnote "n" ([]))]))
+  (D.C__node__Row "n" (false) ([(D.C__node__Table "n" (Some [(D.C__u_run__Code ("astral-😀")); (D.C__u_run__InlineVariable ("plain"))]) ([])); (D.C__node__ListItem "" ([]))]))
 
 let d_e6 : jval int string =
-  (JObj [("kind", (JStr "Row")); ("id", (JStr "")); ("isHeader", (JBool true)); ("children", (JArr [(JObj [("kind", (JStr "Footnote")); ("id", (JStr "n")); ("children", (JArr []))])]))])
+  (JObj [("kind", (JStr "Row")); ("id", (JStr "n")); ("isHeader", (JBool false)); ("children", (JArr [(JObj [("kind", (JStr "Table")); ("id", (JStr "n")); ("caption", (JArr [(JObj [("kind", (JStr "Code")); ("value", (JStr "astral-😀"))]); (JObj [("kind", (JStr "InlineVariable")); ("field", (JStr "plain"))])])); ("children", (JArr []))]); (JObj [("kind", (JStr "ListItem")); ("id", (JStr "")); ("children", (JArr []))])]))])
 
 let d_v7 : D.node int string =
-  (D.C__node__Cell "a\"b" ([(D.C__u_run__InlineVariable ("plain")); (D.C__u_run__InlineRef ("astral-😀"))]))
+  (D.C__node__Cell "a\"b" ([(D.C__u_run__InlineVariable ("quote\" inside"))]))
 
 let d_e7 : jval int string =
-  (JObj [("kind", (JStr "Cell")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "InlineVariable")); ("field", (JStr "plain"))]); (JObj [("kind", (JStr "InlineRef")); ("target", (JStr "astral-😀"))])]))])
+  (JObj [("kind", (JStr "Cell")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "InlineVariable")); ("field", (JStr "quote\" inside"))])]))])
 
 let d_v8 : D.node int string =
-  (D.C__node__Figure "node-1" ("accent-é") ([(D.C__node__Section "node-1" ([(D.C__u_run__InlineRef ("tab\there"))]) (D.C__e_heading_depth__H3) ([])); (D.C__node__ListBlock "a\"b" (D.C__e_list_style__Roman) ([(D.C__node__Document "a\"b" None (D.C__e_locale__EnGB) (D.C__e_numbering__LegalNumbering) ([]))]))]))
+  (D.C__node__Figure "node-1" ("") ([]))
 
 let d_e8 : jval int string =
-  (JObj [("kind", (JStr "Figure")); ("id", (JStr "node-1")); ("source", (JStr "accent-é")); ("children", (JArr [(JObj [("kind", (JStr "Section")); ("id", (JStr "node-1")); ("heading", (JArr [(JObj [("kind", (JStr "InlineRef")); ("target", (JStr "tab\there"))])])); ("depth", (JStr "H3")); ("children", (JArr []))]); (JObj [("kind", (JStr "ListBlock")); ("id", (JStr "a\"b")); ("style", (JStr "Roman")); ("children", (JArr [(JObj [("kind", (JStr "Document")); ("id", (JStr "a\"b")); ("locale", (JStr "EnGB")); ("numbering", (JStr "LegalNumbering")); ("children", (JArr []))])]))])]))])
+  (JObj [("kind", (JStr "Figure")); ("id", (JStr "node-1")); ("source", (JStr "")); ("children", (JArr []))])
 
 let d_v9 : D.node int string =
-  (D.C__node__Caption "a\"b" ([(D.C__u_run__Strong ([(D.C__u_run__InlineVariable ("plain"))]))]))
+  (D.C__node__Caption "n" ([(D.C__u_run__InlineVariable ("astral-😀"))]))
 
 let d_e9 : jval int string =
-  (JObj [("kind", (JStr "Caption")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "Strong")); ("runs", (JArr [(JObj [("kind", (JStr "InlineVariable")); ("field", (JStr "plain"))])]))])]))])
+  (JObj [("kind", (JStr "Caption")); ("id", (JStr "n")); ("runs", (JArr [(JObj [("kind", (JStr "InlineVariable")); ("field", (JStr "astral-😀"))])]))])
 
 let d_v10 : D.node int string =
-  (D.C__node__Footnote "n" ([(D.C__node__Paragraph "a\"b" ([(D.C__u_run__Link ("") ("accent-é"))])); (D.C__node__Figure "n" ("") ([]))]))
+  (D.C__node__Footnote "node-1" ([(D.C__node__Footnote "node-1" ([(D.C__node__Document "node-1" None (D.C__e_locale__EnGB) (D.C__e_numbering__LegalNumbering) ([])); (D.C__node__Footnote "n" ([]))])); (D.C__node__Figure "node-1" ("astral-😀") ([]))]))
 
 let d_e10 : jval int string =
-  (JObj [("kind", (JStr "Footnote")); ("id", (JStr "n")); ("children", (JArr [(JObj [("kind", (JStr "Paragraph")); ("id", (JStr "a\"b")); ("runs", (JArr [(JObj [("kind", (JStr "Link")); ("text", (JStr "")); ("url", (JStr "accent-é"))])]))]); (JObj [("kind", (JStr "Figure")); ("id", (JStr "n")); ("source", (JStr "")); ("children", (JArr []))])]))])
+  (JObj [("kind", (JStr "Footnote")); ("id", (JStr "node-1")); ("children", (JArr [(JObj [("kind", (JStr "Footnote")); ("id", (JStr "node-1")); ("children", (JArr [(JObj [("kind", (JStr "Document")); ("id", (JStr "node-1")); ("locale", (JStr "EnGB")); ("numbering", (JStr "LegalNumbering")); ("children", (JArr []))]); (JObj [("kind", (JStr "Footnote")); ("id", (JStr "n")); ("children", (JArr []))])]))]); (JObj [("kind", (JStr "Figure")); ("id", (JStr "node-1")); ("source", (JStr "astral-😀")); ("children", (JArr []))])]))])
 
 let d_v11 : D.node int string =
-  (D.C__node__Document "" (Some "") (D.C__e_locale__EnGB) (D.C__e_numbering__LegalNumbering) ([]))
+  (D.C__node__Document "n" (Some "new\nline") (D.C__e_locale__EnGB) (D.C__e_numbering__DecimalNumbering) ([(D.C__node__ListItem "a\"b" ([(D.C__node__ListBlock "" (D.C__e_list_style__Roman) ([]))]))]))
 
 let d_e11 : jval int string =
-  (JObj [("kind", (JStr "Document")); ("id", (JStr "")); ("title", (JStr "")); ("locale", (JStr "EnGB")); ("numbering", (JStr "LegalNumbering")); ("children", (JArr []))])
+  (JObj [("kind", (JStr "Document")); ("id", (JStr "n")); ("title", (JStr "new\nline")); ("locale", (JStr "EnGB")); ("numbering", (JStr "DecimalNumbering")); ("children", (JArr [(JObj [("kind", (JStr "ListItem")); ("id", (JStr "a\"b")); ("children", (JArr [(JObj [("kind", (JStr "ListBlock")); ("id", (JStr "")); ("style", (JStr "Roman")); ("children", (JArr []))])]))])]))])
 
 let d_vectors_agree : unit =
   assert_norm (D.enc_node d_v0 == d_e0);
@@ -107,76 +107,76 @@ let d_vectors_agree : unit =
   assert_norm (D.enc_node d_v11 == d_e11)
 
 let s_v0 : S.node int string =
-  (S.C__node__Score "" None (Some "accent-é") ([]))
+  (S.C__node__Score "" None None ([]))
 
 let s_e0 : jval int string =
-  (JObj [("kind", (JStr "Score")); ("id", (JStr "")); ("composer", (JStr "accent-é")); ("children", (JArr []))])
+  (JObj [("kind", (JStr "Score")); ("id", (JStr "")); ("children", (JArr []))])
 
 let s_v1 : S.node int string =
-  (S.C__node__Part "" ("") ([(S.C__r_staff_definition__Mk (0) (S.C__e_clef_kind__Treble) ((S.C__r_key_signature__Mk (S.C__e_note_letter__C) (S.C__e_accidental__DoubleSharp) (S.C__e_mode__LydianAugmented))) ((S.C__r_time_signature__Mk ((-2147483648)) (1))))]) ([(S.C__node__OctaveShiftStart "" (S.C__e_octave_shift_kind__Ottava))]))
+  (S.C__node__Part "node-1" ("tab\there") ([(S.C__r_staff_definition__Mk (0) (S.C__e_clef_kind__Treble) ((S.C__r_key_signature__Mk (S.C__e_note_letter__G) (S.C__e_accidental__Natural) (S.C__e_mode__LydianAugmented))) ((S.C__r_time_signature__Mk ((-7)) ((-1))))); (S.C__r_staff_definition__Mk (42) (S.C__e_clef_kind__Alto) ((S.C__r_key_signature__Mk (S.C__e_note_letter__A) (S.C__e_accidental__Flat) (S.C__e_mode__IonianAugmented))) ((S.C__r_time_signature__Mk (1) ((-2147483648)))))]) ([]))
 
 let s_e1 : jval int string =
-  (JObj [("kind", (JStr "Part")); ("id", (JStr "")); ("name", (JStr "")); ("staves", (JArr [(JObj [("number", (JInt 0)); ("clef", (JStr "Treble")); ("initialKey", (JObj [("tonic", (JStr "C")); ("tonicAccidental", (JStr "DoubleSharp")); ("mode", (JStr "LydianAugmented"))])); ("initialTime", (JObj [("numerator", (JInt (-2147483648))); ("denominator", (JInt 1))]))])])); ("children", (JArr [(JObj [("kind", (JStr "OctaveShiftStart")); ("id", (JStr "")); ("octaveShift", (JStr "Ottava"))])]))])
+  (JObj [("kind", (JStr "Part")); ("id", (JStr "node-1")); ("name", (JStr "tab\there")); ("staves", (JArr [(JObj [("number", (JInt 0)); ("clef", (JStr "Treble")); ("initialKey", (JObj [("tonic", (JStr "G")); ("tonicAccidental", (JStr "Natural")); ("mode", (JStr "LydianAugmented"))])); ("initialTime", (JObj [("numerator", (JInt (-7))); ("denominator", (JInt (-1)))]))]); (JObj [("number", (JInt 42)); ("clef", (JStr "Alto")); ("initialKey", (JObj [("tonic", (JStr "A")); ("tonicAccidental", (JStr "Flat")); ("mode", (JStr "IonianAugmented"))])); ("initialTime", (JObj [("numerator", (JInt 1)); ("denominator", (JInt (-2147483648)))]))])])); ("children", (JArr []))])
 
 let s_v2 : S.node int string =
-  (S.C__node__PartGroup "node-1" (Some "accent-é") (S.C__e_bracket_kind__Brace) ([]))
+  (S.C__node__Measure "" (1) (false) (false) None (false) ([(S.C__node__PartGroup "a\"b" (Some "") (S.C__e_bracket_kind__Brace) ([])); (S.C__node__NavigationMark "n" (S.C__e_navigation_kind__ToCoda))]))
 
 let s_e2 : jval int string =
-  (JObj [("kind", (JStr "PartGroup")); ("id", (JStr "node-1")); ("name", (JStr "accent-é")); ("bracket", (JStr "Brace")); ("children", (JArr []))])
+  (JObj [("kind", (JStr "Measure")); ("id", (JStr "")); ("number", (JInt 1)); ("children", (JArr [(JObj [("kind", (JStr "PartGroup")); ("id", (JStr "a\"b")); ("name", (JStr "")); ("bracket", (JStr "Brace")); ("children", (JArr []))]); (JObj [("kind", (JStr "NavigationMark")); ("id", (JStr "n")); ("navigation", (JStr "ToCoda"))])]))])
 
 let s_v3 : S.node int string =
-  (S.C__node__Measure "n" (0) (false) (false) None (false) ([]))
+  (S.C__node__Staff "n" (42) ([(S.C__node__HairpinEnd ""); (S.C__node__Dynamic "node-1" (S.C__e_dynamic_level__Fortississimo))]))
 
 let s_e3 : jval int string =
-  (JObj [("kind", (JStr "Measure")); ("id", (JStr "n")); ("number", (JInt 0)); ("children", (JArr []))])
+  (JObj [("kind", (JStr "Staff")); ("id", (JStr "n")); ("staffNumber", (JInt 42)); ("children", (JArr [(JObj [("kind", (JStr "HairpinEnd")); ("id", (JStr ""))]); (JObj [("kind", (JStr "Dynamic")); ("id", (JStr "node-1")); ("level", (JStr "Fortississimo"))])]))])
 
 let s_v4 : S.node int string =
-  (S.C__node__Staff "n" (1) ([(S.C__node__Fermata "")]))
+  (S.C__node__GraceNote "a\"b" ((S.C__r_pitch__Mk (S.C__e_note_letter__C) (S.C__e_accidental__Natural) ((-7)) (42))) (S.C__e_grace_kind__Appoggiatura))
 
 let s_e4 : jval int string =
-  (JObj [("kind", (JStr "Staff")); ("id", (JStr "n")); ("staffNumber", (JInt 1)); ("children", (JArr [(JObj [("kind", (JStr "Fermata")); ("id", (JStr ""))])]))])
+  (JObj [("kind", (JStr "GraceNote")); ("id", (JStr "a\"b")); ("pitch", (JObj [("letter", (JStr "C")); ("accidental", (JStr "Natural")); ("octave", (JInt (-7))); ("midi", (JInt 42))])); ("grace", (JStr "Appoggiatura"))])
 
 let s_v5 : S.node int string =
-  (S.C__node__GraceNote "" ((S.C__r_pitch__Mk (S.C__e_note_letter__D) (S.C__e_accidental__DoubleFlat) ((-7)) (1))) (S.C__e_grace_kind__Appoggiatura))
+  (S.C__node__Dynamic "node-1" (S.C__e_dynamic_level__Piano))
 
 let s_e5 : jval int string =
-  (JObj [("kind", (JStr "GraceNote")); ("id", (JStr "")); ("pitch", (JObj [("letter", (JStr "D")); ("accidental", (JStr "DoubleFlat")); ("octave", (JInt (-7))); ("midi", (JInt 1))])); ("grace", (JStr "Appoggiatura"))])
+  (JObj [("kind", (JStr "Dynamic")); ("id", (JStr "node-1")); ("level", (JStr "Piano"))])
 
 let s_v6 : S.node int string =
-  (S.C__node__Dynamic "a\"b" (S.C__e_dynamic_level__FortePiano))
+  (S.C__node__Fermata "a\"b")
 
 let s_e6 : jval int string =
-  (JObj [("kind", (JStr "Dynamic")); ("id", (JStr "a\"b")); ("level", (JStr "FortePiano"))])
+  (JObj [("kind", (JStr "Fermata")); ("id", (JStr "a\"b"))])
 
 let s_v7 : S.node int string =
-  (S.C__node__Fermata "node-1")
+  (S.C__node__HairpinStart "n" (S.C__e_hairpin_kind__Decrescendo))
 
 let s_e7 : jval int string =
-  (JObj [("kind", (JStr "Fermata")); ("id", (JStr "node-1"))])
+  (JObj [("kind", (JStr "HairpinStart")); ("id", (JStr "n")); ("hairpin", (JStr "Decrescendo"))])
 
 let s_v8 : S.node int string =
-  (S.C__node__HairpinStart "a\"b" (S.C__e_hairpin_kind__Crescendo))
+  (S.C__node__HairpinEnd "node-1")
 
 let s_e8 : jval int string =
-  (JObj [("kind", (JStr "HairpinStart")); ("id", (JStr "a\"b")); ("hairpin", (JStr "Crescendo"))])
+  (JObj [("kind", (JStr "HairpinEnd")); ("id", (JStr "node-1"))])
 
 let s_v9 : S.node int string =
-  (S.C__node__HairpinEnd "a\"b")
+  (S.C__node__SlurStart "a\"b")
 
 let s_e9 : jval int string =
-  (JObj [("kind", (JStr "HairpinEnd")); ("id", (JStr "a\"b"))])
+  (JObj [("kind", (JStr "SlurStart")); ("id", (JStr "a\"b"))])
 
 let s_v10 : S.node int string =
-  (S.C__node__SlurStart "n")
-
-let s_e10 : jval int string =
-  (JObj [("kind", (JStr "SlurStart")); ("id", (JStr "n"))])
-
-let s_v11 : S.node int string =
   (S.C__node__SlurEnd "n")
 
-let s_e11 : jval int string =
+let s_e10 : jval int string =
   (JObj [("kind", (JStr "SlurEnd")); ("id", (JStr "n"))])
+
+let s_v11 : S.node int string =
+  (S.C__node__OctaveShiftStart "a\"b" (S.C__e_octave_shift_kind__Ottava))
+
+let s_e11 : jval int string =
+  (JObj [("kind", (JStr "OctaveShiftStart")); ("id", (JStr "a\"b")); ("octaveShift", (JStr "Ottava"))])
 
 let s_vectors_agree : unit =
   assert_norm (S.enc_node s_v0 == s_e0);
@@ -193,76 +193,76 @@ let s_vectors_agree : unit =
   assert_norm (S.enc_node s_v11 == s_e11)
 
 let r_v0 : R.node int string =
-  (R.C__node__Node "n" (R.C__vkind__Embed ("tab\there") None ("quote\" inside") (Some [("", (JStr "plain"))])) (Some true) (Some ""))
+  (R.C__node__Node "a\"b" (R.C__vkind__Embed ("") None ("astral-😀") (Some [("\\", (JFloat "1234.5"))])) (Some true) None)
 
 let r_e0 : jval int string =
-  (JObj [("hidden", (JBool true)); ("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "tab\there")); ("moduleId", (JStr "quote\" inside")); ("props", (JObj [("", (JStr "plain"))]))])); ("label", (JStr ""))])
+  (JObj [("hidden", (JBool true)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "")); ("moduleId", (JStr "astral-😀")); ("props", (JObj [("\\", (JFloat "1234.5"))]))]))])
 
 let r_v1 : R.node int string =
-  (R.C__node__Node "node-1" (R.C__vkind__Embed ("") None ("back\\slash") (Some [("\\", (JArr [(JInt 0); (JStr "back\\slash")])); ("a\"b", (JStr "back\\slash"))])) None None)
+  (R.C__node__Node "a\"b" (R.C__vkind__Link ((R.C__u_slot__str__Fixed ("new\nline"))) ((R.C__u_text__Lookup (Some [("", "back\\slash")]) ("plain"))) (())) (Some false) (Some "</script>"))
 
 let r_e1 : jval int string =
-  (JObj [("id", (JStr "node-1")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "")); ("moduleId", (JStr "back\\slash")); ("props", (JObj [("\\", (JArr [(JInt 0); (JStr "back\\slash")])); ("a\"b", (JStr "back\\slash"))]))]))])
+  (JObj [("hidden", (JBool false)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Link")); ("href", (JObj [("$type", (JStr "Fixed")); ("value", (JStr "new\nline"))])); ("label", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("", (JStr "back\\slash"))])); ("key", (JStr "plain"))])); ("onClick", (JStr "<closure>"))])); ("label", (JStr "</script>"))])
 
 let r_v2 : R.node int string =
-  (R.C__node__Node "n" (R.C__vkind__Note ((R.C__u_text__Lookup (Some [("", "ctrl\u0001here"); ("_", "quote\" inside")]) ("accent-é")))) None None)
+  (R.C__node__Node "a\"b" (R.C__vkind__Note ((R.C__u_text__Lookup (Some [("", "ctrl\u0001here")]) ("back\\slash")))) (Some false) (Some "astral-😀"))
 
 let r_e2 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Note")); ("body", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("", (JStr "ctrl\u0001here")); ("_", (JStr "quote\" inside"))])); ("key", (JStr "accent-é"))]))]))])
+  (JObj [("hidden", (JBool false)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Note")); ("body", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("", (JStr "ctrl\u0001here"))])); ("key", (JStr "back\\slash"))]))])); ("label", (JStr "astral-😀"))])
 
 let r_v3 : R.node int string =
-  (R.C__node__Node "" (R.C__vkind__Embed ("quote\" inside") (Some (R.C__r_content_hash__Mk ("new\nline") (R.C__e_strictness__AdvisoryWarning))) ("") (Some [("9", (JFloat "2.5")); ("_", (JArr [(JInt 42); (JStr "</script>")]))])) None None)
+  (R.C__node__Node "a\"b" (R.C__vkind__Group ([(R.C__node__Node "" (R.C__vkind__Embed ("quote\" inside") (Some (R.C__r_content_hash__Mk ("accent-é") (R.C__e_strictness__AdvisoryWarning))) ("new\nline") (Some [("a", (JStr "back\\slash")); ("a\"b", (JObj [("a", (JStr "astral-😀")); ("z", (JInt (-2147483648)))]))])) None (Some "accent-é")); (R.C__node__Node "" (R.C__vkind__Link ((R.C__u_slot__str__Ref ("tab\there"))) ((R.C__u_text__Inline ("accent-é"))) (())) (Some true) (Some "</script>"))]) (R.C__e_layout_kind__Stack) (())) (Some false) (Some "new\nline"))
 
 let r_e3 : jval int string =
-  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "quote\" inside")); ("contentHash", (JObj [("hash", (JStr "new\nline")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "")); ("props", (JObj [("9", (JFloat "2.5")); ("_", (JArr [(JInt 42); (JStr "</script>")]))]))]))])
+  (JObj [("hidden", (JBool false)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Group")); ("children", (JArr [(JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "quote\" inside")); ("contentHash", (JObj [("hash", (JStr "accent-é")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "new\nline")); ("props", (JObj [("a", (JStr "back\\slash")); ("a\"b", (JObj [("a", (JStr "astral-😀")); ("z", (JInt (-2147483648)))]))]))])); ("label", (JStr "accent-é"))]); (JObj [("hidden", (JBool true)); ("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Link")); ("href", (JObj [("$type", (JStr "Ref")); ("name", (JStr "tab\there"))])); ("label", (JObj [("$type", (JStr "Inline")); ("text", (JStr "accent-é"))])); ("onClick", (JStr "<closure>"))])); ("label", (JStr "</script>"))])])); ("onSelect", (JStr "<closure>"))])); ("label", (JStr "new\nline"))])
 
 let r_v4 : R.node int string =
-  (R.C__node__Node "" (R.C__vkind__Link ((R.C__u_slot__str__Fixed ("new\nline"))) ((R.C__u_text__Lookup (Some [("\\", "accent-é"); ("é", "astral-😀")]) ("new\nline"))) (())) (Some false) (Some "plain"))
+  (R.C__node__Node "a\"b" (R.C__vkind__Link ((R.C__u_slot__str__Ref ("astral-😀"))) ((R.C__u_text__Lookup (Some [("9", "plain")]) (""))) (())) (Some true) (Some "accent-é"))
 
 let r_e4 : jval int string =
-  (JObj [("hidden", (JBool false)); ("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Link")); ("href", (JObj [("$type", (JStr "Fixed")); ("value", (JStr "new\nline"))])); ("label", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("\\", (JStr "accent-é")); ("é", (JStr "astral-😀"))])); ("key", (JStr "new\nline"))])); ("onClick", (JStr "<closure>"))])); ("label", (JStr "plain"))])
+  (JObj [("hidden", (JBool true)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Link")); ("href", (JObj [("$type", (JStr "Ref")); ("name", (JStr "astral-😀"))])); ("label", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("9", (JStr "plain"))])); ("key", (JStr ""))])); ("onClick", (JStr "<closure>"))])); ("label", (JStr "accent-é"))])
 
 let r_v5 : R.node int string =
-  (R.C__node__Node "a\"b" (R.C__vkind__Link ((R.C__u_slot__str__Fixed ("accent-é"))) ((R.C__u_text__Lookup (Some [("", "tab\there"); ("kind", "back\\slash")]) ("back\\slash"))) (())) (Some true) None)
+  (R.C__node__Node "n" (R.C__vkind__Note ((R.C__u_text__Lookup (Some [("0", "quote\" inside"); ("10", "plain")]) ("plain")))) None (Some "back\\slash"))
 
 let r_e5 : jval int string =
-  (JObj [("hidden", (JBool true)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Link")); ("href", (JObj [("$type", (JStr "Fixed")); ("value", (JStr "accent-é"))])); ("label", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("", (JStr "tab\there")); ("kind", (JStr "back\\slash"))])); ("key", (JStr "back\\slash"))])); ("onClick", (JStr "<closure>"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Note")); ("body", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("0", (JStr "quote\" inside")); ("10", (JStr "plain"))])); ("key", (JStr "plain"))]))])); ("label", (JStr "back\\slash"))])
 
 let r_v6 : R.node int string =
-  (R.C__node__Node "a\"b" (R.C__vkind__Note ((R.C__u_text__Lookup (Some [("\u0000", "tab\there")]) ("tab\there")))) (Some false) (Some "new\nline"))
+  (R.C__node__Node "n" (R.C__vkind__Embed ("ctrl\u0001here") (Some (R.C__r_content_hash__Mk ("tab\there") (R.C__e_strictness__AdvisoryWarning))) ("</script>") (Some [("10", (JStr "ctrl\u0001here")); ("kind", (JInt 3))])) (Some false) None)
 
 let r_e6 : jval int string =
-  (JObj [("hidden", (JBool false)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Note")); ("body", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("\u0000", (JStr "tab\there"))])); ("key", (JStr "tab\there"))]))])); ("label", (JStr "new\nline"))])
+  (JObj [("hidden", (JBool false)); ("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "ctrl\u0001here")); ("contentHash", (JObj [("hash", (JStr "tab\there")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "</script>")); ("props", (JObj [("10", (JStr "ctrl\u0001here")); ("kind", (JInt 3))]))]))])
 
 let r_v7 : R.node int string =
-  (R.C__node__Node "n" (R.C__vkind__Embed ("tab\there") (Some (R.C__r_content_hash__Mk ("quote\" inside") (R.C__e_strictness__AdvisoryWarning))) ("quote\" inside") (Some [("9", (JArr [(JInt (-7)); (JStr "astral-😀")])); ("kind", (JObj [("a", (JStr "accent-é")); ("z", (JInt 42))]))])) None None)
+  (R.C__node__Node "" (R.C__vkind__Embed ("back\\slash") (Some (R.C__r_content_hash__Mk ("plain") (R.C__e_strictness__StrictReplay))) ("quote\" inside") (Some [("0", (JStr "back\\slash"))])) None None)
 
 let r_e7 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "tab\there")); ("contentHash", (JObj [("hash", (JStr "quote\" inside")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "quote\" inside")); ("props", (JObj [("9", (JArr [(JInt (-7)); (JStr "astral-😀")])); ("kind", (JObj [("a", (JStr "accent-é")); ("z", (JInt 42))]))]))]))])
+  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "back\\slash")); ("contentHash", (JObj [("hash", (JStr "plain")); ("strictness", (JStr "StrictReplay"))])); ("moduleId", (JStr "quote\" inside")); ("props", (JObj [("0", (JStr "back\\slash"))]))]))])
 
 let r_v8 : R.node int string =
-  (R.C__node__Node "a\"b" (R.C__vkind__Embed ("astral-😀") (Some (R.C__r_content_hash__Mk ("</script>") (R.C__e_strictness__AdvisoryWarning))) ("plain") (Some [("", (JObj [("a", (JStr "astral-😀")); ("z", (JInt (-1)))])); ("_", (JStr "astral-😀"))])) None (Some "new\nline"))
+  (R.C__node__Node "" (R.C__vkind__Embed ("new\nline") (Some (R.C__r_content_hash__Mk ("astral-😀") (R.C__e_strictness__AdvisoryWarning))) ("astral-😀") (Some [("10", (JStr "")); ("_", (JInt 1))])) (Some false) (Some "plain"))
 
 let r_e8 : jval int string =
-  (JObj [("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "astral-😀")); ("contentHash", (JObj [("hash", (JStr "</script>")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "plain")); ("props", (JObj [("", (JObj [("a", (JStr "astral-😀")); ("z", (JInt (-1)))])); ("_", (JStr "astral-😀"))]))])); ("label", (JStr "new\nline"))])
+  (JObj [("hidden", (JBool false)); ("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "new\nline")); ("contentHash", (JObj [("hash", (JStr "astral-😀")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "astral-😀")); ("props", (JObj [("10", (JStr "")); ("_", (JInt 1))]))])); ("label", (JStr "plain"))])
 
 let r_v9 : R.node int string =
-  (R.C__node__Node "n" (R.C__vkind__Embed ("quote\" inside") (Some (R.C__r_content_hash__Mk ("back\\slash") (R.C__e_strictness__StrictReplay))) ("new\nline") (Some [("\\", (JObj [("a", (JStr "new\nline")); ("z", (JInt 1))]))])) (Some false) None)
+  (R.C__node__Node "node-1" (R.C__vkind__Note ((R.C__u_text__Lookup (Some [("0", "back\\slash"); ("😀", "new\nline")]) ("tab\there")))) (Some false) (Some ""))
 
 let r_e9 : jval int string =
-  (JObj [("hidden", (JBool false)); ("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "quote\" inside")); ("contentHash", (JObj [("hash", (JStr "back\\slash")); ("strictness", (JStr "StrictReplay"))])); ("moduleId", (JStr "new\nline")); ("props", (JObj [("\\", (JObj [("a", (JStr "new\nline")); ("z", (JInt 1))]))]))]))])
+  (JObj [("hidden", (JBool false)); ("id", (JStr "node-1")); ("kind", (JObj [("$type", (JStr "Note")); ("body", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("0", (JStr "back\\slash")); ("😀", (JStr "new\nline"))])); ("key", (JStr "tab\there"))]))])); ("label", (JStr ""))])
 
 let r_v10 : R.node int string =
-  (R.C__node__Node "" (R.C__vkind__Embed ("astral-😀") (Some (R.C__r_content_hash__Mk ("</script>") (R.C__e_strictness__StrictReplay))) ("accent-é") (Some [("\\", (JObj [("a", (JStr "quote\" inside")); ("z", (JInt (-1)))])); ("kind", (JInt 3))])) None None)
+  (R.C__node__Node "a\"b" (R.C__vkind__Embed ("plain") (Some (R.C__r_content_hash__Mk ("ctrl\u0001here") (R.C__e_strictness__AdvisoryWarning))) ("astral-😀") (Some [("10", (JStr "new\nline")); ("kind", (JObj [("a", (JStr "plain")); ("z", (JInt (-7)))]))])) (Some true) (Some "ctrl\u0001here"))
 
 let r_e10 : jval int string =
-  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "astral-😀")); ("contentHash", (JObj [("hash", (JStr "</script>")); ("strictness", (JStr "StrictReplay"))])); ("moduleId", (JStr "accent-é")); ("props", (JObj [("\\", (JObj [("a", (JStr "quote\" inside")); ("z", (JInt (-1)))])); ("kind", (JInt 3))]))]))])
+  (JObj [("hidden", (JBool true)); ("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "plain")); ("contentHash", (JObj [("hash", (JStr "ctrl\u0001here")); ("strictness", (JStr "AdvisoryWarning"))])); ("moduleId", (JStr "astral-😀")); ("props", (JObj [("10", (JStr "new\nline")); ("kind", (JObj [("a", (JStr "plain")); ("z", (JInt (-7)))]))]))])); ("label", (JStr "ctrl\u0001here"))])
 
 let r_v11 : R.node int string =
-  (R.C__node__Node "" (R.C__vkind__Note ((R.C__u_text__Lookup (Some [("a\"b", "quote\" inside")]) ("tab\there")))) (Some true) None)
+  (R.C__node__Node "" (R.C__vkind__Embed ("back\\slash") None ("new\nline") (Some [("10", (JArr [(JInt (-1)); (JStr "quote\" inside")]))])) None None)
 
 let r_e11 : jval int string =
-  (JObj [("hidden", (JBool true)); ("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Note")); ("body", (JObj [("$type", (JStr "Lookup")); ("args", (JObj [("a\"b", (JStr "quote\" inside"))])); ("key", (JStr "tab\there"))]))]))])
+  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "Embed")); ("componentId", (JStr "back\\slash")); ("moduleId", (JStr "new\nline")); ("props", (JObj [("10", (JArr [(JInt (-1)); (JStr "quote\" inside")]))]))]))])
 
 let r_vectors_agree : unit =
   assert_norm (R.enc_node r_v0 == r_e0);

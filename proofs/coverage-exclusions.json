@@ -298,10 +298,11 @@
     {
       "members": [
         "Conformance.witnessCoverageLaw",
+        "Conformance.witnessDeclaredFieldsLaw",
         "Conformance.witnessFieldsLaw"
       ],
       "class": "measured-elsewhere",
-      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests.",
+      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests. witnessDeclaredFieldsLaw (Phase 387) is the reflection-free law the Fable pipeline runs over the committed declaredWitnessFields, which SurfaceLawsTests holds equal to reflection.",
       "standIn": "tests/Fuaran.Core.Tests/SurfaceLawsTests.fs"
     },
     {
