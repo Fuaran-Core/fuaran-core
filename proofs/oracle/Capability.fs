@@ -4700,6 +4700,10 @@ let capability_of_j : readers  ->  codec_readers  ->  jval  ->  outcome<capabili
      Error (e)
      end
 | Ok (sg) -> begin
+      
+if (not ((is_total sg))) then begin
+     Error ({d_code = OutOfRange; d_path = (Key ("signature"))::(Key ("holes"))::[]})
+     end else begin
      (match ((field "determinism" (det_agrees_j (determinism_tag sg.sg_effect.determinism)) el)) with
 | Error (e) -> begin
      Error (e)
@@ -4713,6 +4717,7 @@ let capability_of_j : readers  ->  codec_readers  ->  jval  ->  outcome<capabili
      Ok ({c_id = id; c_signature = sg; c_determinism = sg.sg_effect.determinism; c_placement = pl})
      end)
      end)
+     end
      end)
      end)
      end))
@@ -4923,7 +4928,7 @@ let wf_signature : readers  ->  signature  ->  Prims.bool = (fun ( rd  :  reader
      end)))
 
 
-let wf_capability : readers  ->  capability  ->  Prims.bool = (fun ( rd  :  readers ) ( c  :  capability ) -> ((wf_signature rd c.c_signature) && (Prims.op_Equals c.c_determinism c.c_signature.sg_effect.determinism)))
+let wf_capability : readers  ->  capability  ->  Prims.bool = (fun ( rd  :  readers ) ( c  :  capability ) -> (((wf_signature rd c.c_signature) && (is_total c.c_signature)) && (Prims.op_Equals c.c_determinism c.c_signature.sg_effect.determinism)))
 
 
 let rec first_bad_node : readers  ->  Prims.nat  ->  Prims.list<pipeline_node>  ->  FStar_Pervasives_Native.option<Prims.nat> = (fun ( rd  :  readers ) ( i  :  Prims.nat ) ( ns  :  Prims.list<pipeline_node> ) -> (match (ns) with

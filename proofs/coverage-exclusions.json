@@ -1947,6 +1947,14 @@
     },
     {
       "members": [
+        "Query.invokePageWithArgs"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 385: the paged form of the argument-typed invocation, which `invokeWithArgs` is at the first page; the registry dispatchers `queryLaws` rosters (`dispatchPageWith`, the captured and replayed forms) reach it, and the example tests pin the token and the promoted arguments it hands the resolver.",
+      "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
+    },
+    {
+      "members": [
         "Query.invoke"
       ],
       "class": "measured-elsewhere",
