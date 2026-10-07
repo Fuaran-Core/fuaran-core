@@ -2402,15 +2402,15 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.35.2 — DRAFT
+## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a
 consumer's contract, so nothing rides it; the work opening this slot is additive, which makes it a
 PATCH slot. The surface gate classes every member below `additive` (`api/Fuaran.Core.Idl.Codegen.txt`
 gains lines and loses none). A member of a higher class advances the slot rather than riding it.
 
-**Release record — the receiving gate: GREEN, both legs, against the candidate; the tag follows this
-record, and the heading above turns to `released` in the commit after it, as every slot before.** On
+**Release record — the receiving gate: GREEN, both legs, against the candidate; tagged `v0.35.2` at
+`c441e76` on 2026-10-07, the heading above turned in the commit after it, as every slot before.** On
 2026-10-07 the candidate was packed from commit `f4f665f` (the 18 packable projects, version `0.35.2`, into a folder)
 and the downstream host's Fable gate was run against it in its cut-time mode
 (`tests/core-fable/core-fable.ps1 -CoreVersion 0.35.2 -CoreFeed <folder>`). The first run FAILED on
