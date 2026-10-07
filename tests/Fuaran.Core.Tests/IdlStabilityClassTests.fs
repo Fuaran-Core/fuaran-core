@@ -901,7 +901,10 @@ module private Evolution304 =
               )
               VNode("p3", "Note", [ "body", VStr "y"; "count", VInt -7; "ratio", VFloat 2.5 ]) ]
 
-        planted @ Sample.sampleNodes oldIdl [ "Note" ] 304 200
+        planted
+        @ (match Sample.trySampleNodes oldIdl [ "Note" ] 304 200 with
+           | Ok vs -> vs
+           | Error r -> failtestf "the sampler refused the old vocabulary: %s" r.Describe)
         |> List.map (fun v ->
             match Encode.encode oldIdl v with
             | Ok b -> b

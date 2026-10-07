@@ -1531,3 +1531,33 @@ let floorTests =
                   |> List.distinct
 
               Expect.isEmpty orphans "a covered cell whose dimension no guard emits can be starved silently" ]
+
+// ---- Phase 383 — the collision search demands a budget ----
+
+[<Tests>]
+let budgetTests =
+    testList
+        "hashFnAdversarialLaws demands a budget (Phase 383)"
+        [ testCase "a budget below two is a named refusal, and the resistance law is never green over no pre-image"
+          <| fun _ ->
+              for budget in [ -1; 0; 1 ] do
+                  let results =
+                      Conformance.hashFnAdversarialLaws ConformanceTests.wideHash budget 4242
+
+                  Expect.isTrue
+                      (hasRed "budget is at least two" results)
+                      (sprintf "budget=%d is refused by name: %A" budget (redLaws results))
+
+                  Expect.isTrue
+                      (hasRed "resists a re-hashed forgery" results)
+                      (sprintf "budget=%d: the resistance law hashed nothing and must not read green" budget)
+
+          testCase "a budget of two is admitted — the refusal is the argument's, not the outcome's"
+          <| fun _ ->
+              let results = Conformance.hashFnAdversarialLaws ConformanceTests.wideHash 2 4242
+
+              Expect.isFalse
+                  (results |> List.exists (fun r -> r.Law.Contains "budget is at least two"))
+                  "no budget refusal at two"
+
+              Expect.isFalse (hasRed "resists a re-hashed forgery" results) "two distinct pre-images, no collision" ]

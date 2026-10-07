@@ -863,7 +863,7 @@ module internal OpStreamChain =
         | _ ->
             match chainOps cfg hashFn w actor n actualHead [ op ] state with
             | Ok(state', ([ r ] as added)) -> Ok(state', records @ added, { Seq = r.Seq; Hash = r.Hash })
-            | Ok(state', added) -> Ok(state', records @ added, { Seq = n; Hash = actualHead })
+            | Ok _ -> failwith "unreachable: chainOps chains exactly one record for one op"
             | Error(_, rej) -> Error(AppendRejection.Domain rej)
 
     let appendIfWith

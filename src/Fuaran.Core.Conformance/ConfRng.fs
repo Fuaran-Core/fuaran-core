@@ -125,10 +125,19 @@ module ConfRng =
             candidate, rng
 
     /// A uniformly chosen element of `xs` (index drawn by `intBelow`) and the advanced state.
-    /// Throws on an empty list — `intBelow 0` answers 0, which `List.item` rejects.
+    ///
+    /// **The sanctioned programming-error throw (Phase 384).** `xs` is a GENERATOR's alphabet —
+    /// a literal list in the law kit or a domain's generator, fixed when the generator is
+    /// written — so an empty one is a defect of that generator, not a value a run supplies. It
+    /// raises `ArgumentException` naming that, as the kit's other declaration-time refusals do;
+    /// there is deliberately no `tryChoose`, because no caller has a use for drawing from a
+    /// possibly-empty alphabet that `List.isEmpty` before the draw does not serve better.
     let choose (xs: 'a list) (r: T) : 'a * T =
-        let i, r' = intBelow (List.length xs) r
-        List.item i xs, r'
+        match xs with
+        | [] -> invalidArg "xs" "ConfRng.choose: a generator's alphabet is empty, so there is no element to choose"
+        | _ ->
+            let i, r' = intBelow (List.length xs) r
+            List.item i xs, r'
 
     /// Fisher–Yates shuffle.
     let shuffle (xs: 'a list) (r: T) : 'a list * T =

@@ -249,7 +249,8 @@ module Gen =
             idl
             kindTags
 
-    /// An authored value as compilable F# source — the scaffold leg.
+    /// An authored value as compilable F# source — the scaffold leg: an expression of type
+    /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.
     let fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> = Scaffold.fsharpValue idl t v
 
     /// The provenance header every scaffold leg emits.

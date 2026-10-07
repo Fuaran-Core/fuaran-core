@@ -431,12 +431,3 @@ module Sample =
                 Ok [ for i in 0 .. count - 1 -> sampleNode idl r 3 (kindTags.[i % List.length kindTags]) ]
             with Unsampleable(at, reason) ->
                 Error { At = at; Reason = reason }
-
-    /// [[trySampleNodes]] for a vocabulary the caller knows to be sampleable: the same
-    /// vectors, and a refusal raised as `InvalidOperationException` carrying
-    /// [[SampleRefusal.Describe]]. Prefer [[trySampleNodes]] over a vocabulary read from
-    /// outside.
-    let sampleNodes (idl: Idl) (kindTags: string list) (seed: int) (count: int) : IdlValue list =
-        match trySampleNodes idl kindTags seed count with
-        | Ok vs -> vs
-        | Error refusal -> invalidOp refusal.Describe

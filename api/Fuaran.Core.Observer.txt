@@ -10,6 +10,9 @@ ctor Fuaran.Core.ObserverEntry`2..ctor(!0, Microsoft.FSharp.Core.FSharpOption`1<
 ctor Fuaran.Core.ObserverOptions`1..ctor(System.Boolean, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, System.Boolean>>)
 ctor Fuaran.Core.ObserverState`2..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.ObserverEntry`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.ObserverWitness`2..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<!1>>, Fuaran.Core.ObserverOptions`1<!1>)
+field Fuaran.Core.ObserverDefect+Tags.RepeatedInOrder : System.Int32 (literal)
+field Fuaran.Core.ObserverDefect+Tags.UnorderedEntry : System.Int32 (literal)
+field Fuaran.Core.ObserverDefect+Tags.UnregisteredInOrder : System.Int32 (literal)
 interface-marker Fuaran.Core.Observer.IObserver`2
 method Fuaran.Core.Observer.IObserver`2.Observe(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Observation`2<!0, !1>>
 method Fuaran.Core.Observer.IObserver`2.ObserveTree(System.String) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Observation`2<!0, !1>>
@@ -29,6 +32,7 @@ method Fuaran.Core.ObserverWitness.empty`2() : Fuaran.Core.ObserverState`2<!!0, 
 method Fuaran.Core.ObserverWitness.observeTree`2(Fuaran.Core.ObserverState`2<!!0, !!1>, System.String) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Observation`2<!!0, !!1>>
 method Fuaran.Core.ObserverWitness.register`2(Fuaran.Core.ObserverWitness`2<!!0, !!1>, System.String, !!0, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Fuaran.Core.ObserverState`2<!!0, !!1>) : System.Tuple`2<Fuaran.Core.ObserverState`2<!!0, !!1>, Fuaran.Core.Observation`2<!!0, !!1>>
 method Fuaran.Core.ObserverWitness.snapshot`2(Fuaran.Core.ObserverState`2<!!0, !!1>, System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Observation`2<!!0, !!1>>
+method Fuaran.Core.ObserverWitness.tryObserveTree`2(Fuaran.Core.ObserverState`2<!!0, !!1>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Observation`2<!!0, !!1>>, Fuaran.Core.ObserverDefect>
 method Fuaran.Core.ObserverWitness.unregister`2(System.String, Fuaran.Core.ObserverState`2<!!0, !!1>) : Fuaran.Core.ObserverState`2<!!0, !!1>
 method Fuaran.Core.ObserverWitness.update`2(Fuaran.Core.ObserverWitness`2<!!0, !!1>, System.String, !!0, Fuaran.Core.ObserverState`2<!!0, !!1>) : System.Tuple`2<Fuaran.Core.ObserverState`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Observation`2<!!0, !!1>>>
 property Fuaran.Core.Observer.InMemoryObserver`2.State : Fuaran.Core.ObserverState`2<!0, !1> { get }
@@ -49,9 +53,17 @@ type Fuaran.Core.Observer.IObserver`2 (interface)
 type Fuaran.Core.Observer.InMemoryObserver (module)
 type Fuaran.Core.Observer.InMemoryObserver`2 (type)
 type Fuaran.Core.Observer.ObserverOptions (module)
+type Fuaran.Core.ObserverDefect (union)
+type Fuaran.Core.ObserverDefect+RepeatedInOrder (type)
+type Fuaran.Core.ObserverDefect+Tags (type)
+type Fuaran.Core.ObserverDefect+UnorderedEntry (type)
+type Fuaran.Core.ObserverDefect+UnregisteredInOrder (type)
 type Fuaran.Core.ObserverEntry`2 (record)
 type Fuaran.Core.ObserverOptions (module)
 type Fuaran.Core.ObserverOptions`1 (record)
 type Fuaran.Core.ObserverState`2 (record)
 type Fuaran.Core.ObserverWitness (module)
 type Fuaran.Core.ObserverWitness`2 (record)
+union-case Fuaran.Core.ObserverDefect.NewRepeatedInOrder #1(nodeId: System.String)
+union-case Fuaran.Core.ObserverDefect.NewUnorderedEntry #2(nodeId: System.String)
+union-case Fuaran.Core.ObserverDefect.NewUnregisteredInOrder #0(nodeId: System.String)

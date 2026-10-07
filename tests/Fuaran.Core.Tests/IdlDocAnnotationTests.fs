@@ -5,6 +5,13 @@ open System.IO
 open Expecto
 open Fuaran.Core.Idl
 
+/// `Declare.enumAnnotate` over a well-formed fixture: its refusal (an error list since Phase 384)
+/// is a defect of the suite.
+let private annotate (annotations: (string * Annotations) list) (e: IdlEnum) : IdlEnum =
+    match Declare.enumAnnotate annotations e with
+    | Ok e -> e
+    | Error errors -> failwithf "the fixture annotation was refused: %s" (String.concat "; " errors)
+
 // ---------------------------------------------------------------------------
 // Phase 255 — the authored `doc` annotation: what a member IS, declared once in
 // the IDL, carried by the artifact and emitted by the F# generator as the
@@ -82,7 +89,7 @@ let docIdl: Idl =
       Enums =
         [ Declare.enumOf "Tone" [ "Quiet"; "Loud" ]
           // A doc that OPENS with `<` — the one shape the compiler reads as XML.
-          |> Declare.enumAnnotate [ "Loud", doc "<'T> is not a tag here: Option<'T> & friends." ] ]
+          |> annotate [ "Loud", doc "<'T> is not a tag here: Option<'T> & friends." ] ]
       Records =
         [ { Name = "Pair"
             Fields =
@@ -269,7 +276,7 @@ let tests =
                   { docIdl with
                       Enums =
                           [ Declare.enumOf "Tone" [ "Quiet"; "Loud" ]
-                            |> Declare.enumAnnotate
+                            |> annotate
                                 [ "Loud",
                                   { Annotations.Empty with
                                       Doc = Some "  <b> leads, after spaces."

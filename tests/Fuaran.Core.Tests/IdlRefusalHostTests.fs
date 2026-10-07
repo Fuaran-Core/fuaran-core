@@ -430,7 +430,9 @@ let private mutationsOf (c: Certified) (count: int) : string list =
     let tags = c.Idl.Kinds |> List.map _.Tag
 
     let valid =
-        Sample.sampleNodes c.Idl tags (20261002 + c.Name.Length) 200
+        (match Sample.trySampleNodes c.Idl tags (20261002 + c.Name.Length) 200 with
+         | Ok vs -> vs
+         | Error r -> failwithf "%s: the sampler refused: %s" c.Name r.Describe)
         |> List.choose (fun v -> Encode.encode c.Idl v |> Result.toOption)
         // The compiled host runs the hosted codec the other two do not; keep the documents all
         // three read, so a mutation is the only fault in it.

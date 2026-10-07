@@ -26,6 +26,13 @@ open Fuaran.Core.Idl
 
 /// Lower-case wire strings that are not legal F# case names — the `liveRegion`
 /// shape that motivated the split.
+/// `Sample.trySampleNodes` over this suite's well-formed vocabulary; a refusal is a defect of
+/// the suite.
+let private sampleOf (idl: Idl) (tags: string list) (seed: int) (count: int) : IdlValue list =
+    match Sample.trySampleNodes idl tags seed count with
+    | Ok vs -> vs
+    | Error r -> failwithf "the sampler refused: %s" r.Describe
+
 let private liveRegion =
     Declare.enumWith "LiveRegion" [ "Off", "off"; "Polite", "polite"; "Assertive", "assertive" ]
 
@@ -226,7 +233,7 @@ let tests =
 
               let sampled =
                   [ for seed in 1..40 do
-                        for v in Sample.sampleNodes idl [ "Note" ] seed 1 do
+                        for v in sampleOf idl [ "Note" ] seed 1 do
                             match v with
                             | VNode(_, _, fields) ->
                                 match fields |> List.tryFind (fun (n, _) -> n = "live") with
@@ -241,7 +248,7 @@ let tests =
 
               // …and the sample actually encodes, which a case-name leak would not.
               for seed in 1..40 do
-                  for v in Sample.sampleNodes idl [ "Note" ] seed 1 do
+                  for v in sampleOf idl [ "Note" ] seed 1 do
                       match Encode.encode idl v with
                       | Ok _ -> ()
                       | Error e -> failtestf "a sampled node failed to encode: %s" e)

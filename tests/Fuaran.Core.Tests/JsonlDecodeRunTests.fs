@@ -331,3 +331,35 @@ let tests =
               Expect.exists short (fun m -> m.StartsWith "run \\n |") "on a run before a short escape"
               Expect.isNonEmpty dropped "a decoder that drops the run after an escape is caught"
               Expect.exists dropped (fun m -> m.StartsWith "\\n run |") "on a run after a short escape" ]
+
+// ---- Phase 383 — the OpStream impossible branches fail loudly ----
+
+[<Tests>]
+let impossibleBranchTests =
+    testList
+        "OpStream impossible branches (Phase 383)"
+        // The two impossible branches the 2026-10-07 review named fail loudly in the house style
+        // rather than answering a plausible value; nothing can reach them, so the source is read.
+        [ testCase "the linear append's and the keyed capture's impossible branches fail loudly"
+          <| fun _ ->
+              let read (rel: string) =
+                  System.IO.File.ReadAllText(Snapshots.repoFile rel).Replace("\r\n", "\n")
+
+              let chain = read "src/Fuaran.Core.OpStream/Chain.fs"
+              let capture = read "src/Fuaran.Core.OpStream/Capture.fs"
+
+              Expect.isFalse
+                  (chain.Contains "{ Seq = n; Hash = actualHead }")
+                  "no EntryRef fabricated at the previous head"
+
+              Expect.stringContains
+                  chain
+                  "failwith \"unreachable: chainOps chains exactly one record for one op\""
+                  "the append's fallback arm fails loudly"
+
+              Expect.isFalse (capture.Contains "| Error _ -> attempted") "no settle failure dropped"
+
+              Expect.stringContains
+                  capture
+                  "failwithf \"unreachable: the attempt just journalled for %s/%d did not settle\""
+                  "the keyed capture's settle arm fails loudly" ]

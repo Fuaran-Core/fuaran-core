@@ -826,7 +826,42 @@ let private withDefaults (idl: Idl) (defaults: IdlDefault list) = { idl with Def
 let descriptorTableTests =
     testList
         "Phase 293 — the classifier's descriptor table"
-        [ testCase "a type change across a NESTED erased slot is undecided, exit 4, and shape-unreadable" (fun _ ->
+        [ testCase
+              "the descriptor table has a rule for every Change case (Phase 384: the suite holds it, not ruleOf)"
+              (fun _ ->
+                  // `ruleOf` used to reflect over `Change` and raise on its first use when a case had no
+                  // rule — a completeness check of this SOURCE executed on a consumer's machine. It is
+                  // held here instead. Every row of `mappingTable` is a projection of one rule and names
+                  // its case, so a case named by no row is a case with no rule (or one that documents
+                  // nothing, which the generated `docs/` table must not omit either).
+                  let cases =
+                      Microsoft.FSharp.Reflection.FSharpType.GetUnionCases(
+                          typeof<Diff.Change>,
+                          System.Reflection.BindingFlags.Public
+                      )
+                      |> Array.map (fun c -> c.Name)
+                      |> Set.ofArray
+
+                  let ruled =
+                      Diff.mappingTable.Split('\n')
+                      |> Array.choose (fun line ->
+                          let cells = line.Split('|') |> Array.map (fun c -> c.Trim())
+
+                          // `| Change | Wire severity | F# consequence | Classifier case |` — the last
+                          // cell, back-quoted, on every data row.
+                          let last = if cells.Length >= 6 then cells[cells.Length - 2] else ""
+
+                          if last.StartsWith "`" && last.EndsWith "`" then
+                              Some(last.Trim('`'))
+                          else
+                              None)
+                      |> Set.ofArray
+
+                  Expect.isGreaterThan cases.Count 10 "the reflection read the union (the probe saw its cases)"
+                  Expect.equal (Set.difference cases ruled) Set.empty "every Change case has a rule"
+                  Expect.equal (Set.difference ruled cases) Set.empty "and every rule names a Change case")
+
+          testCase "a type change across a NESTED erased slot is undecided, exit 4, and shape-unreadable" (fun _ ->
               // The rule used to test the top-level tag alone, so a list of hosted values
               // moving to a list of verbatim JSON reported `breaking-wire` where the document
               // said undecided — the artifact states nothing about what either slot admits.

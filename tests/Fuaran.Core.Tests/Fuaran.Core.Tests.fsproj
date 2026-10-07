@@ -353,6 +353,12 @@
          Snapshots.fs; appended (append-only). -->
     <Compile Include="PackageDocsTests.fs" />
     <Compile Include="ReadmeClaimsTests.fs" />
+    <!-- Phase 392 — "released" is a gate output: every tag at or above the entry floor is headed
+         `released … as v<v>` (DRAFT over a tag is red by name), every released heading has its tag,
+         the untagged standing version is headed DRAFT, and every released slot from 0.31.0 names its
+         receiving-gate run in a fixed grammar. Reads PackageRosterTests.fs, ChildProcess.fs and
+         Snapshots.fs; appended (append-only). -->
+    <Compile Include="ReleaseRecordTests.fs" />
 
     <!-- Phase 303 — every certification vocabulary's generated F# module is COMPILED: the score
          vocabulary's (field-less kinds emit as marker types) and the reference vocabulary's under its

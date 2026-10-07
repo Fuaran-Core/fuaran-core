@@ -32,7 +32,14 @@ type Note =
       Shape: Shape
       Level: Level }
 
-let private level: Codec<Level> = Codec.enum [ "low", Low; "high", High ]
+/// A fixture declaration, built: these are well-formed, so a refusal is a defect of the suite.
+let private declared (r: Result<Codec<'T>, CodecDeclarationFault list>) : Codec<'T> =
+    match r with
+    | Ok c -> c
+    | Error faults -> failwithf "the fixture declaration was refused: %A" faults
+
+let private level: Codec<Level> =
+    Codec.enum [ "low", Low; "high", High ] |> declared
 
 let private shape: Codec<Shape> =
     Codec.union
@@ -55,6 +62,7 @@ let private shape: Codec<Shape> =
               (Codec.record (fun w h -> w, h)
                |> Codec.field "w" fst Codec.int
                |> Codec.field "h" snd Codec.int) ]
+    |> declared
 
 let private note: Codec<Note> =
     Codec.record (fun i t tags p s l ->
@@ -71,6 +79,7 @@ let private note: Codec<Note> =
     |> Codec.field "shape" (fun n -> n.Shape) shape
     |> Codec.field "level" (fun n -> n.Level) level
     |> Codec.build
+    |> declared
 
 let private multiLine =
     { Id = "n1"
@@ -180,8 +189,8 @@ let tests =
               [ for name, value, v1, v2 in vectors do
                     testCase name
                     <| fun () ->
-                        Expect.equal (Codec.write EncodingProfile.V1 note value) v1 "V1 bytes"
-                        Expect.equal (Codec.write EncodingProfile.V2 note value) v2 "V2 bytes"
+                        Expect.equal (Codec.write EncodingProfile.V1 note value) (Ok v1) "V1 bytes"
+                        Expect.equal (Codec.write EncodingProfile.V2 note value) (Ok v2) "V2 bytes"
 
                         for p, text in [ EncodingProfile.V1, v1; EncodingProfile.V2, v2 ] do
                             Expect.equal (Codec.read note text) (Ok value) "reads back"
@@ -273,14 +282,14 @@ let tests =
                         [ DecodeCode.OutOfRange, "a positive int" ]
                         "refused"
 
-                    Expect.equal (positive.ReadAll(positive.Write 3)) (Ok 3) "admitted"
+                    Expect.equal (positive.Write 3 |> Result.map positive.ReadAll) (Ok(Ok 3)) "admitted"
 
                 testCase "Codec.map carries an isomorphism: the bytes, the refusals and the schema are the base codec's"
                 <| fun () ->
                     let tagged =
                         Codec.map (fun (s: string) -> "#" + s) (fun (s: string) -> s.Substring 1) Codec.string
 
-                    Expect.equal (tagged.Write "#x") (JStr "x") "written as the base"
+                    Expect.equal (tagged.Write "#x") (Ok(JStr "x")) "written as the base"
                     Expect.equal (tagged.ReadAll(JStr "x")) (Ok "#x") "read through there"
 
                     Expect.equal
@@ -300,26 +309,37 @@ let tests =
                         "one defect" ]
 
           testList
-              "Codec — declarations refused when built"
-              [ testCase "a member declared twice"
+              "Codec — declarations refused when built, values refused when written (Phase 384)"
+              [ testCase "a member declared twice is a typed refusal, one per repeated name"
                 <| fun () ->
-                    Expect.throwsT<ArgumentException>
-                        (fun () ->
-                            Codec.record (fun (a: int) (b: int) -> a + b)
-                            |> Codec.field "a" id Codec.int
-                            |> Codec.field "a" id Codec.int
-                            |> Codec.build
-                            |> ignore)
-                        "refused"
+                    let built =
+                        Codec.record (fun (a: int) (b: int) (c: int) -> a + b + c)
+                        |> Codec.field "a" id Codec.int
+                        |> Codec.field "a" id Codec.int
+                        |> Codec.field "a" id Codec.int
+                        |> Codec.build
 
-                testCase "an enum spelling twice, a union tag twice, a discriminator declared as a member"
+                    match built with
+                    | Error faults ->
+                        Expect.equal faults [ CodecDeclarationFault.RepeatedMember("a", None) ] "named once"
+                    | Ok _ -> failtest "a repeated member was built"
+
+                testCase "an enum spelling twice, a union tag twice, a case member twice, a discriminator as a member"
                 <| fun () ->
-                    Expect.throwsT<ArgumentException> (fun () -> Codec.enum [ "a", 1; "a", 2 ] |> ignore) "enum"
+                    Expect.equal
+                        (Codec.enum [ "a", 1; "a", 2; "b", 3; "b", 4 ] |> Result.map ignore)
+                        (Error
+                            [ CodecDeclarationFault.RepeatedSpelling "a"
+                              CodecDeclarationFault.RepeatedSpelling "b" ])
+                        "enum: every repeated spelling"
 
                     let circle =
                         Codec.case "c" (fun (x: float) -> Some x) id (Codec.record id |> Codec.field "r" id Codec.float)
 
-                    Expect.throwsT<ArgumentException> (fun () -> Codec.union "kind" [ circle; circle ] |> ignore) "tag"
+                    Expect.equal
+                        (Codec.union "kind" [ circle; circle ] |> Result.map ignore)
+                        (Error [ CodecDeclarationFault.RepeatedTag "c" ])
+                        "tag"
 
                     let clash =
                         Codec.case
@@ -328,11 +348,99 @@ let tests =
                             id
                             (Codec.record id |> Codec.field "kind" id Codec.float)
 
-                    Expect.throwsT<ArgumentException> (fun () -> Codec.union "kind" [ clash ] |> ignore) "discriminator"
+                    Expect.equal
+                        (Codec.union "kind" [ clash ] |> Result.map ignore)
+                        (Error [ CodecDeclarationFault.DiscriminatorAsMember("c", "kind") ])
+                        "discriminator"
 
-                testCase "a value outside the declaration is refused when written"
+                    // `case` is total; the member it repeats is the closing `union`'s refusal,
+                    // reported beside every other fault, in declaration order.
+                    let twice =
+                        Codec.case
+                            "d"
+                            (fun (x: float) -> Some(x, x))
+                            fst
+                            (Codec.record (fun a b -> a, b)
+                             |> Codec.field "r" fst Codec.float
+                             |> Codec.field "r" snd Codec.float)
+
+                    Expect.equal
+                        (Codec.union "kind" [ twice; clash; clash ] |> Result.map ignore)
+                        (Error
+                            [ CodecDeclarationFault.RepeatedMember("r", Some "d")
+                              CodecDeclarationFault.RepeatedTag "c"
+                              CodecDeclarationFault.DiscriminatorAsMember("c", "kind")
+                              CodecDeclarationFault.DiscriminatorAsMember("c", "kind") ])
+                        "every fault"
+
+                testCase
+                    "a value outside the declaration is refused by Write, at its path — the one writer, which never raises"
                 <| fun () ->
-                    Expect.throwsT<ArgumentException> (fun () -> (Codec.enum [ "a", 1 ]).Write 2 |> ignore) "enum" ]
+                    let partial = Codec.enum [ "a", 1 ] |> declared
+                    Expect.equal (partial.Write 1) (Ok(JStr "a")) "a declared value writes"
+                    Expect.equal (partial.Write 2) (Error(CodecDeclarationFault.Unrecognised [])) "enum"
+
+                    let onlyCircles =
+                        Codec.union
+                            "kind"
+                            [ Codec.case
+                                  "circle"
+                                  (fun s ->
+                                      match s with
+                                      | Circle r -> Some r
+                                      | _ -> None)
+                                  Circle
+                                  (Codec.record id |> Codec.field "radius" id Codec.float) ]
+                        |> declared
+
+                    let holder =
+                        Codec.record id
+                        |> Codec.field "shapes" id (Codec.list onlyCircles)
+                        |> Codec.build
+                        |> declared
+
+                    Expect.equal
+                        (holder.Write [ Circle 1.0; Rect(1, 2) ])
+                        (Error(CodecDeclarationFault.Unrecognised [ PathSegment.Key "shapes"; PathSegment.Index 1 ]))
+                        "a union nested in a record's list, named at the value"
+
+                    Expect.equal
+                        (CodecDeclarationFault.describe (
+                            CodecDeclarationFault.Unrecognised [ PathSegment.Key "shapes"; PathSegment.Index 1 ]
+                        ))
+                        "no case of the declaration recognises the value at $[\"shapes\"][1]"
+                        "the sentence names the path"
+
+                    // `Codec.write`, the text form, answers the same refusal rather than raising.
+                    Expect.equal
+                        (Codec.write EncodingProfile.V2 partial 2)
+                        (Error(CodecDeclarationFault.Unrecognised []))
+                        "Codec.write refuses where Write does"
+
+                    // The corpus bridge's encoder is total over text: a refused value is encoded as
+                    // the refusal's sentence, which no decode admits, so the round-trip law goes red.
+                    match Corpus.roundTrip (Codec.corpus EncodingProfile.V2 partial) 2 with
+                    | Error m -> Expect.stringContains m "refused to write" "the law names the refusal"
+                    | Ok() -> failtest "a value the codec refuses round-tripped"
+
+                    // `CodecDeclarationFault.under` prefixes a write refusal's path, and leaves a
+                    // build-time fault, which has no path, as it is.
+                    Expect.equal
+                        (CodecDeclarationFault.under
+                            (PathSegment.Key "k")
+                            (CodecDeclarationFault.Unrecognised [ PathSegment.Index 0 ]))
+                        (CodecDeclarationFault.Unrecognised [ PathSegment.Key "k"; PathSegment.Index 0 ])
+                        "a path gains its step at the head"
+
+                    Expect.equal
+                        (CodecDeclarationFault.under (PathSegment.Key "k") (CodecDeclarationFault.RepeatedTag "t"))
+                        (CodecDeclarationFault.RepeatedTag "t")
+                        "a build-time fault is unchanged"
+
+                    Expect.equal
+                        (note.Write plain |> Result.map (Canonical.write EncodingProfile.V2))
+                        (Codec.write EncodingProfile.V2 note plain)
+                        "over a covered value, Codec.write is Canonical.write of Write" ]
 
           testList
               "Codec — the schema agrees with the decoder (an independent validator)"

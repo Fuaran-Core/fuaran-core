@@ -88,7 +88,7 @@ method Fuaran.Core.Idl.Artifact.parseDetailed(System.String) : Microsoft.FSharp.
 method Fuaran.Core.Idl.Artifact.render(Fuaran.Core.Idl.Idl) : System.String
 method Fuaran.Core.Idl.Artifact.renderJson(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Idl.Artifact.renderWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : System.String
-method Fuaran.Core.Idl.Declare.enumAnnotate(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Fuaran.Core.Idl.IdlEnum) : Fuaran.Core.Idl.IdlEnum
+method Fuaran.Core.Idl.Declare.enumAnnotate(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Fuaran.Core.Idl.IdlEnum) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlEnum, Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 method Fuaran.Core.Idl.Declare.enumOf(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Fuaran.Core.Idl.IdlEnum
 method Fuaran.Core.Idl.Declare.enumWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.Declare.enumWith(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>) : Fuaran.Core.Idl.IdlEnum
@@ -115,7 +115,6 @@ method Fuaran.Core.Idl.ProposalModule.parse(System.String) : Microsoft.FSharp.Co
 method Fuaran.Core.Idl.ProposalModule.parseDetailed(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.Proposal, Fuaran.Core.DecodeError>
 method Fuaran.Core.Idl.ProposalModule.touchedKinds(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalDelta>) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.ProposalModule.validate(Fuaran.Core.Idl.Proposal) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
-method Fuaran.Core.Idl.Sample.sampleNodes(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlValue>
 method Fuaran.Core.Idl.Sample.trySampleNodes(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Int32, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlValue>, Fuaran.Core.Idl.Sample+SampleRefusal>
 method Fuaran.Core.Idl.Sanitize.isAllowedAttributeKey(System.String) : System.Boolean
 method Fuaran.Core.Idl.Sanitize.isSafeAttributeValue(System.String) : System.Boolean

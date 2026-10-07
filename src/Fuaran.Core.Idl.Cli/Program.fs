@@ -84,8 +84,10 @@ let private usage =
     + "  in-memory copy and four legs run (generate, corpus, fuzz, candidates), then the\n"
     + "  stability cost is reported. --corpus names the directory holding the `nodes/`\n"
     + "  family; without it the corpus leg reports not-checked and the run is not green.\n"
-    + "  Exits 0 every leg passed, 1 a leg failed, 2 the document did not read. A green\n"
-    + "  exit removes one objection; it is never a recommendation.\n"
+    + "  Exits 0 every leg passed, 1 a leg failed, 2 refused: an unknown flag, a\n"
+    + "  non-integer --seed or --vectors, an input that did not read, or an --out that\n"
+    + "  could not be written. A green exit removes one objection; it is never a\n"
+    + "  recommendation.\n"
     + "\n"
     + "EXIT CODES (classify, without --expect)\n"
     + "  0  unchanged / host-surface / additive — a consumer absorbs it by repinning\n"
@@ -231,10 +233,77 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
 
                             1
 
+/// The `spike-proposal` options (Phase 384), parsed STRICTLY as `classify`'s are: an
+/// unrecognised flag, a flag without its value and a non-integer `--seed` / `--vectors` are
+/// refused rather than ignored or defaulted, because a spike run on a seed the operator did not
+/// ask for reports on vectors nobody chose.
+type private SpikeOptions =
+    { Idl: string option
+      Corpus: string option
+      Out: string option
+      Seed: int
+      Vectors: int }
+
+let rec private spikeOptions (acc: SpikeOptions) (argv: string list) : Result<SpikeOptions, string> =
+    let integer (flag: string) (value: string) (set: int -> SpikeOptions) rest =
+        match
+            System.Int32.TryParse(
+                value,
+                System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture
+            )
+        with
+        | true, n -> spikeOptions (set n) rest
+        | _ -> Error(sprintf "%s takes an integer, not '%s'" flag value)
+
+    match argv with
+    | [] -> Ok acc
+    | "--idl" :: value :: rest -> spikeOptions { acc with Idl = Some value } rest
+    | "--corpus" :: value :: rest -> spikeOptions { acc with Corpus = Some value } rest
+    | "--out" :: value :: rest -> spikeOptions { acc with Out = Some value } rest
+    | "--seed" :: value :: rest -> integer "--seed" value (fun n -> { acc with Seed = n }) rest
+    | "--vectors" :: value :: rest -> integer "--vectors" value (fun n -> { acc with Vectors = n }) rest
+    | [ ("--idl" | "--corpus" | "--out") as flag ] -> Error(sprintf "%s needs a path" flag)
+    | [ ("--seed" | "--vectors") as flag ] -> Error(sprintf "%s needs an integer" flag)
+    | other :: _ -> Error(sprintf "unrecognised option: %s" other)
+
+/// The corpus leg's `nodes/` documents under `root`, ordinally sorted, each read through
+/// `readFile`. A `--corpus` that names no directory is refused, as an `--idl` naming no file is;
+/// a root without a `nodes/` family is an empty corpus, which the leg reports as not checked.
+let private readCorpus (root: string) : Result<(string * string) list, string> =
+    if not (Directory.Exists root) then
+        Error(sprintf "--corpus names no directory: %s" root)
+    else
+        let dir = Path.Combine(root, "nodes")
+
+        if not (Directory.Exists dir) then
+            Ok []
+        else
+            let listed =
+                try
+                    Ok(Directory.GetFiles(dir, "*.json"))
+                with e ->
+                    Error(sprintf "corpus unreadable (%s): %s" dir e.Message)
+
+            listed
+            |> Result.bind (fun files ->
+                files
+                |> Array.filter (fun p -> not ((Path.GetFileName p).EndsWith ".expected.json"))
+                |> Array.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+                |> Array.toList
+                |> List.fold
+                    (fun acc p ->
+                        acc
+                        |> Result.bind (fun docs ->
+                            readFile "corpus document" p
+                            |> Result.map (fun text -> (Path.GetFileName p, text) :: docs)))
+                    (Ok [])
+                |> Result.map List.rev)
+
 /// Phase 702 — price a vocabulary-change proposal against a vocabulary without cutting a
 /// branch or writing a declaration. Phase 230 moved it here from the repository's own test
-/// runner (where it was the `--spike-proposal` flag); the flags, the report and the exit
-/// codes are unchanged, which is why its refusals still go to stderr rather than stdout.
+/// runner (where it was the `--spike-proposal` flag); its refusals still go to stderr rather
+/// than stdout, as they did there.
 ///
 /// The vocabulary is an ARGUMENT (`--idl <idl.json>`), read through `Artifact.parse` —
 /// Phase 114's inversion is what makes that possible, and Phase 123 is where it was needed:
@@ -248,79 +317,87 @@ let private classify (beforePath: string) (afterPath: string) (rest: string list
 /// spike whose additive claim went unexamined must not read as a spike that examined it and
 /// found nothing.
 ///
-/// Exit: 0 every leg passed · 1 a leg failed · 2 the document did not read. A green exit is
-/// the removal of one objection, never a recommendation — nothing downstream of this command
-/// may treat 0 as an admission.
+/// Phase 384 — the options are parsed strictly ([[spikeOptions]]) and every read and the
+/// `--out` write are guarded, as `classify`'s are: an unknown flag, a non-integer `--seed` or
+/// `--vectors`, a missing proposal or vocabulary file, a `--corpus` naming no directory and an
+/// unwritable `--out` are each a one-line refusal and exit 2, never a stack trace.
+///
+/// Exit: 0 every leg passed · 1 a leg failed · 2 refused (bad usage, or an input that did not
+/// read, or an output that could not be written). A green exit is the removal of one
+/// objection, never a recommendation — nothing downstream of this command may treat 0 as an
+/// admission.
 let private spikeProposal (proposalPath: string) (rest: string list) : int =
-    let flag name =
-        rest
-        |> List.pairwise
-        |> List.tryPick (fun (a, b) -> if a = name then Some b else None)
-
-    let intFlag name fallback =
-        match flag name with
-        | Some v ->
-            match System.Int32.TryParse v with
-            | true, n -> n
-            | _ -> fallback
-        | None -> fallback
-
-    let corpus =
-        match flag "--corpus" with
-        | None -> []
-        | Some root ->
-            let dir = Path.Combine(root, "nodes")
-
-            if not (Directory.Exists dir) then
-                []
-            else
-                Directory.GetFiles(dir, "*.json")
-                |> Array.filter (fun p -> not ((Path.GetFileName p).EndsWith ".expected.json"))
-                |> Array.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
-                |> Array.map (fun p -> Path.GetFileName p, File.ReadAllText p)
-                |> List.ofArray
-
-    let baseIdl =
-        match flag "--idl" with
-        | None -> Error "no --idl <idl.json> given — the spike prices a proposal AGAINST a vocabulary"
-        | Some path ->
-            if File.Exists path then
-                Artifact.parse (File.ReadAllText path)
-            else
-                Error(sprintf "--idl names no file: %s" path)
-
-    match baseIdl, Proposal.parse (File.ReadAllText proposalPath) with
-    | Error e, _ ->
-        eprintfn "spike-proposal: the vocabulary did not read — %s" e
+    let refuseSpike (message: string) =
+        eprintfn "spike-proposal: %s" message
         2
-    | _, Error e ->
-        eprintfn "spike-proposal: the document did not read — %s" e
-        2
-    | Ok baseVocabulary, Ok proposal ->
+
+    let inputs =
+        spikeOptions
+            { Idl = None
+              Corpus = None
+              Out = None
+              // Pinned, not clock-derived: a divergence a spike finds has to
+              // reproduce from the report alone on another machine.
+              Seed = 20260826
+              Vectors = 200 }
+            rest
+        |> Result.bind (fun opts ->
+            match opts.Idl with
+            | None -> Error "no --idl <idl.json> given — the spike prices a proposal AGAINST a vocabulary"
+            | Some path ->
+                (if File.Exists path then
+                     readFile "--idl" path
+                 else
+                     Error(sprintf "--idl names no file: %s" path))
+                |> Result.bind (fun text ->
+                    Artifact.parse text
+                    |> Result.mapError (fun e -> "the vocabulary did not read — " + e))
+                |> Result.map (fun vocabulary -> opts, vocabulary))
+        |> Result.bind (fun (opts, vocabulary) ->
+            readFile "proposal" proposalPath
+            |> Result.bind (fun text ->
+                Proposal.parse text
+                |> Result.mapError (fun e -> "the document did not read — " + e))
+            |> Result.map (fun proposal -> opts, vocabulary, proposal))
+        |> Result.bind (fun (opts, vocabulary, proposal) ->
+            match opts.Corpus with
+            | None -> Ok(opts, vocabulary, proposal, [])
+            | Some root -> readCorpus root |> Result.map (fun corpus -> opts, vocabulary, proposal, corpus))
+
+    match inputs with
+    | Error e -> refuseSpike e
+    | Ok(opts, baseVocabulary, proposal, corpus) ->
         match
             ProposalSpike.run
                 { Base = baseVocabulary
                   Proposal = proposal
                   Corpus = corpus
-                  // Pinned, not clock-derived: a divergence a spike finds has to
-                  // reproduce from the report alone on another machine.
-                  FuzzSeed = intFlag "--seed" 20260826
-                  FuzzVectors = intFlag "--vectors" 200
+                  FuzzSeed = opts.Seed
+                  FuzzVectors = opts.Vectors
                   External = [] }
         with
-        | Error e ->
-            eprintfn "spike-proposal: %s" e
-            2
+        | Error e -> refuseSpike e
         | Ok report ->
             let text = ProposalSpike.render report
+            let code = if report.Green then 0 else 1
 
-            match flag "--out" with
+            match opts.Out with
+            | None ->
+                printf "%s" text
+                code
             | Some out ->
-                File.WriteAllText(out, text)
-                printfn "wrote %s" out
-            | None -> printf "%s" text
+                let written =
+                    try
+                        File.WriteAllText(out, text)
+                        Ok()
+                    with e ->
+                        Error(sprintf "--out unwritable (%s): %s" out e.Message)
 
-            if report.Green then 0 else 1
+                match written with
+                | Error e -> refuseSpike e
+                | Ok() ->
+                    printfn "wrote %s" out
+                    code
 
 /// Dispatches on the verb. Exit 2 means no verdict was reached (bad usage, an unknown verb,
 /// an empty argument list, an unreadable or malformed input); `--help` exits 0. Every other
