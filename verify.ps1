@@ -8,7 +8,12 @@ param(
     # pinned F*/Z3 and hold the committed oracle to a fresh extraction. Opt-in here because it
     # installs a prover; CI's proofs job runs it on every push. The oracle HOST (the Proofs.Oracle
     # differential family) needs no prover and runs in the ordinary suite below, always.
-    [switch] $Proofs
+    [switch] $Proofs,
+    # Phase 395 — the configuration built and tested. Debug stays the default so a contributor's
+    # command is unchanged; publish-packages runs `-Configuration Release` and then packs
+    # `--no-build` from that same output, so the bytes the gate verified are the bytes that ship.
+    [ValidateSet('Debug', 'Release')]
+    [string] $Configuration = 'Debug'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,7 +37,7 @@ if (-not $SkipFormatCheck) {
 }
 
 $global:LASTEXITCODE = 0
-dotnet build Fuaran.Core.slnx --nologo
+dotnet build Fuaran.Core.slnx --nologo -c $Configuration
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # The Fable compile and the cross-pipeline VALUE-parity leg do not run here (Phase 217). The Fable
@@ -44,13 +49,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # (`fable-exclusions.json`), including the check that no script here invokes the compiler.
 
 $global:LASTEXITCODE = 0
-dotnet run --project tests/Fuaran.Core.Tests --no-build
+dotnet run --project tests/Fuaran.Core.Tests --no-build -c $Configuration
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # The reference adoption sample (docs/ADOPTION.md) must certify GREEN — it exercises the
 # whole adoption path (witness laws + op-algebra + reducer + op-stream) end to end.
 $global:LASTEXITCODE = 0
-dotnet run --project samples/adoption --no-build
+dotnet run --project samples/adoption --no-build -c $Configuration
 if ($LASTEXITCODE -ne 0) {
     Write-Host '==== verify: adoption sample FAILED its conformance report' -ForegroundColor Red
     exit $LASTEXITCODE
