@@ -1668,8 +1668,9 @@ let proofCoverageTests =
               match regenerateOperationTable (renderOperationTable tally) committed with
               | Error why -> failtest why
               | Ok expected when expected = committed.Replace("\r\n", "\n") -> ()
-              | Ok expected when Environment.GetEnvironmentVariable "CORE_APPROVE_LADDER" = "1" ->
-                  File.WriteAllText(path, expected)
+              | Ok expected when Approval.admits Approval.Ladder Approval.Ladders.Operations ->
+                  Approval.write Approval.Ladder Approval.Ladders.Operations path expected
+                  |> ignore
               | Ok _ ->
                   failtest
                       "proofs/README.md's operation-coverage table is not the census's projection — re-run with CORE_APPROVE_LADDER=1 and commit the README"

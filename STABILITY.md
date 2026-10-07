@@ -110,11 +110,19 @@ Regenerate with:
 
 ```
 CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+CORE_APPROVE_API=Fuaran.Core.Wire dotnet run --project tests/Fuaran.Core.Tests
 ```
 
-**The hazard is the one the same switch carries elsewhere: it rewrites EVERY drifted
+Every approval switch in the repository (`CORE_APPROVE_API`, `_WIRE`, `_LADDER`, `_README`, `_DOCS`
+and `FUARAN_REGEN`) has one reading (`tests/Fuaran.Core.Tests/Approval.fs`, Phase 396): absent, empty,
+`0` or `false` is no; `1` or `true` is every file the switch governs; any other value is a filter, a
+comma-separated list of file stems (a package id here). A filter that matches nothing is red by name,
+and each file a switch rewrites is printed.
+
+**The hazard of the bare form is that it rewrites EVERY drifted
 baseline, not the one you were looking at.** An unrelated drift sitting in the tree lands in your
-commit silently. Stage the baselines you meant to move BY NAME and read the rest back out.
+commit silently. Name the package, or stage the baselines you meant to move BY NAME from the printed
+list and read the rest back out.
 
 ### The classes, and what each costs a pinned consumer
 
@@ -2725,6 +2733,32 @@ parameter at the reader, each `UnreadableArgs` shape, and capture and replay of 
 through the new entry points. It also plants a pre-0.36 journal. `FunctionTests` plants every
 `probes307` declaration the encoder can write. The reader's refusal must equal `register`'s sentence
 on both halves of the gate.
+
+### One truthiness and a scope for the approval switches (Phase 396) — NO SURFACE CHANGE: test-project tooling only; no package's surface or wire byte moves
+
+Eleven sites regenerate a committed artefact when an environment variable is set: `CORE_APPROVE_API`
+(the `api/` baselines), `CORE_APPROVE_WIRE` (the `api/wire/` baselines), `CORE_APPROVE_LADDER` (the two
+blocks of `proofs/README.md`), `CORE_APPROVE_README` (the README's version stamps), `CORE_APPROVE_DOCS`
+(`docs/doc-coverage.json`) and `FUARAN_REGEN` (the six generated modules and the snapshot map). Each
+read its own variable with its own idea of "set": `<> "" && <> "0"` at some, `= "1"` at others, so
+`CORE_APPROVE_LADDER=true` approved nothing while `CORE_APPROVE_API=true` approved everything, and none
+could be aimed at one file. All eleven now read through `tests/Fuaran.Core.Tests/Approval.fs`.
+
+**The one rule.** Absent, empty, `0` or `false` is no. `1` or `true` (any case) is every file the switch
+governs. Anything else is a FILTER: a comma-separated list of file stems. For the API and wire switches
+a stem is a package id (`CORE_APPROVE_API=Fuaran.Core.Wire`, `CORE_APPROVE_WIRE=Fuaran.Core.Query`);
+for `FUARAN_REGEN` it is the generated file's name without its extension (`FUARAN_REGEN=MiniGenerated`);
+for `CORE_APPROVE_LADDER` it is `ladder` or `operations` (the two blocks of `proofs/README.md`). A filter
+that names nothing the switch governs is red by name, listing what it does govern, never a silent no-op.
+A file the switch did not admit is held to its committed bytes as usual, so a filter never hides the
+drift of the files it left alone. Every file a switch rewrites is printed (`<SWITCH>: wrote <path>`), so
+the "stage by name" step reads that list rather than `git status`.
+
+**What guards it.** `ApprovalTests` asserts the truthiness table, the filter's matching and its red
+refusals, that a write happens only when admitted and changed, and a sweep over `src/` and `tests/`:
+no file outside `Approval.fs` reads a `CORE_APPROVE_*` or `FUARAN_REGEN` variable directly. The sweep's
+pattern is itself pinned against both call spellings, so it cannot go blind. Class: no package's public
+surface moved, and no wire baseline moved.
 
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 

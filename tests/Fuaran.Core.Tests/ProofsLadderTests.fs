@@ -981,8 +981,9 @@ let proofsLadderTests =
               match regenerateReadme ladderText readmeText with
               | Error why -> failtestf "the README's generated blocks could not be located: %s" why
               | Ok expected when expected = readmeText -> ()
-              | Ok expected when Environment.GetEnvironmentVariable "CORE_APPROVE_LADDER" = "1" ->
-                  File.WriteAllText(proofsReadmePath, expected)
+              | Ok expected when Approval.admits Approval.Ladder Approval.Ladders.Summary ->
+                  Approval.write Approval.Ladder Approval.Ladders.Summary proofsReadmePath expected
+                  |> ignore
               | Ok expected ->
                   let a = readmeText.Replace("\r\n", "\n").Split('\n')
                   let b = expected.Replace("\r\n", "\n").Split('\n')

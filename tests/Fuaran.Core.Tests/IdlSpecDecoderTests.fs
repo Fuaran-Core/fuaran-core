@@ -224,8 +224,8 @@ let tests =
                     let generated = emitted (SpecDecodersIdl.generate ())
                     let path = Snapshots.repoFile SpecDecodersIdl.generatedFile
 
-                    if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
-                        File.WriteAllText(path, generated)
+                    Approval.write Approval.Regen Approval.Regenerated.SpecDecoders path generated
+                    |> ignore
 
                     Expect.equal
                         generated

@@ -62,9 +62,11 @@ module Fuaran.Core.Tests.PublicSurfaceTests
 //
 // ---- regenerating ------------------------------------------------------------------
 //
-//   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+//   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests            (every baseline)
+//   CORE_APPROVE_API=Fuaran.Core.Wire dotnet run --project tests/Fuaran.Core.Tests   (one package id, or a comma list)
 //
-// The forge precedent, and its hazard is the forge one too: it rewrites EVERY baseline, not
+// The value is read by Approval.fs (Phase 396): 1/true is every baseline, a package id is that one. The
+// forge precedent, and its hazard is the forge one too: the bare form rewrites EVERY baseline, not
 // the one you were looking at, so an unrelated drift sitting in the tree lands in your commit
 // silently. Stage the baselines you meant to move BY NAME and read the rest back out.
 // ---------------------------------------------------------------------------
@@ -1043,11 +1045,6 @@ let internal newestVersionTag (tagLines: string list) : string option =
 
 // ---- the suite ------------------------------------------------------------
 
-let private approving () =
-    match Environment.GetEnvironmentVariable "CORE_APPROVE_API" with
-    | null -> false
-    | v -> v.Trim() <> "" && v.Trim() <> "0"
-
 /// The packable roster, from Phase 199's derivation. ONE spelling of "what ships" in this
 /// repository, deliberately: a second would drift from the first exactly the way the documents
 /// that derivation gates had drifted.
@@ -1140,7 +1137,9 @@ let tests =
 
               let dir = apiDir ()
 
-              if approving () then
+              if Approval.requested Approval.Api then
+                  // A filter naming no packable package is red by name, never a quiet no-op.
+                  Approval.requireMatched Approval.Api (projects |> List.map _.PackageId)
                   Directory.CreateDirectory dir |> ignore
 
               let unbuilt = ResizeArray<string>()
@@ -1155,11 +1154,8 @@ let tests =
                       let text = renderBaseline p.PackageId rendered
                       let path = baselinePath p.PackageId
 
-                      if approving () then
-                          let existing = if File.Exists path then File.ReadAllText path else ""
-
-                          if existing <> text then
-                              File.WriteAllText(path, text, UTF8Encoding false)
+                      if Approval.admits Approval.Api p.PackageId then
+                          if Approval.write Approval.Api p.PackageId path text then
                               rewritten.Add p.PackageId
                       elif not (File.Exists path) then
                           // Reported by the completeness leg above; nothing to compare here.
@@ -1186,17 +1182,14 @@ let tests =
 
                               drifted.Add(sprintf "%s — %s (%d move(s))\n%s%s" p.PackageId cls moves.Length shown more)
 
-              if approving () then
+              if Approval.requested Approval.Api then
                   if rewritten.Count = 0 then
-                      printfn "CORE_APPROVE_API: every baseline was already current."
+                      printfn "CORE_APPROVE_API: every selected baseline was already current."
                   else
                       printfn
-                          "CORE_APPROVE_API: rewrote %d baseline(s): %s"
+                          "CORE_APPROVE_API: rewrote %d baseline(s): %s — stage exactly these, by name."
                           rewritten.Count
                           (String.concat ", " rewritten)
-
-                      printfn
-                          "CORE_APPROVE_API: this rewrites EVERY drifted baseline, not only the one you were looking at — stage them by name."
 
               Expect.isEmpty
                   (List.ofSeq unbuilt)
@@ -1204,7 +1197,9 @@ let tests =
                       "every packable project's assembly was found on disk; a missing one is an unbuilt solution, not a surface move:\n       %s"
                       (String.concat "\n       " unbuilt))
 
-              if drifted.Count > 0 && not (approving ()) then
+              // `drifted` holds only the packages the switch did not admit, so under a filter the
+              // unselected packages still report their drift.
+              if drifted.Count > 0 then
                   failtestf
                       "%d package(s) moved their public surface without moving their baseline:\n       %s\n       Remedy: the move is PERMITTED — what is refused is an UNCLASSIFIED one. Regenerate with\n       `CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests`, stage the baselines you meant\n       to move BY NAME, and let the class above decide whether the change RIDES the standing draft slot\n       or ADVANCES <Version> (STABILITY.md, \"Public-surface baselines\")."
                       drifted.Count

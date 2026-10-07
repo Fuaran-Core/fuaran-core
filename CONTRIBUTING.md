@@ -28,6 +28,34 @@ from a passing one in a green report. [`docs/conformance-corpus.md`](docs/confor
 the one-line clone command, the variable that names a clone kept elsewhere, and the documented
 opt-out.
 
+## Regenerating a committed artefact
+
+Several files are projections the suite holds to what the code renders today: the public-surface
+baselines (`api/`), the wire baselines (`api/wire/`), the generated F# modules under
+`tests/Fuaran.Core.Tests/`, the README's version stamps, the proofs README's tables and the
+doc-comment ratchet. Each is rewritten by an environment switch, and all of them are read by ONE rule
+(`tests/Fuaran.Core.Tests/Approval.fs`):
+
+| Switch | Governs | A filter value is |
+|---|---|---|
+| `CORE_APPROVE_API` | `api/<package>.txt` | a package id |
+| `CORE_APPROVE_WIRE` | `api/wire/<package>.txt` | a package id |
+| `CORE_APPROVE_LADDER` | the two generated blocks of `proofs/README.md` | `ladder` or `operations` |
+| `CORE_APPROVE_README` | the README's version stamps | `README` |
+| `CORE_APPROVE_DOCS` | `docs/doc-coverage.json` | `doc-coverage` |
+| `FUARAN_REGEN` | the generated F# modules and `snapshots/spike.json` | the file name without its extension |
+
+Absent, empty, `0` or `false` is no. `1` or `true` rewrites every file the switch governs. Any other
+value is a filter, a comma-separated list: `CORE_APPROVE_API=Fuaran.Core.Wire` rewrites that one
+baseline. A filter that matches nothing fails by name. Each file the run rewrites is printed
+(`CORE_APPROVE_API: wrote <path>`), so stage exactly that list, by name.
+
+```powershell
+$env:CORE_APPROVE_WIRE = 'Fuaran.Core.Query'
+dotnet run --project tests/Fuaran.Core.Tests --no-build -- --filter 'wire'
+Remove-Item Env:CORE_APPROVE_WIRE
+```
+
 ## Coding standards
 
 - **F# formatting is Fantomas.** Run `./run.ps1` (or `dotnet fantomas src tests`) before every
