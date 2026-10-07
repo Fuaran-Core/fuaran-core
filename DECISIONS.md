@@ -1,5 +1,78 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D123: "released" is a gate output — a tag's heading and its receiving-gate record are read by `verify.ps1`, which publish runs; `0.31.0` and `0.35.1` were released without a cited run, and the record says so
+
+**Recorded by Phase 392. Test-only and documentation: no package, surface, wire byte or default moves.**
+
+*The defect.* STABILITY.md's policy (D55) says every version cut cites a green run of the receiving Fable
+gate against the candidate, and that a cut whose run is red is not released. Nothing read it. `v0.35.1`
+was tagged and published while its entry was headed `## 0.35.1 — DRAFT` and cited no run; the per-tag
+property (Phase 205) passed, because it asks only that some heading CONTAIN the version. The `0.35.2`
+release then hit both halves of the gesture by hand: a commit that turned the heading before the tag
+(`285751b`, red on `main` only because the README's unreleased stamps happened to need a DRAFT heading)
+and a tag placed on a commit still headed DRAFT (`c441e76`, red in the publish workflow for the same
+incidental reason). A `1.0.0` could have shipped headed DRAFT with no run cited and every test green.
+
+*The ruling.* The heading and the record are gate outputs. The `Release record` family
+(`tests/Fuaran.Core.Tests/ReleaseRecordTests.fs`) reads the tags in the checked-out history
+(`git tag --merged HEAD`: a tag outside HEAD's history is not this tree's release) and holds:
+
+1. every tag at or above `0.25.0` is headed `## <v> — [title — ]released <yyyy-mm-dd> as `v<v>``; a
+   tagged version headed DRAFT is red by name;
+2. every entry headed `released … as v<v>` has its tag;
+3. the untagged standing `<Version>` is headed `## <v> — DRAFT`, the marker a downstream version check
+   reads off `<FuaranStabilityRecord>`, now declared in `Directory.Build.props`;
+4. every released slot from `0.31.0` carries a `**Release record` paragraph and one
+   `**Receiving gate run:**` paragraph in a fixed grammar: the `fuaran-dotnet` commit, the
+   `core-fable.ps1 -CoreVersion <v> -CoreFeed <folder>` invocation, the compile leg's package count and
+   the value leg's `<m>/<m>`. The grammar is matched per paragraph, so the document's hard wrap cannot
+   hide a record.
+
+`verify.ps1` runs the suite, and the publish workflow runs `verify.ps1` before it packs, so a release
+gesture without the heading and the record is refused before anything ships. Each clause is proved red
+by a plant over synthetic input, and the live case is planted over the real document with the two
+`0.35.2` shapes (the newest tag's heading put back to DRAFT; the same tag withheld). On the tree before
+this phase the live case reported seven faults, the `0.35.1` DRAFT among them by name.
+
+*Why `0.31.0` is the record floor, not `0.25.0`.* The entry floor stays `0.25.0` (Phase 205). The
+receiving gate exists only from D55: `0.25.0` to `0.30.0` were gated by this repository's own Fable leg
+at their tags, so there is no external run to cite, and demanding one would demand invention. `0.31.0`
+is the first cut under D55.
+
+*The two releases without a cited run.* Both records were written from evidence, not invented, and both
+say `none cited before the tag`; the family admits that wording only for the versions this decision lists
+(`releasedWithoutCitedRun`), and reds a listed version whose record does cite a run, so the list cannot
+outlive its reason. Growing it is a decision recorded here, never an edit made to let a release pass.
+
+- **`0.31.0`.** The only run against a `0.31.0` candidate is D55's 217.E (`fuaran-dotnet` `2b3a92c`,
+  2026-09-24: value leg 164/164, no compile count recorded), two days before the tag and before Phase 220
+  and the rest of the slot landed. It certifies an earlier candidate.
+- **`0.35.1`.** Tagged at `9601020` (observed 05:38 UTC, 2026-10-06). No cut-time run is recorded, and
+  none against the committed host gate could have been green: its smoke program built `QueryRegistry`
+  from a full record literal, which does not compile once the record gains `Policy` in that slot, and
+  the host adapted it only in `18541c2`, four hours after the tag. The released bytes were later shown
+  Fable-clean by the host's pinned run at `0.35.1` (2026-10-07: 19 packages, 419/419 vectors), but that
+  is post-release evidence, not the cut-time certification the policy requires. **Whether that evidence
+  is accepted as `0.35.1`'s certification, or consumers are pointed past it to `0.35.2` (whose cut-time
+  run was green), is an operator decision this phase does not take.** The record states the facts either
+  way, and the heading now says what the tag says.
+
+*The release sequence the gate makes mandatory* (STABILITY.md "Versioning policy" carries it as the
+procedure): (1) re-stamp the conformance corpus if `<Version>` moved since its last emit; (2) run the
+receiving gate green, both legs, against the packed candidate; (3) pack the clean tree; (4) in ONE commit,
+write the record and the `Receiving gate run` paragraph, turn the heading to `released`, and regenerate
+the README stamps (`CORE_APPROVE_README=1`, `--filter ReadmeClaims`, under a provisional local tag on the
+candidate commit, since the stamps are derived from tags); (5) tag THAT commit and push the commit and
+the tag together. A tag on an earlier commit is red in publish (clause 1); a pushed flip without its tag
+is red on `main` (clause 2).
+
+*Rejected.* Keeping the check inside the README stamp family (`stampFaults`), which is what caught both
+`0.35.2` misfires: it fires only while some README stamp names the draft, so a release whose slot adds no
+README-named surface would pass a DRAFT tag silently. Reading every tag rather than the merged ones: a
+branch cut before a release would then red on a heading it cannot yet contain. Matching the record as
+free prose: the existing records spell the run several ways, and a fixed grammar is what lets a reader,
+and the gate, find the commit and the counts without interpretation.
+
 ## 2026-10-06 — D122: `Canonical` and `Codec<'T>` join the spine in `Wire`; `Digest` is proposed and its placement is an open question, because the renderer and the hash live in two packages D2 keeps apart
 
 **Recorded by Phase 379. `Fuaran.Core.Wire` and the conformance kit; additive (STABILITY.md, `0.35.2`);

@@ -28,6 +28,45 @@ the floor because it is the oldest slot for which the record can still be writte
 every earlier release predates this document's per-slot classes, so entries for them would be
 invention rather than record, and they are deliberately not retro-fitted.
 
+**"Released" is a gate output, not a heading's claim (Phase 392, DECISIONS.md D123).** The `Release
+record` family reads every tag in the checked-out history and holds four things, each red by name: a
+tag at or above `0.25.0` is headed `## <v> — released <yyyy-mm-dd> as `v<v>`` (a title may sit between
+the version and `released`), so a tagged version headed DRAFT fails; an entry headed `released` has its
+tag, so a heading turned before the tag fails; the untagged standing `<Version>` is headed
+`## <v> — DRAFT`; and every released slot from `0.31.0`, the first cut under D55, carries a
+`**Release record` paragraph and a `**Receiving gate run:**` paragraph in one grammar —
+
+    **Receiving gate run:** `fuaran-dotnet` at `<commit>`, `core-fable.ps1 -CoreVersion <v> -CoreFeed
+    <folder>`; compile leg <n> packages green; value leg <m>/<m> vectors byte-identical.
+
+— naming the host commit the gate ran at, the invocation and both legs' counts. `0.31.0` and `0.35.1`
+were released without a cited run; their records say `none cited before the tag`, and the family admits
+that wording only for the versions D123 lists. The publish workflow runs `verify.ps1` before it packs,
+so a release gesture without the heading and the record is refused there; `Directory.Build.props`
+declares this file as the version's stability record (`<FuaranStabilityRecord>`) so a downstream
+version check reads the same DRAFT marker.
+
+**The release sequence the gate makes mandatory.** In this order, because each step reads the one
+before it:
+
+1. If `<Version>` moved since the conformance corpus was last emitted, re-stamp it
+   (`--emit-laws` and `--emit-apply`, `docs/conformance-corpus.md`) and commit.
+2. Pack every packable project from that clean commit into a folder, and run the receiving gate
+   against it: `fuaran-dotnet`'s `pwsh ./tests/core-fable/core-fable.ps1 -CoreVersion <v> -CoreFeed
+   <folder>`, green on both legs. A package this repository adds since the last release needs the
+   host's candidate-only reference first, or the gate's membership check fails it by name.
+3. Pack again from the clean tree for publication, so the packed surface is the one the gate measured.
+4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs, turn the
+   heading to `released <date> as `v<v>``, and regenerate the README's version stamps
+   (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1`
+   set in the environment). The
+   stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the
+   candidate commit (its `api/` is the release's); delete that tag after the commit.
+5. Tag THAT commit `v<v>` and push the commit and the tag together
+   (`git push --atomic origin main v<v>`), so no CI run sees the turned heading without its tag. A
+   push of the commit alone runs `main`'s CI red on the second clause until the tag exists, and a tag
+   on any earlier commit is red in the publish workflow on the first: both are the gate working.
+
 **Adding a public operation now carries a coverage line (Phase 335).** The `Proofs.Coverage` family
 reads the committed API baselines (`api/*.txt`) as its census of public operations, so the commit that
 publishes a new method or function, and regenerates its baseline, reds the suite until the operation
@@ -2423,6 +2462,11 @@ the 16 Fable-facing packages at `0.35.2` (the two build-time packages excluded b
 compared 419 of 419 `ParityVectors` rows byte-identical between .NET and node. The host's pinned run at
 `0.35.1` stayed green beside it (19 packages, the same 419 rows).
 
+**Receiving gate run:** `fuaran-dotnet` at `606f76e`, `core-fable.ps1 -CoreVersion 0.35.2 -CoreFeed
+<folder>`; compile leg 16 packages green; value leg 419/419 vectors byte-identical. (`606f76e` is the host
+commit adding the candidate-only member, which the green second run needed; this line is in the grammar
+the `Release record` family reads, Phase 392.)
+
 Two more things stood between the draft and this record, both found by this repository's own CI on
 `main` rather than by a reviewer. The `0.35.2` cut (`aa749f4`) moved the renderer's `kitVersion` stamp
 without re-emitting the corpus copies of `laws/capability-laws.json` and `laws/decimal-laws.json`, so
@@ -2731,7 +2775,23 @@ apply corpus' ten result hashes (each `ofCanonicalText` of its stored tree under
 **Not changed.** No published signature is retyped to `Digest`: the Phase 314 maps and every key on the
 `canonicalFields` roster still return strings, byte-identical.
 
-## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
+## 0.35.1 — released 2026-10-06 as `v0.35.1`
+
+**Release record — no receiving-gate run against the candidate was made before the tag, so this slot was
+released against this document's own rule ("Versioning policy"); written by Phase 392 from the evidence,
+2026-10-07.** `v0.35.1` names `9601020`, the version cut, and the tag was observed at 05:38 UTC on
+2026-10-06. Its heading stayed DRAFT until Phase 392, with no record under it. No cut-time run of the
+downstream host's Fable gate is recorded anywhere, and none against the committed gate could have been
+green: the host's smoke program built its `QueryRegistry` from a full record literal, which does not
+compile against `0.35.1` (the record gains `Policy` in this slot), and the host first adapted it in
+`fuaran-dotnet` `18541c2`, at 09:34 UTC the same day, four hours after the tag, when it raised its pin.
+The released bytes have been measured since: the host's pinned run at `0.35.1` on 2026-10-07 was green on
+both legs (19 packages; 419/419 vectors byte-identical; recorded under `0.35.2`). That run came after the
+release and in the pinned mode, so it shows the released packages are Fable-clean; it is not the cut-time
+certification the policy requires. The gap is recorded, not repaired, and is put to the operator;
+DECISIONS.md D123.
+
+**Receiving gate run:** none cited before the tag; DECISIONS.md D123.
 
 **Moved number (2026-10-06).** `0.35.0` was packed as a draft with an earlier public surface than the
 release commit's, and a released version names one contract, so the slot advances to
@@ -3543,6 +3603,10 @@ the host: its smoke program had not followed this slot's breaking edits (qualifi
 both Core lines (`4fc5e4c`). The candidate was re-packed from `218b02f` and the re-run passed: compile
 leg green over 15 Fuaran.Core packages, value leg 393/393 byte-identical on both pipelines; the host's
 pinned run stayed green. The release commit differs from `218b02f` only in this file.
+
+**Receiving gate run:** `fuaran-dotnet` at `4fc5e4c`, `core-fable.ps1 -CoreVersion 0.34.0 -CoreFeed
+<folder>`; compile leg 15 packages green; value leg 393/393 vectors byte-identical. (Restated by Phase 392
+in the grammar the `Release record` family reads, from the record above.)
 
 **Class: breaking (source).** Opened as an additive slot over the tagged `0.33.0` and reclassed
 breaking before any tag, when Phase 252 widened `HostedCodec` (two fields) and retyped `Gen.fsharpValue`
@@ -5318,6 +5382,11 @@ transpiled at 0.33.0, compute packages skipped — and value leg green, 307/307 
 on both pipelines at 0.33.0.** No run named a defect in Core's code. Only this ledger has changed
 since `727f2e5`, so the packages a release builds are the ones the gate measured.
 
+**Receiving gate run:** `fuaran-dotnet` at `8e174bb`, `core-fable.ps1 -CoreVersion 0.33.0 -CoreFeed
+<folder>`; compile leg 15 packages green; value leg 307/307 vectors byte-identical. (Restated by Phase 392
+from the record above; `8e174bb` is the host commit carrying both gate changes the record describes, and
+the host's gate did not change again before the tag.)
+
 **It is a MINOR release because the change that opened it is BREAKING.** `0.32.0` is tagged, so it is a
 consumer's contract and nothing rides it. Phase 258 removes four packages from this repository's
 roster — `removal`, breaking for a consumer that takes them from here — and a breaking change opens a
@@ -6756,6 +6825,11 @@ local candidate feed: 22 packages on the surface (18 referenced, 4 excused), the
 parity vectors byte-identical on both pipelines. Two package ids are new in this release,
 `Fuaran.Core.DataFrame.Conformance` and `Fuaran.Core.DataFrame.CSharp` (Phase 257).
 
+**Receiving gate run:** `fuaran-dotnet` at `3474ade`, `core-fable.ps1 -CoreVersion 0.32.0 -CoreFeed
+<folder>`; compile leg 18 packages green; value leg 166/166 vectors byte-identical. (Restated by Phase 392
+from the record above: the 18 referenced packages compiled, the 4 excused were not; `3474ade` is the host
+commit that taught the gate this release's two new packages, 32 seconds before the tag's commit.)
+
 The phase's source is a downstream spreadsheet-shaped consumer's measurement (Phase 250). It built
 a sheet over `Column.Ops`, `DataFrame.Incremental` and `Propagation`, and found five places where
 the three strands met only through glue it kept by hand. Each entry below closes one of them.
@@ -7097,6 +7171,16 @@ map-only fixtures check too, and so does `fuaran-dotnet`'s model. The fixture is
 emitter.
 
 ## 0.31.0 — released 2026-09-26 as `v0.31.0`
+
+**Release record — no receiving-gate run against the released candidate is cited; written by Phase 392
+from the evidence, 2026-10-07.** This is the first slot cut under DECISIONS.md D55, and the only run of the
+downstream host's gate against a `0.31.0` candidate is the one D55 records as 217.E (`fuaran-dotnet`
+`2b3a92c`, 2026-09-24): value leg 164/164 green, and 40/164 red with `Hash`'s mask removed. That run came
+two days before the tag, before Phase 220 and the rest of this slot landed, and recorded no compile-leg
+count, so it certifies an earlier candidate rather than the one `v0.31.0` released. `0.32.0`, tagged the
+same afternoon, is the first release whose record cites a run against its own candidate. DECISIONS.md D123.
+
+**Receiving gate run:** none cited before the tag; DECISIONS.md D123.
 
 **It is a MINOR release because the change that opened it is BREAKING.**
 Phase 220 changes `Conformance.certify`'s and `Conformance.certifyStream`'s VERDICT for some

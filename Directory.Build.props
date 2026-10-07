@@ -342,6 +342,11 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>fuaran;typed-tree;ops;op-stream;conformance;fsharp;fable</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Phase 392: the stability record of the <Version> above, declared beside it so a downstream
+         version check can read each heading against the tags: a heading whose next word after the
+         version is DRAFT (the default marker) over a tagged version is reported there, as the
+         `Release record` test family reports it here (STABILITY.md "Versioning policy"). -->
+    <FuaranStabilityRecord>STABILITY.md</FuaranStabilityRecord>
   </PropertyGroup>
 
   <!-- Phase 294: a package that can be checked and traced. `Deterministic` is the SDK default and is
