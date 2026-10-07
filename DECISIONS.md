@@ -1,5 +1,91 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D126: a query declares a closed conjunction of typed column predicates and a column order; the resolver honours both or refuses by name; the pattern bank does not capture, and the column layer's scalar functions stay where D66 put them
+
+**Recorded by Phase 398 (operator ruling: the recommended shape ships). `Fuaran.Core.Query`,
+`Fuaran.Core.Conformance` (`queryLaws`); rides the `0.36.0` draft (STABILITY.md, "A query declares
+what it filters and how it orders"). The census behind it is `docs/demand-census.md`.**
+
+*Decided: `Query` gains `Where` and `OrderBy`, both empty by default.* `Where` is a CONJUNCTION of
+`ColumnPredicate`s over the fixed scalar set — `EqualTo`, the four range bounds (`GreaterThan` and
+`LessThan` exclusive, `AtLeast` and `AtMost` inclusive), `Contains` on a string column, `IsNull` and
+`IsNotNull`. `OrderBy` is a list of `SortKey`s, a column and a direction each. An empty member is
+absent from the wire, so every declaration written before the members existed encodes byte for byte
+as it did, and its capture key is unchanged. The union is closed: a predicate a host needs that is
+not here is a ruling, not a host-side extension.
+
+*Decided: a literal is a cell of its column's OWN type, exactly — no widening.* A parameter accepts
+an `int` for a `float` (`ColumnType.widens`, Phase 295) because an argument is a value supplied at
+call time. A predicate's literal is part of the declaration, and one filter should have one
+spelling: with widening, `EqualTo("price", Int 3)` and `EqualTo("price", Float 3.0)` are one filter
+under two encodings and two capture keys. A `Null` literal is refused (`IsNull` is the test), and so
+is a literal the column codec cannot carry (`Table.validate`'s refusal: a non-finite float, decimal,
+date or timestamp text that is not canonical). The wire carries a comparison's literal with its
+`type`, so a predicate document reads alone — the resolver's refusal carries one without a schema.
+
+*Decided: the meaning is Core's, and stated where the type is.* A comparison orders by `Cell.compare`
+(Phase 315: THE cell order — numbers numerically, NaN last, decimals exactly, strings, dates and
+timestamps ordinally, `false` before `true`), so every column type takes the range bounds. `Contains`
+is ordinal and case-sensitive: case folding is a culture's, and the pattern bank's case-insensitivity
+is a property of matching a request, not of filtering data. A `Null` cell satisfies only `IsNull`.
+`Ascending` puts a `Null` first, `Descending` last. A host that cannot give one of these meanings
+refuses the predicate; it does not approximate it.
+
+*Decided: one admission gate.* `QueryRegistry.admissionFault` (D111, Phase 385) holds the filter and
+the order to the declaration's `ResultSchema`: an undeclared column (`UnknownColumn`), `Contains` on a
+column that is not a string (`PredicateNotApplicable`), a literal of another type
+(`PredicateTypeMismatch`) or one its column cannot carry (`IllFormedLiteral`), and an order naming a
+column twice (`DuplicateSortColumn`). `register`, `replace` and the declaration reader run it, and the
+reader reports the refusal at the predicate's or key's path.
+
+*Decided: the resolver receives both, and one that cannot honour them refuses by name.* No new
+resolver signature: the resolver is already handed the `Query`, so it reads `Where` and `OrderBy`
+there. `ResolveFault` gains `PredicateUnsupported` and `OrderUnsupported`, surfacing as
+`QueryError.PredicateNotHonoured` / `OrderNotHonoured`; the capture journals them as their wire
+documents and replay answers them back (Phase 385's path). The untyped resolvers (`Query.invoke`,
+`QueryRegistry.dispatch` and their paged and captured forms) are handed the same declaration, and
+their only refusal stays `Failed`, which is `ExecutionFailed`: a host that must refuse a filter by
+name uses the typed forms. Core cannot see whether a resolver applied a filter; the seam makes the
+honest answer typed and cheap, and `queryLaws` certifies that a refusal reaches the caller.
+
+*Decided: the capture key sees both (Phase 316's paging precedent).* A non-empty `Where` adds three
+fields in front of the bindings — an empty name, the tag `w`, and the canonical text of its
+predicates — and a non-empty `OrderBy` the same with `o`. Neither tag is a cell's, nor the page tag
+`p`, so the pre-image stays a sequence of self-delimiting triples read by their tags. Without this,
+`QueryRegistry.replace` swapping one filter for another under the same id would replay the first
+filter's rows for the second.
+
+*Recorded: the F\* model of the key states the declaration without the new members.*
+`proofs/Query.fst` models `invocationKey` over the id and the arguments, and its fourth theorem reads
+the declaration "through its id alone". For a declaration whose `Where` and `OrderBy` are empty —
+every declaration before this phase, and every one the oracle draws — production computes exactly the
+model's key, so every proved statement still holds of it. For a declaration carrying either, the
+pre-image gains the fields above, which the model does not state; their separation is argued above
+and certified by `queryLaws`, not proved. Stating them in the model is its own phase (the proofs, their
+extraction and the oracle move together), proposed with this one.
+
+*Decided: operands are literals, not parameter references.* A declaration states its own fixed
+filter; a value that varies per call is a parameter, which the resolver already receives typed. A
+parameter-bound predicate would make the filter a function of the arguments and move admission from
+registration to every call. It is not declined forever: it is the first thing the census's fifth stage
+watches for.
+
+*Declined: membership and disjunction.* A value in a set is a disjunction of equalities, and `Where`
+is closed under conjunction only. A host takes the set as a parameter. Admitting `Or` makes the
+predicate language a tree with a normal form to choose, for a need no consumer has yet shown.
+
+*Declined: captures and alternation inside an anchor, on the pattern bank.* A `{…}` wildcard does not
+capture; a value reaches a pattern's `Emit` through the intent's `Args`, which the host parses. The
+emission body is the domain's (`PatternCard`, "the pattern content stays domain-side; the core owns
+only matching and resolution discipline"), and a typed capture would put the domain's parsing in the
+core. Alternation between whole anchors is already expressible: a pattern carries several, and any one
+selects it.
+
+*Declined: the column layer's scalar functions.* Substring, concatenation, date deltas, sorting and
+filtering as OPERATIONS over a table are the compute repository's (D66, executed by D71). What the
+column layer keeps is what a `Where` and an `OrderBy` need to have a meaning: the cell order and the
+null test.
+
 ## 2026-10-07 — D125: a copy D2 does not demand is collapsed into one body, a kernel two packages need lives in the lower one behind `InternalsVisibleTo`, and a public module whose public types are nested in it is not split across files
 
 **Recorded by Phase 388. `Fuaran.Core.OpStream`, `.OpStream.Dag`, `.Ops`, `.Wire`, `.Column`,

@@ -345,7 +345,9 @@ let tests =
                           Determinism = Effect.network }
                     Source = Ref "feed"
                     TimeoutMs = None
-                    PageSize = Some 1 }
+                    PageSize = Some 1
+                    Where = []
+                    OrderBy = [] }
 
               let reg =
                   QueryRegistry.register q QueryRegistry.empty

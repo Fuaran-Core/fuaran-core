@@ -117,7 +117,9 @@ let private readings: Query =
           Determinism = Effect.network }
       Source = Ref "sensor-archive"
       TimeoutMs = Some 2000
-      PageSize = Some 50 }
+      PageSize = Some 50
+      Where = []
+      OrderBy = [] }
 
 let private stations: Query =
     { readings with
@@ -148,7 +150,9 @@ let private invoices: Query =
       Effect = Effect.pureDeterministic
       Source = Ref "ledger"
       TimeoutMs = None
-      PageSize = None }
+      PageSize = None
+      Where = []
+      OrderBy = [] }
 
 let private emptyResult: QueryResult =
     { Rows = { Schema = []; Columns = [] }
@@ -220,7 +224,16 @@ let private queryErrors: QueryError list =
                   "a string value"
                   "parameter 'station' takes a string value, not a JSON array")
       )
-      UnreadableArgs(DecodeError.make DecodeCode.InvalidJson "JSON text" "unexpected end of input") ]
+      UnreadableArgs(DecodeError.make DecodeCode.InvalidJson "JSON text" "unexpected end of input")
+      // Phase 398 — the filter and order refusals: five at admission, two from the resolver.
+      UnknownColumn("temp", [ "station"; "celsius" ])
+      UnknownColumn("temp", [])
+      PredicateTypeMismatch("celsius", IntType, StringType)
+      PredicateNotApplicable("contains", "celsius", IntType)
+      IllFormedLiteral("day", "a date cell must carry a canonical ISO-8601 date")
+      DuplicateSortColumn "station"
+      PredicateNotHonoured(ColumnPredicate.Contains("station", "harb"))
+      OrderNotHonoured "celsius" ]
     @ [ for expected in
             [ IntType
               FloatType
@@ -375,6 +388,7 @@ let tests =
                         | RequiredParamsUnbound xs
                         | RequiredParamsNull xs
                         | ExecutionFailed(_, xs)
+                        | UnknownColumn(_, xs)
                         | QueryPolicyRefused(_, _, xs) -> xs
                         | _ -> []
 

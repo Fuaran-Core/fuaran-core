@@ -10156,6 +10156,16 @@ let private prodQueryErrRender (e: QueryError) : string =
     | QueryApprovalRequired p -> sprintf "ApprovalRequired(%s)" p
     // Phase 385 — the argument reader's refusal; no dispatch raises it, rendered to stay total.
     | UnreadableArgs e -> sprintf "UnreadableArgs(%s)" e.Message
+    // Phase 398 — the shape refusals (registration and the reader) and the resolver's two; the model has
+    // no Where / OrderBy and no dispatch here raises them, rendered to stay total.
+    | UnknownColumn(name, declared) -> sprintf "UnknownColumn(%s;%s)" name (String.concat "," declared)
+    | PredicateTypeMismatch(c, expected, got) ->
+        sprintf "PredicateTypeMismatch(%s;%s;%s)" c (qColTag expected) (qColTag got)
+    | PredicateNotApplicable(p, c, t) -> sprintf "PredicateNotApplicable(%s;%s;%s)" p c (qColTag t)
+    | IllFormedLiteral(c, r) -> sprintf "IllFormedLiteral(%s;%s)" c r
+    | DuplicateSortColumn c -> sprintf "DuplicateSortColumn(%s)" c
+    | PredicateNotHonoured p -> sprintf "PredicateNotHonoured(%A)" p
+    | OrderNotHonoured c -> sprintf "OrderNotHonoured(%s)" c
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -10187,6 +10197,13 @@ let private queryErrClass (e: QueryError) : string =
     | QueryPolicyRefused _ -> "PolicyRefused"
     | QueryApprovalRequired _ -> "ApprovalRequired"
     | UnreadableArgs _ -> "UnreadableArgs"
+    | UnknownColumn _ -> "UnknownColumn"
+    | PredicateTypeMismatch _ -> "PredicateTypeMismatch"
+    | PredicateNotApplicable _ -> "PredicateNotApplicable"
+    | IllFormedLiteral _ -> "IllFormedLiteral"
+    | DuplicateSortColumn _ -> "DuplicateSortColumn"
+    | PredicateNotHonoured _ -> "PredicateNotHonoured"
+    | OrderNotHonoured _ -> "OrderNotHonoured"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with
@@ -10290,7 +10307,9 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
       Effect = { Host = ReadsHost; Determinism = det }
       Source = Ref("src-" + id)
       TimeoutMs = (if page = 0 then None else Some(1000 * page))
-      PageSize = (if page = 2 then Some 50 else None) },
+      PageSize = (if page = 2 then Some 50 else None)
+      Where = []
+      OrderBy = [] },
     rng
 
 /// An argument set against a declaration: per param, three draws in four a binding — one in six
@@ -17243,7 +17262,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-t"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let reg =
                   match QueryRegistry.register q QueryRegistry.empty with
@@ -17345,7 +17366,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-f"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let mq = queryToModel q
 
@@ -17430,7 +17453,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-f"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let mq = queryToModel q
               let one = [ "a", Cell.Str "1b=s2" ]
@@ -17607,7 +17632,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-adv"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let mqa = queryToModel qa
               let mutable qCompared = 0

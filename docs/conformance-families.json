@@ -881,7 +881,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "2400",
+      "cases": "2600",
       "adequacy": "unconditional",
       "refusal": "built"
     },

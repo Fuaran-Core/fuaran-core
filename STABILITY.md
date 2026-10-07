@@ -2801,6 +2801,59 @@ each says why at its head: F# compiles one module from one file, and both module
 nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
 consumer of these packages sees no change from any of this.
 
+### A query declares what it filters and how it orders; a resolver that cannot honour either refuses by name (Phase 398, DECISIONS.md D126) — BREAKING-SOURCE: `Query` gains `Where` and `OrderBy` (`record-widening`), `QueryError` and `ResolveFault` gain cases (`union-widening`); the rest `additive`; the wire `additive`
+
+**The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Query`
+**`record-widening`** — the record fields `Query.Where` and `Query.OrderBy`, which retype the record's
+primary constructor, so every full-literal construction of a `Query` stops compiling (`FS0764`) — and
+**`union-widening`** — `QueryError` gains `UnknownColumn`, `PredicateTypeMismatch`,
+`PredicateNotApplicable`, `IllFormedLiteral`, `DuplicateSortColumn`, `PredicateNotHonoured` and
+`OrderNotHonoured`, and `ResolveFault` gains `PredicateUnsupported` and `OrderUnsupported`, so every
+exhaustive `match` over either is incomplete. The new types `ColumnPredicate`, `SortDirection` and
+`SortKey` are `additive`. No other package's managed baseline moves. The wire baseline
+`api/wire/Fuaran.Core.Query.txt` is `additive`: the `where` and `orderBy` members of a declaration,
+their predicate and order-key documents, and seven query-error documents are new, and no existing
+document's bytes move. The phase was filed `additive`; the gate's class is the honest one, and the
+widening rides this draft as the earlier record-widenings on it did.
+
+**What moved, for a consumer.**
+
+- **Two members on the declaration.** `Where: ColumnPredicate list` is a conjunction: `EqualTo`,
+  `GreaterThan`, `AtLeast`, `LessThan`, `AtMost` (a column and a literal), `Contains` (a string column
+  and a text) and `IsNull` / `IsNotNull` (a column). `OrderBy: SortKey list` is a column and a
+  `SortDirection` each, most significant first. A comparison orders by `Cell.compare`; `Contains` is
+  ordinal and case-sensitive; a `Null` cell satisfies only `IsNull`, and sorts first ascending.
+  **Cost:** a full-literal `Query` adds `Where = []; OrderBy = []`. A copy-and-update
+  (`{ q with … }`) is unaffected.
+- **The wire.** A non-empty `Where` is `"where"`, an array of predicate documents (`"$type"` the
+  predicate; a comparison carries its literal's `type` and `value`, `contains` its `text`); a non-empty
+  `OrderBy` is `"orderBy"`, an array of `{"column", "direction"}` with `ascending` / `descending`. Both
+  are omitted when empty, so every stored declaration encodes byte for byte as before; a test pins one
+  declaration's bytes. The strict read policy refuses an undeclared member of a predicate or a key.
+- **One admission gate, at registration and at the reader.** `register`, `replace` and
+  `QueryCodec`'s declaration reader refuse a predicate or a key naming an undeclared column
+  (`UnknownColumn`), `Contains` on a column that is not a string (`PredicateNotApplicable`), a literal
+  of another type than its column's (`PredicateTypeMismatch` — no widening in a filter) or one its
+  column cannot carry, a `Null` among them (`IllFormedLiteral`), and an order naming a column twice
+  (`DuplicateSortColumn`). The reader reports the refusal at `where[i]` / `orderBy[i]` with the
+  registry's sentence. Parameters are checked first, then the filter, then the order.
+- **The resolver.** It reads both from the `Query` it is handed. A typed resolver that cannot apply
+  one answers `ResolveFault.PredicateUnsupported` / `OrderUnsupported`, which reach the caller as
+  `PredicateNotHonoured` / `OrderNotHonoured`, are journalled as their wire documents and replay as
+  themselves.
+- **The capture key.** `Query.invocationKey` and `invocationKeyPage` add the filter's and the order's
+  canonical text to the pre-image, each behind an empty name and its own tag (`w`, `o`). A declaration
+  with neither keys exactly as before, so every journal written before this draft still replays.
+  `proofs/Query.fst` models the key without the two members (D126 records it): for such declarations
+  the model and production agree, and the oracle compares only those.
+- **The law.** `queryLaws` gains its thirteenth law (the declared filter and order: reaches the
+  resolver, keys apart, round-trips, one gate, a refusal by name, live and on replay), counted once per
+  iteration and drawn after every earlier draw, so the twelve laws before it keep their samples.
+
+**What did not move.** `Fuaran.Core.Column` and `Fuaran.Core.AiSurface`: the census
+(`docs/demand-census.md`) records which intents they express and which are host-side by design, and
+`docs/ADOPTION.md` restates it for an adopter.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

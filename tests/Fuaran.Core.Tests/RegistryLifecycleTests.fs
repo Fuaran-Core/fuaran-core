@@ -41,7 +41,9 @@ let private query (id: string) : Query =
           Determinism = Effect.network }
       Source = Ref id
       TimeoutMs = None
-      PageSize = Some 2 }
+      PageSize = Some 2
+      Where = []
+      OrderBy = [] }
 
 let private orFail (r: Result<'a, 'e>) : 'a =
     match r with

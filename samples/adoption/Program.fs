@@ -264,7 +264,9 @@ let notesQuery: Query =
       Effect = Effect.pureDeterministic
       Source = Ref "outline"
       TimeoutMs = None
-      PageSize = None }
+      PageSize = None
+      Where = []
+      OrderBy = [] }
 
 let queries =
     QueryRegistry.register notesQuery QueryRegistry.empty
