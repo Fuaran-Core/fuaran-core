@@ -1,5 +1,59 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D125: a copy D2 does not demand is collapsed into one body, a kernel two packages need lives in the lower one behind `InternalsVisibleTo`, and a public module whose public types are nested in it is not split across files
+
+**Recorded by Phase 388. `Fuaran.Core.OpStream`, `.OpStream.Dag`, `.Ops`, `.Wire`, `.Column`,
+`.Function`, `.Query`, `.Idl`, `.Idl.Codegen`, `.Conformance`; rides the `0.36.0` draft (STABILITY.md,
+"The copies D2 does not justify collapse into one body each"). Builds on D2; amends D124's "a copy
+rather than a call".**
+
+*Decided: D2 justifies exactly the copies it names, and nothing that only visibility produced.* D2
+keeps `OpStream` and `Wire` standalone, so the escaper in `Actor.fs` (a copy of `Wire.Json.escape`) and
+`Column`'s `fnv1a` stay, each held to its original. The DAG's third escaper did not: the DAG package
+references `OpStream`, and only `internal` on the one body forced the copy, so the body is public
+(`OpStream.Jsonl.quote`) and the copy is deleted. The same test retired every same-package or
+dependent-package duplicate the 2026-10-07 design review listed: one tip walk, one Kahn drain, one
+closure walk, one seam-codec helper set, one `Deferred` projection, one re-worded tag dispatch
+(`Decoder.tagDispatchWith`, public — two packages above `Wire` need it, and a domain codec with a
+sentence of its own needs it too), one exact-decimal reading, one vector-verdict kit, one declaration
+lookup.
+
+*Decided: the xorshift32 kernel lives in `Fuaran.Core.Idl`, internal, and `Fuaran.Core.Conformance`
+reads it through `InternalsVisibleTo` — one implementation rather than a copy held equal by a test.*
+Phase 387 (D124) re-based the IDL sampler on `ConfRng`'s generator as a COPY, because the kit depends
+on `Idl` and not the reverse, and pinned the copy to `ConfRng.intBelow` in `ParityVectorTests`. The
+dependency direction is exactly the reason the kernel belongs in the lower package: `Xorshift32` (the
+step, the seed's warm-up, the top-31-bit draw and the high-bit rejection, generic over how a caller
+threads its position) is the one body, and `ConfRng` and `Sample` are each a few lines of threading over
+it. The alternative — a small PUBLIC generator in `Idl` that `ConfRng` builds on — was declined: it adds
+a second public RNG surface beside `ConfRng`, whose surface is the one a domain is told to use. The
+`InternalsVisibleTo` grant follows the `Function` → `Query` and `Tree` → `ContentAddress` precedents
+(D122): the packages are cut and versioned together from this repository, and the grant names the
+consumer. `Idl` grants `Fuaran.Core.Idl.Codegen` too, for `IdlLookup`. The `ParityVectorTests` pin
+stays and now holds the two threadings, not a duplicated arithmetic.
+
+*Found, and not built: two of the five long-file splits cannot keep the public surface.* `SeamLaws`,
+`StreamLaws` and `TreeLaws` are internal modules and split cleanly (twelve internal modules; the public
+`Conformance` facade's forwards did not move). `Diff` and `FStarTarget` are PUBLIC modules whose public
+types are nested in them — `Diff+Snapshot`, `Diff+Change`, `Diff+Verdict`, `FStarTarget+Slot`,
+`FStarTarget+VectorModel` and the rest — and F# compiles one module from one file. The descriptor table
+and the snapshot reader are written over those types, so a file ahead of `Diff.fs` cannot see them and
+a file after it cannot be called by it; the same holds for every `FStar.fs` section over `Slot`.
+Splitting either means moving its types out, which renames each in the `api/` baseline — a retype every
+consumer pays for a layout. Both files say so at their heads. The same constraint holds for `Dag`
+(`DagOpStream.fs`), whose public types are nested in the `Dag` module.
+
+*Recorded for the next reader: the file-length rule needs a surface reason before it can bind.* The
+phase's acceptance asked that no `src/` file exceed two thousand lines. The internal TypeScript backend
+was split too (`TypeScriptCodec`, `TypeScriptDeclarations`, `TypeScriptDerived`), beyond the five the
+phase named, because it is internal and nothing queued names it. After the phase seven files still
+exceed the line (`Wire.fs`, `DagOpStream.fs`, `Diff.fs`, `FStar.fs`, `Ops.fs`, `Idl.fs`, `Column.fs`).
+Three cannot be split without a retype (above). The other four hold several top-level modules and
+could be divided at module boundaries with no surface move, but they are the declared key files of the
+open phases queued behind this one, and moving them would leave those phases' footprints naming files
+that no longer hold their work — the 401 class, created deliberately. That division is a phase of its
+own, sequenced after the phases that edit those files.
+
 ## 2026-10-07 — D124: the two cross-runtime claims the suite did not measure are measured — the IDL sampler runs on `ConfRng`'s stream and is pinned in `ParityVectors`, the witness freeze reads no reflection under Fable, and D95's escaper guarantee is scoped to IDL-authored text
 
 **Recorded by Phase 387. `Fuaran.Core.Idl` (`Sample`, the `SourceLit` module doc) and

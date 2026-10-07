@@ -572,15 +572,3 @@ module internal Core =
               Unions = idl.Unions |> List.map (fun u -> u.Name, u) |> Map.ofList
               Enums = idl.Enums |> List.map (fun e -> e.Name, e) |> Map.ofList
               Records = idl.Records |> List.map (fun r -> r.Name, r) |> Map.ofList }
-
-    let findKind (idl: Idl) (tag: string) =
-        idl.Kinds |> List.tryFind (fun k -> k.Tag = tag)
-
-    let findUnion (idl: Idl) (name: string) =
-        idl.Unions |> List.tryFind (fun u -> u.Name = name)
-
-    let findEnum (idl: Idl) (name: string) =
-        idl.Enums |> List.tryFind (fun e -> e.Name = name)
-
-    let findRecord (idl: Idl) (name: string) =
-        idl.Records |> List.tryFind (fun r -> r.Name = name)

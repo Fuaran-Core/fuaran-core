@@ -439,6 +439,14 @@ module OpStream =
         /// writer applies, public so a writer outside this package (the DAG's) applies the same one.
         let checkRaw (raw: string) : Result<unit, JsonlWriteFaultReason> = OpStreamJsonl.Jsonl.checkRaw raw
 
+        /// `s` spelled as a JSON string literal by this package's ONE escaper (Phase 388): `"`, `\`,
+        /// and every control character `U+0000`–`U+001F` as lower-case `\u00xx`, with NO short form
+        /// for `\n` / `\r` / `\t` (Phase 287) — the spelling of every line, snapshot and capture this
+        /// package writes. Public so a writer outside this package (the DAG's) spells its members
+        /// with the same body rather than a copy. Value-identical to `Wire.Json.escape`, held so by
+        /// `StringEscapeVectors`. Fable-clean.
+        let quote (s: string) : string = JsonString.quote s
+
     /// Parse JSONL into `(records, rawSnapshotLines)` (Phase 16) — the snapshot-aware reader. The
     /// records are decoded by the witness; the snapshot line, when there is one, is returned verbatim
     /// (its `state` member still embedded raw) so a caller can recover the base state with

@@ -26,6 +26,17 @@ open Fuaran.Core
 // (`hostSurface`). Diffing the artifact therefore diffs exactly the published
 // contract, and works across revisions whose F# vocabulary no longer compiles —
 // which is the whole point of having committed the artifact.
+//
+// **One file, over two thousand lines, deliberately (Phase 388, DECISIONS.md D125).** The
+// file holds the descriptor DATA TABLE (`rules`, about a thousand lines, the section "THE
+// DESCRIPTOR TABLE" below) beside the snapshot reader and the classifier, and Phase 388 found
+// it cannot be split along those banners without moving the public surface: F# compiles one
+// module from one file, and `Diff`'s public types (`Snapshot`, `Change`, `Severity`,
+// `FSharpConsequence`, `Verdict`, …) are NESTED in it — their names are `Diff+Change` and so
+// on — while the table and the reader are built over them. A file ahead of this one cannot
+// see them, and a file after it cannot be called by it. Moving the types out renames every one
+// of them in the `api/` baseline, which is a retype the classifier's consumers would pay for a
+// layout. The split waits for a surface move that has its own reason.
 // ---------------------------------------------------------------------------
 
 /// The IDL stability classifier over two `idl.json` revisions (and optionally each side's

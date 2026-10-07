@@ -229,7 +229,7 @@ module Trust =
         let tokens = idl.Harden
 
         let literalUnion (caseTag: string) (fieldName: string) (name: string) (args: IdlType list) =
-            match idl.Unions |> List.tryFind (fun u -> u.Name = name) with
+            match IdlLookup.tryUnion idl name with
             | None -> false
             | Some u ->
                 match TypeParams.bind u args, u.Cases |> List.tryFind (fun c -> c.Tag = caseTag) with
@@ -252,7 +252,7 @@ module Trust =
                     )
                 )
 
-            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            match IdlLookup.tryKind idl kindTag with
             | None -> refuse "the vocabulary declares no such kind"
             | Some k ->
                 match k.Fields |> List.tryFind (fun f -> f.Name = field) with

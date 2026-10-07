@@ -460,11 +460,6 @@ let internal renderRatchet (measured: DocCoverage list) : string =
     line "}"
     sb.ToString()
 
-let private approvingDocs () =
-    match Environment.GetEnvironmentVariable "CORE_APPROVE_DOCS" with
-    | null -> false
-    | v -> v.Trim() <> "" && v.Trim() <> "0"
-
 /// Every packable package measured from its committed baseline and its built documentation file.
 let private measureAll () : Result<DocCoverage list, string list> =
     let root = repoRoot ()
@@ -557,7 +552,7 @@ let coverageTests =
                         if not (measured |> List.exists (fun m -> m.Package = p)) then
                             yield sprintf "%s is in docs/doc-coverage.json but is not a packable package" p ]
 
-              if approvingDocs () then
+              if Approval.admits Approval.Docs Approval.Files.DocCoverage then
                   // The switch only tightens: an entry it would ADD is refused, so it can never
                   // silence the property it maintains.
                   let added =
@@ -571,7 +566,8 @@ let coverageTests =
                           "CORE_APPROVE_DOCS only removes entries; these undocumented members are not on the list — document them:\n  %s"
                           (String.concat "\n  " added)
 
-                  File.WriteAllText(path, renderRatchet measured)
+                  Approval.write Approval.Docs Approval.Files.DocCoverage path (renderRatchet measured)
+                  |> ignore
               elif not findings.IsEmpty then
                   failtestf "the doc-comment ratchet moved:\n  %s" (String.concat "\n  " findings)
           }

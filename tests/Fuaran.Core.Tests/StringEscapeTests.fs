@@ -154,6 +154,8 @@ module RunBoundaries =
           "Json.render", q, Json.render (JStr s)
           "Canon.render", "{" + q + ":" + q + "}", Canon.render (JObj [ s, JStr s ])
           "Actor.encode", human, Actor.encode (Human s)
+          // Phase 388 - the op-stream package's one escaper, public; `Dag.toJsonl` spells through it.
+          "OpStream.Jsonl.quote", q, OpStream.Jsonl.quote s
           "Dag.toJsonl",
           "{\"node\":true,\"id\":"
           + q
@@ -488,7 +490,7 @@ let tests =
               | Error e -> failtestf "decodeEnvelope: %s" e ]
 
 /// Phase 370 — the generated TypeScript codecs carry a FOURTH copy of the rule: the emitted `encStr`
-/// (`Emit/TypeScript.fs`), which gained Phase 365's fast path — one regex test for an escapable
+/// (`Emit/TypeScriptCodec.fs`), which gained Phase 365's fast path — one regex test for an escapable
 /// character, and the input returned whole between quotes when there is none. These cases run the
 /// function the emitter actually writes, under node, against the .NET escaper.
 module EmittedEncStr =

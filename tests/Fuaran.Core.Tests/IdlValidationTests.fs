@@ -517,7 +517,10 @@ let sourceLitTests =
                           "src/Fuaran.Core.Idl.Codegen/Emit/FSharpDefaults.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/FSharpCodec.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/JsonSchema.fs"
-                          "src/Fuaran.Core.Idl.Codegen/Emit/TypeScript.fs"
+                          // Phase 388 — the TypeScript backend is three files.
+                          "src/Fuaran.Core.Idl.Codegen/Emit/TypeScriptCodec.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/TypeScriptDeclarations.fs"
+                          "src/Fuaran.Core.Idl.Codegen/Emit/TypeScriptDerived.fs"
                           "src/Fuaran.Core.Idl.Codegen/Emit/Scaffold.fs"
                           "src/Fuaran.Core.Idl.Codegen/FStar.fs" ] do
                         let lines = File.ReadAllLines(Snapshots.repoFile rel)

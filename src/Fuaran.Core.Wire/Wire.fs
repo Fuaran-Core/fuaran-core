@@ -2214,6 +2214,19 @@ module Decoder =
                                 ("unknown " + key + " '" + t + "'; the known tags are " + quoteAll known))
                     )
 
+    /// `tagDispatch`, with an unknown tag refused in the caller's own sentence (Phase 388): the
+    /// refusal is the same `UnknownTag` at the discriminator, its expectation still naming every known
+    /// tag, and its message `what + <the tag>` — so a codec whose refusals predate this module keeps
+    /// spelling them as it always has. Every other refusal is `tagDispatch`'s, unchanged.
+    let tagDispatchWith (what: string) (key: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
+        fun el ->
+            tagDispatch key cases el
+            |> Result.mapError (fun e ->
+                match e.Code, e.Path, tryMember key el with
+                | DecodeCode.UnknownTag, [ PathSegment.Key k ], Some(JStr other) when k = key ->
+                    { e with Message = what + other }
+                | _ -> e)
+
     /// `tagDispatch` under the `"kind"` discriminator.
     let kindDispatch (cases: (string * Decoder<'T>) list) : Decoder<'T> = tagDispatch "kind" cases
 

@@ -175,8 +175,8 @@ let tests =
 
                     let path = Snapshots.repoFile DeriveIdl.generatedFile
 
-                    if System.Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
-                        File.WriteAllText(path, generated)
+                    Approval.write Approval.Regen Approval.Regenerated.Derive path generated
+                    |> ignore
 
                     Expect.equal
                         generated

@@ -185,9 +185,6 @@ type ResolveFault =
 /// The wire form of the same value is `QueryCodec.queryErrorJson`.
 module QueryError =
 
-    let private quoteAll (xs: string list) : string =
-        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
-
     /// How to write a value of a type a JSON scalar does not carry as itself.
     let private howToWrite (t: ColumnType) : string =
         match t with
@@ -208,7 +205,7 @@ module QueryError =
             "Refused: there is no query '"
             + id
             + "' you may run. The queries you may run are "
-            + quoteAll known
+            + SeamCodec.quoteAll known
             + "."
         | DuplicateQuery id -> "Refused: the query '" + id + "' is registered twice."
         | UnknownParam(name, []) ->
@@ -219,7 +216,7 @@ module QueryError =
             "Refused: '"
             + name
             + "' is not a parameter of this query. Its parameters are "
-            + quoteAll declared
+            + SeamCodec.quoteAll declared
             + "."
         | ParamTypeMismatch(name, expected, got) ->
             "Refused: parameter '"
@@ -230,17 +227,20 @@ module QueryError =
             + ColumnType.tag got
             + "."
             + howToWrite expected
-        | RequiredParamsUnbound names -> "Refused: required parameters missing: " + quoteAll names + "."
+        | RequiredParamsUnbound names -> "Refused: required parameters missing: " + SeamCodec.quoteAll names + "."
         | SourceNotResolved r -> "Refused: the data source '" + r + "' could not be resolved."
         | ExecutionFailed(detail, []) -> "Refused: the query ran and failed: " + detail + "."
         | ExecutionFailed(detail, recoverable) ->
             "Refused: the query ran and failed: "
             + detail
             + ". You may retry with "
-            + quoteAll recoverable
+            + SeamCodec.quoteAll recoverable
             + "."
         | Timeout -> "Refused: the query timed out."
-        | RequiredParamsNull names -> "Refused: required parameters bound to no value: " + quoteAll names + "."
+        | RequiredParamsNull names ->
+            "Refused: required parameters bound to no value: "
+            + SeamCodec.quoteAll names
+            + "."
         | DuplicateParam name ->
             "Refused: parameter '"
             + name
@@ -253,7 +253,7 @@ module QueryError =
             + "' does not allow this: "
             + reason
             + ". What it allows instead: "
-            + quoteAll allowed
+            + SeamCodec.quoteAll allowed
             + "."
         | QueryApprovalRequired policy ->
             "Refused: the policy '"
@@ -383,14 +383,7 @@ module internal QueryErrorWire =
               "unreadableArgs", Decoder.field "error" decodeErrorOf |> Decoder.map UnreadableArgs ]
 
         // The dispatch's own miss keeps this codec's sentence.
-        fun el ->
-            Decoder.tagDispatch "$type" cases el
-            |> Result.mapError (fun e ->
-                match e.Code, e.Path, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
-                    { e with
-                        Message = "unknown query error: " + other }
-                | _ -> e)
+        Decoder.tagDispatchWith "unknown query error: " "$type" cases
 
     /// A refusal as the text the keyed capture journals for it.
     let render (e: QueryError) : string = Canon.render (toJson e)
@@ -1516,46 +1509,10 @@ module QueryCodec =
     // `Lenient` is byte-for-byte the old behaviour. The embedded `source` and `rows` documents are
     // the column codec's, read by its own rules; the check stops at them.
 
-    let private quoteAll (xs: string list) : string =
-        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
-
     // Phase 310 — the members check is the decode layer's strict policy (`Decoder.members`); the
-    // refusal keeps this codec's sentence, naming the object it is in.
-
-    let private tagOf (el: JVal) : string option =
-        match Decoder.tryMember "$type" el with
-        | Some(JStr t) -> Some t
-        | _ -> None
-
-    let private members (where: string) (known: string list) : Decoder<unit> =
-        fun el ->
-            Decoder.members known el
-            |> Result.mapError (fun e ->
-                match List.tryLast e.Path with
-                | Some(PathSegment.Key k) ->
-                    { e with
-                        Message =
-                            "unknown member '"
-                            + k
-                            + "' in "
-                            + where
-                            + "; its members are "
-                            + quoteAll (List.sort known) }
-                | _ -> e)
-
-    /// Check the member `name` of `el`, where it is present.
-    let private within (name: string) (check: Decoder<unit>) : Decoder<unit> =
-        fun el ->
-            match el with
-            | JObj _ -> Decoder.optField name check el |> Result.map ignore
-            | _ -> Ok()
-
-    /// Check every element of an array.
-    let private each (check: Decoder<unit>) : Decoder<unit> =
-        fun el ->
-            match el with
-            | JArr _ -> Decoder.list check el |> Result.map ignore
-            | _ -> Ok()
+    // refusal keeps this codec's sentence, naming the object it is in. The helpers are the seam
+    // codecs' one set (`SeamCodec`, Phase 388), shared with `CapabilityCodec`.
+    open SeamCodec
 
     let private strictQuery (el: JVal) =
         members

@@ -337,13 +337,7 @@ module CapabilityPipeline =
 
     let private spaceFromJ: Decoder<ValueSpace> =
         fun el ->
-            SpaceCodec.decoder el
-            |> Result.mapError (fun e ->
-                match e.Code, e.Path, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
-                    { e with
-                        Message = "unknown value-space: " + other }
-                | _ -> e)
+            SpaceCodec.decoderSaying "unknown value-space: " el
             // Phase 307: an output space the admission check refuses is refused on read.
             |> Result.bind (fun sp ->
                 match Space.wellFormed sp with
@@ -360,13 +354,7 @@ module CapabilityPipeline =
 
     /// Dispatch on `$type`; a miss keeps this codec's sentence `<what><tag>`.
     let private dispatch (what: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
-        fun el ->
-            Decoder.tagDispatch "$type" cases el
-            |> Result.mapError (fun e ->
-                match e.Code, e.Path, Decoder.tryMember "$type" el with
-                | DecodeCode.UnknownTag, [ PathSegment.Key "$type" ], Some(JStr other) ->
-                    { e with Message = what + other }
-                | _ -> e)
+        Decoder.tagDispatchWith what "$type" cases
 
     let private argSrcToJ (s: ArgSource) : JVal =
         match s with

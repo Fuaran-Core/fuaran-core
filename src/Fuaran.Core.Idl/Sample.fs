@@ -41,9 +41,12 @@ module Sample =
     // compares this module's output across the two pipelines, and
     // `ParityVectorTests` holds the stream equal to `ConfRng`'s from the same seed.
     //
-    // A copy rather than a call, deliberately: `Fuaran.Core.Conformance` depends on
-    // this package, so this package cannot depend on it, and the generator is ten
-    // lines whose identity with `ConfRng` is held by a test rather than by hope.
+    // Phase 388 (DECISIONS.md D125) — one body, not a copy held equal by a test.
+    // `Fuaran.Core.Conformance` depends on this package, so the kernel lives HERE
+    // (`Xorshift32`) and `ConfRng` reads it through this package's
+    // `InternalsVisibleTo`; the sampler and the kit draw the same stream because
+    // they run the same code. `ParityVectorTests` still pins the two streams equal,
+    // which now holds the threading rather than a duplicated arithmetic.
     // -----------------------------------------------------------------------
 
     /// Why a vocabulary could not be sampled (Phase 292) — the typed refusal
@@ -83,46 +86,19 @@ module Sample =
     /// the sampler threads one stream through a recursion that returns values, not states.
     type private Rng = { mutable State: uint32 }
 
-    /// `ConfRng`'s xorshift32 step: three shift/XOR rounds, no multiply, so it is
-    /// value-identical under Fable. Never reaches 0 from a non-zero state.
-    let private step (x: uint32) : uint32 =
-        let a = x ^^^ (x <<< 13)
-        let b = a ^^^ (a >>> 17)
-        b ^^^ (b <<< 5)
-
-    /// `ConfRng.ofSeed`: the seed mixed off zero (xorshift's fixed point) and warmed three rounds.
-    let private ofSeed (seed: int) : Rng =
-        let mixed = uint32 seed ^^^ 0x9E3779B9u
-        let s0 = if mixed = 0u then 0x6D2B79F5u else mixed
-        { State = step (step (step s0)) }
+    /// `ConfRng.ofSeed`: the kernel's seed (`Xorshift32`, Phase 388 — the one body both read).
+    let private ofSeed (seed: int) : Rng = { State = Xorshift32.seeded seed }
 
     /// `ConfRng.next`: advance, and answer the top 31 bits of the new state.
     let private next (r: Rng) : int =
-        r.State <- step r.State
-        int (r.State >>> 1)
+        r.State <- Xorshift32.step r.State
+        Xorshift32.value r.State
 
-    /// The number of bits needed to represent `v`.
-    let rec private bitWidth (acc: int) (v: int) : int =
-        if v = 0 then acc else bitWidth (acc + 1) (v >>> 1)
-
-    /// `ConfRng.intBelow`: a value in `[0, n)` taken from the HIGH bits by rejection, never
-    /// `v % n` — exactly uniform, and reading the best-mixed end of the word. `n = 1` still
-    /// draws once, so the stream advances at the same rate whatever `n` is; `n <= 0` draws
-    /// nothing (no caller passes one — [[pickAt]] refuses an empty list first).
+    /// `ConfRng.intBelow`: the kernel's high-bit rejection draw over this mutable position — the
+    /// position is threaded as itself, so each draw advances it in place. `n <= 0` draws nothing
+    /// (no caller passes one — [[pickAt]] refuses an empty list first).
     let private intBelow (r: Rng) (n: int) : int =
-        if n <= 0 then
-            0
-        elif n = 1 then
-            next r |> ignore
-            0
-        else
-            let shift = 31 - bitWidth 0 (n - 1)
-            let mutable candidate = n
-
-            while candidate >= n do
-                candidate <- next r >>> shift
-
-            candidate
+        Xorshift32.below (fun (r: Rng) -> next r, r) n r |> fst
 
     /// A draw from a non-empty list, its index by [[intBelow]]; an empty one is refused as
     /// nothing to choose from at `at`, never divided by.

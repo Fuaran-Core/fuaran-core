@@ -964,7 +964,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 21 | 0 | 8 | 2 | 2 | 0 | 5 | 4 |
-| `Fuaran.Core.OpStream` | 141 | 10 | 54 | 3 | 1 | 19 | 2 | 52 |
+| `Fuaran.Core.OpStream` | 142 | 10 | 54 | 3 | 1 | 19 | 2 | 53 |
 | `Fuaran.Core.OpStream.Dag` | 85 | 24 | 37 | 0 | 0 | 0 | 0 | 24 |
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
@@ -972,15 +972,15 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
-| `Fuaran.Core.Wire` | 158 | 10 | 16 | 3 | 2 | 0 | 0 | 127 |
-| **Total** | 1154 | 142 | 384 | 32 | 15 | 24 | 8 | 549 |
+| `Fuaran.Core.Wire` | 159 | 10 | 16 | 3 | 2 | 0 | 0 | 128 |
+| **Total** | 1156 | 142 | 384 | 32 | 15 | 24 | 8 | 551 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
 
 1. **Reproducible — met.** `check.ps1 -Runs 3` verifies the module three times from a cold
    cache with `--quake 3` (each query 3/3 over varying Z3 seeds); CI's `proofs` job runs exactly
-   that on `windows-latest` on every push. Locally the module also checks at `--z3rlimit 10` (the
+   that on `windows-latest` and, since Phase 393, `ubuntu-latest` on every push. Locally the module also checks at `--z3rlimit 10` (the
    leg uses 40) and under seeds 1, 2 and 3. There are no proof hints to commit, because the
    pinned release removed them (finding 1) — reproducibility rests on the pin, the seed sweep and
    the margin, not on a replay file.
@@ -1090,6 +1090,28 @@ budget entry to `modules.json` beside it. The first
 run downloads the pinned release (~200 MB, hash-verified) into `proofs/.fstar/`; `FSTAR_HOME`
 pointing at a matching release skips that. Editing a `.fst` without re-extracting fails the leg
 with "oracle drift" — that is the point, not an inconvenience.
+
+**Which operating systems (Phase 393).** `fstar-pin.json` carries one entry per OS — `windows` (a
+`.zip`) and `linux` (a `.tar.gz`) — for the same release, each with the sha256 GitHub publishes for
+that asset. The kit resolves the entry by the host's OS, refuses an OS with no entry **by name**
+(exit 2, the same code as before: no prover can be resolved here), and refuses an entry that is
+incomplete or names a different release than the pin, so a pin bump that forgets one entry is red
+on that OS rather than quietly running the old prover there. A macOS machine has no entry and sets
+`FSTAR_HOME`. `pwsh ./proofs/kit/check-proof-leg.tests.ps1` holds the resolution (its `R` arms need
+no prover), and `-ResolveOnly [-Platform <os>]` on the kit prints the entry an OS would fetch. CI's
+`proofs` job runs on both a Windows and a Linux runner.
+
+**Which run gates a publish (Phase 393).** The tag workflow (`.github/workflows/publish-packages.yml`)
+runs its own `proofs` job — `./proofs/check.ps1 -Runs 3`, step for step the ci job — on the tagged
+commit, and its `publish` job `needs:` it, so nothing is packed over a red leg. The alternative was a
+step reading the tagged commit's `ci` proof-job conclusion through the Checks API and refusing
+anything but `success`; it was declined. A Checks-API read answers a question about a DIFFERENT run
+— one that may still be in flight when the tag is pushed (the release sequence pushes the commit and
+the tag together), that may have been re-run or cancelled, and that a tag on a commit `ci` never ran
+for (a dispatch, a tag pushed ahead of its commit) cannot have — and it makes the gate depend on a
+token permission and on a job's display name. A job in the publish run is about the exact commit
+being packed and is red or green in the same run that would pack it. The cost is one more proof run
+per release, which a release can afford.
 
 ### The module cone — `-Since`, `-Modules`, and when to run which (Phase 328)
 

@@ -18,6 +18,8 @@ namespace Fuaran.Core
 /// The read-side null-tolerance conformance vectors + their runner.
 module WireNullTolerance =
 
+    open VectorKit
+
     /// What a vector claims, stated against **both** read policies at once — the point being
     /// that a tolerance is only meaningful as a difference, so every claim pins what the strict
     /// path does as well as what the tolerant path does.
@@ -128,16 +130,6 @@ module WireNullTolerance =
           { Name = "control: a malformed document fails identically under both policies"
             Json = """{"a":}"""
             Claim = UnaffectedByPolicy } ]
-
-    let private pass (name: string) : Corpus.Outcome =
-        { Name = name
-          Passed = true
-          Detail = "ok" }
-
-    let private fail (name: string) (detail: string) : Corpus.Outcome =
-        { Name = name
-          Passed = false
-          Detail = detail }
 
     let private checkErasesTo (v: Vector) (nullFree: string) : Corpus.Outcome =
         match Json.parseDetailedTolerantOfNull v.Json, Json.parseDetailed nullFree with

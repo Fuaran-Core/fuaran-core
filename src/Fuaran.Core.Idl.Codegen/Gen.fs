@@ -201,11 +201,12 @@ module Gen =
     let jsonSchema (idl: Idl) : Result<string, CodegenError> = JsonSchema.jsonSchema idl
 
     /// A TypeScript value literal for an IDL value under the given wire shape.
-    let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string = TypeScript.typescriptValueWith shape v
+    let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
+        TypeScriptCodec.typescriptValueWith shape v
 
     /// The TypeScript structural encoder/decoder module for the named kinds.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScript.typescriptModule idl kindTags
+        TypeScriptCodec.typescriptModule idl kindTags
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
     /// `fsharpModuleDerived`: the same requests, appended after the module's members with one
@@ -218,7 +219,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        TypeScript.typescriptModuleDerived
+        TypeScriptDerived.typescriptModuleDerived
             (derivations |> List.choose toRequest)
             (derivations |> List.contains Derivation.SpecDecoders)
             idl
@@ -226,11 +227,11 @@ module Gen =
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        TypeScript.typescriptValue idl t v
+        TypeScriptDeclarations.typescriptValue idl t v
 
     /// The TypeScript type declarations for the named kinds.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScript.typescriptDeclarations idl kindTags
+        TypeScriptDeclarations.typescriptDeclarations idl kindTags
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member
     /// `typescriptModuleDerived` exports under the same requests, so the derived module and its
@@ -243,7 +244,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        TypeScript.typescriptDeclarationsDerived
+        TypeScriptDerived.typescriptDeclarationsDerived
             (derivations |> List.choose toRequest)
             (derivations |> List.contains Derivation.SpecDecoders)
             idl

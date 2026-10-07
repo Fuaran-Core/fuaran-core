@@ -728,8 +728,7 @@ let tests =
               if not (File.Exists path) then
                   failtestf "DocGenerated.fs not found at %s — regenerate with --regen-snapshots" path
 
-              if Environment.GetEnvironmentVariable "FUARAN_REGEN" = "1" then
-                  File.WriteAllText(path, generated)
+              Approval.write Approval.Regen Approval.Regenerated.Doc path generated |> ignore
 
               // BYTE-FOR-BYTE (D30) — the same rule its sibling guard in `IdlSpikeTests`
               // applies to `Generated.fs`, and for the same reason: the whitespace-stripping

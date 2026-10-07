@@ -8,8 +8,9 @@ surface friction. Once adopted, the witness contracts harden.
 
 ## Versioning policy
 
-Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Published to the
-`fuaran-ui` GitHub Packages NuGet feed. The publish workflow uses `--skip-duplicate`;
+Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Published to nuget.org by the
+tag workflow [`RELEASING.md`](RELEASING.md) describes (its gates, the Trusted Publishing policy, the
+post-push registry probe). The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
 **Every version cut cites a green run of the Core Fable gate against the candidate (Phase 217,
@@ -110,11 +111,19 @@ Regenerate with:
 
 ```
 CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+CORE_APPROVE_API=Fuaran.Core.Wire dotnet run --project tests/Fuaran.Core.Tests
 ```
 
-**The hazard is the one the same switch carries elsewhere: it rewrites EVERY drifted
+Every approval switch in the repository (`CORE_APPROVE_API`, `_WIRE`, `_LADDER`, `_README`, `_DOCS`
+and `FUARAN_REGEN`) has one reading (`tests/Fuaran.Core.Tests/Approval.fs`, Phase 396): absent, empty,
+`0` or `false` is no; `1` or `true` is every file the switch governs; any other value is a filter, a
+comma-separated list of file stems (a package id here). A filter that matches nothing is red by name,
+and each file a switch rewrites is printed.
+
+**The hazard of the bare form is that it rewrites EVERY drifted
 baseline, not the one you were looking at.** An unrelated drift sitting in the tree lands in your
-commit silently. Stage the baselines you meant to move BY NAME and read the rest back out.
+commit silently. Name the package, or stage the baselines you meant to move BY NAME from the printed
+list and read the rest back out.
 
 ### The classes, and what each costs a pinned consumer
 
@@ -2725,6 +2734,72 @@ parameter at the reader, each `UnreadableArgs` shape, and capture and replay of 
 through the new entry points. It also plants a pre-0.36 journal. `FunctionTests` plants every
 `probes307` declaration the encoder can write. The reader's refusal must equal `register`'s sentence
 on both halves of the gate.
+
+### One truthiness and a scope for the approval switches (Phase 396) — NO SURFACE CHANGE: test-project tooling only; no package's surface or wire byte moves
+
+Eleven sites regenerate a committed artefact when an environment variable is set: `CORE_APPROVE_API`
+(the `api/` baselines), `CORE_APPROVE_WIRE` (the `api/wire/` baselines), `CORE_APPROVE_LADDER` (the two
+blocks of `proofs/README.md`), `CORE_APPROVE_README` (the README's version stamps), `CORE_APPROVE_DOCS`
+(`docs/doc-coverage.json`) and `FUARAN_REGEN` (the six generated modules and the snapshot map). Each
+read its own variable with its own idea of "set": `<> "" && <> "0"` at some, `= "1"` at others, so
+`CORE_APPROVE_LADDER=true` approved nothing while `CORE_APPROVE_API=true` approved everything, and none
+could be aimed at one file. All eleven now read through `tests/Fuaran.Core.Tests/Approval.fs`.
+
+**The one rule.** Absent, empty, `0` or `false` is no. `1` or `true` (any case) is every file the switch
+governs. Anything else is a FILTER: a comma-separated list of file stems. For the API and wire switches
+a stem is a package id (`CORE_APPROVE_API=Fuaran.Core.Wire`, `CORE_APPROVE_WIRE=Fuaran.Core.Query`);
+for `FUARAN_REGEN` it is the generated file's name without its extension (`FUARAN_REGEN=MiniGenerated`);
+for `CORE_APPROVE_LADDER` it is `ladder` or `operations` (the two blocks of `proofs/README.md`). A filter
+that names nothing the switch governs is red by name at every site, whether or not the file has drifted, listing what it does govern, never a silent no-op.
+A file the switch did not admit is held to its committed bytes as usual, so a filter never hides the
+drift of the files it left alone. Every file a switch rewrites is printed (`<SWITCH>: wrote <path>`), so
+the "stage by name" step reads that list rather than `git status`.
+
+**What guards it.** `ApprovalTests` asserts the truthiness table, the filter's matching and its red
+refusals, that a write happens only when admitted and changed, and a sweep over `src/` and `tests/`:
+no file outside `Approval.fs` reads a `CORE_APPROVE_*` or `FUARAN_REGEN` variable directly. The sweep's
+pattern is itself pinned against both call spellings, so it cannot go blind. Class: no package's public
+surface moved, and no wire baseline moved.
+
+### The copies D2 does not justify collapse into one body each, and three of the five long files split along their banners (Phase 388, DECISIONS.md D125) — `additive` (`OpStream.Jsonl.quote`, `Decoder.tagDispatchWith`); the wire `none`
+
+**The class, from the gate.** The surface family prints two moves, both **`additive`**:
+`Fuaran.Core.OpStream` gains `OpStream.Jsonl.quote` (the package's one JSON string escaper, public
+beside `checkRaw`) and `Fuaran.Core.Wire` gains `Decoder.tagDispatchWith` (`tagDispatch` with an
+unknown tag refused in the caller's own sentence). Nothing else in any `api/` baseline moves, and no
+wire byte, digest, `api/wire/` baseline, `ParityVectors` row, `StoredIdentity` vector or committed
+corpus copy moves either: every collapse below is a refactor whose answers the existing baselines
+already pinned.
+
+**One body where there were several.** `Dag.toJsonl` spells its node lines through `OpStream.Jsonl.quote`
+— the DAG package references `OpStream`, so its byte-identical third escaper (`Dag.jstr`) is gone; the
+`Actor.fs` copy of `Wire.Json.escape` stays, being the one D2 demands. `OpStreamChain.tipOf` is the one
+length-and-tip walk under the op stream, the compacted tail and both capture journals. The DAG has one
+Kahn drain (`topoCoreMany` drains the closure through the whole-DAG drain) and one closure walk, and
+`mergeBase` / `commonBase` now size only the MAXIMAL common ancestors of an acyclic history — the same
+answer, because only a maximal member can have the largest closure — where they sized every common
+ancestor; a cyclic, hand-built DAG is still sized member by member, so its answer is unchanged too.
+`CapabilityCodec` and `QueryCodec` share one internal `SeamCodec` (`quoteAll`, `tagOf`, `members`,
+`within`, `each`), the four `Deferred` projections are `InvokeError.settle`, and the five re-worded
+dispatches are `Decoder.tagDispatchWith` (the pipeline's value-space sentence through
+`SpaceCodec.decoderSaying`, internal). `Diff`'s readers (`indexOf`, `childKeysOf`, `shellOf`, the
+grammar refusal) are hoisted out of the entries that each declared them. `Cell.asDecimal` is the one
+exact-decimal reading (`aggAsDecimal` deleted), and `Column.aggregate` is one admission pass driving one
+fold record per `AggFn` — still one walk of the column, and every answer the same value to the bit. The
+three vector families share an internal `VectorKit`, the IDL's `find*` lookups are one internal
+`IdlLookup`, and the xorshift32 kernel `ConfRng` and the IDL sampler both draw through is one internal
+`Xorshift32` in `Fuaran.Core.Idl`, read by `Fuaran.Core.Conformance` and `Fuaran.Core.Idl.Codegen`
+through `InternalsVisibleTo` (the `Function` → `Query` precedent).
+
+**The splits.** `SeamLaws.fs` is six files (`CapabilitySeamLaws`, `QuerySeamLaws`, `RegistrySeamLaws`,
+`ColumnarSeamLaws`, `PipelineSeamLaws`, `PolicySeamLaws`), `StreamLaws.fs` three (`ChainStreamLaws`,
+`DagStreamLaws`, `CaptureStreamLaws`) and `TreeLaws.fs` three (`AlgebraTreeLaws`, `PlacementTreeLaws`,
+`ValidityTreeLaws`), each along its own banners, and the internal TypeScript backend three
+(`TypeScriptCodec`, `TypeScriptDeclarations`, `TypeScriptDerived`). All fifteen are internal: the laws'
+public face is `Conformance`, whose forwards and roster ids did not move, and the backend's is `Gen`. `Diff.fs` and `FStar.fs` are NOT split, and
+each says why at its head: F# compiles one module from one file, and both modules' public types are
+nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
+consumer of these packages sees no change from any of this.
 
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 

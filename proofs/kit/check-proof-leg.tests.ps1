@@ -16,7 +16,9 @@
 # the exit code both disagreed with reality, so pinning the text alone would let the pair drift
 # apart again.
 #
-# FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, below). The first is the control that makes the\n# other three mean something:
+# FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, and since Phase 393 the PIN-RESOLUTION arms,
+# R, which need no prover and run first). The first prover arm is the control that makes the other
+# three mean something:
 #
 #   A. GREEN CONTROL — a true model, no host step: exit 0 AND `proofs: green`. If this is red, the
 #                      scratch apparatus is broken and a red B–D would prove nothing.
@@ -24,8 +26,8 @@
 #   C. HOST RUN      — a host project that builds and cannot run the filter: exit non-zero, no green.
 #   D. CHECK         — a model with a type error: exit non-zero, no green.
 #
-# It needs the pinned prover. Where there is none it says NOT RUN and exits 2 — never 0, because
-# "nothing was checked" must not read as "everything held". `proofs/check.ps1` runs it after a
+# The R arms run anywhere. The rest need the pinned prover; where there is none it says NOT RUN
+# and exits 2 — never 0, because "nothing was checked" must not read as "everything held". `proofs/check.ps1` runs it after a
 # green leg, when the prover is by construction present.
 [CmdletBinding()]
 param(
@@ -49,16 +51,6 @@ if (-not $WorkDir) { $WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "che
 $pinFile = Join-Path $ProofsDir 'fstar-pin.json'
 $pinnedVersion = (Get-Content $pinFile -Raw | ConvertFrom-Json).fstar.TrimStart('v')
 
-# The prover, resolved the way the leg resolves it, WITHOUT the leg's download: a test that fetched
-# a 100 MB release as a side effect would be a surprise, and `check.ps1` has already fetched it.
-$fstarHome = $null
-if ($env:FSTAR_HOME) { $fstarHome = $env:FSTAR_HOME }
-elseif (Test-Path (Join-Path $ProofsDir '.fstar/fstar/bin/fstar.exe')) { $fstarHome = Join-Path $ProofsDir '.fstar/fstar' }
-if (-not $fstarHome -or -not (Test-Path (Join-Path $fstarHome 'bin/fstar.exe'))) {
-    Write-Host "==== leg-tests: NOT RUN — no pinned prover. Set FSTAR_HOME to an F* $pinnedVersion release, or run ``pwsh ./proofs/check.ps1`` once to install it under proofs/.fstar/." -ForegroundColor Yellow
-    exit 2
-}
-
 $script:failures = [System.Collections.Generic.List[string]]::new()
 $script:cases = 0
 
@@ -69,6 +61,86 @@ function Assert-That([string] $what, [bool] $holds, [string] $detail = '') {
         $script:failures.Add($what)
         Write-Host "  FAIL  $what$(if ($detail) { " — $detail" })" -ForegroundColor Red
     }
+}
+
+# ---- R. PIN RESOLUTION, PER OPERATING SYSTEM (Phase 393) -------------------------------------------
+
+# These arms need NO prover: `-ResolveOnly` resolves the pin entry the download path would fetch and
+# stops, so they run first and run everywhere. The committed pin must resolve for both OSes it
+# declares — and for the host's OS — and a pin that cannot serve an OS must be REFUSED NAMING it,
+# exit 2, rather than fetching the wrong release or reading as green.
+$resolveDir = Join-Path $WorkDir 'resolve'
+if (Test-Path $WorkDir) { Remove-Item $WorkDir -Recurse -Force }
+New-Item -ItemType Directory -Force $resolveDir | Out-Null
+$committedPin = Get-Content $pinFile -Raw | ConvertFrom-Json
+
+function Invoke-Resolve([string] $pinPath, [string] $platform) {
+    $resolveArgs = @{ Modules = @('Resolve'); ProofsDir = $resolveDir; PinFile = $pinPath; ResolveOnly = $true }
+    if ($platform) { $resolveArgs.Platform = $platform }
+    Push-Location $WorkDir
+    try {
+        $global:LASTEXITCODE = 0
+        $lines = @(& $Kit @resolveArgs *>&1 | ForEach-Object { [string]$_ })
+        $code = $global:LASTEXITCODE
+    }
+    catch { $lines = @($_.ToString()); $code = 1 }
+    finally { Pop-Location }
+    [pscustomobject]@{ Exit = $code; Text = ($lines -join ' ') }
+}
+
+# A copy of the committed pin with one edit applied, written to the scratch directory.
+function New-ScratchPin([string] $name, [scriptblock] $edit) {
+    $copy = Get-Content $pinFile -Raw | ConvertFrom-Json
+    & $edit $copy
+    $path = Join-Path $resolveDir $name
+    $copy | ConvertTo-Json -Depth 4 | Set-Content $path
+    $path
+}
+
+foreach ($os in 'windows', 'linux') {
+    $r = Invoke-Resolve $pinFile $os
+    $asset = $committedPin.$os.asset
+    Assert-That "R. RESOLVE — the committed pin resolves '$os' to its own entry" ($r.Exit -eq 0 -and $asset -and $r.Text.Contains($asset)) "exit $($r.Exit): $($r.Text)"
+}
+$hostOs = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'macos' } else { '' }
+$r = Invoke-Resolve $pinFile ''
+if ($hostOs -and $committedPin.$hostOs) {
+    Assert-That "R. RESOLVE — with no -Platform the HOST's OS ($hostOs) is resolved" ($r.Exit -eq 0 -and $r.Text.Contains($committedPin.$hostOs.asset)) "exit $($r.Exit): $($r.Text)"
+}
+else {
+    Assert-That "R. REFUSE — a host OS the pin does not declare is refused by name" ($r.Exit -eq 2) "exit $($r.Exit): $($r.Text)"
+}
+
+$r = Invoke-Resolve $pinFile 'macos'
+Assert-That "R. REFUSE — an OS the pin has no entry for exits 2, naming it" ($r.Exit -eq 2 -and $r.Text.Contains("pins no 'macos' release")) "exit $($r.Exit): $($r.Text)"
+
+$noLinux = New-ScratchPin 'no-linux.json' { param($p) $p.PSObject.Properties.Remove('linux') }
+$r = Invoke-Resolve $noLinux 'linux'
+Assert-That "R. REFUSE — a pin without a linux entry refuses linux by name" ($r.Exit -eq 2 -and $r.Text.Contains("pins no 'linux' release")) "exit $($r.Exit): $($r.Text)"
+$r = Invoke-Resolve $noLinux 'windows'
+Assert-That "R. RESOLVE — and the same pin still resolves windows" ($r.Exit -eq 0) "exit $($r.Exit): $($r.Text)"
+
+$noHash = New-ScratchPin 'no-hash.json' { param($p) $p.linux.PSObject.Properties.Remove('sha256') }
+$r = Invoke-Resolve $noHash 'linux'
+Assert-That "R. REFUSE — an entry with no sha256 is refused, naming the field" ($r.Exit -eq 2 -and $r.Text.Contains('incomplete') -and $r.Text.Contains('sha256')) "exit $($r.Exit): $($r.Text)"
+
+$stale = New-ScratchPin 'stale.json' { param($p) $p.linux.asset = $p.linux.asset.Replace($p.fstar, 'v2000.01.01') }
+$r = Invoke-Resolve $stale 'linux'
+Assert-That "R. REFUSE — an entry naming a different release than the pin is refused" ($r.Exit -eq 2 -and $r.Text.Contains('different release')) "exit $($r.Exit): $($r.Text)"
+
+# The prover, resolved the way the leg resolves it, WITHOUT the leg's download: a test that fetched
+# a 100 MB release as a side effect would be a surprise, and `check.ps1` has already fetched it.
+$fstarHome = $null
+if ($env:FSTAR_HOME) { $fstarHome = $env:FSTAR_HOME }
+elseif (Test-Path (Join-Path $ProofsDir '.fstar/fstar/bin/fstar.exe')) { $fstarHome = Join-Path $ProofsDir '.fstar/fstar' }
+if (-not $fstarHome -or -not (Test-Path (Join-Path $fstarHome 'bin/fstar.exe'))) {
+    Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    if ($script:failures.Count -gt 0) {
+        Write-Host "==== leg-tests: RED — $($script:failures.Count) of $script:cases pin-resolution assertion(s) failed" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "==== leg-tests: NOT RUN — no pinned prover ($script:cases pin-resolution assertions held; the prover arms need it). Set FSTAR_HOME to an F* $pinnedVersion release, or run ``pwsh ./proofs/check.ps1`` once to install it under proofs/.fstar/." -ForegroundColor Yellow
+    exit 2
 }
 
 # ---- the scratch proofs directory ----------------------------------------------------------------
