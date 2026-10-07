@@ -1,0 +1,9 @@
+# Fuaran.Core.ContentAddress — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+method Fuaran.Core.ContentAddress.ofCanonicalText(Fuaran.Core.EncodingProfile, System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Digest, System.String>
+method Fuaran.Core.ContentAddress.ofValue(Fuaran.Core.EncodingProfile, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Digest, System.String>
+type Fuaran.Core.ContentAddress (module)

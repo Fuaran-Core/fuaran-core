@@ -16,6 +16,11 @@
     <Compile Include="Tree.fs" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Phase 382 (DECISIONS.md D122, route B): `Digest`'s bytes-level constructor is internal, and
+         the one package that holds the profile-pinned constructor over `Canonical`'s text may call it. -->
+    <InternalsVisibleTo Include="Fuaran.Core.ContentAddress" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="FSharp.Core" />
   </ItemGroup>
 </Project>

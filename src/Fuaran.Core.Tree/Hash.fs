@@ -496,3 +496,112 @@ module Hash =
     /// string the replacement bytes also spell — and this does not.
     let trySha256Hex (input: string) : Result<string, IllFormedUtf16> =
         tryUtf8Bytes input |> Result.map sha256HexOfBytes
+
+/// The algorithm a `Digest` was taken under (Phase 382). One case: SHA-256, the spine's one
+/// cryptographic digest (`Hash.sha256Hex`). A second algorithm would be a new case, and its tagged
+/// spelling (`Digest.print`) a new prefix, so a digest written under one never reads as the other.
+[<RequireQualifiedAccess>]
+type DigestAlgorithm =
+    /// SHA-256 (FIPS 180-4), 64 lowercase hex digits, tagged `sha256`: `Hash.sha256Hex`'s digest.
+    | Sha256
+
+/// A typed content digest (Phase 382, `DECISIONS.md` D122 as amended): the algorithm it was taken
+/// under and its lowercase hex. Equal digests are one algorithm and one hex.
+///
+/// **Who can mint one.** The representation is internal, and so is the one constructor that hashes
+/// arbitrary bytes, so a consumer cannot digest a rendering it did not pin. The public constructors
+/// all start from a CANONICAL rendering: `Digest.tryOfFields` over `Hash.canonicalFields`'s injective
+/// pre-image — the encoding every key and digest on the `canonicalFields` roster is minted through,
+/// the Phase 314 digests among them — and, in `Fuaran.Core.ContentAddress`, the profile-pinned
+/// constructor over `Canonical`'s text under a named `EncodingProfile`. Reading a digest that is
+/// already stored is not minting one: `Digest.tryParse` reads the tagged text and `Digest.tryOfHex`
+/// a bare hex under an algorithm the caller names; both refuse anything but lowercase hex of the
+/// algorithm's length, so a stored digest reads back to exactly the bytes it was stored as.
+type Digest =
+    internal
+        { Alg: DigestAlgorithm
+          HexText: string }
+
+    /// The algorithm the digest was taken under.
+    member d.Algorithm: DigestAlgorithm = d.Alg
+
+    /// The digest as lowercase hex, with no algorithm tag — the form `Hash.sha256Hex` returns and the
+    /// Phase 314 digest maps store.
+    member d.Hex: string = d.HexText
+
+    /// The tagged text `Digest.print` writes.
+    override d.ToString() =
+        match d.Alg with
+        | DigestAlgorithm.Sha256 -> "sha256:" + d.HexText
+
+/// Minting, reading and writing a `Digest` (Phase 382).
+[<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Digest =
+
+    /// The tag `print` writes before the hex, and the hex length, per algorithm.
+    let private tagOf (a: DigestAlgorithm) : string =
+        match a with
+        | DigestAlgorithm.Sha256 -> "sha256"
+
+    let private hexLength (a: DigestAlgorithm) : int =
+        match a with
+        | DigestAlgorithm.Sha256 -> 64
+
+    /// THE BYTES-LEVEL CONSTRUCTOR — internal by the D122 ruling. Visible to `Fuaran.Core.Tree` and
+    /// to `Fuaran.Core.ContentAddress` (its `InternalsVisibleTo`), which call it only over a
+    /// canonical rendering; no other package can hand it bytes.
+    let internal ofSha256Bytes (bytes: byte[]) : Digest =
+        { Alg = DigestAlgorithm.Sha256
+          HexText = Hash.sha256HexOfBytes bytes }
+
+    /// The SHA-256 digest of a field sequence's canonical pre-image (`Hash.canonicalFields`) — the
+    /// encoding every entry on the key roster is minted through. Over well-formed fields its `Hex` is
+    /// exactly `Hash.sha256Hex (Hash.canonicalFields fields)`, so `Tree.ownDigest`, `Tree.frameDigest`
+    /// and the `Subtree` digests of `Tree.digests` are each this digest of their own fields, byte for
+    /// byte. GUARDED: a field carrying an unpaired surrogate is refused, typed, at its index in the
+    /// pre-image, because a digest over the replacement bytes would be some other field list's.
+    let tryOfFields (fields: string list) : Result<Digest, IllFormedUtf16> =
+        Hash.tryUtf8Bytes (Hash.canonicalFields fields) |> Result.map ofSha256Bytes
+
+    let private isLowerHex (s: string) : bool =
+        s |> Seq.forall (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+
+    /// Read a bare stored hex as a digest under the algorithm the caller names — the form the
+    /// Phase 314 maps and `Hash.sha256Hex` store, which carries no algorithm of its own. Refuses
+    /// anything but lowercase hex of the algorithm's length: an uppercase spelling is a different
+    /// string, and accepting it would make `Hex` differ from the stored bytes.
+    let tryOfHex (algorithm: DigestAlgorithm) (hex: string) : Result<Digest, string> =
+        if isNull hex then
+            Error "a digest's hex is null"
+        elif hex.Length <> hexLength algorithm then
+            Error(
+                "a "
+                + tagOf algorithm
+                + " digest is "
+                + string (hexLength algorithm)
+                + " hex digits, got "
+                + string hex.Length
+            )
+        elif not (isLowerHex hex) then
+            Error("a digest's hex is lowercase 0-9a-f only: " + hex)
+        else
+            Ok { Alg = algorithm; HexText = hex }
+
+    /// The tagged text of a digest: the algorithm's tag, a colon, the lowercase hex
+    /// (`sha256:<64 hex>`) — the spelling the conformance vectors and the wire baselines store.
+    let print (d: Digest) : string = d.ToString()
+
+    /// Read the tagged text `print` writes. Exactly `<tag>:<hex>` for a known tag, the hex under
+    /// `tryOfHex`'s rule; anything else — no tag, an unknown one, whitespace, uppercase — is refused
+    /// with the reason. `print` after `tryParse` is the identity on every text it accepts.
+    let tryParse (text: string) : Result<Digest, string> =
+        if isNull text then
+            Error "a digest's text is null"
+        else
+            match text.IndexOf ':' with
+            | -1 -> Error("a digest's text is <algorithm>:<hex>, and has no ':': " + text)
+            | i ->
+                match text.Substring(0, i) with
+                | "sha256" -> tryOfHex DigestAlgorithm.Sha256 (text.Substring(i + 1))
+                | other -> Error("unknown digest algorithm: " + other)

@@ -2660,6 +2660,51 @@ renderer (`Fuaran.Core.Wire`) and the SHA-256 (`Fuaran.Core.Tree`'s `Hash`) in o
 `Wire` standalone. Its placement is an open question in D122 and nothing ships for it here; no hashing
 entry point, digest or id moves.
 
+### `Digest` joins the spine on route B: the type in `Tree`, the profile-pinned constructor in the new `Fuaran.Core.ContentAddress` (Phase 382, DECISIONS.md D122 as amended) — ADDITIVE; the wire `none`
+
+**What moved, for a consumer.** Nothing, unless it asks. `Fuaran.Core.Tree` gains two types and a module
+beside its existing surface, and the repository's packed set gains one package; no existing member,
+default, stored digest or rendered byte changes. The surface gate classes both baselines `additive`
+(`api/Fuaran.Core.Tree.txt` gains lines and loses none; `api/Fuaran.Core.ContentAddress.txt` is new).
+The operator ruled route B on 2026-10-07; D2 stands unamended.
+
+**New, additive — `DigestAlgorithm`, `Digest` and the `Digest` module (in `Fuaran.Core.Tree`).** A typed
+digest: the algorithm (`DigestAlgorithm.Sha256`, the one case) and its lowercase hex, with structural
+equality, `Algorithm`, `Hex` (the bare hex, the form `Hash.sha256Hex` returns) and `ToString` (the tagged
+text). The representation and the bytes-level constructor are `internal`; `Tree` grants the constructor
+to `Fuaran.Core.ContentAddress` only.
+
+- `Digest.tryOfFields fields` — SHA-256 over `Hash.canonicalFields fields`, refusing an unpaired surrogate
+  as `IllFormedUtf16`. Over well-formed fields its `Hex` is `Hash.sha256Hex (Hash.canonicalFields fields)`,
+  so every Phase 314 digest (`Tree.ownDigest`, `Tree.frameDigest`, each entry of `Tree.digests`) is this
+  digest of its own fields.
+- `Digest.tryParse text` / `Digest.print d` — the tagged text `sha256:<64 lowercase hex>`; `print` after
+  `tryParse` is the identity on every text it accepts.
+- `Digest.tryOfHex algorithm hex` — a bare stored hex under the algorithm the caller names.
+
+Both readings refuse anything but lowercase hex of the algorithm's length.
+
+**New package, additive — `Fuaran.Core.ContentAddress`, over `Wire` + `Tree`.**
+
+- `ContentAddress.ofValue profile v` — the digest of `Canonical.tryWrite profile v`; refused where it
+  refuses.
+- `ContentAddress.ofCanonicalText profile text` — the digest of stored text, only when
+  `Canonical.isCanonical profile text`; then it equals `ofValue profile` of the value the text reads as.
+
+The digest is SHA-256 over the text's UTF-8 bytes, so a store that keyed `sha256:` + `Hash.sha256Hex`
+over canonical text reads the same digest here. Adding a package to the packed set is additive under the
+gate's classes (a pinned consumer compiles either way), so it rides this slot. Its nuget.org id is new: the
+first release that carries it needs the id's ownership set up beside the others before the tag.
+
+**Byte-stability.** Committed vectors under `V1` and `V2` with the positive control that a control
+character moves the digest; the Phase 314 maps reproduced by `tryOfFields` under both profiles, the root
+Merkle digest pinned per profile; and every digest the repository stores reproduced through the type — the
+apply corpus' ten result hashes (each `ofCanonicalText` of its stored tree under both profiles), every
+`sha256:` token in `api/wire/`, and the Phase 104 known answers.
+
+**Not changed.** No published signature is retyped to `Digest`: the Phase 314 maps and every key on the
+`canonicalFields` roster still return strings, byte-identical.
+
 ## 0.35.1 — DRAFT (0.35.0 is never released; its entries ship here)
 
 **Moved number (2026-10-06).** `0.35.0` was packed as a draft with an earlier public surface than the

@@ -10,6 +10,12 @@
   "$reasonsNotCarried": "Phase 203 was filed naming four reasons and carries three. `tooling` (a build-time tool whose contract is the shape of what it emits) was written for `Fuaran.Core.Idl.Codegen`'s emitter, and by the time this file was cut that package HAD a model: the six generated-vocabulary modules are its F* target's own output, and `check.ps1`'s header says in as many words that what the leg proves over them is the F* BACKEND. A `tooling` entry for it would have been stale on arrival, which is exactly what this file's second direction fails. `leaving-core` was written for a `Lease` package that had already left. A closed vocabulary term with no entry is a term nothing tests — so both were dropped rather than carried, and `content-free-seam` was added for the three packages whose content is the domain's. The reasoning is recorded in `README.md` under \"Coverage is total or declared\".",
   "exclusions": [
     {
+      "package": "Fuaran.Core.ContentAddress",
+      "reason": "facade",
+      "phase": "fuaran-core#382",
+      "note": "The profile-pinned `Digest` constructor (DECISIONS.md D122, route B): `ofValue` is `Canonical.tryWrite` under the named profile, hashed by `Fuaran.Core.Tree`'s SHA-256, and `ofCanonicalText` admits stored text only where `Canonical.isCanonical` holds. It adds no semantics of its own — the rendering is `Wire`'s (the `WireCanon` model and the profile vectors), the digest `Tree`'s (the known-answer and platform-parity pins) — so a theorem here would restate its two callees'. What it owns, that the digest is of exactly the canonical bytes under both profiles and that every stored result hash in the apply corpus reproduces through it, is pinned by `CodecTests`."
+    },
+    {
       "package": "Fuaran.Core.Idl.Cli",
       "reason": "facade",
       "phase": "fuaran-core#203",
@@ -2716,6 +2722,40 @@
       ],
       "class": "trivial",
       "reason": "Record builders: a codec from its three faces, or from a short-circuiting decoder whose one refusal becomes its one defect."
+    },
+    {
+      "members": [
+        "Digest.tryOfFields",
+        "Digest.tryOfHex",
+        "Digest.tryParse"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The typed digest (Phase 382): the canonical-fields constructor held to `Hash.sha256Hex` over `Hash.canonicalFields`' pre-image and to every Phase 314 map entry, and the two readings of a stored digest held to read-and-write-back on every stored token and to their refusals, by example. Collision behaviour is a claim about the hash, which the ladder declines to make.",
+      "standIn": "tests/Fuaran.Core.Tests/HashTests.fs"
+    },
+    {
+      "members": [
+        "Digest.ToString"
+      ],
+      "class": "trivial",
+      "reason": "Renders a digest as its algorithm's tag, a colon and the hex it holds; computes nothing."
+    },
+    {
+      "members": [
+        "Digest.print"
+      ],
+      "class": "forward",
+      "reason": "The tagged text under a module spelling; forwards to `Digest.ToString`.",
+      "forwardsTo": "Digest.ToString"
+    },
+    {
+      "members": [
+        "ContentAddress.ofValue",
+        "ContentAddress.ofCanonicalText"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The profile-pinned constructor (Phase 382, D122 route B): SHA-256 over `Canonical`'s guarded text under the named profile, pinned under both profiles with the positive control that a control character moves the digest, and held to every stored result hash in the apply corpus; its refusals are `Canonical.tryWrite`'s and `isCanonical`'s.",
+      "standIn": "tests/Fuaran.Core.Tests/CodecTests.fs"
     }
   ]
 }

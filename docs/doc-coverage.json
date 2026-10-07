@@ -26,6 +26,12 @@
       "undocumented": []
     },
     {
+      "package": "Fuaran.Core.ContentAddress",
+      "documented": 3,
+      "total": 3,
+      "undocumented": []
+    },
+    {
       "package": "Fuaran.Core.Function",
       "documented": 298,
       "total": 298,

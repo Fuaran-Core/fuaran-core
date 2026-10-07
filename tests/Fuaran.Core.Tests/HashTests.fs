@@ -310,3 +310,82 @@ let tests =
                   (Hash.sha256Hex "payload")
                   (Hash.sha256Hex "payloae")
                   "one character apart, and the whole digest moves" ]
+
+/// Phase 382 — the typed `Digest` (`DECISIONS.md` D122 as amended): its tagged and bare readings,
+/// their refusals, equality, and the canonical-fields constructor held to `Hash.sha256Hex` over the
+/// same pre-image. The stored-digest vectors and the profile-pinned constructor are in `CodecTests`.
+[<Tests>]
+let digestTests =
+    let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+    let ok (r: Result<Digest, 'e>) : Digest =
+        match r with
+        | Ok d -> d
+        | Error e -> failtestf "expected a digest, got %A" e
+
+    testList
+        "Digest (Phase 382)"
+        [ testCase "tryParse and print are inverse on the tagged text, and Hex is the bare stored hex"
+          <| fun _ ->
+              let d = ok (Digest.tryParse ("sha256:" + abc))
+              Expect.equal (Digest.print d) ("sha256:" + abc) "print after tryParse is the identity"
+              Expect.equal d.Hex abc "Hex is the bare hex, byte for byte"
+              Expect.equal d.Algorithm DigestAlgorithm.Sha256 "the algorithm the tag names"
+              Expect.equal (string d) (Digest.print d) "ToString is print"
+
+          testCase "tryOfHex reads a bare stored hex under the named algorithm, as the tagged text does"
+          <| fun _ ->
+              Expect.equal
+                  (ok (Digest.tryOfHex DigestAlgorithm.Sha256 abc))
+                  (ok (Digest.tryParse ("sha256:" + abc)))
+                  "one digest, two spellings"
+
+          testCase "equality is the algorithm and the hex"
+          <| fun _ ->
+              let other = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+              Expect.equal (ok (Digest.tryParse ("sha256:" + abc))) (ok (Digest.tryParse ("sha256:" + abc))) "same"
+
+              Expect.notEqual
+                  (ok (Digest.tryParse ("sha256:" + abc)))
+                  (ok (Digest.tryParse ("sha256:" + other)))
+                  "one hex digit apart is another digest"
+
+          testCase "the readings refuse every text that is not a known tag over lowercase hex of its length"
+          <| fun _ ->
+              for bad in
+                  [ abc // no tag
+                    "SHA256:" + abc // the tag is lowercase
+                    "md5:" + abc // an unknown algorithm
+                    "sha256:" + abc.ToUpperInvariant() // uppercase hex is another string
+                    "sha256:" + abc.Substring 1 // one digit short
+                    "sha256:" + abc + "0" // one digit long
+                    "sha256: " + abc.Substring 1 // whitespace
+                    "sha256:" + abc.Substring(1) + "g" // not hex
+                    "" ] do
+                  Expect.isError (Digest.tryParse bad) (sprintf "tryParse refuses %A" bad)
+
+              Expect.isError (Digest.tryParse null) "null text"
+              Expect.isError (Digest.tryOfHex DigestAlgorithm.Sha256 null) "null hex"
+              Expect.isError (Digest.tryOfHex DigestAlgorithm.Sha256 (abc.ToUpperInvariant())) "uppercase"
+              Expect.isError (Digest.tryOfHex DigestAlgorithm.Sha256 (abc.Substring 2)) "short"
+
+          testCase "tryOfFields is SHA-256 over canonicalFields' pre-image, byte for byte"
+          <| fun _ ->
+              for fields in
+                  [ []
+                    [ "" ]
+                    [ "a"; "b" ]
+                    [ "a" + Hash.foldSep; Hash.fieldEsc + "b" ]
+                    [ "café"; "日本語"; "🔐" ] ] do
+                  Expect.equal
+                      (ok (Digest.tryOfFields fields)).Hex
+                      (Hash.sha256Hex (Hash.canonicalFields fields))
+                      (sprintf "%A" fields)
+
+          testCase "tryOfFields refuses an unpaired surrogate where sha256Hex would digest a substitute"
+          <| fun _ ->
+              let lone = System.String([| char 0xD800 |])
+
+              match Digest.tryOfFields [ "ok"; lone ] with
+              | Error e -> Expect.equal e.Unit 0xD800 "the unit named"
+              | Ok d -> failtestf "an ill-formed field minted %s" (Digest.print d) ]

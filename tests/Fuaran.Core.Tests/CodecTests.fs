@@ -407,3 +407,189 @@ let tests =
                         (EncodingProfileVectors.storedCodecLaws "v2" note [ spaced ] |> failing)
                         [ "stored codec: every stored text is the codec's canonical text of its value under the declared profile, byte for byte" ]
                         "whitespace" ] ]
+
+// Phase 382 — `Digest` on the spine, on route B (`DECISIONS.md` D122 as amended): the type in
+// `Fuaran.Core.Tree`, the profile-pinned constructor in `Fuaran.Core.ContentAddress`. Held here: the
+// committed vectors under BOTH profiles with the positive control that a control character moves a
+// byte between them, the refusals, and the stored digests the repository already holds — the apply
+// corpus' result hashes, the wire baselines' document hashes, the Phase 104 known answers and the
+// Phase 314 digest maps — each reproduced byte-identically through `Digest`.
+
+/// Every `sha256:<hex>` token in a text, in order.
+let private sha256Tokens (text: string) : string list =
+    Text.RegularExpressions.Regex.Matches(text, "sha256:[0-9a-fA-F]+")
+    |> Seq.map _.Value
+    |> List.ofSeq
+
+let private memberOf (key: string) (v: JVal) : JVal =
+    match v with
+    | JObj ms ->
+        match ms |> List.tryFind (fun (k, _) -> k = key) with
+        | Some(_, x) -> x
+        | None -> failtestf "no member %s" key
+    | _ -> failtestf "not an object at %s" key
+
+let private str (v: JVal) : string =
+    match v with
+    | JStr s -> s
+    | other -> failtestf "not a string: %A" other
+
+let private digestOk (r: Result<Digest, 'e>) : Digest =
+    match r with
+    | Ok d -> d
+    | Error e -> failtestf "expected a digest, got %A" e
+
+/// The value the committed vectors pin: a member carrying a line feed, which `V1` writes as the short
+/// escape and `V2` as the `\u` form, so the two profiles' texts — and digests — differ.
+let private pinned: JVal =
+    JObj [ "id", JStr "n1"; "text", JStr "line one\nline two"; "n", JInt 3 ]
+
+/// The Phase 314 digests of a reference tree whose shell encoder is `Canonical.write profile`.
+let private profiledDigests (profile: EncodingProfile) =
+    let encode (n: Reference.RNode) =
+        Canonical.write profile (JObj [ "kind", JStr n.Kind; "value", JStr n.Value ])
+
+    let tree =
+        Reference.RNode.node
+            "root"
+            "doc"
+            [ Reference.RNode.node "s1" "section" [ Reference.RNode.leaf "p1" "para" "a\tb" ]
+              Reference.RNode.leaf "p2" "para" "c\nd" ]
+
+    encode, Tree.preorder Reference.nodew tree, Tree.digests Reference.nodew Reference.idw encode tree
+
+[<Tests>]
+let digestOnTheSpine =
+    testList
+        "Phase 382 — Digest and ContentAddress"
+        [ testCase "ofValue is SHA-256 over Canonical.write under the named profile, pinned for both profiles"
+          <| fun () ->
+              let v1 = digestOk (ContentAddress.ofValue EncodingProfile.V1 pinned)
+              let v2 = digestOk (ContentAddress.ofValue EncodingProfile.V2 pinned)
+
+              for p, d in [ EncodingProfile.V1, v1; EncodingProfile.V2, v2 ] do
+                  Expect.equal d.Hex (Hash.sha256Hex (Canonical.write p pinned)) (EncodingProfile.name p)
+
+              Expect.equal
+                  (Digest.print v1)
+                  "sha256:ef70e8e111aac8f29b329ae6c439e6d15589f1977ba7737b858c6dbcb8834e6c"
+                  "v1, committed"
+
+              Expect.equal
+                  (Digest.print v2)
+                  "sha256:a4442654373f147e49d546dc7e81aa2c2efe6b344d3f8c535a2b0b32ab604f39"
+                  "v2, committed"
+              // the positive control: the other profile moves a byte, so it moves the digest
+              Expect.notEqual v1 v2 "a control character renders differently under V1 and V2"
+
+          testCase "ofCanonicalText admits exactly the canonical text, and agrees with ofValue"
+          <| fun () ->
+              for p in EncodingProfile.all do
+                  Expect.equal
+                      (ContentAddress.ofCanonicalText p (Canonical.write p pinned))
+                      (ContentAddress.ofValue p pinned)
+                      (EncodingProfile.name p)
+
+              let v1Text = Canonical.write EncodingProfile.V1 pinned
+              Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 v1Text) "V1's short escape is not V2's"
+              Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 "{\"id\": 1}") "whitespace"
+              Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 "{") "not JSON"
+              Expect.isError (ContentAddress.ofCanonicalText EncodingProfile.V2 null) "null"
+
+          testCase "ofValue refuses where Canonical.tryWrite refuses"
+          <| fun () ->
+              Expect.isError (ContentAddress.ofValue EncodingProfile.V2 (JFloat nan)) "a non-finite float"
+
+              Expect.isError
+                  (ContentAddress.ofValue EncodingProfile.V2 (JStr(String([| char 0xDC00 |]))))
+                  "an ill-formed string"
+
+          testCase "the apply corpus' stored result hashes reproduce through Digest under both profiles"
+          <| fun () ->
+              let corpus =
+                  IO.File.ReadAllText(Snapshots.repoFile "conformance/apply/skeleton-apply.json")
+                  |> Canonical.read
+                  |> Result.defaultWith (fun e -> failtestf "the corpus did not read: %A" e)
+
+              let hashed =
+                  match memberOf "vectors" corpus with
+                  | JArr vs ->
+                      vs
+                      |> List.choose (fun v ->
+                          match memberOf "expected" v with
+                          | JObj ms as e when ms |> List.exists (fun (k, _) -> k = "hash") ->
+                              Some(str (memberOf "tree" e), str (memberOf "hash" e))
+                          | _ -> None)
+                  | _ -> failtest "vectors is not an array"
+
+              Expect.equal (List.length hashed) 10 "the corpus holds ten stored result hashes"
+
+              for tree, stored in hashed do
+                  Expect.equal (Digest.print (digestOk (Digest.tryParse stored))) stored "read and written back"
+
+                  for p in EncodingProfile.all do
+                      Expect.equal
+                          (Digest.print (digestOk (ContentAddress.ofCanonicalText p tree)))
+                          stored
+                          (sprintf
+                              "%s: the stored hash is the content address of the stored tree"
+                              (EncodingProfile.name p))
+
+          testCase "every stored sha256 token in the wire baselines reads and writes back byte for byte"
+          <| fun () ->
+              let dir =
+                  IO.Path.GetDirectoryName(Snapshots.repoFile "api/wire/Fuaran.Core.Wire.txt")
+
+              let tokens =
+                  IO.Directory.GetFiles(dir, "*.txt")
+                  |> Array.sort
+                  |> Seq.collect (IO.File.ReadAllText >> sha256Tokens)
+                  |> List.ofSeq
+
+              Expect.isGreaterThan (List.length tokens) 50 "the baselines hold their document hashes"
+
+              for t in tokens do
+                  Expect.equal (Digest.print (digestOk (Digest.tryParse t))) t t
+
+          testCase "the Phase 104 known answers read as bare hex and write back byte for byte"
+          <| fun () ->
+              for input, stored in
+                  [ "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    "abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" ] do
+                  let d = digestOk (Digest.tryOfHex DigestAlgorithm.Sha256 (Hash.sha256Hex input))
+                  Expect.equal d.Hex stored input
+                  Expect.equal (Digest.print d) ("sha256:" + stored) input
+
+          testCase "the Phase 314 digest maps are tryOfFields of their own fields, under both profiles, pinned"
+          <| fun () ->
+              let roots =
+                  [ for p in EncodingProfile.all do
+                        let encode, nodes, d = profiledDigests p
+
+                        for n in nodes do
+                            let key = n.Id
+                            let own = [ key; n.Kind; encode { n with Children = [] } ]
+
+                            let frame = own @ (string (List.length n.Children) :: (n.Children |> List.map _.Id))
+
+                            let subtree =
+                                Map.find key d.Own
+                                :: (n.Children |> List.map (fun c -> Map.find c.Id d.Subtree))
+
+                            for name, fields, map in
+                                [ "own", own, d.Own; "frame", frame, d.Frame; "subtree", subtree, d.Subtree ] do
+                                let stored = Map.find key map
+                                let typed = digestOk (Digest.tryOfFields fields)
+                                let msg = sprintf "%s %s %s" (EncodingProfile.name p) name key
+                                Expect.equal typed.Hex stored msg
+                                Expect.equal (digestOk (Digest.tryOfHex DigestAlgorithm.Sha256 stored)) typed msg
+
+                        yield EncodingProfile.name p, Map.find "root" d.Subtree ]
+
+              Expect.equal
+                  roots
+                  [ "v1", "90079951485355e67c4ac939ba836a7b020395dca933644f192503444c899596"
+                    "v2", "3f07c27d58f766d15a1b8e5995230519d65300b44ccda4f3de9a8af7dc2b7599" ]
+                  "the root Merkle digests, committed"
+
+              Expect.notEqual (snd roots[0]) (snd roots[1]) "the positive control: the profile moves the tree's digest" ]

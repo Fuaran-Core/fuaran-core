@@ -88,6 +88,55 @@ gate for an admitted kit is D120's: committed vectors under every profile, a pos
 re-renders under the other profile and requires a byte to move, and a family a content-addressed
 consumer runs against its own stored corpus (`EncodingProfileVectors.storedCodecLaws`).
 
+**Amended 2026-10-07 (Phase 382) — the operator ruled ROUTE B, and `Digest` ships on it. D2 stands
+unamended.** The ruling was the operator's, given 2026-10-07; this phase records it and builds on it, and
+chose nothing about the route. What shipped, riding the `0.35.2` draft slot (additive):
+
+- **The type is in `Fuaran.Core.Tree`** (`Hash.fs`): `DigestAlgorithm` (one case, `Sha256`) and `Digest`,
+  an algorithm and its lowercase hex with structural equality. Its representation is `internal`, and so is
+  its one bytes-level constructor (`Digest.ofSha256Bytes`), so no consumer can digest bytes it did not pin.
+  `Tree` grants that constructor to exactly one other assembly, the new package, through
+  `InternalsVisibleTo` (the `Function` → `Query` precedent).
+- **`Tree`'s own digests mint one in place.** `Digest.tryOfFields` is SHA-256 over `Hash.canonicalFields`'
+  injective pre-image — a canonical rendering, not raw bytes — so every key on the `canonicalFields` roster
+  that is a SHA-256 (the Phase 314 `Own`, `Frame` and `Subtree` digests, `Tree.ownDigest`,
+  `Tree.frameDigest`) is that function of its own fields, byte for byte. It is GUARDED, on D84's rule: a
+  field carrying an unpaired surrogate is refused rather than digested as its replacement bytes. No
+  existing signature moved: the maps still store strings, and their bytes are the digest's `Hex`.
+- **Reading a stored digest is not minting one.** `Digest.tryParse` reads the tagged text
+  `sha256:<64 lowercase hex>` (the spelling the apply corpus and the wire baselines already store) and
+  `Digest.print` writes it back; `Digest.tryOfHex` reads a bare stored hex under an algorithm the caller
+  names (the form `Hash.sha256Hex` and the Phase 314 maps hold, which carry no algorithm). Both refuse
+  anything but lowercase hex of the algorithm's length, because an accepted uppercase spelling would make
+  `Hex` differ from the stored bytes.
+- **The profile-pinned constructor is in a NEW package, `Fuaran.Core.ContentAddress`**, which references
+  `Wire` and `Tree` so that neither references the other: `ContentAddress.ofValue profile v` is SHA-256
+  over `Canonical.tryWrite profile v`, refused where that refuses, and `ContentAddress.ofCanonicalText
+  profile text` digests stored text only when `Canonical.isCanonical profile text` holds.
+
+*Why the package is named `ContentAddress`.* By its function, as the ruling asks: it is where a value's
+content address — the digest a content-addressed store keys it by — is taken under a named profile. Not
+`Digest`, because the type it returns lives in `Tree`, and a package named for a type it does not hold
+sends a reader to the wrong assembly; not a name for the edge it carries (`Wire` + `Tree`), because a
+package named for its references says nothing about what a consumer reaches it for.
+
+*The byte-stability gate is D120's, as this entry's rule says.* Committed vectors under BOTH profiles
+(`CodecTests`, "Phase 382"): a value carrying a line feed digests to a pinned `sha256:` under `V1` and
+another under `V2`, and the positive control requires the two to differ; a reference tree whose shell
+encoder is `Canonical.write profile` has every Phase 314 map entry reproduced by `tryOfFields` under
+each profile, its root Merkle digest pinned per profile and required to move between them. And every
+digest the repository already stores reproduces byte-identically through the type: the ten result
+hashes in `conformance/apply/skeleton-apply.json` read and write back, and each IS
+`ContentAddress.ofCanonicalText` of its stored tree under `V1` and under `V2` (that corpus spells no
+character the profiles render differently, so both reproduce it); every `sha256:` token in the
+`api/wire/` baselines reads and writes back; the Phase 104 known answers read as bare hex.
+
+*What this does not do.* It does not retype the Phase 314 maps or any key on the roster to `Digest` — that
+would be a `retype`, a breaking move of a published surface, and the phase asked for expressibility
+without a stored byte moving, which is what it delivers. Moving those signatures is a later, versioned act
+if a consumer asks for it. Nor does it close the consumer copies D122 counted; it is the type they can
+now adopt.
+
 ## 2026-10-05 — D121: the value tree is a third of a large-array decode, so a typed reader ships; it is the parser's own scanner, a grammar refusal is always `parse`'s, and a shape mismatch is reported only for a document `parse` accepts
 
 **Recorded by Phase 368. `Fuaran.Core.Wire`; additive (STABILITY.md, `0.35.0`); no value, refusal or
