@@ -246,11 +246,7 @@ let tests =
               | SiblingCorpus.Found root ->
                   let owned = OwnedConformance.root ()
 
-                  let pairs =
-                      [ ApplyVectorExport.vectorsPath root, ApplyVectorExport.vectorsPath owned
-                        ApplyVectorExport.manifestPath root, ApplyVectorExport.manifestPath owned ]
-
-                  for copy, source in pairs do
+                  let requireBoth (copy: string) (source: string) =
                       if not (File.Exists copy) then
                           failtestf
                               "the corpus at '%s' carries no %s — re-run `--emit-apply <corpus dir>` and commit the corpus"
@@ -263,11 +259,45 @@ let tests =
                               (Path.GetFileName source)
                               source
 
+                  // The vectors file is this producer's alone and is compared whole.
+                  let copyVectors, ownVectors =
+                      ApplyVectorExport.vectorsPath root, ApplyVectorExport.vectorsPath owned
+
+                  requireBoth copyVectors ownVectors
+
+                  Expect.equal
+                      (OwnedConformance.fingerprint (File.ReadAllText copyVectors))
+                      (OwnedConformance.fingerprint (File.ReadAllText ownVectors))
+                      (sprintf
+                          "the corpus copy '%s' is STALE against this repository's conformance/%s/%s — re-run `--emit-apply <corpus dir>` and commit the corpus"
+                          copyVectors
+                          ApplyVectorExport.familyDirName
+                          (Path.GetFileName ownVectors))
+
+                  // The manifest is SHARED: a sibling producer's family (the wire specification's `limitsApply`)
+                  // sits beside this one in the corpus copy, so only this family's row is this
+                  // producer's to keep fresh — the row line, as `--emit-apply` writes and preserves it.
+                  let copyManifest, ownManifest =
+                      ApplyVectorExport.manifestPath root, ApplyVectorExport.manifestPath owned
+
+                  requireBoth copyManifest ownManifest
+
+                  let ownRow (path: string) =
+                      File.ReadAllText(path).Replace("\r\n", "\n").Split('\n')
+                      |> Array.tryFind (fun l -> l.StartsWith("    { \"id\": \"" + ApplyVectorExport.familyId + "\""))
+                      |> Option.map (fun l -> l.TrimEnd().TrimEnd(','))
+
+                  match ownRow copyManifest, ownRow ownManifest with
+                  | None, _ ->
+                      failtestf
+                          "the corpus manifest at '%s' carries no %s row — re-run `--emit-apply <corpus dir>` and commit the corpus"
+                          copyManifest
+                          ApplyVectorExport.familyId
+                  | _, None -> failtestf "this repository's %s carries no %s row" ownManifest ApplyVectorExport.familyId
+                  | Some copyRow, Some sourceRow ->
                       Expect.equal
-                          (OwnedConformance.fingerprint (File.ReadAllText copy))
-                          (OwnedConformance.fingerprint (File.ReadAllText source))
+                          copyRow
+                          sourceRow
                           (sprintf
-                              "the corpus copy '%s' is STALE against this repository's conformance/%s/%s — re-run `--emit-apply <corpus dir>` and commit the corpus (copies.json names the same command)"
-                              copy
-                              ApplyVectorExport.familyDirName
-                              (Path.GetFileName source)) ]
+                              "the corpus manifest's %s row is STALE against this repository's — re-run `--emit-apply <corpus dir>` and commit the corpus (the other rows are their producers' to keep fresh)"
+                              ApplyVectorExport.familyId) ]

@@ -532,8 +532,10 @@ module ApplyVectorExport =
 
     /// The family index. EMITTED rather than hand-kept, unlike the `laws/` one — that index spans
     /// families its writer does not know about, so a wholesale renderer there would drop whatever it
-    /// had not been told; this one indexes exactly the family beside it, so emitting it is what
-    /// stops its vector count drifting from the file it counts.
+    /// had not been told. This one renders THIS family's row: in the repository's own
+    /// `conformance/apply/` it is the whole manifest, and in a corpus copy `write` merges the row
+    /// beside any sibling producer's rows (`mergeManifest`), so emitting it is what stops the vector
+    /// count drifting from the file it counts without touching what another producer indexed.
     let renderManifest () : string =
         let sb = StringBuilder()
         let line (s: string) = sb.Append(s).Append('\n') |> ignore
@@ -590,10 +592,60 @@ module ApplyVectorExport =
 
     /// Write both artefacts with LF endings, whatever the host platform — the corpus is
     /// byte-compared by several hosts on three operating systems.
+    let private rowPrefix = "    { \"id\": "
+
+    /// This family's one manifest row, as `renderManifest` spells it.
+    let private ownRowLine () : string =
+        renderManifest().Split('\n')
+        |> Array.find (fun l -> l.StartsWith(rowPrefix + jstr familyId))
+
+    /// The manifest beside a corpus copy is SHARED: a sibling producer's family (the wire specification's
+    /// `limitsApply`, since 2026-10-07) sits beside this one, so the copy's manifest is never
+    /// overwritten wholesale. Every family is one line of the shape `    { "id": "<id>", ... }` —
+    /// the shape this renderer emits and the sibling writers copy — so this family's row is
+    /// replaced (placed first, as it renders here) and every other row is kept byte for byte, its
+    /// trailing comma re-derived from its position. A manifest in any other shape is not
+    /// understood, and `write` refuses rather than clobbers it.
+    let mergeManifest (existing: string) : Result<string, string> =
+        let lines = existing.Replace("\r\n", "\n").Split('\n')
+
+        if not (lines |> Array.exists (fun l -> l.Trim() = "\"families\": [")) then
+            Error "the existing manifest has no \"families\": [ array in the one-row-per-line shape"
+        else
+            let foreign =
+                lines
+                |> Array.filter (fun l -> l.StartsWith rowPrefix && not (l.StartsWith(rowPrefix + jstr familyId)))
+                |> Array.map (fun l -> l.TrimEnd().TrimEnd(','))
+                |> Array.toList
+
+            let own = renderManifest().Split('\n')
+            let headerEnd = own |> Array.findIndex (fun l -> l.Trim() = "\"families\": [")
+            let rows = ownRowLine().TrimEnd(',') :: foreign
+            let last = rows.Length - 1
+            let body = rows |> List.mapi (fun i r -> if i = last then r else r + ",")
+            Ok(String.concat "\n" (Array.toList own.[..headerEnd] @ body @ [ "  ]"; "}"; "" ]))
+
     let write (corpusDir: string) : unit =
         Directory.CreateDirectory(familyDir corpusDir) |> ignore
         File.WriteAllText(vectorsPath corpusDir, renderVectors ())
-        File.WriteAllText(manifestPath corpusDir, renderManifest ())
+        let path = manifestPath corpusDir
+
+        let manifest =
+            if File.Exists path then
+                match mergeManifest (File.ReadAllText path) with
+                | Ok merged -> merged
+                | Error why ->
+                    invalidOp (
+                        "the manifest at '"
+                        + path
+                        + "' cannot be merged into ("
+                        + why
+                        + "); it may carry rows other producers own, so it is not overwritten — hand-merge this family's row"
+                    )
+            else
+                renderManifest ()
+
+        File.WriteAllText(path, manifest)
 
     // -----------------------------------------------------------------------
     //  reading a committed file back

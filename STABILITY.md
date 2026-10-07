@@ -2402,12 +2402,37 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.35.2 — DRAFT
+## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a
 consumer's contract, so nothing rides it; the work opening this slot is additive, which makes it a
 PATCH slot. The surface gate classes every member below `additive` (`api/Fuaran.Core.Idl.Codegen.txt`
 gains lines and loses none). A member of a higher class advances the slot rather than riding it.
+
+**Release record — the receiving gate: GREEN, both legs, against the candidate.** On 2026-10-07 the
+candidate was packed from commit `f4f665f` (the 18 packable projects, version `0.35.2`, into a folder)
+and the downstream host's Fable gate was run against it in its cut-time mode
+(`tests/core-fable/core-fable.ps1 -CoreVersion 0.35.2 -CoreFeed <folder>`). The first run FAILED on
+membership: `Fuaran.Core.ContentAddress` (Phase 382) is the first package this repository has added since
+that gate moved to the host (D55), and the host's smoke project neither referenced it nor excluded it. The
+host gained a candidate-only reference (`CandidateFrom="0.35.2"`: counted as a member only when the Core
+the run compiles against is at or past that version, so the host's own pinned run at `0.35.1` is
+unchanged) and a touch of `ContentAddress.ofValue`. The second run was green: the compile leg transpiled
+the 16 Fable-facing packages at `0.35.2` (the two build-time packages excluded by name), and the value leg
+compared 419 of 419 `ParityVectors` rows byte-identical between .NET and node. The host's pinned run at
+`0.35.1` stayed green beside it (19 packages, the same 419 rows).
+
+Two more things stood between the draft and this record, both found by this repository's own CI on
+`main` rather than by a reviewer. The `0.35.2` cut (`aa749f4`) moved the renderer's `kitVersion` stamp
+without re-emitting the corpus copies of `laws/capability-laws.json` and `laws/decimal-laws.json`, so
+`LawVectors` was red on every `main` run since; the corpus was re-stamped at `0.35.2` (stamp only,
+vectors unchanged, the manifest rows with them). And the corpus's `apply/manifest.json` had gained a
+second family (`limitsApply`, from the wire specification) beside this repository's `skeletonApply` row,
+which the copy check compared whole and the emitter would have overwritten whole; both now work by this
+family's row alone, the emitter merging its row beside any sibling producer's (`ApplyVectorExport.
+mergeManifest`), and the check reds on a perturbed row. Those two fixes and this record are the release
+commit; nothing under `src/` moved after the candidate was packed, so the packed surfaces are the
+released ones.
 
 ### The generator emits the structural derivations a domain otherwise writes by hand (Phase 374) — ADDITIVE; the wire `none`
 
