@@ -707,7 +707,7 @@ the table below are GENERATED from `../proofs.json` (`CORE_APPROVE_LADDER=1` and
 | `capability-scalar-readers-abstract` | `model-bridge` | `permanent` |
 | `capability-key-renderers-abstract` | `model-bridge` | `permanent` |
 | `propagation-order-distinct` | `model-bridge` | `unscheduled` |
-| `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLaws` |
+| `propagation-change-set-and-prior` | `domain-obligation` | `Conformance.propagationEvaluatorLawsAt` |
 | `propagation-prior-blind` | `domain-obligation` | `Conformance.propagationEvaluatorLawsWith` |
 | `propagation-read-witness` | `model-bridge` | `permanent` |
 | `query-renderers-abstract` | `model-bridge` | `permanent` |
@@ -957,7 +957,7 @@ families credit are credited over nested batches as well as flat ones.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
-| `Fuaran.Core.Conformance` | 149 | 1 | 99 | 2 | 6 | 0 | 0 | 41 |
+| `Fuaran.Core.Conformance` | 160 | 1 | 111 | 2 | 6 | 0 | 0 | 40 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 149 | 33 | 64 | 6 | 0 | 5 | 0 | 41 |
 | `Fuaran.Core.Idl` | 60 | 0 | 6 | 1 | 1 | 0 | 0 | 52 |
@@ -973,7 +973,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 159 | 10 | 16 | 3 | 2 | 0 | 0 | 128 |
-| **Total** | 1156 | 142 | 384 | 32 | 15 | 24 | 8 | 551 |
+| **Total** | 1167 | 142 | 396 | 32 | 15 | 24 | 8 | 550 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

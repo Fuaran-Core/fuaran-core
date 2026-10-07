@@ -30,6 +30,8 @@ module Fuaran.Core.Tests.ConformanceVacuityTests
 // their reference runs call them by their deprecated names on purpose.
 #nowarn "44"
 
+open System.IO
+open System.Text.RegularExpressions
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
@@ -108,6 +110,16 @@ let private storedIdentityCaptures =
             |> snd)
         []
 
+/// The observer family's reference witness (Phase 298): an int metric, two flags. Shared by the
+/// `observerLawsAt` run and its obsolete forward's.
+let private observerWitness =
+    ObserverWitness.create (fun (x: int) ->
+        [ if x > 5 then
+              "big"
+
+              if x % 2 = 0 then
+                  "even" ])
+
 /// Every law family the kit ships, run once. Evaluated at most once per process: several of these
 /// are three-hundred-iteration property runs.
 let private runs =
@@ -171,6 +183,16 @@ let private runs =
                    313
                    200)
            run
+               "Conformance.referenceLawsAt"
+               200
+               (Conformance.referenceLawsAt
+                   StructuralIntegrityTests.refw
+                   nodew
+                   idw
+                   StructuralIntegrityTests.refGen
+                   313
+                   200)
+           run
                "Conformance.referenceLaws"
                200
                (Conformance.referenceLaws
@@ -230,6 +252,16 @@ let private runs =
                "Conformance.arbitrationLaws"
                300
                (Conformance.arbitrationLaws nodew idw ConformanceTests.opGen encNode 8585 300)
+           run
+               "Conformance.keyedChildrenLawsAt"
+               200
+               (Conformance.keyedChildrenLawsAt
+                   ConformanceTests.keyw
+                   ConformanceTests.knodew
+                   idw
+                   ConformanceTests.kGen
+                   1890
+                   200)
            run
                "Conformance.keyedChildrenLaws"
                200
@@ -456,6 +488,16 @@ let private runs =
 
            // ---- the remaining witnessed opt-ins ----
            run
+               "Conformance.projectionLawsAt"
+               200
+               (Conformance.projectionLawsAt
+                   ProjectionTests.pw
+                   ProjectionTests.applyOps
+                   ProjectionTests.wireEncode
+                   ProjectionTests.genTree
+                   42
+                   200)
+           run
                "Conformance.projectionLaws"
                200
                (Conformance.projectionLaws
@@ -464,20 +506,13 @@ let private runs =
                    ProjectionTests.wireEncode
                    ProjectionTests.genTree
                    42
-                   200) // Phase 298 — the observer family at a reference witness: an int metric, two flags.
-           run
-               "Conformance.observerLaws"
-               200
-               (Conformance.observerLaws
-                   (ObserverWitness.create (fun (x: int) ->
-                       [ if x > 5 then
-                             "big"
-
-                             if x % 2 = 0 then
-                                 "even" ]))
-                   (ConfRng.intBelow 10)
-                   42
                    200)
+           // Phase 298 — the observer family at a reference witness: an int metric, two flags.
+           run
+               "Conformance.observerLawsAt"
+               200
+               (Conformance.observerLawsAt observerWitness (ConfRng.intBelow 10) 42 200)
+           run "Conformance.observerLaws" 200 (Conformance.observerLaws observerWitness (ConfRng.intBelow 10) 42 200)
            run
                "Conformance.aiSurfaceLawsAt"
                200
@@ -583,6 +618,10 @@ let private runs =
            run "Conformance.dirtyPropagationLaws" 200 (Conformance.dirtyPropagationLaws 4242 200)
            run "Conformance.propagationEvalLaws" 200 (Conformance.propagationEvalLaws 4242 200)
            run
+               "Conformance.propagationEvaluatorLawsAt"
+               200
+               (Conformance.propagationEvaluatorLawsAt ConformanceTests.sheetw 2110 200)
+           run
                "Conformance.propagationEvaluatorLaws"
                200
                (Conformance.propagationEvaluatorLaws ConformanceTests.sheetw 2110 200)
@@ -629,10 +668,24 @@ let private runs =
            // one run is the whole sample.
            run "WireNullTolerance.laws" 1 (WireNullTolerance.laws ())
            run "StringEscapeVectors.laws" 1 (StringEscapeVectors.laws ())
+           run "Conformance.sanitizeLawsAt" 200 (Conformance.sanitizeLawsAt SanitizeWitness.core 349 200)
            run "Conformance.sanitizeLaws" 200 (Conformance.sanitizeLaws SanitizeWitness.core 349 200)
            // Phase 360 — the encoding-profile vectors (a fixed corpus) and the stored-identity families,
            // each at a store the ordinary append wrote: the store, walked whole, is the sample.
            run "EncodingProfileVectors.laws" 1 (EncodingProfileVectors.laws ())
+           // Phase 390 — each vector family's `…With` over its committed corpus, and the cross-pipeline
+           // value table: the table, walked whole, is the sample.
+           run "WireNullTolerance.lawsWith" 1 (WireNullTolerance.lawsWith WireNullTolerance.vectors)
+           run
+               "StringEscapeVectors.lawsWith"
+               1
+               (StringEscapeVectors.lawsWith StringEscapeVectors.vectors StringEscapeVectors.actorVectors)
+           run
+               "EncodingProfileVectors.lawsWith"
+               1
+               (EncodingProfileVectors.lawsWith EncodingProfileVectors.vectors EncodingProfileVectors.actorVectors)
+           run "ParityVectors.laws" 1 (ParityVectors.laws ())
+           run "ParityVectors.lawsWith" 1 (ParityVectors.lawsWith ParityVectors.vectors)
            // Phase 379 — the stored-codec family at a two-text store written under `v2` through the
            // identity codec, one text carrying a line feed so the positive control has a text to move.
            run
@@ -1365,7 +1418,7 @@ let floorTests =
 
           // Phase 349 — every sanitisation law is red at a witness whose floor is open, each arm on
           // the defect it exists for; and green at Core's own floor.
-          testCase "sanitizeLaws is red at an open floor, every law, and green at SanitizeWitness.core"
+          testCase "sanitizeLawsAt is red at an open floor, every law, and green at SanitizeWitness.core"
           <| fun _ ->
               let core = SanitizeWitness.core
 
@@ -1386,10 +1439,10 @@ let floorTests =
                         ScrubMarkdown = fun s -> s + "x" } ]
 
               for fragment, w in witnesses do
-                  let results = Conformance.sanitizeLaws w 349 200
+                  let results = Conformance.sanitizeLawsAt w 349 200
                   Expect.isTrue (hasRed fragment results) (sprintf "%s is red: %A" fragment (redLaws results))
 
-              Expect.isEmpty (redLaws (Conformance.sanitizeLaws core 349 200)) "and green at Core's own floor"
+              Expect.isEmpty (redLaws (Conformance.sanitizeLawsAt core 349 200)) "and green at Core's own floor"
 
           // Phase 349 — the configured-stream laws are green at the canonical config as well as the
           // second one the reference run uses, so the family is not a statement about one format.
@@ -1499,7 +1552,7 @@ let floorTests =
               let honest = Conformance.queryLawsWith w 4242 200
               Expect.isEmpty (redLaws honest) "and the reference resolver is green"
 
-          testCase "propagationEvaluatorLaws is red on an evaluator that asks for a read it does not declare"
+          testCase "propagationEvaluatorLawsAt is red on an evaluator that asks for a read it does not declare"
           <| fun _ ->
               let w = ConformanceTests.sheetw
 
@@ -1510,7 +1563,7 @@ let floorTests =
                               resolve "undeclared-peek" |> ignore
                               w.EvalNode m resolve id }
 
-              let results = Conformance.propagationEvaluatorLaws peeking 4242 100
+              let results = Conformance.propagationEvaluatorLawsAt peeking 4242 100
 
               Expect.isTrue
                   (results
@@ -1561,3 +1614,141 @@ let budgetTests =
                   "no budget refusal at two"
 
               Expect.isFalse (hasRed "resists a re-hashed forgery" results) "two distinct pre-images, no collision" ]
+
+// ---- Phase 390 — the vector families, planted empty ----
+//
+// A vector family's sample is the table it is handed, so the vacuity a drawn family's guard catches
+// has one shape here: a run handed NO vectors. Each family answers it with a law of its own that goes
+// red by name, and this list is what holds every vector family the roster declares to that.
+
+/// The roster modules that hold VECTOR families — runners over an enumerated table rather than drawn
+/// law families. Held equal to the roster's modules below, so a new kit module is classified here.
+let private vectorModules =
+    set
+        [ "WireNullTolerance"
+          "StringEscapeVectors"
+          "EncodingProfileVectors"
+          "StoredIdentity"
+          "ParityVectors" ]
+
+/// Each vector family's run over NO vectors, with the fragment of the law that must read red.
+let private zeroVectorRuns: (string * string * (unit -> LawResult list)) list =
+    let corpus = "the corpus evaluated at least one vector"
+
+    [ "WireNullTolerance.laws", corpus, (fun () -> WireNullTolerance.lawsWith [])
+      "WireNullTolerance.lawsWith", corpus, (fun () -> WireNullTolerance.lawsWith [])
+      "StringEscapeVectors.laws", corpus, (fun () -> StringEscapeVectors.lawsWith [] [])
+      "StringEscapeVectors.lawsWith", corpus, (fun () -> StringEscapeVectors.lawsWith [] [])
+      "EncodingProfileVectors.laws", corpus, (fun () -> EncodingProfileVectors.lawsWith [] [])
+      "EncodingProfileVectors.lawsWith", corpus, (fun () -> EncodingProfileVectors.lawsWith [] [])
+      "ParityVectors.laws", corpus, (fun () -> ParityVectors.lawsWith [])
+      "ParityVectors.lawsWith", corpus, (fun () -> ParityVectors.lawsWith [])
+      // The stored families' sample is the store a consumer hands them: an empty store is the zero.
+      "EncodingProfileVectors.storedCodecLaws",
+      "the store holds at least one text",
+      (fun () -> EncodingProfileVectors.storedCodecLaws "v2" Codec.json [])
+      "StoredIdentity.linearLaws",
+      "the store holds at least one record",
+      (fun () ->
+          StoredIdentity.linearLaws
+              "v2"
+              OpStream.defaultHash
+              storedIdentityWitness
+              storedIdentityWitness
+              OpStream.empty)
+      "StoredIdentity.dagLaws",
+      "the store holds at least one node",
+      (fun () -> StoredIdentity.dagLaws "v2" OpStream.defaultHash storedIdentityWitness storedIdentityWitness Dag.empty)
+      "StoredIdentity.captureLaws",
+      "the store holds at least one capture",
+      (fun () -> StoredIdentity.captureLaws "v2" OpStream.defaultHash []) ]
+
+[<Tests>]
+let vectorFamilyTests =
+    testList
+        "Conformance.VectorFamilies (Phase 390)"
+        [ testCase "every vector family the roster declares has a planted zero-vector run here"
+          <| fun _ ->
+              let declared =
+                  Families.families
+                  |> List.filter (fun f -> Set.contains f.Module vectorModules)
+                  |> List.map (fun f -> f.Id)
+                  |> set
+
+              let planted = zeroVectorRuns |> List.map (fun (id, _, _) -> id) |> set
+              Expect.equal planted declared "the planted runs and the roster's vector families are one set"
+
+          testCase
+              "every kit module is classified: law families in Conformance and FoldConfluence, the rest vector families"
+          <| fun _ ->
+              Expect.equal
+                  (set Families.modules)
+                  (Set.union vectorModules (set [ "Conformance"; "FoldConfluence" ]))
+                  "a new kit module is classified here, so its families cannot escape the zero-vector check"
+
+          testCase "a zero-vector run of every vector family is red, by name"
+          <| fun _ ->
+              for id, fragment, runEmpty in zeroVectorRuns do
+                  let results = runEmpty ()
+
+                  Expect.isTrue
+                      (hasRed fragment results)
+                      (sprintf "%s over no vectors must be red (%s): %A" id fragment (redLaws results))
+
+          testCase "laws () is lawsWith over the committed corpus, and green"
+          <| fun _ ->
+              let pairs =
+                  [ "WireNullTolerance", WireNullTolerance.laws (), WireNullTolerance.lawsWith WireNullTolerance.vectors
+                    "StringEscapeVectors",
+                    StringEscapeVectors.laws (),
+                    StringEscapeVectors.lawsWith StringEscapeVectors.vectors StringEscapeVectors.actorVectors
+                    "EncodingProfileVectors",
+                    EncodingProfileVectors.laws (),
+                    EncodingProfileVectors.lawsWith EncodingProfileVectors.vectors EncodingProfileVectors.actorVectors
+                    "ParityVectors",
+                    ParityVectors.laws (),
+                    ParityVectors.lawsWith (
+                        ParityVectors.vectors @ ParityVectors.hashSweep @ ParityVectors.sanitiseSweep
+                    ) ]
+
+              for name, laws, withCorpus in pairs do
+                  Expect.equal laws withCorpus (sprintf "%s.laws () is lawsWith over its committed corpus" name)
+                  Expect.isEmpty (redLaws laws) (sprintf "%s is green over its committed corpus" name)
+
+          testCase "ParityVectors.lawsWith is red on a row that breaks what makes it comparable"
+          <| fun _ ->
+              let red row fragment =
+                  let results = ParityVectors.lawsWith [ row ]
+                  Expect.isTrue (hasRed fragment results) (sprintf "%A must red %s: %A" row fragment (redLaws results))
+
+              red ("a b", "00") "names one row"
+              red ("café", "00") "printable ASCII"
+              red ("idlSanitize/scrub/x", "diverges:00") "sanitiser-sweep row reads ok"
+
+              Expect.isTrue
+                  (hasRed "names one row" (ParityVectors.lawsWith [ "a", "1"; "a", "2" ]))
+                  "a repeated label is red"
+
+          testCase "no cell in the kit asserts a literal true — a tautological check is evidence (`Saw`), not a law"
+          <| fun _ ->
+              // Phase 390. `Check(true, …)` takes the evidence and asserts nothing, so the census reads
+              // it as a law that held. The two sites it found became `Saw()`; this keeps the shape out.
+              let dir =
+                  Path.Combine(
+                      Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx"),
+                      "src",
+                      "Fuaran.Core.Conformance"
+                  )
+
+              let pattern = Regex(@"\.Check\s*\(\s*true\s*,")
+
+              let offenders =
+                  [ for file in Directory.GetFiles(dir, "*.fs") do
+                        let lines = File.ReadAllLines file
+
+                        for i in 0 .. lines.Length - 1 do
+                            if pattern.IsMatch lines.[i] then
+                                yield sprintf "%s:%d" (Path.GetFileName file) (i + 1) ]
+
+              Expect.isNonEmpty (Directory.GetFiles(dir, "*.fs")) "the scan read the kit's sources"
+              Expect.isEmpty offenders "a literal-true check is `Saw()` in disguise" ]

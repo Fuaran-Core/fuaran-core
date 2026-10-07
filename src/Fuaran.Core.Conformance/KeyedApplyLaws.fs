@@ -310,7 +310,9 @@ module internal KeyedApplyLaws =
                 acceptedKeyed <- acceptedKeyed + 1
 
                 match Tree.wellFormedKeyed nodew keyw idw after with
-                | Tree.Structural -> keyedPreservation.Check(true, fun () -> "")
+                // The match IS the assertion: a structural result is the evidence (`Saw`), and every other
+                // arm below records its counterexample.
+                | Tree.Structural -> keyedPreservation.Saw()
                 | Tree.RepeatedId d ->
                     keyedPreservation.Check(
                         false,

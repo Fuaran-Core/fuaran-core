@@ -75,6 +75,53 @@ nuget.org. A C# or VB tier constructs Core's values through the F# surface, wrap
 authors, and a generated C# veneer over Core's closed unions is the route by which a facade returns
 (DECISIONS.md D28).
 
+## 2d. Every family, one shape: law families and vector families
+
+The kit ships two kinds of family, and you run both the same way — **every entry answers
+`LawResult list`, and green means every result `Passed`**:
+
+- **Law families** are drawn: they take your witnesses, a `seed` and an iteration count, and sample
+  your domain. `Conformance.certify` (or `certifyStream`, for a domain with no uniform tree) is the
+  base run, already an aggregate — its `ConformanceReport.Results` is the `LawResult list`. Every
+  other law family is OPT-IN and called directly beside it: one that needs a witness capability your
+  domain has (`keyedChildrenLawsAt`, `referenceLawsAt`, `propagationEvaluatorLawsAt`,
+  `projectionLawsAt`, `observerLawsAt`, `sanitizeLawsAt`, `capabilityLawsAt`, …), one for a seam not
+  every domain has, or one asking for a stronger promise than the base contract.
+- **Vector families** are enumerated: a runner over a fixed table (`WireNullTolerance`,
+  `StringEscapeVectors`, `EncodingProfileVectors`, `ParityVectors`) or over YOUR store, walked whole
+  (`StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`, `EncodingProfileVectors.storedCodecLaws`).
+  Each answers `laws ()` over its committed corpus, and `lawsWith` over a vector set you hand it.
+  Their vector-shaped entries (`run`, `check`, `lines ()`) stay for the hosts in other languages that
+  diff them; `laws` is how the kit, and you, read them.
+
+```fsharp
+let results =
+    (Conformance.certify nodew idw opGen sw streamGen OpStream.defaultHash seed iters).Results
+    @ Conformance.keyedChildrenLawsAt keyw nodew idw opGen seed iters      // an opt-in that is yours
+    @ StoredIdentity.linearLaws "v2" OpStream.defaultHash sw sw myStoredChain // your store, walked whole
+    @ WireNullTolerance.laws ()                                              // a fixed corpus
+
+results |> List.filter (fun r -> not r.Passed) |> List.iter (fun r -> printfn "RED %s: %A" r.Law r.Counterexample)
+```
+
+**Which families are yours** is data, not reading: `Families.families` enumerates every family the
+kit ships, each with the witnesses it takes, whether `certify` runs it, and — for an opt-in — why
+(`NeedsWitnessCapability`, `SeamNotEveryDomainHas`, `StrongerPromise`, `NoWitnessToCertify`). The
+generated [`conformance-families.md`](conformance-families.md) is the same roster as a table, and its
+JSON twin is what a census tool reads.
+
+**A family that reached nothing is red, never green.** A drawn family whose sample missed a verdict
+fails its own `sample adequacy (…)` law; a vector family handed no vectors fails `<family>: the corpus
+evaluated at least one vector`; a stored family over an empty store fails too. So an empty or
+unreachable run cannot pass as an adopted one.
+
+**The names follow one rule.** A bare name is the family at its default (`capabilityLaws` over the
+kit's own fixtures); `…At` is the same family at YOUR witness; `…With` is the same laws with one more
+parameter pinned, last before the seed (`propagationEvaluatorLawsWith`'s prior-aware evaluator,
+`lawsWith`'s vector set). The bare spellings of the six witness-taking families renamed by Phase 390
+(`keyedChildrenLaws`, `referenceLaws`, `propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`,
+`sanitizeLaws`) are obsolete forwards removed at `1.0.0` — call the `…At` form.
+
 ## 3. Re-express the op-stream
 
 ```fsharp

@@ -170,7 +170,20 @@ module Conformance =
         : LawResult list =
         AlgebraTreeLaws.containerLaws nodew idw gen seed iterations
 
-    /// Forward — see `AlgebraTreeLaws.keyedChildrenLaws`.
+    /// Forward — see `AlgebraTreeLaws.keyedChildrenLawsAt`: the keyed-position laws at a DOMAIN'S
+    /// `KeyedWitness`.
+    let keyedChildrenLawsAt
+        (keyw: KeyedWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        AlgebraTreeLaws.keyedChildrenLawsAt "Conformance.keyedChildrenLawsAt" keyw nodew idw gen seed iterations
+
+    /// Obsolete — `keyedChildrenLawsAt` (Phase 390's application of the naming rule).
+    [<System.Obsolete("Renamed keyedChildrenLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use keyedChildrenLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
     let keyedChildrenLaws
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
@@ -179,7 +192,7 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        AlgebraTreeLaws.keyedChildrenLaws keyw nodew idw gen seed iterations
+        AlgebraTreeLaws.keyedChildrenLawsAt "Conformance.keyedChildrenLaws" keyw nodew idw gen seed iterations
 
     /// Forward — see `PlacementTreeLaws.placementLaws` (Phase 312).
     let placementLaws
@@ -202,7 +215,20 @@ module Conformance =
         : LawResult list =
         ValidityTreeLaws.containmentLaws allowedChildren nodew idw gen seed iterations
 
-    /// Forward — see `ValidityTreeLaws.referenceLaws` (Phase 313).
+    /// Forward — see `ValidityTreeLaws.referenceLawsAt` (Phase 313): the reference laws at a DOMAIN'S
+    /// `RefWitness`.
+    let referenceLawsAt
+        (refw: RefWitness<'Node, 'Id>)
+        (nodew: NodeWitness<'Node, 'Id>)
+        (idw: IdWitness<'Id>)
+        (gen: OpGen<'Node, 'Id>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ValidityTreeLaws.referenceLawsAt "Conformance.referenceLawsAt" refw nodew idw gen seed iterations
+
+    /// Obsolete — `referenceLawsAt` (Phase 390's application of the naming rule).
+    [<System.Obsolete("Renamed referenceLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use referenceLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
     let referenceLaws
         (refw: RefWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
@@ -211,7 +237,7 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        ValidityTreeLaws.referenceLaws refw nodew idw gen seed iterations
+        ValidityTreeLaws.referenceLawsAt "Conformance.referenceLaws" refw nodew idw gen seed iterations
 
     /// Forward — see `PlacementTreeLaws.loweringLaws` (Phase 312).
     let loweringLaws
@@ -818,11 +844,18 @@ module Conformance =
     let propagationEvalLaws (seed: int) (iterations: int) : LawResult list =
         PropagationLaws.propagationEvalLaws seed iterations
 
-    /// Forward — see `PropagationLaws.propagationEvaluatorLaws`.
-    let propagationEvaluatorLaws (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
-        PropagationLaws.propagationEvaluatorLaws evw seed iterations
+    /// Forward — see `PropagationLaws.propagationEvaluatorLawsAt`: the evaluator-contract laws at a
+    /// DOMAIN'S `EvaluatorWitness`.
+    let propagationEvaluatorLawsAt (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
+        PropagationLaws.propagationEvaluatorLawsAt "Conformance.propagationEvaluatorLawsAt" evw seed iterations
 
-    /// Forward — see `PropagationLaws.propagationEvaluatorLawsWith`.
+    /// Obsolete — `propagationEvaluatorLawsAt` (Phase 390's application of the naming rule).
+    [<System.Obsolete("Renamed propagationEvaluatorLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use propagationEvaluatorLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
+    let propagationEvaluatorLaws (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
+        PropagationLaws.propagationEvaluatorLawsAt "Conformance.propagationEvaluatorLaws" evw seed iterations
+
+    /// Forward — see `PropagationLaws.propagationEvaluatorLawsWith`: `propagationEvaluatorLawsAt` with
+    /// the domain's prior-aware evaluator pinned, last before the seed.
     let propagationEvaluatorLawsWith
         (evw: EvaluatorWitness<'Model, 'V>)
         (evalNodeWith: 'Model -> (string -> 'V option) -> 'V option -> string -> Result<'V, string>)
@@ -831,7 +864,20 @@ module Conformance =
         : LawResult list =
         PropagationLaws.propagationEvaluatorLawsWith evw evalNodeWith seed iterations
 
-    /// Forward — see `SurfaceLaws.projectionLaws`.
+    /// Forward — see `SurfaceLaws.projectionLaws`: the projection laws at a DOMAIN'S
+    /// `ProjectionWitness`.
+    let projectionLawsAt
+        (pw: ProjectionWitness<'Node, 'Id, 'Op>)
+        (applyOps: 'Op list -> Result<'Node, string>)
+        (wireEncode: 'Node -> string)
+        (gen: ConfRng.T -> 'Node * ConfRng.T)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        SurfaceLaws.projectionLaws pw applyOps wireEncode gen seed iterations
+
+    /// Obsolete — `projectionLawsAt` (Phase 390's application of the naming rule).
+    [<System.Obsolete("Renamed projectionLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use projectionLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
     let projectionLaws
         (pw: ProjectionWitness<'Node, 'Id, 'Op>)
         (applyOps: 'Op list -> Result<'Node, string>)
@@ -843,8 +889,18 @@ module Conformance =
         SurfaceLaws.projectionLaws pw applyOps wireEncode gen seed iterations
 
     /// Forward — see `ObserverLaws.observerLaws` (Phase 298): in-memory equals live, a cyclic parent
-    /// declaration terminates, and re-entrant subscribers are isolated, over a domain's
+    /// declaration terminates, and re-entrant subscribers are isolated, at a DOMAIN'S
     /// `ObserverWitness` and input generator.
+    let observerLawsAt<'Input, 'Flag when 'Input: equality and 'Flag: equality>
+        (w: ObserverWitness<'Input, 'Flag>)
+        (genInput: ConfRng.T -> 'Input * ConfRng.T)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ObserverLaws.observerLaws w genInput seed iterations
+
+    /// Obsolete — `observerLawsAt` (Phase 390's application of the naming rule).
+    [<System.Obsolete("Renamed observerLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use observerLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
     let observerLaws<'Input, 'Flag when 'Input: equality and 'Flag: equality>
         (w: ObserverWitness<'Input, 'Flag>)
         (genInput: ConfRng.T -> 'Input * ConfRng.T)
@@ -855,7 +911,12 @@ module Conformance =
 
     /// Forward — see `SanitizeLaws.sanitizeLaws` (Phase 349): the sanitisation floor each of the six
     /// `Fuaran.Core.Idl.Sanitize` functions claims, over generated adversarial strings and the pinned
-    /// vectors, at a `SanitizeWitness` — `SanitizeWitness.core` for Core's own floor.
+    /// vectors, at a host's `SanitizeWitness` — `SanitizeWitness.core` for Core's own floor.
+    let sanitizeLawsAt (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
+        SanitizeLaws.sanitizeLaws w seed iterations
+
+    /// Obsolete — `sanitizeLawsAt` (Phase 390's application of the naming rule).
+    [<System.Obsolete("Renamed sanitizeLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use sanitizeLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
     let sanitizeLaws (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
         SanitizeLaws.sanitizeLaws w seed iterations
 

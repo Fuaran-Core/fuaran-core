@@ -306,7 +306,11 @@ module internal ValidityTreeLaws =
     ///
     /// `'Node` and `'Id` need equality. Opt-in: it needs the `RefWitness` a domain with references
     /// declares.
-    let referenceLaws
+    ///
+    /// `family` is the roster id the guard is labelled with — `Conformance.referenceLawsAt`, or the
+    /// bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    let referenceLawsAt
+        (family: string)
         (refw: RefWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -583,7 +587,7 @@ module internal ValidityTreeLaws =
 
         LawKit.results [ exact; forwardExact; families; agreement; preservation; footprintReads; race ]
         @ [ SampleAdequacy.reached
-                "Conformance.referenceLaws"
+                family
                 "reference arm"
                 seed
                 [ "accepted remove", removes

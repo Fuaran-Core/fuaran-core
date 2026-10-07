@@ -42,7 +42,7 @@
     {
       "package": "Fuaran.Core.Projection",
       "reason": "law-tested-by-design",
-      "family": "Conformance.projectionLaws",
+      "family": "Conformance.projectionLawsAt",
       "phase": "fuaran-core#203",
       "note": "The read-token-lever seam. It has real computation — `Projection.project` / `render` / `parseBack` — and the family certifies the round trip, the digest's stability under presentation moves, and the compactness floor, at a domain's own `ProjectionWitness` with `wireEncode` and `applyOps` as per-call parameters. The theorem is declined rather than impossible: what it would take is a model of a domain codec this repository deliberately does not depend on, which is the same boundary the family's own parameters draw."
     },
@@ -481,14 +481,6 @@
       "class": "measured-elsewhere",
       "reason": "Committed vector sets and their runners; the vectors are shared with the other hosts and the runners are exercised over them.",
       "standIn": "tests/Fuaran.Core.Tests/WireNullToleranceTests.fs"
-    },
-    {
-      "members": [
-        "ParityVectors.lines"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Committed vector sets and their runners; the vectors are shared with the other hosts and the runners are exercised over them.",
-      "standIn": "tests/Fuaran.Core.Tests/ParityVectorTests.fs"
     },
     {
       "members": [
@@ -1316,7 +1308,7 @@
       ],
       "class": "measured-elsewhere",
       "reason": "Builds the pure observer witness with explicit options; the observer family builds its witnesses with it.",
-      "through": "Conformance.observerLaws",
+      "through": "Conformance.observerLawsAt",
       "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
     },
     {

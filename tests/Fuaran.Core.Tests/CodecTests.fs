@@ -475,7 +475,11 @@ let tests =
                     let v2s = vectors |> List.map (fun (_, _, _, v2) -> v2)
                     Expect.isTrue (passed (EncodingProfileVectors.storedCodecLaws "v1" note v1s)) "v1"
                     Expect.isTrue (passed (EncodingProfileVectors.storedCodecLaws "v2" note v2s)) "v2"
-                    Expect.isTrue (passed (EncodingProfileVectors.storedCodecLaws "v2" note [])) "an empty store"
+                    // Phase 390 — an empty store certifies nothing, so it is red by name, never green over nothing.
+                    Expect.equal
+                        (EncodingProfileVectors.storedCodecLaws "v2" note [] |> failing)
+                        [ "stored codec: the store holds at least one text" ]
+                        "an empty store"
 
                     Expect.isTrue
                         (passed (EncodingProfileVectors.storedCodecLaws "v2" Codec.json [ "{\"a\":[1,\"x\\u000a\"]}" ]))
@@ -497,7 +501,9 @@ let tests =
                 testCase "an unknown declaration, a defect and a non-canonical spelling each red their law"
                 <| fun () ->
                     Expect.equal
-                        (EncodingProfileVectors.storedCodecLaws "v3" note [] |> failing |> List.length)
+                        (EncodingProfileVectors.storedCodecLaws "v3" note [ "{}" ]
+                         |> failing
+                         |> List.length)
                         4
                         "an unknown profile evaluates nothing"
 

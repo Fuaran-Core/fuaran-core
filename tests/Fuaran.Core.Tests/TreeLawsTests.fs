@@ -171,10 +171,10 @@ let private lawNamed (prefix: string) (results: LawResult list) =
 [<Tests>]
 let keyedChildrenLawTests =
     testList
-        "Conformance.keyedChildrenLaws"
+        "Conformance.keyedChildrenLawsAt"
         [ testCase "the reference witness with a keyed slot is the first certifier — every law green"
           <| fun _ ->
-              let results = Conformance.keyedChildrenLaws keyw knodew idw kGen 1890 200
+              let results = Conformance.keyedChildrenLawsAt keyw knodew idw kGen 1890 200
 
               let failed = results |> List.filter (fun r -> not r.Passed)
 
@@ -184,12 +184,12 @@ let keyedChildrenLawTests =
                       |> List.map (fun r -> sprintf "  %s — %A" r.Law r.Counterexample)
                       |> String.concat "\n"
 
-                  failtestf "the keyed reference witness failed keyedChildrenLaws:\n%s" msg
+                  failtestf "the keyed reference witness failed keyedChildrenLawsAt:\n%s" msg
 
               Expect.equal (List.length results) 4 "three laws + the adequacy guard"
 
               Expect.equal
-                  (Conformance.keyedChildrenLaws keyw knodew idw kGen 1890 200)
+                  (Conformance.keyedChildrenLawsAt keyw knodew idw kGen 1890 200)
                   results
                   "same seed ⇒ identical report"
 
@@ -199,14 +199,14 @@ let keyedChildrenLawTests =
               // those to their own suite, and this is that suite.
               match
                   KitRoster.census
-                  |> List.tryFind (fun (n, _) -> n = "Conformance.keyedChildrenLaws")
+                  |> List.tryFind (fun (n, _) -> n = "Conformance.keyedChildrenLawsAt")
               with
               | Some(_, Guarded _) -> ()
               | Some(_, Unconditional why) -> failtestf "censused Unconditional (%s) but it emits a guard" why
-              | None -> failtest "Conformance.keyedChildrenLaws is missing from SampleAdequacy.census"
+              | None -> failtest "Conformance.keyedChildrenLawsAt is missing from SampleAdequacy.census"
 
               let adequacy =
-                  Conformance.keyedChildrenLaws keyw knodew idw kGen 1890 200
+                  Conformance.keyedChildrenLawsAt keyw knodew idw kGen 1890 200
                   |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
 
               Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
@@ -223,7 +223,7 @@ let keyedChildrenLawTests =
               // engine's own scan, adopted as the domain's check. It is green on every drawn tree,
               // which is why the collision subjects are BUILT.
               let results =
-                  Conformance.keyedChildrenLaws
+                  Conformance.keyedChildrenLawsAt
                       { keyw with
                           IdsUnique = surfaceOnlyUnique }
                       knodew
@@ -255,7 +255,7 @@ let keyedChildrenLawTests =
               // Without this arm the two collision laws certify `fun _ -> false`, which refuses
               // every tree the domain will ever hold and is not a check at all.
               let results =
-                  Conformance.keyedChildrenLaws { keyw with IdsUnique = fun _ -> false } knodew idw kGen 1890 200
+                  Conformance.keyedChildrenLawsAt { keyw with IdsUnique = fun _ -> false } knodew idw kGen 1890 200
 
               let accepts = lawNamed "the domain's id check accepts" results
               Expect.isFalse accepts.Passed "a check that refuses everything must lose the acceptance law"
@@ -267,7 +267,7 @@ let keyedChildrenLawTests =
 
           testCase "a witness declaring no keyed position passes VACUOUSLY, and the report says so"
           <| fun _ ->
-              let results = Conformance.keyedChildrenLaws noKeyed nodew idw opGen 1890 100
+              let results = Conformance.keyedChildrenLawsAt noKeyed nodew idw opGen 1890 100
 
               Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "a domain with no keyed position is not failed"
 
@@ -286,7 +286,7 @@ let keyedChildrenLawTests =
               // claim this family can measure; giving it no way to build one makes the claim
               // unmeasurable, which is not the same as having nothing to claim.
               let results =
-                  Conformance.keyedChildrenLaws
+                  Conformance.keyedChildrenLawsAt
                       { keyw with
                           PlaceKeyedChild = fun _ _ -> None }
                       knodew

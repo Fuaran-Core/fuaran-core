@@ -2801,6 +2801,49 @@ each says why at its head: F# compiles one module from one file, and both module
 nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
 consumer of these packages sees no change from any of this.
 
+### One entry story for the conformance kit: every family answers `LawResult list` and is rostered, a vector family handed nothing is red by name, and six witness-taking families take `…At` (Phase 390, DECISIONS.md D126) — `additive`; BREAKING (behavioural): an empty store reds the stored families; six bare names `[<Obsolete>]` until `1.0.0`; the wire `none`
+
+**The class, from the gate.** `Fuaran.Core.Conformance` prints eleven **`additive`** moves and nothing
+else: `Conformance.keyedChildrenLawsAt`, `referenceLawsAt`, `propagationEvaluatorLawsAt`,
+`projectionLawsAt`, `observerLawsAt`, `sanitizeLawsAt`; `WireNullTolerance.lawsWith`,
+`StringEscapeVectors.lawsWith`, `EncodingProfileVectors.lawsWith`; `ParityVectors.laws` and
+`ParityVectors.lawsWith`. Marking a member `[<Obsolete>]` moves no signature, so the six forwards below
+are not a surface move. No wire byte, `api/wire/` baseline, `ParityVectors` row, committed vector file
+(`conformance/escape/*`, `conformance/encoding/*`) or `lines ()` output moves: the hosts that diff the
+vector families read exactly what they read before.
+
+**The `…At` rule, applied (operator ruling, D126).** `keyedChildrenLaws`, `referenceLaws`,
+`propagationEvaluatorLaws`, `projectionLaws`, `observerLaws` and `sanitizeLaws` each gain an `…At`
+spelling — same parameters, same order, the witness first — and the bare name becomes an
+`[<Obsolete>]` forward naming its replacement, **removed on the `1.0.0` slot by Phase 386's
+`OneDotZero` sweep**. Each forward stays a roster row under its own id (and, where the family is
+guarded, its own guard label), so a census or a pin that names it does not move today. The ladder row
+`propagation-change-set-and-prior` is discharged by `Conformance.propagationEvaluatorLawsAt` now, and the
+operation roster and the coverage exclusions name the `…At` ids, so the sweep moves no discharge. The
+sweep also re-stamps the two `README.md` sentences that still name `keyedChildrenLaws` and
+`propagationEvaluatorLaws` with their arrival versions. Eleven further bare-named witness-taking families
+are NOT renamed here; D126 records them and why the call is escalated.
+
+**Every family is rostered, and an empty sample is red by name.** `ParityVectors.laws ()` is a law
+family now (printable ASCII, one space-free label per row, every sanitiser row `ok`, the `VEC`
+rendering), so `Families.families` enumerates every family the kit ships. Each fixed-corpus vector
+family (`WireNullTolerance`, `StringEscapeVectors`, `EncodingProfileVectors`, `ParityVectors`) gains
+`lawsWith` over a vector set the caller hands it — `laws ()` is `lawsWith` over the committed corpus — and
+one law more, `<family>: the corpus evaluated at least one vector`, counted per vector evaluated. The
+stored families (`StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`,
+`EncodingProfileVectors.storedCodecLaws`) gain `the store holds at least one <record | node | capture |
+text>`. **Behavioural, and deliberately so:** every one of these families answers one more `LawResult`
+than it did, and a stored family run over an EMPTY store, which was green, is red — a store that holds
+nothing certifies nothing. A consumer that certifies a store it knows to be empty drops that run rather
+than reading its green.
+
+**Two tautological cells are evidence.** `PlacementTreeLaws`' refused-graft arm and `KeyedApplyLaws`'
+keyed-preservation arm recorded `Check(true, …)`; both are `Saw()` now, which the census already counted
+the same way, and the suite keeps a literal-true check out of the kit's sources.
+
+**The one entry shape** is `docs/ADOPTION.md` §2d: law families and vector families are run the same
+way, by concatenating their `LawResult list`s, with `Conformance.certify` as the base run.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

@@ -1,5 +1,66 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D126: the kit has one entry story — every family answers `LawResult list` and is rostered, a vector family handed no vectors is red by name, and the `…At` rule is APPLIED to the six bare witness-taking families (operator ruling), with their bare names forwarded until `1.0.0`
+
+**Recorded by Phase 390. `Fuaran.Core.Conformance`; rides the `0.36.0` draft (STABILITY.md, "One
+entry story for the conformance kit"). Amends D78's naming rule by applying it, not by restating it.**
+
+*The `…At` question — the operator's ruling, recorded.* D78 wrote the rule (a bare name is the family
+at its default; `…At` is the domain-witness form; `…With` pins one more parameter, last before the
+seed) and applied `…At` to the families that HAD a default beside the witness form. Six families take a
+domain witness and carry a bare name with the witness first: `keyedChildrenLaws`, `referenceLaws`,
+`propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`, `sanitizeLaws`. The phase offered two
+closures: apply the rule (an `…At` spelling for each, the bare name forwarded), or restate D78 as "the
+`At` suffix marks the seam families whose bare name is the kit-default form". **Ruled 2026-10-07 by the
+operator: APPLY it.** The restatement would freeze an exception an adopter has to learn at `1.0`; a
+forward costs one draft. So each of the six gains its `…At` spelling with the witness first (the
+position every `…At` entry already takes) and the same parameters in the same order; the bare name is
+an `[<Obsolete>]` forward naming its replacement and `1.0.0`, kept as a roster row under its own id —
+and, where the family is guarded, its own guard label — exactly as D78's forwards were, so nothing that
+pins it moves on the day the rule lands. The forwards are on the record for Phase 386's `1.0.0` removal
+sweep. The claims-ladder row `propagation-change-set-and-prior` moves its `dischargedBy` to
+`Conformance.propagationEvaluatorLawsAt`, and the operation roster and the coverage exclusions name the
+`…At` ids, so the sweep removes the forwards without moving a discharge. `propagationEvaluatorLawsWith`
+keeps its name: it is the `…At` family with the prior-aware evaluator pinned last before the seed, which
+is the rule's `…With`.
+
+*What the ruling does NOT yet reach — a finding, routed rather than decided here.* The six were the
+evaluate-design pass's enumeration, and the roster shows more. Eleven further bare-named families take a
+witness capability the base contract does not (`NeedsWitnessCapability`): `attestationLaws`,
+`compositionLaws`, `compositionPilot`, `memoLaws`, `memoSoundnessLaws`, `functionVerifyLaws`,
+`verifyHonestyLaws`, `encoderInjectivityLaws`, `keyedApplyLaws`, `keyedArbitrationLaws` (and its
+`…With`), and `FoldConfluence.laneFoldLaws` (and its `…With`). Under the rule as applied, each is a
+domain-witness form with no default, exactly the six's shape — `keyedApplyLaws` takes the very
+`KeyedWitness` `keyedChildrenLawsAt` does. So "one rule, no exceptions" at `1.0` needs them brought under
+it too, and two of them raise a question the six did not: what a `…With` of an `…At` family is called.
+That is a naming decision with a public cost on the `1.0` slot, so it is escalated as a successor phase
+rather than taken silently inside this one.
+
+*Every family answers `LawResult list` and is rostered — the vector families included.* The pass found
+five vector families answering `Corpus.Outcome list`, `Result<unit, string>` or `string list` and said the
+roster could not see them. Checked against the tree: four already carried a rostered `laws` (Phases 297,
+349, 360, 379); `ParityVectors` alone had none. It gains `laws ()`, stating what makes a row comparable on
+whichever pipeline runs it (printable ASCII, one space-free label per row, every sanitiser row `ok`, the
+`VEC` rendering); the values stay pinned by the suite and diffed by a consumer, so nothing a host reads
+moves. Each fixed-corpus family gains `lawsWith` over a vector set the caller hands it (`laws ()` is
+`lawsWith` over the committed corpus), and carries one more law — `<family>: the corpus evaluated at
+least one vector` — whose evidence is one assertion per vector, counted where each verdict is built
+(D100's rule). A run handed no vectors is therefore red by name; before, it was an empty list, which
+every reader reads as green. The stored families (`StoredIdentity.*`, `storedCodecLaws`) were
+green over an EMPTY store for the same reason — each law asserted once whatever the store held — and
+each now carries `the store holds at least one <record | node | capture | text>`, one assertion per
+item: a behavioural change, deliberately, since a store that holds nothing certifies nothing. The
+suite plants a zero-vector run of every vector family the roster declares and holds that set to the roster.
+
+*A tautological cell is evidence, not a law.* `Check(true, …)` takes the evidence and asserts nothing,
+so the census counted it as a law that held. The two sites (`PlacementTreeLaws`, `KeyedApplyLaws`) are
+`Saw()` — the match guard around each is the assertion — and a source scan keeps the shape out of the kit.
+
+*The one entry shape.* `docs/ADOPTION.md` §2d: every family is run the same way — call it, concatenate
+the `LawResult list`s, green when every result passed — `Conformance.certify` (or `certifyStream`) for the
+base run, each opt-in the roster says is yours, and the vector families' `laws` / `lawsWith` or stored
+laws. The internal `LawKit` runner is how a family is WRITTEN, not how one is run, so it stays internal.
+
 ## 2026-10-07 — D125: a copy D2 does not demand is collapsed into one body, a kernel two packages need lives in the lower one behind `InternalsVisibleTo`, and a public module whose public types are nested in it is not split across files
 
 **Recorded by Phase 388. `Fuaran.Core.OpStream`, `.OpStream.Dag`, `.Ops`, `.Wire`, `.Column`,
