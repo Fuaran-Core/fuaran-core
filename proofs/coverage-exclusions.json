@@ -1321,6 +1321,14 @@
     },
     {
       "members": [
+        "ObserverWitness.tryObserveTree"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Checks a hand-built state's invariant (Order is exactly the keys of Entries, each once) and then walks it with the rostered `observeTree` (Phase 383); each defect it names, and its agreement with the walk on a built state, are example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/ObserverTests.fs"
+    },
+    {
+      "members": [
         "Observer.InMemoryObserver.RegisterNode"
       ],
       "class": "forward",

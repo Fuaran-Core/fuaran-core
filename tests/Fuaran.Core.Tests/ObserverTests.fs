@@ -248,3 +248,65 @@ let tests =
               Expect.equal (io.Observe("cell!A1")).Value.Flags [] "no drift when cached == recomputed"
               Expect.equal (io.Observe("cell!A2")).Value.Flags [ RecomputeDrift 3.0 ] "drift flagged with delta"
           } ]
+
+// ---- Phase 383 — observeTree is total over a hand-built state ----
+
+[<Tests>]
+let totalityTests =
+    let w = Fuaran.Core.ObserverWitness.create deriveBox
+
+    let box =
+        { Width = 10.0
+          Height = 10.0
+          ContentWidth = 5.0 }
+
+    let built =
+        Fuaran.Core.ObserverWitness.empty<BoxInput, BoxFlag>
+        |> Fuaran.Core.ObserverWitness.register w "root" box None
+        |> fst
+        |> Fuaran.Core.ObserverWitness.register w "kid" box (Some "root")
+        |> fst
+
+    let walk (st: Fuaran.Core.ObserverState<BoxInput, BoxFlag>) =
+        Fuaran.Core.ObserverWitness.observeTree st "root"
+        |> List.map (fun o -> o.NodeId)
+
+    testList
+        "ObserverWitness.observeTree is total (Phase 383)"
+        [ testCase "an Order id with no entry is read as unregistered, never a KeyNotFoundException"
+          <| fun _ ->
+              // Both fields are public, so this state is one a caller can hand in.
+              let dangling =
+                  { built with
+                      Order = built.Order @ [ "ghost" ] }
+
+              Expect.equal (walk dangling) [ "root"; "kid" ] "the dangling id is skipped, as snapshot reads it"
+
+              Expect.equal
+                  (Fuaran.Core.ObserverWitness.tryObserveTree dangling "root")
+                  (Error(Fuaran.Core.ObserverDefect.UnregisteredInOrder "ghost"))
+                  "the checked walk names it"
+
+          testCase "a repeated id and an entry Order omits are each named by the checked walk"
+          <| fun _ ->
+              Expect.equal
+                  (Fuaran.Core.ObserverWitness.tryObserveTree
+                      { built with
+                          Order = built.Order @ [ "kid" ] }
+                      "root")
+                  (Error(Fuaran.Core.ObserverDefect.RepeatedInOrder "kid"))
+                  "a repeat"
+
+              Expect.equal
+                  (Fuaran.Core.ObserverWitness.tryObserveTree { built with Order = [ "root" ] } "root")
+                  (Error(Fuaran.Core.ObserverDefect.UnorderedEntry "kid"))
+                  "an omission"
+
+          testCase "a state the functions built is Ok, and the checked walk is the walk"
+          <| fun _ ->
+              Expect.equal
+                  (Fuaran.Core.ObserverWitness.tryObserveTree built "root")
+                  (Ok(Fuaran.Core.ObserverWitness.observeTree built "root"))
+                  "the checked walk agrees"
+
+              Expect.equal (walk built) [ "root"; "kid" ] "and walks both" ]

@@ -117,6 +117,19 @@ type ObserverState<'Input, 'Flag> =
         Order: string list
     }
 
+/// How a hand-built `ObserverState` breaks its documented invariant — `Order` is exactly the keys
+/// of `Entries`, each once (Phase 383). Both fields are public, so a state no `register` produced can
+/// say anything; `ObserverWitness.tryObserveTree` names the first breach rather than walking it.
+/// `RequireQualifiedAccess`: `ObserverDefect.UnregisteredInOrder`, …
+[<RequireQualifiedAccess>]
+type ObserverDefect =
+    /// `Order` names `nodeId`, and `Entries` holds no entry for it.
+    | UnregisteredInOrder of nodeId: string
+    /// `Order` names `nodeId` more than once.
+    | RepeatedInOrder of nodeId: string
+    /// `Entries` holds `nodeId`, and `Order` does not name it.
+    | UnorderedEntry of nodeId: string
+
 /// The observer functions over the witness (Phase 298). Every function is
 /// pure: a registration or update returns the new state and the emission it
 /// produced, and the host delivers emissions to whatever subscribers it
@@ -233,6 +246,10 @@ module ObserverWitness =
     /// forever; and the children map is built once per call in one pass over
     /// the registration order, with a two-list queue, where the class rebuilt
     /// it and appended the queue with `@`.
+    ///
+    /// **Total over any state value (Phase 383).** Both fields of `ObserverState` are public, so an
+    /// `Order` id with no entry is read as unregistered — never walked, never a throw — exactly as
+    /// `snapshot` reads it. `tryObserveTree` refuses such a state with the `ObserverDefect` it holds.
     let observeTree (st: ObserverState<'Input, 'Flag>) (root: string) : Observation<'Input, 'Flag> list =
         if not (Map.containsKey root st.Entries) then
             []
@@ -240,7 +257,7 @@ module ObserverWitness =
             let children =
                 (Map.empty, List.rev st.Order)
                 ||> List.fold (fun (acc: Map<string, string list>) id ->
-                    match (Map.find id st.Entries).ParentId with
+                    match Map.tryFind id st.Entries |> Option.bind (fun e -> e.ParentId) with
                     | Some p -> Map.add p (id :: (Map.tryFind p acc |> Option.defaultValue [])) acc
                     | None -> acc)
 
@@ -266,6 +283,36 @@ module ObserverWitness =
                     walk acc' rest back' seen'
 
             walk [] [ root ] [] (Set.singleton root)
+
+    /// `observeTree` over a state checked first (Phase 383): `Error` with the first breach of the
+    /// state's invariant — an `Order` id with no entry, an id `Order` repeats (both in `Order`'s
+    /// order), then an entry `Order` omits (in id order) — and `Ok (observeTree st root)` for a state
+    /// `register` / `update` / `unregister` could have produced.
+    let tryObserveTree
+        (st: ObserverState<'Input, 'Flag>)
+        (root: string)
+        : Result<Observation<'Input, 'Flag> list, ObserverDefect> =
+        let rec scan (seen: Set<string>) (ids: string list) =
+            match ids with
+            | [] ->
+                st.Entries
+                |> Map.toList
+                |> List.tryPick (fun (id, _) ->
+                    if Set.contains id seen then
+                        None
+                    else
+                        Some(ObserverDefect.UnorderedEntry id))
+            | id :: rest ->
+                if not (Map.containsKey id st.Entries) then
+                    Some(ObserverDefect.UnregisteredInOrder id)
+                elif Set.contains id seen then
+                    Some(ObserverDefect.RepeatedInOrder id)
+                else
+                    scan (Set.add id seen) rest
+
+        match scan Set.empty st.Order with
+        | Some defect -> Error defect
+        | None -> Ok(observeTree st root)
 
 namespace Fuaran.Core.Observer
 

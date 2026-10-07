@@ -672,6 +672,9 @@ module internal OpStreamJsonl =
                     let mutable i = 1
                     let mutable ok = true
                     let mutable expectItem = true
+                    // Phase 383 — an item the scanner refuses is the scanner's own fault, at its
+                    // position in the line, the way `unquote` answers; never a decode of the bad span.
+                    let mutable scanFault: JsonlFault option = None
 
                     let skipWs () =
                         while i < n - 1 && isWs v.[i] do
@@ -690,12 +693,16 @@ module internal OpStreamJsonl =
                                     let e =
                                         try
                                             skipString v i
-                                        with JsonlScanFault _ ->
-                                            n
+                                        with JsonlScanFault(at, r) ->
+                                            scanFault <- Some(faultAt line.Number (p + at) r)
+                                            -1
 
-                                    items.Add(decodeString v i e)
-                                    i <- e
-                                    expectItem <- false
+                                    if e < 0 then
+                                        ok <- false
+                                    else
+                                        items.Add(decodeString v i e)
+                                        i <- e
+                                        expectItem <- false
                                 else
                                     ok <- false
                             elif v.[i] = ',' then
@@ -706,10 +713,10 @@ module internal OpStreamJsonl =
 
                             skipWs ()
 
-                        if ok && not expectItem then
-                            Ok(List.ofSeq items)
-                        else
-                            bad ()
+                        match scanFault with
+                        | Some f -> Error f
+                        | None when ok && not expectItem -> Ok(List.ofSeq items)
+                        | None -> bad ()
 
         let actorField (key: string) (line: JsonlLine) : Result<Actor, JsonlFault> =
             match memberOf key line with

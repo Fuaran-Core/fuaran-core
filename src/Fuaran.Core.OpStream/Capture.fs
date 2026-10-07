@@ -486,8 +486,9 @@ module internal OpStreamCapture =
                 let settled =
                     match settleEffectKeyedWith cfg hashFn encode key occ outcome attempted with
                     | Ok cs -> cs
-                    // unreachable: the attempt was just appended and nothing settled it
-                    | Error _ -> attempted
+                    // The attempt was just appended and nothing settled it, so the settle cannot
+                    // refuse; a refusal here is a defect in this journal, never a plausible value.
+                    | Error _ -> failwithf "unreachable: the attempt just journalled for %s/%d did not settle" key occ
 
                 Some outcome, occ, settled
 

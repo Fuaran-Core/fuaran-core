@@ -1900,3 +1900,25 @@ let validatedDeclarationTests =
 
               Expect.isError e1 "eval refuses"
               Expect.equal e2 e1 "evalFrom refuses with the same reason" ]
+
+// ---- Phase 383 — composeAcross checks its result as compose does ----
+
+[<Tests>]
+let composeAcrossResultTests =
+    testList
+        "Function.composeAcross validates its result (Phase 383)"
+        [ testCase "a cross-witness composition whose embedded hole captures an outer address is IllFormedResult"
+          <| fun _ ->
+              // The embedded inner's hole has the id of an outer hole beside the slot, so after the
+              // binding two holes share one address — the tree `compose` refuses (Phase 307).
+              let inner =
+                  RNode.node "body" "para" [ RNode.hole "t" "field" "title" (ValueHole AnyString) ]
+
+              match Function.composeAcross artw artw id "tpl/s" inner (template ()) with
+              | Error(IllFormedResult(DuplicateHoleAddr _)) -> ()
+              | other -> failtestf "expected IllFormedResult(DuplicateHoleAddr _), got %A" other
+
+              Expect.equal
+                  (Function.composeAcross artw artw id "tpl/s" inner (template ()))
+                  (Function.compose artw "tpl/s" inner (template ()))
+                  "at one witness and the identity embedding, the two compositions agree on the refusal" ]

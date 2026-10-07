@@ -2402,6 +2402,77 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
+## 0.36.0 — DRAFT
+
+### Seven defects on the untrusted and gated paths, each pinned by a go-red plant (Phase 383) — BREAKING-SOURCE: `CapabilityLookup` gains `Policy` (`record-widening`) and `PipelineEvalError` gains `EvalPolicyRefused` (`union-widening`); the rest `additive`; the wire `none`
+
+The 2026-10-07 design review named seven places where the code and the repository's own rules
+disagreed. Each fix lands with a test, law or plant that was run red on the pre-fix code.
+
+**What moved, for a consumer.**
+
+- **The pipeline evaluator admits through the registry's gate.** `CapabilityLookup` carries the
+  registry's `Policy` (both projections, `ofRegistry` and `ofFunctionRegistry`, copy it), and
+  `CapabilityPipeline.eval` / `evalFrom` pass each `Invoke` node's arguments through it before the
+  body runs: a literal as declared, an upstream value through `spell`. A refusal is the new
+  `EvalPolicyRefused (node, reason)`, where `reason` is the registry's own `PolicyRefused` naming the
+  gate, or `ApprovalRequired`. Every denial observer is told, and the body does not run. Before this, a
+  registry tightened with `withGate` was loosened by evaluating a pipeline over it. A clean node
+  `evalFrom` reuses runs no body, so the evaluation that recorded it admitted it. **Cost:** a
+  hand-built `CapabilityLookup` literal states its policy (`Policy = RegistryPolicy.none` runs no
+  gate) (`FS0764` until it does), and an exhaustive `match` over `PipelineEvalError` gains an arm.
+  Plant: `Conformance.policyLaws`' new law ("a pipeline evaluated over either registry's lookup admits
+  each Invoke through the registry's policy …"). It is red on the pre-fix evaluator: the gate parks the
+  node, and the pipeline answers `Ok` with its body run.
+- **`hashFnAdversarialLaws` demands a budget.** A `budget` below two is a refused argument. The family
+  answers a red law, "the collision-search budget is at least two pre-images", naming the budget, beside
+  its two laws reported never reached, and hashes nothing. It is not a throw. The resistance law's
+  evidence is now one assertion per pre-image the crypto stand-in hashed, so a search that hashed
+  nothing cannot read green. The search is a `Map` fold, no longer a `Dictionary`. Plant:
+  `ConformanceVacuityTests` "hashFnAdversarialLaws demands a budget" at budgets −1, 0 and 1. Before,
+  the resistance law read green at each.
+- **`ObserverWitness.observeTree` is total.** An `Order` id with no entry in `Entries` is read as
+  unregistered, as `snapshot` reads it. It is not walked, and `observeTree` no longer throws
+  `KeyNotFoundException`. New, `additive`: `ObserverWitness.tryObserveTree` answers
+  `Error ObserverDefect` on a state that breaks the documented invariant. The cases are
+  `UnregisteredInOrder`, `RepeatedInOrder` and `UnorderedEntry`. `RequireQualifiedAccess` applies. On
+  any state the functions built, the answer is `Ok (observeTree st root)`. Plant: `ObserverTests`
+  "observeTree is total". The pre-fix walk errored with the throw.
+- **`TreePlacement.moveContained` / `move` guard the lengths.** On a tree that already holds `target`
+  more than once under `newParent`, the move is refused `PlaceError.Refused (DuplicateId target)`.
+  Such a tree is not `Tree.WellFormed`. Before, `List.forall2` raised on the two lists of different
+  lengths. The sibling comparison is now element-wise and is false on a length difference. Plant:
+  `OpsTests` "moveContained on a malformed tree". The pre-fix code errored with an `ArgumentException`.
+  **Not changed: `validateMove` does not read `Tree.wellFormed` first.** That would put a whole-tree
+  scan on every applied `MoveNode`. It would also reorder the engine's refusals on every malformed
+  tree, which moves every apply consumer to fix one planning helper. The guard belongs to the helper
+  whose comparison needed it.
+- **`Function.composeAcross` validates its result** as `compose` has since Phase 307. A composed tree
+  that `validate` refuses is `IllFormedResult`. An example is an embedded hole on an address the outer
+  already uses. Plant: `FunctionTests` "composeAcross validates its result". The pre-fix code answered
+  `Ok` with two holes on one address.
+- **The two impossible branches fail loudly** in the house style (`failwith "unreachable: …"`). These
+  are the linear append's fallback arm (`Chain.fs`), which fabricated an `EntryRef` at the previous
+  head, and the keyed capture's settle arm (`Capture.fs`), which dropped a settle failure. Neither can
+  be reached, so the plant reads the source: `JsonlDecodeRunTests` "OpStream impossible branches". It
+  is red on the pre-fix files.
+- **`OpStream.Jsonl.stringsField` propagates the scanner's fault.** An array item the scanner refuses
+  is that refusal, a typed `JsonlFault` at its position in the line. It is never a decode of the bad
+  span. **The review's premise was that this was live on `Dag.fromJsonl`'s `parents`; measured, it is
+  not.** Since Phase 296 `parseLine` scans every member value with the same `skipString` before any
+  accessor runs. A `JsonlLine` is constructed only there and by `actorField`, which scans too. So an
+  unterminated string, a bad escape or a bad `\u` in `parents` was already refused, with the scanner's
+  reason. The swallow was dead code, and it is now a typed propagation rather than a decode. The plant,
+  `DagTests` "Dag.fromJsonl refuses a bad parents string", pins all three shapes with their reasons.
+  It was green on the pre-fix code, which is the measurement, not a gap. A shared `conformance/refusals`
+  vector was deliberately not added: that corpus is the multi-host WIRE codec's, and a JSONL op-stream
+  line is not a wire value.
+
+**The wire: `none`.** No byte, digest or emitted vector moves. The F* model of the pipeline evaluator
+(`proofs/Capability.fst`) carries no policy and stays the model of the ungated evaluator. The oracle
+compares it only over lookups `ofRegistry` builds with no gate, where admission is the identity
+(`ProofOracleTests` renders the new case for completeness).
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

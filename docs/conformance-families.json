@@ -803,7 +803,7 @@
       "optIn": true,
       "reason": "seam-not-every-domain-has",
       "discharges": [],
-      "cases": "1000",
+      "cases": "1200",
       "adequacy": "unconditional",
       "refusal": "built"
     },

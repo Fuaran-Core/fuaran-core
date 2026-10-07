@@ -657,3 +657,41 @@ let verifiedTests =
                   (Dag.appendVerifiedWith parity h sw 0 x (Inc 1) 9 a d4)
                   (Error(Dag.VerifiedAppendRejection.StateMismatch(9, 8)))
                   "9 and 8 do not" ]
+
+// ---- Phase 383 — the parents reader refuses a bad string with the scanner's reason ----
+
+[<Tests>]
+let parentsScanTests =
+    let x = Human "x"
+
+    /// One DAG line with `parents` LAST, so the scanner's refusal is the parents array's own.
+    let lineWith (id: string) (parents: string) =
+        "{\"node\":true,\"id\":\""
+        + id
+        + "\",\"actor\":{\"kind\":\"human\",\"id\":\"x\"},\"op\":"
+        + sw.Encode(Inc 1)
+        + ",\"parents\":"
+        + parents
+        + "}"
+
+    testList
+        "Dag.fromJsonl refuses a bad parents string (Phase 383)"
+        [ testCase "an unterminated string, a bad escape and a bad \\u are each refused with the scanner's reason"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let good = Dag.toJsonl sw.Encode d1
+
+              for parents, reason in
+                  [ "[\"" + a + "]", "unterminated string"
+                    "[\"a\\qb\"]", "invalid escape \\q"
+                    "[\"\\uZZZZ\"]", "invalid escape \\uZZZZ" ] do
+                  match Dag.fromJsonl sw (good + "\n" + lineWith "n2" parents) with
+                  | Error e ->
+                      Expect.stringContains e "line 2:" "the second line is named"
+                      Expect.stringContains e reason (sprintf "and the scanner's reason, for %s" parents)
+                  | Ok dag -> failtestf "a parents array %s must be refused, read %A" parents dag
+
+              // the well-formed spelling of the same line reads
+              match Dag.fromJsonl sw (good + "\n" + lineWith "n2" ("[\"" + a + "\"]")) with
+              | Ok dag -> Expect.equal (dag.Nodes |> Map.find "n2").Parents [ a ] "the parent is read"
+              | Error e -> failtestf "the well-formed line must read: %s" e ]
