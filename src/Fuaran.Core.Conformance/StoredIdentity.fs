@@ -114,7 +114,10 @@ module StoredIdentity =
                                 sprintf "the round trip changed a stored hash (first stray: %A)" (firstStray there home)
                         )
 
-        [ declaredLaw.Result; recompute.Result; roundTrip.Result ]
+        [ declaredLaw.Result
+          recompute.Result
+          roundTrip.Result
+          VectorKit.storeCell "" "record" (List.length records) ]
 
     /// The DAG's laws: every node id in `dag` was minted with `hashFn` under `Dag.nodeIdWith declared`,
     /// its ops encoded by `storeW`. `currentW` encodes them under `OpStream.currentProfile`.
@@ -164,7 +167,10 @@ module StoredIdentity =
                                 sprintf "the round trip changed a stored id (first stray: %A)" (firstStray there home)
                         )
 
-        [ declaredLaw.Result; recompute.Result; roundTrip.Result ]
+        [ declaredLaw.Result
+          recompute.Result
+          roundTrip.Result
+          VectorKit.storeCell "" "node" (Map.count dag.Nodes) ]
 
     /// The capture log's laws: `captures` was chained with `hashFn` from the `""` genesis, its effect
     /// and determinism tags spelled as the declared profile spells them.
@@ -219,4 +225,7 @@ module StoredIdentity =
                                 sprintf "the round trip changed a stored hash (first stray: %A)" (firstStray there home)
                         )
 
-        [ declaredLaw.Result; recompute.Result; roundTrip.Result ]
+        [ declaredLaw.Result
+          recompute.Result
+          roundTrip.Result
+          VectorKit.storeCell "" "capture" (List.length captures) ]

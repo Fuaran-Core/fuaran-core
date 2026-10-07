@@ -974,10 +974,82 @@ let sanitiseSweep: (string * string) list =
            "idlSanitize/url/" + label,
            exactly (renderUrl expected) (renderUrl (Fuaran.Core.Idl.Sanitize.sanitizeUrl input))))
 
+/// `lines`, over rows the caller names — the rendering `lawsWith`'s format law holds.
+let private linesOf (rows: (string * string) list) : string list =
+    rows |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)
+
 /// Every vector as the line a runner compares: `VEC <label> <value>` — the named table first, then
 /// the hash sweep, then the sanitiser sweep. Order is part of the comparison. The `VEC ` prefix is
 /// what lets a runner filter out anything a runtime writes around the program; a label never
 /// contains a space, so the line splits on its first one.
 let lines () : string list =
-    vectors @ hashSweep @ sanitiseSweep
-    |> List.map (fun (k, v) -> sprintf "VEC %s %s" k v)
+    linesOf (vectors @ hashSweep @ sanitiseSweep)
+
+/// The table as `LawResult`s over rows the caller hands it (Phase 390; `laws ()` is this over the
+/// named table and both sweeps, in `lines` order). The VALUES are pinned elsewhere — against
+/// committed bytes by this repository's suite, and across pipelines by a consumer's diff of `lines` —
+/// so these laws state what makes a row comparable at all, on whichever pipeline runs them:
+///   - every label and value is printable ASCII (the module's own promise: a console-encoding
+///     difference must never read as a value divergence);
+///   - every label is non-empty, carries no space and is unique, so a `VEC` line splits on its first
+///     space and names one row;
+///   - every sanitiser-sweep row (`idlSanitize/…`) reads `ok` — the floor produced exactly the
+///     committed output on THIS pipeline;
+///   - `lines` renders each row as `VEC <label> <value>`, in row order;
+///   - the corpus law, whose evidence is one assertion per row evaluated, so a run handed no rows is
+///     red by name (`parity vectors: the corpus evaluated at least one vector`).
+let lawsWith (rows: (string * string) list) : LawResult list =
+    let corpus = VectorKit.corpusCell "parity vectors"
+
+    let ascii =
+        LawKit.LawCell "parity vectors: every label and value is printable ASCII"
+
+    let labels =
+        LawKit.LawCell "parity vectors: every label is non-empty, carries no space, and names one row"
+
+    let sanitiser =
+        LawKit.LawCell "parity vectors: every sanitiser-sweep row reads ok on this pipeline"
+
+    let format =
+        LawKit.LawCell "parity vectors: lines renders each row as VEC <label> <value>, in row order"
+
+    let printable (s: string) =
+        s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~')
+
+    let mutable seen = Set.empty
+
+    for label, value in rows do
+        corpus.Saw()
+
+        ascii.Check(
+            printable label && printable value,
+            fun () -> sprintf "%s emits a character outside printable ASCII" label
+        )
+
+        labels.Check(
+            label <> "" && not (label.Contains " ") && not (Set.contains label seen),
+            fun () -> sprintf "the label %A is empty, carries a space, or repeats" label
+        )
+
+        seen <- Set.add label seen
+
+        sanitiser.Check(
+            not (label.StartsWith "idlSanitize/") || value = "ok",
+            fun () -> sprintf "%s reads %s" label value
+        )
+
+    let rendered = linesOf rows
+
+    format.Check(
+        rendered.Length = rows.Length
+        && List.forall2 (fun (l: string) (k: string, v: string) -> l = "VEC " + k + " " + v) rendered rows,
+        fun () ->
+            sprintf "lines rendered %d lines for %d rows, or a line not of the VEC shape" rendered.Length rows.Length
+    )
+
+    LawKit.results [ ascii; labels; sanitiser; format; corpus ]
+
+/// The whole table as `LawResult`s — `lawsWith` over the named table, the hash sweep and the
+/// sanitiser sweep, the rows `lines ()` renders. A fixed table: every run evaluates every row.
+let laws () : LawResult list =
+    lawsWith (vectors @ hashSweep @ sanitiseSweep)

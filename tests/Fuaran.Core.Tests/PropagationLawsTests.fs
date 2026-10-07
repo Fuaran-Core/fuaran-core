@@ -16,10 +16,10 @@ let private evaluatorLaw (prefix: string) (results: LawResult list) =
 [<Tests>]
 let propagationEvaluatorLawTests =
     testList
-        "Conformance.propagationEvaluatorLaws"
+        "Conformance.propagationEvaluatorLawsAt"
         [ testCase "the formula sheet is the first certifier — every law green, every arm reached"
           <| fun _ ->
-              let results = Conformance.propagationEvaluatorLaws sheetw 2110 200
+              let results = Conformance.propagationEvaluatorLawsAt sheetw 2110 200
               let failed = results |> List.filter (fun r -> not r.Passed)
 
               if not (List.isEmpty failed) then
@@ -28,24 +28,27 @@ let propagationEvaluatorLawTests =
                       |> List.map (fun r -> sprintf "  %s — %A" r.Law r.Counterexample)
                       |> String.concat "\n"
 
-                  failtestf "the formula sheet failed propagationEvaluatorLaws:\n%s" msg
+                  failtestf "the formula sheet failed propagationEvaluatorLawsAt:\n%s" msg
 
               Expect.equal (List.length results) 4 "three laws + the adequacy guard"
 
-              Expect.equal (Conformance.propagationEvaluatorLaws sheetw 2110 200) results "same seed ⇒ identical report"
+              Expect.equal
+                  (Conformance.propagationEvaluatorLawsAt sheetw 2110 200)
+                  results
+                  "same seed ⇒ identical report"
 
           testCase "the census calls it Guarded, and the run reports the arms it reached"
           <| fun _ ->
               match
                   KitRoster.census
-                  |> List.tryFind (fun (n, _) -> n = "Conformance.propagationEvaluatorLaws")
+                  |> List.tryFind (fun (n, _) -> n = "Conformance.propagationEvaluatorLawsAt")
               with
               | Some(_, Guarded _) -> ()
               | Some(_, Unconditional why) -> failtestf "censused Unconditional (%s) but it emits a guard" why
-              | None -> failtest "Conformance.propagationEvaluatorLaws is missing from SampleAdequacy.census"
+              | None -> failtest "Conformance.propagationEvaluatorLawsAt is missing from SampleAdequacy.census"
 
               let adequacy =
-                  Conformance.propagationEvaluatorLaws sheetw 2110 200
+                  Conformance.propagationEvaluatorLawsAt sheetw 2110 200
                   |> List.filter (fun r -> r.Law.StartsWith "sample adequacy")
 
               Expect.equal (List.length adequacy) 1 "exactly one adequacy law"
@@ -65,7 +68,7 @@ let propagationEvaluatorLawTests =
                               sheetEvalNode s resolve id |> Result.map (fun v -> v + clock.Value % 2) }
 
               let law =
-                  Conformance.propagationEvaluatorLaws impure 2110 200
+                  Conformance.propagationEvaluatorLawsAt impure 2110 200
                   |> evaluatorLaw "the domain's evaluator is a function of what it reads"
 
               Expect.isFalse law.Passed "an evaluator consulting ambient state must be refused"
@@ -85,7 +88,7 @@ let propagationEvaluatorLawTests =
 
                               (s', Set.singleton other), r }
 
-              let results = Conformance.propagationEvaluatorLaws dishonest 2110 200
+              let results = Conformance.propagationEvaluatorLawsAt dishonest 2110 200
 
               Expect.isFalse
                   (evaluatorLaw "off the change set the domain names" results).Passed
@@ -127,7 +130,7 @@ let propagationEvaluatorLawTests =
                               let id, r = ConfRng.choose (List.map fst withReads) r
                               ((s, Some id), Set.empty), r }
 
-              let results = Conformance.propagationEvaluatorLaws spy 2110 200
+              let results = Conformance.propagationEvaluatorLawsAt spy 2110 200
 
               Expect.isFalse
                   (evaluatorLaw "off the change set the domain names" results).Passed
@@ -151,7 +154,7 @@ let propagationEvaluatorLawTests =
                               | Error _ -> Ok 0
                               | ok -> ok }
 
-              let results = Conformance.propagationEvaluatorLaws neverFails 2110 200
+              let results = Conformance.propagationEvaluatorLawsAt neverFails 2110 200
               let adequacy = evaluatorLaw "sample adequacy" results
               Expect.isFalse adequacy.Passed "an arm nothing reached must be reported"
 
@@ -203,10 +206,10 @@ let private removing (honest: bool) : EvaluatorWitness<RefSheet, int> =
 [<Tests>]
 let removalHonestyTests =
     testList
-        "Conformance.propagationEvaluatorLaws — removed reads (Phase 308)"
+        "Conformance.propagationEvaluatorLawsAt — removed reads (Phase 308)"
         [ testCase "go-red: a change set blind to the readers of a removed cell loses honesty, naming the reader"
           <| fun _ ->
-              let results = Conformance.propagationEvaluatorLaws (removing false) 2110 200
+              let results = Conformance.propagationEvaluatorLawsAt (removing false) 2110 200
               let law = evaluatorLaw "off the change set the domain names" results
               Expect.isFalse law.Passed "the removal-blind change set is refused"
 
@@ -217,7 +220,7 @@ let removalHonestyTests =
 
           testCase "naming the readers is honest, and the survivors' replay agrees"
           <| fun _ ->
-              let results = Conformance.propagationEvaluatorLaws (removing true) 2110 200
+              let results = Conformance.propagationEvaluatorLawsAt (removing true) 2110 200
 
               let red =
                   results

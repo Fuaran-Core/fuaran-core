@@ -1,7 +1,7 @@
 module Fuaran.Core.Tests.ProjectionTests
 
 // Phase 58 — the projection seam: witness + scoped reads + parseBack, self-proven
-// against the in-repo reference domain via `Conformance.projectionLaws`, plus a
+// against the in-repo reference domain via `Conformance.projectionLawsAt`, plus a
 // deliberately-broken witness whose failure is reproduced from a seed, and the
 // GP6 content-free check (the core contributes only structural glue to a line).
 
@@ -125,8 +125,8 @@ let private fixture =
 let tests =
     testList
         "Projection (Phase 58)"
-        [ test "projectionLaws certify the reference witness green" {
-              let report = Conformance.projectionLaws pw applyOps wireEncode genTree 42 200
+        [ test "projectionLawsAt certify the reference witness green" {
+              let report = Conformance.projectionLawsAt pw applyOps wireEncode genTree 42 200
 
               for r in report do
                   Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
@@ -230,12 +230,12 @@ let tests =
                               rParseBack line
                               |> Result.map (List.map (fun (Upsert(d, id, kind, _)) -> Upsert(d, id, kind, ""))) }
 
-              let report = Conformance.projectionLaws broken applyOps wireEncode genTree 42 200
+              let report = Conformance.projectionLawsAt broken applyOps wireEncode genTree 42 200
               let rt = report |> List.find (fun r -> r.Law.Contains "round-trip")
               Expect.isFalse rt.Passed "the round-trip law catches the lossy parseBack"
               Expect.isSome rt.Counterexample "with a reproducible seed+iteration counterexample"
 
-              let rerun = Conformance.projectionLaws broken applyOps wireEncode genTree 42 200
+              let rerun = Conformance.projectionLawsAt broken applyOps wireEncode genTree 42 200
 
               Expect.equal
                   (rerun |> List.find (fun r -> r.Law.Contains "round-trip")).Counterexample

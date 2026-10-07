@@ -3155,7 +3155,7 @@ let private modelVerify (sink: IAttestationSink) (att: Chain.attestation) (head:
 
 /// A full re-mint under production's own canonical payload and genesis: every record's sequence,
 /// prev-link and hash recomputed from the steps, so `verifyChain` accepts whatever it is handed.
-/// The shape of `Conformance.attestationLaws`'s forgery, spelled here over a step list because a
+/// The shape of `Conformance.attestationLawsAt`'s forgery, spelled here over a step list because a
 /// splice changes the chain's LENGTH, which a record-for-record rehash cannot.
 let private remint (hashFn: HashFn) (encode: 'Op -> string) (steps: (Actor * 'Op) list) : OpRecord<'Op> list =
     (([], OpStream.canonicalConfig.Genesis, 0), steps)
