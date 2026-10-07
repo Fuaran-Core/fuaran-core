@@ -40,7 +40,11 @@ module internal KeyedApplyLaws =
     /// **A witness that declares NO keyed position passes the keyed arms VACUOUSLY and the report
     /// says so**, in `keyedChildrenLaws`' words — while the identity law, which needs no
     /// declaration, is asserted all the same.
-    let keyedApplyLaws
+    ///
+    /// `family` is the roster id the guards are labelled with — `Conformance.keyedApplyLawsAt`, or the
+    /// bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    let keyedApplyLawsAt
+        (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -48,7 +52,6 @@ module internal KeyedApplyLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let family = "Conformance.keyedApplyLaws"
         let canHold = LawKit.canHoldOf gen
         let t = Tree.traversal nodew keyw
 
@@ -310,7 +313,9 @@ module internal KeyedApplyLaws =
                 acceptedKeyed <- acceptedKeyed + 1
 
                 match Tree.wellFormedKeyed nodew keyw idw after with
-                | Tree.Structural -> keyedPreservation.Check(true, fun () -> "")
+                // The match IS the assertion: a structural result is the evidence (`Saw`), and every other
+                // arm below records its counterexample.
+                | Tree.Structural -> keyedPreservation.Saw()
                 | Tree.RepeatedId d ->
                     keyedPreservation.Check(
                         false,

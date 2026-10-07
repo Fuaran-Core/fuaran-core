@@ -32,3 +32,34 @@ module internal VectorKit =
     /// `{"seq":0,"actor":<actor>,"op":{}}` — the linear chain pre-image for one actor.
     let payload (actor: string) : string =
         "{\"seq\":0,\"actor\":" + actor + ",\"op\":{}}"
+
+    /// The one law every vector family's `lawsWith` carries beside its per-vector laws (Phase 390):
+    /// its evidence is one assertion per vector the run EVALUATED, counted where the family builds
+    /// each vector's verdict, so a run handed no vectors reads red by name (`never reached`) rather
+    /// than green over an empty list. It is what lets the census tell a fixed corpus that was walked
+    /// from one that was not.
+    let corpusCell (prefix: string) : LawKit.LawCell =
+        LawKit.LawCell(prefix + ": the corpus evaluated at least one vector")
+
+    /// One vector's law: green exactly when every outcome it produced passed, its first failing
+    /// outcome the counterexample. The vector is counted on `corpus` as it is evaluated.
+    let verdict (corpus: LawKit.LawCell) (law: string) (outcomes: Corpus.Outcome list) : LawResult =
+        corpus.Saw()
+        let cell = LawKit.LawCell law
+
+        match outcomes |> List.tryFind (fun o -> not o.Passed) with
+        | Some o -> cell.Check(false, (fun () -> o.Name + ": " + o.Detail))
+        | None -> cell.Saw()
+
+        cell.Result
+
+    /// The stored families' twin of `corpusCell` (Phase 390): one assertion per stored item the store
+    /// holds, so an empty store reads red by name rather than green over nothing. `what` names the
+    /// item — `record`, `node`, `capture`, `text`.
+    let storeCell (prefix: string) (what: string) (count: int) : LawResult =
+        let cell = LawKit.LawCell(prefix + "the store holds at least one " + what)
+
+        for _ in 1..count do
+            cell.Saw()
+
+        cell.Result

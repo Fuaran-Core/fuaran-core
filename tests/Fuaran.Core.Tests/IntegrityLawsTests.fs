@@ -109,7 +109,7 @@ let integrityLawTests =
           testCase "encoderInjectivityLaws pass for a sound encoder, fail for a lossy one (Phase 56)"
           <| fun _ ->
               // sound encoder (encNode) over varied trees — collision-free.
-              let good = Conformance.encoderInjectivityLaws artw encNode genTree 4242 200
+              let good = Conformance.encoderInjectivityLawsAt artw encNode genTree 4242 200
               Expect.equal (List.length good) 2 "one injectivity law and its searched-size guard reported (Phase 297)"
 
               Expect.isTrue
@@ -127,7 +127,7 @@ let integrityLawTests =
                   flip <- not flip
                   (if flip then a else b), rng
 
-              let bad = Conformance.encoderInjectivityLaws artw lossy twoTrees 1 10
+              let bad = Conformance.encoderInjectivityLawsAt artw lossy twoTrees 1 10
               Expect.isFalse (bad |> List.forall (fun r -> r.Passed)) "a lossy encoder must fail injectivity"
 
               Expect.isTrue
@@ -141,7 +141,7 @@ let integrityLawTests =
               let sink = keyedSink "test-key-0"
 
               let results =
-                  Conformance.attestationLaws sw streamGen sink OpStream.defaultHash 4242 200
+                  Conformance.attestationLawsAt sw streamGen sink OpStream.defaultHash 4242 200
 
               Expect.equal
                   (List.length results)
@@ -158,7 +158,7 @@ let integrityLawTests =
 
               // the falsification guarantee holds under a cryptographic (wide) HashFn too — a re-hashed
               // forgery cannot be re-signed without the key, whatever the chain hash's strength.
-              let wide = Conformance.attestationLaws sw streamGen sink wideHash 4242 200
+              let wide = Conformance.attestationLawsAt sw streamGen sink wideHash 4242 200
 
               Expect.isTrue
                   (wide |> List.forall (fun r -> r.Passed))
@@ -166,7 +166,7 @@ let integrityLawTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.attestationLaws sw streamGen sink OpStream.defaultHash 4242 200)
+                  (Conformance.attestationLawsAt sw streamGen sink OpStream.defaultHash 4242 200)
                   results
                   "same seed ⇒ identical report"
 
@@ -179,7 +179,7 @@ let integrityLawTests =
           testCase "attestationLaws report the noAttestation default as VACUOUS, not as green (Phase 196)"
           <| fun _ ->
               let results =
-                  Conformance.attestationLaws sw streamGen OpStream.noAttestation OpStream.defaultHash 4242 200
+                  Conformance.attestationLawsAt sw streamGen OpStream.noAttestation OpStream.defaultHash 4242 200
 
               let guardOf (r: LawResult) =
                   r.Law.StartsWith SampleAdequacy.guardOpening

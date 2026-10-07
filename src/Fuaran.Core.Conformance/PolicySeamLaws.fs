@@ -75,7 +75,9 @@ module internal PolicySeamLaws =
               Effect = Effect.pureDeterministic
               Source = Ref id
               TimeoutMs = None
-              PageSize = None }
+              PageSize = None
+              Where = []
+              OrderBy = [] }
 
         let ids = [ "a"; "b"; "c" ]
 

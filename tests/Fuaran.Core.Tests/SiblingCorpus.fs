@@ -66,7 +66,7 @@ let dirVariable = "FUARAN_CORE_CORPUS_DIR"
 /// The documented opt-IN. Set (to anything non-blank) it asks for the comparison; unset, every
 /// leg that reads the shared corpus THROUGH `Resolution` reports itself NOT ASKED FOR, by this
 /// name, and the suite certifies Core's own committed vectors alone. CI sets it, so every push
-/// still compares against the corpus at its `main`.
+/// still compares against the corpus — at the commit `copies.json` pins (Phase 394).
 ///
 /// Since Phase 216 this is no longer what decides whether a COPY-FRESHNESS leg speaks — see
 /// `Freshness` at the foot of this file. There it decides only whether a finding is fatal.
@@ -396,3 +396,285 @@ let freshnessFrom (family: string) (from: string) : Freshness =
 /// Resolved with git asked from the test binary's own directory, as `resolve` is.
 let freshness (family: string) : Freshness =
     freshnessFrom family AppContext.BaseDirectory
+
+// ---------------------------------------------------------------------------
+//  Phase 394 — the corpus is a PINNED build input.
+// ---------------------------------------------------------------------------
+//  Until this phase every workflow checked the corpus out with no `ref:`, at whatever its default
+//  branch held at that moment, so a corpus push — a re-stamp, a vector re-sync — could red this
+//  repository's `main` with no commit here, and a corpus regression could be certified against by
+//  accident. The corpus is now a SHA this repository chose: the `corpus` record of `copies.json`
+//  names it, every workflow checkout reads it (`.github/scripts/corpus-pin.ps1`), and moving it is a
+//  deliberate act committed with the change that needs it (docs/conformance-corpus.md, "Bumping the
+//  pin"; DECISIONS.md D126).
+//
+//  The suite reads the SAME record, and when the corpus it is about to read is not at it, says so
+//  with both SHAs — so a red corpus leg is attributed to the side that moved. The direction decides
+//  the grade: a clone AHEAD of the pin is the normal state while a corpus change is in flight, and is
+//  a warning; a clone that does not contain the pin is certifying against something older than (or
+//  beside) what CI certifies against, and FAILS where the live leg was asked for (`askVariable`) —
+//  the posture of the copy-freshness legs above.
+
+/// The `copies.json` member that carries the pin.
+[<Literal>]
+let pinMember = "corpus"
+
+/// The repository the pin must name — the one `cloneUrl` points at, as `owner/name`.
+[<Literal>]
+let pinRepository = "fuaran-ui/fuaran-ui-specification"
+
+/// The corpus commit this repository certifies against, and the account of its last move.
+type CorpusPin =
+    {
+        /// `owner/name` on GitHub — always `pinRepository`; carried so the workflows read it too.
+        Repository: string
+        /// The pinned commit, 40 lowercase hex.
+        Sha: string
+        /// The day of the last bump, `yyyy-MM-dd`.
+        Date: string
+        /// Why the pin last moved — the change that needed it.
+        Reason: string
+    }
+
+let private isFullSha (s: string) =
+    s.Length = 40
+    && s |> Seq.forall (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+
+let private isIsoDate (s: string) =
+    let mutable parsed = DateTime.MinValue
+
+    DateTime.TryParseExact(
+        s,
+        "yyyy-MM-dd",
+        Globalization.CultureInfo.InvariantCulture,
+        Globalization.DateTimeStyles.None,
+        &parsed
+    )
+
+/// The pin `copies.json`'s text declares, or every reason it does not — collected, so a record with
+/// three defects is fixed once. The workflow step (`.github/scripts/corpus-pin.ps1`) applies the same
+/// four rules, so a record this accepts is one CI can check out, and one this refuses fails there by
+/// name too.
+let readPin (copiesText: string) : Result<CorpusPin, string list> =
+    match Json.parse copiesText with
+    | Error e -> Error [ sprintf "copies.json is not JSON (%s)" e ]
+    | Ok(JObj fields) ->
+        match fields |> List.tryFind (fun (k, _) -> k = pinMember) with
+        | None ->
+            Error
+                [ sprintf
+                      "copies.json declares no `%s` record — the corpus pin (repository, sha, date, reason) every corpus checkout reads"
+                      pinMember ]
+        | Some(_, JObj record) ->
+            let str name =
+                match record |> List.tryFind (fun (k, _) -> k = name) with
+                | Some(_, JStr s) -> Some s
+                | _ -> None
+
+            let field name (valid: string -> bool) (rule: string) =
+                match str name with
+                | Some s when valid s -> Ok s
+                | Some s -> Error(sprintf "`%s.%s` is '%s', which is not %s" pinMember name s rule)
+                | None -> Error(sprintf "`%s.%s` is missing or not a string (%s)" pinMember name rule)
+
+            let repository =
+                field "repository" (fun s -> s = pinRepository) (sprintf "'%s'" pinRepository)
+
+            let sha = field "sha" isFullSha "a full commit SHA, 40 lowercase hex"
+            let date = field "date" isIsoDate "a yyyy-MM-dd date"
+
+            let reason =
+                field "reason" (fun s -> not (String.IsNullOrWhiteSpace s)) "a non-blank account of the last bump"
+
+            match repository, sha, date, reason with
+            | Ok r, Ok s, Ok d, Ok why ->
+                Ok
+                    { Repository = r
+                      Sha = s
+                      Date = d
+                      Reason = why }
+            | r, s, d, why ->
+                Error(
+                    [ r; s; d; why ]
+                    |> List.choose (function
+                        | Error e -> Some e
+                        | Ok _ -> None)
+                )
+        | Some _ -> Error [ sprintf "copies.json's `%s` member is not an object" pinMember ]
+    | Ok _ -> Error [ "copies.json is not a JSON object" ]
+
+/// This repository's `copies.json` — through the same root marker the snapshot store uses, so a
+/// linked worktree reads its own copy.
+let pinFile () : string = Snapshots.repoFile "copies.json"
+
+/// The committed pin.
+let pin () : Result<CorpusPin, string list> =
+    let path = pinFile ()
+
+    try
+        readPin (File.ReadAllText path)
+        |> Result.mapError (List.map (fun e -> sprintf "%s (%s)" e path))
+    with e ->
+        Error [ sprintf "copies.json could not be read at '%s': %s" path e.Message ]
+
+/// Where a corpus checkout stands relative to the pin.
+type PinDrift =
+    /// HEAD is the pinned commit.
+    | AtPin of sha: string
+    /// HEAD descends from the pin: the clone carries the pinned corpus and more besides.
+    | Ahead of pinned: string * head: string
+    /// HEAD is an ancestor of the pin: the clone predates what this repository certifies against.
+    | Behind of pinned: string * head: string
+    /// Both commits are known and neither contains the other.
+    | Diverged of pinned: string * head: string
+    /// The clone does not hold the pinned commit at all — behind it, or never fetched it.
+    | PinUnknown of pinned: string * head: string
+    /// The position could not be read: no git, or the directory is not a checkout of its own.
+    | Unreadable of why: string
+
+/// `git <arguments>` in `dir`, as (exit code, trimmed output) — the ancestry questions answer by
+/// EXIT CODE (`merge-base --is-ancestor` says "no" with 1 and "cannot say" with 128), which the
+/// shared `ChildProcess.git` folds into one error.
+let private gitExit (dir: string) (arguments: string) : Result<int * string, string> =
+    try
+        let psi = ChildProcess.redirected "git" arguments
+        psi.WorkingDirectory <- dir
+        use p = Diagnostics.Process.Start psi
+        let out = p.StandardOutput.ReadToEnd()
+        let err = p.StandardError.ReadToEnd()
+        p.WaitForExit()
+        Ok(p.ExitCode, (out + err).Trim())
+    with e ->
+        Error(sprintf "`git %s` could not be run: %s" arguments e.Message)
+
+let private samePath (a: string) (b: string) =
+    let norm (p: string) =
+        Path.GetFullPath(p).TrimEnd('/', '\\').Replace('\\', '/')
+
+    String.Equals(norm a, norm b, StringComparison.OrdinalIgnoreCase)
+
+/// Where the checkout at `root` stands relative to `pinned`.
+///
+/// `root` must be a git checkout OF ITS OWN: a plain copy of the corpus sitting inside another
+/// repository (this one's `.gitignore`d `wire-format-fixtures/`, say) would otherwise answer with
+/// the ENCLOSING repository's HEAD, a SHA that means nothing here.
+let driftAt (pinned: string) (root: string) : PinDrift =
+    match git root "rev-parse --show-toplevel" with
+    | Error why -> Unreadable(sprintf "'%s' is not a git checkout: %s" root why)
+    | Ok top when not (samePath top root) ->
+        Unreadable(
+            sprintf "'%s' is not a git checkout of its own — git answers for the enclosing repository at '%s'" root top
+        )
+    | Ok _ ->
+        match git root "rev-parse HEAD" with
+        | Error why -> Unreadable(sprintf "the corpus HEAD at '%s' could not be read: %s" root why)
+        | Ok head when head = pinned -> AtPin head
+        | Ok head ->
+            match gitExit root (sprintf "cat-file -e %s^{commit}" pinned) with
+            | Error why -> Unreadable why
+            | Ok(code, _) when code <> 0 -> PinUnknown(pinned, head)
+            | Ok _ ->
+                let isAncestor a b =
+                    match gitExit root (sprintf "merge-base --is-ancestor %s %s" a b) with
+                    | Ok(0, _) -> Ok true
+                    | Ok(1, _) -> Ok false
+                    | Ok(code, out) -> Error(sprintf "`git merge-base --is-ancestor` exited %d: %s" code out)
+                    | Error why -> Error why
+
+                match isAncestor pinned head, isAncestor head pinned with
+                | Ok true, _ -> Ahead(pinned, head)
+                | Ok false, Ok true -> Behind(pinned, head)
+                | Ok false, Ok false -> Diverged(pinned, head)
+                | Error why, _
+                | _, Error why -> Unreadable why
+
+/// What a drift reading costs a run.
+type PinGrade =
+    /// The checkout is the pinned commit.
+    | PinHolds
+    /// Reported, and the run continues.
+    | PinWarn of report: string
+    /// Fails the run.
+    | PinFail of report: string
+
+/// The grade of `drift`, where `fatal` is the ask (`askVariable` set). Ahead is never fatal: it is
+/// what a clone looks like while a corpus change is in flight, and the change that needs it bumps
+/// the pin. Everything that is NOT the pinned corpus or a descendant of it fails where the live leg
+/// was asked for, and is reported where it was not.
+let grade (fatal: bool) (copiesPath: string) (drift: PinDrift) : PinGrade =
+    let lines (verdict: string) (pinned: string) (head: string) (remedy: string) =
+        String.concat
+            "\n"
+            [ sprintf "the corpus checkout is %s the pin." verdict
+              sprintf "  pinned (%s `%s.sha`)  %s" copiesPath pinMember pinned
+              sprintf "  checked out (HEAD)  %s" head
+              "  " + remedy ]
+
+    let behind report =
+        if fatal then
+            PinFail report
+        else
+            PinWarn(
+                report
+                + sprintf
+                    "\n  Reported, not failed: %s is unset. CI checks the pin itself out, so it cannot stand here."
+                    askVariable
+            )
+
+    match drift with
+    | AtPin _ -> PinHolds
+    | Ahead(pinned, head) ->
+        PinWarn(
+            lines
+                "AHEAD of"
+                pinned
+                head
+                "Normal while a corpus change is in flight. The Core change that needs it bumps the pin in the same commit (docs/conformance-corpus.md, \"Bumping the pin\"); until then CI certifies against the pin, not this clone."
+        )
+    | Behind(pinned, head) ->
+        behind (
+            lines
+                "BEHIND"
+                pinned
+                head
+                "Fetch the corpus (`git -C <corpus> pull --ff-only`) or check the pin out: this run certifies against an older corpus than CI does."
+        )
+    | Diverged(pinned, head) ->
+        behind (
+            lines
+                "DIVERGED from"
+                pinned
+                head
+                "The clone neither contains the pin nor is contained by it. Check the pin out to certify what CI certifies."
+        )
+    | PinUnknown(pinned, head) ->
+        behind (
+            lines
+                "NOT CARRYING"
+                pinned
+                head
+                "The clone does not hold the pinned commit: fetch it (`git -C <corpus> fetch origin`) and read again."
+        )
+    | Unreadable why ->
+        behind (
+            sprintf
+                "the corpus checkout's position against the pin (%s `%s.sha`) could not be read: %s"
+                copiesPath
+                pinMember
+                why
+        )
+
+/// One line on where `root` stands against the committed pin — appended to the copy-freshness legs'
+/// reports, so a finding says which side moved before anyone reads its detail.
+let pinSummary (root: string) : string =
+    match pin () with
+    | Error errs -> "corpus pin: unreadable — " + String.concat "; " errs
+    | Ok p ->
+        match driftAt p.Sha root with
+        | AtPin sha -> sprintf "corpus pin: the checkout is AT the pin (%s)" sha
+        | Ahead(pinned, head) -> sprintf "corpus pin: the checkout (%s) is AHEAD of the pin (%s)" head pinned
+        | Behind(pinned, head) -> sprintf "corpus pin: the checkout (%s) is BEHIND the pin (%s)" head pinned
+        | Diverged(pinned, head) -> sprintf "corpus pin: the checkout (%s) has DIVERGED from the pin (%s)" head pinned
+        | PinUnknown(pinned, head) ->
+            sprintf "corpus pin: the checkout (%s) does not carry the pinned commit (%s)" head pinned
+        | Unreadable why -> "corpus pin: position unreadable — " + why

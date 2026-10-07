@@ -39,10 +39,21 @@ jobs:
       #
       # Checked out INSIDE the workspace because actions/checkout refuses a path outside it;
       # .gitignore carries the directory so the tree stays clean either way.
-      - name: Check out the wire-format conformance corpus
+      #
+      # Phase 394 — at the PINNED commit, never at whatever the corpus's default branch holds. The
+      # pin is the `corpus` record of copies.json; the step below reads it and refuses an absent or
+      # malformed record by name, so the checkout never runs unpinned. A corpus push therefore
+      # cannot red this repository's main: only a change here, or a deliberate pin bump committed
+      # with the change that needs it, can (docs/conformance-corpus.md, "Bumping the pin").
+      - name: Read the corpus pin (copies.json `corpus`)
+        id: corpus-pin
+        shell: pwsh
+        run: ./.github/scripts/corpus-pin.ps1
+      - name: Check out the wire-format conformance corpus at the pin
         uses: actions/checkout@v4
         with:
-          repository: fuaran-ui/fuaran-ui-specification
+          repository: ${{ steps.corpus-pin.outputs.repository }}
+          ref: ${{ steps.corpus-pin.outputs.sha }}
           path: wire-format-fixtures
       - uses: actions/setup-dotnet@v4
         with:
@@ -96,10 +107,16 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Check out the wire-format conformance corpus
+      # At the pin, as in `verify` (Phase 394).
+      - name: Read the corpus pin (copies.json `corpus`)
+        id: corpus-pin
+        shell: pwsh
+        run: ./.github/scripts/corpus-pin.ps1
+      - name: Check out the wire-format conformance corpus at the pin
         uses: actions/checkout@v4
         with:
-          repository: fuaran-ui/fuaran-ui-specification
+          repository: ${{ steps.corpus-pin.outputs.repository }}
+          ref: ${{ steps.corpus-pin.outputs.sha }}
           path: wire-format-fixtures
       - uses: actions/setup-dotnet@v4
         with:

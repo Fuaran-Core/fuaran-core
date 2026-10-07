@@ -75,6 +75,60 @@ nuget.org. A C# or VB tier constructs Core's values through the F# surface, wrap
 authors, and a generated C# veneer over Core's closed unions is the route by which a facade returns
 (DECISIONS.md D28).
 
+## 2d. Every family, one shape: law families and vector families
+
+The kit ships two kinds of family, and you run both the same way — **every entry answers
+`LawResult list`, and green means every result `Passed`**:
+
+- **Law families** are drawn: they take your witnesses, a `seed` and an iteration count, and sample
+  your domain. `Conformance.certify` (or `certifyStream`, for a domain with no uniform tree) is the
+  base run, already an aggregate — its `ConformanceReport.Results` is the `LawResult list`. Every
+  other law family is OPT-IN and called directly beside it: one that needs a witness capability your
+  domain has (`keyedChildrenLawsAt`, `referenceLawsAt`, `propagationEvaluatorLawsAt`,
+  `projectionLawsAt`, `observerLawsAt`, `sanitizeLawsAt`, `capabilityLawsAt`, …), one for a seam not
+  every domain has, or one asking for a stronger promise than the base contract.
+- **Vector families** are enumerated: a runner over a fixed table (`WireNullTolerance`,
+  `StringEscapeVectors`, `EncodingProfileVectors`, `ParityVectors`) or over YOUR store, walked whole
+  (`StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`, `EncodingProfileVectors.storedCodecLaws`).
+  Each answers `laws ()` over its committed corpus, and `lawsWith` over a vector set you hand it.
+  Their vector-shaped entries (`run`, `check`, `lines ()`) stay for the hosts in other languages that
+  diff them; `laws` is how the kit, and you, read them.
+
+```fsharp
+let results =
+    (Conformance.certify nodew idw opGen sw streamGen OpStream.defaultHash seed iters).Results
+    @ Conformance.keyedChildrenLawsAt keyw nodew idw opGen seed iters      // an opt-in that is yours
+    @ StoredIdentity.linearLaws "v2" OpStream.defaultHash sw sw myStoredChain // your store, walked whole
+    @ WireNullTolerance.laws ()                                              // a fixed corpus
+
+results |> List.filter (fun r -> not r.Passed) |> List.iter (fun r -> printfn "RED %s: %A" r.Law r.Counterexample)
+```
+
+**Which families are yours** is data, not reading: `Families.families` enumerates every family the
+kit ships, each with the witnesses it takes, whether `certify` runs it, and — for an opt-in — why
+(`NeedsWitnessCapability`, `SeamNotEveryDomainHas`, `StrongerPromise`, `NoWitnessToCertify`). The
+generated [`conformance-families.md`](conformance-families.md) is the same roster as a table, and its
+JSON twin is what a census tool reads.
+
+**A family that reached nothing is red, never green.** A drawn family whose sample missed a verdict
+fails its own `sample adequacy (…)` law; a vector family handed no vectors fails `<family>: the corpus
+evaluated at least one vector`; a stored family over an empty store fails too. So an empty or
+unreachable run cannot pass as an adopted one.
+
+**The names follow one rule.** A bare name is the family at its default (`capabilityLaws` over the
+kit's own fixtures); every family that takes a witness capability your domain supplies is spelled
+`…At` (`keyedApplyLawsAt`, `memoLawsAt`, `FoldConfluence.laneFoldLawsAt`, …); and `…With` is the
+`…At` family — or a bare one — with one more parameter, last before the seed
+(`propagationEvaluatorLawsWith`'s prior-aware evaluator, `keyedArbitrationLawsWith`'s footprint and
+admission pair, `laneFoldLawsWith`'s `HashFn`, `lawsWith`'s vector set). There is no `…AtWith`. Phase
+390 brought every witness-taking family under the rule; the bare spellings it replaced
+(`keyedChildrenLaws`, `referenceLaws`, `propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`,
+`sanitizeLaws`, `attestationLaws`, `compositionLaws`, `compositionPilot`, `memoLaws`,
+`memoSoundnessLaws`, `functionVerifyLaws`, `verifyHonestyLaws`, `encoderInjectivityLaws`,
+`keyedApplyLaws`, `keyedArbitrationLaws`, `aiSurfaceLawsUnderKitPolicy` — now
+`aiSurfaceKitPolicyLawsAt` — and `FoldConfluence.laneFoldLaws`) are obsolete forwards removed at
+`1.0.0`; call the `…At` form.
+
 ## 3. Re-express the op-stream
 
 ```fsharp
@@ -191,6 +245,37 @@ repository's, and the compute packages are built over it.
 A consumer that pinned this repository's `<Version>` for those four ids pins the compute repository's
 for them instead: a second `PackageVersion` property, one per producing repository. The versions this
 repository published of them (up to `0.32.0`) stay on nuget.org and keep restoring.
+
+## What the declarative surfaces express
+
+Before writing a host-side convention for an intent, read whether Core already states it, or has
+decided not to. [`demand-census.md`](demand-census.md) carries the full grid with the file:line or
+the decision behind each verdict (Phase 398, DECISIONS.md D128). The short form:
+
+- **A query filters and orders, declared.** `Query.Where` is a closed conjunction of typed column
+  predicates — `EqualTo`, the four range bounds (`GreaterThan`, `AtLeast`, `LessThan`, `AtMost`),
+  `Contains` on a string column, `IsNull` / `IsNotNull` — and `Query.OrderBy` a column list with a
+  direction each. Both are empty by default and then absent from the wire, so a declaration without
+  them encodes exactly as before. A predicate's literal is a cell of its column's own type, and the
+  registry and the declaration reader refuse anything else by name. Your resolver reads both from the
+  `Query` it is handed; if it cannot apply one, it answers `ResolveFault.PredicateUnsupported` /
+  `OrderUnsupported` and the caller receives `PredicateNotHonoured` / `OrderNotHonoured` — never
+  answer rows the filter was not applied to. The capture key sees both, so a replay never answers
+  one filter's rows for another's.
+- **Pagination** is expressible: `PageSize`, the page token on input (`Query.invokePage` and the
+  registry's paged dispatchers) and `NextPageToken` on the result.
+- **Host-side by design on a query:** membership in a set (a disjunction — take the set as a
+  parameter), string building, date arithmetic, and aggregation over the result. A query declares what
+  to fetch, not what to compute.
+- **The pattern bank** matches `contains` (an anchor's literal segments, in order, case-insensitively)
+  and alternation between whole anchors (a pattern carries several; any one selects it). It does not
+  capture: a `{…}` wildcard reads nothing into `Emit`, so a value in the sentence reaches your `Emit`
+  only through the `Args` your host parses. Membership, null tests, date deltas and string building
+  are your `Emit`'s.
+- **The column layer** answers null tests (`Cell.isNull`), aggregation over a column
+  (`Column.aggregate`) and THE cell order (`Cell.compare`). Scalar functions and transforms — substring,
+  concatenation, date deltas, sorting and filtering as operations — are the compute repository's (see
+  "The dataframe path" above).
 
 ## Verify
 

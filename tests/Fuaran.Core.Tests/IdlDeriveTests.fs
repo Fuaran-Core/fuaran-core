@@ -273,7 +273,7 @@ let tests =
                             Tree.Structural
                             "the unkeyed verdict cannot")
 
-                testCase "the generated keyed witness is certified by the kit's keyedChildrenLaws" (fun _ ->
+                testCase "the generated keyed witness is certified by the kit's keyedChildrenLawsAt" (fun _ ->
                     // Trees drawn with a case table of 0..3 entries and a sometimes-present hint,
                     // so the laws meet keyed positions both held and absent.
                     let tree (r: ConfRng.T) =
@@ -308,7 +308,9 @@ let tests =
                                 leaf id, r
                           CanHold = None }
 
-                    let results = Conformance.keyedChildrenLaws keyedWitness nodeWitness idw gen 374 200
+                    let results =
+                        Conformance.keyedChildrenLawsAt keyedWitness nodeWitness idw gen 374 200
+
                     let failed = results |> List.filter (fun r -> not r.Passed)
                     Expect.isEmpty (failed |> List.map (fun r -> r.Law, r.Counterexample)) "every keyed law holds")
 

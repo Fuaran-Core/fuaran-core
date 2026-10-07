@@ -10,6 +10,11 @@
        functions: the internal `cellType`, `determinismTag`, the private `cellFields` with
        `invocationKey` over it (through `Hash.canonicalFields`, Phase 225), `validateParams` (its local `checkArgs` walk and its
        required-params step) and `invoke`;
+     - (Phase 398) the declared FILTER and ORDER: `ColumnPredicate` (all eight cases),
+       `SortDirection` and `SortKey` as closed types, `Query.Where` / `Query.OrderBy` as members of
+       the declaration, the admission checks `QueryShape.whereFault` / `orderFault` that
+       `QueryRegistry.admissionFault` runs after the repeated-parameter check, and the shape
+       fields `QueryShape.keyFields` adds to the capture key's pre-image;
      - the REGISTRY: `QueryRegistry.empty` / `register` / `tryFind` / `enumerate` / `dispatch`;
      - the `Deferred<'T>` envelope the resolver answers in (Phase 198) — its three cases, and
        none of its combinators, exactly as `Capability.fst` carries it for the other seam.
@@ -40,11 +45,16 @@
      - `enumerate_is_registry` — an id is enumerable exactly when `tryFind` resolves it, and
        `dispatch` raises `NoSuchQuery` exactly off the enumeration (`no_such_iff_unregistered`);
        `register` refuses a held id, extends by one entry otherwise, and keeps ids distinct.
-     - `invocation_key_deterministic` — the capture key reads the declaration through its `Id`
-       ALONE and the arguments through their name-sorted canonical form alone: two declarations
-       sharing an id, and two argument lists binding the same names to the same cells in ANY
-       order, key identically. That the key reads no resolver answer and no clock is its TYPE —
-       it is handed neither — and is said here rather than dressed as a lemma.
+     - `invocation_key_deterministic` — the capture key reads the declaration through its `Id`,
+       its `Where` and its `OrderBy` (Phase 398; through its `Id` alone before) and the arguments
+       through their name-sorted canonical form alone: two declarations sharing an id, a filter
+       and an order, and two argument lists binding the same names to the same cells in ANY
+       order, key identically (`invocation_key_reads_id_and_shape` is the half with no premise).
+       That the key reads no resolver answer and no clock is its TYPE — it is handed neither —
+       and is said here rather than dressed as a lemma. `invocation_key_unshaped` is the
+       compatibility claim: a declaration whose filter and order are empty keys exactly as the
+       pre-398 key did, `Id ^ "#" ^ hash (canonical args)`, so every journal keyed before stays
+       readable.
      - (Phase 316) `register_refuses_duplicate_params` — the registry refuses a declaration naming
        a parameter twice, so every query a registry built by `register` holds has distinct names
        (`register_keeps_params_distinct`) and `all_null_refusal_exact`'s premise is DISCHARGED for
@@ -56,11 +66,20 @@
        registration (`unregister_register`), refuses an id not held (`unregister_refuses_unheld`),
        `restrict` keeps exactly the ids kept (`restrict_members`), and `union` refuses a shared id
        and otherwise holds exactly the ids of both (`union_members`).
-     - `invocation_key_injective` (Phase 225) — the capture key's pre-image is INJECTIVE: two
-       argument lists with one name-sorted canonical string are one sorted list and hold the same
-       bindings, so distinct argument sets have distinct pre-images. It is proved over a reading
-       of a string as its symbols (`symbols_faithful`, the reading `Chain.fst` takes) and states
-       what it needs of the host functions in `key_premises` (section 8b).
+     - `invocation_key_injective` (Phase 225; over the shape since Phase 398) — the capture key's
+       pre-image is INJECTIVE: two (filter, order, argument list) triples with one pre-image have
+       the same filter, the same order, and one name-sorted argument list holding the same
+       bindings, so declarations differing in filter or order, and distinct argument sets, have
+       distinct pre-images; `invocation_key_page_injective` extends it to the page token. It is
+       proved over a reading of a string as its symbols (`symbols_faithful`, the reading
+       `Chain.fst` takes) and states what it needs of the host functions in `key_premises`
+       (section 8b).
+     - (Phase 398) the admission: `register` refuses a declaration whose filter names an
+       undeclared column, applies `contains` to a column that is not a string, compares with a
+       `Null` or with a literal of another type than its column's, or whose order names an
+       undeclared column or one column twice — after the id and the repeated-parameter checks,
+       first fault first (`register_refuses_shape`), and admits exactly the declarations with no
+       such fault (`register_extends`).
 
    THE FINDINGS read off the model, each proved and asserted on the shipped seam — and both
    now CLOSED:
@@ -84,7 +103,17 @@
    WHAT IS NOT CLAIMED. Anything about a resolver. Anything about the five renderers beyond the
    total-order premise `invocation_key_deterministic` states for the comparator and the
    `key_premises` `invocation_key_injective` states (`query-renderers-abstract`) — in particular
-   nothing about whether two distinct pre-images hash apart. The ORDER `enumerate` returns — production's `Map` sorts by id,
+   nothing about whether two distinct pre-images hash apart, and nothing about the canonical
+   JSON the shape fields carry beyond `key_premises`' injectivity of `render_where` /
+   `render_order` (production's `Canon.render` over the predicate and order-key documents,
+   measured on the shipped codec by the declaration round trip in `ProofOracleTests`). The
+   admission's LITERAL-CARRIABILITY clause — `Table.validate`'s refusal of a non-finite float or
+   of decimal, date or timestamp text that is not canonical, answered `IllFormedLiteral` with its
+   reason — is the column layer's grammar (`DecimalText.fst`, `WireColumn.fst`) and is not
+   restated here: the model takes a present, well-typed literal as carried, and the oracle draws
+   carried literals only. The resolver's two Phase 398 refusals (`PredicateNotHonoured` /
+   `OrderNotHonoured`) belong to the typed resolver, which this model does not carry, as it
+   carries neither the policy gate's refusals nor `UnreadableArgs`. The ORDER `enumerate` returns — production's `Map` sorts by id,
    the model holds the map as a list, and the theorem is about membership. `QueryCodec`.
 
    HOW TO READ IT. Every definition names its F# counterpart. The module is SELF-CONTAINED like
@@ -181,7 +210,28 @@ type effect_class = { host: host_effect; determinism: determinism_source }
 (* F#: `QueryParam`. *)
 type query_param = { p_name: string; p_type: column_type; p_required: bool }
 
-(* F#: `Query`. `Source` is an opaque carrier: the seam never reads it. *)
+(* F#: `ColumnPredicate` (Phase 398) — one typed predicate over a result column; every case, in
+   the F#'s order. A comparison's literal is a `cell`. *)
+type predicate =
+  | EqualTo     : column:string -> value:cell -> predicate
+  | GreaterThan : column:string -> value:cell -> predicate
+  | AtLeast     : column:string -> value:cell -> predicate
+  | LessThan    : column:string -> value:cell -> predicate
+  | AtMost      : column:string -> value:cell -> predicate
+  | Contains    : column:string -> text:string -> predicate
+  | IsNull      : column:string -> predicate
+  | IsNotNull   : column:string -> predicate
+
+(* F#: `SortDirection` (Phase 398). *)
+type sort_direction =
+  | Ascending
+  | Descending
+
+(* F#: `SortKey` (Phase 398). *)
+type sort_key = { k_column: string; k_direction: sort_direction }
+
+(* F#: `Query`. `Source` is an opaque carrier: the seam never reads it. `Where` and `OrderBy`
+   (Phase 398) are the closed types above, read by the admission and by the capture key. *)
 type query = {
   q_id: string;
   q_params: list query_param;
@@ -189,7 +239,9 @@ type query = {
   q_effect: effect_class;
   q_source: string;
   q_timeout_ms: option int;
-  q_page_size: option int
+  q_page_size: option int;
+  q_where: list predicate;
+  q_order_by: list sort_key
 }
 
 (* F#: `QueryError`. *)
@@ -204,6 +256,12 @@ type query_error =
   | Timeout               : query_error
   | RequiredParamsNull    : names:list string -> query_error
   | DuplicateParam        : name:string -> query_error
+  (* Phase 398 — the admission's refusals of a filter or an order. *)
+  | UnknownColumn         : name:string -> declared:list string -> query_error
+  | PredicateTypeMismatch : column:string -> expected:column_type -> got:column_type -> query_error
+  | PredicateNotApplicable : predicate:string -> column:string -> column_type:column_type -> query_error
+  | IllFormedLiteral      : column:string -> reason:string -> query_error
+  | DuplicateSortColumn   : column:string -> query_error
 
 (* F#: `(string * Cell) list` — a typed invocation's args, name → bound cell. *)
 type arguments = list (string & cell)
@@ -260,7 +318,11 @@ noeq type renderers = {
   render_float: string -> string;
   hash:         string -> string;
   name_le:      string -> string -> bool;
-  field:        string -> string
+  field:        string -> string;
+  (* Phase 398 — F#: `Canon.render (JArr (where |> List.map QueryShape.predicateJson))` and the
+     same over `QueryShape.sortKeyJson`: the canonical text of a filter and of an order. *)
+  render_where: list predicate -> string;
+  render_order: list sort_key -> string
 }
 
 (* F#: `Query.cellFields`, first component — the cell's constructor as a one-letter tag. A
@@ -325,9 +387,31 @@ let rec fields (rn:renderers) (l:list string) : Tot string =
    (section 8b) is the theorem that replaced the finding. *)
 let canonical (rn:renderers) (l:arguments) : Tot string = fields rn (arg_fields rn l)
 
+(* F#: `QueryShape.keyFields` (Phase 398), in front of `rest`: a non-empty filter adds the triple
+   (an empty name, the tag `w`, its canonical text), a non-empty order the triple with `o`, filter
+   first; an empty one adds nothing. *)
+let order_fields (rn:renderers) (o:list sort_key) (rest:list string) : Tot (list string) =
+  match o with
+  | [] -> rest
+  | _ :: _ -> "" :: "o" :: rn.render_order o :: rest
+
+let shape_fields (rn:renderers) (w:list predicate) (o:list sort_key) (rest:list string)
+  : Tot (list string) =
+  match w with
+  | [] -> order_fields rn o rest
+  | _ :: _ -> "" :: "w" :: rn.render_where w :: order_fields rn o rest
+
+(* F#: the pre-image `Query.invocationKey` hands `Hash.canonicalFields` — the shape fields of the
+   declaration, then the (name-sorted) argument fields. *)
+let key_fields (rn:renderers) (q:query) (l:arguments) : Tot (list string) =
+  shape_fields rn q.q_where q.q_order_by (arg_fields rn l)
+
+(* F#: `Hash.canonicalFields` over the key fields. *)
+let canonical_key (rn:renderers) (q:query) (l:arguments) : Tot string = fields rn (key_fields rn q l)
+
 (* F#: `Query.invocationKey`. *)
 let invocation_key (rn:renderers) (q:query) (a:arguments) : Tot string =
-  q.q_id ^ "#" ^ rn.hash (canonical rn (sort_args rn a))
+  q.q_id ^ "#" ^ rn.hash (canonical_key rn q (sort_args rn a))
 
 (* ======================================================================================
    3. `Query.validateParams` and `Query.invoke`.
@@ -456,16 +540,89 @@ let rec ids (qs:list query) : Tot (list string) =
   | [] -> []
   | q :: t -> q.q_id :: ids t
 
-(* F#: `QueryRegistry.register` — additive, no silent overwrite, and (Phase 316) only a declaration
-   whose parameter names are distinct: the id is checked first, then the first repeated name is
-   refused `DuplicateParam` (production's `admissionFault`, through `Capability.repeatedAddrs`). *)
+(* ---- Phase 398: the admission of a filter and an order (`QueryShape.whereFault` / `orderFault`) ---- *)
+
+(* F#: `schema |> List.tryFind (fun (n, _) -> n = c)` — a column's declared type, first match. *)
+let rec schema_type (c:string) (s:list (string & column_type)) : Tot (option column_type) =
+  match s with
+  | [] -> None
+  | (n, t) :: r -> if n = c then Some t else schema_type c r
+
+(* F#: `QueryShape.column`. *)
+let predicate_column (p:predicate) : Tot string =
+  match p with
+  | EqualTo c _ | GreaterThan c _ | AtLeast c _ | LessThan c _ | AtMost c _ -> c
+  | Contains c _ -> c
+  | IsNull c | IsNotNull c -> c
+
+(* F#: `QueryShape.literal`. *)
+let predicate_literal (p:predicate) : Tot (option cell) =
+  match p with
+  | EqualTo _ v | GreaterThan _ v | AtLeast _ v | LessThan _ v | AtMost _ v -> Some v
+  | Contains _ _ | IsNull _ | IsNotNull _ -> None
+
+(* F#: the sentence `whereFault` gives a `Null` literal. *)
+let null_literal_reason : string = "a null literal compares with nothing; test for absence with isNull"
+
+(* F#: `whereFault`'s local `fault`, one predicate against the schema, in its order: an undeclared
+   column, `contains` on a column that is not a string, a `Null` literal, a literal of another
+   type. (Its fifth clause, `Table.validate`'s carriability, is not restated: header.) *)
+let predicate_fault (s:list (string & column_type)) (p:predicate) : Tot (option query_error) =
+  let c = predicate_column p in
+  match schema_type c s with
+  | None -> Some (UnknownColumn c (keys s))
+  | Some ty ->
+    match p with
+    | Contains _ _ -> if ty = StringType then None else Some (PredicateNotApplicable "contains" c ty)
+    | _ ->
+      match predicate_literal p with
+      | None -> None
+      | Some Null -> Some (IllFormedLiteral c null_literal_reason)
+      | Some v ->
+        match cell_type v with
+        | Some got -> if got = ty then None else Some (PredicateTypeMismatch c ty got)
+        | None -> None
+
+(* F#: `QueryShape.whereFault` — the first predicate's fault, predicates in order. *)
+let rec where_fault (s:list (string & column_type)) (w:list predicate) : Tot (option query_error) =
+  match w with
+  | [] -> None
+  | p :: r ->
+    match predicate_fault s p with
+    | Some e -> Some e
+    | None -> where_fault s r
+
+(* F#: `QueryShape.orderFault` — an undeclared column, then a column already named (`seen` holds
+   the columns of the keys before this one). *)
+let rec order_fault (s:list (string & column_type)) (seen:list string) (o:list sort_key)
+  : Tot (option query_error) (decreases o) =
+  match o with
+  | [] -> None
+  | k :: r ->
+    if not (mem k.k_column (keys s)) then Some (UnknownColumn k.k_column (keys s))
+    else if mem k.k_column seen then Some (DuplicateSortColumn k.k_column)
+    else order_fault s (k.k_column :: seen) r
+
+(* F#: `QueryRegistry.admissionFault` — the repeated parameter first (Phase 316), then the filter,
+   then the order (Phase 398). *)
+let admission_fault (q:query) : Tot (option query_error) =
+  match repeated [] (param_names q.q_params) with
+  | d :: _ -> Some (DuplicateParam d)
+  | [] ->
+    match where_fault q.q_schema q.q_where with
+    | Some e -> Some e
+    | None -> order_fault q.q_schema [] q.q_order_by
+
+(* F#: `QueryRegistry.register` — additive, no silent overwrite, and only a declaration the
+   admission gate admits: the id is checked first, then `admissionFault` (a repeated parameter,
+   Phase 316; a filter or an order its schema does not admit, Phase 398). *)
 let register (q:query) (r:registry) : Tot (outcome registry query_error) =
   match find_query q.q_id r.queries with
   | Some _ -> Error (DuplicateQuery q.q_id)
   | None ->
-    match repeated [] (param_names q.q_params) with
-    | d :: _ -> Error (DuplicateParam d)
-    | [] -> Ok { queries = q :: r.queries }
+    match admission_fault q with
+    | Some e -> Error e
+    | None -> Ok { queries = q :: r.queries }
 
 (* F#: `QueryRegistry.tryFind`. *)
 let try_find_query (id:string) (r:registry) : Tot (option query) = find_query id r.queries
@@ -713,9 +870,16 @@ let register_refuses_duplicate (q:query) (r:registry)
   = find_query_mem q.q_id r.queries
 
 let register_extends (q:query) (r:registry)
-  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ repeated [] (param_names q.q_params) == [])
+  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ admission_fault q == None)
           (ensures register q r == Ok { queries = q :: r.queries } /\
                    (forall (id:string). mem id (ids (q :: r.queries)) <==> (id = q.q_id \/ mem id (ids (enumerate r)))))
+  = find_query_mem q.q_id r.queries
+
+(* Phase 398 — and refuses, with the admission's first fault, a fresh declaration the gate does not
+   admit: a repeated parameter, then a filter, then an order its schema does not admit. *)
+let register_refuses_shape (q:query) (r:registry)
+  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ Some? (admission_fault q))
+          (ensures register q r == Error (Some?.v (admission_fault q)))
   = find_query_mem q.q_id r.queries
 
 (* A registry built by `register` holds distinct ids — so `find_query` is a function of the id,
@@ -864,13 +1028,15 @@ let rec sorted_unique (le:string -> string -> bool) (s1 s2:arguments)
         mem_arg_key h1 t2
       end
 
-(* THE FOURTH THEOREM. F#: `Query.invocationKey`. The key reads the declaration through its id
-   alone, and the arguments through their name-sorted canonical form alone: two declarations
-   sharing an id, and two argument lists binding the same distinct names to the same cells in
-   any order, key identically — whatever else the declarations say, and whatever order the
-   caller happened to write the bindings in. *)
+(* THE FOURTH THEOREM. F#: `Query.invocationKey`. The key reads the declaration through its id,
+   its filter and its order (Phase 398 — through its id alone before), and the arguments through
+   their name-sorted canonical form alone: two declarations sharing an id, a `Where` and an
+   `OrderBy`, and two argument lists binding the same distinct names to the same cells in any
+   order, key identically — whatever else the declarations say (parameters, schema, effect,
+   source, timeout, page size), and whatever order the caller happened to write the bindings in. *)
 let invocation_key_deterministic (rn:renderers) (q q':query) (a a':arguments)
   : Lemma (requires total_order rn.name_le /\ q.q_id == q'.q_id /\
+                    q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
                     distinct (keys a) /\ distinct (keys a') /\ same_bindings a a')
           (ensures invocation_key rn q a == invocation_key rn q' a')
   = let aux (x:(string & cell)) : Lemma (mem_arg x (sort_args rn a) = mem_arg x (sort_args rn a')) =
@@ -910,10 +1076,19 @@ let accepted_invocation_key_deterministic (rn:renderers) (q:query) (a a':argumen
   = validate_params_distinct q a; validate_params_distinct q a';
     invocation_key_deterministic rn q q a a'
 
-(* The id-only half on its own, with no premise at all. *)
-let invocation_key_id_only (rn:renderers) (q q':query) (a:arguments)
-  : Lemma (requires q.q_id == q'.q_id)
+(* The declaration half on its own, with no premise at all: the key reads a declaration through
+   its id, its filter and its order, and nothing else of it. *)
+let invocation_key_reads_id_and_shape (rn:renderers) (q q':query) (a:arguments)
+  : Lemma (requires q.q_id == q'.q_id /\ q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by)
           (ensures invocation_key rn q a == invocation_key rn q' a)
+  = ()
+
+(* THE COMPATIBILITY CLAIM (Phase 398). F#: a declaration whose `Where` and `OrderBy` are empty
+   keys exactly as `Query.invocationKey` did before either existed — the id, `#`, and the hash of
+   the arguments' canonical string alone — so every journal keyed before Phase 398 still replays. *)
+let invocation_key_unshaped (rn:renderers) (q:query) (a:arguments)
+  : Lemma (requires q.q_where == [] /\ q.q_order_by == [])
+          (ensures invocation_key rn q a == q.q_id ^ "#" ^ rn.hash (canonical rn (sort_args rn a)))
   = ()
 
 (* ======================================================================================
@@ -973,7 +1148,8 @@ let injective (#a:eqtype) (f:a -> string) : prop = forall (x y:a). f x == f y ==
 [@@ noextract_to "FSharp"]
 let key_premises (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers) : prop =
   symbols_faithful reveal /\ reveal "" == [] /\ ~(e == t) /\ field_faithful reveal e t rn.field /\
-  injective rn.render_int /\ injective rn.render_float
+  injective rn.render_int /\ injective rn.render_float /\
+  injective rn.render_where /\ injective rn.render_order
 
 (* ---- the symbol level ---- *)
 
@@ -1075,19 +1251,84 @@ let canonical_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:
   fields_injective reveal e t rn (arg_fields rn a1) (arg_fields rn a2);
   arg_fields_injective rn a1 a2
 
-(* THE FIFTH THEOREM. F#: `Query.invocationKey`'s pre-image. Two argument lists whose
-   name-sorted canonical strings agree ARE the same sorted list, and so hold exactly the same
-   bindings: distinct argument sets have distinct pre-images, for every declaration, accepted or
-   not. It needs no premise about the comparator — the sort is a function, and equal outputs are
-   all the argument reads. Whether two distinct pre-images HASH apart is a claim about FNV-1a and
-   is not made (`query-renderers-abstract`). *)
+(* ---- Phase 398: the shape fields in front of the bindings ---- *)
+
+(* The four renderer injectivities the field-list argument spends — the cell carriers' and the
+   shape's canonical texts'. *)
+[@@ noextract_to "FSharp"]
+let shape_premises (rn:renderers) : prop =
+  injective rn.render_int /\ injective rn.render_float /\
+  injective rn.render_where /\ injective rn.render_order
+
+(* No cell's tag is a shape tag or the page tag — what keeps a `w`, `o` or `p` triple from reading
+   as a binding. *)
+let cell_tag_not_shape (c:cell) : Lemma (cell_tag c <> "w" /\ cell_tag c <> "o" /\ cell_tag c <> "p") = ()
+
+(* So the argument fields never open with one: their second field, when they have one, is a tag. *)
+let arg_fields_not_shape (rn:renderers) (l:arguments) (x:string) (r:list string)
+  : Lemma (requires (x == "w" \/ x == "o" \/ x == "p") /\ arg_fields rn l == "" :: x :: r)
+          (ensures False)
+  = match l with
+    | [] -> ()
+    | (_, v) :: _ -> cell_tag_not_shape v
+
+(* The order triple and the bindings after it determine the order and the bindings. *)
+let order_fields_injective (rn:renderers) (o1 o2:list sort_key) (a1 a2:arguments)
+  : Lemma (requires shape_premises rn /\
+                    order_fields rn o1 (arg_fields rn a1) == order_fields rn o2 (arg_fields rn a2))
+          (ensures o1 == o2 /\ a1 == a2)
+  = match o1, o2 with
+    | [], [] -> arg_fields_injective rn a1 a2
+    | _ :: _, _ :: _ -> arg_fields_injective rn a1 a2
+    | [], _ :: _ -> arg_fields_not_shape rn a1 "o" (rn.render_order o2 :: arg_fields rn a2)
+    | _ :: _, [] -> arg_fields_not_shape rn a2 "o" (rn.render_order o1 :: arg_fields rn a1)
+
+(* Fields that open with the order triple, or with the bindings, never open with the filter's. *)
+let order_fields_not_tag (rn:renderers) (o:list sort_key) (a:arguments) (x:string) (r:list string)
+  : Lemma (requires (x == "w" \/ x == "p") /\ order_fields rn o (arg_fields rn a) == "" :: x :: r)
+          (ensures False)
+  = match o with
+    | [] -> arg_fields_not_shape rn a x r
+    | _ :: _ -> ()
+
+(* The shape fields and the bindings after them determine the filter, the order and the bindings. *)
+let shape_fields_injective (rn:renderers) (w1 w2:list predicate) (o1 o2:list sort_key)
+  (a1 a2:arguments)
+  : Lemma (requires shape_premises rn /\
+                    shape_fields rn w1 o1 (arg_fields rn a1) == shape_fields rn w2 o2 (arg_fields rn a2))
+          (ensures w1 == w2 /\ o1 == o2 /\ a1 == a2)
+  = match w1, w2 with
+    | [], [] -> order_fields_injective rn o1 o2 a1 a2
+    | _ :: _, _ :: _ -> order_fields_injective rn o1 o2 a1 a2
+    | [], _ :: _ ->
+      order_fields_not_tag rn o1 a1 "w" (rn.render_where w2 :: order_fields rn o2 (arg_fields rn a2))
+    | _ :: _, [] ->
+      order_fields_not_tag rn o2 a2 "w" (rn.render_where w1 :: order_fields rn o1 (arg_fields rn a1))
+
+(* The key fields determine the declaration's filter and order and the argument list. *)
+let key_fields_injective (rn:renderers) (q q':query) (a a':arguments)
+  : Lemma (requires shape_premises rn /\ key_fields rn q a == key_fields rn q' a')
+          (ensures q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\ a == a')
+  = shape_fields_injective rn q.q_where q'.q_where q.q_order_by q'.q_order_by a a'
+
+(* THE FIFTH THEOREM. F#: `Query.invocationKey`'s pre-image (Phase 225; over the declaration's
+   filter and order since Phase 398). Two (declaration, argument list) pairs whose pre-images agree
+   have the SAME `Where` and the SAME `OrderBy`, and their name-sorted argument lists are the same
+   list, holding exactly the same bindings: declarations differing in filter or order, and distinct
+   argument sets, have distinct pre-images, for every declaration, accepted or not. It needs no
+   premise about the comparator — the sort is a function, and equal outputs are all the argument
+   reads. (The id is the key's prefix, outside the pre-image; two keys with distinct ids differ
+   there.) Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made
+   (`query-renderers-abstract`). *)
 let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (a a':arguments)
+  (q q':query) (a a':arguments)
   : Lemma (requires key_premises reveal e t rn /\
-                    canonical rn (sort_args rn a) == canonical rn (sort_args rn a'))
-          (ensures sort_args rn a == sort_args rn a' /\
+                    canonical_key rn q (sort_args rn a) == canonical_key rn q' (sort_args rn a'))
+          (ensures q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
+                   sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
-  canonical_injective reveal e t rn (sort_args rn a) (sort_args rn a');
+  fields_injective reveal e t rn (key_fields rn q (sort_args rn a)) (key_fields rn q' (sort_args rn a'));
+  key_fields_injective rn q q' (sort_args rn a) (sort_args rn a');
   let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
     sort_mem rn a x; sort_mem rn a' x
   in
@@ -1280,21 +1521,21 @@ let registered_all_null_refusal_exact (r:registry) (id:string)
     | Some q -> all_null_refusal_exact q
     | None -> ()
 
-(* F#: `Query.invocationKeyPage`'s pre-image fields — for the first page the arguments' fields
-   alone, otherwise the page triple (an empty name, the tag `p` no cell carries, the token) in
-   front of them. *)
-let page_fields (rn:renderers) (tok:option string) (l:arguments) : Tot (list string) =
+(* F#: `Query.invocationKeyPage`'s pre-image fields — for the first page the key fields alone (the
+   declaration's shape fields, Phase 398, then the arguments'), otherwise the page triple (an empty
+   name, the tag `p` no cell carries and no shape triple carries, the token) in front of them. *)
+let page_fields (rn:renderers) (tok:option string) (q:query) (l:arguments) : Tot (list string) =
   match tok with
-  | None -> arg_fields rn l
-  | Some t -> "" :: "p" :: t :: arg_fields rn l
+  | None -> key_fields rn q l
+  | Some t -> "" :: "p" :: t :: key_fields rn q l
 
 (* F#: `Hash.canonicalFields` over the page fields. *)
-let canonical_page (rn:renderers) (tok:option string) (l:arguments) : Tot string =
-  fields rn (page_fields rn tok l)
+let canonical_page (rn:renderers) (tok:option string) (q:query) (l:arguments) : Tot string =
+  fields rn (page_fields rn tok q l)
 
 (* F#: `Query.invocationKeyPage`. *)
 let invocation_key_page (rn:renderers) (q:query) (a:arguments) (tok:option string) : Tot string =
-  q.q_id ^ "#" ^ rn.hash (canonical_page rn tok (sort_args rn a))
+  q.q_id ^ "#" ^ rn.hash (canonical_page rn tok q (sort_args rn a))
 
 (* The first page keys exactly as `invocationKey`, so a journal keyed before paging still replays. *)
 let invocation_key_page_none (rn:renderers) (q:query) (a:arguments)
@@ -1304,47 +1545,63 @@ let invocation_key_page_none (rn:renderers) (q:query) (a:arguments)
 (* No cell's tag is the page tag — which is what keeps a page triple from reading as a binding. *)
 let cell_tag_not_page (c:cell) : Lemma (cell_tag c <> "p") = ()
 
-(* The page fields determine the token and the argument list. *)
-let page_fields_injective (rn:renderers) (t1 t2:option string) (a1 a2:arguments)
-  : Lemma (requires injective rn.render_int /\ injective rn.render_float /\
-                    page_fields rn t1 a1 == page_fields rn t2 a2)
-          (ensures t1 == t2 /\ a1 == a2)
-  = match t1, t2 with
-    | None, None -> arg_fields_injective rn a1 a2
-    | Some _, Some _ -> arg_fields_injective rn a1 a2
-    | None, Some _ ->
-      (match a1 with
-       | [] -> ()
-       | (_, v) :: _ -> cell_tag_not_page v)
-    | Some _, None ->
-      (match a2 with
-       | [] -> ()
-       | (_, v) :: _ -> cell_tag_not_page v)
+(* The key fields never open with the page triple: they open with a shape triple (`w` or `o`) or
+   with a binding, whose second field is a cell's tag. *)
+let key_fields_not_page (rn:renderers) (q:query) (a:arguments) (r:list string)
+  : Lemma (requires key_fields rn q a == "" :: "p" :: r) (ensures False)
+  = match q.q_where with
+    | [] -> order_fields_not_tag rn q.q_order_by a "p" r
+    | _ :: _ -> ()
 
-(* THE PAGE KEY'S INJECTIVITY (Phase 316, extending 225's). Two (argument set, token) pairs whose
-   page pre-images agree hold the SAME token and the same bindings — so a paged query captured page
-   by page keys every page apart, and replay of page n reads page n's capture. Conditional exactly
-   as `invocation_key_injective` is, on `key_premises`; whether two distinct pre-images HASH apart
-   is a claim about FNV-1a and is not made. *)
+(* The page fields determine the token, the declaration's filter and order, and the argument list. *)
+let page_fields_injective (rn:renderers) (t1 t2:option string) (q1 q2:query) (a1 a2:arguments)
+  : Lemma (requires shape_premises rn /\ page_fields rn t1 q1 a1 == page_fields rn t2 q2 a2)
+          (ensures t1 == t2 /\ q1.q_where == q2.q_where /\ q1.q_order_by == q2.q_order_by /\ a1 == a2)
+  = match t1, t2 with
+    | None, None -> key_fields_injective rn q1 q2 a1 a2
+    | Some _, Some _ -> key_fields_injective rn q1 q2 a1 a2
+    | None, Some t ->
+      key_fields_not_page rn q1 a1 (t :: key_fields rn q2 a2)
+    | Some t, None ->
+      key_fields_not_page rn q2 a2 (t :: key_fields rn q1 a1)
+
+(* THE PAGE KEY'S INJECTIVITY (Phase 316, extending 225's; over the declaration's filter and order
+   since Phase 398). Two (declaration, argument set, token) triples whose page pre-images agree hold
+   the SAME token, the SAME `Where`, the SAME `OrderBy` and the same bindings — so a paged query
+   captured page by page keys every page apart, a declaration filtered or ordered differently keys
+   apart page by page, and replay of page n reads page n's capture. Conditional exactly as
+   `invocation_key_injective` is, on `key_premises`; whether two distinct pre-images HASH apart is a
+   claim about FNV-1a and is not made. *)
 let invocation_key_page_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (a a':arguments) (tok tok':option string)
+  (q q':query) (a a':arguments) (tok tok':option string)
   : Lemma (requires key_premises reveal e t rn /\
-                    canonical_page rn tok (sort_args rn a) == canonical_page rn tok' (sort_args rn a'))
-          (ensures tok == tok' /\ sort_args rn a == sort_args rn a' /\
+                    canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a'))
+          (ensures tok == tok' /\ q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
+                   sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
-  fields_injective reveal e t rn (page_fields rn tok (sort_args rn a)) (page_fields rn tok' (sort_args rn a'));
-  page_fields_injective rn tok tok' (sort_args rn a) (sort_args rn a');
+  fields_injective reveal e t rn (page_fields rn tok q (sort_args rn a)) (page_fields rn tok' q' (sort_args rn a'));
+  page_fields_injective rn tok tok' q q' (sort_args rn a) (sort_args rn a');
   let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
     sort_mem rn a x; sort_mem rn a' x
   in
   FStar.Classical.forall_intro aux
 
-(* The law a host reads: distinct tokens give distinct pre-images, whatever the arguments. *)
+(* The law a host reads: distinct tokens give distinct pre-images, whatever the declarations and
+   the arguments. *)
 let distinct_tokens_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
-  (rn:renderers) (a a':arguments) (tok tok':option string)
+  (rn:renderers) (q q':query) (a a':arguments) (tok tok':option string)
   : Lemma (requires key_premises reveal e t rn /\ ~(tok == tok'))
-          (ensures ~(canonical_page rn tok (sort_args rn a) == canonical_page rn tok' (sort_args rn a')))
-  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn a a' tok) tok'
+          (ensures ~(canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a')))
+  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn q q' a a' tok) tok'
+
+(* Phase 398 — and the same for the shape: a declaration filtered or ordered differently gives a
+   distinct pre-image on every page, whatever the arguments and the tokens. *)
+let distinct_shapes_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+  (rn:renderers) (q q':query) (a a':arguments) (tok tok':option string)
+  : Lemma (requires key_premises reveal e t rn /\
+                    ~(q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by))
+          (ensures ~(canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a')))
+  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn q q' a a' tok) tok'
 
 (* F#: `Query.invokePage` — `invoke`, with the token handed to the resolver. *)
 let invoke_page (#v:Type) (q:query) (a:arguments) (tok:option string)
@@ -1489,7 +1746,9 @@ let twin_query : query =
     q_effect = { host = Pure; determinism = { has_clock = false; has_random = false; has_network = false } };
     q_source = "src";
     q_timeout_ms = None;
-    q_page_size = None }
+    q_page_size = None;
+    q_where = [];
+    q_order_by = [] }
 
 let twin_param : query_param = { p_name = "region"; p_type = StringType; p_required = true }
 
@@ -1500,7 +1759,15 @@ let twin_rn : renderers =
     render_float = (fun x -> x);
     hash = (fun x -> x);
     name_le = (fun _ _ -> true);
-    field = (fun x -> x) }
+    field = (fun x -> x);
+    render_where = (fun _ -> "W");
+    render_order = (fun _ -> "O") }
+
+(* Phase 398 — a declaration filtered and ordered over its one column. *)
+let twin_shaped : query =
+  { twin_query with
+      q_where = [ Contains "n" "eu" ];
+      q_order_by = [ { k_column = "n"; k_direction = Descending } ] }
 
 let twins : list twin = [
   { tname = "validate-params-accepts-a-bound-required-param";
@@ -1526,8 +1793,39 @@ let twins : list twin = [
   { tname = "unregister-undoes-register";
     tholds = (fun () -> unregister "q" ({ queries = [ twin_query ] }) = Ok empty) };
   { tname = "the-first-page-adds-no-field";
-    tholds = (fun () -> page_fields twin_rn None [ ("a", Str "x") ] = [ "a"; "s"; "x" ]) };
+    tholds = (fun () -> page_fields twin_rn None twin_query [ ("a", Str "x") ] = [ "a"; "s"; "x" ]) };
   { tname = "a-later-page-leads-with-the-page-triple";
-    tholds = (fun () -> page_fields twin_rn (Some "t") [] = [ ""; "p"; "t" ]) } ]
+    tholds = (fun () -> page_fields twin_rn (Some "t") twin_query [] = [ ""; "p"; "t" ]) };
+  { tname = "a-shaped-declaration-leads-with-its-filter-then-its-order";
+    tholds = (fun () ->
+      page_fields twin_rn (Some "t") twin_shaped [ ("a", Str "x") ]
+      = [ ""; "p"; "t"; ""; "w"; "W"; ""; "o"; "O"; "a"; "s"; "x" ]) };
+  { tname = "an-order-alone-adds-only-its-triple";
+    tholds = (fun () ->
+      key_fields twin_rn ({ twin_shaped with q_where = [] }) [] = [ ""; "o"; "O" ]) };
+  { tname = "register-admits-a-well-formed-filter-and-order";
+    tholds = (fun () -> register twin_shaped empty = Ok ({ queries = [ twin_shaped ] })) };
+  { tname = "register-refuses-an-undeclared-filter-column";
+    tholds = (fun () ->
+      register ({ twin_query with q_where = [ IsNull "x" ] }) empty = Error (UnknownColumn "x" [ "n" ])) };
+  { tname = "register-refuses-contains-on-a-column-that-is-not-a-string";
+    tholds = (fun () ->
+      register ({ twin_query with q_schema = [ ("n", IntType) ]; q_where = [ Contains "n" "1" ] }) empty
+      = Error (PredicateNotApplicable "contains" "n" IntType)) };
+  { tname = "register-refuses-a-null-literal";
+    tholds = (fun () ->
+      register ({ twin_query with q_where = [ EqualTo "n" Null ] }) empty
+      = Error (IllFormedLiteral "n" null_literal_reason)) };
+  { tname = "register-refuses-a-literal-of-another-type";
+    tholds = (fun () ->
+      register ({ twin_query with q_where = [ AtLeast "n" (Int 3) ] }) empty
+      = Error (PredicateTypeMismatch "n" StringType IntType)) };
+  { tname = "register-refuses-an-order-naming-a-column-twice";
+    tholds = (fun () ->
+      register
+        ({ twin_query with
+             q_order_by = [ { k_column = "n"; k_direction = Ascending }; { k_column = "n"; k_direction = Descending } ] })
+        empty
+      = Error (DuplicateSortColumn "n")) } ]
 
 let _ = assert_norm (twins_hold twins == true)

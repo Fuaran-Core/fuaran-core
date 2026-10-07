@@ -357,42 +357,40 @@ module EncodingProfileVectors =
         | [] -> Ok()
         | first :: _ -> Error(first.Name + ": " + first.Detail)
 
-    /// The table as lines a host in another language can diff: `name<TAB>V1<TAB>V2` per value
-    /// vector, then `actor: name<TAB>V1<TAB>V2` per actor, then `capture<TAB>V1<TAB>V2` — the bytes
-    /// each profile renders or folds, as the TABLE states them. Deterministic; no seed.
-    let lines () : string list =
-        [ for v in vectors -> v.Name + "\t" + v.V1 + "\t" + v.V2 ]
-        @ [ for a in actorVectors -> "actor: " + a.Name + "\t" + a.V1 + "\t" + a.V2 ]
+    /// `lines`, over a table the caller names — the rendering `lawsWith`'s format law holds.
+    let private linesOf (vs: Vector list) (actors: ActorVector list) : string list =
+        [ for v in vs -> v.Name + "\t" + v.V1 + "\t" + v.V2 ]
+        @ [ for a in actors -> "actor: " + a.Name + "\t" + a.V1 + "\t" + a.V2 ]
         @ [ "capture: effect TAB, determinism LF\t"
             + capturePreimage EncodingProfile.V1
             + "\t"
             + capturePreimage EncodingProfile.V2 ]
 
-    /// The family as `LawResult`s, on the `StringEscapeVectors.laws` precedent: one law per value
-    /// vector, per actor vector and for the shared checks, green exactly when every check it makes
-    /// passes, and one law on the FORMAT `lines` renders (three tab-separated fields, no field
-    /// carrying a tab or a line break). The committed rendering is
-    /// `conformance/encoding/encoding-profiles.json`.
-    let laws () : LawResult list =
-        let verdict (name: string) (outcomes: Corpus.Outcome list) : LawResult =
-            let law = LawKit.LawCell("encoding profile: " + name)
+    /// The table as lines a host in another language can diff: `name<TAB>V1<TAB>V2` per value
+    /// vector, then `actor: name<TAB>V1<TAB>V2` per actor, then `capture<TAB>V1<TAB>V2` — the bytes
+    /// each profile renders or folds, as the TABLE states them. Deterministic; no seed.
+    let lines () : string list = linesOf vectors actorVectors
 
-            match outcomes |> List.tryFind (fun o -> not o.Passed) with
-            | Some o -> law.Check(false, (fun () -> o.Name + ": " + o.Detail))
-            | None -> law.Saw()
-
-            law.Result
+    /// The family as `LawResult`s over a table the caller hands it (Phase 390; `laws ()` is this over
+    /// the committed `vectors` and `actorVectors`): one law per value vector, per actor vector and for
+    /// the shared checks, green exactly when every check it makes passes; one law on the FORMAT `lines`
+    /// renders (three tab-separated fields, no field carrying a tab or a line break); and the corpus
+    /// law, whose evidence is one assertion per vector evaluated, so a run handed no vectors is red by
+    /// name (`encoding profile: the corpus evaluated at least one vector`). The shared checks run on
+    /// every call — they are the profiles' own, not the table's — and are not counted as a vector.
+    let lawsWith (vs: Vector list) (actors: ActorVector list) : LawResult list =
+        let corpus = corpusCell "encoding profile"
 
         let format =
             LawKit.LawCell "lines () renders the table as name, V1 and V2, tab-separated, in table order, one line each"
 
-        let rendered = lines ()
+        let rendered = linesOf vs actors
 
         let wellFormed (l: string) =
             l.Split('\t').Length = 3 && not (l.Contains "\n") && not (l.Contains "\r")
 
         format.Check(
-            rendered.Length = vectors.Length + actorVectors.Length + 1
+            rendered.Length = vs.Length + actors.Length + 1
             && List.forall wellFormed rendered,
             fun () ->
                 match rendered |> List.tryFind (fun l -> not (wellFormed l)) with
@@ -400,9 +398,26 @@ module EncodingProfileVectors =
                 | None -> sprintf "lines () rendered %d lines" rendered.Length
         )
 
-        (vectors |> List.map (fun v -> verdict v.Name (runVector v)))
-        @ (actorVectors |> List.map (fun a -> verdict ("actor " + a.Name) (runActor a)))
-        @ [ verdict "the shared checks" (runShared ()); format.Result ]
+        let perVector =
+            (vs
+             |> List.map (fun v -> verdict corpus ("encoding profile: " + v.Name) (runVector v)))
+            @ (actors
+               |> List.map (fun a -> verdict corpus ("encoding profile: actor " + a.Name) (runActor a)))
+
+        let shared =
+            let cell = LawKit.LawCell "encoding profile: the shared checks"
+
+            match runShared () |> List.tryFind (fun o -> not o.Passed) with
+            | Some o -> cell.Check(false, (fun () -> o.Name + ": " + o.Detail))
+            | None -> cell.Saw()
+
+            cell.Result
+
+        perVector @ [ shared; format.Result; corpus.Result ]
+
+    /// The family as `LawResult`s, on the `StringEscapeVectors.laws` precedent — `lawsWith vectors
+    /// actorVectors`. The committed rendering is `conformance/encoding/encoding-profiles.json`.
+    let laws () : LawResult list = lawsWith vectors actorVectors
 
     /// The stored-codec family (Phase 379) — the one a content-addressed consumer runs against ITS
     /// OWN persisted corpus of canonical texts, `StoredIdentity`'s posture for a store written
@@ -503,4 +518,8 @@ module EncodingProfileVectors =
 
             control.Check(wrong.IsNone, (fun () -> Option.defaultValue "" wrong))
 
-        [ known.Result; reads.Result; recomputes.Result; control.Result ]
+        [ known.Result
+          reads.Result
+          recomputes.Result
+          control.Result
+          VectorKit.storeCell "stored codec: " "text" (List.length stored) ]

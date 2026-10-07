@@ -335,7 +335,9 @@ module internal RegistrySeamLaws =
               Effect = Effect.pureDeterministic
               Source = Ref id
               TimeoutMs = None
-              PageSize = None }
+              PageSize = None
+              Where = []
+              OrderBy = [] }
 
         let familyOf (id: string) : RuleFamily<unit, string> = { Id = id; Run = fun _ _ -> [] }
 

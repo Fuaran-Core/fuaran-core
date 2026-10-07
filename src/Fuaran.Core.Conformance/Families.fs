@@ -506,22 +506,42 @@ module Families =
           // family that certifies the unsigned path is `noAttestationVacuityLaws` beside it.
           //
           // Phase 297 — the op-forgery arm is demanded by the same guard.
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
           c
-              "attestationLaws"
+              "attestationLawsAt"
               [ "StreamWitness"; "StreamGen"; "IAttestationSink" ]
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "signing outcome and op tamper" ])
               (Built, "op and actor forgeries are built each iteration; its guard is on the signing outcome")
           c
-              "compositionLaws"
+              "attestationLaws"
+              [ "StreamWitness"; "StreamGen"; "IAttestationSink" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "signing outcome and op tamper" ])
+              (Built, "an obsolete forward of attestationLawsAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "compositionLawsAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Unconditional "each iteration composes a drawn pair and compares against the nested application")
               (NoRefusal, "a compose Error only fails a law or is compared opaquely")
           c
-              "compositionPilot"
+              "compositionLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration composes a drawn pair and compares against the nested application")
+              (NoRefusal, "an obsolete forward of compositionLawsAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "compositionPilotAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
@@ -529,21 +549,49 @@ module Families =
                   "it runs `compositionLaws` (unconditional above) and BUILDS both applyMemo arms across the witness boundary each iteration — a closed inner sub-function memoised, and the composed outer compared against direct apply")
               (NoRefusal, "as compositionLaws; a memo Error only fails a law")
           c
-              "memoLaws"
+              "compositionPilot"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional
+                  "it runs `compositionLaws` (unconditional above) and BUILDS both applyMemo arms across the witness boundary each iteration — a closed inner sub-function memoised, and the composed outer compared against direct apply")
+              (NoRefusal, "an obsolete forward of compositionPilotAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "memoLawsAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Unconditional "each iteration forces a miss then a hit, and an effecting bypass, by construction")
               (NoRefusal, "every Error arm only fails a law")
           c
-              "memoSoundnessLaws"
+              "memoLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration forces a miss then a hit, and an effecting bypass, by construction")
+              (NoRefusal, "an obsolete forward of memoLawsAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "memoSoundnessLawsAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Unconditional "each iteration applies the caller-supplied under-declared function twice")
               (NoRefusal, "an Error only fails a law; the cache bypass is not a refusal")
           c
-              "functionVerifyLaws"
+              "memoSoundnessLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration applies the caller-supplied under-declared function twice")
+              (NoRefusal, "an obsolete forward of memoSoundnessLawsAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "functionVerifyLawsAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
@@ -551,32 +599,76 @@ module Families =
               (DrawnMissIsRed,
                "the broken function is caught only when genParams reaches its bad sub-space, and a broken function that verifies clean is itself a red law")
           c
-              "verifyHonestyLaws"
+              "functionVerifyLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration verifies a SOUND and a BROKEN function, both caller-supplied")
+              (DrawnMissIsRed, "an obsolete forward of functionVerifyLawsAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "verifyHonestyLawsAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Unconditional "each iteration verifies a stochastic and an under-declared function, both caller-supplied")
               (DrawnMissIsRed,
                "the broken verdicts depend on genParams, and a broken function verifying under any axis is a red law")
+          c
+              "verifyHonestyLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration verifies a stochastic and an under-declared function, both caller-supplied")
+              (DrawnMissIsRed, "an obsolete forward of verifyHonestyLawsAt, under its own id")
           // Phase 297 — moved out of `Unconditional`, where "each iteration hashes a drawn pair of
           // trees" was false: each iteration hashes ONE tree against a seen-map, so a generator that
           // draws one tree every time compared nothing and passed green. The family now counts the
           // distinct trees it saw and the pairs it compared, as `codecInjectivityLaws` does.
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
           c
-              "encoderInjectivityLaws"
+              "encoderInjectivityLawsAt"
               [ "ArtifactWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "distinct tree (seen / compared)" ])
               (NoRefusal, "no refused outcome is read")
           c
+              "encoderInjectivityLaws"
+              [ "ArtifactWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "distinct tree (seen / compared)" ])
+              (NoRefusal, "an obsolete forward of encoderInjectivityLawsAt, under its own id")
+          // Phase 390 — the naming rule applied: `projectionLawsAt` is the domain-witness spelling, and
+          // the bare name is an obsolete forward under its own id until `1.0.0`.
+          c
+              "projectionLawsAt"
+              [ "ProjectionWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional "each iteration projects, re-imports and scopes the same tree")
+              (NoRefusal, "a re-import Error only fails a law")
+          c
               "projectionLaws"
               [ "ProjectionWitness" ]
               (Some NeedsWitnessCapability)
               []
               (Unconditional "each iteration projects, re-imports and scopes the same tree")
-              (NoRefusal, "a re-import Error only fails a law") // Phase 298 — the observer seam's family: every arm is built each iteration (a drawn
-          // registration script, a ring of parents, a re-entrant subscriber).
+              (NoRefusal, "an obsolete forward of projectionLawsAt, under its own id")
+          // Phase 298 — the observer seam's family: every arm is built each iteration (a drawn
+          // registration script, a ring of parents, a re-entrant subscriber). Phase 390 — `observerLawsAt`
+          // is its domain-witness spelling; the bare name is an obsolete forward until `1.0.0`.
+          c
+              "observerLawsAt"
+              [ "ObserverWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional
+                  "each iteration drives a drawn registration script, a parent ring and a re-entrant subscriber")
+              (NoRefusal, "no refused outcome is read")
           c
               "observerLaws"
               [ "ObserverWitness" ]
@@ -584,7 +676,7 @@ module Families =
               []
               (Unconditional
                   "each iteration drives a drawn registration script, a parent ring and a re-entrant subscriber")
-              (NoRefusal, "no refused outcome is read")
+              (NoRefusal, "an obsolete forward of observerLawsAt, under its own id")
           // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
           // rejection only when the caller's op generator draws one; the decision axis, the unknown
           // tool and the unknown proposal id are built.
@@ -610,8 +702,10 @@ module Families =
               []
               (Guarded [ "accepted"; "refused"; "allowed"; "parked"; "denied" ])
               (Drawn, "an obsolete forward of aiSurfaceLawsAt, under its own id")
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
           c
-              "aiSurfaceLawsUnderKitPolicy"
+              "aiSurfaceKitPolicyLawsAt"
               [ "AiSurfaceWitness" ]
               (Some NeedsWitnessCapability)
               []
@@ -619,6 +713,13 @@ module Families =
               (Drawn,
                "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; the kit rolls the decision, and unknown tool and unknown id are built")
 
+          c
+              "aiSurfaceLawsUnderKitPolicy"
+              [ "AiSurfaceWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "accepted"; "refused" ])
+              (Drawn, "an obsolete forward of aiSurfaceKitPolicyLawsAt, under its own id")
           // Phase 246 — the seam families at a DOMAIN'S seam. Their fixture-bound forms below take
           // only a seed and certify Core's own fixtures, which is what they are for.
           // Phase 246 — the seam families at a domain's seam: every outcome is a call the domain's
@@ -677,15 +778,24 @@ module Families =
           // the domain's own `PlaceKeyedChild`, and whether the witness honours a placement is the
           // domain's to answer. A witness that declares NO keyed position is the one case that is
           // not an unreached arm — it is a declaration that there is nothing to reach — and the
-          // family reports that as its adequacy line rather than as a missed verdict.
+          // family reports that as its adequacy line rather than as a missed verdict. Phase 390 —
+          // `keyedChildrenLawsAt` is its domain-witness spelling; the bare name is an obsolete forward
+          // under its own id and guard label until `1.0.0`.
           c
-              "keyedChildrenLaws"
+              "keyedChildrenLawsAt"
               ([ "KeyedWitness" ] @ treeWitness)
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ])
               (Built,
                "the keyed-and-surface and double-keyed collisions are built through PlaceKeyedChild; its guard covers the built arms")
+          c
+              "keyedChildrenLaws"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "built arm (clean full walk / keyed id in the surface / one id in two keyed positions)" ])
+              (Built, "an obsolete forward of keyedChildrenLawsAt, under its own id")
           // Phase 312 — the placement algebra, tree lowering and fresh ids. Each takes the base run's
           // witness (freshIdLaws also a `setId` and the minting strategy it certifies, neither a
           // witness record) and promises more than the base contract does, so each is elected.
@@ -735,14 +845,23 @@ module Families =
               (Guarded [ "grammar refusal" ])
               (Drawn,
                "IllegalChild is reached by drawn ops and by a graft built from the drawn tree's first illegal pair; a grammar the generator never violates reaches neither, which the grammar-refusal guard reports")
+          // Phase 390 — `referenceLawsAt` is the domain-witness spelling; the bare name is an obsolete
+          // forward under its own id and guard label until `1.0.0`.
           c
-              "referenceLaws"
+              "referenceLawsAt"
               [ "RefWitness"; "NodeWitness"; "IdWitness"; "OpGen" ]
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "reference arm" ])
               (Drawn,
                "StillReferenced is reached only when a drawn remove destroys a declaration a survivor references, and the race only when the tree holds a resolved reference; the reference-arm guard counts both")
+          c
+              "referenceLaws"
+              [ "RefWitness"; "NodeWitness"; "IdWitness"; "OpGen" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "reference arm" ])
+              (Drawn, "an obsolete forward of referenceLawsAt, under its own id")
           c
               "loweringLaws"
               treeWitness
@@ -763,8 +882,10 @@ module Families =
           // Phase 286 — the same declaration, handed to the engine: the collisions the unkeyed
           // engine is blind to are BUILT through `PlaceKeyedChild`, and the engine's refusal is
           // held to the domain's own walk over them.
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
           c
-              "keyedApplyLaws"
+              "keyedApplyLawsAt"
               ([ "KeyedWitness" ] @ treeWitness)
               (Some NeedsWitnessCapability)
               // `witness-surface-scope` moved here from `keyedChildrenLaws` (Phase 286): once the
@@ -775,9 +896,27 @@ module Families =
                   [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision / accepted op over the keyed walk) and op kind" ])
               (Built,
                "the three keyed collisions are built through PlaceKeyedChild and must be refused DuplicateId; its guard covers the built arms")
+          c
+              "keyedApplyLaws"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded
+                  [ "built arm (keyed holder / clean insert / keyed-vs-structural collision in either direction / keyed-vs-keyed collision / accepted op over the keyed walk) and op kind" ])
+              (Built, "an obsolete forward of keyedApplyLawsAt, under its own id")
           // Phase 247 — arbitration at a domain's own footprint and applicability, held to the keyed
           // engine the accepted scripts land with. The container-illegal proposal and the keyed-id
           // clash are BUILT; the rest of the rejected bucket is drawn, as in `arbitrationLaws`.
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          c
+              "keyedArbitrationLawsAt"
+              ([ "KeyedWitness" ] @ treeWitness)
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded
+                  [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind (delegates to keyedArbitrationLawsWith)" ])
+              (Drawn, "delegates to keyedArbitrationLawsWith")
           c
               "keyedArbitrationLaws"
               ([ "KeyedWitness" ] @ treeWitness)
@@ -785,7 +924,7 @@ module Families =
               []
               (Guarded
                   [ "arbitration bucket, built arm (container-illegal proposal / keyed-id clash) and op kind (delegates to keyedArbitrationLawsWith)" ])
-              (Drawn, "delegates to keyedArbitrationLawsWith")
+              (Drawn, "an obsolete forward of keyedArbitrationLawsAt, under its own id")
           c
               "keyedArbitrationLawsWith"
               ([ "KeyedWitness" ] @ treeWitness)
@@ -798,14 +937,23 @@ module Families =
           // Phase 211 — the same contract, at a DOMAIN'S evaluator. Every arm the agreement law
           // distinguishes is DRAWN from the domain's own edits: a change that reached a reader, a
           // clean node reused from `prior`, and an edited evaluator that failed. A domain whose edits
-          // all move the dependency map reaches none of them, and the guard says so.
+          // all move the dependency map reaches none of them, and the guard says so. Phase 390 —
+          // `propagationEvaluatorLawsAt` is its domain-witness spelling and takes the ladder row; the
+          // bare name is an obsolete forward under its own id and guard label until `1.0.0`.
           c
-              "propagationEvaluatorLaws"
+              "propagationEvaluatorLawsAt"
               [ "EvaluatorWitness" ]
               (Some NeedsWitnessCapability)
               [ "propagation-change-set-and-prior" ]
               (Guarded [ "evaluator edit" ])
               (Drawn, "the failing-evaluator arm comes from the domain's own edits; guarded on evaluator edit")
+          c
+              "propagationEvaluatorLaws"
+              [ "EvaluatorWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "evaluator edit" ])
+              (Drawn, "an obsolete forward of propagationEvaluatorLawsAt, under its own id")
 
           // Phase 250 — the prior-aware evaluator: a recomputed node handed its prior (the prior
           // path, not only priming) and a clean node reused from it. It runs the family above first,
@@ -817,7 +965,7 @@ module Families =
               [ "propagation-prior-blind" ]
               (Guarded [ "evaluator edit"; "prior-aware edit" ])
               (Drawn,
-               "runs propagationEvaluatorLaws first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit")
+               "runs propagationEvaluatorLawsAt first, so its failing-evaluator arm is drawn the same way; the prior-aware arms are guarded on prior-aware edit")
 
           // Phase 297 — moved out of `Unconditional`: the tamper arm runs only when a fresh draw
           // encodes differently from the value it replaces, which the domain's generator decides.
@@ -1016,9 +1164,10 @@ module Families =
 
           // Phase 349 — the sanitisation floor, at a host's `SanitizeWitness` (`SanitizeWitness.core`
           // for Core's own). Every arm is built each iteration: the pinned vectors on the first, drawn
-          // splices on every one.
+          // splices on every one. Phase 390 — `sanitizeLawsAt` is its witness spelling; the bare name is
+          // an obsolete forward under its own id until `1.0.0`.
           c
-              "sanitizeLaws"
+              "sanitizeLawsAt"
               [ "SanitizeWitness" ]
               (Some NeedsWitnessCapability)
               []
@@ -1026,6 +1175,14 @@ module Families =
                   "every iteration scrubs drawn splices and benign text; the first also runs every pinned URL, markdown and attribute vector")
               (Built,
                "the refused URLs, the rejected attribute keys and values and the dangerous markdown are fixed vectors the first iteration always runs")
+          c
+              "sanitizeLaws"
+              [ "SanitizeWitness" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Unconditional
+                  "every iteration scrubs drawn splices and benign text; the first also runs every pinned URL, markdown and attribute vector")
+              (Built, "an obsolete forward of sanitizeLawsAt, under its own id")
 
           // Phase 349 — the string-escape vectors (Phase 287) rostered as laws, on the
           // `WireNullTolerance.laws` precedent, so `lines`' format is a mapped operation.
@@ -1110,6 +1267,71 @@ module Families =
                   "a fixed vector corpus: every run evaluates every vector under both read policies, so there is no sample that could miss one")
               (Built, "every malformed and no-absence vector is a fixed member of the corpus")
 
+          // Phase 390 — each vector family's `…With`: the same laws over a vector set the caller hands
+          // it, with the corpus law whose evidence is one assertion per vector evaluated, so a run
+          // handed no vectors is red by name. The sample is exactly what the caller handed in, walked
+          // whole; the corpus law is what makes an empty one loud.
+          f
+              "WireNullTolerance"
+              "lawsWith"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the handed vector set, walked whole: every vector is evaluated under both read policies, and the corpus law reds a set with none")
+              (Built, "the malformed and no-absence vectors are members of the handed set, each evaluated")
+          f
+              "StringEscapeVectors"
+              "lawsWith"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the handed character and actor vectors, walked whole, and their rendered table; the corpus law reds a set with none")
+              (NoRefusal, "every vector is an accepted spelling; no refused outcome is read")
+          f
+              "EncodingProfileVectors"
+              "lawsWith"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the handed value and actor vectors, walked whole under both profiles, the shared checks and the rendered table; the corpus law reds a set with none")
+              (NoRefusal, "every vector is an accepted rendering; no refused outcome is read")
+
+          // Phase 390 — the cross-pipeline value table (Phase 217) rostered: its laws state what makes
+          // a row comparable on whichever pipeline runs it (printable ASCII, one space-free label per
+          // row, the sanitiser rows reading `ok`, the `VEC` rendering). The values themselves are
+          // pinned by this repository's suite and diffed across pipelines by a consumer.
+          f
+              "ParityVectors"
+              "laws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "a fixed table: every run evaluates every named row and every row of both sweeps, so there is no sample that could miss one")
+              (NoRefusal, "every row is a computed value; no refused outcome is read")
+          f
+              "ParityVectors"
+              "lawsWith"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "the handed rows, walked whole: every row is evaluated, and the corpus law reds a set with none")
+              (NoRefusal, "every row is a computed value; no refused outcome is read")
+
+          // Phase 390 — the `…At` row is the domain-witness spelling; the bare row is its obsolete forward,
+          // under its own id and guard label until `1.0.0`.
+          f
+              "FoldConfluence"
+              "laneFoldLawsAt"
+              [ "StreamWitness"; "LaneGen" ]
+              (Some NeedsWitnessCapability)
+              []
+              (Guarded [ "lane-fold outcome (delegates to laneFoldLawsWith)" ])
+              (Drawn, "delegates to laneFoldLawsWith")
           f
               "FoldConfluence"
               "laneFoldLaws"
@@ -1117,7 +1339,7 @@ module Families =
               (Some NeedsWitnessCapability)
               []
               (Guarded [ "lane-fold outcome (delegates to laneFoldLawsWith)" ])
-              (Drawn, "delegates to laneFoldLawsWith")
+              (Drawn, "an obsolete forward of laneFoldLawsAt, under its own id")
           f
               "FoldConfluence"
               "laneFoldLawsWith"
@@ -1533,7 +1755,7 @@ module Families =
               [ "Arbitration.arbitrate"
                 "Arbitration.arbitrateWith"
                 "Arbitration.duplicateIds" ] }
-          { Family = "Conformance.attestationLaws"
+          { Family = "Conformance.attestationLawsAt"
             Operations = [ "OpStream.attestHead"; "OpStream.verifyAttestation" ] }
           { Family = "Conformance.attributedLaws"
             Operations = [ "OpStream.Attributed.liftWitness" ] }
@@ -1606,7 +1828,7 @@ module Families =
                 "ColumnValidator.unique"
                 "ColumnValidator.validate"
                 "Validator.canonicalCodes" ] }
-          { Family = "Conformance.compositionLaws"
+          { Family = "Conformance.compositionLawsAt"
             Operations =
               [ "Function.composeAcross"
                 "Function.composedEffectAcross"
@@ -1675,7 +1897,7 @@ module Families =
             Operations = [ "Ops.interference"; "Dag.conflicts"; "Footprint.slotNodes" ] }
           { Family = "Conformance.freshIdLaws"
             Operations = [ "FreshIds.repairDuplicates"; "TreePlacement.cloneContained" ] }
-          { Family = "Conformance.functionVerifyLaws"
+          { Family = "Conformance.functionVerifyLawsAt"
             Operations =
               [ "Conformance.verifyFunction"
                 "Conformance.verifyFunctionSymbolic"
@@ -1698,7 +1920,7 @@ module Families =
                 "Validator.verdict"
                 "Validator.gate"
                 "Validator.encodeVerdict" ] }
-          { Family = "Conformance.keyedApplyLaws"
+          { Family = "Conformance.keyedApplyLawsAt"
             Operations =
               [ "Ops.applyContainedKeyed"
                 "Ops.canApplyContainedKeyed"
@@ -1706,9 +1928,9 @@ module Families =
                 "Tree.idsKeyed"
                 "Tree.keyedIds"
                 "Tree.traversal" ] }
-          { Family = "Conformance.keyedArbitrationLaws"
+          { Family = "Conformance.keyedArbitrationLawsAt"
             Operations = [ "Ops.footprintKeyed"; "Ops.canApplyAllKeyed" ] }
-          { Family = "Conformance.keyedChildrenLaws"
+          { Family = "Conformance.keyedChildrenLawsAt"
             Operations = [ "Ops.applyContainedKeyed"; "Tree.keyedIds" ] }
           { Family = "Conformance.laneLaws"
             Operations =
@@ -1728,9 +1950,9 @@ module Families =
                 "Dag.prunable" ] }
           { Family = "Conformance.loweringLaws"
             Operations = [ "Ops.lower"; "Ops.shellOf"; "Ops.skeletonRoot" ] }
-          { Family = "Conformance.memoLaws"
+          { Family = "Conformance.memoLawsAt"
             Operations = [ "Function.applyMemo"; "Memo.empty" ] }
-          { Family = "Conformance.memoSoundnessLaws"
+          { Family = "Conformance.memoSoundnessLawsAt"
             Operations = [ "Memo.isMemoisable"; "Function.observedEffect"; "Function.applyMemo" ] }
           { Family = "Conformance.mergeConflictLaws"
             Operations = [ "Dag.conflicts" ] }
@@ -1738,7 +1960,7 @@ module Families =
             Operations = [ "OpStream.verifyAttestation" ] }
           { Family = "Conformance.normalizeLaws"
             Operations = [ "Ops.normalize" ] }
-          { Family = "Conformance.observerLaws"
+          { Family = "Conformance.observerLawsAt"
             Operations =
               [ "ObserverWitness.empty"
                 "ObserverWitness.register"
@@ -1763,7 +1985,7 @@ module Families =
                 "TreePlacement.moveContained"
                 "TreePlacement.place"
                 "TreePlacement.move" ] }
-          { Family = "Conformance.projectionLaws"
+          { Family = "Conformance.projectionLawsAt"
             Operations =
               [ "Projection.project"
                 "Projection.render"
@@ -1877,7 +2099,7 @@ module Families =
                 "QueryRegistry.dispatchCaptured"
                 "QueryRegistry.dispatchPageCaptured"
                 "QueryRegistry.dispatchReplayed" ] }
-          { Family = "Conformance.referenceLaws"
+          { Family = "Conformance.referenceLawsAt"
             Operations =
               [ "Ops.applyReferenced"
                 "Ops.footprintReferenced"
@@ -1909,7 +2131,7 @@ module Families =
                 "Validator.replace"
                 "Validator.restrict"
                 "Validator.union" ] }
-          { Family = "Conformance.sanitizeLaws"
+          { Family = "Conformance.sanitizeLawsAt"
             Operations =
               [ "Idl.Sanitize.isAllowedAttributeKey"
                 "Idl.Sanitize.isSafeAttributeValue"
@@ -1942,7 +2164,7 @@ module Families =
                 "OpStream.toJsonl"
                 "OpStream.fromJsonl"
                 "OpStream.tryToJsonl" ] }
-          { Family = "Conformance.verifyHonestyLaws"
+          { Family = "Conformance.verifyHonestyLawsAt"
             Operations = [ "Conformance.verifyFunction"; "Conformance.renderCounterexample" ] }
           { Family = "EncodingProfileVectors.laws"
             Operations =
@@ -1961,8 +2183,10 @@ module Families =
                 "Canonical.isCanonical" ] }
           { Family = "EncodingProfileVectors.storedCodecLaws"
             Operations = [ "Canonical.read"; "Codec.read"; "Codec.write" ] }
-          { Family = "FoldConfluence.laneFoldLaws"
+          { Family = "FoldConfluence.laneFoldLawsAt"
             Operations = [ "FoldConfluence.foldOnce"; "Dag.reconcileMany" ] }
+          { Family = "ParityVectors.laws"
+            Operations = [ "ParityVectors.lines" ] }
           { Family = "StoredIdentity.captureLaws"
             Operations = [ "OpStream.firstCaptureBreakEncoding"; "OpStream.rehashCapturesEncoding" ] }
           { Family = "StoredIdentity.dagLaws"

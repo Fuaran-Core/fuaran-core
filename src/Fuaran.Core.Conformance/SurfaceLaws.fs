@@ -503,7 +503,7 @@ module internal SurfaceLaws =
     /// The AI-surface laws (Phase 59) at the domain's OWN policy — see `aiSurfaceRun` above for the
     /// four laws. Since `0.32.0` (Phase 246) the decision each drawn op meets is the witness's
     /// `Decide`, and the family is starved unless that policy allows, parks and denies something the
-    /// generator draws. `aiSurfaceLawsUnderKitPolicy` is the pre-`0.32.0` behaviour.
+    /// generator draws. `aiSurfaceKitPolicyLawsAt` is the pre-`0.32.0` behaviour.
     ///
     /// `family` labels the guards — `Conformance.aiSurfaceLawsAt`, or the obsolete bare name's own
     /// id for one draft (Phase 297's naming rule: the domain-witness form is `…At`).
@@ -523,14 +523,18 @@ module internal SurfaceLaws =
     /// certifies the proposal plumbing and says nothing about the domain's `Decide`, sampled here
     /// only for totality. A policy that allows every write passes it. Run it beside `aiSurfaceLawsAt`
     /// when the plumbing is the question, never instead of it.
-    let aiSurfaceLawsUnderKitPolicy
+    ///
+    /// Phase 390: `aiSurfaceKitPolicyLawsAt` (the kit-policy family, at the domain's witness); `family`
+    /// labels the guards, or the obsolete `aiSurfaceLawsUnderKitPolicy` id until `1.0.0`.
+    let aiSurfaceKitPolicyLawsAt
+        (family: string)
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (state0: 'State)
         (seed: int)
         (iterations: int)
         : LawResult list =
-        aiSurfaceRun "Conformance.aiSurfaceLawsUnderKitPolicy" true w genOp state0 seed iterations
+        aiSurfaceRun family true w genOp state0 seed iterations
 
     // ---- Phase 232 — the witness-record field freeze, held by a law --------------------------------
     //

@@ -478,7 +478,7 @@ let private aiSurfaceTests =
               let w = surface (fun _ _ -> PolicyDecision.Allow) [ "{anything}" ]
 
               let red =
-                  Conformance.aiSurfaceLawsUnderKitPolicy w (fun r -> Put "x", r) [] 1 4
+                  Conformance.aiSurfaceKitPolicyLawsAt w (fun r -> Put "x", r) [] 1 4
                   |> List.filter (fun r -> not r.Passed)
                   |> List.choose (fun r -> r.Counterexample)
 
@@ -592,7 +592,7 @@ let private treeTests =
 let private observerTests =
     testList
         "Observer (Phase 298)"
-        [ testCase "observerLaws are green at a reference witness"
+        [ testCase "observerLawsAt are green at a reference witness"
           <| fun _ ->
               let w =
                   ObserverWitness.create (fun (x: int) ->
@@ -602,7 +602,7 @@ let private observerTests =
                             if x % 2 = 0 then
                                 "even" ])
 
-              for r in Conformance.observerLaws w (ConfRng.intBelow 10) 298 100 do
+              for r in Conformance.observerLawsAt w (ConfRng.intBelow 10) 298 100 do
                   Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
 
           testCase "a derivation that throws leaves the state unregistered"

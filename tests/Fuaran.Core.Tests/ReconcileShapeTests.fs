@@ -166,7 +166,7 @@ let reconcileShapeTests =
                     BaseOp = Nop
                     Lanes = fun _ r -> lanes, r }
 
-              let results = FoldConfluence.laneFoldLaws w blind string gen 2 11 5
+              let results = FoldConfluence.laneFoldLawsAt w blind string gen 2 11 5
 
               for r in
                   results

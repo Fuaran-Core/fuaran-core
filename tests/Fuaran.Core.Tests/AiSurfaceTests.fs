@@ -347,7 +347,7 @@ let tests =
               | Some c -> Expect.stringContains c "never reached parked, denied" "and it names the unreached decisions"
               | None -> failtest "a red guard carries its counterexample"
 
-              let kit = Conformance.aiSurfaceLawsUnderKitPolicy witness genNoteOp state0 1234 200
+              let kit = Conformance.aiSurfaceKitPolicyLawsAt witness genNoteOp state0 1234 200
 
               Expect.equal (List.length kit) 6 "four subject laws and the two Phase 223 guards"
 

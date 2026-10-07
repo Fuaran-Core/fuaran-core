@@ -439,7 +439,15 @@ module internal PropagationLaws =
     ///
     /// **Opt-in, not folded into `certify`** — the `keyedChildrenLaws` shape. `certify` takes a tree
     /// witness, and a domain that does not evaluate incrementally has nothing for this family to say.
-    let propagationEvaluatorLaws (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
+    ///
+    /// `family` is the roster id the guard is labelled with — `Conformance.propagationEvaluatorLawsAt`,
+    /// or the bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    let propagationEvaluatorLawsAt
+        (family: string)
+        (evw: EvaluatorWitness<'Model, 'V>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
         let purity =
             LawKit.LawCell
                 "the domain's evaluator is a function of what it reads: repeated and reordered evaluation agree (purity, determinism)"
@@ -811,7 +819,7 @@ module internal PropagationLaws =
 
         LawKit.results [ purity; honesty; agreement ]
         @ [ SampleAdequacy.reachedBeside
-                "Conformance.propagationEvaluatorLaws"
+                family
                 "evaluator edit"
                 seed
                 [ "change reaching a reader", readerReached
@@ -860,7 +868,8 @@ module internal PropagationLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let reference = propagationEvaluatorLaws evw seed iterations
+        let reference =
+            propagationEvaluatorLawsAt "Conformance.propagationEvaluatorLawsAt" evw seed iterations
 
         let blind =
             LawKit.LawCell

@@ -1083,7 +1083,11 @@ module internal AlgebraTreeLaws =
     /// `OpGen`, and a domain with no keyed positions has nothing for this family to say; folding
     /// it in would add laws that cannot fail for most domains, and would make `certify`'s law
     /// count depend on a witness it does not take.
-    let keyedChildrenLaws
+    ///
+    /// `family` is the roster id the guard is labelled with — `Conformance.keyedChildrenLawsAt`, or
+    /// the bare spelling for the obsolete forward that keeps its own id until `1.0.0` (Phase 390).
+    let keyedChildrenLawsAt
+        (family: string)
         (keyw: KeyedWitness<'Node, 'Id>)
         (nodew: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -1250,14 +1254,14 @@ module internal AlgebraTreeLaws =
             // no evidence they read through this line rather than reporting "never reached".
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]
             @ [ { Law =
-                    SampleAdequacy.lawPrefix "Conformance.keyedChildrenLaws"
+                    SampleAdequacy.lawPrefix family
                     + "the witness declares NO keyed position, so the collision laws are vacuous BY DECLARATION"
                   Passed = true
                   Counterexample = None } ]
         else
             LawKit.results [ accepted; surfaceClash; twiceKeyed ]
             @ [ SampleAdequacy.reached
-                    "Conformance.keyedChildrenLaws"
+                    family
                     "built arm"
                     seed
                     [ "clean full walk", cleanWalks

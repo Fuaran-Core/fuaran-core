@@ -18,7 +18,7 @@ let functionLawTests =
         [ // Phase 47 — the cross-witness composition laws.
           testCase "compositionLaws certify nested-application + associativity + hygiene + effect-join (Phase 47)"
           <| fun _ ->
-              let results = Conformance.compositionLaws artw artw id genComposition 4242 200
+              let results = Conformance.compositionLawsAt artw artw id genComposition 4242 200
 
               Expect.equal
                   (List.length results)
@@ -35,7 +35,7 @@ let functionLawTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.compositionLaws artw artw id genComposition 4242 200)
+                  (Conformance.compositionLawsAt artw artw id genComposition 4242 200)
                   results
                   "same seed ⇒ identical report"
 
@@ -43,7 +43,7 @@ let functionLawTests =
           testCase "memoLaws certify equals-direct + param-miss + effecting-bypass + replay-parity (Phase 49)"
           <| fun _ ->
               let results =
-                  Conformance.memoLaws artw encNode genMemo OpStream.defaultHash 4242 200
+                  Conformance.memoLawsAt artw encNode genMemo OpStream.defaultHash 4242 200
 
               Expect.equal
                   (List.length results)
@@ -60,7 +60,7 @@ let functionLawTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.memoLaws artw encNode genMemo OpStream.defaultHash 4242 200)
+                  (Conformance.memoLawsAt artw encNode genMemo OpStream.defaultHash 4242 200)
                   results
                   "same seed ⇒ identical report"
 
@@ -68,7 +68,7 @@ let functionLawTests =
           testCase "compositionPilot certifies composeAcross + applyMemo across two distinct witnesses (Phase 51)"
           <| fun _ ->
               let results =
-                  Conformance.compositionPilot artw artw2 embedToR encNode encNode2 genComposition2 4242 200
+                  Conformance.compositionPilotAt artw artw2 embedToR encNode encNode2 genComposition2 4242 200
 
               Expect.equal
                   (List.length results)
@@ -85,7 +85,7 @@ let functionLawTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.compositionPilot artw artw2 embedToR encNode encNode2 genComposition2 4242 200)
+                  (Conformance.compositionPilotAt artw artw2 embedToR encNode encNode2 genComposition2 4242 200)
                   results
                   "same seed ⇒ identical report"
 
@@ -107,7 +107,7 @@ let functionLawTests =
               let underDeclaredArgs = Map.ofList [ "ud/c", ValueArg "3" ]
 
               let results =
-                  Conformance.memoSoundnessLaws artw encNode underDeclared underDeclaredArgs 4242 50
+                  Conformance.memoSoundnessLawsAt artw encNode underDeclared underDeclaredArgs 4242 50
 
               Expect.equal (List.length results) 2 "gate-distinction + bypass laws reported"
 
@@ -121,7 +121,7 @@ let functionLawTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.memoSoundnessLaws artw encNode underDeclared underDeclaredArgs 4242 50)
+                  (Conformance.memoSoundnessLawsAt artw encNode underDeclared underDeclaredArgs 4242 50)
                   results
                   "same seed ⇒ identical report" ]
 
@@ -310,7 +310,14 @@ let functionVerifyTests =
           testCase "functionVerifyLaws certify sound-clean + broken-fails + determinism (Phase 48)"
           <| fun _ ->
               let results =
-                  Conformance.functionVerifyLaws artw (tplCount (0, 5)) (tplCount (0, 10)) countReg genParamsFor 777 200
+                  Conformance.functionVerifyLawsAt
+                      artw
+                      (tplCount (0, 5))
+                      (tplCount (0, 10))
+                      countReg
+                      genParamsFor
+                      777
+                      200
 
               Expect.equal (List.length results) 3 "sound + broken + determinism laws reported"
 
@@ -324,7 +331,7 @@ let functionVerifyTests =
 
               // seed-replay determinism of the kit itself
               Expect.equal
-                  (Conformance.functionVerifyLaws
+                  (Conformance.functionVerifyLawsAt
                       artw
                       (tplCount (0, 5))
                       (tplCount (0, 10))
@@ -350,7 +357,7 @@ let functionVerifyTests =
                       Eff = { Host = Pure; Determinism = d } }
 
               let results =
-                  Conformance.verifyHonestyLaws artw mkSoundDet mkBrokenDet countReg genParamsFor 777 200
+                  Conformance.verifyHonestyLawsAt artw mkSoundDet mkBrokenDet countReg genParamsFor 777 200
 
               Expect.equal (List.length results) 2 "stochastic-verifies + effect-class-agnostic laws reported"
 
@@ -364,6 +371,6 @@ let functionVerifyTests =
 
               // seed-replay determinism
               Expect.equal
-                  (Conformance.verifyHonestyLaws artw mkSoundDet mkBrokenDet countReg genParamsFor 777 200)
+                  (Conformance.verifyHonestyLawsAt artw mkSoundDet mkBrokenDet countReg genParamsFor 777 200)
                   results
                   "same seed ⇒ identical report" ]

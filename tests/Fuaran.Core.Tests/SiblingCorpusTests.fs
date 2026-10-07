@@ -305,3 +305,300 @@ let tests =
                   Expect.stringContains why SiblingCorpus.cloneUrl "and carries the clone command"
               | SiblingCorpus.NotAsked why -> failtestf "asked for by value, yet reported not asked: %s" why
               | SiblingCorpus.Found root -> failtestf "a corpus resolved at '%s' from a non-existent override" root ]
+
+// ---------------------------------------------------------------------------
+// Phase 394 — the corpus pin, proved in both directions.
+//
+// The record is read by two readers — the workflow step (`.github/scripts/corpus-pin.ps1`) and the
+// suite (`SiblingCorpus.readPin`) — and the first leg below holds them to one answer over a valid
+// record and over malformed ones, so a pin the suite accepts is one CI can check out. The drift
+// reading is proved against a scratch repository built here, in every direction it distinguishes,
+// and the grade table is proved for both values of the ask. The live leg at the foot reads the
+// corpus this run would certify against and names both SHAs when it is not at the pin.
+// ---------------------------------------------------------------------------
+
+let private validPin =
+    """{
+  "kind": "copies",
+  "corpus": {
+    "repository": "fuaran-ui/fuaran-ui-specification",
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "date": "2026-10-07",
+    "reason": "a test record"
+  },
+  "records": []
+}"""
+
+/// `.github/scripts/corpus-pin.ps1 -CopiesJson <path>`, run the way the workflows run it, with a
+/// scratch `GITHUB_OUTPUT` so the step's real output channel is read too (and a CI run's own output
+/// file is never written by the suite): (exit code, stdout+stderr, the GITHUB_OUTPUT file's text).
+let private runPinStep (copiesPath: string) : int * string * string =
+    let output = Path.GetTempFileName()
+
+    try
+        let psi = ChildProcess.redirected "pwsh" ""
+
+        for a in
+            [ "-NoProfile"
+              "-NonInteractive"
+              "-File"
+              Path.Combine(repoRoot, ".github", "scripts", "corpus-pin.ps1")
+              "-CopiesJson"
+              copiesPath ] do
+            psi.ArgumentList.Add a
+
+        psi.Environment["GITHUB_OUTPUT"] <- output
+        use p = Process.Start psi
+        let out = p.StandardOutput.ReadToEndAsync()
+        let err = p.StandardError.ReadToEndAsync()
+        p.WaitForExit()
+        p.ExitCode, (out.Result + err.Result).Trim(), File.ReadAllText(output).Replace("\r\n", "\n").Trim()
+    finally
+        File.Delete output
+
+let private withScratchFile (text: string) (body: string -> unit) =
+    let path =
+        Path.Combine(Path.GetTempPath(), "fuaran-core-pin-" + Guid.NewGuid().ToString("N") + ".json")
+
+    File.WriteAllText(path, text)
+
+    try
+        body path
+    finally
+        File.Delete path
+
+/// A scratch git repository, removed however the body ends. `git` is run with an identity of its
+/// own so the commits need nothing from the machine's configuration.
+let private withScratchRepo (body: string -> (string -> string) -> unit) =
+    let dir =
+        Path.Combine(Path.GetTempPath(), "fuaran-core-pinrepo-" + Guid.NewGuid().ToString("N"))
+
+    Directory.CreateDirectory dir |> ignore
+
+    let git (arguments: string) =
+        match
+            runGit
+                dir
+                ("-c user.name=pin -c user.email=pin@example.invalid -c commit.gpgsign=false "
+                 + arguments)
+        with
+        | 0, out -> out
+        | code, out -> failtestf "`git %s` exited %d in the scratch repository: %s" arguments code out
+
+    try
+        git "-c init.defaultBranch=main init" |> ignore
+        body dir git
+    finally
+        // git marks its object files read-only; clear that so the scratch tree can be removed.
+        for f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories) do
+            File.SetAttributes(f, FileAttributes.Normal)
+
+        Directory.Delete(dir, true)
+
+let private commit (git: string -> string) (message: string) : string =
+    git (sprintf "commit --allow-empty -m \"%s\"" message) |> ignore
+    git "rev-parse HEAD"
+
+[<Tests>]
+let pinTests =
+    testList
+        "SiblingCorpus.pin"
+        [ testCase "the committed copies.json carries a well-formed corpus pin"
+          <| fun _ ->
+              match SiblingCorpus.pin () with
+              | Ok p -> Expect.equal p.Repository SiblingCorpus.pinRepository "the pin names the corpus repository"
+              | Error errs -> failtestf "the committed corpus pin does not read: %s" (String.concat "; " errs)
+
+          testCase "an absent or malformed pin is refused, naming every defect"
+          <| fun _ ->
+              let refused (text: string) =
+                  match SiblingCorpus.readPin text with
+                  | Ok p -> failtestf "accepted a malformed pin: %A" p
+                  | Error errs -> errs
+
+              Expect.isOk (SiblingCorpus.readPin validPin) "the well-formed record reads"
+
+              let absent = refused """{ "kind": "copies", "records": [] }"""
+              Expect.stringContains (List.head absent) "declares no `corpus` record" "an absent record is named"
+
+              let notObject = refused """{ "kind": "copies", "corpus": "main", "records": [] }"""
+
+              Expect.stringContains
+                  (List.head notObject)
+                  "is not an object"
+                  "a branch name in place of a record is refused"
+
+              let three =
+                  refused (
+                      validPin
+                          .Replace("0123456789abcdef0123456789abcdef01234567", "8725ce4")
+                          .Replace("2026-10-07", "07/10/2026")
+                          .Replace("a test record", "  ")
+                  )
+
+              Expect.equal (List.length three) 3 "every defect is collected, not the first"
+              Expect.stringContains (String.concat "\n" three) "40 lowercase hex" "an abbreviated SHA is refused"
+              Expect.stringContains (String.concat "\n" three) "yyyy-MM-dd" "a non-ISO date is refused"
+              Expect.stringContains (String.concat "\n" three) "non-blank" "a blank reason is refused"
+
+              let otherRepo =
+                  refused (validPin.Replace("fuaran-ui/fuaran-ui-specification", "someone/fork"))
+
+              Expect.stringContains (List.head otherRepo) "corpus.repository" "a different repository is refused"
+
+              let upper =
+                  refused (validPin.Replace("abcdef0123456789abcdef01234567", "ABCDEF0123456789ABCDEF01234567"))
+
+              Expect.stringContains (List.head upper) "corpus.sha" "an uppercase SHA is refused"
+
+          testCase "the workflow pin step and the suite read copies.json alike"
+          <| fun _ ->
+              // Valid: both accept, and the step's output channel carries exactly what the suite read.
+              withScratchFile validPin (fun path ->
+                  let code, out, ghOutput = runPinStep path
+                  Expect.equal code 0 (sprintf "the step accepts the record the suite accepts: %s" out)
+
+                  Expect.equal
+                      ghOutput
+                      "repository=fuaran-ui/fuaran-ui-specification\nsha=0123456789abcdef0123456789abcdef01234567"
+                      "the step hands the checkout the repository and the SHA, through GITHUB_OUTPUT")
+
+              // The repository's own record: the SHA the workflows check out is the SHA the suite holds.
+              let code, out, ghOutput = runPinStep (SiblingCorpus.pinFile ())
+              Expect.equal code 0 (sprintf "the step accepts the committed pin: %s" out)
+
+              match SiblingCorpus.pin () with
+              | Ok p -> Expect.stringContains ghOutput ("sha=" + p.Sha) "the step and the suite name one SHA"
+              | Error errs -> failtestf "the committed pin does not read: %s" (String.concat "; " errs)
+
+              // Malformed, each way the suite refuses: the step refuses too, names the defect, and
+              // writes nothing a checkout could use.
+              for text, defect in
+                  [ """{ "kind": "copies", "records": [] }""", "declares no `corpus` record"
+                    validPin.Replace("0123456789abcdef0123456789abcdef01234567", "main"), "corpus.sha"
+                    validPin.Replace("2026-10-07", "yesterday"), "corpus.date"
+                    validPin.Replace("a test record", ""), "corpus.reason"
+                    validPin.Replace("fuaran-ui/fuaran-ui-specification", "someone/fork"), "corpus.repository"
+                    "not json at all", "not JSON" ] do
+                  Expect.isError (SiblingCorpus.readPin text) (sprintf "the suite refuses the record naming %s" defect)
+
+                  withScratchFile text (fun path ->
+                      let code, out, ghOutput = runPinStep path
+                      Expect.equal code 1 (sprintf "the step refuses the record naming %s: %s" defect out)
+                      Expect.stringContains out defect "and names the defect"
+                      Expect.equal ghOutput "" "and hands the checkout nothing")
+
+          testCase "the drift reading tells every direction apart, from a real repository"
+          <| fun _ ->
+              withScratchRepo (fun dir git ->
+                  let first = commit git "first"
+                  let second = commit git "second"
+
+                  Expect.equal (SiblingCorpus.driftAt second dir) (SiblingCorpus.AtPin second) "HEAD at the pin"
+
+                  Expect.equal
+                      (SiblingCorpus.driftAt first dir)
+                      (SiblingCorpus.Ahead(first, second))
+                      "HEAD past the pin"
+
+                  let unknown = String.replicate 40 "e"
+
+                  Expect.equal
+                      (SiblingCorpus.driftAt unknown dir)
+                      (SiblingCorpus.PinUnknown(unknown, second))
+                      "a pin the clone has never fetched"
+
+                  git (sprintf "checkout --quiet --detach %s" first) |> ignore
+
+                  Expect.equal
+                      (SiblingCorpus.driftAt second dir)
+                      (SiblingCorpus.Behind(second, first))
+                      "HEAD before the pin"
+
+                  let beside = commit git "beside"
+
+                  Expect.equal
+                      (SiblingCorpus.driftAt second dir)
+                      (SiblingCorpus.Diverged(second, beside))
+                      "HEAD on another line from the pin"
+
+                  // A directory inside a repository is not a checkout of its own: git would answer with
+                  // the enclosing repository's HEAD, which means nothing about a corpus copied there.
+                  let nested = Path.Combine(dir, "wire-format-fixtures")
+                  Directory.CreateDirectory nested |> ignore
+
+                  match SiblingCorpus.driftAt second nested with
+                  | SiblingCorpus.Unreadable why -> Expect.stringContains why "not a git checkout of its own" "named"
+                  | other -> failtestf "a nested plain directory read as %A" other)
+
+              let plain =
+                  Path.Combine(Path.GetTempPath(), "fuaran-core-notgit-" + Guid.NewGuid().ToString("N"))
+
+              Directory.CreateDirectory plain |> ignore
+
+              try
+                  match SiblingCorpus.driftAt (String.replicate 40 "a") plain with
+                  | SiblingCorpus.Unreadable _ -> ()
+                  | other -> failtestf "a directory outside any repository read as %A" other
+              finally
+                  Directory.Delete plain
+
+          testCase "the grade depends on the direction and, past the pin's ancestry, on the ask"
+          <| fun _ ->
+              let pinned = String.replicate 40 "1"
+              let head = String.replicate 40 "2"
+              let file = "copies.json"
+
+              let gradeOf fatal drift = SiblingCorpus.grade fatal file drift
+
+              for fatal in [ false; true ] do
+                  Expect.equal (gradeOf fatal (SiblingCorpus.AtPin pinned)) SiblingCorpus.PinHolds "at the pin holds"
+
+                  match gradeOf fatal (SiblingCorpus.Ahead(pinned, head)) with
+                  | SiblingCorpus.PinWarn report ->
+                      Expect.stringContains report pinned "an ahead clone names the pin"
+                      Expect.stringContains report head "and its own HEAD"
+                      Expect.stringContains report "AHEAD" "and the direction"
+                  | other -> failtestf "an ahead clone graded %A with the ask %b — ahead is never fatal" other fatal
+
+              for drift, word in
+                  [ SiblingCorpus.Behind(pinned, head), "BEHIND"
+                    SiblingCorpus.Diverged(pinned, head), "DIVERGED"
+                    SiblingCorpus.PinUnknown(pinned, head), "NOT CARRYING" ] do
+                  match gradeOf true drift, gradeOf false drift with
+                  | SiblingCorpus.PinFail asked, SiblingCorpus.PinWarn unasked ->
+                      for report in [ asked; unasked ] do
+                          Expect.stringContains report pinned (sprintf "%s names the pin" word)
+                          Expect.stringContains report head (sprintf "%s names the HEAD" word)
+                          Expect.stringContains report word "and the direction"
+
+                      Expect.stringContains
+                          unasked
+                          SiblingCorpus.askVariable
+                          "the unasked report says why it did not fail"
+                  | a, u -> failtestf "%s graded %A asked and %A unasked; wanted FAIL and WARN" word a u
+
+              match
+                  gradeOf true (SiblingCorpus.Unreadable "no git"), gradeOf false (SiblingCorpus.Unreadable "no git")
+              with
+              | SiblingCorpus.PinFail _, SiblingCorpus.PinWarn _ -> ()
+              | a, u -> failtestf "an unreadable position graded %A asked and %A unasked" a u
+
+          testCase "the corpus this run reads is at copies.json's pin, or the run says which side moved"
+          <| fun _ ->
+              // Decided by PRESENCE, as the laws/ copy-freshness legs are (Phase 216): a corpus checked
+              // out beside this one is read whether or not the live leg was asked for, and the ask
+              // decides only whether a corpus that is not at (or past) the pin FAILS.
+              match SiblingCorpus.freshness "laws" with
+              | SiblingCorpus.NotChecked(why, true) -> failtest why
+              | SiblingCorpus.NotChecked(why, false) -> skiptest why
+              | SiblingCorpus.Compare(root, fatal) ->
+                  match SiblingCorpus.pin () with
+                  | Error errs -> failtestf "the committed corpus pin does not read: %s" (String.concat "; " errs)
+                  | Ok p ->
+                      match SiblingCorpus.grade fatal (SiblingCorpus.pinFile ()) (SiblingCorpus.driftAt p.Sha root) with
+                      | SiblingCorpus.PinHolds -> ()
+                      | SiblingCorpus.PinWarn report ->
+                          printfn "\nCORPUS PIN — %s\n  corpus  %s\n" report root
+                          Console.Out.Flush()
+                      | SiblingCorpus.PinFail report -> failtestf "CORPUS PIN — %s\n  corpus  %s" report root ]

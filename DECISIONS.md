@@ -1,5 +1,229 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D128: a query declares a closed conjunction of typed column predicates and a column order; the resolver honours both or refuses by name; the pattern bank does not capture, and the column layer's scalar functions stay where D66 put them
+
+**Recorded by Phase 398 (operator ruling: the recommended shape ships). `Fuaran.Core.Query`,
+`Fuaran.Core.Conformance` (`queryLaws`); rides the `0.36.0` draft (STABILITY.md, "A query declares
+what it filters and how it orders"). The census behind it is `docs/demand-census.md`.**
+
+*Decided: `Query` gains `Where` and `OrderBy`, both empty by default.* `Where` is a CONJUNCTION of
+`ColumnPredicate`s over the fixed scalar set — `EqualTo`, the four range bounds (`GreaterThan` and
+`LessThan` exclusive, `AtLeast` and `AtMost` inclusive), `Contains` on a string column, `IsNull` and
+`IsNotNull`. `OrderBy` is a list of `SortKey`s, a column and a direction each. An empty member is
+absent from the wire, so every declaration written before the members existed encodes byte for byte
+as it did, and its capture key is unchanged. The union is closed: a predicate a host needs that is
+not here is a ruling, not a host-side extension.
+
+*Decided: a literal is a cell of its column's OWN type, exactly — no widening.* A parameter accepts
+an `int` for a `float` (`ColumnType.widens`, Phase 295) because an argument is a value supplied at
+call time. A predicate's literal is part of the declaration, and one filter should have one
+spelling: with widening, `EqualTo("price", Int 3)` and `EqualTo("price", Float 3.0)` are one filter
+under two encodings and two capture keys. A `Null` literal is refused (`IsNull` is the test), and so
+is a literal the column codec cannot carry (`Table.validate`'s refusal: a non-finite float, decimal,
+date or timestamp text that is not canonical). The wire carries a comparison's literal with its
+`type`, so a predicate document reads alone — the resolver's refusal carries one without a schema.
+
+*Decided: the meaning is Core's, and stated where the type is.* A comparison orders by `Cell.compare`
+(Phase 315: THE cell order — numbers numerically, NaN last, decimals exactly, strings, dates and
+timestamps ordinally, `false` before `true`), so every column type takes the range bounds. `Contains`
+is ordinal and case-sensitive: case folding is a culture's, and the pattern bank's case-insensitivity
+is a property of matching a request, not of filtering data. A `Null` cell satisfies only `IsNull`.
+`Ascending` puts a `Null` first, `Descending` last. A host that cannot give one of these meanings
+refuses the predicate; it does not approximate it.
+
+*Decided: one admission gate.* `QueryRegistry.admissionFault` (D111, Phase 385) holds the filter and
+the order to the declaration's `ResultSchema`: an undeclared column (`UnknownColumn`), `Contains` on a
+column that is not a string (`PredicateNotApplicable`), a literal of another type
+(`PredicateTypeMismatch`) or one its column cannot carry (`IllFormedLiteral`), and an order naming a
+column twice (`DuplicateSortColumn`). `register`, `replace` and the declaration reader run it, and the
+reader reports the refusal at the predicate's or key's path.
+
+*Decided: the resolver receives both, and one that cannot honour them refuses by name.* No new
+resolver signature: the resolver is already handed the `Query`, so it reads `Where` and `OrderBy`
+there. `ResolveFault` gains `PredicateUnsupported` and `OrderUnsupported`, surfacing as
+`QueryError.PredicateNotHonoured` / `OrderNotHonoured`; the capture journals them as their wire
+documents and replay answers them back (Phase 385's path). The untyped resolvers (`Query.invoke`,
+`QueryRegistry.dispatch` and their paged and captured forms) are handed the same declaration, and
+their only refusal stays `Failed`, which is `ExecutionFailed`: a host that must refuse a filter by
+name uses the typed forms. Core cannot see whether a resolver applied a filter; the seam makes the
+honest answer typed and cheap, and `queryLaws` certifies that a refusal reaches the caller.
+
+*Decided: the capture key sees both (Phase 316's paging precedent).* A non-empty `Where` adds three
+fields in front of the bindings — an empty name, the tag `w`, and the canonical text of its
+predicates — and a non-empty `OrderBy` the same with `o`. Neither tag is a cell's, nor the page tag
+`p`, so the pre-image stays a sequence of self-delimiting triples read by their tags. Without this,
+`QueryRegistry.replace` swapping one filter for another under the same id would replay the first
+filter's rows for the second.
+
+*Decided (driver ruling, closed in this phase): the F\* model states the new members, concretely.*
+As first written the phase left `proofs/Query.fst` modelling `invocationKey` over the id and the
+arguments, with a fourth theorem reading the declaration "through its id alone". That is false of
+production for a declaration that filters or orders, so the proof row overclaimed. The gap is CLOSED
+here rather than handed to a successor. The model carries `predicate`, `sort_direction` and `sort_key`
+as closed types (every F# case, no type parameter) and `q_where` / `q_order_by` on the declaration. It
+models the admission (`where_fault`, `order_fault`, `admission_fault`, with `register_refuses_shape`)
+and the shape fields (`shape_fields`, `key_fields`). Theorem four is restated over the id AND the shape
+(`invocation_key_deterministic`, `invocation_key_reads_id_and_shape`). The compatibility claim is its
+own lemma (`invocation_key_unshaped`: an empty filter and order key exactly as the pre-398 key). The
+injectivity theorems cover (filter and order, page token, arguments) (`invocation_key_injective`,
+`invocation_key_page_injective`, `distinct_shapes_distinct_preimages`). What the shape spends is two
+renderer premises in `key_premises`, beside the int and float renderers': the filter's and the order's
+canonical text are injective. The oracle measures both on the shipped codec through the declaration
+round trip. Two things are stated as outside the model rather than modelled: the column layer's
+literal-carriability clause (`Table.validate`'s, which `DecimalText.fst` and `WireColumn.fst` own), and
+the typed resolver's two refusals (the model carries the untyped resolver, as before). The oracle is
+re-extracted, and the differential draws filtered and ordered declarations, comparing the admission's
+five refusals and the shaped key byte for byte.
+
+*Decided: operands are literals, not parameter references.* A declaration states its own fixed
+filter; a value that varies per call is a parameter, which the resolver already receives typed. A
+parameter-bound predicate would make the filter a function of the arguments and move admission from
+registration to every call. It is not declined forever: it is the first thing the census's fifth stage
+watches for.
+
+*Declined: membership and disjunction.* A value in a set is a disjunction of equalities, and `Where`
+is closed under conjunction only. A host takes the set as a parameter. Admitting `Or` makes the
+predicate language a tree with a normal form to choose, for a need no consumer has yet shown.
+
+*Declined: captures and alternation inside an anchor, on the pattern bank.* A `{…}` wildcard does not
+capture; a value reaches a pattern's `Emit` through the intent's `Args`, which the host parses. The
+emission body is the domain's (`PatternCard`, "the pattern content stays domain-side; the core owns
+only matching and resolution discipline"), and a typed capture would put the domain's parsing in the
+core. Alternation between whole anchors is already expressible: a pattern carries several, and any one
+selects it.
+
+*Declined: the column layer's scalar functions.* Substring, concatenation, date deltas, sorting and
+filtering as OPERATIONS over a table are the compute repository's (D66, executed by D71). What the
+column layer keeps is what a `Where` and an `OrderBy` need to have a meaning: the cell order and the
+null test.
+
+## 2026-10-07 — D127: the kit has one entry story — every family answers `LawResult list` and is rostered, a vector family handed no vectors is red by name, and the `…At` rule covers EVERY witness-taking family (two rulings), with the bare names forwarded until `1.0.0`
+
+**Recorded by Phase 390. `Fuaran.Core.Conformance`; rides the `0.36.0` draft (STABILITY.md, "One
+entry story for the conformance kit"). Amends D78's naming rule by applying it, not by restating it.
+(Filed as D126 on the phase branch; Phase 394 took D126 first.)**
+
+*The rule, as it now stands with no exception.* D78 wrote it: a bare name is the family at its default;
+`…At` is the domain-witness form; `…With` is the same laws with a pinned parameter injected, last
+before the seed. Phase 390 makes it total and checkable:
+
+- **Every family that takes a witness capability the base contract does not** (roster reason
+  `NeedsWitnessCapability` — an `ArtifactWitness`, a `KeyedWitness`, an attestation sink, a lane
+  generator, an evaluator, observer, projection, sanitiser or AI-surface witness, a seam witness) **is
+  spelled `…At`.** The base-contract families over `NodeWitness` / `StreamWitness` alone keep bare
+  names: they are the kit's default run, which is what a bare name means.
+- **A configured form is `…With`, never `…AtWith`.** The `…With` of a witness-taking family is the
+  `…At` family taking its configuration as a further parameter, last before the seed, and an `…At`
+  sibling always stands beside it. That is what the three existing precedents already were
+  (`propagationEvaluatorLawsWith`, `keyedArbitrationLawsWith`, `FoldConfluence.laneFoldLawsWith`), so no
+  `…With` name moves; the rule names what they already did.
+- **A family whose stem is not `…Laws` keeps its stem** (`compositionPilot` → `compositionPilotAt`), and
+  a family that is a different law SET over the same witness says so in its stem, not in a suffix the
+  rule does not have: `aiSurfaceLawsUnderKitPolicy` (the proposal plumbing under the kit's policy, at the
+  domain's witness) is `aiSurfaceKitPolicyLawsAt`.
+- **Aggregates are not families.** `certify`, `certifyStream` and `FoldConfluence.certifyFold` answer a
+  `ConformanceReport`, are not rostered, and are outside the rule.
+
+`ConformanceVacuityTests`' "naming rule" list holds the roster to it — every live witness-taking family
+`…At` or `…With`, every `…With` with its `…At`, no `…AtWith`, no `…At` without a witness — and plants a
+violating roster to show it goes red.
+
+*The rulings, recorded.* The phase offered two closures for the six bare witness-taking families the
+evaluate-design pass named: apply the rule, or restate D78 as "the `At` suffix marks the seam families
+whose bare name is the kit-default form". **Ruled 2026-10-07 by the operator: APPLY it** — the
+restatement would freeze an exception an adopter has to learn at `1.0`, and a forward costs one draft.
+Checking the roster found eleven more (`attestationLaws`, `compositionLaws`, `compositionPilot`,
+`memoLaws`, `memoSoundnessLaws`, `functionVerifyLaws`, `verifyHonestyLaws`, `encoderInjectivityLaws`,
+`keyedApplyLaws`, `keyedArbitrationLaws`, `FoldConfluence.laneFoldLaws`), and the rule's test found a
+twelfth (`aiSurfaceLawsUnderKitPolicy`). **Ruled the same day, as a second ruling: bring all of them
+under the rule in this phase**, choosing the `…With` reading above from D78's text and the existing
+precedents. Each gains its `…At` spelling with the same parameters in the same order, witness first; the
+bare name is an `[<Obsolete>]` forward naming its replacement and `1.0.0`, kept as a roster row under
+its own id and its own guard label, exactly as D78's forwards were, so nothing that pins it moves on the
+day the rule lands. **All eighteen forwards are on the record for Phase 386's `1.0.0` removal sweep.**
+The claims-ladder rows move their `dischargedBy` to the `…At` ids (`propagation-change-set-and-prior` to
+`propagationEvaluatorLawsAt`, `witness-surface-scope` to `keyedApplyLawsAt`); the operation roster and
+the coverage exclusions name the `…At` ids (the `Fuaran.Core.AiSurface` exclusion also leaves Phase 297's
+own obsolete `aiSurfaceLaws` for `aiSurfaceLawsAt`), so the sweep removes the forwards without moving a
+discharge.
+
+*Every family answers `LawResult list` and is rostered — the vector families included.* The pass found
+five vector families answering `Corpus.Outcome list`, `Result<unit, string>` or `string list` and said the
+roster could not see them. Checked against the tree: four already carried a rostered `laws` (Phases 297,
+349, 360, 379); `ParityVectors` alone had none. It gains `laws ()`, stating what makes a row comparable on
+whichever pipeline runs it (printable ASCII, one space-free label per row, every sanitiser row `ok`, the
+`VEC` rendering); the values stay pinned by the suite and diffed by a consumer, so nothing a host reads
+moves. Each fixed-corpus family gains `lawsWith` over a vector set the caller hands it (`laws ()` is
+`lawsWith` over the committed corpus), and carries one more law — `<family>: the corpus evaluated at
+least one vector` — whose evidence is one assertion per vector, counted where each verdict is built
+(D100's rule). A run handed no vectors is therefore red by name; before, it was an empty list, which
+every reader reads as green. The stored families (`StoredIdentity.*`, `storedCodecLaws`) were
+green over an EMPTY store for the same reason — each law asserted once whatever the store held — and
+each now carries `the store holds at least one <record | node | capture | text>`, one assertion per
+item: a behavioural change, deliberately, since a store that holds nothing certifies nothing. The
+suite plants a zero-vector run of every vector family the roster declares and holds that set to the roster.
+
+*A tautological cell is evidence, not a law.* `Check(true, …)` takes the evidence and asserts nothing,
+so the census counted it as a law that held. The two sites (`PlacementTreeLaws`, `KeyedApplyLaws`) are
+`Saw()` — the match guard around each is the assertion — and a source scan keeps the shape out of the kit.
+
+*The one entry shape.* `docs/ADOPTION.md` §2d: every family is run the same way — call it, concatenate
+the `LawResult list`s, green when every result passed — `Conformance.certify` (or `certifyStream`) for the
+base run, each opt-in the roster says is yours, and the vector families' `laws` / `lawsWith` or stored
+laws. The internal `LawKit` runner is how a family is WRITTEN, not how one is run, so it stays internal.
+
+## 2026-10-07 — D126: the conformance corpus is a pinned build input — `main` is red only for a change in this repository or a deliberate bump, and `--emit-laws` restamps the corpus manifest rows beside the files
+
+**Recorded by Phase 394. Test project and workflows only (`copies.json`, `.github/workflows/ci.yml`,
+`.github/workflows/publish-packages.yml`, `.github/scripts/corpus-pin.ps1`, `SiblingCorpus`,
+`LawVectorExport`); no package or wire byte moves. Builds on D31 (an asked-for corpus that is absent
+fails) and D50 (a stamp-only mismatch is fatal where asked); restates the 2026-09-15 ruling (C)
+against the pin.**
+
+*Decided: the corpus Core certifies against is a SHA Core chose.* Every workflow checkout of
+`fuaran-ui/fuaran-ui-specification` — `ci.yml`'s `verify` and `proofs`, `publish-packages.yml`'s
+`proofs` and `publish`, four in all — named no `ref:` until now, so it read whatever the corpus's
+default branch held at that moment. A corpus push could red this repository's `main` with no commit
+here, and refuse a tag's publish; a corpus regression could be certified against by accident. The
+`corpus` record of `copies.json` (repository, full SHA, date, reason) is now the one tracked pin;
+each checkout reads it through `.github/scripts/corpus-pin.ps1`, which refuses an absent or
+malformed record by name before the checkout runs. `FUARAN_CORE_CORPUS_DIR` and
+`FUARAN_CORE_CORPUS_FRESHNESS` are unchanged.
+
+*Decided: the pin moves only with the change that needs it.* A bump is one commit carrying the
+record's edit and the change that made it necessary, its message naming both SHAs, after the corpus
+change is pushed and the corpus legs re-run at the new pin (docs/conformance-corpus.md, "Bumping the
+pin"). A `<Version>` move is such a change: the cut, the re-emitted `conformance/` and the bump to
+the re-stamped corpus commit travel together, so ruling (C)'s window on Core's side — which used to
+run from a cut to whatever the corpus branch held — now runs from a cut to a pin bump, both commits
+here, and the procedure makes it empty. The host side of (C) is adoption and is unchanged.
+
+*Decided: the suite reports drift by DIRECTION.* `SiblingCorpus` reads the same record (the suite
+runs the workflow step over valid and malformed records to keep the two readers one) and, wherever a
+corpus is present, names both SHAs when the checkout is not at the pin: AHEAD is a warning everywhere
+(the normal state while a corpus change is in flight); BEHIND, DIVERGED, not carrying the pin, or not
+a git checkout of its own warn locally and FAIL where the live leg is asked for. A directory inside
+another repository is refused as unreadable rather than read, because git would answer with the
+enclosing repository's HEAD. In CI the checkout is the pin, so the reading holds by construction.
+
+*Decided (operator ruling, folded in): the corpus `laws/manifest.json` rows are restamped with the
+files.* `LawVectorExport.write` deliberately left the shared index alone, so every `<Version>` move
+left Core's rows naming the previous kit beside files stamped with the new one, and the rows were
+hand-edited at each cut (most recently at the `0.36.0` slot opening, corpus `8725ce4`). The reason the
+index is not rendered still holds — it lists families this repository does not own — so the restamp
+is surgical: exactly the derived members (`kitVersion`, `vectors`, and `seed` / `iterations` for the
+drawn family) of exactly Core's rows, refusing an absent, repeated or incomplete row before anything
+is written, and proved by parsing the result back to the original with only those members replaced.
+A corpus-present leg holds each row to the file beside it. Measured on the pinned corpus:
+`--emit-laws` into a copy of it whose `decimal` row was set back to `0.35.2` / 74 restored the
+manifest byte for byte.
+
+*Rejected: pinning by branch or tag.* A branch is the defect; a corpus tag is a second name the corpus
+repository controls and can move. *Rejected: a workflow-level `env:` literal per file.* Four copies of
+one value must all move at every bump, and a missed one is a job certifying against a different
+corpus with nothing to say so; the pin lives once, in the file the suite already reads. *Rejected: rendering the whole manifest.* It would drop the compute
+repository's `transformLaws` row, which this repository does not own.
+
 ## 2026-10-07 — D125: a copy D2 does not demand is collapsed into one body, a kernel two packages need lives in the lower one behind `InternalsVisibleTo`, and a public module whose public types are nested in it is not split across files
 
 **Recorded by Phase 388. `Fuaran.Core.OpStream`, `.OpStream.Dag`, `.Ops`, `.Wire`, `.Column`,
@@ -3533,6 +3757,7 @@ one that disappears. Three `…With` entries whose pinned parameter is not last 
 (`snapshotLawsWith`, `concurrencyLawsWith`, `laneFoldLawsWith`) cannot take a forward under the name
 the rule gives them; they are reordered together, in one breaking change, rather than one at a time.
 (Closed on this draft: reordered with no forward — see "the kit's last three `…With` entries are reordered with no forward".)
+(Amended by D127, Phase 390, `0.36.0` draft: the rule now covers EVERY family that takes a witness capability the base contract does not — each is spelled `…At`, its configured form is `…With` (the `…At` family with one more parameter, last before the seed, never `…AtWith`), and the eighteen bare spellings it replaced are obsolete forwards removed at `1.0.0`. A roster test holds it.)
 
 **Declined here, and why.** Widening `LawResult` to carry a passing guard's reached counts is a
 recorded open decision and is not taken by this phase: the runner makes it a one-module change

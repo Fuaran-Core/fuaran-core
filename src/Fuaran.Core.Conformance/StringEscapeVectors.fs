@@ -19,9 +19,9 @@ namespace Fuaran.Core
 //  what the linear chain and the DAG chain did before Phase 287. A host in any language that
 //  claims to reproduce this package's chain hashes satisfies these vectors or does not.
 //
-//  It sits beside the law kit as `WireNullTolerance` does — a vector family with a runner, not
-//  a `LawResult` family — because nothing here is drawn: the alphabet is the whole of what the
-//  rule escapes, enumerated. FSharp.Core only, Fable-clean.
+//  It sits beside the law kit as `WireNullTolerance` does — a VECTOR family: a runner over an
+//  enumerated table with a `LawResult` projection (`laws`), because nothing here is drawn: the
+//  alphabet is the whole of what the rule escapes, enumerated. FSharp.Core only, Fable-clean.
 // ============================================================================
 
 /// The string-escape conformance vectors + their runner.
@@ -184,36 +184,32 @@ module StringEscapeVectors =
         | [] -> Ok()
         | first :: _ -> Error(first.Name + ": " + first.Detail)
 
+    /// `lines`, over a table the caller names — the rendering `lawsWith`'s format law holds.
+    let private linesOf (vs: Vector list) (actors: (string * Actor * string) list) : string list =
+        [ for v in vs -> v.Name + "\t" + v.Escaped + "\t" + Actor.encode (Human v.Input)
+          for name, actor, encoded in actors ->
+              name + "\t" + encoded + "\t" + OpStream.canonicalConfig.Payload 0 actor "{}" ]
+
     /// The table as lines a host in another language, or the same package under another
     /// pipeline, can diff: `name<TAB>escaped<TAB>Actor.encode (Human input)` per character vector,
     /// then `name<TAB>encoded<TAB>chain payload` per named actor. Deterministic; no seed.
-    let lines () : string list =
-        [ for v in vectors -> v.Name + "\t" + v.Escaped + "\t" + Actor.encode (Human v.Input)
-          for name, actor, encoded in actorVectors ->
-              name + "\t" + encoded + "\t" + OpStream.canonicalConfig.Payload 0 actor "{}" ]
+    let lines () : string list = linesOf vectors actorVectors
 
-    /// The family as `LawResult`s (Phase 349), rostered as `StringEscapeVectors.laws` on the
-    /// `WireNullTolerance.laws` precedent: one law per character vector and per named actor, green
-    /// exactly when every check `runVector` / `runActor` makes for it passes, and one law on the
+    /// The family as `LawResult`s over a table the caller hands it (Phase 390; `laws ()` is this over
+    /// the committed `vectors` and `actorVectors`): one law per character vector and per named actor,
+    /// green exactly when every check `runVector` / `runActor` makes for it passes; one law on the
     /// FORMAT `lines` renders — each character vector as `name<TAB>escaped<TAB>{"kind":"human",
     /// "id":"escaped"}` and each named actor as `name<TAB>encoding<TAB>` its chain pre-image, in table
-    /// order, no field carrying a tab or a line break. The format law is stated from the TABLE, not
-    /// by calling the escapers, so a renderer that drifted from the table is caught even where the
-    /// escapers still agree with it. The corpus is fixed, so the one run is the whole sample; the
-    /// committed rendering a host in another language diffs against is
-    /// `conformance/escape/string-escape.json`.
-    let laws () : LawResult list =
-        let verdict (name: string) (outcomes: Corpus.Outcome list) : LawResult =
-            let law = LawKit.LawCell("string escape: " + name)
-
-            match outcomes |> List.tryFind (fun o -> not o.Passed) with
-            | Some o -> law.Check(false, (fun () -> o.Name + ": " + o.Detail))
-            | None -> law.Saw()
-
-            law.Result
+    /// order, no field carrying a tab or a line break; and the corpus law, whose evidence is one
+    /// assertion per vector evaluated, so a run handed no vectors is red by name (`string escape: the
+    /// corpus evaluated at least one vector`). The format law is stated from the TABLE, not by calling
+    /// the escapers, so a renderer that drifted from the table is caught even where the escapers still
+    /// agree with it.
+    let lawsWith (vs: Vector list) (actors: (string * Actor * string) list) : LawResult list =
+        let corpus = corpusCell "string escape"
 
         let expected =
-            [ for v in vectors ->
+            [ for v in vs ->
                   v.Name
                   + "\t"
                   + v.Escaped
@@ -221,9 +217,9 @@ module StringEscapeVectors =
                   + "{\"kind\":\"human\",\"id\":"
                   + quoted v.Escaped
                   + "}"
-              for name, _, encoded in actorVectors -> name + "\t" + encoded + "\t" + payload encoded ]
+              for name, _, encoded in actors -> name + "\t" + encoded + "\t" + payload encoded ]
 
-        let rendered = lines ()
+        let rendered = linesOf vs actors
 
         let format =
             LawKit.LawCell
@@ -247,6 +243,16 @@ module StringEscapeVectors =
                         expected.Length
         )
 
-        (vectors |> List.map (fun v -> verdict v.Name (runVector v)))
-        @ (actorVectors |> List.map (fun ((name, _, _) as a) -> verdict name (runActor a)))
-        @ [ format.Result ]
+        let perVector =
+            (vs
+             |> List.map (fun v -> verdict corpus ("string escape: " + v.Name) (runVector v)))
+            @ (actors
+               |> List.map (fun ((name, _, _) as a) -> verdict corpus ("string escape: " + name) (runActor a)))
+
+        perVector @ [ format.Result; corpus.Result ]
+
+    /// The family as `LawResult`s (Phase 349), rostered as `StringEscapeVectors.laws` on the
+    /// `WireNullTolerance.laws` precedent — `lawsWith vectors actorVectors`. The corpus is fixed, so
+    /// the one run is the whole sample; the committed rendering a host in another language diffs
+    /// against is `conformance/escape/string-escape.json`.
+    let laws () : LawResult list = lawsWith vectors actorVectors

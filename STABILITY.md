@@ -2801,6 +2801,112 @@ each says why at its head: F# compiles one module from one file, and both module
 nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
 consumer of these packages sees no change from any of this.
 
+### One entry story for the conformance kit: every family answers `LawResult list` and is rostered, a vector family handed nothing is red by name, and every witness-taking family takes `…At` (Phase 390, DECISIONS.md D127) — `additive`; BREAKING (behavioural): an empty store reds the stored families; eighteen bare names `[<Obsolete>]` until `1.0.0`; the wire `none`
+
+**The class, from the gate.** `Fuaran.Core.Conformance` prints twenty-three **`additive`** moves and
+nothing else: eighteen `…At` spellings — `Conformance.keyedChildrenLawsAt`, `referenceLawsAt`,
+`propagationEvaluatorLawsAt`, `projectionLawsAt`, `observerLawsAt`, `sanitizeLawsAt`,
+`attestationLawsAt`, `compositionLawsAt`, `compositionPilotAt`, `memoLawsAt`, `memoSoundnessLawsAt`,
+`functionVerifyLawsAt`, `verifyHonestyLawsAt`, `encoderInjectivityLawsAt`, `keyedApplyLawsAt`,
+`keyedArbitrationLawsAt`, `aiSurfaceKitPolicyLawsAt` and `FoldConfluence.laneFoldLawsAt` — and
+`WireNullTolerance.lawsWith`, `StringEscapeVectors.lawsWith`, `EncodingProfileVectors.lawsWith`,
+`ParityVectors.laws` and `ParityVectors.lawsWith`. Marking a member `[<Obsolete>]` moves no signature, so
+the forwards below are not a surface move. No wire byte, `api/wire/` baseline, `ParityVectors` row,
+committed vector file (`conformance/escape/*`, `conformance/encoding/*`) or `lines ()` output moves: the
+hosts that diff the vector families read exactly what they read before.
+
+**The `…At` rule covers every witness-taking family (two rulings, D127).** A family that
+takes a witness capability the base contract does not is spelled `…At`; its configured form is `…With`,
+the `…At` family with one more parameter last before the seed, never `…AtWith` — which is what
+`propagationEvaluatorLawsWith`, `keyedArbitrationLawsWith` and `laneFoldLawsWith` already were, so no
+`…With` moves. The eighteen bare spellings it replaced (`keyedChildrenLaws`, `referenceLaws`,
+`propagationEvaluatorLaws`, `projectionLaws`, `observerLaws`, `sanitizeLaws`, `attestationLaws`,
+`compositionLaws`, `compositionPilot`, `memoLaws`, `memoSoundnessLaws`, `functionVerifyLaws`,
+`verifyHonestyLaws`, `encoderInjectivityLaws`, `keyedApplyLaws`, `keyedArbitrationLaws`,
+`aiSurfaceLawsUnderKitPolicy`, `FoldConfluence.laneFoldLaws`) are `[<Obsolete>]` forwards — same
+parameters, same order — **removed on the `1.0.0` slot by Phase 386's `OneDotZero` sweep**. Each stays a
+roster row under its own id and its own guard label, so a census or a pin that names it does not move
+today. The ladder rows `propagation-change-set-and-prior` and `witness-surface-scope` are discharged by
+the `…At` ids now, and the operation roster and the coverage exclusions name the `…At` ids, so the sweep
+moves no discharge. The sweep also re-stamps the `README.md` sentences that still name a bare spelling
+with its arrival version. A roster test holds the rule: a live witness-taking family spelled outside it
+is red by name.
+
+**Every family is rostered, and an empty sample is red by name.** `ParityVectors.laws ()` is a law
+family now (printable ASCII, one space-free label per row, every sanitiser row `ok`, the `VEC`
+rendering), so `Families.families` enumerates every family the kit ships. Each fixed-corpus vector
+family (`WireNullTolerance`, `StringEscapeVectors`, `EncodingProfileVectors`, `ParityVectors`) gains
+`lawsWith` over a vector set the caller hands it — `laws ()` is `lawsWith` over the committed corpus — and
+one law more, `<family>: the corpus evaluated at least one vector`, counted per vector evaluated. The
+stored families (`StoredIdentity.linearLaws` / `dagLaws` / `captureLaws`,
+`EncodingProfileVectors.storedCodecLaws`) gain `the store holds at least one <record | node | capture |
+text>`. **Behavioural, and deliberately so:** every one of these families answers one more `LawResult`
+than it did, and a stored family run over an EMPTY store, which was green, is red — a store that holds
+nothing certifies nothing. A consumer that certifies a store it knows to be empty drops that run rather
+than reading its green.
+
+**Two tautological cells are evidence.** `PlacementTreeLaws`' refused-graft arm and `KeyedApplyLaws`'
+keyed-preservation arm recorded `Check(true, …)`; both are `Saw()` now, which the census already counted
+the same way, and the suite keeps a literal-true check out of the kit's sources.
+
+**The one entry shape** is `docs/ADOPTION.md` §2d: law families and vector families are run the same
+way, by concatenating their `LawResult list`s, with `Conformance.certify` as the base run.
+
+### A query declares what it filters and how it orders; a resolver that cannot honour either refuses by name (Phase 398, DECISIONS.md D128) — BREAKING-SOURCE: `Query` gains `Where` and `OrderBy` (`record-widening`), `QueryError` and `ResolveFault` gain cases (`union-widening`); the rest `additive`; the wire `additive`
+
+**The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Query`
+**`record-widening`** — the record fields `Query.Where` and `Query.OrderBy`, which retype the record's
+primary constructor, so every full-literal construction of a `Query` stops compiling (`FS0764`) — and
+**`union-widening`** — `QueryError` gains `UnknownColumn`, `PredicateTypeMismatch`,
+`PredicateNotApplicable`, `IllFormedLiteral`, `DuplicateSortColumn`, `PredicateNotHonoured` and
+`OrderNotHonoured`, and `ResolveFault` gains `PredicateUnsupported` and `OrderUnsupported`, so every
+exhaustive `match` over either is incomplete. The new types `ColumnPredicate`, `SortDirection` and
+`SortKey` are `additive`. No other package's managed baseline moves. The wire baseline
+`api/wire/Fuaran.Core.Query.txt` is `additive`: the `where` and `orderBy` members of a declaration,
+their predicate and order-key documents, and seven query-error documents are new, and no existing
+document's bytes move. The phase was filed `additive`; the gate's class is the honest one, and the
+widening rides this draft as the earlier record-widenings on it did.
+
+**What moved, for a consumer.**
+
+- **Two members on the declaration.** `Where: ColumnPredicate list` is a conjunction: `EqualTo`,
+  `GreaterThan`, `AtLeast`, `LessThan`, `AtMost` (a column and a literal), `Contains` (a string column
+  and a text) and `IsNull` / `IsNotNull` (a column). `OrderBy: SortKey list` is a column and a
+  `SortDirection` each, most significant first. A comparison orders by `Cell.compare`; `Contains` is
+  ordinal and case-sensitive; a `Null` cell satisfies only `IsNull`, and sorts first ascending.
+  **Cost:** a full-literal `Query` adds `Where = []; OrderBy = []`. A copy-and-update
+  (`{ q with … }`) is unaffected.
+- **The wire.** A non-empty `Where` is `"where"`, an array of predicate documents (`"$type"` the
+  predicate; a comparison carries its literal's `type` and `value`, `contains` its `text`); a non-empty
+  `OrderBy` is `"orderBy"`, an array of `{"column", "direction"}` with `ascending` / `descending`. Both
+  are omitted when empty, so every stored declaration encodes byte for byte as before; a test pins one
+  declaration's bytes. The strict read policy refuses an undeclared member of a predicate or a key.
+- **One admission gate, at registration and at the reader.** `register`, `replace` and
+  `QueryCodec`'s declaration reader refuse a predicate or a key naming an undeclared column
+  (`UnknownColumn`), `Contains` on a column that is not a string (`PredicateNotApplicable`), a literal
+  of another type than its column's (`PredicateTypeMismatch` — no widening in a filter) or one its
+  column cannot carry, a `Null` among them (`IllFormedLiteral`), and an order naming a column twice
+  (`DuplicateSortColumn`). The reader reports the refusal at `where[i]` / `orderBy[i]` with the
+  registry's sentence. Parameters are checked first, then the filter, then the order.
+- **The resolver.** It reads both from the `Query` it is handed. A typed resolver that cannot apply
+  one answers `ResolveFault.PredicateUnsupported` / `OrderUnsupported`, which reach the caller as
+  `PredicateNotHonoured` / `OrderNotHonoured`, are journalled as their wire documents and replay as
+  themselves.
+- **The capture key.** `Query.invocationKey` and `invocationKeyPage` add the filter's and the order's
+  canonical text to the pre-image, each behind an empty name and its own tag (`w`, `o`). A declaration
+  with neither keys exactly as before, so every journal written before this draft still replays.
+  `proofs/Query.fst` models both members and the key over them: theorem four reads the id and the
+  shape, `invocation_key_unshaped` proves the unshaped key unchanged, and the injectivity theorems
+  cover the shape and the page token (D128). The oracle is re-extracted and draws shaped
+  declarations. The `Query` proof module's budget moves from 40s to 110s (`proofs/modules.json`).
+- **The law.** `queryLaws` gains its thirteenth law (the declared filter and order: reaches the
+  resolver, keys apart, round-trips, one gate, a refusal by name, live and on replay), counted once per
+  iteration and drawn after every earlier draw, so the twelve laws before it keep their samples.
+
+**What did not move.** `Fuaran.Core.Column` and `Fuaran.Core.AiSurface`: the census
+(`docs/demand-census.md`) records which intents they express and which are host-side by design, and
+`docs/ADOPTION.md` restates it for an adopter.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

@@ -627,7 +627,7 @@ let tests =
 
                 testCase "the reference family is green at the reference witness"
                 <| fun _ ->
-                    let results = Conformance.referenceLaws refw nodew idw refGen 313 200
+                    let results = Conformance.referenceLawsAt refw nodew idw refGen 313 200
 
                     for r in results do
                         Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
@@ -638,7 +638,7 @@ let tests =
                         { RefsOf = fun _ -> []
                           DeclsOf = fun n -> [ n.Id ] }
 
-                    let results = Conformance.referenceLaws none nodew idw refGen 313 50
+                    let results = Conformance.referenceLawsAt none nodew idw refGen 313 50
                     Expect.isFalse (results |> List.forall (fun r -> r.Passed)) "the reference-arm guard reds" ]
 
           testList

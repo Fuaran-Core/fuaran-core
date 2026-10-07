@@ -3,7 +3,7 @@ module Fuaran.Core.Tests.KeyedArbitrationTests
 // Phase 247 — off-walk identity in the footprint and arbitration. `Ops.footprintKeyed` reads an
 // inserted subtree's ids over the keyed walk, so two scripts that each bring in one keyed id are
 // dependent; `Arbitration.arbitrateWith` takes the domain's footprint and applicability, and
-// `arbitrateContained` is its container-aware common case; `Conformance.keyedArbitrationLaws`
+// `arbitrateContained` is its container-aware common case; `Conformance.keyedArbitrationLawsAt`
 // builds the container-illegal proposal and the keyed-id clash the plain family never draws.
 //
 // The domain is `ConformanceTests`' keyed reference: `KNode` holds a case table (`Cases`) beside
@@ -283,11 +283,11 @@ let tests =
                     Expect.isOk (landKeyed keyed.MergedScript t) "and the admitted half lands under the keyed engine" ]
 
           testList
-              "Conformance.keyedArbitrationLaws"
+              "Conformance.keyedArbitrationLawsAt"
               [ testCase "the keyed reference passes, with both built arms reached"
                 <| fun _ ->
                     let results =
-                        Conformance.keyedArbitrationLaws keyw knodew idw containedKGen encK 2470 200
+                        Conformance.keyedArbitrationLawsAt keyw knodew idw containedKGen encK 2470 200
 
                     match failed results with
                     | [] -> ()
@@ -346,7 +346,7 @@ let tests =
                           IdsUnique = fun t -> Tree.isWellFormed nodew idw t }
 
                     let results =
-                        Conformance.keyedArbitrationLaws declaresNone nodew idw opGen encNode 2473 200
+                        Conformance.keyedArbitrationLawsAt declaresNone nodew idw opGen encNode 2473 200
 
                     Expect.isEmpty (failed results) "green"
 

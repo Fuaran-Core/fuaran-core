@@ -70,10 +70,17 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check out the wire-format conformance corpus
+      # At the pin the TAGGED commit's copies.json names (Phase 394), as ci.yml does — so a tag
+      # certifies against exactly the corpus its own commit chose, whatever the corpus holds today.
+      - name: Read the corpus pin (copies.json `corpus`)
+        id: corpus-pin
+        shell: pwsh
+        run: ./.github/scripts/corpus-pin.ps1
+      - name: Check out the wire-format conformance corpus at the pin
         uses: actions/checkout@v4
         with:
-          repository: fuaran-ui/fuaran-ui-specification
+          repository: ${{ steps.corpus-pin.outputs.repository }}
+          ref: ${{ steps.corpus-pin.outputs.sha }}
           path: wire-format-fixtures
       - uses: actions/setup-dotnet@v4
         with:
@@ -110,11 +117,17 @@ jobs:
         with:
           global-json-file: global.json
       # The wire-format conformance corpus is a build input of the gate's corpus leg, which is
-      # asked for by name exactly as ci.yml asks for it (an absent corpus fails, never skips).
-      - name: Check out the wire-format conformance corpus
+      # asked for by name exactly as ci.yml asks for it (an absent corpus fails, never skips), and
+      # checked out at the tagged commit's pin (Phase 394).
+      - name: Read the corpus pin (copies.json `corpus`)
+        id: corpus-pin
+        shell: pwsh
+        run: ./.github/scripts/corpus-pin.ps1
+      - name: Check out the wire-format conformance corpus at the pin
         uses: actions/checkout@v4
         with:
-          repository: fuaran-ui/fuaran-ui-specification
+          repository: ${{ steps.corpus-pin.outputs.repository }}
+          ref: ${{ steps.corpus-pin.outputs.sha }}
           path: wire-format-fixtures
       - name: Verify the Release build (./verify.ps1 -Configuration Release)
         shell: pwsh

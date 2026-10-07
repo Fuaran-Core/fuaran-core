@@ -161,8 +161,9 @@ module internal PlacementTreeLaws =
                 match TreePlacement.placeContained canHold nodew idw pid anchor node tree with
                 | Error(PlaceError.Refused r) when Ops.canApplyContained canHold nodew idw insert tree = Error r ->
                     // the generator's fresh node is one this witness refuses to graft — the engine's
-                    // verdict, carried unchanged, and nothing to land
-                    asEngine.Check(true, fun () -> "")
+                    // verdict, carried unchanged, and nothing to land. The match guard IS the assertion,
+                    // so the cell records evidence (`Saw`) rather than a check that cannot fail.
+                    asEngine.Saw()
                 | Error e ->
                     lands.Check(
                         false,

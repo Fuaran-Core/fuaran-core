@@ -3155,7 +3155,7 @@ let private modelVerify (sink: IAttestationSink) (att: Chain.attestation) (head:
 
 /// A full re-mint under production's own canonical payload and genesis: every record's sequence,
 /// prev-link and hash recomputed from the steps, so `verifyChain` accepts whatever it is handed.
-/// The shape of `Conformance.attestationLaws`'s forgery, spelled here over a step list because a
+/// The shape of `Conformance.attestationLawsAt`'s forgery, spelled here over a step list because a
 /// splice changes the chain's LENGTH, which a record-for-record rehash cannot.
 let private remint (hashFn: HashFn) (encode: 'Op -> string) (steps: (Actor * 'Op) list) : OpRecord<'Op> list =
     (([], OpStream.canonicalConfig.Genesis, 0), steps)
@@ -10028,6 +10028,26 @@ let private qDetToModel (d: DeterminismSource) : ModelQuery.determinism_source =
       ModelQuery.determinism_source.has_network = Set.contains NetworkFactor d }
 
 
+/// A filter predicate as the model reads it (Phase 398).
+let private qPredToModel (p: ColumnPredicate) : ModelQuery.predicate =
+    match p with
+    | ColumnPredicate.EqualTo(c, v) -> ModelQuery.EqualTo(c, qCellToModel v)
+    | ColumnPredicate.GreaterThan(c, v) -> ModelQuery.GreaterThan(c, qCellToModel v)
+    | ColumnPredicate.AtLeast(c, v) -> ModelQuery.AtLeast(c, qCellToModel v)
+    | ColumnPredicate.LessThan(c, v) -> ModelQuery.LessThan(c, qCellToModel v)
+    | ColumnPredicate.AtMost(c, v) -> ModelQuery.AtMost(c, qCellToModel v)
+    | ColumnPredicate.Contains(c, t) -> ModelQuery.Contains(c, t)
+    | ColumnPredicate.IsNull c -> ModelQuery.IsNull c
+    | ColumnPredicate.IsNotNull c -> ModelQuery.IsNotNull c
+
+/// An order key as the model reads it (Phase 398).
+let private qKeyToModel (k: SortKey) : ModelQuery.sort_key =
+    { ModelQuery.sort_key.k_column = k.Column
+      ModelQuery.sort_key.k_direction =
+        match k.Direction with
+        | SortDirection.Ascending -> ModelQuery.Ascending
+        | SortDirection.Descending -> ModelQuery.Descending }
+
 /// A declaration as the model reads it. `keepRequired = false` is the FORGETFUL bridge the
 /// go-red uses: every param crosses as optional, so the model stops seeing step 2.
 let private queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
@@ -10044,12 +10064,71 @@ let private queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query 
           ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
       ModelQuery.query.q_source = sprintf "%A" q.Source
       ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: int) -> bigint n) q.TimeoutMs)
-      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: int) -> bigint n) q.PageSize) }
+      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: int) -> bigint n) q.PageSize)
+      ModelQuery.query.q_where = q.Where |> List.map qPredToModel
+      ModelQuery.query.q_order_by = q.OrderBy |> List.map qKeyToModel }
 
 let private queryToModel (q: Query) : ModelQuery.query = queryToModelWith true q
 
-/// Production's own five calls. `compare` on two F# strings is ordinal, which is what
-/// `List.sortBy fst` sorts a name by; `field` is the Phase 225 canonicaliser both seams share.
+// ---- Phase 398: the shape renderers are production's own codec ----
+
+/// A model cell back as production's: the inverse of `qCellToModel` (a float's carrier is its
+/// round-trip text).
+let private qCellOfModel (c: ModelQuery.cell) : Cell =
+    match c with
+    | ModelQuery.Int v -> Cell.Int(int v)
+    | ModelQuery.Float v -> Cell.Float(System.Double.Parse(v, System.Globalization.CultureInfo.InvariantCulture))
+    | ModelQuery.Bool v -> Cell.Bool v
+    | ModelQuery.Str v -> Cell.Str v
+    | ModelQuery.Date v -> Cell.Date v
+    | ModelQuery.Timestamp v -> Cell.Timestamp v
+    | ModelQuery.Decimal v -> Cell.Decimal v
+    | ModelQuery.Null -> Cell.Null
+
+let private qPredOfModel (p: ModelQuery.predicate) : ColumnPredicate =
+    match p with
+    | ModelQuery.EqualTo(c, v) -> ColumnPredicate.EqualTo(c, qCellOfModel v)
+    | ModelQuery.GreaterThan(c, v) -> ColumnPredicate.GreaterThan(c, qCellOfModel v)
+    | ModelQuery.AtLeast(c, v) -> ColumnPredicate.AtLeast(c, qCellOfModel v)
+    | ModelQuery.LessThan(c, v) -> ColumnPredicate.LessThan(c, qCellOfModel v)
+    | ModelQuery.AtMost(c, v) -> ColumnPredicate.AtMost(c, qCellOfModel v)
+    | ModelQuery.Contains(c, t) -> ColumnPredicate.Contains(c, t)
+    | ModelQuery.IsNull c -> ColumnPredicate.IsNull c
+    | ModelQuery.IsNotNull c -> ColumnPredicate.IsNotNull c
+
+let private qKeyOfModel (k: ModelQuery.sort_key) : SortKey =
+    { Column = k.k_column
+      Direction =
+        match k.k_direction with
+        | ModelQuery.Ascending -> SortDirection.Ascending
+        | ModelQuery.Descending -> SortDirection.Descending }
+
+/// The declaration a shape renderer encodes: everything but the member it reads is fixed.
+let private shapeCarrier: Query =
+    { Id = "shape"
+      Params = []
+      ResultSchema = []
+      Effect = Effect.pureDeterministic
+      Source = Ref "shape"
+      TimeoutMs = None
+      PageSize = None
+      Where = []
+      OrderBy = [] }
+
+/// The canonical text production's codec writes for one member of a declaration — the member the
+/// capture key's shape fields carry (`QueryShape.keyFields` renders the same array through the same
+/// `Canon.render`). Read off the PUBLIC codec, so the renderer is production's own call, not a copy.
+let private memberText (name: string) (q: Query) : string =
+    match Json.parse (QueryCodec.encode q) with
+    | Ok(JObj ms) ->
+        match ms |> List.tryFind (fun (k, _) -> k = name) with
+        | Some(_, v) -> Canon.render v
+        | None -> ""
+    | _ -> ""
+
+/// Production's own seven calls. `compare` on two F# strings is ordinal, which is what
+/// `List.sortBy fst` sorts a name by; `field` is the Phase 225 canonicaliser both seams share; the
+/// shape renderers (Phase 398) are the declaration codec's `where` and `orderBy` members.
 let private queryRenderers: ModelQuery.renderers =
     { ModelQuery.renderers.render_int = fun (n: bigint) -> string (int n)
       ModelQuery.renderers.render_float =
@@ -10057,7 +10136,19 @@ let private queryRenderers: ModelQuery.renderers =
             Canon.canonicalFloat (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
       ModelQuery.renderers.hash = Hash.fnv1a
       ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
-      ModelQuery.renderers.field = Hash.canonicalField }
+      ModelQuery.renderers.field = Hash.canonicalField
+      ModelQuery.renderers.render_where =
+        fun (w: ModelQuery.predicate list) ->
+            memberText
+                "where"
+                { shapeCarrier with
+                    Where = w |> List.map qPredOfModel }
+      ModelQuery.renderers.render_order =
+        fun (o: ModelQuery.sort_key list) ->
+            memberText
+                "orderBy"
+                { shapeCarrier with
+                    OrderBy = o |> List.map qKeyOfModel } }
 
 /// The ORDER-BLIND comparator the second go-red uses: everything is below everything, so the
 /// model's insertion sort leaves the caller's order standing.
@@ -10156,6 +10247,16 @@ let private prodQueryErrRender (e: QueryError) : string =
     | QueryApprovalRequired p -> sprintf "ApprovalRequired(%s)" p
     // Phase 385 — the argument reader's refusal; no dispatch raises it, rendered to stay total.
     | UnreadableArgs e -> sprintf "UnreadableArgs(%s)" e.Message
+    // Phase 398 — the shape refusals (registration and the reader) and the resolver's two; the model has
+    // no Where / OrderBy and no dispatch here raises them, rendered to stay total.
+    | UnknownColumn(name, declared) -> sprintf "UnknownColumn(%s;%s)" name (String.concat "," declared)
+    | PredicateTypeMismatch(c, expected, got) ->
+        sprintf "PredicateTypeMismatch(%s;%s;%s)" c (qColTag expected) (qColTag got)
+    | PredicateNotApplicable(p, c, t) -> sprintf "PredicateNotApplicable(%s;%s;%s)" p c (qColTag t)
+    | IllFormedLiteral(c, r) -> sprintf "IllFormedLiteral(%s;%s)" c r
+    | DuplicateSortColumn c -> sprintf "DuplicateSortColumn(%s)" c
+    | PredicateNotHonoured p -> sprintf "PredicateNotHonoured(%A)" p
+    | OrderNotHonoured c -> sprintf "OrderNotHonoured(%s)" c
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -10171,6 +10272,13 @@ let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     | ModelQuery.Timeout -> "Timeout"
     | ModelQuery.RequiredParamsNull names -> sprintf "RequiredParamsNull(%s)" (String.concat "," names)
     | ModelQuery.DuplicateParam name -> sprintf "DuplicateParam(%s)" name
+    // Phase 398 — the admission's refusals of a filter or an order, rendered as production's are.
+    | ModelQuery.UnknownColumn(name, declared) -> sprintf "UnknownColumn(%s;%s)" name (String.concat "," declared)
+    | ModelQuery.PredicateTypeMismatch(c, expected, got) ->
+        sprintf "PredicateTypeMismatch(%s;%s;%s)" c (qModelColTag expected) (qModelColTag got)
+    | ModelQuery.PredicateNotApplicable(p, c, t) -> sprintf "PredicateNotApplicable(%s;%s;%s)" p c (qModelColTag t)
+    | ModelQuery.IllFormedLiteral(c, r) -> sprintf "IllFormedLiteral(%s;%s)" c r
+    | ModelQuery.DuplicateSortColumn c -> sprintf "DuplicateSortColumn(%s)" c
 
 let private queryErrClass (e: QueryError) : string =
     match e with
@@ -10187,6 +10295,13 @@ let private queryErrClass (e: QueryError) : string =
     | QueryPolicyRefused _ -> "PolicyRefused"
     | QueryApprovalRequired _ -> "ApprovalRequired"
     | UnreadableArgs _ -> "UnreadableArgs"
+    | UnknownColumn _ -> "UnknownColumn"
+    | PredicateTypeMismatch _ -> "PredicateTypeMismatch"
+    | PredicateNotApplicable _ -> "PredicateNotApplicable"
+    | IllFormedLiteral _ -> "IllFormedLiteral"
+    | DuplicateSortColumn _ -> "DuplicateSortColumn"
+    | PredicateNotHonoured _ -> "PredicateNotHonoured"
+    | OrderNotHonoured _ -> "OrderNotHonoured"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with
@@ -10216,7 +10331,12 @@ type private QueryTally =
       QKeysWithNull: int
       QKeysPermuted: int
       QRepeatedParamDecls: int
-      QClasses: Set<string> }
+      QClasses: Set<string>
+      // Phase 398 — shaped declarations registered, shape refusals compared, keys over a shape.
+      QShapedRegistered: int
+      QShapeRefused: int
+      QShapedKeys: int
+      QRegisterClasses: Set<string> }
 
 let private queryIdPool = [ "q-a"; "q-b"; "q-c" ]
 let private queryParamNamePool = [ "p0"; "p1"; "p2"; "when" ]
@@ -10284,13 +10404,103 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
     let page, r6 = ConfRng.intBelow 3 r5
     rng <- r6
 
+    // Phase 398 — the declared filter and order, drawn AFTER every earlier draw. One declaration in
+    // two carries a shape over a drawn two-column schema: each predicate a drawn kind on a drawn
+    // column — one in eight an undeclared one — with, for a comparison, a literal of the column's
+    // own type, or one time in eight a `Null` and one in eight a literal of ANOTHER type; each order
+    // key a drawn column (the undeclared one possible, a repeat possible) and direction. Every
+    // literal is one the column layer carries (the pools are finite and canonical), because the
+    // model does not restate `Table.validate`'s clause (row `query-register-refuses-shape`).
+    let shaped, r7 = ConfRng.intBelow 2 rng
+    rng <- r7
+
+    let schema, where, order =
+        if shaped = 0 then
+            [ "n", IntType ], [], []
+        else
+            let g = ref rng
+            let t1, r8 = ConfRng.choose queryTypePool g.Value
+            let t2, r9 = ConfRng.choose queryTypePool r8
+            g.Value <- r9
+            let schema = [ "c1", t1; "c2", t2 ]
+
+            let column () =
+                let k, r = ConfRng.intBelow 8 g.Value
+                g.Value <- r
+
+                if k = 0 then
+                    "zz", StringType
+                else
+                    let c, r' = ConfRng.choose schema g.Value
+                    g.Value <- r'
+                    c
+
+            let literal (ty: ColumnType) =
+                let k, r = ConfRng.intBelow 8 g.Value
+                g.Value <- r
+
+                if k = 0 then
+                    Cell.Null
+                elif k = 1 then
+                    let other, r' =
+                        ConfRng.choose (queryTypePool |> List.filter (fun t -> t <> ty)) g.Value
+
+                    let c, r'' = genCellOf other r'
+                    g.Value <- r''
+                    c
+                else
+                    let c, r' = genCellOf ty g.Value
+                    g.Value <- r'
+                    c
+
+            let nWhere, r10 = ConfRng.intBelow 3 g.Value
+            g.Value <- r10
+
+            let where =
+                [ for _ in 1..nWhere do
+                      let c, ty = column ()
+                      let kind, r = ConfRng.intBelow 8 g.Value
+                      g.Value <- r
+
+                      match kind with
+                      | 0 -> ColumnPredicate.EqualTo(c, literal ty)
+                      | 1 -> ColumnPredicate.GreaterThan(c, literal ty)
+                      | 2 -> ColumnPredicate.AtLeast(c, literal ty)
+                      | 3 -> ColumnPredicate.LessThan(c, literal ty)
+                      | 4 -> ColumnPredicate.AtMost(c, literal ty)
+                      | 5 ->
+                          let text, r' = ConfRng.choose [ ""; "x"; "\u0001"; "w" ] g.Value
+                          g.Value <- r'
+                          ColumnPredicate.Contains(c, text)
+                      | 6 -> ColumnPredicate.IsNull c
+                      | _ -> ColumnPredicate.IsNotNull c ]
+
+            let nOrder, r11 = ConfRng.intBelow 3 g.Value
+            g.Value <- r11
+
+            let order =
+                [ for _ in 1..nOrder do
+                      let c, _ = column ()
+
+                      let d, r =
+                          ConfRng.choose [ SortDirection.Ascending; SortDirection.Descending ] g.Value
+
+                      g.Value <- r
+                      { Column = c; Direction = d } ]
+
+            rng <- g.Value
+
+            schema, where, order
+
     { Id = id
       Params = List.ofSeq ps
-      ResultSchema = [ "n", IntType ]
+      ResultSchema = schema
       Effect = { Host = ReadsHost; Determinism = det }
       Source = Ref("src-" + id)
       TimeoutMs = (if page = 0 then None else Some(1000 * page))
-      PageSize = (if page = 2 then Some 50 else None) },
+      PageSize = (if page = 2 then Some 50 else None)
+      Where = where
+      OrderBy = order },
     rng
 
 /// An argument set against a declaration: per param, three draws in four a binding — one in six
@@ -10372,6 +10582,9 @@ let private queryProbe
     let mutable registered = 0
     let mutable dupRefused = 0
     let mutable repeatedDecls = 0
+    let mutable shapedRegistered = 0
+    let mutable shapeRefused = 0
+    let mutable registerClasses = acc.QRegisterClasses
 
     for _ in 1..n do
         let id, r2 = ConfRng.choose queryIdPool rng
@@ -10386,8 +10599,21 @@ let private queryProbe
             preg <- p'
             mreg <- m'
             registered <- registered + 1
+
+            if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
+                shapedRegistered <- shapedRegistered + 1
         | Error pe, ModelQuery.Error me ->
             dupRefused <- dupRefused + 1
+
+            match pe with
+            | UnknownColumn _
+            | PredicateTypeMismatch _
+            | PredicateNotApplicable _
+            | IllFormedLiteral _
+            | DuplicateSortColumn _ ->
+                shapeRefused <- shapeRefused + 1
+                registerClasses <- Set.add (queryErrClass pe) registerClasses
+            | _ -> ()
 
             if prodQueryErrRender pe <> modelQueryErrRender me then
                 diffs.Add(
@@ -10424,6 +10650,7 @@ let private queryProbe
     let mutable keys = 0
     let mutable keysWithNull = 0
     let mutable keysPermuted = 0
+    let mutable shapedKeys = 0
     let mutable classes = acc.QClasses
     let k, r4 = ConfRng.intBelow 4 rng
     rng <- r4
@@ -10569,6 +10796,9 @@ let private queryProbe
             let mKey = ModelQuery.invocation_key rn mq margs
             keys <- keys + 1
 
+            if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
+                shapedKeys <- shapedKeys + 1
+
             if args |> List.exists (fun (_, c) -> c = Cell.Null) then
                 keysWithNull <- keysWithNull + 1
 
@@ -10632,7 +10862,11 @@ let private queryProbe
       QKeysWithNull = acc.QKeysWithNull + keysWithNull
       QKeysPermuted = acc.QKeysPermuted + keysPermuted
       QRepeatedParamDecls = acc.QRepeatedParamDecls + repeatedDecls
-      QClasses = classes },
+      QClasses = classes
+      QShapedRegistered = acc.QShapedRegistered + shapedRegistered
+      QShapeRefused = acc.QShapeRefused + shapeRefused
+      QShapedKeys = acc.QShapedKeys + shapedKeys
+      QRegisterClasses = registerClasses },
     rng
 
 let private queryDifferential
@@ -10659,7 +10893,11 @@ let private queryDifferential
           QKeysWithNull = 0
           QKeysPermuted = 0
           QRepeatedParamDecls = 0
-          QClasses = Set.empty }
+          QClasses = Set.empty
+          QShapedRegistered = 0
+          QShapeRefused = 0
+          QShapedKeys = 0
+          QRegisterClasses = Set.empty }
 
     for i in 1..trials do
         let t, r' = queryProbe bridge rn i tally rng
@@ -17123,6 +17361,13 @@ let proofOracleTests =
                   // pending 45, noSuch 885, validated 171, refused 133, execFailed 43,
                   // refusedWithoutResolver 1018; keys 304 (36 over a Null binding, 72 held still
                   // under a reordering), each compared with its six page keys.
+                  // Phase 398 draws one declaration in two with a filter and an order over a drawn schema,
+                  // after every earlier draw; re-measured at the same 500: registered 394, refused at
+                  // registration 356 (138 of them a filter or order the schema does not admit, every one of
+                  // the five shape refusals reached), 96 shaped declarations registered; settled 70,
+                  // pending 27, noSuch 1006, validated 134, refused 101, execFailed 37,
+                  // refusedWithoutResolver 1107; keys 235 (37 over a Null binding, 58 held still, 60 over a
+                  // filter or an order). Every earlier floor still holds.
                   Expect.isGreaterThan
                       t.QRegistered
                       200
@@ -17187,6 +17432,35 @@ let proofOracleTests =
                           "the shipped key was held still under a reordering of distinct names (permuted=%d)"
                           t.QKeysPermuted)
 
+                  // Phase 398 — the declared filter and order were drawn, admitted, refused and keyed.
+                  Expect.isGreaterThan
+                      t.QShapedRegistered
+                      40
+                      (sprintf "filtered or ordered declarations were registered (shaped=%d)" t.QShapedRegistered)
+
+                  Expect.isGreaterThan
+                      t.QShapeRefused
+                      50
+                      (sprintf
+                          "filters and orders the schema does not admit were refused (shapeRefused=%d)"
+                          t.QShapeRefused)
+
+                  Expect.isGreaterThan
+                      t.QShapedKeys
+                      25
+                      (sprintf "capture keys over a filter or an order were compared (shapedKeys=%d)" t.QShapedKeys)
+
+                  for cls in
+                      [ "UnknownColumn"
+                        "PredicateTypeMismatch"
+                        "PredicateNotApplicable"
+                        "IllFormedLiteral"
+                        "DuplicateSortColumn" ] do
+                      Expect.isTrue
+                          (Set.contains cls t.QRegisterClasses)
+                          (sprintf "the sample reached a %s registration refusal (reached: %A)" cls t.QRegisterClasses)
+
+
                   for cls in
                       [ "NoSuchQuery"
                         "UnknownParam"
@@ -17226,6 +17500,62 @@ let proofOracleTests =
                   "and every disagreement is about the capture key — the comparator reaches nothing else"
 
           testCase
+              "the filter and order renderers are injective on the shipped codec — a drawn Where and OrderBy round-trip QueryCodec, and the model's key reads them"
+          <| fun _ ->
+              // `key_premises` assumes `render_where` / `render_order` injective; the differential
+              // instantiates them at the declaration codec's `where` / `orderBy` members, so the
+              // premise is measured here on the shipped codec: every ADMITTED drawn declaration
+              // reads back to itself (so its member texts determine its filter and order), two
+              // distinct drawn filters never render one text, and the model's key — with
+              // production's renderers — moves when the shape is dropped, and keys as the pre-398
+              // key (`invocation_key_unshaped`) once it is.
+              let mutable rng = ConfRng.ofSeed 3983
+              let texts = System.Collections.Generic.Dictionary<string, ColumnPredicate list>()
+              let mutable admitted = 0
+              let mutable shaped = 0
+
+              for i in 1..400 do
+                  let q, r = genQueryDecl ("q-" + string i) rng
+                  rng <- r
+
+                  match QueryRegistry.register q QueryRegistry.empty with
+                  | Error _ -> ()
+                  | Ok _ ->
+                      admitted <- admitted + 1
+
+                      Expect.equal
+                          (QueryCodec.decode (QueryCodec.encode q))
+                          (Ok q)
+                          "an admitted declaration round-trips"
+
+                      if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
+                          shaped <- shaped + 1
+                          let mq = queryToModel q
+                          let bare = queryToModel { q with Where = []; OrderBy = [] }
+                          let args = [ "p0", Cell.Int 1 ] |> qArgsToModel
+
+                          Expect.notEqual
+                              (ModelQuery.invocation_key queryRenderers mq args)
+                              (ModelQuery.invocation_key queryRenderers bare args)
+                              "the model's key reads the shape"
+
+                          Expect.equal
+                              (ModelQuery.invocation_key queryRenderers bare args)
+                              (Query.invocationKey { q with Where = []; OrderBy = [] } [ "p0", Cell.Int 1 ])
+                              "an unshaped declaration keys as production's"
+
+                      if not (List.isEmpty q.Where) then
+                          let text = queryRenderers.render_where (q.Where |> List.map qPredToModel)
+
+                          match texts.TryGetValue text with
+                          | true, seen -> Expect.equal seen q.Where (sprintf "one filter text, one filter: %s" text)
+                          | _ -> texts[text] <- q.Where
+
+              Expect.isGreaterThan admitted 100 (sprintf "declarations were admitted (admitted=%d)" admitted)
+              Expect.isGreaterThan shaped 40 (sprintf "of them filtered or ordered (shaped=%d)" shaped)
+              Expect.isGreaterThan texts.Count 20 (sprintf "distinct filters were rendered (filters=%d)" texts.Count)
+
+          testCase
               "no resolver runs on a refused dispatch — `unregistered_refused` and `validate_before_resolve`, on the shipped seam"
           <| fun _ ->
               // The two theorems' statements instantiated on production: an unregistered id and a
@@ -17243,7 +17573,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-t"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let reg =
                   match QueryRegistry.register q QueryRegistry.empty with
@@ -17345,7 +17677,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-f"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let mq = queryToModel q
 
@@ -17430,7 +17764,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-f"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let mq = queryToModel q
               let one = [ "a", Cell.Str "1b=s2" ]
@@ -17607,7 +17943,9 @@ let proofOracleTests =
                         Determinism = Effect.network }
                     Source = Ref "src-adv"
                     TimeoutMs = None
-                    PageSize = None }
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
 
               let mqa = queryToModel qa
               let mutable qCompared = 0

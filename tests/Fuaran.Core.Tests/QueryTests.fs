@@ -18,7 +18,9 @@ let private sampleQuery: Query =
           Determinism = Effect.network }
       Source = Ref "sales"
       TimeoutMs = Some 5000
-      PageSize = Some 100 }
+      PageSize = Some 100
+      Where = []
+      OrderBy = [] }
 
 let private sampleResult: QueryResult =
     { Rows =
@@ -600,3 +602,363 @@ let typedDispatchTests =
                   (replay legacy)
                   (Ok(Error(ExecutionFailed(sentence, []))))
                   "the recorded text, as it always was" ]
+
+// ---- Phase 398: the declared filter and order ----
+
+/// A declaration over one column of every type, filtered by one predicate of every kind and ordered
+/// by two keys.
+let private shaped: Query =
+    { sampleQuery with
+        Id = "shaped"
+        ResultSchema =
+            [ "region", StringType
+              "revenue", FloatType
+              "day", DateType
+              "amount", DecimalType
+              "n", IntType
+              "ok", BoolType
+              "at", TimestampType ]
+        Where =
+            [ ColumnPredicate.EqualTo("region", Str "UK")
+              ColumnPredicate.GreaterThan("revenue", Float 1.5)
+              ColumnPredicate.AtLeast("day", Date "2026-01-01")
+              ColumnPredicate.LessThan("amount", Decimal "12.5")
+              ColumnPredicate.AtMost("n", Int 10)
+              ColumnPredicate.Contains("region", "U")
+              ColumnPredicate.IsNull "ok"
+              ColumnPredicate.IsNotNull "at" ]
+        OrderBy =
+            [ { Column = "day"
+                Direction = SortDirection.Descending }
+              { Column = "region"
+                Direction = SortDirection.Ascending } ] }
+
+let private shapedArgs = [ "year", Int 2026 ]
+
+/// The registration refusal of `shaped` with its filter and order replaced.
+let private refusal (where: ColumnPredicate list) (order: SortKey list) =
+    QueryRegistry.register
+        { shaped with
+            Where = where
+            OrderBy = order }
+        QueryRegistry.empty
+
+/// The column a predicate names, read by the test rather than by the package.
+let private predicateColumn (p: ColumnPredicate) : string =
+    match p with
+    | ColumnPredicate.EqualTo(c, _)
+    | ColumnPredicate.GreaterThan(c, _)
+    | ColumnPredicate.AtLeast(c, _)
+    | ColumnPredicate.LessThan(c, _)
+    | ColumnPredicate.AtMost(c, _)
+    | ColumnPredicate.Contains(c, _)
+    | ColumnPredicate.IsNull c
+    | ColumnPredicate.IsNotNull c -> c
+
+[<Tests>]
+let whereOrderByTests =
+    testList
+        "Query Where / OrderBy (Phase 398)"
+        [ testCase "a declaration with neither member encodes the bytes it encoded before the members existed"
+          <| fun _ ->
+              // The encoder appends the two members only when non-empty, so with both empty its bytes
+              // are the encoder's before Phase 398; this pins them.
+              Expect.equal
+                  (QueryCodec.encode sampleQuery)
+                  "{\"$type\":\"query\",\"effect\":{\"determinism\":\"network\",\"host\":\"readsHost\"},\"id\":\"sales-by-region\",\"pageSize\":100,\"params\":[{\"name\":\"year\",\"required\":true,\"type\":\"int\"},{\"name\":\"region\",\"required\":false,\"type\":\"string\"}],\"resultSchema\":[{\"name\":\"region\",\"type\":\"string\"},{\"name\":\"revenue\",\"type\":\"float\"}],\"source\":{\"ref\":\"sales\",\"schema\":[]},\"timeoutMs\":5000}"
+                  "byte-identical"
+
+          testCase "every predicate kind and the order round-trip the codec, under both read policies"
+          <| fun _ ->
+              let text = QueryCodec.encode shaped
+              Expect.stringContains text "\"where\":[" "the filter is written"
+              Expect.stringContains text "\"orderBy\":[" "the order is written"
+
+              Expect.stringContains
+                  text
+                  "{\"$type\":\"atLeast\",\"column\":\"day\",\"type\":\"date\",\"value\":\"2026-01-01\"}"
+                  "a comparison carries its literal's type and value"
+
+              Expect.stringContains
+                  text
+                  "{\"$type\":\"lessThan\",\"column\":\"amount\",\"type\":\"decimal\",\"value\":\"12.5\"}"
+                  "a decimal literal is decimal text, as the column codec writes it"
+
+              Expect.stringContains text "{\"column\":\"day\",\"direction\":\"descending\"}" "an order key"
+              Expect.equal (QueryCodec.decode text) (Ok shaped) "lenient"
+              Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok shaped) "strict"
+
+          testCase "the registry refuses a filter or an order its result schema does not admit, by name"
+          <| fun _ ->
+              let declared = shaped.ResultSchema |> List.map fst
+              Expect.isOk (QueryRegistry.register shaped QueryRegistry.empty) "the well-formed shape registers"
+
+              Expect.equal
+                  (refusal [ ColumnPredicate.IsNull "nope" ] [])
+                  (Error(UnknownColumn("nope", declared)))
+                  "an undeclared predicate column"
+
+              Expect.equal
+                  (refusal
+                      []
+                      [ { Column = "nope"
+                          Direction = SortDirection.Ascending } ])
+                  (Error(UnknownColumn("nope", declared)))
+                  "an undeclared order column"
+
+              Expect.equal
+                  (refusal [ ColumnPredicate.EqualTo("revenue", Int 3) ] [])
+                  (Error(PredicateTypeMismatch("revenue", FloatType, IntType)))
+                  "a literal of another type: no widening in a filter"
+
+              Expect.equal
+                  (refusal [ ColumnPredicate.Contains("n", "1") ] [])
+                  (Error(PredicateNotApplicable("contains", "n", IntType)))
+                  "contains on a column that is not a string"
+
+              for bad, column in
+                  [ ColumnPredicate.EqualTo("region", Null), "region"
+                    ColumnPredicate.AtLeast("day", Date "2026-13-01"), "day"
+                    ColumnPredicate.LessThan("amount", Decimal "12.50"), "amount"
+                    ColumnPredicate.GreaterThan("revenue", Float nan), "revenue" ] do
+                  match refusal [ bad ] [] with
+                  | Error(IllFormedLiteral(c, reason)) ->
+                      Expect.equal c column "names the column"
+                      Expect.isNotEmpty reason "says why"
+                  | other -> failtestf "%A was not refused as an ill-formed literal: %A" bad other
+
+              Expect.equal
+                  (refusal
+                      []
+                      [ { Column = "day"
+                          Direction = SortDirection.Ascending }
+                        { Column = "day"
+                          Direction = SortDirection.Descending } ])
+                  (Error(DuplicateSortColumn "day"))
+                  "an order naming a column twice"
+
+              // `replace` runs the same gate.
+              let reg =
+                  QueryRegistry.register shaped QueryRegistry.empty
+                  |> Result.toOption
+                  |> Option.get
+
+              Expect.equal
+                  (QueryRegistry.replace
+                      { shaped with
+                          Where = [ ColumnPredicate.IsNull "nope" ] }
+                      reg)
+                  (Error(UnknownColumn("nope", declared)))
+                  "replace refuses it too"
+
+          testCase "the declaration reader refuses what the registry refuses, at the member at fault"
+          <| fun _ ->
+              let text = QueryCodec.encode shaped
+              let declared = shaped.ResultSchema |> List.map fst
+
+              let refusedAt (edited: string) =
+                  Expect.notEqual edited text "the probe edited the document"
+
+                  match QueryCodec.decodeDetailedWith ReadPolicy.Lenient edited with
+                  | Error e -> e
+                  | Ok q -> failtestf "an inadmissible declaration was read: %A" q
+
+              // A literal whose stated type is not the column's.
+              let retyped =
+                  refusedAt (
+                      text.Replace(
+                          "{\"$type\":\"atMost\",\"column\":\"n\",\"type\":\"int\",\"value\":10}",
+                          "{\"$type\":\"atMost\",\"column\":\"n\",\"type\":\"float\",\"value\":10.5}"
+                      )
+                  )
+
+              Expect.equal retyped.Path [ PathSegment.Key "where"; PathSegment.Index 4 ] "at the predicate"
+
+              Expect.equal
+                  retyped.Message
+                  (QueryError.describe (PredicateTypeMismatch("n", IntType, FloatType)))
+                  "with the registry's sentence"
+
+              // A predicate naming an undeclared column.
+              let stray =
+                  refusedAt (
+                      text.Replace("\"$type\":\"isNull\",\"column\":\"ok\"", "\"$type\":\"isNull\",\"column\":\"nope\"")
+                  )
+
+              Expect.equal stray.Path [ PathSegment.Key "where"; PathSegment.Index 6 ] "at the predicate"
+              Expect.equal stray.Message (QueryError.describe (UnknownColumn("nope", declared))) "named"
+
+              // An order naming a column twice.
+              let twice =
+                  refusedAt (
+                      text.Replace(
+                          "{\"column\":\"region\",\"direction\":\"ascending\"}",
+                          "{\"column\":\"day\",\"direction\":\"ascending\"}"
+                      )
+                  )
+
+              Expect.equal twice.Path [ PathSegment.Key "orderBy"; PathSegment.Index 1 ] "at the second key"
+
+              // A literal that is not a value of the type it states.
+              let malformed =
+                  refusedAt (text.Replace("\"value\":\"2026-01-01\"", "\"value\":\"2026-02-30\""))
+
+              Expect.equal malformed.Code DecodeCode.OutOfRange "out of range"
+
+              Expect.equal
+                  malformed.Path
+                  [ PathSegment.Key "where"; PathSegment.Index 2; PathSegment.Key "value" ]
+                  "at the value"
+
+              // An unknown predicate kind and an unknown direction.
+              let unknownKind =
+                  refusedAt (text.Replace("\"$type\":\"contains\"", "\"$type\":\"matches\""))
+
+              Expect.equal unknownKind.Code DecodeCode.UnknownTag "an unknown predicate"
+
+              let unknownDir =
+                  refusedAt (text.Replace("\"direction\":\"descending\"", "\"direction\":\"down\""))
+
+              Expect.equal unknownDir.Code DecodeCode.UnknownTag "an unknown direction"
+
+          testCase "the strict policy refuses an undeclared member of a predicate or an order key"
+          <| fun _ ->
+              let text = QueryCodec.encode shaped
+
+              for edited in
+                  [ text.Replace(
+                        "\"$type\":\"isNull\",\"column\":\"ok\"",
+                        "\"$type\":\"isNull\",\"column\":\"ok\",\"text\":\"x\""
+                    )
+                    text.Replace("{\"column\":\"day\",", "{\"column\":\"day\",\"nulls\":\"first\",") ] do
+                  Expect.notEqual edited text "the probe edited the document"
+                  Expect.equal (QueryCodec.decode edited) (Ok shaped) "lenient reads past it"
+                  Expect.isError (QueryCodec.decodeWith ReadPolicy.Strict edited) "strict refuses it"
+
+          testCase "the invocation key sees the filter and the order"
+          <| fun _ ->
+              let k = Query.invocationKey shaped shapedArgs
+              let noWhere = Query.invocationKey { shaped with Where = [] } shapedArgs
+              let noOrder = Query.invocationKey { shaped with OrderBy = [] } shapedArgs
+
+              let neither =
+                  Query.invocationKey { shaped with Where = []; OrderBy = [] } shapedArgs
+
+              Expect.equal
+                  (List.length (List.distinct [ k; noWhere; noOrder; neither ]))
+                  4
+                  "four declarations, four keys"
+
+              Expect.notEqual
+                  (Query.invocationKey
+                      { shaped with
+                          Where = [ ColumnPredicate.AtMost("n", Int 11) ] }
+                      shapedArgs)
+                  (Query.invocationKey
+                      { shaped with
+                          Where = [ ColumnPredicate.AtMost("n", Int 10) ] }
+                      shapedArgs)
+                  "the literal is keyed"
+
+              Expect.equal (Query.invocationKeyPage shaped shapedArgs None) k "the first page keys as the invocation"
+
+              Expect.notEqual
+                  (Query.invocationKeyPage shaped shapedArgs (Some "t"))
+                  (Query.invocationKeyPage { shaped with Where = [] } shapedArgs (Some "t"))
+                  "a page of a filtered declaration keys apart"
+
+          testCase "the resolver receives the filter and the order, and refuses one it cannot honour by name"
+          <| fun _ ->
+              let reg =
+                  QueryRegistry.register shaped QueryRegistry.empty
+                  |> Result.toOption
+                  |> Option.get
+
+              let seen = ref None
+
+              let served =
+                  QueryRegistry.dispatchWithArgs reg "shaped" shapedArgs (fun q _ ->
+                      seen.Value <- Some(q.Where, q.OrderBy)
+                      Ok(Ready sampleResult))
+
+              Expect.equal served (Ok(Ready sampleResult)) "served"
+              Expect.equal seen.Value (Some(shaped.Where, shaped.OrderBy)) "handed exactly what was declared"
+
+              let contains = ColumnPredicate.Contains("region", "U")
+
+              let noContains (_: Query) (_: (string * Cell) list) =
+                  Error(ResolveFault.PredicateUnsupported contains)
+
+              Expect.equal
+                  (QueryRegistry.dispatchWithArgs reg "shaped" shapedArgs noContains)
+                  (Error(PredicateNotHonoured contains))
+                  "an unhonoured predicate is refused naming it"
+
+              Expect.equal
+                  (Query.invokePageWithArgs shaped shapedArgs (Some "p2") (fun _ _ _ ->
+                      Error(ResolveFault.OrderUnsupported "day")))
+                  (Error(OrderNotHonoured "day"))
+                  "an unhonoured order is refused naming the column"
+
+              // Captured and replayed as the refusal it was answered live.
+              let live, _, journal =
+                  QueryRegistry.dispatchCapturedWith
+                      OpStream.defaultHash
+                      QueryCodec.encodeResult
+                      reg
+                      "shaped"
+                      shapedArgs
+                      noContains
+                      []
+
+              Expect.equal live (Error(PredicateNotHonoured contains)) "captured live"
+
+              let replayed =
+                  QueryRegistry.dispatchReplayedWith
+                      QueryCodec.decodeResult
+                      reg
+                      "shaped"
+                      shapedArgs
+                      None
+                      (fun _ _ _ -> Ok(Ready sampleResult))
+                      Map.empty
+                      journal
+                  |> Result.map fst
+
+              Expect.equal replayed (Ok live) "replayed exactly"
+
+          testCase "the new refusals cross the wire and read as one sentence naming what they refuse"
+          <| fun _ ->
+              let refusals =
+                  [ UnknownColumn("nope", [ "a"; "b" ])
+                    UnknownColumn("nope", [])
+                    PredicateTypeMismatch("d", DateType, StringType)
+                    PredicateNotApplicable("contains", "n", IntType)
+                    IllFormedLiteral("d", "not a day that exists")
+                    DuplicateSortColumn "d"
+                    PredicateNotHonoured(ColumnPredicate.AtLeast("amount", Decimal "0.05"))
+                    PredicateNotHonoured(ColumnPredicate.Contains("s", "x"))
+                    PredicateNotHonoured(ColumnPredicate.IsNotNull "x")
+                    OrderNotHonoured "d" ]
+
+              for e in refusals do
+                  Expect.equal
+                      (QueryCodec.decodeQueryError (QueryCodec.encodeQueryError e))
+                      (Ok e)
+                      (sprintf "%A round-trips" e)
+
+                  let sentence = QueryError.describe e
+                  Expect.isTrue (sentence.StartsWith "Refused: ") "a refusal sentence"
+
+                  let column =
+                      match e with
+                      | UnknownColumn(c, _)
+                      | PredicateTypeMismatch(c, _, _)
+                      | PredicateNotApplicable(_, c, _)
+                      | IllFormedLiteral(c, _)
+                      | DuplicateSortColumn c
+                      | OrderNotHonoured c -> c
+                      | PredicateNotHonoured p -> predicateColumn p
+                      | other -> failtestf "not a Phase 398 refusal: %A" other
+
+                  Expect.stringContains sentence ("'" + column + "'") "names the column" ]
