@@ -1,5 +1,68 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D124: the two cross-runtime claims the suite did not measure are measured — the IDL sampler runs on `ConfRng`'s stream and is pinned in `ParityVectors`, the witness freeze reads no reflection under Fable, and D95's escaper guarantee is scoped to IDL-authored text
+
+**Recorded by Phase 387. `Fuaran.Core.Idl` (`Sample`, the `SourceLit` module doc) and
+`Fuaran.Core.Conformance` (`ParityVectors`, `SurfaceLaws`); rides the `0.36.0` draft (STABILITY.md,
+"The two cross-runtime claims the suite did not measure are measured"). Amends D95.**
+
+The repository's rule since Phase 217 (D55) is that a cross-pipeline VALUE claim is bought by a
+`ParityVectors` row and never asserted. The 2026-10-07 design review found two claims that were
+asserted, and one reflection path compiled into the Fable distribution and certified by nothing.
+
+*Decided: the sampler is re-based on the `ConfRng` shape (route (b)), not pinned as it was (route
+(a)) — operator ruling.* `Sample` was a `uint64` LCG with a 64-bit multiply, inside a Fable-shipped
+package — the arithmetic shape `ConfRng` was moved off at `0.20.0` because Fable cannot carry it — and
+it chose by `% n`, the low-bit modulo draw `ConfRng.intBelow` was fixed for at `0.12.0`. Route (a)
+would have pinned that generator's draws and kept a second RNG discipline alive beside the kit's
+because a vector said it agreed today; route (b) gives every Fable-shipped package one discipline.
+The sampler is now `ConfRng`'s xorshift32 (shifts and XOR), seeded by `ConfRng.ofSeed`'s warm-up, and
+every bounded choice — a pool pick, a list or map length, a presence coin, a JSON shape — is
+`intBelow` by rejection from the high bits. It is a private COPY, not a call, because
+`Fuaran.Core.Conformance` references `Fuaran.Core.Idl` and so cannot be referenced back; the copy is
+held to the original by `ParityVectorTests` ("the sampler draws ConfRng's stream from the same seed,
+by rejection"), which predicts every sampled choice over forty-three seeds from `ConfRng.intBelow`.
+The cross-pipeline half is seven `sample/*` rows at the tail of `ParityVectors.vectors`: four
+`sample/draws/*` rows over a vocabulary whose every choice is visible in its encoding (a seven-case
+enum, where rejection and modulo choose differently), two `sample/nodes/*` digests over a vocabulary
+reaching every slot shape the sampler draws, and the typed refusal's text.
+
+*The cost, stated in the `0.12.0` form: every sampled set moved.* The signatures did not; the values
+did. A consumer that pinned a sampled vector, or a corpus generated from a seed, sees different nodes.
+In this repository that moved the generated F* normaliser facts (`proofs/VocabularyVectors.fst`,
+regenerated with `--emit-fstar` and verified by the pinned prover, a perturbed fact refused), and one
+non-vacuity demand that had been met by the seed rather than by design: the Phase 347 `__proto__`
+corner in `IdlRefusalHostTests` fired only when a mutation's randomly drawn position happened to be
+an object. That demand was READ, not re-seeded: the corner is now drawn among the document's object
+positions, which every document has.
+
+*Decided: the reflection path is FENCED, not certified by a cited run — operator ruling.*
+`witnessFieldsLaw` (`FSharpType.IsRecord` / `GetRecordFields`) and `witnessCoverageLaw` are .NET-only,
+with the assembly enumeration that was already fenced. The Fable pipeline's `witnessSurfaceLaws ()`
+runs `witnessDeclaredFieldsLaw` per frozen record over `declaredWitnessFields`, a committed list of
+each record's fields as reflection reads them — the fact beside `frozenWitnessFields`' policy, same
+law name and counterexample on both pipelines. The list is derived from the same reflection and held
+to it by `SurfaceLawsTests` ("the committed declared-field list is what reflection reads"). A cited
+node run would have certified one compile on one day; a fence is structural, so no future change to
+Fable's reflection support can make the family say something different on the two pipelines.
+
+*Decided: D95's guarantee is scoped to IDL-authored text, and the trust boundary is stated where it
+lives.* D95 and the `SourceLit` doc said a vocabulary built in code "still cannot put a byte of source
+into a generated module". It can, by design: a `THosted` slot's `FSharp` / `Encode` / `Decode`, a
+`TFn` slot's `ClosureSig`, and every `support.json` entry are HOST SOURCE, spliced verbatim, because
+escaping them would turn code into a string. `Declare.errors` checks a hosted slot only for its
+declared wire form and format, and `SupportArtifact.ofJson` checks shape. So the escaper's guarantee
+covers what the IDL authors — identifiers, wire spellings, the discriminator, categories, docs,
+deprecation prose — and host source is trusted exactly as far as the project that compiles it trusts
+its own code: a vocabulary or support file from an untrusted party must not carry it.
+`IdlCertificationTests` ("Phase 387 — hosted source is trusted host code, outside the escaper")
+plants a hosted body that would be unsafe as data and asserts it lands verbatim and live, with the
+same text as a category as the control that reaches no source line.
+
+*Not decided here.* Whether host source should become validatable — a declared allow-list of host
+expressions, or a separate signed support channel — is a change of trust boundary, not a correction of
+its description; nothing in the demand census asks for it.
+
 ## 2026-10-07 — D123: "released" is a gate output — a tag's heading and its receiving-gate record are read by `verify.ps1`, which publish runs; `0.31.0` and `0.35.1` were released without a cited run, and the record says so
 
 **Recorded by Phase 392. Test-only and documentation: no package, surface, wire byte or default moves.**
@@ -2070,6 +2133,13 @@ free to be source text. So a name is held to the identifier grammar at declarati
 splice of authored text goes through `SourceLit`; a source-reading test refuses the hand-rolled shapes
 the removed splices had, and a vocabulary of hostile text built in code is emitted by every backend
 with its payload never reaching source.
+
+*Amended by Phase 387 (D124): the guarantee is scoped to IDL-AUTHORED text.* "A vocabulary built in
+code cannot splice source" holds for every name, spelling and prose field the IDL authors. It does not
+hold, and never did, for host source: a `THosted` slot's `FSharp` / `Encode` / `Decode`, a `TFn`
+slot's `ClosureSig` and every `support.json` entry are spliced verbatim by design, validated for wire
+form and shape only, and trusted as the compiling project's own code. D124 records the boundary and
+the test that pins it.
 
 *Not decided here.* Whether a declared name is a legal identifier IN EACH LANGUAGE beyond the lexical
 grammar — an F# keyword as a case tag, a lower-case union case — is the emitter's compile question, not

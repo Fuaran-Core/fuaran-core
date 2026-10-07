@@ -25,9 +25,25 @@ module Sample =
     // no decimal point (so a re-parse sees an integer).
     //
     // Determinism is the whole point of a failing vector, so this uses an
-    // explicit LCG rather than `System.Random`, whose sequence is not
+    // explicit generator rather than `System.Random`, whose sequence is not
     // contractually stable across runtimes — a vector that fails elsewhere has
     // to reproduce here from its seed alone.
+    //
+    // Phase 387 (DECISIONS.md D124) — "on any runtime" is MEASURED, not asserted.
+    // The generator is the conformance kit's `ConfRng` shape, draw for draw: a
+    // uint32 xorshift32 (shifts and XOR only) seeded by the same warm-up, and every
+    // bounded choice taken from the HIGH bits by rejection. Until 0.36.0 it was a
+    // uint64 LCG with a 64-bit multiply — the arithmetic shape `ConfRng` documents
+    // as the one Fable cannot carry — and it chose by `% n`, the low-bit modulo
+    // draw `ConfRng.intBelow` was fixed for at 0.12.0. Nothing measured either:
+    // `ParityVectors` carried no sampler row. Its `sample/*` rows now pin the
+    // drawn choices and the sampled node sets, so the receiving gate's node leg
+    // compares this module's output across the two pipelines, and
+    // `ParityVectorTests` holds the stream equal to `ConfRng`'s from the same seed.
+    //
+    // A copy rather than a call, deliberately: `Fuaran.Core.Conformance` depends on
+    // this package, so this package cannot depend on it, and the generator is ten
+    // lines whose identity with `ConfRng` is held by a test rather than by hope.
     // -----------------------------------------------------------------------
 
     /// Why a vocabulary could not be sampled (Phase 292) — the typed refusal
@@ -63,18 +79,57 @@ module Sample =
     /// field is itself, a domain with no leaf kind), which used to overflow the stack.
     let private bottom = -24
 
-    type private Rng = { mutable State: uint64 }
+    /// The sampler's generator position — `ConfRng.T`'s xorshift32 state, held mutably because
+    /// the sampler threads one stream through a recursion that returns values, not states.
+    type private Rng = { mutable State: uint32 }
 
-    let private nextInt (r: Rng) : int =
-        r.State <- r.State * 6364136223846793005UL + 1442695040888963407UL
-        int ((r.State >>> 33) &&& 0x7FFFFFFFUL)
+    /// `ConfRng`'s xorshift32 step: three shift/XOR rounds, no multiply, so it is
+    /// value-identical under Fable. Never reaches 0 from a non-zero state.
+    let private step (x: uint32) : uint32 =
+        let a = x ^^^ (x <<< 13)
+        let b = a ^^^ (a >>> 17)
+        b ^^^ (b <<< 5)
 
-    /// A draw from a non-empty list; an empty one is refused as nothing to choose from at
-    /// `at`, never divided by.
+    /// `ConfRng.ofSeed`: the seed mixed off zero (xorshift's fixed point) and warmed three rounds.
+    let private ofSeed (seed: int) : Rng =
+        let mixed = uint32 seed ^^^ 0x9E3779B9u
+        let s0 = if mixed = 0u then 0x6D2B79F5u else mixed
+        { State = step (step (step s0)) }
+
+    /// `ConfRng.next`: advance, and answer the top 31 bits of the new state.
+    let private next (r: Rng) : int =
+        r.State <- step r.State
+        int (r.State >>> 1)
+
+    /// The number of bits needed to represent `v`.
+    let rec private bitWidth (acc: int) (v: int) : int =
+        if v = 0 then acc else bitWidth (acc + 1) (v >>> 1)
+
+    /// `ConfRng.intBelow`: a value in `[0, n)` taken from the HIGH bits by rejection, never
+    /// `v % n` — exactly uniform, and reading the best-mixed end of the word. `n = 1` still
+    /// draws once, so the stream advances at the same rate whatever `n` is; `n <= 0` draws
+    /// nothing (no caller passes one — [[pickAt]] refuses an empty list first).
+    let private intBelow (r: Rng) (n: int) : int =
+        if n <= 0 then
+            0
+        elif n = 1 then
+            next r |> ignore
+            0
+        else
+            let shift = 31 - bitWidth 0 (n - 1)
+            let mutable candidate = n
+
+            while candidate >= n do
+                candidate <- next r >>> shift
+
+            candidate
+
+    /// A draw from a non-empty list, its index by [[intBelow]]; an empty one is refused as
+    /// nothing to choose from at `at`, never divided by.
     let private pickAt (r: Rng) (at: string) (xs: 'a list) : 'a =
         match xs with
         | [] -> refuse at "there is nothing to choose from (it declares no case)"
-        | _ -> xs.[nextInt r % List.length xs]
+        | _ -> List.item (intBelow r (List.length xs)) xs
 
     /// A draw from one of the sampler's own pools, which are never empty.
     let private pick (r: Rng) (xs: 'a list) : 'a = pickAt r "a pool" xs
@@ -213,7 +268,7 @@ module Sample =
         match t with
         | TStr -> VStr(pick r stringPool)
         | TInt -> VInt(pick r intPool)
-        | TBool -> VBool(nextInt r % 2 = 0)
+        | TBool -> VBool(intBelow r 2 = 0)
         | TFloat -> VFloat(pick r floatPool)
         | TClosure
         | TFn _ -> VClosure
@@ -234,7 +289,7 @@ module Sample =
         | TJson
         | THosted _ ->
             VJson(
-                match nextInt r % 4 with
+                match intBelow r 4 with
                 | 0 -> JStr(pick r stringPool)
                 | 1 -> JFloat(pick r floatPool)
                 | 2 -> JArr [ JInt(pick r intPool); JStr(pick r stringPool) ]
@@ -249,10 +304,10 @@ module Sample =
         | TList inner ->
             // Bounded, and empty is a legitimate sample — an empty collection is
             // NOT absence, and the two must stay distinguishable on the wire.
-            let n = if depth <= 0 then 0 else nextInt r % 3
+            let n = if depth <= 0 then 0 else intBelow r 3
             VList [ for _ in 1..n -> sampleType idl r (depth - 1) inner ]
         | TMap vt ->
-            let n = if depth <= 0 then 0 else nextInt r % 3
+            let n = if depth <= 0 then 0 else intBelow r 3
             VMap [ for i in 1..n -> (sprintf "k%d" i), sampleType idl r (depth - 1) vt ]
         | TRecord name ->
             match idl.Records |> List.tryFind (fun rc -> rc.Name = name) with
@@ -354,12 +409,12 @@ module Sample =
                 // sometimes absent, and an omit-when-default that sits at its
                 // default often enough to exercise the omission path.
                 | Optional ->
-                    if nextInt r % 3 = 0 then
+                    if intBelow r 3 = 0 then
                         VAbsent
                     else
                         sampleType idl r depth f.Type
                 | OmitDefault d ->
-                    if nextInt r % 2 = 0 then
+                    if intBelow r 2 = 0 then
                         d
                     else
                         sampleType idl r depth f.Type
@@ -419,7 +474,7 @@ module Sample =
         (seed: int)
         (count: int)
         : Result<IdlValue list, SampleRefusal> =
-        let r = { State = uint64 seed * 2862933555777941757UL + 3037000493UL }
+        let r = ofSeed seed
 
         match kindTags with
         | [] when count > 0 ->
@@ -428,6 +483,15 @@ module Sample =
                   Reason = "none was given to cycle over" }
         | _ ->
             try
-                Ok [ for i in 0 .. count - 1 -> sampleNode idl r 3 (kindTags.[i % List.length kindTags]) ]
+                // The tags in order, repeated — a deterministic cycle, not a draw, so it takes no
+                // RNG. `kindTags` is non-empty whenever `count > 0` (refused above), so the
+                // truncation always terminates.
+                let tags =
+                    Seq.initInfinite (fun _ -> kindTags)
+                    |> Seq.concat
+                    |> Seq.truncate (max 0 count)
+                    |> Seq.toList
+
+                Ok [ for tag in tags -> sampleNode idl r 3 tag ]
             with Unsampleable(at, reason) ->
                 Error { At = at; Reason = reason }

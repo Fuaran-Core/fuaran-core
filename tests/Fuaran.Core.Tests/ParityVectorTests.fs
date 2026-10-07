@@ -268,7 +268,21 @@ let private expected: (string * string) list =
       "space/int/leading-space", "refused"
       "space/int/leading-plus", "refused"
       "space/int/exponent", "refused"
-      "space/int/leading-zero", "5" ]
+      "space/int/leading-zero", "5"
+      // Phase 387 — the IDL sampler on `ConfRng`'s stream (D124). A value move from 0.36.0: the
+      // sampler was a uint64 LCG choosing by modulo before it, and no row measured it.
+      "sample/draws/seed-0",
+      "{\"id\":\"n\",\"kind\":{\"$type\":\"K\",\"e\":\"c5\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c5\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c3\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c4\"}}"
+      "sample/draws/seed-1",
+      "{\"id\":\"n\",\"kind\":{\"$type\":\"K\",\"e\":\"c3\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c4\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c6\"}}|{\"id\":\"n\",\"kind\":{\"$type\":\"K\",\"e\":\"c4\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c6\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c1\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}"
+      "sample/draws/seed-neg-1",
+      "{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c4\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c6\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c1\"}}|{\"id\":\"n\",\"kind\":{\"$type\":\"K\",\"e\":\"c4\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c5\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c5\"}}|{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c1\"}}"
+      "sample/draws/seed-1488",
+      "{\"id\":\"\",\"kind\":{\"$type\":\"K\",\"e\":\"c3\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c1\"}}|{\"id\":\"node-1\",\"kind\":{\"$type\":\"K\",\"e\":\"c2\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c1\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c4\"}}|{\"id\":\"n\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"n\",\"kind\":{\"$type\":\"K\",\"e\":\"c0\"}}|{\"id\":\"a\\\"b\",\"kind\":{\"$type\":\"K\",\"e\":\"c5\"}}"
+      "sample/nodes/seed-0", "d79fef4d5f0e03bf97e01c6856bd5718e9e676465304b2c6cef25f2542e85d9c"
+      "sample/nodes/seed-1488", "99a43020e793bd8c06be6fb123efff4bc673b27102feb4d80ec62f13db4e8443"
+      "sample/refusal/empty-enum",
+      "refused:cannot sample enum 'Nothing': there is nothing to choose from (it declares no case)" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -296,7 +310,8 @@ let private families =
       "cellCompare/"
       "decimal/"
       "decimalCodec/"
-      "decimalAggregate/" ]
+      "decimalAggregate/"
+      "sample/" ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
@@ -485,4 +500,57 @@ let tests =
               // largest double below 1e17 is 99999999999999984, written 99999999999999980
               Expect.equal (System.Math.BitIncrement 9007199254740992.0) 9007199254740994.0 "2^53 + 2"
               Expect.equal (System.Math.BitDecrement 1e17) 99999999999999984.0 "below 1e17"
-              Expect.equal (System.Math.BitIncrement 1e17) 100000000000000016.0 "above 1e17" ]
+              Expect.equal (System.Math.BitIncrement 1e17) 100000000000000016.0 "above 1e17"
+
+          // Phase 387 — the sampler's stream IS `ConfRng`'s, draw for draw. `Fuaran.Core.Idl` cannot
+          // reference the conformance kit (the kit references it), so the sampler carries its own copy
+          // of the generator; this is what keeps the copy honest. The draw vocabulary makes exactly
+          // two choices per node — an id from the sampler's four-id pool, then one of seven enum
+          // cases — so each sampled node is predicted from two `ConfRng.intBelow` draws off the same
+          // seed. Seven is not a power of two, so a modulo draw would choose differently here.
+          testCase "the sampler draws ConfRng's stream from the same seed, by rejection"
+          <| fun _ ->
+              let enumCases = [ "c0"; "c1"; "c2"; "c3"; "c4"; "c5"; "c6" ]
+              // The sampler's id pool, in its declared order (`Sample.sampleNode`).
+              let idPool = [ "n"; "node-1"; "a\"b"; "" ]
+
+              let idl: Fuaran.Core.Idl.Idl =
+                  { Kinds =
+                      [ { Tag = "K"
+                          Category = "content"
+                          Annotations = Fuaran.Core.Idl.Annotations.Empty
+                          Fields =
+                            [ { Name = "e"
+                                Type = Fuaran.Core.Idl.TEnum "Seven"
+                                Opt = Fuaran.Core.Idl.Required
+                                Annotations = Fuaran.Core.Idl.Annotations.Empty } ] } ]
+                    Unions = []
+                    Enums = [ Fuaran.Core.Idl.Declare.enumOf "Seven" enumCases ]
+                    Records = []
+                    Defaults = []
+                    NodeFields = []
+                    Ops = []
+                    Wire = Fuaran.Core.Idl.WireShape.Default
+                    Harden = Fuaran.Core.Idl.HardenPolicy.Undeclared }
+
+              let predicted (seed: int) (count: int) =
+                  let mutable r = ConfRng.ofSeed seed
+
+                  [ for _ in 1..count do
+                        let i, r1 = ConfRng.intBelow 4 r
+                        let j, r2 = ConfRng.intBelow 7 r1
+                        r <- r2
+                        List.item i idPool, List.item j enumCases ]
+
+              for seed in [ -1; 0; 1; 1488 ] @ [ 2..40 ] do
+                  let sampled =
+                      match Fuaran.Core.Idl.Sample.trySampleNodes idl [ "K" ] seed 8 with
+                      | Error r -> failtestf "seed %d: the sampler refused: %s" seed r.Describe
+                      | Ok nodes ->
+                          nodes
+                          |> List.map (fun v ->
+                              match v with
+                              | Fuaran.Core.Idl.VNode(id, "K", [ "e", Fuaran.Core.Idl.VEnum e ]) -> id, e
+                              | other -> failtestf "seed %d: an unexpected sample shape %A" seed other)
+
+                  Expect.equal sampled (predicted seed 8) (sprintf "seed %d: the sampler's choices are ConfRng's" seed) ]

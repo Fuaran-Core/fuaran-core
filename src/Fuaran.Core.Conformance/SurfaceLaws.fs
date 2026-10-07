@@ -549,42 +549,35 @@ module internal SurfaceLaws =
     // reason, in `unfrozenWitnesses`. A new witness is therefore a CLASSIFICATION someone makes in
     // the commit that adds it, never one nobody noticed.
 
-    /// The frozen witness records, each with the type the law reads and its pinned field list: the
-    /// six core records Phase 232 froze, the six conformance-kit inputs Phase 330 brought in, and
-    /// Phase 313's `RefWitness`, frozen at birth.
-    /// The type arguments are placeholders — a record's field NAMES and ORDER do not depend on them.
-    let private frozenWitnesses: (string * System.Type * string list) list =
-        [ "IdWitness", typeof<IdWitness<obj>>, [ "ToString"; "OfString"; "Equals" ]
-          "NodeWitness", typeof<NodeWitness<obj, obj>>, [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ]
-          "StreamWitness", typeof<StreamWitness<obj, obj, obj>>, [ "Apply"; "Encode"; "Decode" ]
-          "ArtifactWitness", typeof<ArtifactWitness<obj, obj>>, [ "Tree"; "IdW"; "Holes"; "Effect"; "Bind" ]
-          "AiSurfaceWitness",
-          typeof<AiSurfaceWitness<obj, obj, obj>>,
-          [ "ReadTools"; "OpKinds"; "KindOfOp"; "Patterns"; "Decide"; "Apply"; "Explain" ]
-          "ProjectionWitness",
-          typeof<ProjectionWitness<obj, obj, obj>>,
-          [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
+    /// The frozen witness records and their pinned field lists: the six core records Phase 232
+    /// froze, the six conformance-kit inputs Phase 330 brought in, and the records frozen at birth
+    /// since (Phases 298, 313, 318, 349). The freeze POLICY — what each record may carry.
+    let private frozenPins: (string * string list) list =
+        [ "IdWitness", [ "ToString"; "OfString"; "Equals" ]
+          "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ]
+          "StreamWitness", [ "Apply"; "Encode"; "Decode" ]
+          "ArtifactWitness", [ "Tree"; "IdW"; "Holes"; "Effect"; "Bind" ]
+          "AiSurfaceWitness", [ "ReadTools"; "OpKinds"; "KindOfOp"; "Patterns"; "Decide"; "Apply"; "Explain" ]
+          "ProjectionWitness", [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
           // Phase 298 — the observer seam's witness, frozen as it ships
-          "ObserverWitness", typeof<ObserverWitness<obj, obj>>, [ "Derive"; "Options" ]
-          "CapabilitySeamWitness", typeof<CapabilitySeamWitness<obj>>, [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
-          "QuerySeamWitness", typeof<QuerySeamWitness>, [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
-          "CapabilityPipelineWitness", typeof<CapabilityPipelineWitness>, [ "PipelineRegistry"; "GenPipeline" ]
-          "ConstructWitness", typeof<ConstructWitness<obj>>, [ "Surface"; "Construct" ]
+          "ObserverWitness", [ "Derive"; "Options" ]
+          "CapabilitySeamWitness", [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
+          "QuerySeamWitness", [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
+          "CapabilityPipelineWitness", [ "PipelineRegistry"; "GenPipeline" ]
+          "ConstructWitness", [ "Surface"; "Construct" ]
           "KeyedWitness",
-          typeof<KeyedWitness<obj, obj>>,
           [ "Surface"
             "KeyedChildren"
             "ReplaceKeyedChildren"
             "PlaceKeyedChild"
             "IdsUnique" ]
-          "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>, [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ]
+          "EvaluatorWitness", [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ]
           // Phase 313 — the reference witness, frozen as it ships: a domain constructs it by name,
           // exactly as it constructs a core witness, so a field add would break it the same way.
-          "RefWitness", typeof<RefWitness<obj, obj>>, [ "RefsOf"; "DeclsOf" ]
+          "RefWitness", [ "RefsOf"; "DeclsOf" ]
           // Phase 349 — the sanitisation floor's witness, frozen at birth on the Phase 313 precedent:
           // a host constructs it by name from its own copy of the floor.
           "SanitizeWitness",
-          typeof<SanitizeWitness>,
           [ "SanitizeUrl"
             "SanitizeUrlOrBlank"
             "IsAllowedAttributeKey"
@@ -594,7 +587,7 @@ module internal SurfaceLaws =
           // Phase 318 — the AI surface's composing witness, frozen at birth: it EMBEDS the frozen
           // `AiSurfaceWitness` and adds the dry run and the effects accessor, the "compose, never
           // grow" route STABILITY prescribes, and a domain constructs it by name.
-          "GuardedSurfaceWitness", typeof<GuardedSurfaceWitness<obj, obj, obj>>, [ "Surface"; "DryRun"; "EffectsOf" ] ]
+          "GuardedSurfaceWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).
@@ -604,8 +597,48 @@ module internal SurfaceLaws =
     /// carries a `STABILITY.md` entry naming the record, the field and why composition — a new
     /// witness record that EMBEDS the frozen one — could not express it. From 1.0 there is no such
     /// route: a frozen witness does not grow.
-    let frozenWitnessFields: (string * string list) list =
-        frozenWitnesses |> List.map (fun (name, _, fields) -> name, fields)
+    let frozenWitnessFields: (string * string list) list = frozenPins
+
+    /// The fields each frozen witness record DECLARES, by name and in declaration order — the FACT
+    /// beside `frozenWitnessFields`' policy (Phase 387, DECISIONS.md D124).
+    ///
+    /// **Why a committed list rather than reflection.** The field laws read the records by
+    /// reflection on .NET, where it is the strongest reading there is: the assembly a domain
+    /// compiled against, not this file. A Fable-compiled program reads THIS list instead, so no
+    /// reflection runs on that pipeline — record reflection under Fable was compiled and certified
+    /// by nothing. The list is derived from the same reflection and held to it by this repository's
+    /// .NET suite (`SurfaceLawsTests`, "the committed declared-field list is what reflection
+    /// reads"), so a record that grows a field reddens that test until the list is re-derived, and
+    /// the re-derived list then reddens the freeze on both pipelines until the widening is made
+    /// deliberately.
+    let declaredWitnessFields: (string * string list) list =
+        [ "IdWitness", [ "ToString"; "OfString"; "Equals" ]
+          "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ]
+          "StreamWitness", [ "Apply"; "Encode"; "Decode" ]
+          "ArtifactWitness", [ "Tree"; "IdW"; "Holes"; "Effect"; "Bind" ]
+          "AiSurfaceWitness", [ "ReadTools"; "OpKinds"; "KindOfOp"; "Patterns"; "Decide"; "Apply"; "Explain" ]
+          "ProjectionWitness", [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
+          "ObserverWitness", [ "Derive"; "Options" ]
+          "CapabilitySeamWitness", [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
+          "QuerySeamWitness", [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
+          "CapabilityPipelineWitness", [ "PipelineRegistry"; "GenPipeline" ]
+          "ConstructWitness", [ "Surface"; "Construct" ]
+          "KeyedWitness",
+          [ "Surface"
+            "KeyedChildren"
+            "ReplaceKeyedChildren"
+            "PlaceKeyedChild"
+            "IdsUnique" ]
+          "EvaluatorWitness", [ "Surface"; "Model"; "Deps"; "EvalNode"; "Change" ]
+          "RefWitness", [ "RefsOf"; "DeclsOf" ]
+          "SanitizeWitness",
+          [ "SanitizeUrl"
+            "SanitizeUrlOrBlank"
+            "IsAllowedAttributeKey"
+            "IsSafeAttributeValue"
+            "SanitizeAttributes"
+            "ScrubMarkdown" ]
+          "GuardedSurfaceWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
 
     /// The public records named `…Witness` that the freeze deliberately does NOT cover, each with
     /// why (Phase 232). Listing them is what lets `witnessSurfaceLaws` hold every public witness to a
@@ -621,6 +654,62 @@ module internal SurfaceLaws =
     /// that adds it.
     let unfrozenWitnesses: (string * string) list = []
 
+    /// The per-record law's name — one spelling on both pipelines, so a family run reads the same
+    /// row on .NET and under Fable.
+    let private witnessFieldsCell (record: string) : LawKit.LawCell =
+        LawKit.LawCell(
+            "witness surface ("
+            + record
+            + "): the record carries exactly its frozen fields, in declaration order"
+        )
+
+    /// The freeze check over field NAMES: `actual = pinned`, and on a mismatch the fields added and
+    /// removed and the route a deliberate widening takes.
+    let private checkFrozenFields (law: LawKit.LawCell) (record: string) (pinned: string list) (actual: string list) =
+        let mismatch () =
+            let render (xs: string list) =
+                if List.isEmpty xs then "none" else String.concat ", " xs
+
+            let added = actual |> List.filter (fun f -> not (List.contains f pinned))
+            let removed = pinned |> List.filter (fun f -> not (List.contains f actual))
+
+            let reordered =
+                if List.isEmpty added && List.isEmpty removed then
+                    " (the same fields, reordered)"
+                else
+                    ""
+
+            record
+            + " declares ["
+            + String.concat "; " actual
+            + "] where the freeze pins ["
+            + String.concat "; " pinned
+            + "] — added: "
+            + render added
+            + "; removed: "
+            + render removed
+            + reordered
+            + ". A frozen witness does not grow: compose a new witness record that embeds it (STABILITY.md, \"Witness-record field freeze\"), or, before 1.0 only, widen it deliberately — edit its entry in Conformance.frozenWitnessFields and record the widening in STABILITY.md in the same commit."
+
+        law.Check((actual = pinned), mismatch)
+
+    /// One frozen record's law over a field list that is DATA rather than a reflected type
+    /// (Phase 387): `declared`, by name and in order, equals `pinned`. It is the law a Fable-compiled
+    /// program runs, over `declaredWitnessFields` — reflection-free, so nothing on that pipeline
+    /// depends on record reflection being transpiled faithfully. Same name and counterexample as
+    /// `witnessFieldsLaw`, which reads the record itself on .NET.
+    let witnessDeclaredFieldsLaw (record: string) (pinned: string list) (declared: string list) : LawResult =
+        let law = witnessFieldsCell record
+        checkFrozenFields law record pinned declared
+        law.Result
+
+#if !FABLE_COMPILER
+    // ---- .NET-only: the laws that READ RECORDS BY REFLECTION (Phase 387, D124) ----
+    // `FSharpType.IsRecord` / `GetRecordFields` were compiled into the Fable distribution, ran under
+    // node through `witnessSurfaceLaws ()`, and were certified there by nothing — "Fable supports
+    // record reflection, so it probably works". They are fenced to .NET with the assembly
+    // enumeration below, and the Fable pipeline reads `declaredWitnessFields` instead.
+
     /// A type's name without its generic arity suffix — the name a reader and STABILITY.md use.
     let private bareTypeName (t: System.Type) : string =
         let n = t.Name
@@ -630,13 +719,10 @@ module internal SurfaceLaws =
     /// One frozen record's law: `t`'s record fields, by name and in declaration order, equal
     /// `pinned`. The law and its counterexample name `record`, so a red gate says WHICH witness
     /// moved and how — the fields added and removed, and the route a deliberate widening takes.
+    /// .NET-only since Phase 387: it reads `t` by reflection (a Fable program runs
+    /// `witnessDeclaredFieldsLaw` instead).
     let witnessFieldsLaw (record: string) (pinned: string list) (t: System.Type) : LawResult =
-        let law =
-            LawKit.LawCell(
-                "witness surface ("
-                + record
-                + "): the record carries exactly its frozen fields, in declaration order"
-            )
+        let law = witnessFieldsCell record
 
         if not (Microsoft.FSharp.Reflection.FSharpType.IsRecord t) then
             law.Check(
@@ -646,37 +732,10 @@ module internal SurfaceLaws =
                     + " is no longer an F# record, so its field set cannot be read — the freeze names a record"
             )
         else
-            let actual =
-                Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
-                |> Array.map (fun p -> p.Name)
-                |> Array.toList
-
-            let mismatch () =
-                let render (xs: string list) =
-                    if List.isEmpty xs then "none" else String.concat ", " xs
-
-                let added = actual |> List.filter (fun f -> not (List.contains f pinned))
-                let removed = pinned |> List.filter (fun f -> not (List.contains f actual))
-
-                let reordered =
-                    if List.isEmpty added && List.isEmpty removed then
-                        " (the same fields, reordered)"
-                    else
-                        ""
-
-                record
-                + " declares ["
-                + String.concat "; " actual
-                + "] where the freeze pins ["
-                + String.concat "; " pinned
-                + "] — added: "
-                + render added
-                + "; removed: "
-                + render removed
-                + reordered
-                + ". A frozen witness does not grow: compose a new witness record that embeds it (STABILITY.md, \"Witness-record field freeze\"), or, before 1.0 only, widen it deliberately — edit its entry in Conformance.frozenWitnessFields and record the widening in STABILITY.md in the same commit."
-
-            law.Check((actual = pinned), mismatch)
+            Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
+            |> Array.map (fun p -> p.Name)
+            |> Array.toList
+            |> checkFrozenFields law record pinned
 
         law.Result
 
@@ -684,7 +743,8 @@ module internal SurfaceLaws =
     /// classified — frozen (`frozenWitnessFields`) or declared outside the freeze
     /// (`unfrozenWitnesses`) — and every classified name is a record `records` actually holds. Both directions, so a new
     /// witness cannot appear unfrozen AND a renamed or deleted one cannot leave a pin standing over
-    /// nothing. A name in both lists is refused too: a witness is frozen or it is not.
+    /// nothing. A name in both lists is refused too: a witness is frozen or it is not. .NET-only
+    /// since Phase 387, with the reflection it reads.
     let witnessCoverageLaw (records: System.Type list) : LawResult =
         let found =
             records
@@ -724,7 +784,27 @@ module internal SurfaceLaws =
         law.Check(List.isEmpty problems, fun () -> String.concat "; " problems)
         law.Result
 
-#if !FABLE_COMPILER
+    /// The type the .NET field law reflects over, per frozen record. The type arguments are
+    /// placeholders — a record's field NAMES and ORDER do not depend on them. .NET-only with the
+    /// reflection that reads them (Phase 387).
+    let private frozenWitnessTypes: (string * System.Type) list =
+        [ "IdWitness", typeof<IdWitness<obj>>
+          "NodeWitness", typeof<NodeWitness<obj, obj>>
+          "StreamWitness", typeof<StreamWitness<obj, obj, obj>>
+          "ArtifactWitness", typeof<ArtifactWitness<obj, obj>>
+          "AiSurfaceWitness", typeof<AiSurfaceWitness<obj, obj, obj>>
+          "ProjectionWitness", typeof<ProjectionWitness<obj, obj, obj>>
+          "ObserverWitness", typeof<ObserverWitness<obj, obj>>
+          "CapabilitySeamWitness", typeof<CapabilitySeamWitness<obj>>
+          "QuerySeamWitness", typeof<QuerySeamWitness>
+          "CapabilityPipelineWitness", typeof<CapabilityPipelineWitness>
+          "ConstructWitness", typeof<ConstructWitness<obj>>
+          "KeyedWitness", typeof<KeyedWitness<obj, obj>>
+          "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>
+          "RefWitness", typeof<RefWitness<obj, obj>>
+          "SanitizeWitness", typeof<SanitizeWitness>
+          "GuardedSurfaceWitness", typeof<GuardedSurfaceWitness<obj, obj, obj>> ]
+
     /// Every public type in the kit's own assembly and in the Fuaran.Core assemblies it references,
     /// transitively. A Fable-compiled program has no assembly to enumerate, which is why this and
     /// the law that reads it are .NET-only (see `witnessSurfaceLaws`).
@@ -748,23 +828,42 @@ module internal SurfaceLaws =
         found |> Seq.sortBy (fun t -> t.FullName) |> Seq.toList
 #endif
 
-    /// Phase 232 — the witness-record field freeze, as a law family. Thirteen laws on .NET since
-    /// Phase 330: one per frozen record (`witnessFieldsLaw` over `frozenWitnessFields`, twelve), and
-    /// `witnessCoverageLaw` over every public record in the Fuaran.Core assemblies the kit
-    /// references. No witness and no seed:
-    /// the family certifies the Core it was COMPILED AGAINST, so a domain runs it deliberately —
-    /// typically at a pin bump — rather than through `certify`, which certifies a witness.
+    /// Phase 232 — the witness-record field freeze, as a law family: one law per frozen record and,
+    /// on .NET, `witnessCoverageLaw` over every public record in the Fuaran.Core assemblies the kit
+    /// references. No witness and no seed: the family certifies the Core it was COMPILED AGAINST, so
+    /// a domain runs it deliberately — typically at a pin bump — rather than through `certify`,
+    /// which certifies a witness.
     ///
-    /// Under Fable the coverage law is absent rather than reported green: a transpiled program has
-    /// no assemblies to enumerate, and the completeness of the pin list is a property of this
-    /// repository's tree, which its own .NET gate holds. The twelve field laws run on both pipelines.
+    /// **The two pipelines read different evidence, and each reads the strongest it has (Phase 387,
+    /// DECISIONS.md D124).** On .NET each record's law reflects over the record itself
+    /// (`witnessFieldsLaw`). Under Fable no reflection runs: each record's law reads the committed
+    /// `declaredWitnessFields` (`witnessDeclaredFieldsLaw`), a list this repository's .NET suite holds
+    /// equal to the reflected fields, and the coverage law is absent rather than reported green — a
+    /// transpiled program has no assemblies to enumerate, and the completeness of the pin list is a
+    /// property of this repository's tree, which its own .NET gate holds.
     let witnessSurfaceLaws () : LawResult list =
-        let fields =
-            frozenWitnesses
-            |> List.map (fun (name, t, pinned) -> witnessFieldsLaw name pinned t)
-
 #if FABLE_COMPILER
-        fields
+        frozenWitnessFields
+        |> List.map (fun (name, pinned) ->
+            let declared =
+                declaredWitnessFields
+                |> List.tryFind (fun (n, _) -> n = name)
+                |> Option.map snd
+                |> Option.defaultValue []
+
+            witnessDeclaredFieldsLaw name pinned declared)
 #else
+        let fields =
+            frozenWitnessFields
+            |> List.map (fun (name, pinned) ->
+                match frozenWitnessTypes |> List.tryFind (fun (n, _) -> n = name) with
+                | Some(_, t) -> witnessFieldsLaw name pinned t
+                | None ->
+                    let law = witnessFieldsCell name
+
+                    law.Check(false, fun () -> name + " is frozen but names no record type for the .NET law to read")
+
+                    law.Result)
+
         fields @ [ witnessCoverageLaw (kitPublicTypes ()) ]
 #endif

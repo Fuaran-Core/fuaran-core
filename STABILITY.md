@@ -2616,6 +2616,47 @@ stack-traced. Each is one line on stderr and exit 2. An invocation that read bef
 report and exits the same code. `README.md`'s package row states the full regime: `classify` 0 / 3 / 4,
 or 0 / 1 under `--expect`; `spike-proposal` 0 / 1; 2 for every refusal.
 
+### The two cross-runtime claims the suite did not measure are measured (Phase 387, DECISIONS.md D124) — `additive` on the .NET surface; the Fable sources lose two reflection laws (`removal`); every SAMPLED set moves; the wire `none`
+
+**The class, from the gate.** The surface family prints `Fuaran.Core.Conformance` **`additive`**
+(`Conformance.declaredWitnessFields`, `Conformance.witnessDeclaredFieldsLaw`) and no move in
+`Fuaran.Core.Idl` — the sampler's change is to its VALUES, which no surface baseline can see and this
+entry states instead. The `fable/` sources, which no baseline renders, lose
+`Conformance.witnessFieldsLaw` and `Conformance.witnessCoverageLaw`: both read records by reflection
+and are .NET-only now — a **`removal`** for a consumer that compiles the kit under Fable and called
+either directly. No wire byte, digest, `api/wire/` baseline or generated-decoder byte moves.
+
+**The sampler is `ConfRng`'s stream, and every sampled set moved — the `0.12.0` form.**
+`Fuaran.Core.Idl.Sample` was a `uint64` LCG (a 64-bit multiply, the shape Fable cannot carry) choosing
+by `% n`. It is now `ConfRng`'s xorshift32 seeded as `ConfRng.ofSeed` seeds, with every bounded choice
+`intBelow` by rejection, and `trySampleNodes` cycles its kind tags without an index modulo. The
+signatures did not move; **every value did**: a consumer that pinned a sampled vector, or a corpus or
+proof fact generated from a seed, sees different nodes from the same seed and must regenerate it. Treat
+the repin as a READ, as `0.12.0` asked: a vacuity or coverage demand that still passes should pass for
+a reason. In this repository the move regenerated `proofs/VocabularyVectors.fst` (verified by the
+pinned prover) and exposed one demand met by the seed rather than by design — the Phase 347
+`__proto__` corner of the sampled-mutation law, which now draws among object positions.
+
+**The claim is measured, on both legs.** `ParityVectors.vectors` gains seven `sample/*` rows at its
+tail (every earlier row keeps its place): `sample/draws/*` over four seeds — a vocabulary whose
+encoding spells out each choice, a seven-case enum where rejection and modulo differ —
+`sample/nodes/*`, the SHA-256 of twelve sampled nodes over every slot shape at two seeds, and
+`sample/refusal/empty-enum`, the typed refusal's text. `ParityVectorTests` pins their .NET bytes and
+holds the sampler's copy of the generator to `ConfRng.intBelow` over forty-three seeds; the receiving
+gate's node leg compares the rows across the two pipelines at the next cut that cites it.
+
+**The witness freeze reads no reflection under Fable.** `witnessSurfaceLaws ()` on .NET is unchanged —
+one reflecting `witnessFieldsLaw` per frozen record and the coverage law. Under Fable each record's law
+is `witnessDeclaredFieldsLaw` over `Conformance.declaredWitnessFields`, the committed list of each
+frozen record's fields as reflection reads them, with the same law name and counterexample; this
+repository's `SurfaceLawsTests` holds the list equal to reflection, so a record that grows a field
+reddens that test before the list can lag it.
+
+**D95, as it is.** The `SourceLit` module doc and D95 now say that the escaper's guarantee covers
+IDL-authored text only. A `THosted` slot's `FSharp` / `Encode` / `Decode`, a `TFn` slot's
+`ClosureSig` and `support.json` entries are host source, spliced verbatim and trusted as the compiling
+project's own code; `IdlCertificationTests` pins that boundary with a planted hosted body.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a
