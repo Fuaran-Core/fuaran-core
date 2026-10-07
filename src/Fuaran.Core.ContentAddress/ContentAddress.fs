@@ -14,12 +14,22 @@ namespace Fuaran.Core
 [<RequireQualifiedAccess>]
 module ContentAddress =
 
+    open System.Runtime.CompilerServices
+
+    /// SHA-256 over the UTF-8 bytes of `text`, through `Digest.ofSha256Bytes` — the bytes-level
+    /// constructor `Fuaran.Core.Tree` shares with this package alone, through its
+    /// `InternalsVisibleTo` (D122). `NoInlining` (D129): the F# optimiser would otherwise copy a body
+    /// naming that internal member into a Release-built caller, which cannot reach it and fails with
+    /// `MethodAccessException`. Both constructors below reach it only through here.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let private mint (text: string) : Digest =
+        Digest.ofSha256Bytes (Hash.utf8Bytes text)
+
     /// The digest of `v`'s canonical text under `profile`: `Canonical.tryWrite profile v`, hashed.
     /// Refused exactly where `tryWrite` refuses (a non-finite float or an ill-formed string, named
     /// with its path), because there the text would not mean `v` and two values would share it.
     let ofValue (profile: EncodingProfile) (v: JVal) : Result<Digest, string> =
-        Canonical.tryWrite profile v
-        |> Result.map (fun text -> Digest.ofSha256Bytes (Hash.utf8Bytes text))
+        Canonical.tryWrite profile v |> Result.map mint
 
     /// The digest of stored text, admitted only when the text IS canonical under `profile`
     /// (`Canonical.isCanonical`): then its bytes are `ofValue profile` of the value it reads as, and
@@ -30,7 +40,7 @@ module ContentAddress =
         if isNull text then
             Error "the text is null"
         elif Canonical.isCanonical profile text then
-            Ok(Digest.ofSha256Bytes (Hash.utf8Bytes text))
+            Ok(mint text)
         else
             Error(
                 "the text is not canonical under "

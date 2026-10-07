@@ -56,7 +56,7 @@ module internal TypeScriptDeclarations =
             | TFloat, VFloat f -> Ok(invariantFloat f)
             | TFloat, VInt i -> Ok(string i)
             | TEnum n, VEnum wire ->
-                match IdlLookup.tryEnum idl n with
+                match CodegenLookup.tryEnum idl n with
                 | Some e when List.contains wire e.WireCases -> Ok(SourceLit.tsString wire)
                 | _ -> mismatch (sprintf "the wire string %A at enum '%s'" wire n)
             | TList inner, VList xs ->
@@ -81,11 +81,11 @@ module internal TypeScriptDeclarations =
             // one's presence test honest (see [[typescriptValueWith]]).
             | (TClosure | TFn _ | TOpaque), (VClosure | VOpaque) -> Ok "(() => undefined)"
             | TRecord n, VRecord authored ->
-                match IdlLookup.tryRecord idl n with
+                match CodegenLookup.tryRecord idl n with
                 | None -> mismatch (sprintf "a value of the undeclared record '%s'" n)
                 | Some r -> members subst ("record '" + n + "'") r.Fields authored |> Result.map objectOf
             | TUnion(n, args), VUnion(tag, authored) ->
-                match IdlLookup.tryUnion idl n with
+                match CodegenLookup.tryUnion idl n with
                 | None -> mismatch (sprintf "a value of the undeclared union '%s'" n)
                 | Some u when List.length u.Params <> List.length args ->
                     mismatch (sprintf "union '%s' applied to %d type arguments" n (List.length args))
@@ -126,7 +126,7 @@ module internal TypeScriptDeclarations =
             |> Result.map (List.choose id)
 
         and node (id: string) envelope (kindTag: string) fields : Result<string, CodegenError> =
-            match IdlLookup.tryKind idl kindTag with
+            match CodegenLookup.tryKind idl kindTag with
             | None -> mismatch (sprintf "a node of the undeclared kind '%s'" kindTag)
             | Some k ->
                 match
@@ -220,7 +220,7 @@ module internal TypeScriptDeclarations =
     /// `<Kind>Spec`, `DecodeRefusal`) is refused as `UnsupportedConstruct` rather than declared
     /// twice.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
+        let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
 
         let enums, unions, records = referenced idl kinds
         let disc = tsDiscKey idl.Wire.Discriminator

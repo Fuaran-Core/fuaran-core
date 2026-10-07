@@ -7,6 +7,9 @@
     <Description>Fuaran.Core.Query — the declarative, cross-domain data-acquisition seam (Phase 46): the data-acquisition sibling to Capability. A Query is a serialisable, typed declaration of external data to fetch (relational rows, retrieval hits, file/asset ingest, reference lookup) producing a Column Table; the host supplies the resolver (witness pattern). Default-deny registry, typed param validation, Phase 27 capture keying, Fable-clean codec. FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Phase 402 - the one boundary this package reads Fuaran.Core.Function's internals through,
+         each forwarder NoInlining (DECISIONS.md D129). -->
+    <Compile Include="FunctionInternals.fs" />
     <Compile Include="Query.fs" />
   </ItemGroup>
   <ItemGroup>

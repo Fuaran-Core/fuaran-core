@@ -16,9 +16,9 @@
 # the exit code both disagreed with reality, so pinning the text alone would let the pair drift
 # apart again.
 #
-# FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, and since Phase 393 the PIN-RESOLUTION arms,
-# R, which need no prover and run first). The first prover arm is the control that makes the other
-# three mean something:
+# FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, since Phase 393 the PIN-RESOLUTION arms,
+# R, which need no prover and run first, and since Phase 402 the FLOOR-OS arms, O, and the CACHE
+# PROVENANCE arms, P). The first prover arm is the control that makes the other three mean something:
 #
 #   A. GREEN CONTROL — a true model, no host step: exit 0 AND `proofs: green`. If this is red, the
 #                      scratch apparatus is broken and a red B–D would prove nothing.
@@ -297,6 +297,91 @@ Assert-That 'G. TWINS — and does not print proofs: green' (-not $g.Green) (Sho
 
 $h = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); Twins = $true })
 Assert-That 'H. TWINS — a -ProofOnly model needs no twins' ($h.Exit -eq 0) "exit $($h.Exit): $(Show-Tail $h)"
+
+# ---- O. THE FLOORS' OS (Phase 402) -----------------------------------------------------------------
+
+# A floor is enforced on the OS `floorSeeding.os` names and on no other. LegGood checks in about a
+# second, so a 50s floor is a breach wherever it is enforced: red on the host's own OS, and on any
+# other OS not enforced, the leg green and saying why.
+$otherOs = if ($hostOs -eq 'linux') { 'windows' } else { 'linux' }
+function Set-FloorBudget([string] $os) {
+    @{
+        kind         = 'proofModules'
+        floorSeeding = @{ os = $os }
+        modules      = @(@{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 50 })
+    } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.floor.json')
+}
+
+Set-FloorBudget $hostOs
+$o1 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.floor.json') })
+Assert-That "O. FLOOR — a floor seeded on this OS ($hostOs) is enforced: a breach exits NON-ZERO" ($o1.Exit -ne 0 -and -not $o1.Green) "exit $($o1.Exit): $(Show-Tail $o1)"
+Assert-That 'O. FLOOR — and names the floor it broke' ([bool](@($o1.Lines -match 'under its 50s floor').Count)) (Show-Tail $o1)
+
+Set-FloorBudget $otherOs
+$o2 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.floor.json') })
+Assert-That "O. FLOOR — a floor seeded on $otherOs is not enforced on $($hostOs): exit 0 and green" ($o2.Exit -eq 0 -and $o2.Green) "exit $($o2.Exit): $(Show-Tail $o2)"
+Assert-That 'O. FLOOR — and says the floors are not enforced here, and why' ([bool](@($o2.Lines -match "seeded on $otherOs and are NOT enforced").Count)) (Show-Tail $o2)
+
+Set-FloorBudget 'solaris'
+$o3 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.floor.json') })
+Assert-That 'O. FLOOR — a floorSeeding.os naming no OS is refused, naming the key' ($o3.Exit -ne 0 -and -not $o3.Green -and [bool](@($o3.Lines -match 'floorSeeding.os').Count)) "exit $($o3.Exit): $(Show-Tail $o3)"
+
+# ---- P. CACHE PROVENANCE (Phase 402) ----------------------------------------------------------------
+
+# The second writer, caught directly. LegUses depends on LegGood; LegThird depends on nothing.
+Set-Content (Join-Path $scratch 'LegUses.fst') "module LegUses`n`nopen LegGood`n`nlet two : nat = one + one`n"
+Set-Content (Join-Path $scratch 'LegThird.fst') "module LegThird`n`nlet three : nat = 3`n"
+@{
+    kind    = 'proofModules'
+    modules = @(
+        @{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 0 }
+        @{ module = 'LegFailsName'; budgetSeconds = 60; floorSeconds = 0 }
+        @{ module = 'LegUses'; budgetSeconds = 60; floorSeconds = 0 }
+        @{ module = 'LegThird'; budgetSeconds = 60; floorSeconds = 0 }
+    )
+} | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.provenance.json')
+$provenance = $base + @{ BudgetFile = (Join-Path $scratch 'modules.provenance.json') }
+
+# The CONTROL: a dependency checked first leaves its own `.checked` file for the dependent to read,
+# which is this run's own write and no second writer.
+$p0 = Invoke-Leg ($provenance + @{ Modules = @('LegGood', 'LegUses'); ProofOnly = @('LegGood', 'LegUses') })
+Assert-That 'P. PROVENANCE CONTROL — a dependency checked before its dependent exits 0 and green' ($p0.Exit -eq 0 -and $p0.Green) "exit $($p0.Exit): $(Show-Tail $p0)"
+
+# The second CONTROL, dependent first. The pinned prover writes a module's `.checked` file only when
+# it checks that module itself, never for a dependency it checks on the way (measured 2026-10-07), so
+# checking LegUses leaves LegGood's own file absent and LegGood's check after it is still cold. If a
+# prover release ever starts caching dependencies, this arm goes red, and the rule's premise with it.
+$p1 = Invoke-Leg ($provenance + @{ Modules = @('LegUses', 'LegGood'); ProofOnly = @('LegUses', 'LegGood') })
+Assert-That 'P. PROVENANCE CONTROL — a dependent checked before its dependency leaves the dependency cold: exit 0 and green' ($p1.Exit -eq 0 -and $p1.Green) "exit $($p1.Exit): $(Show-Tail $p1)"
+
+# A SECOND WRITER: another runspace forges LegThird's `.checked` file into the cache the moment
+# LegGood's appears, which is a whole LegFailsName check before LegThird's turn.
+$pcache = Join-Path $WorkDir 'pcache'
+$writer = [powershell]::Create()
+$null = $writer.AddScript({
+        param($dir)
+        $deadline = [DateTime]::UtcNow.AddMinutes(5)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (Test-Path (Join-Path $dir 'LegGood.fst.checked')) {
+                Set-Content (Join-Path $dir 'LegThird.fst.checked') 'forged by a second writer'
+                return
+            }
+            Start-Sleep -Milliseconds 20
+        }
+    }).AddArgument($pcache)
+$writerRun = $writer.BeginInvoke()
+try {
+    $p2 = Invoke-Leg ($provenance + @{
+            Modules = @('LegGood', 'LegFailsName', 'LegThird'); ProofOnly = @('LegGood', 'LegFailsName', 'LegThird'); CacheDir = $pcache
+        })
+}
+finally {
+    $writer.Stop()
+    $writer.Dispose()
+}
+Assert-That 'P. SECOND WRITER — a file another process wrote into the cache is refused' ($p2.Exit -ne 0 -and -not $p2.Green) "exit $($p2.Exit): $(Show-Tail $p2)"
+Assert-That 'P. SECOND WRITER — before LegThird is checked, and naming what it found' ([bool](@($p2.Lines -match 'SECOND WRITER.*LegThird\.fst\.checked appeared|LegThird\.fst is NOT about to be checked cold').Count)) (Show-Tail $p2)
+Assert-That 'P. SECOND WRITER — and prints no LegThird.fst verified line' (-not [bool](@($p2.Lines -match 'LegThird\.fst verified').Count)) (Show-Tail $p2)
 
 Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 

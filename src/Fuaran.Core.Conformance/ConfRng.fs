@@ -35,6 +35,8 @@ namespace Fuaran.Core
 /// the same run, which is how a counterexample is reproduced.
 module ConfRng =
 
+    open System.Runtime.CompilerServices
+
     /// An immutable generator position: every draw returns the value and the NEXT `T`, so a
     /// stream is reproduced by re-threading from the same `ofSeed`.
     type T =
@@ -50,17 +52,22 @@ module ConfRng =
     // 32-bit multiply: until 0.20.0 this generator was an LCG on exactly that product, and under
     // Fable every draw after the first collapsed to zero. The cross-pipeline `confRng/*` vectors in
     // `ParityVectors` (this package) are what buy it, and they redden on a reverted multiply.
+    // The three functions below that name `Xorshift32` are `NoInlining` (Phase 402, DECISIONS.md
+    // D129): the kernel is internal to `Fuaran.Core.Idl`, and a body naming it that the F# optimiser
+    // copied into a Release-built caller failed there with `MethodAccessException`.
 
     /// Seed to initial state. Non-zero by construction (see `Xorshift32.step`), and warmed by three
     /// rounds so that adjacent seeds start far apart rather than one shift-and-XOR apart —
     /// a kit that certifies over a seed SWEEP would otherwise draw near-identical samples
     /// from consecutive seeds.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
     let ofSeed (seed: int) : T = { State = Xorshift32.seeded seed }
 
     /// A non-negative int (the top 31 bits of the advanced state) and that state.
     ///
     /// Value-identical on .NET and under Fable, which is the constraint `intBelow` documents
     /// below and this function did not honour until 0.20.0 — see `Xorshift32.step`.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
     let next (r: T) : int * T =
         let s = Xorshift32.step r.State
         Xorshift32.value s, { State = s }
@@ -81,6 +88,7 @@ module ConfRng =
     /// exactly) and no 32-bit multiply (which does not wrap identically on both pipelines), so
     /// the kit stays value-identical under Fable. `next` honours that same constraint since
     /// 0.20.0, having been an LCG that did not — see `Xorshift32`, and `Hash.fs`.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
     let intBelow (n: int) (r: T) : int * T = Xorshift32.below next n r
 
     /// A uniformly chosen element of `xs` (index drawn by `intBelow`) and the advanced state.

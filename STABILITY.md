@@ -2907,6 +2907,28 @@ widening rides this draft as the earlier record-widenings on it did.
 (`docs/demand-census.md`) records which intents they express and which are host-side by design, and
 `docs/ADOPTION.md` restates it for an adopter.
 
+### A Release-built consumer no longer fails reaching an internal member; the proof leg's cold check holds on both OSes (Phase 402, DECISIONS.md D129) — NO SURFACE CHANGE: no public member, signature or wire byte moves; behavioural for a Release-built consumer, which stops failing
+
+**What moved, for a consumer.** Built in Release against `0.35.2`, a consumer that called
+`ConfRng.ofSeed`, `ConfRng.next`, `ConfRng.intBelow` (and so every generator and law family drawing
+through them), or `QueryRegistry.register`, `unregister`, `replace`, `restrict` and `union`, could fail
+at run time with `MethodAccessException`. The F# optimiser had copied a body naming another Core
+package's internal member into the consumer's assembly. Those functions, and every other reach across
+a friend grant between Core packages, now sit in `NoInlining` bodies that stay in the package that
+holds the grant (D129). Nothing to change at a call site. The only difference is that a Release build
+now runs. `CrossAssemblyInliningTests` holds the rule over the built IL of both configurations.
+
+**The proof leg.** Each module's time floor is enforced only on the OS it was seeded on
+(`proofs/modules.json` `floorSeeding.os`, `windows` for every committed floor). A floor is a fact about
+one kind of machine. The first Linux run verified `WireColumn` faster than its Windows-seeded floor,
+and there was no second writer. The second writer the floor stands in for is now refused directly, on
+every OS, by the kit's cache provenance check: nothing may move in the cache between two of a run's
+prover invocations, and a module's own `.checked` file may not be there before its cold check. A
+copy of `proofs/kit/check-proof-leg.ps1` re-copies from here, as its record in `copies.json` says.
+
+**Cost:** none at a call site. A Release-built consumer pays one call where the optimiser used to
+copy a body, on functions whose bodies are a call or two.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

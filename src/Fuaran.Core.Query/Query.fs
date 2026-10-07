@@ -557,7 +557,7 @@ module QueryError =
             "Refused: there is no query '"
             + id
             + "' you may run. The queries you may run are "
-            + SeamCodec.quoteAll known
+            + FunctionInternals.Reads.quoteAll known
             + "."
         | DuplicateQuery id -> "Refused: the query '" + id + "' is registered twice."
         | UnknownParam(name, []) ->
@@ -568,7 +568,7 @@ module QueryError =
             "Refused: '"
             + name
             + "' is not a parameter of this query. Its parameters are "
-            + SeamCodec.quoteAll declared
+            + FunctionInternals.Reads.quoteAll declared
             + "."
         | ParamTypeMismatch(name, expected, got) ->
             "Refused: parameter '"
@@ -579,19 +579,22 @@ module QueryError =
             + ColumnType.tag got
             + "."
             + howToWrite expected
-        | RequiredParamsUnbound names -> "Refused: required parameters missing: " + SeamCodec.quoteAll names + "."
+        | RequiredParamsUnbound names ->
+            "Refused: required parameters missing: "
+            + FunctionInternals.Reads.quoteAll names
+            + "."
         | SourceNotResolved r -> "Refused: the data source '" + r + "' could not be resolved."
         | ExecutionFailed(detail, []) -> "Refused: the query ran and failed: " + detail + "."
         | ExecutionFailed(detail, recoverable) ->
             "Refused: the query ran and failed: "
             + detail
             + ". You may retry with "
-            + SeamCodec.quoteAll recoverable
+            + FunctionInternals.Reads.quoteAll recoverable
             + "."
         | Timeout -> "Refused: the query timed out."
         | RequiredParamsNull names ->
             "Refused: required parameters bound to no value: "
-            + SeamCodec.quoteAll names
+            + FunctionInternals.Reads.quoteAll names
             + "."
         | DuplicateParam name ->
             "Refused: parameter '"
@@ -605,7 +608,7 @@ module QueryError =
             + "' does not allow this: "
             + reason
             + ". What it allows instead: "
-            + SeamCodec.quoteAll allowed
+            + FunctionInternals.Reads.quoteAll allowed
             + "."
         | QueryApprovalRequired policy ->
             "Refused: the policy '"
@@ -625,7 +628,7 @@ module QueryError =
             "Refused: '"
             + name
             + "' is not a column of this query's result. Its columns are "
-            + SeamCodec.quoteAll declared
+            + FunctionInternals.Reads.quoteAll declared
             + "."
         | PredicateTypeMismatch(column, expected, got) ->
             "Refused: the filter on column '"
@@ -1228,7 +1231,7 @@ module QueryRegistry =
     /// since Phase 316, only a declaration whose parameter names are distinct (`DuplicateParam`
     /// otherwise, naming the repeated name). The id is checked first.
     let register (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
-        KeyedRegistry.register DuplicateQuery admissionFault q.Id q r.Queries
+        FunctionInternals.Registry.register DuplicateQuery admissionFault q.Id q r.Queries
         |> Result.map (fun m -> { r with Queries = m })
 
     /// The query registered under `id`, or `None`. A bare lookup: unlike `dispatch` it
@@ -1268,7 +1271,7 @@ module QueryRegistry =
 
     /// The policy's admission of one validated invocation, in this seam's error.
     let private admit (r: QueryRegistry) (q: Query) (args: (string * Cell) list) : Result<unit, QueryError> =
-        RegistryPolicy.admit
+        FunctionInternals.Registry.admit
             (fun policy (g: RejectionGuidance) -> QueryPolicyRefused(policy, g.Message, g.Alternatives))
             QueryApprovalRequired
             r.Policy
@@ -1350,14 +1353,14 @@ module QueryRegistry =
     /// does not hold it, naming every id it does hold. Removing a query just registered gives back
     /// the registry it was registered into.
     let unregister (id: string) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
-        KeyedRegistry.unregister (fun id known -> NoSuchQuery(id, known)) id r.Queries
+        FunctionInternals.Registry.unregister (fun id known -> NoSuchQuery(id, known)) id r.Queries
         |> Result.map (fun m -> { r with Queries = m })
 
     /// Swap the query registered under `q.Id` for `q` — the hot-reload verb. Refused `NoSuchQuery`
     /// when the id is not registered, and held to the admission `register` runs (`DuplicateParam`);
     /// on a refusal the registry is unchanged.
     let replace (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
-        KeyedRegistry.replace (fun id known -> NoSuchQuery(id, known)) admissionFault q.Id q r.Queries
+        FunctionInternals.Registry.replace (fun id known -> NoSuchQuery(id, known)) admissionFault q.Id q r.Queries
         |> Result.map (fun m -> { r with Queries = m })
 
     /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny. An id
@@ -1365,13 +1368,13 @@ module QueryRegistry =
     /// enumerates.
     let restrict (keep: Set<string>) (r: QueryRegistry) : QueryRegistry =
         { r with
-            Queries = KeyedRegistry.restrict keep r.Queries }
+            Queries = FunctionInternals.Registry.restrict keep r.Queries }
 
     /// The join of two registries whose ids are disjoint — refused `DuplicateQuery` naming the first
     /// id, in id order, that both hold (no silent overwrite, as `register`). Associative. The union
     /// runs both registries' gates (Phase 318, `RegistryPolicy.combine`).
     let union (a: QueryRegistry) (b: QueryRegistry) : Result<QueryRegistry, QueryError> =
-        KeyedRegistry.union DuplicateQuery a.Queries b.Queries
+        FunctionInternals.Registry.union DuplicateQuery a.Queries b.Queries
         |> Result.map (fun m ->
             { Queries = m
               Policy = RegistryPolicy.combine a.Policy b.Policy })
@@ -1982,7 +1985,7 @@ module QueryCodec =
     // Phase 310 — the members check is the decode layer's strict policy (`Decoder.members`); the
     // refusal keeps this codec's sentence, naming the object it is in. The helpers are the seam
     // codecs' one set (`SeamCodec`, Phase 388), shared with `CapabilityCodec`.
-    open SeamCodec
+    open FunctionInternals.Reads
 
     let private strictQuery (el: JVal) =
         members

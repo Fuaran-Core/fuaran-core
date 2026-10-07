@@ -1139,7 +1139,7 @@ const cEveryOf = (read) => {
         if List.isEmpty requests && not decoders then
             Ok None
         else
-            let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
+            let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
 
             let _, unions, records = referenced idl kinds
             let msg = msgCarrying idl

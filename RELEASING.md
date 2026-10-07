@@ -66,6 +66,55 @@ pwsh ./.github/scripts/probe-registry.ps1 -ListRoster       # the ids it would a
   version. Re-run to complete a partial push. If the published contents are wrong, the fix ships as
   the next patch version.
 
+## Exercising the release gates
+
+A gate that has never been seen to refuse is a claim, not evidence. So each gate on the release path
+is run once where it guards, before the first release that depends on it, and the runs are recorded
+here. Repeat the exercise after any change to `publish-packages.yml`, to the `verify` or `proofs`
+jobs of `ci.yml`, or to `proofs/kit/check-proof-leg.ps1`.
+
+**1. The `main` run of `ci.yml`.** After the change lands, read the first `ci` run on `main`. All
+four legs must be green: `verify (Debug)`, `verify (Release)`, `proofs (windows-latest)` and
+`proofs (ubuntu-latest)`. If a proof leg dies with no F\* error line, re-run it before you diagnose
+it. A leg that lost its prover has refuted nothing.
+
+**2. A refused publish.** Push a disposable tag whose publish run cannot publish, and whose proof
+leg must refuse it. The tag's commit sits on a throwaway branch and makes exactly these changes:
+
+- `proofs/DagFold.fst` gains one lemma the prover must refuse, for example
+  `let gate_probe_refuted (n: nat) : Lemma (n + 1 = n) = ()`. `DagFold` is the first module the leg
+  checks, so the refusal comes in its first minute.
+- `.github/workflows/publish-packages.yml` loses every step that could reach the registry: the
+  NuGet login, both pushes and the registry probe. The `publish` job also loses `id-token: write`.
+  So no outcome of the run can publish anything, whatever else goes wrong.
+- `Directory.Build.props` sets `<Version>` to the tag's version, `0.0.0-gate-probe-<yyyymmdd>`.
+  The `tag` job refuses any tag that is not `v<Version>`, and it has to be green for the run to
+  reach the proof leg.
+
+The run must show `tag` green, `proofs` red at the planted lemma, and `publish` skipped. Then delete
+the tag and the branch on the remote. No tag-reading test family can read the probe tag while it
+exists: each parses tags as `vX.Y.Z` exactly, and `GateProbeTagTests` holds that for every reader.
+
+```powershell
+$date = Get-Date -Format yyyyMMdd
+git switch -c "gate-probe-$date" origin/main
+# make the three changes above, then:
+git commit -am "test: a disposable gate probe, never merged"
+git tag "v0.0.0-gate-probe-$date"
+git push origin "gate-probe-$date" "v0.0.0-gate-probe-$date"
+# read the publish-packages run the tag started, record it below, then:
+git push origin --delete "v0.0.0-gate-probe-$date" "gate-probe-$date"
+git tag -d "v0.0.0-gate-probe-$date"
+git switch main
+git branch -D "gate-probe-$date"
+```
+
+**The record.** Newest first. Each exercise adds its runs here.
+
+| When | Run | Commit | Gate | Outcome |
+|---|---|---|---|---|
+| 2026-10-07 | [ci 37688313255](https://github.com/Fuaran-Core/fuaran-core/actions/runs/37688313255) | `785f9db` (`main`) | `verify (Release)`, `proofs (ubuntu-latest)`: the first run of each | **Both red, and both findings were real.** `verify (Release)`: nine families failed with `MethodAccessException`, because the F# optimiser had copied bodies that name another package's internal member into the test assembly. A Release-built consumer failed the same way. Fixed by Phase 402 (DECISIONS.md D129). `proofs (ubuntu-latest)`: the Linux leg itself worked (the archive, the prover and every model checked green), but it was refused at `WireColumn`, 16s against a 17s floor seeded on Windows. The Linux runner is faster, and there was no second writer. Since Phase 402, a floor is enforced only on the OS it was seeded on, and the kit's cache provenance check refuses a second writer directly, on every OS. |
+
 ## The Trusted Publishing policy
 
 The publish job has no long-lived API key. `NuGet/login@v1` exchanges the job's GitHub OIDC token

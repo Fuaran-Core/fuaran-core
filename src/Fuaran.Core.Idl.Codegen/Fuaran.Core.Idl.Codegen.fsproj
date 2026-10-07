@@ -25,6 +25,9 @@
     <!-- Phase 293 - the emitters, split behind the `Gen` facade: internal modules in dependency
          order, the facade last so it can forward to all of them and declare the published
          support types. -->
+    <!-- Phase 402 - the one boundary this package reads Fuaran.Core.Idl's internals through, each
+         lookup NoInlining (DECISIONS.md D129); first, so every emitter can call it. -->
+    <Compile Include="Lookup.fs" />
     <Compile Include="Emit/Core.fs" />
     <Compile Include="Emit/Reach.fs" />
     <Compile Include="Emit/Annotations.fs" />

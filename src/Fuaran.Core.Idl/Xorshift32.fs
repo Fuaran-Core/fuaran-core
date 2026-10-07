@@ -6,7 +6,9 @@ namespace Fuaran.Core
 /// sampler draws `ConfRng`'s stream by construction rather than by a copy held equal by a test. It
 /// lives here, in the lower of the two packages, because `Fuaran.Core.Conformance` references this
 /// one; that package reads it through `InternalsVisibleTo` (DECISIONS.md D125). Internal: the
-/// surface is `ConfRng`'s.
+/// surface is `ConfRng`'s. So every function there that names this module is `NoInlining` (D129): a
+/// body naming an internal member of THIS assembly, copied by the F# optimiser into a Release-built
+/// caller of `ConfRng`, fails there with `MethodAccessException`.
 ///
 /// **Shifts and XOR, never a 32-bit multiply — and that is the whole point of this kernel.** A
 /// `uint32` product is the one arithmetic shape Fable cannot carry: it is formed on a double, so

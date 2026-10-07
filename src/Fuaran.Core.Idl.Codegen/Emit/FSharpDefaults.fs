@@ -117,7 +117,7 @@ module internal FSharpDefaults =
             | None -> refuse ()
         | TList _, VList [] -> Ok "[]"
         | TRecord n, VRecord authored ->
-            match IdlLookup.tryRecord idl n with
+            match CodegenLookup.tryRecord idl n with
             | None -> refuse ()
             | Some r ->
                 r.Fields
@@ -127,7 +127,7 @@ module internal FSharpDefaults =
                 |> sequenceR
                 |> Result.map (recordLit r.Name)
         | TUnion(n, args), VUnion(tag, authored) ->
-            match IdlLookup.tryUnion idl n with
+            match CodegenLookup.tryUnion idl n with
             | None -> refuse ()
             | Some u when List.length u.Params <> List.length args -> refuse ()
             // The shared wire rule — see [[isDeclaredTransparentCase]]. This arm is what the

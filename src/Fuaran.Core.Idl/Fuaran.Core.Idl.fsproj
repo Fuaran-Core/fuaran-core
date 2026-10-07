@@ -39,7 +39,10 @@
   <ItemGroup>
     <!-- Phase 388: the declaration lookups (`IdlLookup`) are the code generator's too, and the
          xorshift32 kernel (`Xorshift32`) is the conformance kit's `ConfRng` too — one body each,
-         read by the packages above this one rather than copied into them. -->
+         read by the packages above this one rather than copied into them. Phase 402: each friend
+         reads them only from NoInlining functions (DECISIONS.md D129), because the F# optimiser
+         would otherwise copy a body naming them into a Release-built caller that cannot see them;
+         CrossAssemblyInliningTests holds it, and fails on a grant here that nothing reads. -->
     <InternalsVisibleTo Include="Fuaran.Core.Idl.Codegen" />
     <InternalsVisibleTo Include="Fuaran.Core.Conformance" />
   </ItemGroup>

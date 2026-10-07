@@ -29,6 +29,16 @@
 #               measuring apparatus is broken — almost always a second writer in the cache — so
 #               everything after it would be measured with the same broken apparatus. -NoFloor
 #               is the deliberate opt-out for a machine genuinely that fast.
+#               A floor is a number measured on ONE kind of machine, so since Phase 402 the budget
+#               file's `floorSeeding.os` names the OS its floors were seeded on, and on any other
+#               OS they are not enforced (one line says so): a Windows-seeded floor broke the first
+#               Linux run, whose runner is simply faster. The second writer the floor stands in for
+#               is caught DIRECTLY, on every OS and whatever the clock says, by the CACHE
+#               PROVENANCE check (Phase 402): between two of this run's prover invocations nothing
+#               in the cache may appear, change or vanish, and a module's own `.checked` file may
+#               not be in the cache before its cold check starts. Either is a refusal naming the
+#               files — the 2026-09-14 incident (another run's `.checked` files found by this one)
+#               is exactly both.
 #               The cache the cold runs use is PER INVOCATION (<WorkDir>/cache-<pid>, or
 #               -CacheDir), created and removed by this script, so that "cold cache" cannot be
 #               quietly falsified by another run in the same worktree. See "Running it" in the
@@ -652,6 +662,25 @@ foreach ($declared in $budgets.Keys) {
 # normalised measurement would be a number nobody observed, and the whole value of this leg's cost
 # half is that every figure in it is one somebody's machine really produced.
 #
+# THE FLOORS' OS (Phase 402). A floor is the fastest cold run ever observed on the machine that
+# seeded it, halved — a fact about that machine as much as about the module. The first Linux run
+# verified WireColumn in 16s against a 17s floor seeded on Windows: a faster runner, not a second
+# writer. So `floorSeeding.os` names the OS the floors were seeded on, and they are enforced there
+# only. ABSENT means every OS, which is how an adopter's file without the key has always read. Not
+# enforcing them elsewhere does NOT leave the cold claim unchecked: the cache provenance check in
+# section 3 is what catches a second writer, on every OS, and the floor is its backstop where a
+# floor has been measured. Seeding floors for a second OS is a change to this file's format, made
+# when a reader wants that backstop there, with that OS's own cold runs as its evidence.
+$hostPlatform = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'macos' } else { '' }
+$floorsSeededOn = $null
+if ($null -ne $budgetDocument.floorSeeding -and $null -ne $budgetDocument.floorSeeding.os) {
+    $floorsSeededOn = [string]$budgetDocument.floorSeeding.os
+    if (@('windows', 'linux', 'macos') -notcontains $floorsSeededOn) {
+        Fail "$budgetName floorSeeding.os is '$floorsSeededOn' — it names the OS the floors were seeded on: windows, linux or macos"
+    }
+}
+$floorsApplyHere = ($null -eq $floorsSeededOn) -or ($floorsSeededOn -eq $hostPlatform)
+
 # THE THRESHOLD is declared, in this file's own `contentionSeeding` block, for the same reason the
 # budget and floor rules are: a number the engine baked in would be a number no repository could
 # re-seed from its own machine. An ABSENT block is NOT a finding — unlike an absent budget or floor,
@@ -838,10 +867,62 @@ Write-Host "==== proofs: cache $cache$(if (-not $script:invocationCacheIsOurs) {
 if ($NoFloor) {
     Write-Host "==== proofs: -NoFloor — the per-module time floors in $budgetName are NOT enforced on this run" -ForegroundColor Yellow
 }
+elseif (-not $floorsApplyHere) {
+    Write-Host "==== proofs: the time floors in $budgetName were seeded on $floorsSeededOn and are NOT enforced on $(if ($hostPlatform) { $hostPlatform } else { 'this OS' }) — a floor measures one kind of machine; the cache provenance check is what refuses a second writer here" -ForegroundColor Cyan
+}
+
+# THE CACHE PROVENANCE CHECK (Phase 402) — the second writer, caught directly rather than inferred
+# from the clock. Only this run's prover writes the cache, one invocation at a time, so the cache's
+# state is RECORDED after each invocation and must be found unchanged before the next; and the pinned
+# prover writes a module's `.checked` file only when it checks that module itself — never for a
+# dependency it checks on the way, measured 2026-10-07 and held by the kit tests' P arms — so a
+# module's own file cannot legitimately be there before its cold check. A file's state is its length and last write time — enough to see a write,
+# and nothing that costs a read of its bytes. What it cannot see is a writer active only DURING one
+# invocation and silent after it, whose files the next record takes as this run's own; that is the
+# window the floor still backstops where one is enforced, and a writer whose files include a model
+# not yet checked is caught anyway, by that model's own `.checked` file.
+function Get-CacheState([string] $dir) {
+    $state = @{}
+    if (Test-Path $dir) {
+        foreach ($f in Get-ChildItem $dir -File -Recurse -Force) {
+            $state[[System.IO.Path]::GetRelativePath($dir, $f.FullName)] = "$($f.Length):$($f.LastWriteTimeUtc.Ticks)"
+        }
+    }
+    $state
+}
+
+# What moved between two recorded states, one line per file.
+function Compare-CacheState([hashtable] $recorded, [hashtable] $now) {
+    $moved = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in $now.Keys) {
+        if (-not $recorded.ContainsKey($name)) { $moved.Add("$name appeared") }
+        elseif ($recorded[$name] -ne $now[$name]) { $moved.Add("$name was rewritten") }
+    }
+    foreach ($name in $recorded.Keys) {
+        if (-not $now.ContainsKey($name)) { $moved.Add("$name vanished") }
+    }
+    , @($moved | Sort-Object)
+}
+
+function Assert-CacheProvenance([hashtable] $recorded, [string] $module, [int] $run, [bool] $cold) {
+    $moved = Compare-CacheState $recorded (Get-CacheState $cache)
+    if ($moved.Count -gt 0) {
+        Fail ("a SECOND WRITER in the cache: before $module.fst on run $run of $Runs, $($moved.Count) file(s) in $cache moved since this run's last prover invocation, which nothing in this run did — $($moved -join '; '). " +
+            'Every time measured from here on would be read off a cache this run does not own. Check for another check.ps1 or fstar process against this cache (see section 3).')
+    }
+    if ($cold) {
+        $own = @(Get-ChildItem $cache -File -Force -Filter "$module.fst.checked*" -ErrorAction SilentlyContinue)
+        if ($own.Count -gt 0) {
+            Fail ("$module.fst is NOT about to be checked cold on run $run of ${Runs}: its own $($own[0].Name) is already in $cache. " +
+                'This run has not checked it, and the pinned prover writes a module''s .checked file only when it checks that module itself, so a SECOND WRITER put it there (see section 3).')
+        }
+    }
+}
 
 for ($run = 1; $run -le $Runs; $run++) {
     if (Test-Path $cache) { Remove-Item $cache -Recurse -Force }
     New-Item -ItemType Directory -Force $cache | Out-Null
+    $cacheState = Get-CacheState $cache
 
     # The PRE-FLIGHT line (Phase 166), at the head of every run rather than once per invocation:
     # contention is what changes between run 1 and run 3, so a number taken once says nothing about
@@ -860,12 +941,15 @@ for ($run = 1; $run -le $Runs; $run++) {
         for ($attempt = 1; $attempt -le 2; $attempt++) {
             $isRetry = $attempt -gt 1
             $suffix = if ($isRetry) { ".run$run.retry" } else { ".run$run" }
+            Assert-CacheProvenance $cacheState $module $run (-not $isRetry)
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $checked = Invoke-Prover @(
                 '--z3rlimit', $ZRlimit, '--quake', $Quake, '--report_assumes', 'error',
                 '--cache_checked_modules', '--cache_dir', $cache, "$module.fst"
             ) (Join-Path $logsDir "$module$suffix.check.log")
             $sw.Stop()
+            # Whatever this invocation wrote — verified, refuted or aborted — is this run's own.
+            $cacheState = Get-CacheState $cache
             $seconds = [int]$sw.Elapsed.TotalSeconds
 
             if ($checked.ExitCode -ne 0) {
@@ -939,9 +1023,9 @@ for ($run = 1; $run -le $Runs; $run++) {
             # undershoot says the measurement itself is not to be believed — the cache was not cold —
             # and every module after it is measured by the same apparatus, so carrying on would print
             # more green lines that a reader is entitled to read as evidence and that are not.
-            if (-not $NoFloor -and $floors.ContainsKey($module) -and $seconds -lt $floors[$module]) {
+            if (-not $NoFloor -and $floorsApplyHere -and $floors.ContainsKey($module) -and $seconds -lt $floors[$module]) {
                 Fail ("$module.fst verified in ${seconds}s on run $run of $Runs, under its $($floors[$module])s floor — that is not a cold verification. " +
-                    'Almost always a second writer in the cache directory (see section 3). Check for another check.ps1 or fstar process against this worktree; ' +
+                    'The cache provenance check saw no second writer between invocations, so suspect one that wrote DURING this one: check for another check.ps1 or fstar process against this cache; ' +
                     "if this machine really is that fast, re-seed the floor per $budgetName floorSeeding and cite your phase, or pass -NoFloor for this run.")
             }
 

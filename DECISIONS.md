@@ -1,5 +1,57 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D129: a Core assembly reaches another's internal member only from a `NoInlining` function; the friend grants stay, and no internal is made public to escape the rule
+
+**Recorded by Phase 402. `Fuaran.Core.Conformance` (`ConfRng`), `Fuaran.Core.Idl.Codegen`
+(`CodegenLookup`), `Fuaran.Core.Query` (`FunctionInternals`), `Fuaran.Core.ContentAddress`; the test
+is `CrossAssemblyInliningTests`. Rides the `0.36.0` draft with no surface change (STABILITY.md, "A
+Release-built consumer no longer fails reaching an internal member").**
+
+*The defect.* The first `main` run of the Release verify leg (ci run 37688313255, Core `785f9db`)
+failed nine test families with `MethodAccessException`: a test method was calling `Fuaran.Core.Idl`'s
+internal `Xorshift32.seeded`. The tests never named it. In Release, the F# optimiser inlines a public
+function's body into the assembly that CALLS it, and `ConfRng.ofSeed` was one call to `seeded`, which
+`Fuaran.Core.Conformance` reads through `Fuaran.Core.Idl`'s `InternalsVisibleTo`. The optimiser hides
+a function whose body names an internal member of its OWN assembly, so that body is never copied out.
+It does not do this for an internal member of ANOTHER assembly, because from the friend's side that
+member is visible. So the body was copied into a caller that cannot see the member. That is a
+shipped defect, not a test artefact: every Release-built consumer of the conformance kit failed the
+same way. A census of the built IL found the same shape at every friend grant between shipped
+packages. `QueryRegistry.register` and four of its siblings were single calls into
+`Fuaran.Core.Function`'s internal `KeyedRegistry`, and the code generator called `IdlLookup` from
+thirty-seven places.
+
+*Decided: the rule is `NoInlining`, uniformly.* A reference from one Core assembly to another's
+non-public member sits only in a function marked `[<MethodImpl(MethodImplOptions.NoInlining)>]`. A
+body with that mark is never copied into another assembly, so its reference stays in the assembly the
+grant was made to. Each friend reads through one small boundary. `ConfRng.ofSeed`, `next` and
+`intBelow` carry the mark themselves. The code generator reads `IdlLookup` only through the internal
+`CodegenLookup`. `Fuaran.Core.Query` reads `SeamCodec`, `KeyedRegistry` and `RegistryPolicy.admit`
+only through the internal `FunctionInternals`. `ContentAddress` mints through one private `mint`.
+Each forwarder takes its target's FULL argument list, so the reference is in its own body and not in
+a closure it returns. A closure has no attribute to carry.
+
+*Rejected: making the kernel and the lookups public.* That was the other way out, and it would have
+frozen at 1.0 a second public generator beside `ConfRng`, and four lookups nobody asked for. It also
+cannot be the uniform rule. `Digest.ofSha256Bytes` is internal by the D122 ruling, so that no package
+but `Fuaran.Core.Tree` and `Fuaran.Core.ContentAddress` can hand it bytes. A rule that applied to
+three grants and not the fourth would need a second rule for the fourth. `NoInlining` adds no surface,
+and dropping it later is a non-breaking change, which is the cheaper way round to be wrong before a
+freeze.
+
+*Held by:* `CrossAssemblyInliningTests` decodes every shipped assembly's IL in the configuration under
+test. It fails on any operand that resolves to another Core assembly's non-public member from a
+method without the mark, which includes a closure. The rule is deliberately stricter than "public
+functions only". A private helper with no mark can be inlined, inside its own assembly, into a public
+function that then carries the reference out. That happens in Release and not in Debug, so a check
+keyed on visibility would pass in one configuration and fail in the other. Keyed on the mark, it reads
+the same in both. The same family requires every friend grant between shipped assemblies to have at
+least one reader. A grant nothing reads is removed, and a scan that has stopped seeing references
+goes red rather than passing over nothing. Verified both ways: the suite built in Release before the
+fix reproduced CI's `MethodAccessException` locally, and after it the Release test assembly's IL
+reaches no Core internal it is not granted. Removing the mark from `mint` reddens the family, naming
+the site.
+
 ## 2026-10-07 — D128: a query declares a closed conjunction of typed column predicates and a column order; the resolver honours both or refuses by name; the pattern bank does not capture, and the column layer's scalar functions stay where D66 put them
 
 **Recorded by Phase 398 (operator ruling: the recommended shape ships). `Fuaran.Core.Query`,

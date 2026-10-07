@@ -251,14 +251,14 @@ module internal TypeScriptCodec =
         // than an equality test, because JS arrays compare by reference.
         | TList _, VList [] -> Ok(src + ".length === 0")
         | TRecord n, VRecord authored ->
-            match IdlLookup.tryRecord idl n with
+            match CodegenLookup.tryRecord idl n with
             | None -> refuse ()
             | Some r ->
                 r.Fields
                 |> List.map (fun rf -> tsIsDefaultField idl disc src Map.empty rf authored)
                 |> concatR " && "
         | TUnion(n, args), VUnion(tag, authored) ->
-            match IdlLookup.tryUnion idl n with
+            match CodegenLookup.tryUnion idl n with
             | None -> refuse ()
             | Some u when List.length u.Params <> List.length args -> refuse ()
             // A DECLARED transparent case is on the wire BARE, so neither the tagged predicate
@@ -1134,7 +1134,7 @@ const dFormat = (format, v) => {
     /// whose own IDL said the slot was omitted at its default. A backend that emits source for a
     /// declaration it cannot honour is worse than one that refuses.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
+        let kinds = kindTags |> List.choose (fun t -> CodegenLookup.tryKind idl t)
 
         let _, unions, _ = referenced idl kinds
 

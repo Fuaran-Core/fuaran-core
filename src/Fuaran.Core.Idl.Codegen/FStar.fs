@@ -337,7 +337,7 @@ module FStarTarget =
         | KeyOrder.Sorted -> ms |> List.sortWith (fun a b -> System.String.CompareOrdinal(a.Name, b.Name))
         | KeyOrder.Declared -> ms
 
-    // Phase 293 — the finders are the vocabulary's own (`IdlLookup.tryRecord` / `tryUnion` /
+    // Phase 293 — the finders are the vocabulary's own (`CodegenLookup.tryRecord` / `tryUnion` /
     // `tryEnum`, one body since Phase 388): one spelling of a name lookup across every backend.
 
     /// The declared default of an omit-default member, as an F* literal — the admissible set
@@ -354,13 +354,13 @@ module FStarTarget =
         | SMap _, VMap [] -> Ok "[]"
         | SSentinel _, _ -> Ok "()"
         | SRecord n, VRecord authored ->
-            match IdlLookup.tryRecord idl n with
+            match CodegenLookup.tryRecord idl n with
             | None -> Error(CodegenError.UnsupportedDefault(TRecord n, v))
             | Some r ->
                 members idl Map.empty (where + " (default)") r.Fields
                 |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName s) "Mk") ms authored)
         | SUnion(n, args), VUnion(tag, authored) ->
-            match IdlLookup.tryUnion idl n with
+            match CodegenLookup.tryUnion idl n with
             | Some u when List.length u.Params = List.length args ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
                 | None -> Error(CodegenError.UnsupportedDefault(TUnion(n, []), v))
@@ -376,7 +376,7 @@ module FStarTarget =
             // which falls THROUGH `CaseOf` to the string it was handed. Both spellings are
             // therefore live in the corpus, and resolving either is the only reading that
             // does not refuse a default the F# backend accepts.
-            match IdlLookup.tryEnum idl n with
+            match CodegenLookup.tryEnum idl n with
             | Some e when List.contains spelling e.Cases -> Ok(ctorName ("e_" + snake n) spelling)
             | Some e ->
                 match e.CaseOf spelling with
@@ -541,7 +541,7 @@ module FStarTarget =
                     if seen.Add key then
                         order.Add s
 
-                        match IdlLookup.tryRecord idl n with
+                        match CodegenLookup.tryRecord idl n with
                         | None ->
                             fail (CodegenError.UnmodellableInFStar("an undeclared record '" + n + "'", "record " + n))
                         | Some r ->
@@ -556,7 +556,7 @@ module FStarTarget =
                     if seen.Add key then
                         order.Add s
 
-                        match IdlLookup.tryUnion idl n with
+                        match CodegenLookup.tryUnion idl n with
                         | None ->
                             fail (CodegenError.UnmodellableInFStar("an undeclared union '" + n + "'", "union " + n))
                         | Some u when List.length u.Params <> List.length args ->
@@ -630,7 +630,7 @@ module FStarTarget =
                         match acc with
                         | Error e -> Error e
                         | Ok ks ->
-                            match IdlLookup.tryKind idl tag with
+                            match CodegenLookup.tryKind idl tag with
                             | None ->
                                 Error(
                                     CodegenError.UnmodellableInFStar("an undeclared kind '" + tag + "'", "kind " + tag)
@@ -1380,7 +1380,7 @@ module FStarTarget =
             line ""
 
             for name in c.Enums do
-                match IdlLookup.tryEnum idl name with
+                match CodegenLookup.tryEnum idl name with
                 | None -> ()
                 | Some e ->
                     let tn = "e_" + snake name
@@ -3048,7 +3048,7 @@ module FStarTarget =
         | SJson, VJson j -> jsonTerm where j
         | SSentinel _, _ -> Ok "()"
         | SEnum n, VEnum spelling ->
-            match IdlLookup.tryEnum idl n with
+            match CodegenLookup.tryEnum idl n with
             | Some e when List.contains spelling e.Cases -> Ok(q + ctorName ("e_" + snake n) spelling)
             | Some e ->
                 match e.CaseOf spelling with
@@ -3066,13 +3066,13 @@ module FStarTarget =
             |> seqR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
         | SRecord n, VRecord fs ->
-            match IdlLookup.tryRecord idl n with
+            match CodegenLookup.tryRecord idl n with
             | None -> unmodellable ("the undeclared record " + n) where
             | Some r ->
                 members idl Map.empty where r.Fields
                 |> Result.bind (fun ms -> ctorTerm idl q where (q + ctorName (slotName s) "Mk") [] ms fs)
         | SUnion(n, args), VUnion(tag, fs) ->
-            match IdlLookup.tryUnion idl n with
+            match CodegenLookup.tryUnion idl n with
             | Some u when List.length u.Params = List.length args ->
                 if (TransparentUnion.tag idl.Harden u).IsSome then
                     unmodellable ("a value of the transparent union " + n) where
@@ -3138,7 +3138,7 @@ module FStarTarget =
         (tag: string)
         (fs: (string * IdlValue) list)
         : Result<string, CodegenError> =
-        match IdlLookup.tryKind idl tag with
+        match CodegenLookup.tryKind idl tag with
         | None -> unmodellable ("the undeclared kind " + tag) where
         | Some k ->
             match members idl Map.empty where k.Fields, members idl Map.empty where idl.NodeFields, strLit where id with
@@ -3179,7 +3179,7 @@ module FStarTarget =
             | _ -> unmodellable "an object with no discriminator in the interpreter's bytes" where
 
         let kindMembers (tag: string) =
-            match IdlLookup.tryKind idl tag with
+            match CodegenLookup.tryKind idl tag with
             | None -> unmodellable ("the undeclared kind " + tag) where
             | Some k -> members idl Map.empty where k.Fields
 
@@ -3197,13 +3197,13 @@ module FStarTarget =
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SMap inner, JObj fs -> objectOf (fun _ -> Some inner) fs
         | SRecord n, JObj fs ->
-            match IdlLookup.tryRecord idl n with
+            match CodegenLookup.tryRecord idl n with
             | None -> unmodellable ("the undeclared record " + n) where
             | Some r ->
                 members idl Map.empty where r.Fields
                 |> Result.bind (fun ms -> objectOf (slotOf ms) fs)
         | SUnion(n, args), JObj fs ->
-            match IdlLookup.tryUnion idl n, tagOf fs with
+            match CodegenLookup.tryUnion idl n, tagOf fs with
             | _, Error e -> Error e
             | Some u, Ok tag when List.length u.Params = List.length args ->
                 match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
