@@ -2408,8 +2408,8 @@ measurement, the compat promise, and the migration route if the flip is ever wan
 ### The `0.35.2` surface is total: `Codec<'T>` refuses rather than raises, `Declare.enumAnnotate` answers an error list, the scaffold emits a refusal, `spike-proposal` refuses typed, and one spelling per twin pair (Phase 384) — `removal` / `retype`; the wire `none`
 
 **The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Wire`
-**`removal`** (the record field `Codec<'T>.Write` goes; `Codec<'T>`'s constructor and `Codec.enum`,
-`Codec.build` and `Codec.union` **`retype`**; the rest additive) and `Fuaran.Core.Idl` **`removal`**
+**`retype`** (the record field `Codec<'T>.Write` and so `Codec<'T>`'s constructor, `Codec.write`,
+`Codec.enum`, `Codec.build` and `Codec.union`; the rest additive) and `Fuaran.Core.Idl` **`removal`**
 (`Sample.sampleNodes` goes; `Declare.enumAnnotate` **`retype`**). `Fuaran.Core.Idl.Codegen`'s and
 `Fuaran.Core.Idl.Cli`'s baselines do not move — their changes are to what they EMIT and how they
 REFUSE, which the surface gate cannot see and this entry states instead. No wire byte, digest,
@@ -2436,24 +2436,31 @@ standalone. `CodecDeclarationFault.describe` renders one; `CodecDeclarationFault
   by the `union` that closes it, as `RepeatedMember(name, Some tag)`, beside the union's own faults.
   The list rather than the first fault is the posture `Declare.errors` and `enumWireErrors` already
   take: a declaration with three faults is fixed in one pass.
-- **Writing refuses.** The record field `Write : 'T -> JVal` is replaced by
-  `TryWrite : 'T -> Result<JVal, CodecDeclarationFault>`, threaded through `list` (the item's index),
+- **Writing refuses — through ONE writer.** The record field `Write : 'T -> JVal` is retyped to
+  `Write : 'T -> Result<JVal, CodecDeclarationFault>`, threaded through `list` (the item's index),
   `field` / `optField` (the member's key), `map` and `refine`, so a nested value no case recognises is
-  refused AT ITS PATH. `Write` survives as a MEMBER, `c.Write v`, documented as the
-  exhaustive-declaration form: over a declaration that covers every value of its type it never reaches
-  the arm, and reaching it is the sanctioned programming-error throw (`ArgumentException` carrying the
-  fault's sentence), with `TryWrite` the refusing twin beside it. A member and not a second field, so
-  the two faces cannot disagree: `Write` IS `TryWrite`'s `Ok`. `Codec.make` and `Codec.ofDecoder` still
-  take a total `'T -> JVal`; `Codec.write` raises where `Write` does, and its refusing form is
-  `c.TryWrite v |> Result.map (Canonical.write profile)`.
+  refused AT ITS PATH. There is no raising writer beside it: a run-time writer that throws next to a
+  refusing one is the throwing-twin pattern this phase removes (as it removes `Sample.sampleNodes`),
+  and 1.0 would freeze it. **Why `Write` and not `TryWrite`:** in `Fuaran.Core.Wire` a `try` prefix
+  marks the refusing half of a twin pair (`Canonical.tryWrite` beside `Canonical.write`,
+  `Canon.tryRender` beside `Canon.render`); an operation that is the SOLE spelling and returns a
+  `Result` is named plainly (`ReadAll`, `Codec.read`, `Canonical.read`, every `Decoder`). The writer is
+  sole, so it is `Write`. The text form follows: `Codec.write profile c v` answers
+  `Result<string, CodecDeclarationFault>` (it answered `string` and raised there) — still unguarded
+  as `Canonical.write` is, `Canonical.tryWrite` over `c.Write v` being the form whose output may be
+  hashed. `Codec.corpus`'s encoder is total over text (`Corpus.Codec` is unchanged), so a value the
+  declaration refuses is encoded as the refusal's sentence, which no decode admits: the round-trip
+  law goes red naming it. `Codec.make` and `Codec.ofDecoder` still take a total `'T -> JVal`;
+  `EncodingProfileVectors.storedCodecLaws` reports a value its codec refuses to write under the
+  recompute law.
 
 **Migration.** A `Codec.enum` / `build` / `union` site binds the result: a fixture declaration known to
 be well-formed unwraps it once (`match … with Ok c -> c | Error faults -> failwithf "%A" faults`), a
-declaration read from data reports the faults. `codec.Write v` reads unchanged — it is the member now;
-`{ Write = …; ReadAll = …; Schema = … }` becomes `Codec.make …` (or `{ TryWrite = write >> Ok; … }`);
-a caller that wants the refusal calls `codec.TryWrite v`. The `0.35.2` entry below records what
-`0.35.2` shipped — that a malformed declaration raised when BUILT — and is left as the record of that
-release rather than rewritten.
+declaration read from data reports the faults. `codec.Write v` and `Codec.write profile codec v` now
+answer a `Result`: bind it, or match `Error fault` where the declaration may not cover the value.
+`{ Write = f; ReadAll = …; Schema = … }` over a total `f` becomes `Codec.make f …` (or
+`{ Write = f >> Ok; … }`). The `0.35.2` entry below records what `0.35.2` shipped — that a malformed
+declaration raised when BUILT — and is left as the record of that release rather than rewritten.
 
 **`Declare.enumAnnotate` — `retype`.** It answers `Result<IdlEnum, string list>` where it `failwith`ed:
 one error per annotation naming a case the enum does not declare, and one when two entries name the same

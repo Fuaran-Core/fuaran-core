@@ -492,7 +492,11 @@ module EncodingProfileVectors =
             let stray =
                 values
                 |> List.tryPick (fun (i, t, v) ->
-                    match Canonical.tryWrite p (codec.Write v) with
+                    match
+                        codec.Write v
+                        |> Result.mapError CodecDeclarationFault.describe
+                        |> Result.bind (Canonical.tryWrite p)
+                    with
                     | Ok w when w = t -> None
                     | Ok w -> Some(sprintf "stored text %d is %s; its value's canonical text is %s" i t w)
                     | Error e -> Some(sprintf "stored text %d has no canonical text: %s" i e))
@@ -501,20 +505,20 @@ module EncodingProfileVectors =
 
             let wrong =
                 [ for i, _, v in values do
-                      let j = codec.Write v
+                      // A value the codec refuses to write is the recompute law's finding, above.
+                      for j in Option.toList (Result.toOption (codec.Write v)) do
+                          for o in EncodingProfile.all do
+                              if o <> p then
+                                  let moved = Canonical.write o j <> Canonical.write p j
 
-                      for o in EncodingProfile.all do
-                          if o <> p then
-                              let moved = Canonical.write o j <> Canonical.write p j
-
-                              if moved <> carriesShortForm j then
-                                  yield
-                                      sprintf
-                                          "stored text %d: under %s its bytes %s, but its value %s a line feed, carriage return or tab"
-                                          i
-                                          (EncodingProfile.name o)
-                                          (if moved then "move" else "do not move")
-                                          (if moved then "carries no" else "carries") ]
+                                  if moved <> carriesShortForm j then
+                                      yield
+                                          sprintf
+                                              "stored text %d: under %s its bytes %s, but its value %s a line feed, carriage return or tab"
+                                              i
+                                              (EncodingProfile.name o)
+                                              (if moved then "move" else "do not move")
+                                              (if moved then "carries no" else "carries") ]
                 |> List.tryHead
 
             control.Check(wrong.IsNone, (fun () -> Option.defaultValue "" wrong))

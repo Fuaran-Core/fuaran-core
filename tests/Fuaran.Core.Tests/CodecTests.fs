@@ -189,8 +189,8 @@ let tests =
               [ for name, value, v1, v2 in vectors do
                     testCase name
                     <| fun () ->
-                        Expect.equal (Codec.write EncodingProfile.V1 note value) v1 "V1 bytes"
-                        Expect.equal (Codec.write EncodingProfile.V2 note value) v2 "V2 bytes"
+                        Expect.equal (Codec.write EncodingProfile.V1 note value) (Ok v1) "V1 bytes"
+                        Expect.equal (Codec.write EncodingProfile.V2 note value) (Ok v2) "V2 bytes"
 
                         for p, text in [ EncodingProfile.V1, v1; EncodingProfile.V2, v2 ] do
                             Expect.equal (Codec.read note text) (Ok value) "reads back"
@@ -282,14 +282,14 @@ let tests =
                         [ DecodeCode.OutOfRange, "a positive int" ]
                         "refused"
 
-                    Expect.equal (positive.ReadAll(positive.Write 3)) (Ok 3) "admitted"
+                    Expect.equal (positive.Write 3 |> Result.map positive.ReadAll) (Ok(Ok 3)) "admitted"
 
                 testCase "Codec.map carries an isomorphism: the bytes, the refusals and the schema are the base codec's"
                 <| fun () ->
                     let tagged =
                         Codec.map (fun (s: string) -> "#" + s) (fun (s: string) -> s.Substring 1) Codec.string
 
-                    Expect.equal (tagged.Write "#x") (JStr "x") "written as the base"
+                    Expect.equal (tagged.Write "#x") (Ok(JStr "x")) "written as the base"
                     Expect.equal (tagged.ReadAll(JStr "x")) (Ok "#x") "read through there"
 
                     Expect.equal
@@ -373,11 +373,12 @@ let tests =
                               CodecDeclarationFault.DiscriminatorAsMember("c", "kind") ])
                         "every fault"
 
-                testCase "a value outside the declaration is refused by TryWrite, at its path; Write raises it"
+                testCase
+                    "a value outside the declaration is refused by Write, at its path — the one writer, which never raises"
                 <| fun () ->
                     let partial = Codec.enum [ "a", 1 ] |> declared
-                    Expect.equal (partial.TryWrite 1) (Ok(JStr "a")) "a declared value writes"
-                    Expect.equal (partial.TryWrite 2) (Error(CodecDeclarationFault.Unrecognised [])) "enum"
+                    Expect.equal (partial.Write 1) (Ok(JStr "a")) "a declared value writes"
+                    Expect.equal (partial.Write 2) (Error(CodecDeclarationFault.Unrecognised [])) "enum"
 
                     let onlyCircles =
                         Codec.union
@@ -399,7 +400,7 @@ let tests =
                         |> declared
 
                     Expect.equal
-                        (holder.TryWrite [ Circle 1.0; Rect(1, 2) ])
+                        (holder.Write [ Circle 1.0; Rect(1, 2) ])
                         (Error(CodecDeclarationFault.Unrecognised [ PathSegment.Key "shapes"; PathSegment.Index 1 ]))
                         "a union nested in a record's list, named at the value"
 
@@ -410,11 +411,17 @@ let tests =
                         "no case of the declaration recognises the value at $[\"shapes\"][1]"
                         "the sentence names the path"
 
-                    // `Codec.Write` (the record's member) is the exhaustive-declaration form: it
-                    // raises exactly where `TryWrite` refuses, and nowhere else.
-                    Expect.throwsT<ArgumentException>
-                        (fun () -> partial.Write 2 |> ignore)
-                        "Codec.Write is the exhaustive form"
+                    // `Codec.write`, the text form, answers the same refusal rather than raising.
+                    Expect.equal
+                        (Codec.write EncodingProfile.V2 partial 2)
+                        (Error(CodecDeclarationFault.Unrecognised []))
+                        "Codec.write refuses where Write does"
+
+                    // The corpus bridge's encoder is total over text: a refused value is encoded as
+                    // the refusal's sentence, which no decode admits, so the round-trip law goes red.
+                    match Corpus.roundTrip (Codec.corpus EncodingProfile.V2 partial) 2 with
+                    | Error m -> Expect.stringContains m "refused to write" "the law names the refusal"
+                    | Ok() -> failtest "a value the codec refuses round-tripped"
 
                     // `CodecDeclarationFault.under` prefixes a write refusal's path, and leaves a
                     // build-time fault, which has no path, as it is.
@@ -431,9 +438,9 @@ let tests =
                         "a build-time fault is unchanged"
 
                     Expect.equal
-                        (note.TryWrite plain |> Result.map (Canonical.write EncodingProfile.V2))
-                        (Ok(Codec.write EncodingProfile.V2 note plain))
-                        "over a covered value, TryWrite is Write" ]
+                        (note.Write plain |> Result.map (Canonical.write EncodingProfile.V2))
+                        (Codec.write EncodingProfile.V2 note plain)
+                        "over a covered value, Codec.write is Canonical.write of Write" ]
 
           testList
               "Codec — the schema agrees with the decoder (an independent validator)"

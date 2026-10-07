@@ -3284,7 +3284,7 @@ module Canonical =
 /// in, at build and at write. A declaration that cannot be written consistently is refused when
 /// it is BUILT (`Codec.enum`, `Codec.build` and `Codec.union` answer every fault they find, in
 /// declaration order); a declaration that is not exhaustive over the type it is written at is
-/// refused when a value it does not cover is WRITTEN, through `Codec<'T>.TryWrite`, as
+/// refused when a value it does not cover is WRITTEN, through `Codec<'T>.Write`, as
 /// `Unrecognised` at the path of the value no case recognised.
 [<RequireQualifiedAccess>]
 type CodecDeclarationFault =
@@ -3299,7 +3299,7 @@ type CodecDeclarationFault =
     | DiscriminatorAsMember of tag: string * key: string
     /// A written value that no case of an `enum` or a `union` recognises — the declaration is not
     /// exhaustive over the values it was asked to write. `path` is root-first to that value,
-    /// relative to the value handed to `TryWrite`.
+    /// relative to the value handed to `Write`.
     | Unrecognised of path: PathSegment list
 
 /// Rendering and paths for `CodecDeclarationFault` (Phase 384).
@@ -3338,16 +3338,16 @@ module CodecDeclarationFault =
 /// reports, and on a clean input the two answer one value. The codes and paths are
 /// `DecodeError`'s, the vocabulary every reader on the spine shares.
 ///
-/// Writing is total in its refusing form (Phase 384): `TryWrite` answers the `JVal` a value is
-/// written as, or `CodecDeclarationFault.Unrecognised` at the value no `enum` or `union` case
-/// recognises. `Write` is the exhaustive-declaration form — for a declaration that covers every
-/// value of its type it never reaches that arm, and reaching it is a programming error it raises
-/// as `ArgumentException`.
+/// Writing is total (Phase 384): `Write` answers the `JVal` a value is written as, or
+/// `CodecDeclarationFault.Unrecognised` at the value no `enum` or `union` case recognises. It is the
+/// codec's ONE writer — there is no raising twin beside it — and, as the spine's sole
+/// result-returning operations are (`ReadAll`, `Codec.read`, `Canonical.read`, the decoders), it is
+/// named plainly: a `try` prefix marks the refusing half of a twin pair, and there is no pair.
 type Codec<'T> =
     {
         /// The value as the `JVal` it is written as, or the declaration's refusal of a value it does
         /// not cover. Answers `Ok` over every value the declaration covers.
-        TryWrite: 'T -> Result<JVal, CodecDeclarationFault>
+        Write: 'T -> Result<JVal, CodecDeclarationFault>
         /// The value a `JVal` reads as, or every defect found in it.
         ReadAll: JVal -> Result<'T, DecodeError list>
         /// The JSON Schema (2020-12 vocabulary) of what `Write` produces and `ReadAll` accepts:
@@ -3355,14 +3355,6 @@ type Codec<'T> =
         /// `oneOf`. Descriptive: the decoder, not the schema, is the authority on acceptance.
         Schema: JVal
     }
-
-    /// The value as the `JVal` it is written as — `TryWrite`'s `Ok`. The exhaustive-declaration
-    /// form: a value the declaration does not cover is a programming error, raised as
-    /// `ArgumentException` naming the fault; `TryWrite` is the form that answers it.
-    member c.Write(v: 'T) : JVal =
-        match c.TryWrite v with
-        | Ok j -> j
-        | Error f -> invalidArg "v" (CodecDeclarationFault.describe f)
 
 /// The members of an object codec still being declared (Phase 379): `'R` is the value written,
 /// `'C` what remains of its constructor. Built by `Codec.record` and `Codec.field` /
@@ -3380,7 +3372,7 @@ type CodecFields<'R, 'C> =
 type CodecCase<'T> =
     private
         { Tag: string
-          TryWrite: 'T -> Result<(string * JVal) list, CodecDeclarationFault> option
+          WriteCase: 'T -> Result<(string * JVal) list, CodecDeclarationFault> option
           ReadCase: (string * JVal) list -> Result<'T, DecodeError list>
           CaseProperties: (string * JVal) list
           CaseRequired: string list
@@ -3392,7 +3384,7 @@ type CodecCase<'T> =
 /// or a case tag named twice, a discriminator that is also a member — is refused when the codec
 /// is BUILT: `enum`, `build` and `union` answer `Error` with every `CodecDeclarationFault` they
 /// find (Phase 384), and nothing raises. A value an `enum` or `union` does not cover is refused
-/// when it is written, through `Codec<'T>.TryWrite`.
+/// when it is written, through `Codec<'T>.Write`.
 [<RequireQualifiedAccess>]
 module Codec =
 
@@ -3462,7 +3454,7 @@ module Codec =
     /// A codec from its three faces, for a type the combinators do not reach. The caller owns their
     /// agreement; everything built from the combinators below has it by construction.
     let make (write: 'T -> JVal) (readAll: JVal -> Result<'T, DecodeError list>) (schema: JVal) : Codec<'T> =
-        { TryWrite = write >> Ok
+        { Write = write >> Ok
           ReadAll = readAll
           Schema = schema }
 
@@ -3516,7 +3508,7 @@ module Codec =
                 | None -> Error(CodecDeclarationFault.Unrecognised [])
 
             Ok
-                { TryWrite = tryWrite
+                { Write = tryWrite
                   ReadAll = Decoder.oneOf cases >> one
                   Schema = JObj [ "enum", JArr(cases |> List.map (fst >> JStr)) ] }
 
@@ -3549,17 +3541,15 @@ module Codec =
                     Error errors
             | other -> Error [ Decoder.wrongKind "array" other ]
 
-        { TryWrite =
-            traverse (fun i x ->
-                c.TryWrite x
-                |> Result.mapError (CodecDeclarationFault.under (PathSegment.Index i)))
+        { Write =
+            traverse (fun i x -> c.Write x |> Result.mapError (CodecDeclarationFault.under (PathSegment.Index i)))
             >> Result.map JArr
           ReadAll = readAll
           Schema = JObj [ "type", JStr "array"; "items", c.Schema ] }
 
     /// The codec of a type isomorphic to `'T`: `there` after reading, `back` before writing.
     let map (there: 'T -> 'U) (back: 'U -> 'T) (c: Codec<'T>) : Codec<'U> =
-        { TryWrite = back >> c.TryWrite
+        { Write = back >> c.Write
           ReadAll = c.ReadAll >> Result.map there
           Schema = c.Schema }
 
@@ -3574,7 +3564,7 @@ module Codec =
                 | Ok u -> Ok u
                 | Error why -> Error [ DecodeError.make DecodeCode.OutOfRange expected why ])
 
-        { TryWrite = back >> c.TryWrite
+        { Write = back >> c.Write
           ReadAll = readAll
           Schema = c.Schema }
 
@@ -3595,7 +3585,7 @@ module Codec =
             fun r ->
                 fs.WriteFields r
                 |> Result.bind (fun before ->
-                    c.TryWrite(get r)
+                    c.Write(get r)
                     |> Result.mapError (CodecDeclarationFault.under (PathSegment.Key name))
                     |> Result.map (fun j -> before @ [ name, j ]))
           ReadFields =
@@ -3624,7 +3614,7 @@ module Codec =
                 | Some a ->
                     fs.WriteFields r
                     |> Result.bind (fun before ->
-                        c.TryWrite a
+                        c.Write a
                         |> Result.mapError (CodecDeclarationFault.under (PathSegment.Key name))
                         |> Result.map (fun j -> before @ [ name, j ]))
                 | None -> fs.WriteFields r
@@ -3648,7 +3638,7 @@ module Codec =
         | _ :: _ as repeated -> Error(repeated |> List.map (fun n -> CodecDeclarationFault.RepeatedMember(n, None)))
         | [] ->
             Ok
-                { TryWrite = fs.WriteFields >> Result.map JObj
+                { Write = fs.WriteFields >> Result.map JObj
                   ReadAll = fun j -> strictObject fs.Names j fs.ReadFields
                   Schema = objectSchema [] fs.Properties fs.Required }
 
@@ -3659,7 +3649,7 @@ module Codec =
     /// by the `union` that closes it, which refuses a member name repeated in the case.
     let case (tag: string) (project: 'T -> 'P option) (inject: 'P -> 'T) (fs: CodecFields<'P, 'P>) : CodecCase<'T> =
         { Tag = tag
-          TryWrite = fun v -> project v |> Option.map fs.WriteFields
+          WriteCase = fun v -> project v |> Option.map fs.WriteFields
           ReadCase = fun members -> fs.ReadFields members |> Result.map inject
           CaseProperties = fs.Properties
           CaseRequired = fs.Required
@@ -3690,7 +3680,7 @@ module Codec =
                 let written =
                     cases
                     |> List.tryPick (fun c ->
-                        c.TryWrite v
+                        c.WriteCase v
                         |> Option.map (Result.map (fun fields -> JObj((key, JStr c.Tag) :: fields))))
 
                 match written with
@@ -3716,16 +3706,18 @@ module Codec =
                                     (key :: c.CaseRequired) ] ]
 
             Ok
-                { TryWrite = tryWrite
+                { Write = tryWrite
                   ReadAll = readAll
                   Schema = schema }
 
     // ---- text ----
 
-    /// The canonical text of `v` under `profile`: `Canonical.write profile (c.Write v)`. Raises
-    /// where `Write` does — over a value the declaration does not cover; the refusing form is
-    /// `c.TryWrite v |> Result.map (Canonical.write profile)`.
-    let write (profile: EncodingProfile) (c: Codec<'T>) (v: 'T) : string = Canonical.write profile (c.Write v)
+    /// The canonical text of `v` under `profile` — `c.Write v |> Result.map (Canonical.write profile)` —
+    /// or the declaration's refusal of a value it does not cover (Phase 384: it answered a string
+    /// and raised there). Unguarded as `Canonical.write` is: a non-finite float or an ill-formed
+    /// string renders; `Canonical.tryWrite` over `c.Write v` is the form whose output may be hashed.
+    let write (profile: EncodingProfile) (c: Codec<'T>) (v: 'T) : Result<string, CodecDeclarationFault> =
+        c.Write v |> Result.map (Canonical.write profile)
 
     /// The value JSON `text` reads as, or every defect: a parse refusal is the one defect, at the
     /// root. Either escaping spelling reads.
@@ -3736,12 +3728,25 @@ module Codec =
 
     /// The codec as the conformance corpus's `Corpus.Codec`, writing canonical text under
     /// `profile` and reading with the strict reader's sentence — so a declaration is held to the
-    /// round-trip and reject laws `Corpus` already runs.
+    /// round-trip and reject laws `Corpus` already runs. `Corpus.Codec`'s encoder is total over
+    /// text, so a value the declaration refuses to write is encoded as the refusal's sentence under
+    /// a fixed prefix — text that is not JSON — and the bridge's decoder answers that sentence back
+    /// as its refusal, so the round-trip law goes red NAMING the write refusal rather than the bridge
+    /// raising or reporting only that the text did not parse.
     let corpus (profile: EncodingProfile) (c: Codec<'T>) : Corpus.Codec<'T> =
-        { Encode = write profile c
+        let refused = "the codec refused to write the value: "
+
+        { Encode =
+            fun v ->
+                match write profile c v with
+                | Ok text -> text
+                | Error f -> refused + CodecDeclarationFault.describe f
           Decode =
             fun text ->
-                match read c text with
-                | Ok v -> Ok v
-                | Error(e :: _) -> Error(DecodeError.render e)
-                | Error [] -> Error "a collecting decoder answered no defect and no value" }
+                if text.StartsWith(refused, System.StringComparison.Ordinal) then
+                    Error text
+                else
+                    match read c text with
+                    | Ok v -> Ok v
+                    | Error(e :: _) -> Error(DecodeError.render e)
+                    | Error [] -> Error "a collecting decoder answered no defect and no value" }
