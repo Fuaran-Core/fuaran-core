@@ -199,14 +199,18 @@ module internal ProposalSpike =
             // split (Phase 97) precisely because its output is a VALUE rather than a
             // language, and a consumer wanting vectors should not have to take a
             // source generator to get them.
-            let vectors = Sample.sampleNodes post tags seed count
-
+            //
+            // Phase 384 — through the refusing face: a post vocabulary the sampler cannot draw
+            // from is a failed fuzz leg naming why, not an exception out of the command.
             let interpreter =
-                vectors
-                |> List.mapi (fun i v ->
-                    match Encode.encode post v with
-                    | Ok w -> Ok(i, v, w)
-                    | Error m -> Error(sprintf "vector %d did not encode: %s" i m))
+                match Sample.trySampleNodes post tags seed count with
+                | Error refusal -> [ Error("the sampler cannot draw from the post vocabulary: " + refusal.Describe) ]
+                | Ok vectors ->
+                    vectors
+                    |> List.mapi (fun i v ->
+                        match Encode.encode post v with
+                        | Ok w -> Ok(i, v, w)
+                        | Error m -> Error(sprintf "vector %d did not encode: %s" i m))
 
             // Phase 195 — ONE traversal, not a `tryPick` probe followed by a re-walk that had to
             // answer the already-excluded `Error` arm with a throw. The arm was unreachable and

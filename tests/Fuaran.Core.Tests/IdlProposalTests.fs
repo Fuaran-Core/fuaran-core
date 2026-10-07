@@ -444,6 +444,54 @@ let tests =
                         Expect.stringContains err "no --idl" "the refusal names the missing argument"
                         Expect.equal out "" "and nothing is printed to stdout"))
 
+                testCase
+                    "Phase 384 — a bad flag, a bad integer, a missing file and an unwritable --out are typed refusals, exit 2"
+                    (fun _ ->
+                        withCommandInputs (completeJson tooltipDelta candidateWire) (fun path ->
+                            let full =
+                                sprintf
+                                    "spike-proposal \"%s\" --idl \"%s\" --corpus \"%s\""
+                                    (path "proposal.json")
+                                    (path "idl.json")
+                                    (path "corpus")
+
+                            for args, named in
+                                [ full + " --sede 7", "unrecognised option: --sede"
+                                  full + " --seed seven", "--seed takes an integer, not 'seven'"
+                                  full + " --vectors 1.5", "--vectors takes an integer, not '1.5'"
+                                  full + " --vectors", "--vectors needs an integer"
+                                  sprintf
+                                      "spike-proposal \"%s\" --idl \"%s\""
+                                      (path "absent-proposal.json")
+                                      (path "idl.json"),
+                                  "proposal not found"
+                                  sprintf
+                                      "spike-proposal \"%s\" --idl \"%s\""
+                                      (path "proposal.json")
+                                      (path "absent-idl.json"),
+                                  "--idl names no file"
+                                  sprintf
+                                      "spike-proposal \"%s\" --idl \"%s\" --corpus \"%s\""
+                                      (path "proposal.json")
+                                      (path "idl.json")
+                                      (path "absent-corpus"),
+                                  "--corpus names no directory"
+                                  full + sprintf " --out \"%s\"" (path "no-such-dir/report.md"), "--out unwritable" ] do
+                                let code, out, err = runCli args
+                                Expect.equal code 2 (sprintf "%s: refused, exit 2" named)
+                                Expect.stringContains err named (sprintf "%s: the refusal names it" named)
+
+                                Expect.isFalse
+                                    (err.Contains "   at " || err.Contains "Exception")
+                                    (sprintf "%s: a sentence, never a stack trace — got %s" named err)
+
+                                Expect.equal out "" (sprintf "%s: nothing on stdout" named)
+
+                            // The control: the same full invocation, with a writable --out, is green.
+                            let code, out, _ = runCli (full + sprintf " --out \"%s\"" (path "report.md"))
+                            Expect.equal code 0 "a writable --out on a green run exits 0"
+                            Expect.stringContains out "wrote" "and says where it wrote"))
+
                 testCase "the verb is in the help text, and a bare verb is refused" (fun _ ->
                     let helpCode, helpOut, _ = runCli "--help"
                     Expect.equal helpCode 0 "help exits 0"

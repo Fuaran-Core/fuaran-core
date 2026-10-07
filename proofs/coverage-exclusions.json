@@ -1009,11 +1009,10 @@
     },
     {
       "members": [
-        "Idl.Sample.sampleNodes",
         "Idl.Sample.trySampleNodes"
       ],
       "class": "measured-elsewhere",
-      "reason": "Sample-tree generation from a vocabulary (total since Phase 292); its tests and every differential that draws from it stand in.",
+      "reason": "Sample-tree generation from a vocabulary (total since Phase 292; its throwing twin `sampleNodes` removed on the 0.36.0 draft, Phase 384); its tests and every differential that draws from it stand in.",
       "standIn": "tests/Fuaran.Core.Tests/IdlValidationTests.fs"
     },
     {
@@ -2709,10 +2708,13 @@
         "Codec.map",
         "Codec.refine",
         "Codec.decoder",
-        "Codec.corpus"
+        "Codec.corpus",
+        "Codec.Write",
+        "CodecDeclarationFault.describe",
+        "CodecDeclarationFault.under"
       ],
       "class": "measured-elsewhere",
-      "reason": "The Codec<'T> combinators (Phase 379): what a declaration writes, its collecting order and paths, its build-time refusals and its schema's agreement with an independent validator are pinned by example; the stored-codec family certifies a consumer's codec over its own store, not the combinators.",
+      "reason": "The Codec<'T> combinators (Phase 379): what a declaration writes, its collecting order and paths, its build-time refusals and its schema's agreement with an independent validator are pinned by example; the stored-codec family certifies a consumer's codec over its own store, not the combinators. Since Phase 384 the refusals are typed — every `CodecDeclarationFault` a builder answers, and `TryWrite`'s `Unrecognised` at the path of the value no case recognises, with `Write` raising exactly there — and are pinned by example too.",
       "standIn": "tests/Fuaran.Core.Tests/CodecTests.fs"
     },
     {

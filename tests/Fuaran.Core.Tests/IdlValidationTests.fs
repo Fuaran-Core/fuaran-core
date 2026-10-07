@@ -229,6 +229,42 @@ let declareErrorsTests =
                   Expect.isEmpty (Declare.errors idl) (sprintf "%s: Declare.errors" name)
           }
 
+          test "Declare.enumAnnotate refuses an unknown or doubly-annotated case as an error list (Phase 384)" {
+              // It raised (`failwithf`) — the one `Declare.*` function that did. Its refusal is now
+              // `enumWireErrors`' sentence for the same defect, so the construction site and the
+              // backstop name a dangling annotation identically.
+              let level = Declare.enumWith "Level" [ "Low", "low"; "High", "high" ]
+
+              let note =
+                  { Annotations.Empty with
+                      Since = Some "0.36.0" }
+
+              match Declare.enumAnnotate [ "Low", note; "Medium", note; "Loud", note ] level with
+              | Ok e -> failtestf "annotated cases the enum does not declare: %A" e
+              | Error errs ->
+                  Expect.equal
+                      errs
+                      [ "enum 'Level': annotation names case 'Medium', which the enum does not declare"
+                        "enum 'Level': annotation names case 'Loud', which the enum does not declare" ]
+                      "one error per unknown case, in authored order"
+
+                  let byLiteral =
+                      { small with
+                          Enums =
+                              [ { level with
+                                    CaseAnnotations = [ "Medium", note ] } ] }
+
+                  Expect.contains (Declare.enumWireErrors byLiteral) errs.Head "the backstop's own sentence"
+
+              match Declare.enumAnnotate [ "Low", note; "Low", note ] level with
+              | Error errs -> Expect.equal errs [ "enum 'Level': two annotation entries name the same case" ] "twice"
+              | Ok e -> failtestf "annotated one case twice: %A" e
+
+              match Declare.enumAnnotate [ "High", note ] level with
+              | Ok e -> Expect.equal (e.AnnotationsOf "High") note "a declared case is annotated"
+              | Error errs -> failtestf "refused a declared case: %A" errs
+          }
+
           test "each adversarial vocabulary is refused, naming the rule it breaks" {
               for name, fragment, idl in adversarial do
                   let errs = Declare.errors idl
@@ -433,7 +469,11 @@ let sourceLitTests =
 
               // Admitted by the enum: F# writes the HOST case, TypeScript an escaped literal.
               match Gen.fsharpValue hostile (TEnum "Level") (VEnum payload) with
-              | Ok src -> Expect.equal src "Level.Low" "the host case, never the wire text"
+              | Ok src ->
+                  Expect.equal
+                      src
+                      "(Ok(Level.Low) : Result<_, Fuaran.Core.DecodeError>)"
+                      "the host case, never the wire text"
               | Error e -> failtestf "the F# scaffold refused an admitted value: %A" e
 
               match Gen.typescriptValue hostile (TEnum "Level") (VEnum payload) with
@@ -446,8 +486,8 @@ let sourceLitTests =
           test "the scaffold writes a whole float at a float slot as a float literal" {
               match Gen.fsharpValue small TFloat (VInt 2), Gen.fsharpValue small TFloat (VFloat 2.0) with
               | Ok a, Ok b ->
-                  Expect.equal a "2.0" "an int-authored float"
-                  Expect.equal b "2.0" "a whole float"
+                  Expect.equal a "(Ok(2.0) : Result<_, Fuaran.Core.DecodeError>)" "an int-authored float"
+                  Expect.equal b "(Ok(2.0) : Result<_, Fuaran.Core.DecodeError>)" "a whole float"
               | r -> failtestf "refused: %A" r
 
               match Gen.fsharpValue small TFloat (VFloat nan) with
@@ -571,8 +611,6 @@ let samplerTotalityTests =
               match Sample.trySampleNodes small [ "Nope" ] 1 3 with
               | Error r -> Expect.stringContains r.At "Nope" "named"
               | Ok vs -> failtestf "sampled %A for an undeclared kind" vs
-
-              Expect.throws (fun () -> Sample.sampleNodes small [] 1 3 |> ignore) "the throwing face raises the refusal"
           }
 
           test "an empty enum or union, or a type with no finite value, is refused rather than divided by" {

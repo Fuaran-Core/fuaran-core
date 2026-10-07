@@ -321,9 +321,10 @@ let gateConditionalTests =
               Expect.isOk (Trust.checkHardenPolicy gateless noTrust) "nothing to gate, nothing to declare"
 
               let node =
-                  match Sample.sampleNodes gateless (gateless.Kinds |> List.map _.Tag) 7 1 with
-                  | [ v ] -> v
-                  | other -> failtestf "expected one sampled node, got %d" other.Length
+                  match Sample.trySampleNodes gateless (gateless.Kinds |> List.map _.Tag) 7 1 with
+                  | Ok [ v ] -> v
+                  | Error r -> failtestf "the sampler refused: %s" r.Describe
+                  | Ok other -> failtestf "expected one sampled node, got %d" other.Length
 
               Expect.isOk (Trust.harden gateless noTrust node) "the checked path is reachable")
 

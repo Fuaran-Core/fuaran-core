@@ -1811,15 +1811,25 @@ module Declare =
     /// exists at the moment the claim is made, rather than leaving it to
     /// [[enumWireErrors]] to find later. A name the enum does not declare is refused
     /// here — an annotation on nothing is a typo, not a declaration.
-    let enumAnnotate (annotations: (string * Annotations) list) (e: IdlEnum) : IdlEnum =
-        match annotations |> List.filter (fun (c, _) -> not (List.contains c e.Cases)) with
-        | [] -> { e with CaseAnnotations = annotations }
-        | unknown ->
-            failwithf
-                "enum '%s': cannot annotate case(s) %s — the enum declares %A"
-                e.Name
-                (unknown |> List.map fst |> String.concat ", ")
-                e.Cases
+    ///
+    /// Phase 384 — the refusal is an ERROR LIST, as [[enumWireErrors]]' is and in its
+    /// sentences: one per annotation naming a case the enum does not declare, and one when
+    /// two entries name the same case. It used to raise, the one `Declare.*` function
+    /// that did.
+    let enumAnnotate (annotations: (string * Annotations) list) (e: IdlEnum) : Result<IdlEnum, string list> =
+        let annotated = annotations |> List.map fst
+
+        let errors =
+            [ for c in annotated do
+                  if not (List.contains c e.Cases) then
+                      sprintf "enum '%s': annotation names case '%s', which the enum does not declare" e.Name c
+
+              if List.length (List.distinct annotated) <> List.length annotated then
+                  sprintf "enum '%s': two annotation entries name the same case" e.Name ]
+
+        match errors with
+        | [] -> Ok { e with CaseAnnotations = annotations }
+        | _ -> Error errors
 
     /// Well-formedness of every enum's case↔wire mapping — the backstop for a
     /// record built by literal rather than through [[enumOf]] / [[enumWith]].
