@@ -4,6 +4,13 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
 
+/// `Declare.enumAnnotate` over a well-formed fixture: its refusal (an error list since Phase 384)
+/// is a defect of the suite.
+let private annotate (annotations: (string * Annotations) list) (e: IdlEnum) : IdlEnum =
+    match Declare.enumAnnotate annotations e with
+    | Ok e -> e
+    | Error errors -> failwithf "the fixture annotation was refused: %s" (String.concat "; " errors)
+
 // ---------------------------------------------------------------------------
 // Phase 119 — declared annotations on a KIND (and therefore on a tree-op) and on
 // an ENUM CASE, and the two-release retirement path they make affordable.
@@ -101,7 +108,7 @@ let private withOpAnn (a: Annotations) : Idl =
 /// The same vocabulary with the enum's `Quiet` case marked.
 let private withEnumCaseAnn (a: Annotations) : Idl =
     { plainIdl with
-        Enums = plainIdl.Enums |> List.map (Declare.enumAnnotate [ "Quiet", a ]) }
+        Enums = plainIdl.Enums |> List.map (annotate [ "Quiet", a ]) }
 
 let private authored =
     VNode("n1", "Note", [ "text", VStr "x"; "tone", VEnum "Loud" ])
@@ -154,7 +161,7 @@ let tests =
 
               let marked =
                   { withKindAnn (deprecated (Some "Note") (Some "folded into Note")) with
-                      Enums = plainIdl.Enums |> List.map (Declare.enumAnnotate [ "Quiet", inProcessOnly ]) }
+                      Enums = plainIdl.Enums |> List.map (annotate [ "Quiet", inProcessOnly ]) }
 
               Expect.equal (enc marked) (enc plainIdl) "an annotation moved a wire byte"
 
@@ -214,7 +221,7 @@ let tests =
               // the HOST case name (which is what the F# backend attaches to).
               let mapped =
                   Declare.enumWith "Tone" [ "Plain", "plain"; "Loud", "loud"; "Quiet", "quiet" ]
-                  |> Declare.enumAnnotate [ "Quiet", deprecated (Some "Plain") None ]
+                  |> annotate [ "Quiet", deprecated (Some "Plain") None ]
 
               let idl = { plainIdl with Enums = [ mapped ] }
               let text = Artifact.render idl
@@ -239,7 +246,7 @@ let tests =
           testCase "the artifact round-trip law holds with both placements annotated" (fun _ ->
               let idl =
                   { withKindAnn (since "0.18.0") with
-                      Enums = plainIdl.Enums |> List.map (Declare.enumAnnotate [ "Quiet", inProcessOnly ]) }
+                      Enums = plainIdl.Enums |> List.map (annotate [ "Quiet", inProcessOnly ]) }
 
               match Artifact.parse (Artifact.render idl) with
               | Error e -> failtestf "did not read back: %s" e
@@ -256,11 +263,10 @@ let tests =
           // ---- 2. declaration-site well-formedness --------------------------
 
           testCase "Declare.enumAnnotate refuses a case the enum does not declare" (fun _ ->
-              Expect.throws
-                  (fun () ->
-                      Declare.enumAnnotate [ "Screaming", since "0.18.0" ] (Declare.enumOf "Tone" [ "Plain" ])
-                      |> ignore)
-                  "an annotation on nothing is a typo, not a declaration")
+              Expect.equal
+                  (Declare.enumAnnotate [ "Screaming", since "0.18.0" ] (Declare.enumOf "Tone" [ "Plain" ]))
+                  (Error [ "enum 'Tone': annotation names case 'Screaming', which the enum does not declare" ])
+                  "an annotation on nothing is a typo, not a declaration — refused as an error list")
 
           testCase "enumWireErrors is the backstop for a record built by literal" (fun _ ->
               let broken =
@@ -444,7 +450,7 @@ let tests =
                   classifyAll
                       plainIdl
                       { withKindAnn inProcessOnly with
-                          Enums = plainIdl.Enums |> List.map (Declare.enumAnnotate [ "Quiet", since "0.18.0" ]) }
+                          Enums = plainIdl.Enums |> List.map (annotate [ "Quiet", since "0.18.0" ]) }
 
               Expect.isFalse
                   (cs

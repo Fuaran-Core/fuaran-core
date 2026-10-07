@@ -924,7 +924,8 @@ commits to rather than by size.
   and renders it through `Canon` — the canonical number / key / escape rules are **inherited**
   from `Fuaran.Core.Wire`, not re-implemented, so a change to them is a `Canon` event and is
   governed by "Canonical float layout" and "Digest changes" below, not here.
-- **The sampler** — `Sample.sampleNodes`, deterministic from `(seed, index)` alone. Its LCG is
+- **The sampler** — `Sample.trySampleNodes` (its throwing twin `sampleNodes` removed on the
+  0.36.0 draft, Phase 384), deterministic from `(seed, index)` alone. Its LCG is
   explicit rather than `System.Random` precisely so a vector that fails on another host
   reproduces here from its seed. **The sampled sequence for a given `(idl, tags, seed, count)`
   is part of the contract**: a change to the draw order is a wire-visible change for anyone
@@ -2511,6 +2512,109 @@ disagreed. Each fix lands with a test, law or plant that was run red on the pre-
 (`proofs/Capability.fst`) carries no policy and stays the model of the ungated evaluator. The oracle
 compares it only over lookups `ofRegistry` builds with no gate, where admission is the identity
 (`ProofOracleTests` renders the new case for completeness).
+
+### The `0.35.2` surface is total: `Codec<'T>` refuses rather than raises, `Declare.enumAnnotate` answers an error list, the scaffold emits a refusal, `spike-proposal` refuses typed, and one spelling per twin pair (Phase 384) — `removal` / `retype`; the wire `none`
+
+**The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Wire`
+**`retype`** (the record field `Codec<'T>.Write` and so `Codec<'T>`'s constructor, `Codec.write`,
+`Codec.enum`, `Codec.build` and `Codec.union`; the rest additive) and `Fuaran.Core.Idl` **`removal`**
+(`Sample.sampleNodes` goes; `Declare.enumAnnotate` **`retype`**). `Fuaran.Core.Idl.Codegen`'s and
+`Fuaran.Core.Idl.Cli`'s baselines do not move — their changes are to what they EMIT and how they
+REFUSE, which the surface gate cannot see and this entry states instead. No wire byte, digest,
+`api/wire/` baseline or generated-decoder byte moves.
+
+**Why now, against a released surface.** CONTRIBUTING's rule is "no exception from a public function",
+refined in practice to a documented programming-error throw at declaration time with a `try` twin
+where a caller may want the refusal (D111). The surface `0.35.2` released this morning broke that in
+five places the 2026-10-07 Evaluate-design pass named. Pre-1.0, a minor draft is where that is mended:
+the same change after 1.0 is a major. No `[<Obsolete>]` forward is left for any of it — 1.0 freezes
+without forwards.
+
+**`Codec<'T>` — the shape taken, and why.** One vocabulary, `CodecDeclarationFault` (new, in
+`Fuaran.Core.Wire`), for every refusal the combinators make: `RepeatedSpelling`, `RepeatedMember`
+(naming the union case, or `None` for a record), `RepeatedTag`, `DiscriminatorAsMember`, and
+`Unrecognised path` for a value no `enum` or `union` case recognises. The `DeclarationFault` family was
+not reusable: it lives in `Fuaran.Core.Function`, above `Wire` on the spine, and D2 keeps `Wire`
+standalone. `CodecDeclarationFault.describe` renders one; `CodecDeclarationFault.under` prefixes an
+`Unrecognised` path, as `DecodeError.under` does.
+
+- **Building refuses.** `Codec.enum`, `Codec.build` and `Codec.union` answer
+  `Result<Codec<'T>, CodecDeclarationFault list>` — every fault, in declaration order — where they
+  raised `ArgumentException` on the first. `Codec.case` is now TOTAL: a member it repeats is reported
+  by the `union` that closes it, as `RepeatedMember(name, Some tag)`, beside the union's own faults.
+  The list rather than the first fault is the posture `Declare.errors` and `enumWireErrors` already
+  take: a declaration with three faults is fixed in one pass.
+- **Writing refuses — through ONE writer.** The record field `Write : 'T -> JVal` is retyped to
+  `Write : 'T -> Result<JVal, CodecDeclarationFault>`, threaded through `list` (the item's index),
+  `field` / `optField` (the member's key), `map` and `refine`, so a nested value no case recognises is
+  refused AT ITS PATH. There is no raising writer beside it: a run-time writer that throws next to a
+  refusing one is the throwing-twin pattern this phase removes (as it removes `Sample.sampleNodes`),
+  and 1.0 would freeze it. **Why `Write` and not `TryWrite`:** in `Fuaran.Core.Wire` a `try` prefix
+  marks the refusing half of a twin pair (`Canonical.tryWrite` beside `Canonical.write`,
+  `Canon.tryRender` beside `Canon.render`); an operation that is the SOLE spelling and returns a
+  `Result` is named plainly (`ReadAll`, `Codec.read`, `Canonical.read`, every `Decoder`). The writer is
+  sole, so it is `Write`. The text form follows: `Codec.write profile c v` answers
+  `Result<string, CodecDeclarationFault>` (it answered `string` and raised there) — still unguarded
+  as `Canonical.write` is, `Canonical.tryWrite` over `c.Write v` being the form whose output may be
+  hashed. `Codec.corpus`'s encoder is total over text (`Corpus.Codec` is unchanged), so a value the
+  declaration refuses is encoded as the refusal's sentence, which no decode admits: the round-trip
+  law goes red naming it. `Codec.make` and `Codec.ofDecoder` still take a total `'T -> JVal`;
+  `EncodingProfileVectors.storedCodecLaws` reports a value its codec refuses to write under the
+  recompute law.
+
+**Migration.** A `Codec.enum` / `build` / `union` site binds the result: a fixture declaration known to
+be well-formed unwraps it once (`match … with Ok c -> c | Error faults -> failwithf "%A" faults`), a
+declaration read from data reports the faults. `codec.Write v` and `Codec.write profile codec v` now
+answer a `Result`: bind it, or match `Error fault` where the declaration may not cover the value.
+`{ Write = f; ReadAll = …; Schema = … }` over a total `f` becomes `Codec.make f …` (or
+`{ Write = f >> Ok; … }`). The `0.35.2` entry below records what `0.35.2` shipped — that a malformed
+declaration raised when BUILT — and is left as the record of that release rather than rewritten.
+
+**`Declare.enumAnnotate` — `retype`.** It answers `Result<IdlEnum, string list>` where it `failwith`ed:
+one error per annotation naming a case the enum does not declare, and one when two entries name the same
+case, in exactly `Declare.enumWireErrors`' sentences, so the construction site and the backstop name a
+dangling annotation identically. It was the one `Declare.*` function that raised (D44's posture
+inverted). **Migration:** bind the result as above.
+
+**`Sample.sampleNodes` — `removal`.** The throwing twin of `trySampleNodes` goes rather than being
+documented as a sanctioned throw: its input is a vocabulary and a tag list, values a caller reads from
+outside as often as it writes them, so it is not a declaration-time programming error, and every caller
+in this repository — the `spike-proposal` fuzz leg among them, which now reports a sampler refusal as a
+failed leg rather than an exception — already had a refusal to report. **Migration:**
+`Sample.trySampleNodes idl tags seed count`, with the `SampleRefusal` (`Describe`) on `Error`. The
+sampled sequence is unchanged.
+
+**`ConfRng.choose` — documented, kept.** Its argument is a generator's ALPHABET, a literal list fixed
+when the generator is written, so an empty one is a defect of that generator rather than a value a run
+supplies. It stays the sanctioned programming-error throw and now says so: it raises
+`ArgumentException` naming the empty alphabet where it raised `List.item`'s. There is deliberately no
+`tryChoose` — no caller has a use for drawing from a possibly-empty alphabet that an `isEmpty` before
+the draw does not serve better. The draw sequence for a non-empty list is unchanged.
+
+**`Diff.ruleOf` — no surface move.** Its completeness check over `Change`'s union cases ran on the
+first classification on a consumer's machine and `failwithf`ed; the check is now a suite test
+(`IdlDiffTests`, over `FSharpType.GetUnionCases` and the rendered `Diff.mappingTable`, both directions),
+so a `Change` case added without its rule fails this repository's gate instead.
+
+**`Gen.fsharpValue` — the scaffold emits a refusal (no signature move; the EMITTED source moves).** A
+hosted slot's value is built by the slot's own codec when the scaffolded source RUNS, and that codec can
+refuse a value inside the declared wire form; the scaffold emitted `failwith __e` there, into the
+consumer's source. The scaffolded expression is now a `Result<'T, Fuaran.Core.DecodeError>`: each
+hosted value is decoded ahead of the construction and bound by name (`__h0`, …), and a refusal is the
+generated decoders' own (D109) — `OutOfRange`, "a value the slot's host codec admits", the codec's
+sentence. Where nothing hosted is reached the expression is `Ok(…)` of the construction, so its type
+does not depend on the value. The emitted source holds no `failwith`; `DecodeError` and `DecodeCode`
+are fully qualified, so it needs no `open`. `Trust.scaffoldFSharp` carries the same expression under its
+provenance header. **Migration:** a consumer that splices the scaffold as `let tree : Node = <src>`
+binds it instead — `match <src> with Ok tree -> … | Error e -> …`.
+
+**`fuaran-core-idl spike-proposal` — refuses typed, exit 2.** Its options are parsed strictly, as
+`classify`'s are: an unrecognised flag, a flag without its value and a non-integer `--seed` or
+`--vectors` are refused where they were ignored or silently defaulted; a missing proposal or vocabulary
+file, a `--corpus` naming no directory and an `--out` that cannot be written are refused where they
+stack-traced. Each is one line on stderr and exit 2. An invocation that read before still reads the same
+report and exits the same code. `README.md`'s package row states the full regime: `classify` 0 / 3 / 4,
+or 0 / 1 under `--expect`; `spike-proposal` 0 / 1; 2 for every refusal.
 
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 

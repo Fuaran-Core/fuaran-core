@@ -833,9 +833,10 @@ let idlFStarTargetTests =
                               tag
 
                       let sampled =
-                          match Sample.sampleNodes g.Idl [ sampleTag ] 293 1 with
-                          | [ v ] -> v
-                          | other -> failtestf "%s: one sample of %s, got %d" g.Module tag (List.length other)
+                          match Sample.trySampleNodes g.Idl [ sampleTag ] 293 1 with
+                          | Ok [ v ] -> v
+                          | Error r -> failtestf "%s: the sampler refused %s: %s" g.Module tag r.Describe
+                          | Ok other -> failtestf "%s: one sample of %s, got %d" g.Module tag (List.length other)
 
                       let wire =
                           match Encode.encode g.Idl sampled with

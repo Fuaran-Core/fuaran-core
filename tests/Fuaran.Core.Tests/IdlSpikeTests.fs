@@ -648,7 +648,10 @@ let tests =
               // escaping and float formatting — so this reaches shapes the corpus
               // does not contain: control characters, surrogate pairs, whole-valued
               // floats, empty collections, and both sides of every presence rule.
-              let vectors = Sample.sampleNodes miniIdl generatedKinds 20260726 500
+              let vectors =
+                  match Sample.trySampleNodes miniIdl generatedKinds 20260726 500 with
+                  | Ok vs -> vs
+                  | Error r -> failtestf "the sampler refused: %s" r.Describe
 
               Expect.equal (List.length vectors) 500 "the sampler produced the requested vectors"
 
@@ -767,8 +770,10 @@ let tests =
                       // Phase 689 — the spike IDL now carries `'Msg`-producing handlers, so the
                       // generated `Node` is generic. The scaffold instantiates it; the injection
                       // question this test asks is about the emitted STRING literals, not `'Msg`.
-                      + "\n\nlet __scaffolded: Node<unit> = "
+                      // Phase 384 — the scaffold is a `Result`, `Ok` of the construction.
+                      + "\n\nlet __scaffolded: Node<unit> = match "
                       + valueSrc
+                      + " with Ok n -> n | Error e -> failwithf \"refused: %A\" e"
                       + "\nprintfn \"%s\" (encodeNode __scaffolded)\n"
 
                   let path =
@@ -961,7 +966,9 @@ module private SecondVocabulary =
 
     /// The documents both hosts are held to: the sampler's draw, rendered by the interpreter.
     let documents =
-        Sample.sampleNodes idl tags 20260926 300
+        (match Sample.trySampleNodes idl tags 20260926 300 with
+         | Ok vs -> vs
+         | Error r -> failwithf "the sampler refused: %s" r.Describe)
         |> List.map (fun v ->
             match Encode.encode idl v with
             | Ok w -> w
@@ -1189,8 +1196,11 @@ let secondVocabularyTests =
                       + "    match decodeNode d with\n"
                       + "    | Ok n -> printfn \"ok\\t%s\" (encodeNode n)\n"
                       + "    | Error e -> printfn \"err\\t%s\\t%s\" (DecodeError.codeName e.Code) (Canon.render (DecodePath.toJson e.Path))\n"
-                      + "let __trip : Node = "
+                      // Phase 384 — the scaffold is a `Result`; the trip's hosted `departs` is
+                      // decoded by the slot's own codec ahead of the construction.
+                      + "let __trip : Node = match "
                       + tripSrc
+                      + " with Ok n -> n | Error e -> failwithf \"refused: %A\" e"
                       + "\nprintfn \"trip\\t%s\" (encodeNode __trip)\n"
                       // Wire equality: the decoded tree equals itself and its re-decode — the
                       // comparison the tree-algebra families make, which did not compile before.

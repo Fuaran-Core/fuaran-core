@@ -2183,19 +2183,13 @@ module Diff =
                     "`host-surface-only` — host-language source the generator splices, never on the wire"
                     "`full-literal-construction` for a kind projection or the type splice (generated declarations move), else `no-generated-shape-change`" ] ]
 
-    /// The rule for a change, by its union case name. Built once; a `Change` case with no rule
-    /// is a defect this table reports at first use rather than a silent default.
+    /// The rule for a change, by its union case name. Built once. The table is TOTAL over
+    /// `Change`'s cases, and that is a property of this source, not of any input: the suite holds
+    /// it (`IdlDiffTests`, over `FSharpType.GetUnionCases` and the rendered [[mappingTable]]), so
+    /// a case added without its rule fails the repository's gate rather than a classification on
+    /// a consumer's machine (Phase 384 — the check used to run here, at first use, and raise).
     let private ruleOf: Change -> Rule =
         let byCase = rules |> List.map (fun r -> r.Case, r) |> Map.ofList
-
-        let cases =
-            Microsoft.FSharp.Reflection.FSharpType.GetUnionCases(typeof<Change>, System.Reflection.BindingFlags.Public)
-            |> Array.map (fun c -> c.Name)
-
-        let missing = cases |> Array.filter (fun n -> not (byCase.ContainsKey n))
-
-        if missing.Length > 0 then
-            failwithf "the descriptor table has no rule for: %s" (String.concat ", " missing)
 
         fun (c: Change) ->
             let case, _ =

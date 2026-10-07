@@ -342,7 +342,9 @@ let private vectorsFor (idl: Idl) (hosted: Map<string, Random -> JVal>) (seed: i
             | THosted h, VJson _ -> hosted.TryFind h.Encode |> Option.map (fun draw -> VJson(draw rng))
             | _ -> None)
 
-    Sample.sampleNodes idl tags seed count
+    (match Sample.trySampleNodes idl tags seed count with
+     | Ok vs -> vs
+     | Error r -> failwithf "the sampler refused: %s" r.Describe)
     |> List.map (rehost TNode)
     |> List.collect (fun v -> [ v; adversarial idl rng v ])
 
@@ -701,7 +703,9 @@ let private opsOf (idl: Idl) (seed: int) (count: int) : Idl * IdlValue list =
                       Annotations = Annotations.Empty } ] }
 
     holder,
-    Sample.sampleNodes holder [ "OpHolder303" ] seed count
+    (match Sample.trySampleNodes holder [ "OpHolder303" ] seed count with
+     | Ok vs -> vs
+     | Error r -> failwithf "the sampler refused: %s" r.Describe)
     |> List.choose (function
         | VNode(_, _, [ "op", op ])
         | VNodeEnv(_, _, _, [ "op", op ]) -> Some op

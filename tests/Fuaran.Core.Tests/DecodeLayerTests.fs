@@ -755,7 +755,10 @@ let tests =
                         | Error e -> failwithf "encode: %s" e
 
                     let gen (seed: int) =
-                        Sample.sampleNodes idl tags seed 1 |> List.head
+                        match Sample.trySampleNodes idl tags seed 1 with
+                        | Ok(v :: _) -> v
+                        | Ok [] -> failwith "the sampler drew no vector"
+                        | Error r -> failwithf "the sampler refused: %s" r.Describe
 
                     let decode: Decoder<IdlValue> = fun j -> Decode.decodeDetailed idl (Json.render j)
 

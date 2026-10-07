@@ -332,3 +332,138 @@ let supportTests =
                   (unsupported "a projection on an unknown kind" (withSupport bad baseIdl))
                   "a declared kind projection for 'Notes'"
                   "the refusal names the kind") ]
+
+// ---------------------------------------------------------------------------
+// Phase 384 — the scaffold's generated code refuses, too.
+//
+// A hosted slot's value is built at the scaffold's RUN time by the slot's own codec, which can
+// refuse it — the generator cannot run host source, so a value inside the declared wire form can
+// still be one the codec does not admit. The scaffold used to emit `failwith __e` there, into
+// the consumer's source. It now emits a `Result<'T, DecodeError>`: each hosted value decoded
+// ahead of the construction, its refusal the generated decoders' own (D109). Planted here with a
+// codec that refuses a negative stamp — inside the declared wire form (an int), outside the
+// codec's admission — and run, because a refusal in emitted source is only evidence once the
+// emitted source has been compiled and has refused.
+// ---------------------------------------------------------------------------
+
+/// A hosted stamp: an `int` on the host and the wire, whose codec admits only a non-negative one.
+let private stamp: HostedCodec =
+    { FSharp = "int"
+      Encode = "(fun (n: int) -> JInt n)"
+      Decode = "(fun (j: JVal) -> match j with JInt n when n >= 0 -> Ok n | _ -> Error \"a negative stamp\")"
+      Wire = Some TInt
+      Format = None }
+
+let private stampedIdl: Idl =
+    { baseIdl with
+        Kinds =
+            [ { Tag = "Note"
+                Category = "leaf"
+                Annotations = Annotations.Empty
+                Fields = [ f "label" TStr Required; f "stamp" (THosted stamp) Required ] } ] }
+
+let private stamped (n: int) : IdlValue =
+    VNode("n", "Note", [ "label", VStr "x"; "stamp", VJson(JInt n) ])
+
+[<Tests>]
+let scaffoldRefusalTests =
+    testList
+        "Phase 384 — the scaffold emits a refusal, not a failwith"
+        [ testCase "a hosted value is decoded ahead of the construction; the source holds no failwith" (fun _ ->
+              let src =
+                  expectEmits "a stamped note" (Gen.fsharpValue stampedIdl TNode (stamped -3))
+
+              Expect.isFalse (src.Contains "failwith") "no failwith in the emitted source"
+              Expect.stringContains src "Fuaran.Core.DecodeCode.OutOfRange" "the generated decoders' refusal"
+              Expect.stringContains src "Stamp = __h0" "the slot's place is the bound value"
+
+              // Nothing hosted: still a Result, so the expression's type does not depend on the value.
+              Expect.equal
+                  (Gen.fsharpValue stampedIdl TStr (VStr "x"))
+                  (Ok "(Ok(\"x\") : Result<_, Fuaran.Core.DecodeError>)")
+                  "Ok of the literal")
+
+          testCase "compiled, the scaffold answers Error for the value its codec refuses and Ok otherwise" (fun _ ->
+              let decls =
+                  match Gen.fsharpModule "Stamped" stampedIdl kinds with
+                  | Ok m -> m.Replace("module Stamped\n", "")
+                  | Error e -> failtestf "F# codegen: %s" (CodegenError.describe e)
+
+              let scaffold (n: int) =
+                  expectEmits "a stamped note" (Gen.fsharpValue stampedIdl TNode (stamped n))
+
+              let report (name: string) (n: int) =
+                  "match "
+                  + scaffold n
+                  + " with\n"
+                  + "| Ok v -> printfn \"ok\t%s\" (encodeNode v)\n"
+                  + "| Error e -> printfn \"err\t%s\t%s\t%s\" (DecodeError.codeName e.Code) e.Expected e.Message\n"
+                  |> fun body ->
+                      "let "
+                      + name
+                      + " () =\n    "
+                      + body.Replace("\n", "\n    ")
+                      + "\n"
+                      + name
+                      + " ()\n"
+
+              let dllRef (name: string) =
+                  "#r @\""
+                  + System.IO.Path.Combine(System.AppContext.BaseDirectory, name)
+                  + "\"\n"
+
+              let fsx =
+                  dllRef "Fuaran.Core.Wire.dll"
+                  + dllRef "Fuaran.Core.Tree.dll"
+                  + dllRef "Fuaran.Core.Validator.dll"
+                  + decls
+                  + "\n\n"
+                  + report "refused" -3
+                  + report "admitted" 4
+
+              let path =
+                  System.IO.Path.Combine(
+                      System.IO.Path.GetTempPath(),
+                      sprintf "fuaran-384-%s.fsx" (System.Guid.NewGuid().ToString("N"))
+                  )
+
+              System.IO.File.WriteAllText(path, fsx)
+
+              try
+                  match
+                      (try
+                          Some(
+                              System.Diagnostics.Process.Start(
+                                  ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")
+                              )
+                          )
+                       with _ ->
+                           None)
+                  with
+                  | None -> skiptest "dotnet not on PATH — the compiled scaffold check is skipped"
+                  | Some p ->
+                      let err = p.StandardError.ReadToEndAsync()
+                      let out = p.StandardOutput.ReadToEnd()
+                      p.WaitForExit()
+
+                      if p.ExitCode <> 0 then
+                          failtestf "fsi failed (%d): %s" p.ExitCode err.Result
+
+                      let lines =
+                          out.Replace("\r\n", "\n").Split('\n')
+                          |> Array.filter (fun l -> l <> "")
+                          |> List.ofArray
+
+                      Expect.equal
+                          lines
+                          [ "err\tOutOfRange\ta value the slot's host codec admits\ta negative stamp"
+                            "ok\t"
+                            + (match Encode.encode stampedIdl (stamped 4) with
+                               | Ok w -> w
+                               | Error m -> failtestf "interpreter: %s" m) ]
+                          "the codec's refusal is a DecodeError, and an admitted value constructs"
+              finally
+                  try
+                      System.IO.File.Delete path
+                  with _ ->
+                      ()) ]

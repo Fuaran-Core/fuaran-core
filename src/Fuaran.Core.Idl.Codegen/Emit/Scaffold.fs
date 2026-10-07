@@ -70,22 +70,14 @@ module internal Scaffold =
             else
                 None
 
-    /// Emit an F# value-construction expression for an authored `IdlValue` of
-    /// type `t`, building values of the GENERATED types (`Gen.fsharpModule`'s). Wire-derived
-    /// strings route through `SourceLit.fsString`; an unsupported shape is REFUSED rather than
-    /// mis-emitted (the syntax-tree-emission contract), and the refusal is a [[CodegenError]]
-    /// (Phase 252) — the same typed shape every module emitter returns.
-    ///
-    /// BREAKING (Phase 252): the error channel was a plain `string`. A caller that wants the
-    /// sentence adapts with `|> Result.mapError CodegenError.describe`.
-    ///
-    /// Phase 252 also widened what it constructs: an enum literal resolves through
-    /// [[IdlEnum.CaseOf]] to the HOST case the generated type declares (the wire string is
-    /// not an F# identifier in general — `"documents"` against `Documents`), and a
-    /// [[TRecord]] value emits a record expression under the same presence rules a kind's
-    /// spec record uses. A union case's positional fields honour presence too: an
-    /// `Optional` one is `Some(…)` / `None`, as its generated declaration says.
-    let rec fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+    /// The body of [[fsharpValue]]: the construction expression, with each hosted slot's place
+    /// a binder (`__h<i>`) and its `(decode, literal)` pair appended to `hosted` in emission order.
+    let rec private emitValue
+        (hosted: ResizeArray<string * string>)
+        (idl: Idl)
+        (t: IdlType)
+        (v: IdlValue)
+        : Result<string, CodegenError> =
         // Phase 292 — a scalar or enum is the DECLARED-DEFAULT literal ([[fsDefaultLit]]):
         // one spelling for a value in source, so the scaffold no longer writes a whole float
         // as `2` (an int literal, FS0001 at a float slot), and its string literal is the
@@ -117,6 +109,7 @@ module internal Scaffold =
                     c.Fields
                     |> List.map (fun f ->
                         fsPositional
+                            hosted
                             idl
                             (sprintf "union case '%s.%s'" name tag)
                             { f with
@@ -131,13 +124,13 @@ module internal Scaffold =
             match idl.Records |> List.tryFind (fun r -> r.Name = name) with
             | None -> Error(valueMismatch (sprintf "a value of the undeclared record '%s'" name))
             | Some r ->
-                fsAssignments idl ("record '" + name + "'") r.Fields fields
+                fsAssignments hosted idl ("record '" + name + "'") r.Fields fields
                 |> Result.map (recordLit name)
         | TNode, VNode(id, kindTag, fields) ->
             match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
             | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
             | Some k ->
-                fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields
+                fsAssignments hosted idl ("kind '" + kindTag + "'") k.Fields fields
                 |> Result.map (fun recFields ->
                     sprintf
                         "{ Id = %s; Kind = NodeKind.%s %s }"
@@ -153,8 +146,8 @@ module internal Scaffold =
             | None -> Error(valueMismatch (sprintf "a node of the undeclared kind '%s'" kindTag))
             | Some k ->
                 match
-                    fsAssignments idl ("kind '" + kindTag + "'") k.Fields fields,
-                    fsAssignments idl "node envelope" idl.NodeFields envelope
+                    fsAssignments hosted idl ("kind '" + kindTag + "'") k.Fields fields,
+                    fsAssignments hosted idl "node envelope" idl.NodeFields envelope
                 with
                 | Error e, _
                 | _, Error e -> Error e
@@ -169,7 +162,7 @@ module internal Scaffold =
                     )
         | TList inner, VList xs ->
             xs
-            |> List.map (fsharpValue idl inner)
+            |> List.map (emitValue hosted idl inner)
             |> sequenceR
             |> Result.map (fun items -> "[ " + String.concat "; " items + " ]")
         | _, VAbsent -> Error(valueMismatch "an absent value (VAbsent) in a value position")
@@ -190,7 +183,12 @@ module internal Scaffold =
             | Error m, _ -> Error(valueMismatch (sprintf "a hosted value outside its declared wire form (%s)" m))
             | _, None -> Error(valueMismatch "a hosted value holding a non-finite float, which has no F# literal")
             | Ok(), Some lit ->
-                Ok(sprintf "(match (%s) (%s) with Ok __v -> __v | Error __e -> failwith __e)" h.Decode lit)
+                // Phase 384 — the decode is HOISTED: the slot's place in the value is a binder,
+                // and `fsharpValue` binds it through the slot's codec ahead of the value, so a
+                // codec that refuses answers a `DecodeError` rather than raising (it used to emit
+                // `failwith`).
+                hosted.Add((h.Decode, lit))
+                Ok(sprintf "__h%d" (hosted.Count - 1))
         // What remains is REFUSED by construct, never mis-emitted: a hosted slot's value is
         // a host type only its own codec knows how to build (unless its wire form is
         // declared, above), a closure is behaviour (human-bound, Phase 318), and a JSON /
@@ -218,7 +216,8 @@ module internal Scaffold =
     /// One POSITIONAL union-case field, under the presence rules its generated declaration
     /// states (an `Optional` field is `T option`). `authored` is the value at the field's name,
     /// if any.
-    and fsPositional
+    and private fsPositional
+        (hosted: ResizeArray<string * string>)
         (idl: Idl)
         (where: string)
         (f: IdlField)
@@ -237,15 +236,16 @@ module internal Scaffold =
             // A host-only field has no wire projection, so a wire value at its name is not
             // its value — take the placeholder.
             | HostOnly -> hostOnlyLit f
-            | Optional -> fsharpValue idl f.Type fv |> Result.map (fun s -> "Some(" + s + ")")
+            | Optional -> emitValue hosted idl f.Type fv |> Result.map (fun s -> "Some(" + s + ")")
             | OmitDefault _
-            | Required -> fsharpValue idl f.Type fv
+            | Required -> emitValue hosted idl f.Type fv
 
     /// Record-field assignments (`Label = …; Icon = Some …`) for one declared field
     /// list against one authored field list, honouring every presence rule. Shared
     /// by a kind's spec record, (Phase 698) the node envelope and (Phase 252) a
     /// non-discriminated record — `where` names the owner for the refusals only.
-    and fsAssignments
+    and private fsAssignments
+        (hosted: ResizeArray<string * string>)
         (idl: Idl)
         (where: string)
         (declared: IdlField list)
@@ -253,10 +253,52 @@ module internal Scaffold =
         : Result<string list, CodegenError> =
         declared
         |> List.map (fun f ->
-            fsPositional idl where f (authored |> List.tryFind (fun (n, _) -> n = f.Name) |> Option.map snd)
+            fsPositional hosted idl where f (authored |> List.tryFind (fun (n, _) -> n = f.Name) |> Option.map snd)
             |> Result.map (fun e -> pascal f.Name + " = " + e))
         |> sequenceR
 
+
+    /// Emit an F# value-construction expression for an authored `IdlValue` of
+    /// type `t`, building values of the GENERATED types (`Gen.fsharpModule`'s). Wire-derived
+    /// strings route through `SourceLit.fsString`; an unsupported shape is REFUSED rather than
+    /// mis-emitted (the syntax-tree-emission contract), and the refusal is a [[CodegenError]]
+    /// (Phase 252) — the same typed shape every module emitter returns.
+    ///
+    /// BREAKING (Phase 252): the error channel was a plain `string`. A caller that wants the
+    /// sentence adapts with `|> Result.mapError CodegenError.describe`.
+    ///
+    /// Phase 252 also widened what it constructs: an enum literal resolves through
+    /// [[IdlEnum.CaseOf]] to the HOST case the generated type declares (the wire string is
+    /// not an F# identifier in general — `"documents"` against `Documents`), and a
+    /// [[TRecord]] value emits a record expression under the same presence rules a kind's
+    /// spec record uses. A union case's positional fields honour presence too: an
+    /// `Optional` one is `Some(…)` / `None`, as its generated declaration says.
+    ///
+    /// **Total in the code it emits, too (Phase 384).** The expression is a
+    /// `Result<'T, DecodeError>` — `Ok` of the constructed value — because a hosted slot's value
+    /// is built at the scaffold's run time by the slot's own codec, which can refuse it. Each
+    /// hosted value is decoded ahead of the construction and bound by name; a refusal is the
+    /// generated decoders' own (D109): `OutOfRange`, "a value the slot's host codec admits",
+    /// with the codec's sentence. The emitted source holds no `failwith`. Where nothing hosted
+    /// is reached the expression is `Ok` of the construction, so its type does not depend on the
+    /// value. `DecodeError` and `DecodeCode` are written fully qualified, so the expression
+    /// needs no `open`.
+    let fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
+        let hosted = ResizeArray<string * string>()
+
+        emitValue hosted idl t v
+        |> Result.map (fun body ->
+            let bound =
+                (("Ok(" + body + ")"), List.indexed (List.ofSeq hosted) |> List.rev)
+                ||> List.fold (fun inner (i, (decode, lit)) ->
+                    sprintf
+                        "Result.bind (fun __h%d -> %s) ((%s) (%s) |> Result.mapError (fun (__e: string) -> Fuaran.Core.DecodeError.make Fuaran.Core.DecodeCode.OutOfRange \"a value the slot's host codec admits\" __e))"
+                        i
+                        inner
+                        decode
+                        lit)
+
+            "(" + bound + " : Result<_, Fuaran.Core.DecodeError>)")
 
     /// A provenance-stamp header for AI-scaffolded source (Phase 321) — records
     /// the source wire hash + the typed actor so generated code is auditable +
