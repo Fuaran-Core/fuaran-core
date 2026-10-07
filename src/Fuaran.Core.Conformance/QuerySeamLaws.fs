@@ -29,6 +29,15 @@ module internal QuerySeamLaws =
     /// `dispatchCapturedWith` replays through `dispatchReplayedWith` as exactly the refusal
     /// `dispatchPageWith` answers live, page by page. Every iteration builds a refusal on its first
     /// page, and the law is counted per refusal page.
+    ///
+    /// Since Phase 398 it also certifies the declared FILTER and ORDER: a declaration carrying a
+    /// `Where` predicate (each of the eight kinds in turn) and an `OrderBy` key registers, hands the
+    /// resolver exactly what it declared, keys its capture apart from the same declaration without
+    /// either, and round-trips the codec; a predicate naming an undeclared column is refused by
+    /// `register` and by the declaration reader with one error; a declaration with neither member
+    /// writes neither; and a resolver that cannot honour the predicate or the order is refused
+    /// `PredicateNotHonoured` / `OrderNotHonoured` naming it, live and on replay. Counted once per
+    /// iteration.
     let queryLaws (seed: int) (iterations: int) : LawResult list =
         let validation =
             LawKit.LawCell
@@ -70,6 +79,10 @@ module internal QuerySeamLaws =
             LawKit.LawCell
                 "a typed resolver's fault is captured, paged and replayed as the refusal it was answered live"
 
+        let shape =
+            LawKit.LawCell
+                "a declared Where / OrderBy reaches the resolver, keys its capture apart, round-trips the codec and is admitted by one gate; a filter or order the resolver cannot honour is refused by name"
+
         // value-codec for the captured realized result (the QueryResult itself, rendered canonically).
         let encodeV (qr: QueryResult) : string = QueryCodec.encodeResult qr
 
@@ -92,7 +105,9 @@ module internal QuerySeamLaws =
                       Determinism = Effect.network }
                   Source = Ref("src-" + string i)
                   TimeoutMs = Some 5000
-                  PageSize = None }
+                  PageSize = None
+                  Where = []
+                  OrderBy = [] }
 
             // param-validation: in-type accepts; wrong-type + unknown reject.
             (match Query.validateParams q [ "p0", Int 42 ] with
@@ -493,12 +508,134 @@ module internal QuerySeamLaws =
                     | Ok _ -> ())
 
                 // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
-                match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
-                | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> typedFailure.Saw()
-                | other ->
-                    typedFailure.Check(
-                        false,
-                        fun () -> at (sprintf "a resolver failure did not become ExecutionFailed: %A" other)
+                (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
+                 | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> typedFailure.Saw()
+                 | other ->
+                     typedFailure.Check(
+                         false,
+                         fun () -> at (sprintf "a resolver failure did not become ExecutionFailed: %A" other)
+                     ))
+
+                // ---- Phase 398: the declared filter and order ----
+                // Drawn after every earlier draw, so the laws above keep the samples they had. One
+                // predicate of each kind in turn over a two-column result, one drawn order key.
+                let shapeSchema = [ "n", IntType; "s", StringType ]
+                let lit = rng.IntBelow 100
+
+                let predicate =
+                    match i % 8 with
+                    | 0 -> ColumnPredicate.EqualTo("n", Int lit)
+                    | 1 -> ColumnPredicate.GreaterThan("n", Int lit)
+                    | 2 -> ColumnPredicate.AtLeast("n", Int lit)
+                    | 3 -> ColumnPredicate.LessThan("n", Int lit)
+                    | 4 -> ColumnPredicate.AtMost("n", Int lit)
+                    | 5 -> ColumnPredicate.Contains("s", "x" + string lit)
+                    | 6 -> ColumnPredicate.IsNull "s"
+                    | _ -> ColumnPredicate.IsNotNull "n"
+
+                let order =
+                    [ { Column = rng.Choose [ "n"; "s" ]
+                        Direction = rng.Choose [ SortDirection.Ascending; SortDirection.Descending ] } ]
+
+                let orderColumn = (List.head order).Column
+
+                let qS =
+                    { q with
+                        Id = "shaped-" + string i
+                        ResultSchema = shapeSchema
+                        Where = [ predicate ]
+                        OrderBy = order }
+
+                // One gate: a predicate naming an undeclared column is refused by the registry and
+                // by the declaration reader with the same error, the reader at the predicate's path.
+                let stray =
+                    { qS with
+                        Where = [ ColumnPredicate.IsNull "absent" ] }
+
+                let strayError = UnknownColumn("absent", [ "n"; "s" ])
+
+                let admitted =
+                    QueryRegistry.register stray QueryRegistry.empty = Error strayError
+                    && (match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode stray) with
+                        | Error e ->
+                            e.Path = [ PathSegment.Key "where"; PathSegment.Index 0 ]
+                            && e.Message = QueryError.describe strayError
+                        | Ok _ -> false)
+
+                // Absent is absent: a declaration with neither member writes neither.
+                let bare = QueryCodec.encode { qS with Where = []; OrderBy = [] }
+
+                let absentOmitted =
+                    not (bare.Contains "\"where\"") && not (bare.Contains "\"orderBy\"")
+
+                let keysApart =
+                    let k = Query.invocationKey qS goodArgs
+
+                    k <> Query.invocationKey { qS with Where = [] } goodArgs
+                    && k <> Query.invocationKey { qS with OrderBy = [] } goodArgs
+                    && Query.invocationKeyPage qS goodArgs None = k
+
+                match QueryRegistry.register qS QueryRegistry.empty with
+                | Error e -> shape.Fail(at (sprintf "a well-formed filtered declaration was refused: %A" e))
+                | Ok regS ->
+                    let seen = ref None
+
+                    let served =
+                        QueryRegistry.dispatchWithArgs regS qS.Id goodArgs (fun q' _ ->
+                            seen.Value <- Some(q'.Where, q'.OrderBy)
+                            Ok(Ready realized))
+
+                    let unhonoured (_: Query) (_: (string * Cell) list) =
+                        Error(ResolveFault.PredicateUnsupported predicate)
+
+                    let refusedP = QueryRegistry.dispatchWithArgs regS qS.Id goodArgs unhonoured
+
+                    let refusedO =
+                        QueryRegistry.dispatchWithArgs regS qS.Id goodArgs (fun _ _ ->
+                            Error(ResolveFault.OrderUnsupported orderColumn))
+
+                    let capturedP, _, journalP =
+                        QueryRegistry.dispatchCapturedWith hashFn encodeV regS qS.Id goodArgs unhonoured []
+
+                    let replayedP =
+                        QueryRegistry.dispatchReplayedWith
+                            decodeV
+                            regS
+                            qS.Id
+                            goodArgs
+                            None
+                            (fun _ _ _ -> Ok(Ready realized))
+                            Map.empty
+                            journalP
+                        |> Result.map fst
+
+                    shape.Check(
+                        served = Ok(Ready realized)
+                        && seen.Value = Some([ predicate ], order)
+                        && refusedP = Error(PredicateNotHonoured predicate)
+                        && refusedO = Error(OrderNotHonoured orderColumn)
+                        && capturedP = refusedP
+                        && replayedP = Ok refusedP
+                        && QueryCodec.decode (QueryCodec.encode qS) = Ok qS
+                        && keysApart
+                        && admitted
+                        && absentOmitted,
+                        fun () ->
+                            at (
+                                sprintf
+                                    "filter %A order %A: served %A seen %A refused %A / %A captured %A replayed %A keysApart %b admitted %b absentOmitted %b"
+                                    predicate
+                                    order
+                                    served
+                                    seen.Value
+                                    refusedP
+                                    refusedO
+                                    capturedP
+                                    replayedP
+                                    keysApart
+                                    admitted
+                                    absentOmitted
+                            )
                     ))
 
         LawKit.results
@@ -513,7 +650,8 @@ module internal QuerySeamLaws =
               typedFault
               paging
               registration
-              typedReach ]
+              typedReach
+              shape ]
 
     /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`

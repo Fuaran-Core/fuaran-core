@@ -246,6 +246,37 @@ A consumer that pinned this repository's `<Version>` for those four ids pins the
 for them instead: a second `PackageVersion` property, one per producing repository. The versions this
 repository published of them (up to `0.32.0`) stay on nuget.org and keep restoring.
 
+## What the declarative surfaces express
+
+Before writing a host-side convention for an intent, read whether Core already states it, or has
+decided not to. [`demand-census.md`](demand-census.md) carries the full grid with the file:line or
+the decision behind each verdict (Phase 398, DECISIONS.md D128). The short form:
+
+- **A query filters and orders, declared.** `Query.Where` is a closed conjunction of typed column
+  predicates — `EqualTo`, the four range bounds (`GreaterThan`, `AtLeast`, `LessThan`, `AtMost`),
+  `Contains` on a string column, `IsNull` / `IsNotNull` — and `Query.OrderBy` a column list with a
+  direction each. Both are empty by default and then absent from the wire, so a declaration without
+  them encodes exactly as before. A predicate's literal is a cell of its column's own type, and the
+  registry and the declaration reader refuse anything else by name. Your resolver reads both from the
+  `Query` it is handed; if it cannot apply one, it answers `ResolveFault.PredicateUnsupported` /
+  `OrderUnsupported` and the caller receives `PredicateNotHonoured` / `OrderNotHonoured` — never
+  answer rows the filter was not applied to. The capture key sees both, so a replay never answers
+  one filter's rows for another's.
+- **Pagination** is expressible: `PageSize`, the page token on input (`Query.invokePage` and the
+  registry's paged dispatchers) and `NextPageToken` on the result.
+- **Host-side by design on a query:** membership in a set (a disjunction — take the set as a
+  parameter), string building, date arithmetic, and aggregation over the result. A query declares what
+  to fetch, not what to compute.
+- **The pattern bank** matches `contains` (an anchor's literal segments, in order, case-insensitively)
+  and alternation between whole anchors (a pattern carries several; any one selects it). It does not
+  capture: a `{…}` wildcard reads nothing into `Emit`, so a value in the sentence reaches your `Emit`
+  only through the `Args` your host parses. Membership, null tests, date deltas and string building
+  are your `Emit`'s.
+- **The column layer** answers null tests (`Cell.isNull`), aggregation over a column
+  (`Column.aggregate`) and THE cell order (`Cell.compare`). Scalar functions and transforms — substring,
+  concatenation, date deltas, sorting and filtering as operations — are the compute repository's (see
+  "The dataframe path" above).
+
 ## Verify
 
 `./verify.ps1` builds the sample and runs its conformance report as part of the green gate. A clean

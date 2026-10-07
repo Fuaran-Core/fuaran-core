@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 297 claims — 216 proved across 28 models, 46 tested, 33 assumed (6 `domain-obligation`, 21 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 299 claims — 218 proved across 28 models, 46 tested, 33 assumed (6 `domain-obligation`, 21 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 This directory is the mechanised half of the correctness story whose differential half already
@@ -5671,13 +5671,18 @@ Four theorems, over any registry, any renderers and any host resolver:
    holds distinct ids (`register_keeps_distinct`) — which is what makes a capture key's id prefix
    name ONE declaration. Membership, not order, as in theorem 10: production's `Map` sorts the
    enumeration and the id order is `queryLaws`'s to certify.
-4. **`invocation_key_deterministic`** — the capture key reads the declaration through its `Id`
-   ALONE and the arguments through their name-sorted canonical form alone: two declarations sharing
-   an id, and two argument lists binding the same DISTINCT names to the same cells in ANY order,
-   key identically — under any hash and any numeral renderer, given only that the name comparator
-   is a total order. The order half is `sorted_unique` (two name-sorted lists with distinct names
+4. **`invocation_key_deterministic`** — the capture key reads the declaration through its `Id`,
+   its `Where` and its `OrderBy` (Phase 398; through its `Id` ALONE before) and the arguments
+   through their name-sorted canonical form alone: two declarations sharing an id, a filter and an
+   order, and two argument lists binding the same DISTINCT names to the same cells in ANY order,
+   key identically — under any hash and any renderer, given only that the name comparator is a
+   total order. The order half is `sorted_unique` (two name-sorted lists with distinct names
    holding the same bindings are the same list) over a model of `List.sortBy` as the stable
-   insertion sort it is; the id half needs no premise (`invocation_key_id_only`).
+   insertion sort it is; the declaration half needs no premise
+   (`invocation_key_reads_id_and_shape`). A declaration whose filter and order are empty keys
+   exactly as the pre-398 key did (`invocation_key_unshaped`, the compatibility claim), and one
+   whose filter or order differs keys apart (`invocation_key_injective`, over the shape since
+   Phase 398).
 
 **What the fourth theorem deliberately does not say.** The shard asked for the key to be "a function
 of the declaration and the validated arguments alone — never of the resolver's answer or the clock".
@@ -5846,7 +5851,8 @@ the `renderers` record so the model and its extraction stay ASCII. The oracle co
    `validate_params_shape`, `validate_params_exact`, `refusal_is_truthful`,
    `unbound_required_truthful`, `no_such_iff_unregistered`, `registered_dispatches`,
    `register_refuses_duplicate`, `register_extends`, `register_keeps_distinct`, `sorted_unique`,
-   `invocation_key_id_only`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
+   `invocation_key_reads_id_and_shape`; since Phase 398 `invocation_key_unshaped` and
+   `register_refuses_shape`), the envelope's unreachable fourth outcome (`invoke_never_ok_failed`,
    `dispatch_never_ok_failed`), since Phase 226 `required_is_non_null`, `all_null_refusal_exact`
    and `null_required_truthful` where the first finding (`all_null_accepted`) stood, and, since Phase 225, the
    capture key's injectivity (`invocation_key_injective` and the six lemmas under it) where the

@@ -126,7 +126,9 @@ let private readingsQuery: Query =
           Determinism = Effect.network }
       Source = Ref "readings"
       TimeoutMs = Some 5000
-      PageSize = None }
+      PageSize = None
+      Where = []
+      OrderBy = [] }
 
 let queryRegistry: QueryRegistry =
     QueryRegistry.empty
