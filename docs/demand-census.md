@@ -8,7 +8,7 @@ the next consumer reaches for it, like everybody's error but the language's. Thi
 intents consumers reach for and gives each one, on each surface, a **verdict** — so a consumer reads
 a decision rather than discovering a gap.
 
-It was first run by Phase 398 (DECISIONS.md D126), against the `0.36.0` draft. The verdicts that
+It was first run by Phase 398 (DECISIONS.md D128), against the `0.36.0` draft. The verdicts that
 reach consumers are restated in [`ADOPTION.md`](ADOPTION.md#what-the-declarative-surfaces-express).
 
 ## The verdicts
@@ -27,14 +27,14 @@ gap: every one is either expressible or host-side by a recorded decision.
 | intent | verdict | decided at |
 |---|---|---|
 | substring / contains | **expressible** — `ColumnPredicate.Contains`, ordinal and case-sensitive, on a `string` column | `Query.fs:95` |
-| membership (a value in a set) | **host-side by design** — `Where` is a conjunction; a set is a disjunction of equalities. A host takes the set as a parameter and its resolver reads it | D126 |
-| string building | **host-side by design** — a query declares what to fetch, not what to compute; scalar functions are the compute repository's | D126, D66 |
+| membership (a value in a set) | **host-side by design** — `Where` is a conjunction; a set is a disjunction of equalities. A host takes the set as a parameter and its resolver reads it | D128 |
+| string building | **host-side by design** — a query declares what to fetch, not what to compute; scalar functions are the compute repository's | D128, D66 |
 | null tests | **expressible** — `ColumnPredicate.IsNull` / `IsNotNull` | `Query.fs:97` |
 | date deltas | **host-side by design** as arithmetic (D66); a date RANGE against a literal is expressible — `AtLeast` / `LessThan` on a `date` column | `Query.fs:82` |
 | pagination | **expressible** — `Query.PageSize`, the page token on input (`Query.invokePage`), `QueryResult.NextPageToken` | `Query.fs:145`, `:1006`, `:169` |
 | sorting | **expressible** — `Query.OrderBy`, a column list with a direction each | `Query.fs:152` |
 | filtering (equality, range) | **expressible** — `Query.Where`, a closed conjunction: `EqualTo`, `GreaterThan`, `AtLeast`, `LessThan`, `AtMost` | `Query.fs:149`, `:82` |
-| aggregation over the result | **host-side by design** on `Query` (a query returns rows); expressible over a `Table` in the column layer, below | D126 |
+| aggregation over the result | **host-side by design** on `Query` (a query returns rows); expressible over a `Table` in the column layer, below | D128 |
 | alternation, typed slots | not a `Query` intent (they are the pattern bank's) | — |
 
 A resolver that cannot honour a declared predicate or order refuses it by name
@@ -54,8 +54,8 @@ registration and by the declaration reader with one error (`QueryRegistry.admiss
 | null tests | **host-side by design** — the intent's `Args` are strings the host parsed; `Emit` reads them | `AiSurface.fs:84` |
 | date deltas | **host-side by design** — `Emit` | `AiSurface.fs:103` |
 | pagination, sorting, filtering, aggregation | not pattern-bank intents (a match emits ops, not rows) | — |
-| alternation | **expressible** between whole anchors — a pattern carries several, and any ONE matching selects it; **host-side by design** within one anchor, and the bank resolves first match in bank order | `AiSurface.fs:100`, `:295`, D126 |
-| typed slots / captures | **host-side by design** — a `{…}` wildcard never captures; a value reaches `Emit` only through `Args`, which the host fills | `AiSurface.fs:84`, D126 |
+| alternation | **expressible** between whole anchors — a pattern carries several, and any ONE matching selects it; **host-side by design** within one anchor, and the bank resolves first match in bank order | `AiSurface.fs:100`, `:295`, D128 |
+| typed slots / captures | **host-side by design** — a `{…}` wildcard never captures; a value reaches `Emit` only through `Args`, which the host fills | `AiSurface.fs:84`, D128 |
 
 ### The column layer (`src/Fuaran.Core.Column/Column.fs`)
 
@@ -86,7 +86,7 @@ corpus. Its five stages:
    the codec carries it, and the cited file:line is the evidence. No model run was spent, and none
    is needed to settle a structural question.
 4. **Dispatch by layer.** An intent that should be Core surface becomes surface (Phase 398 shipped
-   `Where` and `OrderBy`); one that should not is a recorded decision (D126) and is listed here as
+   `Where` and `OrderBy`); one that should not is a recorded decision (D128) and is listed here as
    host-side by design.
 5. **Verify the compounding.** The verdicts that ship are pinned by tests that go red if the surface
    moves back: the `Query Where / OrderBy (Phase 398)` list in `QueryTests.fs` and the

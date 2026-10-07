@@ -196,7 +196,7 @@ repository published of them (up to `0.32.0`) stay on nuget.org and keep restori
 
 Before writing a host-side convention for an intent, read whether Core already states it, or has
 decided not to. [`demand-census.md`](demand-census.md) carries the full grid with the file:line or
-the decision behind each verdict (Phase 398, DECISIONS.md D126). The short form:
+the decision behind each verdict (Phase 398, DECISIONS.md D128). The short form:
 
 - **A query filters and orders, declared.** `Query.Where` is a closed conjunction of typed column
   predicates — `EqualTo`, the four range bounds (`GreaterThan`, `AtLeast`, `LessThan`, `AtMost`),

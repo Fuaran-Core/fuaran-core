@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-07 — D126: a query declares a closed conjunction of typed column predicates and a column order; the resolver honours both or refuses by name; the pattern bank does not capture, and the column layer's scalar functions stay where D66 put them
+## 2026-10-07 — D128: a query declares a closed conjunction of typed column predicates and a column order; the resolver honours both or refuses by name; the pattern bank does not capture, and the column layer's scalar functions stay where D66 put them
 
 **Recorded by Phase 398 (operator ruling: the recommended shape ships). `Fuaran.Core.Query`,
 `Fuaran.Core.Conformance` (`queryLaws`); rides the `0.36.0` draft (STABILITY.md, "A query declares

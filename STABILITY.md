@@ -2801,7 +2801,7 @@ each says why at its head: F# compiles one module from one file, and both module
 nested in them (`Diff+Change`, `FStarTarget+Slot`, …), so no layout of either keeps those names. A
 consumer of these packages sees no change from any of this.
 
-### A query declares what it filters and how it orders; a resolver that cannot honour either refuses by name (Phase 398, DECISIONS.md D126) — BREAKING-SOURCE: `Query` gains `Where` and `OrderBy` (`record-widening`), `QueryError` and `ResolveFault` gain cases (`union-widening`); the rest `additive`; the wire `additive`
+### A query declares what it filters and how it orders; a resolver that cannot honour either refuses by name (Phase 398, DECISIONS.md D128) — BREAKING-SOURCE: `Query` gains `Where` and `OrderBy` (`record-widening`), `QueryError` and `ResolveFault` gain cases (`union-widening`); the rest `additive`; the wire `additive`
 
 **The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Query`
 **`record-widening`** — the record fields `Query.Where` and `Query.OrderBy`, which retype the record's
@@ -2846,7 +2846,7 @@ widening rides this draft as the earlier record-widenings on it did.
   with neither keys exactly as before, so every journal written before this draft still replays.
   `proofs/Query.fst` models both members and the key over them: theorem four reads the id and the
   shape, `invocation_key_unshaped` proves the unshaped key unchanged, and the injectivity theorems
-  cover the shape and the page token (D126). The oracle is re-extracted and draws shaped
+  cover the shape and the page token (D128). The oracle is re-extracted and draws shaped
   declarations. The `Query` proof module's budget moves from 40s to 110s (`proofs/modules.json`).
 - **The law.** `queryLaws` gains its thirteenth law (the declared filter and order: reaches the
   resolver, keys apart, round-trips, one gate, a refusal by name, live and on replay), counted once per

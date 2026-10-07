@@ -67,7 +67,7 @@ type QueryParam =
         Required: bool
     }
 
-/// One typed predicate over a column of a query's result (Phase 398, DECISIONS.md D126) — a member of
+/// One typed predicate over a column of a query's result (Phase 398, DECISIONS.md D128) — a member of
 /// the closed conjunction a `Query.Where` declares. Every case names a column of `ResultSchema`; a
 /// case carrying a literal carries a present `Cell` of EXACTLY that column's type (no widening, so
 /// one filter has one spelling), well-formed as `Table.validate` reads it. `QueryRegistry.register`,
