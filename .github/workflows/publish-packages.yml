@@ -9,9 +9,11 @@ name: publish-packages
 #   1. the ref must be a tag (a workflow_dispatch run on a branch is refused, because no version
 #      can be checked against a branch), and the tag must be `v<Version>` for the <Version> in
 #      Directory.Build.props — a mistyped tag packs the standing version under the wrong name;
-#   2. `verify.ps1` runs before anything is packed, with the same inputs the ci workflow gives it.
-#      The proof leg stays in ci (it needs the pinned prover on Windows); publishing a commit
-#      whose ci run is red is the operator's call to not make.
+#   2. `verify.ps1 -Configuration Release` runs before anything is packed, with the same inputs the ci
+#      workflow gives it, and the pack that follows is `--no-build` over THAT output (Phase 395): the
+#      assemblies the gate's surface and documentation checks read are the assemblies that ship, not a
+#      second build of the same sources. The proof leg stays in ci (it needs the pinned prover on
+#      Windows); publishing a commit whose ci run is red is the operator's call to not make.
 on:
   push:
     tags: ['v*']
@@ -61,14 +63,14 @@ jobs:
         with:
           repository: fuaran-ui/fuaran-ui-specification
           path: wire-format-fixtures
-      - name: Verify (./verify.ps1)
+      - name: Verify the Release build (./verify.ps1 -Configuration Release)
         shell: pwsh
         env:
           FUARAN_CORE_CORPUS_FRESHNESS: '1'
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
-        run: ./verify.ps1
-      - name: Pack (all packable src projects)
-        run: dotnet pack Fuaran.Core.slnx -c Release -o ${{ runner.temp }}/nupkgs
+        run: ./verify.ps1 -Configuration Release
+      - name: Pack what was verified (all packable src projects, --no-build)
+        run: dotnet pack Fuaran.Core.slnx -c Release --no-build -o ${{ runner.temp }}/nupkgs
       # Auth is Trusted Publishing (OIDC): a policy on nuget.org (repo owner /
       # repo / this workflow's file name) exchanges the job's OIDC token for a
       # 1-hour API key — no long-lived key secret to rotate. NUGET_USER is the

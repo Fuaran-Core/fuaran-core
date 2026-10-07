@@ -6,8 +6,18 @@ on:
   pull_request:
 
 jobs:
+  # Phase 395 — both configurations, because they ship differently: Debug is the contributor's own
+  # path (`./verify.ps1`), Release is what publish-packages verifies and then packs `--no-build`. A
+  # Release-only red (an optimiser-sensitive test, a Release-only surface difference) would otherwise
+  # first show on a tag push, when the version is already named; the second leg costs a build and a
+  # run in parallel and moves that red to the commit that caused it.
   verify:
+    name: verify (${{ matrix.configuration }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
     steps:
       # The package-roster checks (Phases 199 and 205) read the repository's RELEASE TAGS and
       # refuse an empty tag list on purpose — with none, their comparisons would pass vacuously.
@@ -57,12 +67,12 @@ jobs:
       # tests/Fuaran.Core.Tests/open-phases.json, and the publication-boundary sweep reads the committed
       # tests/Fuaran.Core.Tests/publication-boundary.json over every tracked file. A gate whose
       # verdict depended on a variable this job never set would be a clause that cannot be red here.
-      - name: Verify (./verify.ps1)
+      - name: Verify (./verify.ps1 -Configuration ${{ matrix.configuration }})
         shell: pwsh
         env:
           FUARAN_CORE_CORPUS_FRESHNESS: '1'
           FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
-        run: ./verify.ps1
+        run: ./verify.ps1 -Configuration ${{ matrix.configuration }}
 
   # Phase 131 — the proof leg. proofs/DagFold.fst is checked by the PINNED F*/Z3 three times
   # from a cold cache (exit criterion 1: reproducible), the committed F# oracle is held to a fresh
