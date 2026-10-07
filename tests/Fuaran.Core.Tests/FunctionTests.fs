@@ -1922,3 +1922,55 @@ let composeAcrossResultTests =
                   (Function.composeAcross artw artw id "tpl/s" inner (template ()))
                   (Function.compose artw "tpl/s" inner (template ()))
                   "at one witness and the identity embedding, the two compositions agree on the refusal" ]
+
+// ---- Phase 385 — the capability reader runs the registries' whole admission gate ----
+
+[<Tests>]
+let readerAdmissionTests =
+    testList
+        "CapabilityCodec runs the registries' admission gate (Phase 385)"
+        [ testCase "a declaration the registries refuse is refused at the reader with the registry's own error"
+          <| fun _ ->
+              // Every probe the encoder can write (a non-finite bound has no JSON spelling) reaches
+              // the reader, and the reader answers exactly the sentence `register` answers.
+              let read =
+                  [ for name, holes, expected in probes307 do
+                        match CapabilityCodec.tryEncode (Capability.create "c" (sig307 holes) Server) with
+                        | Error _ -> ()
+                        | Ok text ->
+                            Expect.equal (register307 holes) (Error expected) (name + ": the registry's refusal")
+
+                            Expect.equal
+                                (CapabilityCodec.decode text)
+                                (Error(InvokeError.describe expected))
+                                (name + ": the reader's refusal is the registry's")
+
+                            yield name ]
+
+              Expect.containsAll
+                  read
+                  [ "a count past the cap"
+                    "a negative count"
+                    "two holes at one address"
+                    "an empty enum" ]
+                  "both halves of the gate — totality and well-formedness — reach the reader"
+
+          testCase "a non-total declaration is NonTotalCapability at the reader, not a well-formedness refusal"
+          <| fun _ ->
+              let holes = [ entry307 "r" "repeat" (Some(IntRange(-1, 3))) ]
+              let text = CapabilityCodec.encode (Capability.create "c" (sig307 holes) Server)
+
+              match
+                  CapabilityCodec.decodeJsonDetailedWith
+                      ReadPolicy.Lenient
+                      (Decode.parse text |> Result.toOption |> Option.get)
+              with
+              | Error e ->
+                  Expect.equal e.Message (InvokeError.describe (NonTotalCapability("c", [ "r" ]))) "the totality half"
+                  Expect.equal e.Path [ PathSegment.Key "signature"; PathSegment.Key "holes" ] "at the holes"
+                  Expect.equal e.Code DecodeCode.OutOfRange "out of the admitted range"
+              | Ok c -> failtestf "a non-total declaration was read: %A" c
+
+          testCase "an admitted declaration still round-trips"
+          <| fun _ ->
+              Expect.equal (CapabilityCodec.decode (CapabilityCodec.encode intCap307)) (Ok intCap307) "round trip" ]

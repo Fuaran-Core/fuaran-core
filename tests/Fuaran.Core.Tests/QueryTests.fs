@@ -326,3 +326,277 @@ let registrationDuplicateParamTests =
                   "the repeated name is refused at registration"
 
               Expect.isOk (QueryRegistry.register sampleQuery QueryRegistry.empty) "distinct names still register" ]
+
+// ---- Phase 385: one admission gate at every reader, and the typed resolver at every dispatcher ----
+
+/// `text` with its first `"$type"` member rewritten to `tag` (or removed, for `None`).
+let private retag (from: string) (tag: string option) (text: string) : string =
+    let tagMember = "\"$type\":\"" + from + "\""
+
+    match tag with
+    | Some t -> text.Replace(tagMember, "\"$type\":\"" + t + "\"")
+    | None -> text.Replace(tagMember + ",", "")
+
+[<Tests>]
+let readerAdmissionTests =
+    testList
+        "Query readers admit what the registry admits (Phase 385)"
+        [ testCase "a query document whose $type is not query is a DecodeError naming the tag"
+          <| fun _ ->
+              let text = QueryCodec.encode sampleQuery
+              Expect.equal (QueryCodec.decode text) (Ok sampleQuery) "round trip"
+
+              let other = retag "query" (Some "queryResult") text
+              Expect.notEqual other text "the probe edited the tag"
+
+              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient other with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.UnknownTag "an unknown tag"
+                  Expect.equal e.Path [ PathSegment.Key "$type" ] "at the tag"
+                  Expect.equal e.Message "not a query declaration: queryResult" "naming the tag"
+              | Ok q -> failtestf "another document type was read as a query: %A" q
+
+              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (retag "query" None text) with
+              | Error e -> Expect.equal e.Code DecodeCode.MissingField "an untagged document is refused"
+              | Ok q -> failtestf "an untagged document was read as a query: %A" q
+
+          testCase "a result document whose $type is not queryResult is a DecodeError naming the tag"
+          <| fun _ ->
+              let text = QueryCodec.encodeResult sampleResult
+              Expect.equal (QueryCodec.decodeResult text) (Ok sampleResult) "round trip"
+
+              Expect.equal
+                  (QueryCodec.decodeResult (retag "queryResult" (Some "query") text))
+                  (Error "not a query result: query")
+                  "another document type"
+
+              Expect.isError (QueryCodec.decodeResult (retag "queryResult" None text)) "an untagged document"
+
+          testCase "a declaration naming a parameter twice is refused at the reader with the registry's DuplicateParam"
+          <| fun _ ->
+              let twice =
+                  { sampleQuery with
+                      Params =
+                          sampleQuery.Params
+                          @ [ { Name = "year"
+                                Type = StringType
+                                Required = false } ] }
+
+              let registryRefusal =
+                  match QueryRegistry.register twice QueryRegistry.empty with
+                  | Error e -> e
+                  | Ok _ -> failtest "the registry admitted a repeated parameter"
+
+              Expect.equal registryRefusal (DuplicateParam "year") "the registry's refusal"
+
+              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode twice) with
+              | Error e ->
+                  Expect.equal e.Message (QueryError.describe registryRefusal) "the reader's refusal is the registry's"
+                  Expect.equal e.Path [ PathSegment.Key "params" ] "at the parameters"
+              | Ok q -> failtestf "the reader admitted what the registry refuses: %A" q
+
+          testCase "decodeArgs answers unreadable input with UnreadableArgs, never ExecutionFailed"
+          <| fun _ ->
+              match QueryCodec.decodeArgs sampleQuery "{" with
+              | Error [ UnreadableArgs e ] ->
+                  Expect.equal e.Code DecodeCode.InvalidJson "a parse failure"
+                  Expect.equal e.Path [] "at the root"
+              | other -> failtestf "expected UnreadableArgs, got %A" other
+
+              match QueryCodec.decodeArgs sampleQuery "[2024]" with
+              | Error [ UnreadableArgs e ] ->
+                  Expect.equal e.Code DecodeCode.WrongKind "not an object"
+                  Expect.equal e.Path [] "at the root"
+              | other -> failtestf "expected UnreadableArgs, got %A" other
+
+              match QueryCodec.decodeArgs sampleQuery """{"year":{"y":2024},"region":"UK"}""" with
+              | Error [ UnreadableArgs e ] ->
+                  Expect.equal e.Code DecodeCode.WrongKind "a kind no column type spells"
+                  Expect.equal e.Path [ PathSegment.Key "year" ] "at the parameter"
+              | other -> failtestf "expected UnreadableArgs at year, got %A" other
+
+              Expect.equal
+                  (QueryCodec.decodeArgs sampleQuery """{"year":"2024"}""")
+                  (Error [ ParamTypeMismatch("year", IntType, StringType) ])
+                  "a scalar of the wrong type is still a type mismatch"
+
+              let e =
+                  UnreadableArgs(DecodeError.make DecodeCode.InvalidJson "JSON text" "unexpected end")
+
+              Expect.equal (QueryCodec.decodeQueryError (QueryCodec.encodeQueryError e)) (Ok e) "round trip"
+
+              Expect.equal
+                  (QueryError.describe e)
+                  "Refused: the arguments could not be read at $: unexpected end. Send one JSON object keyed by parameter name."
+                  "described" ]
+
+/// A resolver answering per page: the first page a result, then a timeout, a recoverable failure and
+/// a missing source.
+let private typedPages (_: Query) (token: string option) (args: (string * Cell) list) =
+    match token with
+    | None -> Ok(Ready { sampleResult with PageNum = 0 })
+    | Some "p1" -> Error ResolveFault.TimedOut
+    | Some "p2" -> Error(ResolveFault.Failed("busy", [ "year" ]))
+    | Some "p3" -> Error(ResolveFault.SourceMissing "sales")
+    | Some other -> Ok(Failed("no page " + other + " for " + string (List.length args)))
+
+let private tokens385 = [ None; Some "p1"; Some "p2"; Some "p3" ]
+
+[<Tests>]
+let typedDispatchTests =
+    testList
+        "The typed resolver reaches paging, capture and replay (Phase 385)"
+        [ testCase "invokePageWithArgs hands the resolver the token and the promoted arguments"
+          <| fun _ ->
+              let q =
+                  { sampleQuery with
+                      Params =
+                          [ { Name = "w"
+                              Type = FloatType
+                              Required = true } ] }
+
+              let seen = ref None
+
+              let answer =
+                  Query.invokePageWithArgs q [ "w", Int 3 ] (Some "t") (fun _ t args ->
+                      seen.Value <- Some(t, args)
+                      Error ResolveFault.TimedOut)
+
+              Expect.equal answer (Error Timeout) "the typed fault, by name"
+              Expect.equal seen.Value (Some(Some "t", [ "w", Float 3.0 ])) "token and promoted arguments"
+
+              Expect.equal
+                  (Query.invokeWithArgs q [ "w", Int 3 ] (fun q' a -> typedPages q' None a))
+                  (Query.invokePageWithArgs q [ "w", Int 3 ] None typedPages)
+                  "invokeWithArgs is the first page"
+
+          testCase "a ResolveFault is paged, captured and replayed as the refusal answered live"
+          <| fun _ ->
+              let args = [ "year", Int 2026 ]
+
+              let live =
+                  tokens385
+                  |> List.map (fun t -> QueryRegistry.dispatchPageWith registered "sales-by-region" args t typedPages)
+
+              Expect.equal
+                  live
+                  [ Ok(Ready { sampleResult with PageNum = 0 })
+                    Error Timeout
+                    Error(ExecutionFailed("busy", [ "year" ]))
+                    Error(SourceNotResolved "sales") ]
+                  "each page's typed answer"
+
+              let captured, journal =
+                  tokens385
+                  |> List.fold
+                      (fun (acc, j) t ->
+                          let a, _, j' =
+                              QueryRegistry.dispatchPageCapturedWith
+                                  OpStream.defaultHash
+                                  QueryCodec.encodeResult
+                                  registered
+                                  "sales-by-region"
+                                  args
+                                  t
+                                  typedPages
+                                  j
+
+                          acc @ [ a ], j')
+                      ([], [])
+
+              Expect.equal captured live "capture answers what the live dispatch answers"
+
+              let replayed =
+                  tokens385
+                  |> List.fold
+                      (fun (acc, cursor) t ->
+                          match
+                              QueryRegistry.dispatchReplayedWith
+                                  QueryCodec.decodeResult
+                                  registered
+                                  "sales-by-region"
+                                  args
+                                  t
+                                  (fun _ _ _ -> failtest "replay must not resolve a network query")
+                                  cursor
+                                  journal
+                          with
+                          | Ok(a, cursor') -> acc @ [ a ], cursor'
+                          | Error f -> failtestf "replay faulted: %A" f)
+                      ([], Map.empty)
+                  |> fst
+
+              Expect.equal replayed live "replay answers each page as it was answered live"
+
+              let unpaged, _, j1 =
+                  QueryRegistry.dispatchCapturedWith
+                      OpStream.defaultHash
+                      QueryCodec.encodeResult
+                      registered
+                      "sales-by-region"
+                      args
+                      (fun q a -> typedPages q (Some "p1") a)
+                      []
+
+              Expect.equal unpaged (Error Timeout) "the unpaged capture"
+
+              Expect.equal
+                  (QueryRegistry.dispatchReplayedWith
+                      QueryCodec.decodeResult
+                      registered
+                      "sales-by-region"
+                      args
+                      None
+                      typedPages
+                      Map.empty
+                      j1
+                   |> Result.map fst)
+                  (Ok(Error Timeout))
+                  "replays as the timeout"
+
+          testCase "an untyped failure replays as the ExecutionFailed answered live; a pre-0.36 reason as before"
+          <| fun _ ->
+              let args = [ "year", Int 2026 ]
+
+              let answer, _, journal =
+                  QueryRegistry.dispatchCaptured
+                      OpStream.defaultHash
+                      QueryCodec.encodeResult
+                      registered
+                      "sales-by-region"
+                      args
+                      (fun _ -> Failed "down")
+                      []
+
+              Expect.equal answer (Error(ExecutionFailed("down", []))) "live"
+
+              let replay j =
+                  QueryRegistry.dispatchReplayed
+                      QueryCodec.decodeResult
+                      registered
+                      "sales-by-region"
+                      args
+                      None
+                      (fun _ _ -> Ready sampleResult)
+                      Map.empty
+                      j
+                  |> Result.map fst
+
+              Expect.equal (replay journal) (Ok answer) "replayed exactly"
+
+              // A journal written before 0.36.0 recorded the refusal's sentence.
+              let sentence = QueryError.describe (ExecutionFailed("down", []))
+
+              let _, _, legacy =
+                  OpStream.captureEffectKeyed
+                      OpStream.defaultHash
+                      QueryCodec.encodeResult
+                      (Query.determinismTag sampleQuery)
+                      (Query.invocationKey sampleQuery args)
+                      (fun () -> Some(Error sentence))
+                      []
+
+              Expect.equal
+                  (replay legacy)
+                  (Ok(Error(ExecutionFailed(sentence, []))))
+                  "the recorded text, as it always was" ]

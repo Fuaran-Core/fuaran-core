@@ -354,7 +354,23 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
             | Error e -> failtestf "a valid document did not parse: %s" e
 
         let spots = positions verbatim [] doc |> List.toArray
-        let path, value = spots.[rng.Next spots.Length]
+
+        // Phase 387 — the `__proto__` corner (draw 5) is drawn among the OBJECT positions, which
+        // every document has (its root is one). Drawn among all positions, it fired only when the
+        // position happened to be an object — a handful of times in a 400-document run — so whether
+        // the corner was reached at all was a property of the seed: the sampler's re-basing on the
+        // `ConfRng` stream (D124) moved the sampled documents, and the draw stopped reaching it.
+        let candidates =
+            if draw = 5 then
+                spots
+                |> Array.filter (fun (_, v) ->
+                    match v with
+                    | JObj fields -> not fields.IsEmpty
+                    | _ -> false)
+            else
+                spots
+
+        let path, value = candidates.[rng.Next candidates.Length]
 
         match draw, value, List.rev path with
         // Phase 347 — a whole number written as a FLOAT token: an int slot refuses `7.0` and `7e0`

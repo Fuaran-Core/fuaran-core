@@ -863,7 +863,21 @@ module TypeParams =
 /// UNTRUSTED input (DECISIONS D95): [[Declare.errors]] refuses a vocabulary that carries
 /// such text at every loading path, and this module is the second half of the same rule —
 /// a vocabulary built in code, which no loader sees, still cannot put a byte of source into
-/// a generated module.
+/// a generated module THROUGH THE TEXT THE IDL AUTHORS: its identifiers, wire spellings,
+/// discriminator, categories, docs and deprecation prose.
+///
+/// **The trust boundary — what this module does NOT cover (Phase 387, DECISIONS D124).** Some
+/// declared text is not IDL-authored data but HOST SOURCE, spliced verbatim by design: a
+/// [[THosted]] slot's `FSharp` type and its `Encode` / `Decode` expressions, a [[TFn]] slot's
+/// [[ClosureSig]] host types and placeholder, and every `support.json` entry (a doc block, a
+/// splice, a kind projection, the host prelude). Escaping them would destroy them — they are
+/// code — so none passes through here; [[Declare.errors]] checks a hosted slot only for its
+/// declared wire form and format, and `SupportArtifact.ofJson` checks only shape. Whoever
+/// supplies them supplies source to the generated module, trusted exactly as far as the project
+/// that compiles it trusts its own code, so a vocabulary or support file from an untrusted
+/// party must not carry them. The guarantee above is scoped to IDL-authored text and stops
+/// there; `IdlCertificationTests` pins the boundary by planting a hosted body that would be
+/// unsafe as data and asserting it reaches the generated module verbatim.
 ///
 /// **The policies.** A string LITERAL (F#, an F# attribute argument, TypeScript) escapes the
 /// quote and the backslash, names `\n` `\r` `\t`, and writes every other C0 control, U+0085,

@@ -2616,6 +2616,116 @@ stack-traced. Each is one line on stderr and exit 2. An invocation that read bef
 report and exits the same code. `README.md`'s package row states the full regime: `classify` 0 / 3 / 4,
 or 0 / 1 under `--expect`; `spike-proposal` 0 / 1; 2 for every refusal.
 
+### The two cross-runtime claims the suite did not measure are measured (Phase 387, DECISIONS.md D124) — `additive` on the .NET surface; the Fable sources lose two reflection laws (`removal`); every SAMPLED set moves; the wire `none`
+
+**The class, from the gate.** The surface family prints `Fuaran.Core.Conformance` **`additive`**
+(`Conformance.declaredWitnessFields`, `Conformance.witnessDeclaredFieldsLaw`) and no move in
+`Fuaran.Core.Idl` — the sampler's change is to its VALUES, which no surface baseline can see and this
+entry states instead. The `fable/` sources, which no baseline renders, lose
+`Conformance.witnessFieldsLaw` and `Conformance.witnessCoverageLaw`: both read records by reflection
+and are .NET-only now — a **`removal`** for a consumer that compiles the kit under Fable and called
+either directly. No wire byte, digest, `api/wire/` baseline or generated-decoder byte moves.
+
+**The sampler is `ConfRng`'s stream, and every sampled set moved — the `0.12.0` form.**
+`Fuaran.Core.Idl.Sample` was a `uint64` LCG (a 64-bit multiply, the shape Fable cannot carry) choosing
+by `% n`. It is now `ConfRng`'s xorshift32 seeded as `ConfRng.ofSeed` seeds, with every bounded choice
+`intBelow` by rejection, and `trySampleNodes` cycles its kind tags without an index modulo. The
+signatures did not move; **every value did**: a consumer that pinned a sampled vector, or a corpus or
+proof fact generated from a seed, sees different nodes from the same seed and must regenerate it. Treat
+the repin as a READ, as `0.12.0` asked: a vacuity or coverage demand that still passes should pass for
+a reason. In this repository the move regenerated `proofs/VocabularyVectors.fst` (verified by the
+pinned prover) and exposed one demand met by the seed rather than by design — the Phase 347
+`__proto__` corner of the sampled-mutation law, which now draws among object positions.
+
+**The claim is measured, on both legs.** `ParityVectors.vectors` gains seven `sample/*` rows at its
+tail (every earlier row keeps its place): `sample/draws/*` over four seeds — a vocabulary whose
+encoding spells out each choice, a seven-case enum where rejection and modulo differ —
+`sample/nodes/*`, the SHA-256 of twelve sampled nodes over every slot shape at two seeds, and
+`sample/refusal/empty-enum`, the typed refusal's text. `ParityVectorTests` pins their .NET bytes and
+holds the sampler's copy of the generator to `ConfRng.intBelow` over forty-three seeds; the receiving
+gate's node leg compares the rows across the two pipelines at the next cut that cites it.
+
+**The witness freeze reads no reflection under Fable.** `witnessSurfaceLaws ()` on .NET is unchanged —
+one reflecting `witnessFieldsLaw` per frozen record and the coverage law. Under Fable each record's law
+is `witnessDeclaredFieldsLaw` over `Conformance.declaredWitnessFields`, the committed list of each
+frozen record's fields as reflection reads them, with the same law name and counterexample; this
+repository's `SurfaceLawsTests` holds the list equal to reflection, so a record that grows a field
+reddens that test before the list can lag it.
+
+**D95, as it is.** The `SourceLit` module doc and D95 now say that the escaper's guarantee covers
+IDL-authored text only. A `THosted` slot's `FSharp` / `Encode` / `Decode`, a `TFn` slot's
+`ClosureSig` and `support.json` entries are host source, spliced verbatim and trusted as the compiling
+project's own code; `IdlCertificationTests` pins that boundary with a planted hosted body.
+
+### One admission gate at every reader, on the query side too; the typed resolver reaches paging, capture and replay (Phase 385) — BREAKING-SOURCE: `QueryError` gains `UnreadableArgs` (`union-widening`); the rest `additive`; the wire `additive`
+
+**The class, from the gate.** The surface family prints, against `v0.35.2`: `Fuaran.Core.Query`
+**`union-widening`**: the appended case `QueryError.UnreadableArgs of error: DecodeError`. Its other
+moves are `additive`: `Query.invokePageWithArgs` and the `QueryRegistry` entry points
+`dispatchPageWith`, `dispatchCapturedWith`, `dispatchPageCapturedWith` and `dispatchReplayedWith`.
+`Fuaran.Core.Function` and `Fuaran.Core.Conformance` do not move their managed baselines; their
+changes are internal or behavioural, and this entry states them. The wire baseline
+`api/wire/Fuaran.Core.Query.txt` is `additive`: the `unreadableArgs` query-error document is new,
+and no existing document's bytes move. The capability and query codecs emit the same bytes they did.
+
+**What moved, for a consumer.**
+
+- **The query readers check their tag and run the registry's gate (D104, D111).** `QueryCodec`'s
+  declaration reader refuses a document whose `"$type"` is not `query`, with `UnknownTag` at `$type`
+  ("not a query declaration: <tag>"), or `MissingField` when the tag is absent. The result reader
+  does the same for `queryResult`. The declaration reader then runs `QueryRegistry.admissionFault`.
+  This is the one function `register` and `replace` run. A declaration naming a parameter twice is
+  refused `OutOfRange` at `params`, with the sentence of the registry's `DuplicateParam`. Before
+  this, the reader admitted declarations the registry then refused, and read a document of any tag.
+  **Cost:** a hand-written query or result document without its `"$type"` no longer reads.
+  `encode` and `encodeResult` always wrote it.
+- **The capability reader runs the WHOLE gate.** `CapabilityCodec`'s capability reader runs
+  `Capability.admissionOf` over the signature it has just read. This is the one gate both
+  registries run, through `admissionFault`, in the same order: totality, then well-formedness. A
+  non-total declaration (a repeat over a non-count space) is refused `OutOfRange` at
+  `signature.holes`, with the sentence of the registry's `NonTotalCapability`. Before this it was
+  read, and `register` refused it. An ill-formed declaration is refused at the same path as before,
+  and its sentence is now the registry's `IllFormedCapability` sentence. It used to read
+  "ill-formed signature: …". The bare `signatureOf` keeps its well-formedness check and its
+  sentence. The F* model moves with it: `proofs/Capability.fst`'s `capability_of_j` refuses a
+  non-total signature, `wf_capability` requires totality, and `capability_roundtrip` states the
+  refusal. All three theorems re-verified, and the oracle was re-extracted.
+- **`decodeArgs` answers a parse with a decode refusal.** The new `UnreadableArgs` carries the
+  `DecodeError`: its code, its path within the argument document and its sentence. It covers text
+  that is not JSON, a document that is not an object, and a parameter value of a kind no column
+  type spells (an array or an object, at that parameter's path). These were
+  `ExecutionFailed("decode: …" / "parse: …")`. Now no path that ran no resolver answers
+  `ExecutionFailed`. **Cost:** an exhaustive `match` over `QueryError` gains an arm.
+- **The typed resolver reaches the dispatchers.** `Query.invokePageWithArgs` is `invokePage` with
+  the typed resolver. The resolver gets the token and the validated, promoted arguments, and answers
+  a `ResolveFault` beside the envelope. `invokeWithArgs` is its first page. `QueryRegistry` gains
+  `dispatchPageWith`, `dispatchCapturedWith`, `dispatchPageCapturedWith` and `dispatchReplayedWith`.
+  These are the typed twins of `dispatchPage`, `dispatchCaptured`, `dispatchPageCaptured` and
+  `dispatchReplayed`. Every existing spelling is unchanged.
+- **A refusal replays as the refusal (behavioural, every captured dispatcher).** The keyed capture
+  journal now records a resolver's refusal as its canonical query-error document
+  (`QueryCodec.encodeQueryError`). Replay reads it back as that `QueryError`. A captured `Timeout`
+  replays as `Timeout`, and an `ExecutionFailed` replays with its `recoverable` arguments. This
+  matches how a `Ready` result replays as itself. Before, the journal recorded
+  `QueryError.describe`'s sentence, and replay answered `ExecutionFailed(sentence, [])` for every
+  refusal. So a replayed refusal disagreed with the live one even on the untyped path. A recorded
+  reason that is not a query-error document comes from a journal written before this draft. It
+  still replays as `ExecutionFailed(reason, [])`, so old journals read as they did. **Cost:** the
+  `Value` of a query capture's `Refused` record is now that document, not a sentence. A 0.35.x
+  reader replaying a journal written by this draft answers `ExecutionFailed(<document>, [])`. The
+  error codec moved below the registry (an internal `QueryErrorWire` module) so the registry can
+  write it. `QueryCodec.queryErrorJson`, `encodeQueryError`, `queryErrorOf` and
+  `decodeQueryError` are unchanged spellings over it.
+
+**Plants.** `Conformance.queryLaws` gains "a typed resolver's fault is captured, paged and replayed
+as the refusal it was answered live". Every iteration builds a typed fault on its first page, and
+the law is counted per refusal page, where the refusal is built (D100). It reds when the journal
+records the sentence again. `QueryTests` plants the wrong tag on both documents, the repeated
+parameter at the reader, each `UnreadableArgs` shape, and capture and replay of all three faults
+through the new entry points. It also plants a pre-0.36 journal. `FunctionTests` plants every
+`probes307` declaration the encoder can write. The reader's refusal must equal `register`'s sentence
+on both halves of the gate.
+
 ## 0.35.2 — released 2026-10-07 as `v0.35.2`
 
 **Slot class: additive.** Opened over the tagged `0.35.1` (`v0.35.1`) by Phase 374. `0.35.1` is a

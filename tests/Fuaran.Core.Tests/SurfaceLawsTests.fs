@@ -239,4 +239,69 @@ let witnessSurfaceLawTests =
               Expect.isEmpty (Set.intersect frozen unfrozen) "a witness is frozen or it is not"
 
               for name, why in Conformance.unfrozenWitnesses do
-                  Expect.isNotEmpty (why.Trim()) (sprintf "%s is declared outside the freeze with no reason" name) ]
+                  Expect.isNotEmpty (why.Trim()) (sprintf "%s is declared outside the freeze with no reason" name)
+
+          // Phase 387 (D124) — the Fable pipeline reads `declaredWitnessFields` instead of reflecting,
+          // so the list is only as good as its agreement with the records. THIS is the test that holds
+          // it: every frozen record, read by reflection from the shipped assemblies, declares exactly
+          // the committed list, by name and in order. A record that grows a field reddens here first;
+          // re-derive the list, and the freeze then reddens on both pipelines until the widening is
+          // made deliberately.
+          testCase "the committed declared-field list is what reflection reads, for every frozen record"
+          <| fun _ ->
+              Expect.equal
+                  (Conformance.declaredWitnessFields |> List.map fst)
+                  (Conformance.frozenWitnessFields |> List.map fst)
+                  "the declared-field list covers exactly the frozen records, in pin order"
+
+              let bare (t: System.Type) =
+                  let n = t.Name
+                  let tick = n.IndexOf '`'
+                  if tick < 0 then n else n.Substring(0, tick)
+
+              for name, declared in Conformance.declaredWitnessFields do
+                  let t =
+                      shippedPublicTypes.Value
+                      |> List.filter (fun t -> bare t = name && Microsoft.FSharp.Reflection.FSharpType.IsRecord t)
+                      |> function
+                          | [ t ] -> t
+                          | ts -> failtestf "%s: expected one public record, found %d" name (List.length ts)
+
+                  let reflected =
+                      Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
+                      |> Array.map (fun p -> p.Name)
+                      |> Array.toList
+
+                  Expect.equal
+                      declared
+                      reflected
+                      (sprintf "%s: the committed declared-field list disagrees with the record — re-derive it" name)
+
+          testCase "the reflection-free law agrees with the reflecting one, and fails on a widened list"
+          <| fun _ ->
+              for name, pinned in Conformance.frozenWitnessFields do
+                  let declared =
+                      Conformance.declaredWitnessFields |> List.find (fun (n, _) -> n = name) |> snd
+
+                  let r = Conformance.witnessDeclaredFieldsLaw name pinned declared
+                  Expect.isTrue r.Passed (sprintf "%s: %s" name (defaultArg r.Counterexample r.Law))
+
+              let widened =
+                  Conformance.witnessDeclaredFieldsLaw
+                      "NodeWitness"
+                      (pinnedOf "NodeWitness")
+                      (pinnedOf "NodeWitness" @ [ "Label" ])
+
+              Expect.isFalse widened.Passed "a widened declared list passed the freeze"
+              Expect.stringContains widened.Law "(NodeWitness)" "the law names the record"
+
+              Expect.stringContains
+                  (defaultArg widened.Counterexample "")
+                  "added: Label"
+                  "the counterexample names the field"
+
+              let reflecting =
+                  Conformance.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyWidenedWitness>
+
+              Expect.equal widened.Law reflecting.Law "one law name on both pipelines"
+              Expect.equal widened.Counterexample reflecting.Counterexample "one counterexample on both pipelines" ]

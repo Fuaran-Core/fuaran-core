@@ -883,12 +883,22 @@ module Conformance =
     /// Forward — see `SurfaceLaws.unfrozenWitnesses`.
     let unfrozenWitnesses: (string * string) list = SurfaceLaws.unfrozenWitnesses
 
-    /// Forward — see `SurfaceLaws.witnessFieldsLaw`.
+    /// Forward — see `SurfaceLaws.declaredWitnessFields` (Phase 387).
+    let declaredWitnessFields: (string * string list) list =
+        SurfaceLaws.declaredWitnessFields
+
+    /// Forward — see `SurfaceLaws.witnessDeclaredFieldsLaw` (Phase 387).
+    let witnessDeclaredFieldsLaw (record: string) (pinned: string list) (declared: string list) : LawResult =
+        SurfaceLaws.witnessDeclaredFieldsLaw record pinned declared
+
+#if !FABLE_COMPILER
+    /// Forward — see `SurfaceLaws.witnessFieldsLaw`. .NET-only since Phase 387: it reads by reflection.
     let witnessFieldsLaw (record: string) (pinned: string list) (t: System.Type) : LawResult =
         SurfaceLaws.witnessFieldsLaw record pinned t
 
-    /// Forward — see `SurfaceLaws.witnessCoverageLaw`.
+    /// Forward — see `SurfaceLaws.witnessCoverageLaw`. .NET-only since Phase 387: it reads by reflection.
     let witnessCoverageLaw (records: System.Type list) : LawResult = SurfaceLaws.witnessCoverageLaw records
+#endif
 
     /// Forward — see `SurfaceLaws.witnessSurfaceLaws`.
     let witnessSurfaceLaws () : LawResult list = SurfaceLaws.witnessSurfaceLaws ()

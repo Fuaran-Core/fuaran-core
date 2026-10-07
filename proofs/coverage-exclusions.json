@@ -298,10 +298,11 @@
     {
       "members": [
         "Conformance.witnessCoverageLaw",
+        "Conformance.witnessDeclaredFieldsLaw",
         "Conformance.witnessFieldsLaw"
       ],
       "class": "measured-elsewhere",
-      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests.",
+      "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests. witnessDeclaredFieldsLaw (Phase 387) is the reflection-free law the Fable pipeline runs over the committed declaredWitnessFields, which SurfaceLawsTests holds equal to reflection.",
       "standIn": "tests/Fuaran.Core.Tests/SurfaceLawsTests.fs"
     },
     {
@@ -1943,6 +1944,14 @@
       "class": "measured-elsewhere",
       "reason": "Query invocation and its argument-typed and all-errors forms, and schema export, beside the rostered key / tag / validate; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
+    },
+    {
+      "members": [
+        "Query.invokePageWithArgs"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 385: the paged form of the argument-typed invocation, which `invokeWithArgs` is at the first page; the registry dispatchers `queryLaws` rosters (`dispatchPageWith`, the captured and replayed forms) reach it, and the example tests pin the token and the promoted arguments it hands the resolver.",
+      "standIn": "tests/Fuaran.Core.Tests/QueryTests.fs"
     },
     {
       "members": [

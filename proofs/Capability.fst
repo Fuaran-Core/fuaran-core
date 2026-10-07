@@ -4459,6 +4459,11 @@ let capability_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome cap
   match field "signature" (signature_of_j rd cr) el with
   | Error e -> Error e
   | Ok sg ->
+  (* Phase 385: the reader runs the registries' WHOLE admission gate over the signature it has read,
+     totality as well as the well-formedness `signature_of_j` runs, so a non-total signature is
+     refused `OutOfRange` at `signature.holes`, where `register` refuses it `NonTotalCapability`. *)
+  if not (is_total sg) then Error ({ d_code = OutOfRange; d_path = [Key "signature"; Key "holes"] })
+  else
   match field "determinism" (det_agrees_j (determinism_tag sg.sg_effect.determinism)) el with
   | Error e -> Error e
   | Ok () ->
@@ -4760,24 +4765,30 @@ let signature_decoded_wf (rd:readers) (cr:codec_readers) (el:jval) (sg:signature
      | _ -> ());
     signature_roundtrip_identity rd cr sg
 
-(* A capability the codec carries unchanged: a well-formed signature, and the determinism the
-   signature's effect derives — which production's `Capability` cannot disagree with (the axis is
-   a derived member since Phase 295) and the model's record, which still carries it, can. *)
+(* A capability the codec carries unchanged: a well-formed signature, a TOTAL one (Phase 385 — the
+   reader runs the registries' whole admission gate), and the determinism the signature's effect
+   derives — which production's `Capability` cannot disagree with (the axis is a derived member since
+   Phase 295) and the model's record, which still carries it, can. *)
 let wf_capability (rd:readers) (c:capability) : Tot bool =
-  wf_signature rd c.c_signature && c.c_determinism = c.c_signature.sg_effect.determinism
+  wf_signature rd c.c_signature && is_total c.c_signature &&
+  c.c_determinism = c.c_signature.sg_effect.determinism
 
 (* THE SIXTEENTH THEOREM (Phase 354), `capability_roundtrip`. F#: `CapabilityCodec.decodeJson` after
    `encodeJson`. DECODE AFTER ENCODE, EXACTLY, for every capability: the signature's refusal, under
-   `signature`, where `signature_roundtrip` refuses it; `OutOfRange` at `determinism` where the
-   label written disagrees with the one the signature's effect derives (Phase 44's cross-check);
-   otherwise the capability with its signature in normal form. On a well-formed capability the
-   round trip is the identity. *)
+   `signature`, where `signature_roundtrip` refuses it; `OutOfRange` at `signature.holes` where the
+   signature read back is not total (Phase 385: the reader runs the registries' totality check, which
+   `register` answers `NonTotalCapability`); `OutOfRange` at `determinism` where the label written
+   disagrees with the one the signature's effect derives (Phase 44's cross-check); otherwise the
+   capability with its signature in normal form. On a well-formed capability the round trip is the
+   identity. *)
 let capability_roundtrip (rd:readers) (cr:codec_readers) (c:capability)
   : Lemma (capability_of_j rd cr (capability_json c) ==
            (match signature_of_j rd cr (signature_json c.c_signature) with
             | Error e -> Error (under (Key "signature") e)
             | Ok sg ->
-              if c.c_determinism = c.c_signature.sg_effect.determinism
+              if not (is_total sg)
+              then Error ({ d_code = OutOfRange; d_path = [Key "signature"; Key "holes"] })
+              else if c.c_determinism = c.c_signature.sg_effect.determinism
               then Ok ({ c with c_signature = sg })
               else Error ({ d_code = OutOfRange; d_path = [Key "determinism"] })))
   = signature_roundtrip rd cr c.c_signature;

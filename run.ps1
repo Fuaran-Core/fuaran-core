@@ -5,7 +5,12 @@
 param(
     [switch] $SkipFormat,
     [switch] $SkipBuild,
-    [switch] $SkipTests
+    [switch] $SkipTests,
+    # Phase 395 — the configuration built and tested; Debug stays the default so the contributor's
+    # command is unchanged. Release is what publish-packages verifies and packs (verify.ps1 takes
+    # the same switch).
+    [ValidateSet('Debug', 'Release')]
+    [string] $Configuration = 'Debug'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,18 +33,18 @@ if (-not $SkipFormat) {
 
 if (-not $SkipBuild) {
     $global:LASTEXITCODE = 0
-    dotnet build Fuaran.Core.slnx --nologo
+    dotnet build Fuaran.Core.slnx --nologo -c $Configuration
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 if (-not $SkipTests) {
     $global:LASTEXITCODE = 0
-    dotnet run --project tests/Fuaran.Core.Tests --no-build
+    dotnet run --project tests/Fuaran.Core.Tests --no-build -c $Configuration
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     # The reference adoption sample (docs/ADOPTION.md) must certify GREEN — the same stage verify.ps1
     # runs, so the two launchers cannot disagree about whether the repository is green.
     $global:LASTEXITCODE = 0
-    dotnet run --project samples/adoption --no-build
+    dotnet run --project samples/adoption --no-build -c $Configuration
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

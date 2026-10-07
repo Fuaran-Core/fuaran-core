@@ -977,9 +977,13 @@ let internal ownConfiguration () : string option =
         | configDir when configDir.Name = "bin" -> Some tfmParent.Name
         | configDir -> Some configDir.Name
 
-/// The built assembly for a packable project, preferring this binary's own configuration.
-/// `Error` names what was looked for — a missing assembly means the solution was not built,
-/// which is a different failure from a surface that moved and must not read as one.
+/// The built assembly for a packable project, from THIS binary's own configuration and no other.
+/// The gate is meant to verify the bytes that ship (Phase 395): a `Release` run that quietly fell
+/// back to a `Debug` assembly left on disk by an earlier build would render, and pass, a surface it
+/// never built. So when the configuration is known only that configuration's output is read, and its
+/// absence is an `Error` naming what was looked for — a missing assembly means that configuration
+/// was not built, a different failure from a surface that moved, and must not read as one. A binary
+/// whose output path names no configuration reads whatever is under `bin/`.
 let internal assemblyFor (root: string) (projectFile: string) (packageId: string) : Result<string, string> =
     let projectDir = Path.Combine(root, Path.GetDirectoryName(projectFile: string))
     let binDir = Path.Combine(projectDir, "bin")
@@ -991,17 +995,25 @@ let internal assemblyFor (root: string) (projectFile: string) (packageId: string
             Directory.GetFiles(binDir, packageId + ".dll", SearchOption.AllDirectories)
             |> Array.toList
 
-        let preferred =
+        let chosen =
             match ownConfiguration () with
             | Some config ->
                 candidates
                 |> List.filter (fun p ->
                     p.Replace('\\', '/').Contains("/bin/" + config + "/", StringComparison.OrdinalIgnoreCase))
-            | None -> []
+            | None -> candidates
 
-        match preferred @ candidates with
+        match chosen with
         | best :: _ -> Ok best
-        | [] -> Error(sprintf "%s: no %s.dll under %s — build the solution first" packageId packageId binDir)
+        | [] ->
+            let inConfiguration =
+                ownConfiguration ()
+                |> Option.map (sprintf " in the %s configuration")
+                |> Option.defaultValue ""
+
+            Error(
+                sprintf "%s: no %s.dll under %s%s — build the solution first" packageId packageId binDir inConfiguration
+            )
 
 let private repoRoot () : string = Snapshots.repoFile ""
 
@@ -1047,6 +1059,44 @@ let tests =
     testList
         "Public surface"
         [
+
+          // Phase 395 — the surface is rendered from the configuration under test, never from a stale
+          // build of another. Over a synthetic tree holding ONLY the other configuration's assembly the
+          // locator must refuse (go-red: the old preference-then-fallback returned it), and it must find
+          // the assembly once this binary's own configuration has one.
+          test "assemblyFor reads only the running configuration's output" {
+              match ownConfiguration () with
+              | None -> ()
+              | Some own ->
+                  let other = if own = "Release" then "Debug" else "Release"
+
+                  let root =
+                      Path.Combine(Path.GetTempPath(), "fuaran-core-assemblyFor-" + Guid.NewGuid().ToString("N"))
+
+                  let place (config: string) =
+                      let dir = Path.Combine(root, "src", "Fuaran.Core.Probe", "bin", config, "net10.0")
+                      Directory.CreateDirectory dir |> ignore
+                      File.WriteAllBytes(Path.Combine(dir, "Fuaran.Core.Probe.dll"), [||])
+                      Path.Combine(dir, "Fuaran.Core.Probe.dll")
+
+                  try
+                      place other |> ignore
+                      let project = Path.Combine("src", "Fuaran.Core.Probe", "Fuaran.Core.Probe.fsproj")
+
+                      match assemblyFor root project "Fuaran.Core.Probe" with
+                      | Ok found -> failtestf "read %s from the other configuration (%s)" found other
+                      | Error why -> Expect.stringContains why own "the refusal names the configuration it wanted"
+
+                      let wanted = place own
+
+                      Expect.equal
+                          (assemblyFor root project "Fuaran.Core.Probe")
+                          (Ok wanted)
+                          "the running configuration's assembly is the one read"
+                  finally
+                      if Directory.Exists root then
+                          Directory.Delete(root, true)
+          }
 
           test "every packable package has a committed baseline, and no baseline is orphaned" {
               let root = repoRoot ()
