@@ -112,6 +112,30 @@ let tests =
               finally
                   Directory.Delete(dir, true)
 
+          testCase "a mistyped filter is red even when the file is already current"
+          <| fun _ ->
+              let dir =
+                  Path.Combine(Path.GetTempPath(), "approval-" + Guid.NewGuid().ToString "N")
+
+              Directory.CreateDirectory dir |> ignore
+              let path = Path.Combine(dir, "README.md")
+
+              try
+                  File.WriteAllText(path, "current")
+
+                  Expect.throws
+                      (fun () -> writeFor (Only [ "READM" ]) Readme Files.Readme path "current" |> ignore)
+                      "a typo'd filter against unchanged content is refused, not ignored"
+
+                  Expect.throws
+                      (fun () -> requireMatchedFor (Only [ "READM" ]) Readme [ Files.Readme ])
+                      "validate's check refuses it before any content comparison"
+
+                  Expect.equal (File.ReadAllText path) "current" "and nothing was written"
+              finally
+                  Directory.Delete(dir, true)
+
+
           testCase "no source reads a CORE_APPROVE_* or FUARAN_REGEN variable outside Approval.fs"
           <| fun _ ->
               let files = sourceFiles ()

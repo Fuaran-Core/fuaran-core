@@ -978,6 +978,8 @@ let proofsLadderTests =
               let ladderText = File.ReadAllText ladderPath
               let readmeText = File.ReadAllText proofsReadmePath
 
+              Approval.validate Approval.Ladder
+
               match regenerateReadme ladderText readmeText with
               | Error why -> failtestf "the README's generated blocks could not be located: %s" why
               | Ok expected when expected = readmeText -> ()

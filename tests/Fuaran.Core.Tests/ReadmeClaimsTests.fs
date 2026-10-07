@@ -436,6 +436,8 @@ let tests =
                   let readme = File.ReadAllText(readmePath ())
                   let floor = fst releases.Head
 
+                  Approval.validate Approval.Readme
+
                   match stampReadme (arrivalOf releases current standing) floor readme with
                   | Error why -> failtestf "the README's generated parts could not be located: %s" why
                   | Ok derived when derived = readme.Replace("\r\n", "\n") -> ()

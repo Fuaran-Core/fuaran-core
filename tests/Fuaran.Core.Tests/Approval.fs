@@ -204,3 +204,11 @@ let admits (name: string) (stem: string) : bool = admitsFor (read name) name ste
 /// Write `text` to `path` when the site is admitted and the bytes differ; see `writeFor`.
 let write (name: string) (stem: string) (path: string) (text: string) : bool =
     writeFor (read name) name stem path text
+
+/// Red, by name, when the switch carries a filter naming nothing it governs, whether or not the
+/// file at the calling site has drifted. A site whose rewrite sits behind a content comparison
+/// calls this FIRST, so a mistyped filter is never ignored just because the content is current.
+/// A switch governed by the packable roster (API, wire) has no fixed stems and is checked by its
+/// own site against the roster it iterates.
+let validate (name: string) : unit =
+    fixedStems name |> Option.iter (requireMatched name)

@@ -2749,7 +2749,7 @@ governs. Anything else is a FILTER: a comma-separated list of file stems. For th
 a stem is a package id (`CORE_APPROVE_API=Fuaran.Core.Wire`, `CORE_APPROVE_WIRE=Fuaran.Core.Query`);
 for `FUARAN_REGEN` it is the generated file's name without its extension (`FUARAN_REGEN=MiniGenerated`);
 for `CORE_APPROVE_LADDER` it is `ladder` or `operations` (the two blocks of `proofs/README.md`). A filter
-that names nothing the switch governs is red by name, listing what it does govern, never a silent no-op.
+that names nothing the switch governs is red by name at every site, whether or not the file has drifted, listing what it does govern, never a silent no-op.
 A file the switch did not admit is held to its committed bytes as usual, so a filter never hides the
 drift of the files it left alone. Every file a switch rewrites is printed (`<SWITCH>: wrote <path>`), so
 the "stage by name" step reads that list rather than `git status`.
