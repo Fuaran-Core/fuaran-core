@@ -16,6 +16,12 @@ Requirements: the .NET SDK pinned in [`global.json`](global.json).
 
 A change is ready to propose when `./verify.ps1` is green.
 
+Both launchers take `-Configuration Debug|Release` (default `Debug`, so the commands above are unchanged).
+A release is verified in `Release` and the packages are packed from that same output --
+`./verify.ps1 -Configuration Release`, then `dotnet pack Fuaran.Core.slnx -c Release --no-build` -- so the
+surface and documentation checks read the assemblies that ship. CI runs both configurations; run
+`./verify.ps1 -Configuration Release` locally when a change could behave differently under the optimiser.
+
 Two of the suites certify against a conformance corpus that lives in a separate repository, and an
 absent corpus **fails** the gate rather than skipping it — a skipped comparison is indistinguishable
 from a passing one in a green report. [`docs/conformance-corpus.md`](docs/conformance-corpus.md) has
