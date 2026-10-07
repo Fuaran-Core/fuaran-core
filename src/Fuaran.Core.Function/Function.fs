@@ -645,6 +645,10 @@ module Function =
     ///                          the embedded inner's holes re-root UNDER that address, so two
     ///                          cross-witness compositions into distinct slots cannot capture.
     ///   • Fork 3 (effect)    — surfaced via `composedEffectAcross` (the componentwise join).
+    ///
+    /// The composed result is checked exactly as `compose` checks its own (Phases 307, 383): a tree
+    /// `validate` refuses under `wa` — an embedded hole on an address the outer already uses — is
+    /// refused `IllFormedResult`, never returned.
     let composeAcross
         (wa: ArtifactWitness<'A, 'IdA>)
         (wb: ArtifactWitness<'B, 'IdB>)
@@ -676,8 +680,13 @@ module Function =
                             Error(SlotKindMismatch(slotAddr, k, wa.Tree.KindTag embedded))
                         | _ ->
                             // Fork 2 — bind by absolute address; the inner's holes re-root under it.
+                            // And the RESULT is checked, as `compose` checks it (Phase 383): a
+                            // composed tree `validate` refuses is `IllFormedResult`, never returned.
                             match wa.Bind slotAddr (SlotArg embedded) outer with
-                            | Ok n -> Ok n
+                            | Ok n ->
+                                match validate wa n with
+                                | Ok() -> Ok n
+                                | Error fault -> Error(IllFormedResult fault)
                             | Error m -> Error(BindFailed(slotAddr, m))
                     | _ -> Error(NotASlot slotAddr)
 

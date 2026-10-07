@@ -2441,7 +2441,8 @@ module internal SeamLaws =
                     Server
 
             { TryFind = fun id -> if id = "inc" then Some inc else None
-              Known = [ "inc" ] }
+              Known = [ "inc" ]
+              Policy = RegistryPolicy.none }
 
         // s1 → a, s2 → b : two independent branches.
         let pipeline: CapabilityPipeline =
@@ -2588,6 +2589,10 @@ module internal SeamLaws =
                 "withGate never lowers decide's rank, a union refuses what either side refused, and restrict, register and unregister carry the policy through equality"
 
         let agrees = LawKit.LawCell "the body runs exactly when decide answers Allow"
+
+        let pipelineAdmits =
+            LawKit.LawCell
+                "a pipeline evaluated over either registry's lookup admits each Invoke through the registry's policy: a denied one is EvalPolicyRefused naming its gate, a parked one EvalPolicyRefused with ApprovalRequired, observers told, and its body never runs"
 
         let decisions =
             [ PolicyDecision.Allow
@@ -2790,6 +2795,68 @@ module internal SeamLaws =
                     fun () -> at (sprintf "observers saw %A / %A for %A" (List.ofSeq told) (List.ofSeq qTold) expected)
                 )
 
+                // ---- the pipeline evaluator admits through the gate (Phase 383) ----
+                let pipeline: CapabilityPipeline =
+                    { Nodes =
+                        [ Source("s", "ref", IntRange(0, 9))
+                          Invoke("i", id, IntRange(0, 9), [ "n", FromNode "s" ]) ] }
+
+                let invoked = ResizeArray<string>()
+
+                let pipelineBody (node: PipelineNode) (_: (string * PipelineArg<int>) list) : Result<int, string> =
+                    match node with
+                    | Source _ -> Ok n
+                    | Invoke(nid, _, _, _) ->
+                        invoked.Add nid
+                        Ok n
+
+                let toldBefore = told.Count
+
+                let viaCap =
+                    CapabilityPipeline.eval (CapabilityLookup.ofRegistry capReg) string pipelineBody pipeline
+
+                let toldByEval = told.Count - toldBefore
+
+                let viaFn =
+                    CapabilityPipeline.eval (CapabilityLookup.ofFunctionRegistry fnReg) string pipelineBody pipeline
+
+                let viaFrom =
+                    CapabilityPipeline.evalFrom
+                        (CapabilityLookup.ofRegistry capReg)
+                        string
+                        pipelineBody
+                        Map.empty
+                        (Set.ofList [ "s" ])
+                        pipeline
+
+                let wanted: Result<Map<string, int>, PipelineEvalError> =
+                    match expected with
+                    | PolicyDecision.Allow -> Ok(Map.ofList [ "s", n; "i", n ])
+                    | PolicyDecision.NeedsApproval -> Error(EvalPolicyRefused("i", ApprovalRequired gateName))
+                    | PolicyDecision.Deny g ->
+                        Error(EvalPolicyRefused("i", PolicyRefused(gateName, g.Message, g.Alternatives)))
+
+                pipelineAdmits.Check(
+                    viaCap = wanted
+                    && viaFn = wanted
+                    && viaFrom = wanted
+                    && invoked.Count = (if refusedHere then 0 else 3)
+                    && toldByEval = (if refusedHere then 1 else 0),
+                    fun () ->
+                        at (
+                            sprintf
+                                "gate %s on %s deciding %A: the pipeline gave %A / %A / %A (bodies run %A, observers told %d)"
+                                gateName
+                                id
+                                expected
+                                viaCap
+                                viaFn
+                                viaFrom
+                                (List.ofSeq invoked)
+                                toldByEval
+                        )
+                )
+
                 // ---- a gate only tightens ----
                 let args = [ "n", string n ]
 
@@ -2842,7 +2909,7 @@ module internal SeamLaws =
                     fun () -> at (sprintf "decide and dispatch disagree on %s" id)
                 ))
 
-        LawKit.results [ lattice; beforeBody; observed; tightens; agrees ]
+        LawKit.results [ lattice; beforeBody; observed; tightens; agrees; pipelineAdmits ]
 
     /// The no-unapproved-write law and the dry run's agreement with `Apply`, at a DOMAIN's guarded
     /// AI surface (Phase 318). Runs the domain's OWN `Decide` (never a kit policy), joined with the

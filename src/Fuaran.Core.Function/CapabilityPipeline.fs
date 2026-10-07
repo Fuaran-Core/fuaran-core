@@ -98,11 +98,15 @@ type PipelineEvalError =
     /// An upstream value, spelled, lies outside the space of the hole it feeds; `reason` is the
     /// `ArgOutOfSpace` carrying that spelling.
     | EvalArgRefused of node: string * reason: InvokeError
+    /// The lookup's policy refused this node's invocation (Phase 383): `reason` is the registry's own
+    /// refusal — `PolicyRefused` naming the gate for a `Deny`, `ApprovalRequired` for a park — after
+    /// every denial observer was told. The node's body did not run, and evaluation stops there.
+    | EvalPolicyRefused of node: string * reason: InvokeError
 
-/// Where a pipeline resolves its `Invoke` nodes' capabilities (Phase 295): a lookup and the ids it
-/// holds (for the refusal that names them). Both registries project one — `ofRegistry`,
-/// `ofFunctionRegistry` — so a host that loads content packs into a `FunctionRegistry` type-checks
-/// and evaluates against it, and keeps no second registry.
+/// Where a pipeline resolves its `Invoke` nodes' capabilities (Phase 295): a lookup, the ids it
+/// holds (for the refusal that names them) and the policy that admits an invocation (Phase 383).
+/// Both registries project one — `ofRegistry`, `ofFunctionRegistry` — so a host that loads content
+/// packs into a `FunctionRegistry` type-checks and evaluates against it, and keeps no second registry.
 type CapabilityLookup =
     {
         /// Resolves a capability id; `None` makes an `Invoke` of it a `PipelineNoSuchCapability`.
@@ -110,20 +114,27 @@ type CapabilityLookup =
         /// The ids `TryFind` resolves, reported in `PipelineNoSuchCapability`; it is not consulted to
         /// resolve, so a hand-built lookup should keep the two in step.
         Known: string list
+        /// The gates every `Invoke` node passes before its body runs (Phase 383) — the registry's own
+        /// `Policy` in both projections, so evaluating a pipeline over a registry tightened with
+        /// `withGate` admits exactly what that registry's dispatch admits. A hand-built lookup states
+        /// its policy; `RegistryPolicy.none` runs no gate.
+        Policy: RegistryPolicy<Capability, (string * string) list>
     }
 
 /// The two projections onto `CapabilityLookup`.
 module CapabilityLookup =
 
-    /// A capability registry as a lookup.
+    /// A capability registry as a lookup, carrying the registry's policy.
     let ofRegistry (r: CapabilityRegistry) : CapabilityLookup =
         { TryFind = fun id -> CapabilityRegistry.tryFind id r
-          Known = r.Capabilities |> Map.toList |> List.map fst }
+          Known = r.Capabilities |> Map.toList |> List.map fst
+          Policy = r.Policy }
 
-    /// A function registry as a lookup: each entry's capability, by its id.
+    /// A function registry as a lookup: each entry's capability, by its id, and the registry's policy.
     let ofFunctionRegistry (r: FunctionRegistry) : CapabilityLookup =
         { TryFind = fun id -> FunctionRegistry.tryFind id r |> Option.map (fun e -> e.Capability)
-          Known = FunctionRegistry.ids r }
+          Known = FunctionRegistry.ids r
+          Policy = r.Policy }
 
 /// Build / type-check / key / serialise / **evaluate** a `CapabilityPipeline`. Additive over the
 /// `Capability` surface; FSharp.Core-only, Fable-clean.
@@ -485,7 +496,30 @@ module CapabilityPipeline =
                             | Some _, None -> Error(EvalIllTyped(PipelineArgRefused(nid, UninvocableArg addr)))))
                 |> Result.map List.rev
 
+        // Phase 383 — the admission gate (D111: one gate at every reader). An `Invoke` passes the
+        // lookup's policy over its arguments as the seam reads them — a literal as declared, an
+        // upstream value through `spell` — exactly as `CapabilityRegistry.dispatch` would, observers
+        // told; a refusal stops evaluation before the body. A `Source` invokes nothing.
+        let admitted (args: (string * PipelineArg<'v>) list) : Result<unit, PipelineEvalError> =
+            match n with
+            | Source _ -> Ok()
+            | Invoke(_, capId, _, _) ->
+                match lookup.TryFind capId with
+                // Unreachable after `typeCheck`, which refused an unresolved id; refused as it would.
+                | None -> Error(EvalIllTyped(PipelineNoSuchCapability(capId, lookup.Known)))
+                | Some c ->
+                    let spelled =
+                        args
+                        |> List.map (fun (addr, a) ->
+                            match a with
+                            | LiteralArg s -> addr, s
+                            | FromUpstream v -> addr, spell v)
+
+                    RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired lookup.Policy capId c spelled
+                    |> Result.mapError (fun e -> EvalPolicyRefused(nid, e))
+
         resolved
+        |> Result.bind (fun args -> admitted args |> Result.map (fun () -> args))
         |> Result.bind (fun args ->
             match body n args with
             | Ok v -> Ok v
@@ -494,16 +528,19 @@ module CapabilityPipeline =
     /// The reference evaluator (Phase 62): fold the host `body` over the pipeline in declaration
     /// (topological) order, threading an `id → value` result map. `body` receives each node and its args
     /// with every `FromNode` edge already resolved to the upstream value. Total — an ill-typed pipeline,
-    /// an upstream value outside its hole's space, or a body failure is a named `PipelineEvalError`,
-    /// never a throw. The cross-host compute contract the incremental `evalFrom` is certified
-    /// byte-identical to.
+    /// an upstream value outside its hole's space, a policy refusal or a body failure is a named
+    /// `PipelineEvalError`, never a throw. The cross-host compute contract the incremental `evalFrom`
+    /// is certified byte-identical to.
     ///
-    /// **It type-checks first (Phase 295).** `eval` takes the capability lookup and refuses a pipeline
-    /// `typeCheck` refuses as `EvalIllTyped`, before any body runs, so it is not a second dispatch path
-    /// beside `CapabilityRegistry.dispatch`: a node runs only where its capability resolves and its
-    /// arguments are ones that capability takes. `spell` writes an upstream value as the argument
-    /// string the seam reads (the identity for a `string` pipeline), and a value outside the space of
-    /// the hole it feeds is `EvalArgRefused`.
+    /// **It type-checks first (Phase 295) and admits through the lookup's policy (Phase 383).** `eval`
+    /// refuses a pipeline `typeCheck` refuses as `EvalIllTyped`, before any body runs; then each
+    /// `Invoke` node's arguments pass the lookup's `Policy` — the registry's own gates, in both
+    /// projections — before its body runs, and a refusal is `EvalPolicyRefused` carrying the
+    /// registry's `PolicyRefused` / `ApprovalRequired`, observers told. So it is not a second dispatch
+    /// path beside `CapabilityRegistry.dispatch`: a node runs only where its capability resolves, its
+    /// arguments are ones that capability takes, and the registry's policy admits the invocation.
+    /// `spell` writes an upstream value as the argument string the seam reads (the identity for a
+    /// `string` pipeline), and a value outside the space of the hole it feeds is `EvalArgRefused`.
     ///
     /// **It stays SYNCHRONOUS, by decision (Phase 210's routed-out question, operator decision
     /// 2026-09-19).** `Capability.invoke` and both dispatchers carry the `Deferred` envelope; `body`
@@ -572,7 +609,9 @@ module CapabilityPipeline =
     /// upstream values. Effect-honesty on the dirty path: a clean node reuses its recorded value (the
     /// Phase-53 gate), an uncaptured live node on the dirty path re-invokes, so incrementality never serves
     /// a stale effect result. A node absent from `prior` (never evaluated) is always (re-)evaluated.
-    /// It type-checks first, exactly as `eval` does (Phase 295), so the two refuse the same pipelines.
+    /// It type-checks first and admits every node it re-invokes through the lookup's policy, exactly as
+    /// `eval` does (Phases 295, 383), so the two refuse the same pipelines; a reused clean node runs no
+    /// body, and so is admitted by the evaluation that recorded it.
     let evalFrom
         (lookup: CapabilityLookup)
         (spell: 'v -> string)

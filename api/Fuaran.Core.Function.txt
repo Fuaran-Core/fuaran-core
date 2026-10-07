@@ -6,7 +6,7 @@
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 ctor Fuaran.Core.ArtifactWitness`2..ctor(Fuaran.Core.NodeWitness`2<!0, !1>, Fuaran.Core.IdWitness`1<!1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.HoleDecl>>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.EffectClass>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Arg`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>>>)
 ctor Fuaran.Core.Capability..ctor(System.String, Fuaran.Core.Signature, Fuaran.Core.Placement)
-ctor Fuaran.Core.CapabilityLookup..ctor(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+ctor Fuaran.Core.CapabilityLookup..ctor(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>)
 ctor Fuaran.Core.CapabilityPipeline..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>)
 ctor Fuaran.Core.CapabilityRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>, Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>)
 ctor Fuaran.Core.EffectClass..ctor(Fuaran.Core.HostEffect, Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>)
@@ -94,6 +94,7 @@ field Fuaran.Core.PipelineError+Tags.UnknownNode : System.Int32 (literal)
 field Fuaran.Core.PipelineEvalError+Tags.EvalArgRefused : System.Int32 (literal)
 field Fuaran.Core.PipelineEvalError+Tags.EvalIllTyped : System.Int32 (literal)
 field Fuaran.Core.PipelineEvalError+Tags.EvalNodeFailed : System.Int32 (literal)
+field Fuaran.Core.PipelineEvalError+Tags.EvalPolicyRefused : System.Int32 (literal)
 field Fuaran.Core.PipelineNode+Tags.Invoke : System.Int32 (literal)
 field Fuaran.Core.PipelineNode+Tags.Source : System.Int32 (literal)
 field Fuaran.Core.Placement+Tags.BuildTime : System.Int32 (literal)
@@ -288,6 +289,7 @@ record-field Fuaran.Core.Capability.Id #0 : System.String
 record-field Fuaran.Core.Capability.Placement #2 : Fuaran.Core.Placement
 record-field Fuaran.Core.Capability.Signature #1 : Fuaran.Core.Signature
 record-field Fuaran.Core.CapabilityLookup.Known #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.CapabilityLookup.Policy #2 : Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>
 record-field Fuaran.Core.CapabilityLookup.TryFind #0 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>>
 record-field Fuaran.Core.CapabilityPipeline.Nodes #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>
 record-field Fuaran.Core.CapabilityRegistry.Capabilities #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>
@@ -454,6 +456,7 @@ type Fuaran.Core.PipelineEvalError (union)
 type Fuaran.Core.PipelineEvalError+EvalArgRefused (type)
 type Fuaran.Core.PipelineEvalError+EvalIllTyped (type)
 type Fuaran.Core.PipelineEvalError+EvalNodeFailed (type)
+type Fuaran.Core.PipelineEvalError+EvalPolicyRefused (type)
 type Fuaran.Core.PipelineEvalError+Tags (type)
 type Fuaran.Core.PipelineNode (union)
 type Fuaran.Core.PipelineNode+Invoke (type)
@@ -560,6 +563,7 @@ union-case Fuaran.Core.PipelineError.NewUnknownNode #1(id: System.String)
 union-case Fuaran.Core.PipelineEvalError.NewEvalArgRefused #2(node: System.String, reason: Fuaran.Core.InvokeError)
 union-case Fuaran.Core.PipelineEvalError.NewEvalIllTyped #0(reason: Fuaran.Core.PipelineError)
 union-case Fuaran.Core.PipelineEvalError.NewEvalNodeFailed #1(node: System.String, message: System.String)
+union-case Fuaran.Core.PipelineEvalError.NewEvalPolicyRefused #3(node: System.String, reason: Fuaran.Core.InvokeError)
 union-case Fuaran.Core.PipelineNode.NewInvoke #1(id: System.String, capabilityId: System.String, outputType: Fuaran.Core.ValueSpace, args: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ArgSource>>)
 union-case Fuaran.Core.PipelineNode.NewSource #0(id: System.String, dataRef: System.String, outputType: Fuaran.Core.ValueSpace)
 union-case Fuaran.Core.Placement.BuildTime #0()

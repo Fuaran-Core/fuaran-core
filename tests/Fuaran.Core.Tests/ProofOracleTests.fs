@@ -8568,6 +8568,9 @@ let private prodEvalErrRender (e: PipelineEvalError) : string =
     | EvalIllTyped r -> sprintf "EvalIllTyped(%s)" (prodPipeErrRender r)
     | EvalNodeFailed(n, m) -> sprintf "EvalNodeFailed(%s;%s)" n m
     | EvalArgRefused(n, r) -> sprintf "EvalArgRefused(%s;%s)" n (prodInvokeErrRender r)
+    // Phase 383 — the policy admission the model does not carry; the oracle's lookups run no gate,
+    // so it is never answered here, and a render that reached it would differ from every model render.
+    | EvalPolicyRefused(n, r) -> sprintf "EvalPolicyRefused(%s;%s)" n (prodInvokeErrRender r)
 
 let private modelEvalErrRender (e: ModelCap.pipeline_eval_error) : string =
     match e with

@@ -699,3 +699,45 @@ let graftRefusalCorrespondenceTests =
               | Some r ->
                   Expect.isFalse r.Passed "an incoherent predicate must split the two refusals"
                   Expect.isSome r.Counterexample "and the split is reported with a counterexample" ]
+
+// ---- Phase 383 — a contained move over a tree holding the target twice under the new parent ----
+
+[<Tests>]
+let moveContainedLengthTests =
+    testList
+        "TreePlacement.moveContained on a malformed tree (Phase 383)"
+        [ testCase "a target already held twice under the new parent is refused DuplicateId, never a throw"
+          <| fun _ ->
+              // Not `Tree.WellFormed`: "a" appears twice under "p". The sibling list and the wanted
+              // order then differ in length, which `List.forall2` raised on.
+              let t =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "p" "section" [ RNode.leaf "a" "para" "1"; RNode.leaf "a" "para" "2" ] ]
+
+              for anchor in [ Anchor.Last; Anchor.First; Anchor.Index 0 ] do
+                  Expect.equal
+                      (TreePlacement.move nodew idw "a" "p" anchor t)
+                      (Error(PlaceError.Refused(DuplicateId "a")))
+                      (sprintf "the repeated target is named, at %A" anchor)
+
+              Expect.equal
+                  (TreePlacement.moveContained canHold137 nodew idw "a" "p" Anchor.Last t)
+                  (Error(PlaceError.Refused(DuplicateId "a")))
+                  "the contained form refuses it the same way"
+
+          testCase "a well-formed move onto its own parent still plans nothing or one reorder"
+          <| fun _ ->
+              let t =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.node "p" "section" [ RNode.leaf "a" "para" "1"; RNode.leaf "b" "para" "2" ] ]
+
+              Expect.equal (TreePlacement.move nodew idw "a" "p" Anchor.First t) (Ok []) "already there"
+
+              Expect.equal
+                  (TreePlacement.move nodew idw "a" "p" Anchor.Last t)
+                  (Ok [ ReorderChildren("p", [ "b"; "a" ]) ])
+                  "a reorder among its own siblings" ]

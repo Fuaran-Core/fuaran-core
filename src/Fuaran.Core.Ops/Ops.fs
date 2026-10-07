@@ -2361,22 +2361,35 @@ module TreePlacement =
         | Ok() ->
             let siblings = childIds w idw newParent root
             let isTarget c = idw.Equals c target
-            let alreadyChild = List.exists isTarget siblings
+            let held = siblings |> List.filter isTarget |> List.length
             let others = siblings |> List.filter (isTarget >> not)
 
-            positionOf idw newParent anchor others
-            |> Result.map (fun k ->
-                let wanted = List.insertAt k target others
+            // Phase 383 — a tree holding `target` more than once under `newParent` is not
+            // `Tree.WellFormed`; the move is refused naming the repeated id, as the engine refuses a
+            // repeated id, rather than comparing two lists of different lengths.
+            if held > 1 then
+                Error(PlaceError.Refused(DuplicateId target))
+            else
+                positionOf idw newParent anchor others
+                |> Result.map (fun k ->
+                    let wanted = List.insertAt k target others
 
-                if alreadyChild then
-                    if List.forall2 idw.Equals wanted siblings then
-                        []
+                    // Element-wise under the witness, false on a length difference — never a throw.
+                    let rec sameIds (a: 'Id list) (b: 'Id list) =
+                        match a, b with
+                        | [], [] -> true
+                        | x :: xs, y :: ys -> idw.Equals x y && sameIds xs ys
+                        | _ -> false
+
+                    if held = 1 then
+                        if sameIds wanted siblings then
+                            []
+                        else
+                            [ ReorderChildren(newParent, wanted) ]
+                    elif k = List.length others then
+                        [ move ]
                     else
-                        [ ReorderChildren(newParent, wanted) ]
-                elif k = List.length others then
-                    [ move ]
-                else
-                    [ Batch [ move; ReorderChildren(newParent, wanted) ] ])
+                        [ Batch [ move; ReorderChildren(newParent, wanted) ] ])
 
     /// Move `target` under `newParent` at `anchor` — to another parent, or to another position among
     /// its own siblings — as a script `Ops.applyAll` accepts (see the module note for its shape).

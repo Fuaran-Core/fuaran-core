@@ -880,6 +880,11 @@ module internal IntegrityLaws =
     /// The law PASSES when the crypto stand-in resists and the default admits (the documented posture);
     /// it FAILS only on a regression (the default silently widened, or the stand-in collided in-budget).
     /// No cryptographic hash ships in Core — `cryptoHf` is a host-side / test stand-in (GP3).
+    ///
+    /// **The budget is the sample, so it is DEMANDED (Phase 383).** A collision needs two pre-images: a
+    /// `budget` below two is a refused argument — the family answers a red law naming it, beside the two
+    /// laws reported never reached, and hashes nothing. The resistance law's evidence is one assertion
+    /// per pre-image the crypto stand-in hashed, so a search that hashed nothing cannot read green.
     let hashFnAdversarialLaws (cryptoHf: HashFn) (budget: int) (seed: int) : LawResult list =
         let resist =
             LawKit.LawCell "a collision-resistant HashFn resists a re-hashed forgery (no in-budget pre-image collision)"
@@ -888,55 +893,70 @@ module internal IntegrityLaws =
             LawKit.LawCell
                 "the default FNV-1a admits a re-hashed forgery (an in-budget collision — documented non-crypto posture)"
 
-        // The first two distinct pre-images sharing a hash — the re-hashed-forgery primitive. The
-        // enumeration is `seed + k` for `k` below the budget: no draw, so no cursor — the budget IS
-        // the sample, and the seed only offsets where it starts.
-        let firstCollision (hf: HashFn) : (string * string) option =
-            let seen = System.Collections.Generic.Dictionary<string, string>()
-            let mutable found = None
-            let mutable k = 0
+        if budget < 2 then
+            { Law = "the collision-search budget is at least two pre-images"
+              Passed = false
+              Counterexample =
+                Some(
+                    sprintf
+                        "seed=%d: budget=%d is refused — a collision needs two pre-images, so no pre-image was hashed and neither law below was run"
+                        seed
+                        budget
+                ) }
+            :: LawKit.results [ resist; admit ]
+        else
+            // The first two distinct pre-images sharing a hash — the re-hashed-forgery primitive — and
+            // how many pre-images the search hashed. The enumeration is `seed + k` for `k` below the
+            // budget: no draw, so no cursor — the budget IS the sample, and the seed only offsets where
+            // it starts. A `Map` fold, not a mutable dictionary: FSharp.Core-only, Fable-clean.
+            let firstCollision (hf: HashFn) : (string * string) option * int =
+                let rec go (k: int) (seen: Map<string, string>) =
+                    if k >= budget then
+                        None, k
+                    else
+                        let payload = "forge-" + string (seed + k)
+                        let h = hf "" payload
 
-            while found.IsNone && k < budget do
-                let payload = "forge-" + string (seed + k)
-                let h = hf "" payload
+                        match Map.tryFind h seen with
+                        | Some prior when prior <> payload -> Some(prior, payload), k + 1
+                        | Some _ -> go (k + 1) seen
+                        | None -> go (k + 1) (Map.add h payload seen)
 
-                match seen.TryGetValue h with
-                | true, prior when prior <> payload -> found <- Some(prior, payload)
-                | true, _ -> ()
-                | false, _ -> seen.[h] <- payload
+                go 0 Map.empty
 
-                k <- k + 1
+            (match firstCollision cryptoHf with
+             | None, hashed ->
+                 for _ in 1..hashed do
+                     resist.Saw()
+             | Some(a, b), _ ->
+                 resist.Check(
+                     false,
+                     fun () ->
+                         sprintf
+                             "seed=%d: the crypto stand-in collided in-budget (%s / %s) — too weak for the posture"
+                             seed
+                             a
+                             b
+                 ))
 
-            found
+            (match firstCollision OpStream.defaultHash with
+             | Some(a, b), _ when a <> b && OpStream.defaultHash "" a = OpStream.defaultHash "" b -> admit.Saw()
+             | Some(a, b), _ ->
+                 admit.Check(
+                     false,
+                     fun () -> sprintf "seed=%d: an FNV-1a 'collision' did not check out (%s / %s)" seed a b
+                 )
+             | None, _ ->
+                 admit.Check(
+                     false,
+                     fun () ->
+                         sprintf
+                             "seed=%d: no FNV-1a collision within budget=%d — the default may have silently widened (posture regression)"
+                             seed
+                             budget
+                 ))
 
-        (match firstCollision cryptoHf with
-         | None -> resist.Saw()
-         | Some(a, b) ->
-             resist.Check(
-                 false,
-                 fun () ->
-                     sprintf
-                         "seed=%d: the crypto stand-in collided in-budget (%s / %s) — too weak for the posture"
-                         seed
-                         a
-                         b
-             ))
-
-        (match firstCollision OpStream.defaultHash with
-         | Some(a, b) when a <> b && OpStream.defaultHash "" a = OpStream.defaultHash "" b -> admit.Saw()
-         | Some(a, b) ->
-             admit.Check(false, fun () -> sprintf "seed=%d: an FNV-1a 'collision' did not check out (%s / %s)" seed a b)
-         | None ->
-             admit.Check(
-                 false,
-                 fun () ->
-                     sprintf
-                         "seed=%d: no FNV-1a collision within budget=%d — the default may have silently widened (posture regression)"
-                         seed
-                         budget
-             ))
-
-        LawKit.results [ resist; admit ]
+            LawKit.results [ resist; admit ]
 
     /// The attributed-stream lift laws (Phase 81) — the teeth on `OpStream.Attributed.liftWitness` and
     /// the "attribution rides inside the chained op, so the hash chain covers it" claim. Over a
