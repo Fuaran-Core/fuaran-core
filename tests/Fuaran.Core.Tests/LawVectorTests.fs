@@ -667,13 +667,18 @@ let tests =
                       Console.Out.Flush()
                   | CapabilityCopyMissing ->
                       announce
-                          (banner "CAPABILITY CORPUS COPY MISSING" [ sprintf "expected at  %s" copy; "    " + emitCopy ])
+                          (banner
+                              "CAPABILITY CORPUS COPY MISSING"
+                              [ sprintf "expected at  %s" copy
+                                SiblingCorpus.pinSummary root
+                                "    " + emitCopy ])
                           fatal
                   | CapabilityDiffers detail ->
                       announce
                           (banner
                               "CAPABILITY CORPUS COPY DIFFERS — beyond the recorded invocation-key lag"
                               [ sprintf "copy  %s" copy
+                                SiblingCorpus.pinSummary root
                                 ""
                                 detail
                                 ""
@@ -831,7 +836,11 @@ let tests =
 
                   if not (File.Exists copy) then
                       announce
-                          (banner "DECIMAL CORPUS COPY MISSING" [ sprintf "expected at  %s" copy; "    " + emitCopy ])
+                          (banner
+                              "DECIMAL CORPUS COPY MISSING"
+                              [ sprintf "expected at  %s" copy
+                                SiblingCorpus.pinSummary root
+                                "    " + emitCopy ])
                           fatal
                   elif
                       OwnedConformance.fingerprint (File.ReadAllText copy)
@@ -840,5 +849,154 @@ let tests =
                       announce
                           (banner
                               "DECIMAL CORPUS COPY DIFFERS"
-                              [ sprintf "copy  %s" copy; "    " + emitHere; "    " + emitCopy ])
+                              [ sprintf "copy  %s" copy
+                                SiblingCorpus.pinSummary root
+                                "    " + emitHere
+                                "    " + emitCopy ])
+                          fatal
+
+          // -------------------------------------------------------------------
+          //  Phase 394 — the corpus laws/manifest.json rows beside the files.
+          // -------------------------------------------------------------------
+
+          testCase "the manifest restamp moves exactly the derived members of exactly Core's rows"
+          <| fun _ ->
+              // A manifest shaped like the corpus's: Core's two rows stale in every derived member, a
+              // row Core does not own, and a description that MENTIONS the members inside a string.
+              let stale =
+                  String.concat
+                      "\n"
+                      [ "{"
+                        "  \"version\": 1,"
+                        "  \"families\": ["
+                        "    { \"id\": \"capabilityLaws\", \"kind\": \"law-vectors\", \"file\": \"capability-laws.json\", \"kitVersion\": \"0.1.0\", \"seed\": 1, \"iterations\": 2, \"vectors\": 3, \"description\": \"mentions \\\"kitVersion\\\": \\\"9.9.9\\\" and \\\"vectors\\\": 7 in prose\" },"
+                        "    { \"id\": \"decimal\", \"kind\": \"law-vectors\", \"file\": \"decimal-laws.json\", \"kitVersion\": \"0.1.0\", \"vectors\": 3, \"description\": \"d\" },"
+                        "    { \"id\": \"transformLaws\", \"kind\": \"law-vectors\", \"file\": \"transform-laws.json\", \"kitVersion\": \"0.1.0\", \"vectors\": 16, \"description\": \"another producer's row\" }"
+                        "  ],"
+                        "  \"notExported\": []"
+                        "}"
+                        "" ]
+
+              let rows =
+                  [ "capabilityLaws",
+                    LawVectorExport.derivedMembers (LawVectorExport.Capabilities.render ())
+                    |> Result.defaultWith failwith
+                    "decimal",
+                    LawVectorExport.derivedMembers (LawVectorExport.Decimals.render ())
+                    |> Result.defaultWith failwith ]
+
+              let files =
+                  [ "capabilityLaws", Some(LawVectorExport.Capabilities.render ())
+                    "decimal", Some(LawVectorExport.Decimals.render ()) ]
+
+              Expect.isNonEmpty
+                  (LawVectorExport.manifestFindings stale files)
+                  "the go-red: stale rows are findings before the restamp"
+
+              match LawVectorExport.restampManifest stale rows with
+              | Error why -> failtestf "the restamp refused a well-formed manifest: %s" why
+              | Ok restamped ->
+                  Expect.isEmpty (LawVectorExport.manifestFindings restamped files) "every derived member now agrees"
+
+                  let kit = LawVectorExport.kitVersion ()
+                  let staleLines = stale.Split('\n')
+                  let newLines = restamped.Split('\n')
+                  Expect.equal newLines.Length staleLines.Length "no line is added or dropped"
+
+                  for i in 0 .. staleLines.Length - 1 do
+                      if
+                          not (
+                              staleLines[i].Contains "\"capabilityLaws\""
+                              || staleLines[i].Contains "\"decimal\""
+                          )
+                      then
+                          Expect.equal newLines[i] staleLines[i] "a line outside Core's rows is byte-identical"
+
+                  Expect.stringContains restamped (sprintf "\"kitVersion\": \"%s\"" kit) "the stamp is this kit's"
+
+                  Expect.stringContains
+                      restamped
+                      "mentions \\\"kitVersion\\\": \\\"9.9.9\\\" and \\\"vectors\\\": 7 in prose"
+                      "a member named inside a string is untouched"
+
+                  Expect.stringContains
+                      restamped
+                      "\"kitVersion\": \"0.1.0\", \"vectors\": 16"
+                      "another producer's row is untouched"
+
+                  Expect.equal
+                      (LawVectorExport.restampManifest restamped rows)
+                      (Ok restamped)
+                      "the restamp is idempotent"
+
+          testCase "the manifest restamp refuses a row it cannot edit surgically"
+          <| fun _ ->
+              let rows =
+                  [ "decimal",
+                    LawVectorExport.derivedMembers (LawVectorExport.Decimals.render ())
+                    |> Result.defaultWith failwith ]
+
+              let manifest (row: string) =
+                  "{\n  \"families\": [\n    " + row + "\n  ]\n}\n"
+
+              let refusal (text: string) =
+                  match LawVectorExport.restampManifest text rows with
+                  | Error why -> why
+                  | Ok _ -> failtestf "restamped a manifest it should have refused:\n%s" text
+
+              Expect.stringContains
+                  (refusal (manifest "{ \"id\": \"capabilityLaws\", \"kitVersion\": \"0.1.0\", \"vectors\": 1 }"))
+                  "no one-line row for `decimal`"
+                  "an absent row is refused — adding a family to the shared index is an edit made once"
+
+              Expect.stringContains
+                  (refusal (manifest "{ \"id\": \"decimal\", \"kitVersion\": \"0.1.0\" }"))
+                  "declares no `vectors` member"
+                  "a row missing a derived member is refused"
+
+              Expect.stringContains
+                  (refusal (
+                      manifest (
+                          "{ \"id\": \"decimal\", \"kitVersion\": \"0.1.0\", \"vectors\": 1 },\n    "
+                          + "{ \"id\": \"decimal\", \"kitVersion\": \"0.1.0\", \"vectors\": 1 }"
+                      )
+                  ))
+                  "2 rows for `decimal`"
+                  "a repeated row is refused"
+
+          testCase "the corpus laws/manifest.json rows describe the files beside them"
+          <| fun _ ->
+              match SiblingCorpus.freshness LawVectorExport.familyDirName with
+              | SiblingCorpus.NotChecked(why, true) -> failtest why
+              | SiblingCorpus.NotChecked(why, false) ->
+                  printfn "%s" (banner "LAWS MANIFEST ROWS NOT CHECKED" [ why ])
+                  Console.Out.Flush()
+                  skiptest why
+              | SiblingCorpus.Compare(root, fatal) ->
+                  let manifest = LawVectorExport.manifestPath root
+
+                  let findings =
+                      if File.Exists manifest then
+                          LawVectorExport.manifestRows
+                          |> List.map (fun (id, fileName) ->
+                              let path = Path.Combine(LawVectorExport.familyDir root, fileName)
+
+                              id,
+                              (if File.Exists path then
+                                   Some(File.ReadAllText path)
+                               else
+                                   None))
+                          |> LawVectorExport.manifestFindings (File.ReadAllText manifest)
+                      else
+                          [ sprintf "no %s at '%s'" LawVectorExport.manifestFileName manifest ]
+
+                  if not findings.IsEmpty then
+                      announce
+                          (banner
+                              "LAWS MANIFEST ROWS DISAGREE WITH THE FILES BESIDE THEM"
+                              ([ sprintf "manifest  %s" manifest; SiblingCorpus.pinSummary root; "" ]
+                               @ findings
+                               @ [ ""
+                                   "`--emit-laws <corpus dir>` restamps the rows with the files (Phase 394):"
+                                   "    " + emitCopy ]))
                           fatal ]

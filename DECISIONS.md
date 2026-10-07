@@ -1,5 +1,57 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-07 — D126: the conformance corpus is a pinned build input — `main` is red only for a change in this repository or a deliberate bump, and `--emit-laws` restamps the corpus manifest rows beside the files
+
+**Recorded by Phase 394. Test project and workflows only (`copies.json`, `.github/workflows/ci.yml`,
+`.github/workflows/publish-packages.yml`, `.github/scripts/corpus-pin.ps1`, `SiblingCorpus`,
+`LawVectorExport`); no package or wire byte moves. Builds on D31 (an asked-for corpus that is absent
+fails) and D50 (a stamp-only mismatch is fatal where asked); restates the 2026-09-15 ruling (C)
+against the pin.**
+
+*Decided: the corpus Core certifies against is a SHA Core chose.* Every workflow checkout of
+`fuaran-ui/fuaran-ui-specification` — `ci.yml`'s `verify` and `proofs`, `publish-packages.yml`'s
+`proofs` and `publish`, four in all — named no `ref:` until now, so it read whatever the corpus's
+default branch held at that moment. A corpus push could red this repository's `main` with no commit
+here, and refuse a tag's publish; a corpus regression could be certified against by accident. The
+`corpus` record of `copies.json` (repository, full SHA, date, reason) is now the one tracked pin;
+each checkout reads it through `.github/scripts/corpus-pin.ps1`, which refuses an absent or
+malformed record by name before the checkout runs. `FUARAN_CORE_CORPUS_DIR` and
+`FUARAN_CORE_CORPUS_FRESHNESS` are unchanged.
+
+*Decided: the pin moves only with the change that needs it.* A bump is one commit carrying the
+record's edit and the change that made it necessary, its message naming both SHAs, after the corpus
+change is pushed and the corpus legs re-run at the new pin (docs/conformance-corpus.md, "Bumping the
+pin"). A `<Version>` move is such a change: the cut, the re-emitted `conformance/` and the bump to
+the re-stamped corpus commit travel together, so ruling (C)'s window on Core's side — which used to
+run from a cut to whatever the corpus branch held — now runs from a cut to a pin bump, both commits
+here, and the procedure makes it empty. The host side of (C) is adoption and is unchanged.
+
+*Decided: the suite reports drift by DIRECTION.* `SiblingCorpus` reads the same record (the suite
+runs the workflow step over valid and malformed records to keep the two readers one) and, wherever a
+corpus is present, names both SHAs when the checkout is not at the pin: AHEAD is a warning everywhere
+(the normal state while a corpus change is in flight); BEHIND, DIVERGED, not carrying the pin, or not
+a git checkout of its own warn locally and FAIL where the live leg is asked for. A directory inside
+another repository is refused as unreadable rather than read, because git would answer with the
+enclosing repository's HEAD. In CI the checkout is the pin, so the reading holds by construction.
+
+*Decided (operator ruling, folded in): the corpus `laws/manifest.json` rows are restamped with the
+files.* `LawVectorExport.write` deliberately left the shared index alone, so every `<Version>` move
+left Core's rows naming the previous kit beside files stamped with the new one, and the rows were
+hand-edited at each cut (most recently at the `0.36.0` slot opening, corpus `8725ce4`). The reason the
+index is not rendered still holds — it lists families this repository does not own — so the restamp
+is surgical: exactly the derived members (`kitVersion`, `vectors`, and `seed` / `iterations` for the
+drawn family) of exactly Core's rows, refusing an absent, repeated or incomplete row before anything
+is written, and proved by parsing the result back to the original with only those members replaced.
+A corpus-present leg holds each row to the file beside it. Measured on the pinned corpus:
+`--emit-laws` into a copy of it whose `decimal` row was set back to `0.35.2` / 74 restored the
+manifest byte for byte.
+
+*Rejected: pinning by branch or tag.* A branch is the defect; a corpus tag is a second name the corpus
+repository controls and can move. *Rejected: a workflow-level `env:` literal per file.* Four copies of
+one value must all move at every bump, and a missed one is a job certifying against a different
+corpus with nothing to say so; the pin lives once, in the file the suite already reads. *Rejected: rendering the whole manifest.* It would drop the compute
+repository's `transformLaws` row, which this repository does not own.
+
 ## 2026-10-07 — D125: a copy D2 does not demand is collapsed into one body, a kernel two packages need lives in the lower one behind `InternalsVisibleTo`, and a public module whose public types are nested in it is not split across files
 
 **Recorded by Phase 388. `Fuaran.Core.OpStream`, `.OpStream.Dag`, `.Ops`, `.Wire`, `.Column`,

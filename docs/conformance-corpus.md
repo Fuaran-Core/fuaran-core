@@ -74,8 +74,18 @@ is retired; the UI tier now READS the corpus copy and certifies its pinned kit a
 other host does. A future law set Core is the reference for is added here, beside this one — the
 propagation law set fuaran#1764 plans is one — never as a second exporter in a host repository.
 
-`laws/manifest.json` in the corpus, the index over every family in `laws/`, stays hand-curated: no
-exporter owns it, for the reason `LawVectorExport.write` gives.
+`laws/manifest.json` in the corpus, the index over every family in `laws/`, stays hand-curated as an
+INDEX: no exporter renders it, because it lists families this repository does not own and a
+wholesale renderer would drop them. But its rows for Core's two families repeat members DERIVED from
+the files they name — `kitVersion`, `vectors`, and `seed` / `iterations` for the drawn family — and
+since Phase 394 `--emit-laws <corpus dir>` restamps exactly those members of exactly those rows in
+the same act that writes the files, so a `<Version>` move can no longer leave a row naming the
+previous kit beside a file stamped with the new one (the lag that was hand-edited at every cut until
+then). The edit is surgical and self-checking: a row that is absent, repeated, or missing a derived
+member is REFUSED before anything is written (adding a family to the index, or a member to a row, is
+an edit made once, by hand), and the result must parse to the original with only those members
+replaced. The in-suite leg "the corpus laws/manifest.json rows describe the files beside them" holds
+each row to the file beside it, wherever a corpus is present, under the same ask as the copy legs.
 
 **The capability copy lags by ruling, until fuaran#1860.** Phase 225 changed every capture key's
 value, and `capability-laws.json` pins literal keys. The committed file here carries this kit's keys;
@@ -141,11 +151,19 @@ to somebody else. Phase 216 moved the discovery; the sequence it discovers is th
 # 1. move <Version> in Directory.Build.props, then re-emit the source of truth
 dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws
 
-# 2. re-stamp the corpus copy with the same exporter, pointed at the corpus checkout
+# 2. re-stamp the corpus copy (and, since Phase 394, its laws/manifest.json rows) with the same
+#    exporter, pointed at the corpus checkout
 dotnet run --project tests/Fuaran.Core.Tests -- --emit-laws ../Fuaran-UI/wire-format-fixtures
 
-# 3. commit BOTH, and push BOTH — they are two repositories, and the corpus is a public one
+# 3. commit and push the CORPUS first — it is a separate, public repository
+# 4. bump the pin to that corpus commit (see "Bumping the pin") and commit it IN THE SAME COMMIT as
+#    the <Version> move and the re-emitted conformance/ — then push this repository
 ```
+
+Since Phase 394 CI certifies against the pinned corpus, not the corpus's `main`, so step 4 is what
+makes CI see step 2 at all: a version move whose commit does not also move the pin is red on its own
+push (the pinned copy carries the old stamp, and a stamp-only mismatch is fatal there, D50) — which
+is the point. The red is attributed to the commit that caused it, never to a later one.
 
 Step 1 is not optional and never was: the default suite holds the committed file to a fresh render,
 so a version move without it is red in this repository immediately. Step 2 is the one a session
@@ -153,7 +171,9 @@ forgets, because until Phase 216 nothing here said anything about it. Now the or
 run prints the copy's stamp, this kit's stamp and both commands, whenever a corpus is checked out
 beside this one — a report locally, a failure in CI. The interval between the two pushes is real and
 cannot be closed (two repositories, two permission sets), but it now starts at a moment the session
-knows about.
+knows about — and since Phase 394 it cannot red this repository's `main` at all: until the pin
+moves, CI reads the corpus the pin names, and the pin moves in the commit that also moves
+`<Version>`.
 
 **Two readings, and they are never merged into one sentence.** A copy whose **vectors** differ
 records answers this kit's reference evaluator no longer gives — a content divergence, on the file
@@ -178,6 +198,17 @@ by anything above: it governs when a host adopts, this governs when a producer e
 216 also settled is that the two cannot both hold while the leg merely FAILS with one sentence —
 "accept the stale reading" and "CI is red" cannot both be true of the same report — which is why
 the readings are separated whatever else is decided.
+
+**Ruling (C), restated against the pin (Phase 394).** Before the pin, the stale reading this
+repository could observe ran from a Core cut to whatever the corpus branch happened to hold when a
+run checked it out — a window nobody opened or closed on purpose, which could also be closed or
+reopened by a corpus push with no Core commit at all. Now the corpus Core certifies against moves
+only when the pin does, so the window (C) governs on Core's side runs **from a Core cut to a pin
+bump**, and both ends are commits in this repository. The procedure above puts them in ONE commit,
+so on `main` the window is empty by construction; a cut committed without its bump is red on its
+own push, and attributed to it. The host side of (C) — a host certifying against the corpus at its
+own pin of Core, until it raises — is unchanged: that is adoption, and it was never this
+repository's window to close.
 
 ## The opt-in live-corpus leg
 
@@ -256,17 +287,89 @@ therefore never reached the corpus from a linked worktree.
 
 ### What CI does
 
-`.github/workflows/ci.yml` checks the corpus out beside the repository checkout, names it in
-`FUARAN_CORE_CORPUS_DIR`, and sets `FUARAN_CORE_CORPUS_FRESHNESS`, in both the `verify` and the
-`proofs` jobs. So every push still compares against the corpus at its own `main`, and drift between
-this kit and the published corpus — a stale copy, a model that no longer agrees with production over
-the domain's documents, a vocabulary that moved under the committed F\* model — surfaces on the
-change that caused it instead of on somebody else's change days later. A machine holding only this
-repository runs the default suite and is green; that is the acceptance the phase was cut for.
+`.github/workflows/ci.yml` checks the corpus out beside the repository checkout **at the pinned
+commit**, names it in `FUARAN_CORE_CORPUS_DIR`, and sets `FUARAN_CORE_CORPUS_FRESHNESS`, in both the
+`verify` and the `proofs` jobs; `publish-packages.yml` does the same in its `proofs` and `publish`
+jobs, reading the pin from the TAGGED commit. So every push compares against the corpus this
+repository chose, and drift between this kit and that corpus — a stale copy, a model that no longer
+agrees with production over the domain's documents, a vocabulary that moved under the committed F\*
+model — surfaces on the change that caused it instead of on somebody else's change days later. A
+machine holding only this repository runs the default suite and is green; that is the acceptance
+the phase was cut for.
 
 **A stamp-only mismatch is FATAL there, by operator ruling (2026-09-21, DECISIONS D50), and the
 workflow is deliberately unchanged by Phase 216** — fatal is the status quo, so an edit to it would
 have been a change away from the ruling rather than toward it.
+
+## The pin
+
+Until Phase 394 every one of those checkouts named no `ref:`, so it took whatever the corpus's
+default branch held at that moment. A corpus push — a re-stamp, a vector re-sync — could red this
+repository's `main` with no commit here, and could refuse a tag's publish; and a corpus regression
+could be certified against by accident. The corpus is now a **pinned build input**: `main` goes red
+only for a change in this repository or for a deliberate bump (DECISIONS.md D126).
+
+The pin is the `corpus` record of `copies.json`, the file that already declares the corpus copies:
+
+```json
+"corpus": {
+  "repository": "fuaran-ui/fuaran-ui-specification",
+  "sha": "<the corpus commit, 40 lowercase hex>",
+  "date": "<yyyy-MM-dd of the last bump>",
+  "reason": "<the change that needed it>"
+}
+```
+
+Two readers hold it to the same four rules — the repository is exactly the corpus, the SHA is a full
+lowercase commit SHA (never a branch, never an abbreviation), the date is `yyyy-MM-dd`, the reason
+is not blank — and the suite runs the first against the second over valid and malformed records so
+they cannot drift apart:
+
+- **every workflow checkout** runs `.github/scripts/corpus-pin.ps1` first and passes its outputs as
+  the checkout's `repository:` and `ref:`; an absent or malformed record fails that step by name, and
+  the checkout never runs unpinned. `FUARAN_CORE_CORPUS_DIR` and `FUARAN_CORE_CORPUS_FRESHNESS` are
+  unchanged;
+- **the suite** (`SiblingCorpus.pin` / `driftAt` / `grade`) reads the record and, wherever a corpus
+  is present, says where that checkout stands against it with BOTH SHAs, so a contributor sees which
+  side moved before a red corpus leg tells them nothing:
+
+| The checkout is… | Unasked (local) | Asked (`FUARAN_CORE_CORPUS_FRESHNESS`, CI) |
+|---|---|---|
+| at the pin | holds | holds |
+| AHEAD of the pin (descends from it) | WARN — the normal state while a corpus change is in flight | WARN |
+| BEHIND the pin, DIVERGED from it, or NOT CARRYING it | WARN, saying it would fail where asked | **FAIL** |
+| not a git checkout of its own | WARN | **FAIL** — the position cannot be proved |
+
+The copy-freshness legs' reports carry the same one-line reading, so a `laws/` finding says which
+side moved too. In CI the checkout IS the pin, so the reading holds by construction; it earns its
+keep on a contributor's clone.
+
+### Bumping the pin
+
+Moving the pin is a deliberate act, and it travels with the change that needs it:
+
+1. **Land the corpus change first** — in the corpus repository, pushed, so the commit is reachable on
+   its `origin`. A pin naming a commit only one clone holds fails every CI checkout.
+2. **Edit the record**: `sha` to that commit (`git -C <corpus> rev-parse HEAD`, the full 40 hex), `date`
+   to today, `reason` to the change that needs it.
+3. **Re-run the corpus legs** against a checkout AT the new pin, asked for by name:
+
+   ```powershell
+   git -C <corpus> checkout <new sha>
+   $env:FUARAN_CORE_CORPUS_FRESHNESS = '1'
+   $env:FUARAN_CORE_CORPUS_DIR = '<corpus>'
+   pwsh ./verify.ps1
+   ```
+
+4. **Commit the pin with the change that needs it, in ONE commit whose message names both SHAs** —
+   `corpus pin <old sha> -> <new sha>: <reason>`. A version cut (above), a re-emitted copy, a law
+   that changed what the corpus must carry: whatever made the bump necessary is in that commit, so
+   the commit that moves what Core certifies against is the commit that explains why.
+
+A bump whose only reason is "the corpus moved" is not a reason. Adopting new corpus content on
+purpose — fixtures the proof-oracle pools should read, a re-synced copy — is a change that needs the
+bump, and the `reason` names it; a corpus commit nobody here has a use for yet is one Core does not
+need to certify against, and the AHEAD warning on a local clone is the honest report of that state.
 
 ## The `apply/` family
 

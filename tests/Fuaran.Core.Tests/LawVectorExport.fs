@@ -603,15 +603,280 @@ module LawVectorExport =
         [ capabilityPath corpusDir, Capabilities.render ()
           decimalPath corpusDir, Decimals.render () ]
 
+    // -----------------------------------------------------------------------
+    //  Phase 394 — the corpus `laws/manifest.json` rows beside the files
+    // -----------------------------------------------------------------------
+    //  The corpus indexes every family in `laws/` in one hand-curated `manifest.json`, and each
+    //  row Core's families own repeats members DERIVED from the file it names: the `kitVersion`
+    //  stamp, the vector count, and (for a drawn family) the seed and iterations. Until this phase
+    //  `write` left the manifest alone, so every `<Version>` move restamped the file and left its
+    //  row naming the previous kit — a lag the corpus carried until someone hand-edited the row.
+    //
+    //  The reason the manifest was not written still holds for the INDEX: it is a shared file that
+    //  lists families this repository does not own (`transformLaws` is the compute repository's), and
+    //  a wholesale renderer would drop what it does not know. So the restamp is surgical: it edits
+    //  exactly the derived members of exactly the rows of the families written here, refuses a row
+    //  that is absent, repeated, or missing a derived member (adding a family to the shared index, or
+    //  a member to a row, is an edit made once, by hand), and proves its own edit by parsing the
+    //  result and requiring it to equal the original with only those members replaced.
+
+    /// The corpus's index over every family in `laws/`.
+    let manifestFileName = "manifest.json"
+
+    let manifestPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, manifestFileName)
+
+    /// Each emitted family's row id in the corpus manifest, with the file that row names.
+    let manifestRows: (string * string) list =
+        [ "capabilityLaws", Capabilities.fileName; "decimal", Decimals.fileName ]
+
+    /// The members of a manifest row derived from the text of the file it names, in row order:
+    /// `kitVersion` always; `seed` and `iterations` when the file declares them (a drawn family);
+    /// `vectors` as the length of the file's `vectors` array.
+    let derivedMembers (fileText: string) : Result<(string * JVal) list, string> =
+        match Json.parse fileText with
+        | Error e -> Error(sprintf "the law file is not JSON (%s)" e)
+        | Ok(JObj fields) ->
+            let find name =
+                fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+
+            match find "kitVersion", find "vectors" with
+            | Some(JStr stamp), Some(JArr vectors) ->
+                let drawn =
+                    [ "seed"; "iterations" ]
+                    |> List.choose (fun name ->
+                        match find name with
+                        | Some(JInt n) -> Some(name, JInt n)
+                        | _ -> None)
+
+                Ok([ "kitVersion", JStr stamp ] @ drawn @ [ "vectors", JInt(List.length vectors) ])
+            | _ -> Error "the law file declares no string `kitVersion` and `vectors` array"
+        | Ok _ -> Error "the law file is not a JSON object"
+
+    let private renderMember (value: JVal) : string =
+        match value with
+        | JStr s -> jstr s
+        | JInt n -> jint n
+        | other -> Json.render other
+
+    let private rowLine (id: string) =
+        System.Text.RegularExpressions.Regex(
+            "^\\s*\\{\\s*\"id\"\\s*:\\s*\""
+            + System.Text.RegularExpressions.Regex.Escape id
+            + "\"",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant
+        )
+
+    // A member's NAME in quotes immediately followed by a colon can only be a member: inside a JSON
+    // string every quote is escaped, so `\"vectors\": 5` in a description never matches.
+    let private memberPattern (name: string) =
+        System.Text.RegularExpressions.Regex(
+            "\"" + name + "\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|-?[0-9]+)",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant
+        )
+
+    let private familiesOf (manifest: JVal) : JVal list option =
+        match manifest with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (k, _) -> k = "families") with
+            | Some(_, JArr rows) -> Some rows
+            | _ -> None
+        | _ -> None
+
+    let private rowId (row: JVal) : string option =
+        match row with
+        | JObj fields ->
+            match fields |> List.tryFind (fun (k, _) -> k = "id") with
+            | Some(_, JStr id) -> Some id
+            | _ -> None
+        | _ -> None
+
+    /// The parsed manifest with each named row's members replaced — the tree a correct restamp must
+    /// produce, and the yardstick it is held to.
+    let private substituted (manifest: JVal) (rows: (string * (string * JVal) list) list) : JVal =
+        match manifest with
+        | JObj fields ->
+            fields
+            |> List.map (fun (k, v) ->
+                match k, v with
+                | "families", JArr families ->
+                    k,
+                    JArr(
+                        families
+                        |> List.map (fun row ->
+                            match rowId row, row with
+                            | Some id, JObj members ->
+                                match rows |> List.tryFind (fun (rid, _) -> rid = id) with
+                                | Some(_, wanted) ->
+                                    JObj(
+                                        members
+                                        |> List.map (fun (m, mv) ->
+                                            match wanted |> List.tryFind (fun (w, _) -> w = m) with
+                                            | Some(_, nv) -> m, nv
+                                            | None -> m, mv)
+                                    )
+                                | None -> row
+                            | _ -> row)
+                    )
+                | _ -> k, v)
+            |> JObj
+        | other -> other
+
+    /// `manifestText` with each row in `rows` (id, derived members) restamped, or why not. Every byte
+    /// outside the replaced member values is kept, so the shared file's hand-curated layout survives.
+    let restampManifest (manifestText: string) (rows: (string * (string * JVal) list) list) : Result<string, string> =
+        match Json.parse manifestText with
+        | Error e -> Error(sprintf "laws/%s is not JSON (%s)" manifestFileName e)
+        | Ok original ->
+            let lines = manifestText.Split('\n')
+
+            let edit (acc: Result<string[], string>) (id: string, members: (string * JVal) list) =
+                acc
+                |> Result.bind (fun (current: string[]) ->
+                    let hits =
+                        current
+                        |> Array.indexed
+                        |> Array.filter (fun (_, l) -> (rowLine id).IsMatch l)
+                        |> Array.map fst
+
+                    match hits with
+                    | [| index |] ->
+                        members
+                        |> List.fold
+                            (fun (line: Result<string, string>) (name, value) ->
+                                line
+                                |> Result.bind (fun (l: string) ->
+                                    let pattern = memberPattern name
+
+                                    match pattern.Matches(l).Count with
+                                    | 1 ->
+                                        Ok(
+                                            pattern.Replace(
+                                                l,
+                                                (fun (m: System.Text.RegularExpressions.Match) ->
+                                                    m.Value.Substring(0, m.Groups[1].Index - m.Index)
+                                                    + renderMember value),
+                                                1
+                                            )
+                                        )
+                                    | 0 ->
+                                        Error(
+                                            sprintf
+                                                "laws/%s row `%s` declares no `%s` member — add it to the row once, by hand"
+                                                manifestFileName
+                                                id
+                                                name
+                                        )
+                                    | n ->
+                                        Error(
+                                            sprintf
+                                                "laws/%s row `%s` carries `%s` %d times on its line"
+                                                manifestFileName
+                                                id
+                                                name
+                                                n
+                                        )))
+                            (Ok current[index])
+                        |> Result.map (fun l ->
+                            let next = Array.copy current
+                            next[index] <- l
+                            next)
+                    | [||] ->
+                        Error(
+                            sprintf
+                                "laws/%s carries no one-line row for `%s` — adding a family to the shared index is an edit made once, by hand"
+                                manifestFileName
+                                id
+                        )
+                    | many -> Error(sprintf "laws/%s carries %d rows for `%s`" manifestFileName many.Length id))
+
+            rows
+            |> List.fold edit (Ok lines)
+            |> Result.bind (fun edited ->
+                let text = String.concat "\n" edited
+
+                match Json.parse text with
+                | Error e -> Error(sprintf "the restamped laws/%s does not parse (%s)" manifestFileName e)
+                | Ok restamped when restamped = substituted original rows -> Ok text
+                | Ok _ ->
+                    Error(
+                        sprintf
+                            "the restamped laws/%s differs from the original by more than the derived members — refused"
+                            manifestFileName
+                    ))
+
+    /// Each emitted family's row against the text of the file it names: `[]` when every derived
+    /// member agrees, else one finding per disagreement (or per row or file that cannot be read).
+    let manifestFindings (manifestText: string) (files: (string * string option) list) : string list =
+        match Json.parse manifestText with
+        | Error e -> [ sprintf "laws/%s is not JSON (%s)" manifestFileName e ]
+        | Ok manifest ->
+            match familiesOf manifest with
+            | None -> [ sprintf "laws/%s declares no `families` array" manifestFileName ]
+            | Some families ->
+                files
+                |> List.collect (fun (id, fileText) ->
+                    match families |> List.filter (fun r -> rowId r = Some id) with
+                    | [ JObj row ] ->
+                        match fileText with
+                        | None -> [ sprintf "row `%s`: the file it names is absent beside it" id ]
+                        | Some text ->
+                            match derivedMembers text with
+                            | Error e -> [ sprintf "row `%s`: %s" id e ]
+                            | Ok derived ->
+                                derived
+                                |> List.choose (fun (name, want) ->
+                                    match row |> List.tryFind (fun (k, _) -> k = name) with
+                                    | Some(_, have) when have = want -> None
+                                    | Some(_, have) ->
+                                        Some(
+                                            sprintf
+                                                "row `%s`: `%s` is %s, the file beside it says %s"
+                                                id
+                                                name
+                                                (renderMember have)
+                                                (renderMember want)
+                                        )
+                                    | None -> Some(sprintf "row `%s`: declares no `%s` member" id name))
+                    | [] -> [ sprintf "laws/%s carries no row for `%s`" manifestFileName id ]
+                    | many -> [ sprintf "laws/%s carries %d rows for `%s`" manifestFileName many.Length id ])
+
+    /// The rows `write` restamps, derived from the text it is about to write — the same bytes, so
+    /// a row can never name a file other than the one beside it.
+    let private writtenRows (corpusDir: string) : (string * (string * JVal) list) list =
+        let texts = emitted corpusDir
+
+        manifestRows
+        |> List.map (fun (id, fileName) ->
+            let text =
+                texts |> List.find (fun (path, _) -> Path.GetFileName path = fileName) |> snd
+
+            match derivedMembers text with
+            | Ok members -> id, members
+            | Error e -> failwithf "the %s this kit renders did not read back: %s" fileName e)
+
     /// Write the vectors with LF endings, whatever the host platform — the corpus is byte-compared
-    /// by several hosts on three operating systems.
-    ///
-    /// The family MANIFEST beside them is deliberately not written here. It indexes every family in
-    /// `laws/`, and a wholesale renderer would silently drop whatever it does not know about.
-    /// Moving a family between its `families` and `notExported` lists is an edit to a shared index,
-    /// made once.
+    /// by several hosts on three operating systems — and, where a family `manifest.json` sits
+    /// beside them (the corpus; this repository's `conformance/laws/` carries none), restamp the
+    /// rows of the families written here in the same act (Phase 394). A manifest that cannot be
+    /// restamped fails the command BEFORE any file is written, so the files and their rows never
+    /// part company.
     let write (corpusDir: string) : unit =
+        let manifest = manifestPath corpusDir
+
+        let restamped =
+            if File.Exists manifest then
+                match restampManifest (File.ReadAllText manifest) (writtenRows corpusDir) with
+                | Ok text -> Some text
+                | Error why -> failwithf "%s (%s) — nothing was written" why manifest
+            else
+                None
+
         Directory.CreateDirectory(familyDir corpusDir) |> ignore
 
         for path, text in emitted corpusDir do
             File.WriteAllText(path, text)
+
+        match restamped with
+        | Some text when text <> File.ReadAllText manifest -> File.WriteAllText(manifest, text)
+        | _ -> ()
