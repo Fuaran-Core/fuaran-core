@@ -1680,6 +1680,14 @@
     },
     {
       "members": [
+        "OpStream.Jsonl.quote"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The package's one JSON string escaper, public since Phase 388 so the DAG package spells its node lines through it instead of carrying a third copy. Its bytes are pinned character by character against `Wire.Json.escape` by the `StringEscapeVectors` family, through `Actor.encode` and `Dag.toJsonl`.",
+      "standIn": "tests/Fuaran.Core.Tests/StringEscapeTests.fs"
+    },
+    {
+      "members": [
         "OpStream.Snapshots.firstBreak",
         "OpStream.Snapshots.ofJsonl",
         "OpStream.Snapshots.take",

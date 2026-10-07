@@ -27,12 +27,12 @@ module internal Reach =
                 args |> List.iter visit
 
                 if unions.Add n then
-                    match findUnion idl n with
+                    match IdlLookup.tryUnion idl n with
                     | Some u -> u.Cases |> List.iter (fun c -> c.Fields |> List.iter (fun f -> visit f.Type))
                     | None -> ()
             | TRecord n ->
                 if records.Add n then
-                    match findRecord idl n with
+                    match IdlLookup.tryRecord idl n with
                     | Some r -> r.Fields |> List.iter (fun f -> visit f.Type)
                     | None -> ()
             | TList inner -> visit inner

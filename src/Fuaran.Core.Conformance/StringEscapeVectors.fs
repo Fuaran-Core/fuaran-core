@@ -5,12 +5,14 @@ namespace Fuaran.Core
 //
 //  The spine has ONE rule for spelling a string inside canonical JSON — `"` as `\"`, `\` as
 //  `\\`, every control character `U+0000`–`U+001F` as lower-case `\u00xx`, nothing else — and
-//  THREE functions that carry it: `Wire.Json.escape` (the original; `Canon.render` escapes
-//  through it), `Actor.encode` in `Fuaran.Core.OpStream` and `Dag.toJsonl` in
-//  `Fuaran.Core.OpStream.Dag`. The last two are copies, because DECISIONS.md D2 keeps both
-//  packages free of a `Wire` reference. A copy is safe only while it is held to the original,
-//  and this family is what holds it: for every character the rule escapes, and for the actors
-//  a chain pre-image carries, it pins the exact bytes each function emits against one table.
+//  TWO bodies that carry it: `Wire.Json.escape` (the original; `Canon.render` escapes through
+//  it) and the copy in `Fuaran.Core.OpStream` (`OpStream.Jsonl.quote`), which DECISIONS.md D2
+//  demands because that package takes no `Wire` reference. `Actor.encode` spells through the
+//  copy, and so does `Dag.toJsonl` in `Fuaran.Core.OpStream.Dag` — which references
+//  `OpStream` and so carries no copy of its own since Phase 388. A copy is safe only while it
+//  is held to the original, and this family is what holds it: for every character the rule
+//  escapes, and for the actors a chain pre-image carries, it pins the exact bytes each emitter
+//  writes against one table.
 //
 //  Why the bytes matter: the actor is folded into the chain hash, so an escaper that spells
 //  `\n` where another host spells `\u000a` gives the same record two chain hashes — which is
@@ -24,6 +26,8 @@ namespace Fuaran.Core
 
 /// The string-escape conformance vectors + their runner.
 module StringEscapeVectors =
+
+    open VectorKit
 
     /// One character the rule escapes (or, as a control, one it must leave alone), with the
     /// exact bytes every escaper on the spine emits for it — and the bytes the linear chain
@@ -81,28 +85,6 @@ module StringEscapeVectors =
           "{\"kind\":\"agent\",\"model\":\"m\\u000a\",\"version\":\"1\\u0009\",\"id\":\"id\\u000d\"}"
           "human with NUL", Human "\u0000", "{\"kind\":\"human\",\"id\":\"\\u0000\"}"
           "human with no control character", Human "u", "{\"kind\":\"human\",\"id\":\"u\"}" ]
-
-    let private pass (name: string) : Corpus.Outcome =
-        { Name = name
-          Passed = true
-          Detail = "ok" }
-
-    let private fail (name: string) (detail: string) : Corpus.Outcome =
-        { Name = name
-          Passed = false
-          Detail = detail }
-
-    let private expect (name: string) (what: string) (expected: string) (got: string) : Corpus.Outcome =
-        if got = expected then
-            pass name
-        else
-            fail name (what + " emitted " + got + ", expected " + expected)
-
-    let private quoted (body: string) : string = "\"" + body + "\""
-
-    /// `{"seq":0,"actor":<actor>,"op":{}}` — the linear chain pre-image for one actor.
-    let private payload (actor: string) : string =
-        "{\"seq\":0,\"actor\":" + actor + ",\"op\":{}}"
 
     /// The DAG node line for a node whose id and only parent are both `id`.
     let private nodeLine (id: string) : string =

@@ -252,14 +252,14 @@ module internal TypeScript =
         // than an equality test, because JS arrays compare by reference.
         | TList _, VList [] -> Ok(src + ".length === 0")
         | TRecord n, VRecord authored ->
-            match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+            match IdlLookup.tryRecord idl n with
             | None -> refuse ()
             | Some r ->
                 r.Fields
                 |> List.map (fun rf -> tsIsDefaultField idl disc src Map.empty rf authored)
                 |> concatR " && "
         | TUnion(n, args), VUnion(tag, authored) ->
-            match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+            match IdlLookup.tryUnion idl n with
             | None -> refuse ()
             | Some u when List.length u.Params <> List.length args -> refuse ()
             // A DECLARED transparent case is on the wire BARE, so neither the tagged predicate
@@ -1135,9 +1135,7 @@ const dFormat = (format, v) => {
     /// whose own IDL said the slot was omitted at its default. A backend that emits source for a
     /// declaration it cannot honour is worse than one that refuses.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        let kinds =
-            kindTags
-            |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+        let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
 
         let _, unions, _ = referenced idl kinds
 
@@ -1496,7 +1494,7 @@ const plain = (pairs) =>
             | TFloat, VFloat f -> Ok(invariantFloat f)
             | TFloat, VInt i -> Ok(string i)
             | TEnum n, VEnum wire ->
-                match idl.Enums |> List.tryFind (fun e -> e.Name = n) with
+                match IdlLookup.tryEnum idl n with
                 | Some e when List.contains wire e.WireCases -> Ok(SourceLit.tsString wire)
                 | _ -> mismatch (sprintf "the wire string %A at enum '%s'" wire n)
             | TList inner, VList xs ->
@@ -1521,11 +1519,11 @@ const plain = (pairs) =>
             // one's presence test honest (see [[typescriptValueWith]]).
             | (TClosure | TFn _ | TOpaque), (VClosure | VOpaque) -> Ok "(() => undefined)"
             | TRecord n, VRecord authored ->
-                match idl.Records |> List.tryFind (fun r -> r.Name = n) with
+                match IdlLookup.tryRecord idl n with
                 | None -> mismatch (sprintf "a value of the undeclared record '%s'" n)
                 | Some r -> members subst ("record '" + n + "'") r.Fields authored |> Result.map objectOf
             | TUnion(n, args), VUnion(tag, authored) ->
-                match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
+                match IdlLookup.tryUnion idl n with
                 | None -> mismatch (sprintf "a value of the undeclared union '%s'" n)
                 | Some u when List.length u.Params <> List.length args ->
                     mismatch (sprintf "union '%s' applied to %d type arguments" n (List.length args))
@@ -1566,7 +1564,7 @@ const plain = (pairs) =>
             |> Result.map (List.choose id)
 
         and node (id: string) envelope (kindTag: string) fields : Result<string, CodegenError> =
-            match idl.Kinds |> List.tryFind (fun k -> k.Tag = kindTag) with
+            match IdlLookup.tryKind idl kindTag with
             | None -> mismatch (sprintf "a node of the undeclared kind '%s'" kindTag)
             | Some k ->
                 match
@@ -1660,9 +1658,7 @@ const plain = (pairs) =>
     /// `<Kind>Spec`, `DecodeRefusal`) is refused as `UnsupportedConstruct` rather than declared
     /// twice.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        let kinds =
-            kindTags
-            |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+        let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
 
         let enums, unions, records = referenced idl kinds
         let disc = tsDiscKey idl.Wire.Discriminator
@@ -2918,9 +2914,7 @@ const cEveryOf = (read) => {
         if List.isEmpty requests && not decoders then
             Ok None
         else
-            let kinds =
-                kindTags
-                |> List.choose (fun t -> idl.Kinds |> List.tryFind (fun k -> k.Tag = t))
+            let kinds = kindTags |> List.choose (fun t -> IdlLookup.tryKind idl t)
 
             let _, unions, records = referenced idl kinds
             let msg = msgCarrying idl

@@ -191,14 +191,7 @@ module internal OpStreamCapture =
             v, captures
         else
             // One walk for the length and the tip (Phase 296) where there were two.
-            let mutable seq = 0
-            let mutable prev = cfg.Genesis
-            let mutable rest = captures
-
-            while not rest.IsEmpty do
-                prev <- rest.Head.Hash
-                seq <- seq + 1
-                rest <- rest.Tail
+            let seq, prev = tipOf (fun (c: EffectCapture) -> c.Hash) cfg.Genesis captures
 
             let value = encode v
             let h = hashFn prev (capturePayload seq eff det value)
@@ -406,14 +399,7 @@ module internal OpStreamCapture =
         (value: string)
         (captures: KeyedCapture list)
         : KeyedCapture list =
-        let mutable seq = 0
-        let mutable prev = cfg.Genesis
-        let mutable rest = captures
-
-        while not rest.IsEmpty do
-            prev <- rest.Head.Hash
-            seq <- seq + 1
-            rest <- rest.Tail
+        let seq, prev = tipOf (fun (c: KeyedCapture) -> c.Hash) cfg.Genesis captures
 
         captures
         @ [ { Seq = seq

@@ -44,6 +44,9 @@
     <Compile Include="Conformance.fs" />
     <!-- Phase 102 — the null-tolerant read family. Independent of the op-algebra law kit
          above (it drives Fuaran.Core.Wire's parser only), so it is appended at the end. -->
+    <!-- Phase 388 — the vector families' shared verdicts and spellings (internal), ahead of the
+         first family that reads them. -->
+    <Compile Include="VectorKit.fs" />
     <Compile Include="WireNullTolerance.fs" />
     <!-- Phase 100 — the fold-confluence pack (N-lane arrival-order invariance). After
          Conformance.fs: it reads `ConfRng` and `ConformanceReport` from there, and `LawResult`
@@ -63,8 +66,8 @@
          Conformance.fs and carries no law, so it sits before the roster and depends on nothing
          after it. -->
     <Compile Include="ParityVectors.fs" />
-    <!-- Phase 287 — the string-escape vector family: pins the D2 copies of `Wire.Json.escape` in
-         OpStream and OpStream.Dag byte-identical to the original. A vector family with a runner
+    <!-- Phase 287 — the string-escape vector family: pins the D2 copy of `Wire.Json.escape` in
+         OpStream (the one OpStream.Dag spells through since Phase 388) byte-identical to the original. A vector family with a runner
          (the WireNullTolerance shape), not a `LawResult` family, so it carries no roster row. -->
     <Compile Include="StringEscapeVectors.fs" />
     <!-- Phase 360 — the encoding-profile vectors (the frozen V1 renderer pinned against the published

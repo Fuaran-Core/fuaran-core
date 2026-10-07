@@ -308,11 +308,7 @@ module FunctionRegistry =
             Capability.validateArgs e.Capability args
             |> Result.bind (fun () ->
                 RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired r.Policy id e.Capability args)
-            |> Result.bind (fun () ->
-                match body e () with
-                | Ready v -> Ok(Ready v)
-                | Pending -> Ok Pending
-                | Failed m -> Error(BodyFailed m))
+            |> Result.bind (fun () -> InvokeError.settle (body e ()))
 
     /// Partially apply a registered function (Phase 50) — the content-pack formalism. Produce a NEW
     /// entry under `newId` whose signature is `Function.signatureExcluding boundAddrs` of the source's

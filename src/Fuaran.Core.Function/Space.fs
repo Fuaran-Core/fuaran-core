@@ -210,10 +210,6 @@ module Space =
         | Enum [] -> Error SpaceFault.Empty
         | _ -> Ok()
 
-    /// Values in single quotes, comma-separated — how a refusal names a closed set.
-    let internal quoteAll (xs: string list) : string =
-        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
-
     /// A value space in words, for a model to read (Phase 251): what a value must be to lie in the
     /// space, phrased so the sentence `InvokeError.describe` builds around it says what WOULD be
     /// accepted. An `Enum` names its members (the name-the-alternatives rule); a float bound is
@@ -224,7 +220,7 @@ module Space =
         | FloatRange(lo, hi) -> "a number from " + Canon.canonicalFloat lo + " to " + Canon.canonicalFloat hi
         | StringLen(lo, hi) -> "a string of " + string lo + " to " + string hi + " characters"
         | Enum [] -> "a member of an empty set, so no value is accepted"
-        | Enum xs -> "one of " + quoteAll xs
+        | Enum xs -> "one of " + SeamCodec.quoteAll xs
         | AnyString -> "any string"
         | SlotTree None -> "a tree: a JSON object with a \"kind\""
         | SlotTree(Some k) -> "a tree of kind '" + k + "': a JSON object whose \"kind\" is '" + k + "'"
@@ -288,21 +284,21 @@ module SpaceCodec =
           "anyString", Decoder.succeed AnyString
           "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree ]
 
-    /// Dispatch on `key`; an unknown tag keeps the sentence `unknown value-space kind: <tag>`.
-    let private dispatchOn (key: string) (cs: (string * Decoder<ValueSpace>) list) : Decoder<ValueSpace> =
-        fun el ->
-            Decoder.tagDispatch key cs el
-            |> Result.mapError (fun e ->
-                match e.Code, e.Path, Decoder.tryMember key el with
-                | DecodeCode.UnknownTag, [ PathSegment.Key k ], Some(JStr other) when k = key ->
-                    { e with
-                        Message = "unknown value-space kind: " + other }
-                | _ -> e)
-
     /// Read a value space. A `"$type"` document is read as `toJson` writes it; an object with no
     /// `"$type"` and a `"kind"` is read in the descriptor spelling (lenient, for the 0.34.0 draft).
-    let decoder: Decoder<ValueSpace> =
+    ///
+    /// `typeMiss` is the sentence an unknown `"$type"` is refused in (`<typeMiss><tag>`), so a codec
+    /// that embeds a value space keeps its own (Phase 388: `CapabilityPipelineCodec` reads through
+    /// this rather than re-wording the refusal after it); an unknown descriptor `"kind"` is always
+    /// `unknown value-space kind: <tag>`.
+    let internal decoderSaying (typeMiss: string) : Decoder<ValueSpace> =
         fun el ->
             match Decoder.tryMember "$type" el, Decoder.tryMember "kind" el with
-            | None, Some _ -> dispatchOn "kind" (cases "minLength" "maxLength") el
-            | _ -> dispatchOn "$type" (cases "min" "max") el
+            | None, Some _ ->
+                Decoder.tagDispatchWith "unknown value-space kind: " "kind" (cases "minLength" "maxLength") el
+            | _ -> Decoder.tagDispatchWith typeMiss "$type" (cases "min" "max") el
+
+    /// Read a value space — `decoderSaying`, an unknown tag refused as
+    /// `unknown value-space kind: <tag>` under either discriminator.
+    let decoder: Decoder<ValueSpace> =
+        fun el -> decoderSaying "unknown value-space kind: " el

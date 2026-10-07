@@ -54,17 +54,9 @@ module internal OpStreamCompacted =
             | Some k -> KeyIndex.add k { Seq = r.Seq; Hash = r.Hash } idx
             | None -> idx)
 
-    /// The next sequence and the head, in one walk of the tail.
+    /// The next sequence and the head, in one walk of the tail (`tipOf`, from the snapshot's hash).
     let private tip (c: Compacted<'Op, 'State>) : int * string =
-        let mutable n = 0
-        let mutable last = c.Snapshot.PrevHash
-        let mutable rest = c.Tail
-
-        while not rest.IsEmpty do
-            last <- rest.Head.Hash
-            n <- n + 1
-            rest <- rest.Tail
-
+        let n, last = tipOf (fun (r: OpRecord<'Op>) -> r.Hash) c.Snapshot.PrevHash c.Tail
         c.Snapshot.Seq + n, last
 
     let compactAt

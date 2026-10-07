@@ -154,6 +154,8 @@ module RunBoundaries =
           "Json.render", q, Json.render (JStr s)
           "Canon.render", "{" + q + ":" + q + "}", Canon.render (JObj [ s, JStr s ])
           "Actor.encode", human, Actor.encode (Human s)
+          // Phase 388 - the op-stream package's one escaper, public; `Dag.toJsonl` spells through it.
+          "OpStream.Jsonl.quote", q, OpStream.Jsonl.quote s
           "Dag.toJsonl",
           "{\"node\":true,\"id\":"
           + q

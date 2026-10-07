@@ -611,7 +611,25 @@ module Dag =
                 | Ok state' -> Ok(state', id, dag')
                 | Error rej -> Error(DagAppendIfRejection.Domain rej)
 
-    /// The Kahn drain over the WHOLE node set (Phase 311): `(placed, unplaced)`. The ready frontier is
+    /// The ancestor closure of `roots` — each root plus all its transitive parents the DAG holds; a
+    /// root or parent it does not hold contributes nothing. The one closure walk (Phase 388):
+    /// `ancestorsOf` is its one-root case and `topoCoreMany` drains it. An explicit work-list (Phase
+    /// 10), so a long ancestor chain cannot overflow the stack. Tail-recursive.
+    let private closureOf (dag: T<'Op>) (roots: string list) : Set<string> =
+        let rec collect (acc: Set<string>) (stack: string list) =
+            match stack with
+            | [] -> acc
+            | id :: rest ->
+                if Set.contains id acc then
+                    collect acc rest
+                else
+                    match Map.tryFind id dag.Nodes with
+                    | Some n -> collect (Set.add id acc) (n.Parents @ rest)
+                    | None -> collect acc rest
+
+        collect Set.empty roots
+
+    /// The Kahn drain over a node set (Phase 311; any set since Phase 388, the whole DAG's by `drainBy`): `(placed, unplaced)`. The ready frontier is
     /// ordered by `(key node, id)` — the caller's key first, the ordinal id breaking every tie, so the
     /// order is total whatever the key — and drained smallest first; a parent the DAG does not hold
     /// constrains nothing (the fold path's policy, `topoCore`'s). In-degrees count a parent named twice
@@ -619,12 +637,14 @@ module Dag =
     /// in id order. Iterative — no recursion over the graph's depth. With a constant key the placed
     /// order is the drain `Reach.ofDag` numbers its slots in, and on a down-closed node set it is every
     /// per-head drain restricted (DagFold section 13).
-    let private drainBy (key: DagNode<'Op> -> 'K) (dag: T<'Op>) : string list * string list =
+    /// Over a DOWN-CLOSED set (an ancestor closure) a held parent is a parent in the set, so the drain
+    /// of the set is the drain of the sub-DAG it names (`topoCoreMany`).
+    let private drainNodes (key: DagNode<'Op> -> 'K) (nodes: Map<string, DagNode<'Op>>) : string list * string list =
         let mutable indeg: Map<string, int> = Map.empty
         let mutable children: Map<string, string list> = Map.empty
 
-        for KeyValue(id, n) in dag.Nodes do
-            let held = n.Parents |> List.filter dag.Nodes.ContainsKey
+        for KeyValue(id, n) in nodes do
+            let held = n.Parents |> List.filter nodes.ContainsKey
             indeg <- Map.add id (List.length held) indeg
 
             for p in held do
@@ -634,7 +654,7 @@ module Dag =
             indeg
             |> Map.toSeq
             |> Seq.filter (fun (_, d) -> d = 0)
-            |> Seq.map (fun (id, _) -> key dag.Nodes.[id], id)
+            |> Seq.map (fun (id, _) -> key nodes.[id], id)
             |> Set.ofSeq
 
         let placed = ResizeArray<string>()
@@ -652,16 +672,19 @@ module Dag =
                     indeg <- Map.add k d indeg
 
                     if d = 0 then
-                        ready <- Set.add (key dag.Nodes.[k], k) ready
+                        ready <- Set.add (key nodes.[k], k) ready
             | None -> ()
 
         let placedSet = Set.ofSeq placed
 
         List.ofSeq placed,
-        dag.Nodes
+        nodes
         |> Map.toList
         |> List.map fst
         |> List.filter (fun id -> not (Set.contains id placedSet))
+
+    /// `drainNodes` over the whole DAG.
+    let private drainBy (key: DagNode<'Op> -> 'K) (dag: T<'Op>) : string list * string list = drainNodes key dag.Nodes
 
     /// `firstBreak` with the actor spelled by `actorText` in each recomputed id (Phase 360).
     let private firstBreakAs
@@ -740,58 +763,16 @@ module Dag =
     /// head is the one-root case, byte-for-byte the drain it always was. The drain is a function of the
     /// node SET it covers, so the order the roots are named in cannot reach the output.
     let private topoCoreMany (dag: T<'Op>) (roots: string list) : string list * Set<string> =
-        // Ancestor-closure via an explicit work-list (Phase 10) — a deep/long DAG cannot
-        // overflow the stack the way the prior fold-recursive `collect` could. Tail-recursive.
-        let rec collect (acc: Set<string>) (stack: string list) =
-            match stack with
-            | [] -> acc
-            | id :: rest ->
-                if Set.contains id acc then
-                    collect acc rest
-                else
-                    match Map.tryFind id dag.Nodes with
-                    | Some n -> collect (Set.add id acc) (n.Parents @ rest)
-                    | None -> collect acc rest
+        // The closure's drain is `drainNodes` restricted to the closure (Phase 388): one Kahn body,
+        // smallest id first among the ready nodes — the order this function always emitted, now off
+        // an ordered set rather than a list re-sorted on every insert. Cyclic nodes stay unplaced, so
+        // `order` is strictly shorter than the closure exactly when the closure is cyclic.
+        let anc = closureOf dag roots
 
-        let anc = collect Set.empty roots
+        let placed, _ =
+            drainNodes (fun _ -> 0) (dag.Nodes |> Map.filter (fun id _ -> Set.contains id anc))
 
-        let parentsIn id =
-            (Map.find id dag.Nodes).Parents |> List.filter (fun p -> Set.contains p anc)
-
-        let children =
-            anc
-            |> Set.toList
-            |> List.collect (fun id -> parentsIn id |> List.map (fun p -> p, id))
-            |> List.groupBy fst
-            |> List.map (fun (p, ps) -> p, ps |> List.map snd)
-            |> Map.ofList
-
-        let mutable indeg =
-            anc
-            |> Set.toList
-            |> List.map (fun id -> id, List.length (parentsIn id))
-            |> Map.ofList
-
-        let mutable ready =
-            anc |> Set.toList |> List.filter (fun id -> indeg.[id] = 0) |> List.sort
-
-        let result = ResizeArray<string>()
-
-        while not (List.isEmpty ready) do
-            let id = List.head ready
-            ready <- List.tail ready
-            result.Add id
-
-            match Map.tryFind id children with
-            | Some kids ->
-                for k in kids do
-                    indeg <- Map.add k (indeg.[k] - 1) indeg
-
-                    if indeg.[k] = 0 then
-                        ready <- (k :: ready) |> List.sort
-            | None -> ()
-
-        List.ofSeq result, anc
+        placed, anc
 
     let private topoCore (dag: T<'Op>) (headId: string) : string list * Set<string> = topoCoreMany dag [ headId ]
 
@@ -1122,75 +1103,19 @@ module Dag =
 
     // ---- JSONL persistence (Phase 01) ----
     // The linear OpStream round-trips to JSONL; the DAG does too, closing the persistence
-    // asymmetry. Read through the linear package's one scanner (`OpStream.Jsonl`, Phase 296) — the
-    // Dag module takes no Core.Wire dependency (D2) and stays Fable-clean (Phase 241). One JSON
+    // asymmetry. Read through the linear package's one scanner (`OpStream.Jsonl`, Phase 296) and
+    // spelled by its one escaper (`OpStream.Jsonl.quote`, Phase 388): this package references
+    // `OpStream`, so neither is copied here, and it stays Fable-clean (Phase 241). One JSON
     // object per node; the `op` value is the witness's own Encode output embedded raw (preserved
     // byte-for-byte); nodes are emitted in id-sorted order so output is stable for a fixed DAG.
-
-    /// The `\u00xx` spelling of each control character `U+0000`–`U+001F`, lower-case hex, built
-    /// once (Phase 365) — the copy of `Wire.Json`'s table that `jstr` spells from.
-    let private jstrControlEscapes: string[] =
-        let hex = "0123456789abcdef"
-        Array.init 0x20 (fun c -> "\\u00" + string hex.[c >>> 4] + string hex.[c &&& 0xF])
-
-    /// JSON string spelling for the node line — the spine's one escaping rule (Phase 287): `"`,
-    /// `\`, and every control character `U+0000`–`U+001F` as lower-case `\u00xx`, with NO short
-    /// form for `\n` / `\r` / `\t`. A DELIBERATE COPY of `Wire.Json.escape`, for the reason the
-    /// scanner below is one: this module takes no `Core.Wire` dependency (D2). It is held
-    /// VALUE-IDENTICAL to the original by `StringEscapeVectors` in the conformance kit — which
-    /// pins `toJsonl`'s bytes for a node id carrying a control character against
-    /// `Wire.Json.escape`'s — so the copy cannot drift quietly. (The `actor` member is spelled by
-    /// `Actor.encode`, the linear package's copy of the same rule.) Fable-clean.
-    ///
-    /// The fast path of `Wire.Json.escape` (Phase 365), copied with it: a string with nothing to
-    /// escape is quoted whole, and otherwise each clean run is one ranged append and each control
-    /// character is spelled from a table built once.
-    let private jstr (s: string) : string =
-        let mutable first = 0
-        let mutable clean = true
-
-        while clean && first < s.Length do
-            let code = int s.[first]
-
-            if code < 0x20 || code = 0x22 || code = 0x5C then
-                clean <- false
-            else
-                first <- first + 1
-
-        if clean then
-            "\"" + s + "\""
-        else
-            let sb = System.Text.StringBuilder(s.Length + 18)
-            sb.Append('"').Append(s, 0, first) |> ignore
-            let mutable start = first
-
-            for i in first .. s.Length - 1 do
-                let code = int s.[i]
-
-                if code < 0x20 || code = 0x22 || code = 0x5C then
-                    if i > start then
-                        sb.Append(s, start, i - start) |> ignore
-
-                    (if code = 0x22 then sb.Append("\\\"")
-                     elif code = 0x5C then sb.Append("\\\\")
-                     else sb.Append(jstrControlEscapes.[code]))
-                    |> ignore
-
-                    start <- i + 1
-
-            if s.Length > start then
-                sb.Append(s, start, s.Length - start) |> ignore
-
-            sb.Append('"') |> ignore
-            sb.ToString()
 
     /// One JSON object per node, in deterministic id-sorted order. The `op` is embedded as raw
     /// JSON (the witness's own Encode output), so a round-trip preserves it byte-for-byte.
     let private nodeLine (n: DagNode<'Op>) (opJson: string) : string =
         "{\"node\":true,\"id\":"
-        + jstr n.Id
+        + OpStream.Jsonl.quote n.Id
         + ",\"parents\":["
-        + (n.Parents |> List.map jstr |> String.concat ",")
+        + (n.Parents |> List.map OpStream.Jsonl.quote |> String.concat ",")
         + "],\"actor\":"
         + Actor.encode n.Actor
         + ",\"op\":"
@@ -1312,20 +1237,29 @@ module Dag =
 
     /// The ancestor-closure of `id` — `id` itself plus all its transitive parents present in
     /// the DAG. Empty for an id not in the DAG. Total.
-    let ancestorsOf (dag: T<'Op>) (id: string) : Set<string> =
-        // Explicit work-list (Phase 10) so a long ancestor chain cannot overflow the stack.
-        let rec collect (acc: Set<string>) (stack: string list) =
-            match stack with
-            | [] -> acc
-            | cur :: rest ->
-                if Set.contains cur acc then
-                    collect acc rest
-                elif not (dag.Nodes.ContainsKey cur) then
-                    collect acc rest
-                else
-                    collect (Set.add cur acc) ((dag.Nodes.[cur]).Parents @ rest)
+    let ancestorsOf (dag: T<'Op>) (id: string) : Set<string> = closureOf dag [ id ]
 
-        collect Set.empty [ id ]
+    /// Of a non-empty DOWN-CLOSED node set (an intersection of ancestor closures), the node with the
+    /// largest ancestor closure, tie-broken by id (Phase 388). Over an ACYCLIC set only a MAXIMAL
+    /// member can win — a member with a descendant in the set has a strictly smaller closure than
+    /// that descendant — so the maximal members are found in one closure walk (the set minus every
+    /// member's strict ancestors) and only they are sized. It was a closure per member: quadratic in
+    /// the shared history. A set holding a CYCLE (a hand-built or tampered DAG; the drain leaves it
+    /// unplaced) is sized member by member as before, because there a closure need not grow along an
+    /// edge and a cycle has no maximal member at all — so the answer is the same on every input.
+    let private deepest (dag: T<'Op>) (common: Set<string>) : string =
+        let candidates =
+            match drainNodes (fun _ -> 0) (dag.Nodes |> Map.filter (fun id _ -> Set.contains id common)) with
+            | _, [] ->
+                let below =
+                    closureOf dag (common |> Set.toList |> List.collect (fun id -> dag.Nodes.[id].Parents))
+
+                Set.difference common below
+            | _ -> common
+
+        candidates
+        |> Set.toList
+        |> List.maxBy (fun id -> Set.count (ancestorsOf dag id), id)
 
     /// The merge base of two heads: A MAXIMAL common ancestor — the common ancestor with the largest
     /// ancestor-closure (a node strictly deeper than any of its own ancestors has a strictly larger
@@ -1343,10 +1277,7 @@ module Dag =
         if Set.isEmpty common then
             None
         else
-            common
-            |> Set.toList
-            |> List.maxBy (fun id -> Set.count (ancestorsOf dag id), id)
-            |> Some
+            Some(deepest dag common)
 
     /// The common base of N heads (Phase 311): `mergeBase`'s rule over all of them at once — of the
     /// nodes in EVERY head's ancestor closure, the one with the largest closure, tie-broken by id.
@@ -1366,10 +1297,7 @@ module Dag =
             if Set.isEmpty common then
                 None
             else
-                common
-                |> Set.toList
-                |> List.maxBy (fun id -> Set.count (ancestorsOf dag id), id)
-                |> Some
+                Some(deepest dag common)
 
     /// The branch delta: the nodes on the region from (exclusive) `baseId` to (inclusive)
     /// `head`, in topological order — the ops a reconciler replays. Equals `head`'s
@@ -1710,7 +1638,7 @@ module Dag =
     // ---- the reachability index (Phase 289) ----
     // Every graph query above recomputes from the node map: `ancestorsOf` walks the parents on each
     // call, `tryTopoOrder` / `tryReplayTo` / `between` re-drain a head's closure, `mergeBase` takes
-    // two closures and one more per common ancestor, and `reconcileMany` one per head. Each is
+    // two closures and one more per MAXIMAL common ancestor (Phase 388), and `reconcileMany` one per head. Each is
     // O(closure) per call, which is fine for one call and quadratic for a loop of them. `Reach`
     // builds the answers once per load and answers the same questions from what it holds. It is an
     // ADDITIONAL way to ask: every function above keeps its signature and its answer, and the laws
