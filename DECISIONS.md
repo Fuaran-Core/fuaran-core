@@ -1,5 +1,64 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D134: the surface draws the type attributes that decide what consumer source is legal, classes a move of one `retype`, and refuses the member-level ones it does not draw
+
+**Recorded by Phase 406. `tests/Fuaran.Core.Tests/PublicSurfaceTests.fs` and every `api/*.txt`
+baseline; no package source moves.**
+
+*The defect.* Phase 386 put `[<RequireQualifiedAccess>]` on six public unions. Every consumer that
+names one of their cases bare stops compiling, and the surface family printed `unchanged`, because
+the renderer drew a type by its kind and its members and never by the attributes the F# compiler
+reads off it. The `1.0.0` baselines become the frozen reference for the major, so a gate blind to a
+class of breaking move would carry that blindness for the whole `1.x` line.
+
+*Decided: the rule for what is drawn is "adding or removing it changes which consumer source
+compiles".* Drawn off a type, one `attribute <type> <Name>` line each: `RequireQualifiedAccess`
+(on a union, a record or a module), `AutoOpen`, `NoEquality`, `NoComparison`, `ReferenceEquality`,
+`AllowNullLiteral`, `Sealed`, `AbstractClass` and `Measure`, matched by their FSharp.Core qualified
+names; and `Struct`, read off the IL as a base of `System.ValueType`, because the value-type-ness is
+the fact a consumer meets whatever spelled it. A separate line, not a suffix on the `type` line, so
+the one-time regeneration adds lines and changes none, and a type carrying two attributes moves one
+line when one of them moves.
+
+*Decided: a moved attribute line is a `retype`, in both directions, on a type both sides publish.*
+Removing `RequireQualifiedAccess` breaks no existing call site, but it lets a bare case shadow
+another in the consumer's scope, which is the exact defect D101 records, so the cheaper reading
+would be the wrong one. The line is never paired with another line; it is classed by whether its
+type stays published, so a new qualified type is `additive` and a departed one's line goes with it
+as a `removal`. The report prints, beside each move, what that attribute costs a consumer.
+
+*Not drawn, each with its reason.* `CustomEquality` and `CustomComparison` leave the type satisfying
+`equality` and `comparison`; what moves is the result of `=`, a behaviour this gate never claims.
+`StructuralEquality` and `StructuralComparison` assert the default and fail at the type's own
+definition when it cannot hold. `CompilationRepresentation(ModuleSuffix)` renames the module in IL,
+which the `type` line already shows. A comparison or equality constraint lost by INFERENCE (a field
+gaining a function type) is not an attribute and needs none: it rides a field move the gate already
+classes `retype` or `record-widening`.
+
+*Refused, not drawn: the member- and parameter-level attributes.* `ParamArray`, `[<Optional>]`,
+F# `?arg` (`OptionalArgument`), `[<Extension>]`, `CompilerMessage`, `RequiresExplicitTypeArguments`
+and `CompilationRepresentation` with any flag but `ModuleSuffix` (which moves a member between
+instance and static in IL) change which calls compile. Drawing them needs a per-overload identity the
+token grammar does not have, for a shape nothing ships: a scan of the 18 packable assemblies finds
+none. Leaving them unseen would rebuild the blindness this phase removes, so a test refuses them by
+name, member and parameter; the first one shipped is red until the renderer draws it in the same
+change. Rejected: drawing them now, which would add grammar for a case with no instance to test it
+against beyond a probe.
+
+*The since-tag report.* A tag none of whose baselines carries an attribute line predates this phase;
+against it the report compares without them and prints that it did, as Phase 237 does for field
+names. The test is tag-wide rather than per package, because a current package can carry no drawn
+attribute at all. Against `v0.36.0` this hides the six qualifications from the class lines, so the
+`1.0.0` ledger points at their baseline lines instead, and the six were measured as the whole
+attribute difference by rendering the `0.36.0` packages with this renderer. The live gate never
+strips.
+
+*Evidence.* A compiled go-red pair in the test assembly (one union, bare and qualified) classes the
+gain and the loss each as one `retype` printing its reason, and an identical control as unchanged;
+every drawn attribute has a probe and a perturbation leg; a planted `ParamArray` parameter and F#
+optional argument are named by the refusal scan. The regeneration added 107 `attribute` lines across
+17 baselines and changed no other byte.
+
 ## 2026-10-08 — D133: `1.0.0` freezes with no obsolete forward, three shapes close, D101 becomes a gate, and the `OneDotZero` family makes "1.0" a test output
 
 **Recorded by Phase 386. Every package with a forward, `Fuaran.Core.Function`, `Fuaran.Core.Query`,

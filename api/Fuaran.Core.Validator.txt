@@ -4,6 +4,10 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.RegistrationError RequireQualifiedAccess
+attribute Fuaran.Core.Severity RequireQualifiedAccess
+attribute Fuaran.Core.Validator+GatePolicy RequireQualifiedAccess
+attribute Fuaran.Core.Validator+ReferenceDefect`1 RequireQualifiedAccess
 ctor Fuaran.Core.ColumnRule..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Table, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<System.String>>>)
 ctor Fuaran.Core.ColumnValidator+Registry..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnRule>)
 ctor Fuaran.Core.Defect`1..ctor(System.String, Fuaran.Core.Severity, System.String, Microsoft.FSharp.Core.FSharpOption`1<!0>, System.String, Microsoft.FSharp.Collections.FSharpList`1<!0>)
