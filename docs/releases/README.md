@@ -11,6 +11,10 @@ without a slot here, or a heading that disagrees with its file is red. A tagged 
 `released <date> as v<version>` and the untagged standing `<Version>` is headed `DRAFT`. This index
 is what `Directory.Build.props` points a downstream version check at (`<FuaranStabilityRecord>`).
 
+## 1.0.0 — DRAFT
+
+[`1.0.0.md`](1.0.0.md)
+
 ## 0.36.0 — released 2026-10-08 as `v0.36.0`
 
 [`0.36.0.md`](0.36.0.md)

@@ -289,7 +289,9 @@ let private noteProjection: Gen.KindProjection =
       Decoder =
         """and private decNoteSpec (j: JVal) : Result<NoteSpec, DecodeError> =
         dObj j |> Result.bind (fun fs -> dReq "body" fs decText) |> Result.map (fun t -> { Body = t })"""
-      Mk = Some """let mkNote (body: Text) : NoteSpec = { Body = body }""" }
+      Mk = Some """let mkNote (body: Text) : NoteSpec = { Body = body }"""
+      MapMsg = None
+      RecordFields = None }
 
 let support: SupportDocument =
     { Support =

@@ -148,6 +148,12 @@ module SupportArtifact =
                                 "encoder", JStr p.Encoder
                                 "decoder", JStr p.Decoder ]
                               @ optKey "mk" p.Mk
+                              // Phase 403 — both absent from a projection that declares neither, so
+                              // a document written before them renders byte for byte as it did.
+                              @ optKey "mapMsg" p.MapMsg
+                              @ (match p.RecordFields with
+                                 | Some fs -> [ "recordFields", CodegenLookup.fieldsJson fs ]
+                                 | None -> [])
                           ))
                   ) ]
 
@@ -246,6 +252,24 @@ module SupportArtifact =
         strAt "case" v
         |> Result.bind (fun c -> strAt "expression" v |> Result.map (fun e -> c, e))
 
+    /// A projection's declared record fields, in authored order — the vocabulary's own field
+    /// reader, so a field reads alike in `idl.json` and here.
+    let private readRecordFields (kindTag: string) (v: JVal) : Result<IdlField list option, string> =
+        match atKey "recordFields" v with
+        | None -> Ok None
+        | Some(JArr xs) ->
+            xs
+            |> List.map (fun x ->
+                CodegenLookup.readField x
+                |> Result.mapError (fun e ->
+                    "projection '"
+                    + kindTag
+                    + "' has a malformed record field: "
+                    + DecodeError.describe e))
+            |> sequence
+            |> Result.map Some
+        | Some _ -> Error("projection '" + kindTag + "' has a non-array 'recordFields'")
+
     let private readProjection (v: JVal) : Result<string * Gen.KindProjection, string> =
         strAt "kind" v
         |> Result.bind (fun kindTag ->
@@ -256,12 +280,18 @@ module SupportArtifact =
                     strAt "decoder" v
                     |> Result.bind (fun dec ->
                         optStrAt "mk" v
-                        |> Result.map (fun mk ->
-                            kindTag,
-                            { SpecDecl = spec
-                              Encoder = enc
-                              Decoder = dec
-                              Mk = mk })))))
+                        |> Result.bind (fun mk ->
+                            optStrAt "mapMsg" v
+                            |> Result.bind (fun map ->
+                                readRecordFields kindTag v
+                                |> Result.map (fun fields ->
+                                    kindTag,
+                                    { SpecDecl = spec
+                                      Encoder = enc
+                                      Decoder = dec
+                                      Mk = mk
+                                      MapMsg = map
+                                      RecordFields = fields })))))))
 
     let private readPrelude (root: JVal) : Result<HostPreludeRef option, string> =
         match atKey "hostPrelude" root with

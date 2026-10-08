@@ -377,12 +377,20 @@ module Diff =
         let projection (p: Gen.KindProjection) =
             String.concat
                 "\n--\n"
-                [ p.SpecDecl
-                  p.Encoder
-                  p.Decoder
-                  (match p.Mk with
-                   | Some mk -> mk
-                   | None -> "") ]
+                ([ p.SpecDecl
+                   p.Encoder
+                   p.Decoder
+                   (match p.Mk with
+                    | Some mk -> mk
+                    | None -> "") ]
+                 // Phase 403 — appended only when declared, so a projection declaring neither
+                 // compares exactly as it did before they existed.
+                 @ (match p.MapMsg with
+                    | Some map -> [ "mapMsg:\n" + map ]
+                    | None -> [])
+                 @ (match p.RecordFields with
+                    | Some fs -> [ "recordFields:\n" + Canon.render (CodegenLookup.fieldsJson fs) ]
+                    | None -> []))
 
         [ for KeyValue(path, lines) in sup.Docs -> "doc:" + path, String.concat "\n" lines
           match sup.TypeSplice with
