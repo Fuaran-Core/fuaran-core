@@ -1,5 +1,73 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D130: a strict proof run records cost and refuses a cached read; one cached-read threshold replaces the per-module floors
+
+**Recorded by Phase 399, on an operator ruling of 2026-10-08. `proofs/kit/check-proof-leg.ps1`,
+`proofs/modules.json` (`cachedRead`), `proofs/check.ps1`, `.github/workflows/proofs-strict.yml`; held
+by the `C` arms of `proofs/kit/check-proof-leg.tests.ps1`. No package or wire byte moves.**
+
+*The ruling (the operator's).* `-Strict` had been answering two questions with one switch. **A cost
+overrun is not a strict failure.** A module at 110% of its budget is a slow cold check, which is the
+opposite of a warm one. Under `-Strict` an overrun is a recorded `COST` finding: it is printed, it is
+written to the strict baseline with its percentage, and the scheduled strict run trends it. It never
+turns the leg red. Budgets are neither raised to make a run pass nor deleted; they stay the trend's
+reference. **The hard gate is "this was not a real cold verification"**, and it is detected by a
+cached-read threshold measured on the machine, not by a percentage of a time. The Phase 402 cache
+provenance check stays the primary signal. The threshold is its backstop for a writer active during
+one invocation. The scheduled strict workflow follows the same rules: it reports cost overruns as
+findings and fails only on a cached read or a model that does not verify.
+
+*The measurement.* On the pinned prover, on the local Windows dev machine that recorded the first
+strict baseline (other sessions active), ten modules were cold-checked in roster order into one
+fresh cache, and each was then re-run three times against the populated cache with the leg's own
+flags. The cached reads took 0.18s to 0.51s. Cold checks of the same modules took 0.38s (`Limits`),
+1.61s (`Skeleton`), and 29.8s to 184.0s for the rest. The kit tests' one-line models check cold in
+about 0.2s. Every cold check printed at least three `Quake:` query lines, and every cached read
+printed none. The figures are in `proofs/modules.json` `cachedRead.measured` and in the
+`proofs/README.md` section "Cached read or cold check".
+
+*The decision.* The threshold is `cachedRead.thresholdSeconds` = **1.0s**, about twice the slowest
+cached read. Some models genuinely check faster than that cold, so the threshold cannot judge every
+module. It applies to a module whose recorded `fastestSeconds` is at least
+`cachedRead.appliesFromFastestSeconds` = **3s**. `Skeleton`, `Limits` and `WireVersioning` fall
+below that and rest on the provenance check alone, which the leg says at start-up. The threefold
+margin covers a machine about twice as fast as this one, which is what the Linux runner measured
+against the Windows-seeded floors (`WireColumn`, 16s against 17s). A check under the threshold fails
+before its green line is printed.
+
+*The floors are retired, on that evidence.* The per-module `floorSeconds` (Phase 164) and
+`floorSeeding.os` (Phase 402) answered the same question with one number per module per machine.
+The measurement shows nothing between a cached read and a cold check for such a number to see: a
+module is either read back in half a second or checked. A faster machine reads a cache faster still
+and stays under the threshold, so no OS gate is needed. A much slower machine could take longer than
+the threshold to read a cache, so the gate would miss; that is the safe direction, and the
+provenance check still runs. Keeping both mechanisms would mean two gates for one question, one of
+which is already known to break on a faster runner. A budget file that still carries `floorSeeding`
+or a `floorSeconds` is refused by name. `-NoFloor` is gone. `fastestSeconds` stays, as the
+threshold's applicability input, and `floorSeeding.zeroBelowSeconds` moved to
+`contentionSeeding.minimumSeconds`, the one place it is still read.
+
+*What `-Strict` still turns red.* A coverage or shape finding: a module with no budget, a module
+with no `fastestSeconds` when a threshold is declared, a budget for a module the leg does not check,
+or a budget file with no `cachedRead` block. These are gaps in a declaration, not measurements of a
+machine. The contention factor and its labels are unchanged; they now tell a reader of the strict
+record which overruns measure the machine.
+
+*Observed, and left for the operator.* The absence of any `Quake:` line separates a cached read from
+a cold check without a clock, and it also covers the sub-second modules the threshold cannot judge.
+It was not adopted, because the ruling asked for a threshold and a second gate is a decision to make
+on its own. A module with no SMT query at all would print no `Quake:` line when checked cold, so
+adopting it would need a declared exemption for such modules.
+
+*The first strict baseline.* `proofs/last-strict.json` records a green `check.ps1 -Runs 3 -Strict`
+of `fe50742`. That run used the semantics before this decision; it was green with every overrun
+labelled contended. The run before it, on the same machine, was red on one unlabelled finding,
+`DocVocabularyProofs` at 27s against a 20s budget at x0.72. That module had grown with Phase 293
+without a re-seed, and Phase 399 re-seeded it from its slowest ordinary observation (70s/32s, before
+this ruling). Under this decision neither overrun would have been red. The code this decision changes
+is a leg script, so `-Since` reads that baseline as predating every module until a strict run of the
+new code is recorded.
+
 ## 2026-10-07 — D129: a Core assembly reaches another's internal member only from a `NoInlining` function; the friend grants stay, and no internal is made public to escape the rule
 
 **Recorded by Phase 402. `Fuaran.Core.Conformance` (`ConfRng`), `Fuaran.Core.Idl.Codegen`

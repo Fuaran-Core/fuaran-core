@@ -3,7 +3,7 @@
 A repository that wants an F\* proof leg needs the same nine things every time: a pinned prover, a
 script that locates or downloads it, checks each model from a cold cache, extracts each model to F\#
 and diffs the result against a committed oracle, runs the host families, and measures each module
-against a declared budget and a declared floor; two hand-written runtime shims the extractor's
+against a declared budget and a declared cached-read threshold; two hand-written runtime shims the extractor's
 output compiles against; a never-packed oracle project with the two settings that generated F\#
 needs; a CI job; a claims ladder; and a cost declaration. Written out by hand each time, that is
 four copies of one design and — the part that actually bites — **four prover pins, three of which
@@ -36,7 +36,7 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. Classifies every lost pass into one of the three verdicts below. | copy verbatim |
 | `templates/check.ps1` | The thin caller. Three declarations to edit at the top; nothing below them is per-repository. | copy and edit |
 | `templates/oracle.fsproj.template` | The never-packed oracle project: `--strict-indentation-`, the FS0058/FS0064/FS1182 `NoWarn`, and the compile order the shims and models need. Named `.template` so no build or glob in a host repository can pick it up. | copy, rename and edit |
-| `templates/modules.json` | The cost declaration: the budget rule, the floor rule, the contention threshold, and one worked entry. | copy and edit |
+| `templates/modules.json` | The cost declaration: the budget rule, the cached-read threshold, the contention threshold, and one worked entry. | copy and edit |
 | `LADDER.md` | **The ladder's schema**: every field of `proofs.json`, which are required, what each level's evidence is, and how names are matched. The page the template is written against, and the one any tool reading a ladder reads it by. | read |
 | `templates/proofs.json` | The claims ladder: the closed level set, what each level means, and the host family that holds the rows to the tree. Goes at the **repository root**, not in `proofs/`. Written against `LADDER.md`. | copy and edit |
 | `templates/ci-proofs-job.yml` | The CI job, with the cache key that hashes the pin file — which is the whole mechanism by which a pin bump reaches CI with no second edit. | copy and edit |
@@ -97,7 +97,7 @@ the pinned prover rather than assumed:
 
 **A retry's clock is a WARM measurement and feeds neither gate.** The aborted attempt has already
 half-filled the cache, so the retry is not a cold run; its line says so, it is compared to neither
-the budget nor the floor, and the leg's closing verdict names every abort that was retried and
+the budget nor the cached-read threshold, and the leg's closing verdict names every abort that was retried and
 passed — a green run that lost a prover and got it back is not the same evidence as one that did
 not, and it should not take scrolling to find that out.
 
@@ -221,9 +221,10 @@ an ordinary pass crosses it — the labelling path is the same one a genuinely c
 Above the threshold, every cost finding from that run is **labelled** where the closing verdict prints
 it, and the label carries the whole consequence: **a labelled finding is not a re-seed obligation.**
 Re-seeding a budget from one raises a ceiling to fit a slow afternoon, which is precisely how a budget
-stops meaning anything. `-Strict` promotes only the **unlabelled** findings — a session that asked for
-a red leg on cost asked to be stopped by a regression, and a contended pass is not one — while the
-coverage and shape findings belong to no run, are never labelled, and so always promote.
+stops meaning anything. Since Phase 399 `-Strict` promotes **no** cost finding (see "Cost is
+recorded, a cached read is refused" below); the label is what tells a reader of the strict record
+which overruns measure the machine. The coverage and shape findings belong to no run, are never
+labelled, and are still red under `-Strict`.
 
 Five details are load-bearing rather than decorative:
 
@@ -247,11 +248,11 @@ Five details are load-bearing rather than decorative:
   untouched and the leg **says so** — "I could not tell" must never print as "nothing is touched".
 - **A module too cheap to time does not vote.** The clock is whole seconds, so 0s against a recorded
   2s is a ratio of 0 and 1s is a ratio of 0.5, and neither says anything about the machine. The cut is
-  `floorSeeding.zeroBelowSeconds` — this file's existing answer to "below what is a reading
-  process-start noise", reused rather than minted again — and a run with fewer than
+  `contentionSeeding.minimumSeconds` (until Phase 399 the retired floors' `zeroBelowSeconds`) — this
+  file's answer to "below what is a reading process-start noise" — and a run with fewer than
   `contentionSeeding.minimumSamples` contributors reports the factor as **not computed** rather than
   taking a median of one.
-- **An absent `contentionSeeding` block is not a finding.** Unlike a missing budget or floor, which
+- **An absent `contentionSeeding` block is not a finding.** Unlike a missing budget or `fastestSeconds`, which
   fire per module when a model is added, this one is per file and one-off, and a finding present on
   every run of an unseeded repository is one people learn to scroll past. The factor is still computed
   and still printed; nothing is labelled, and the line names the block to seed. That is the pre-171
@@ -262,6 +263,38 @@ whichever phase seeds that number: it says what the machine was doing when the m
 so a later reader can tell a budget seeded on a quiet machine from one seeded on a busy one. It is
 **provenance only** — the engine holds it to its shape and computes nothing from it, for the same
 reason the factor is never multiplied into a measurement. Absent reads as "not recorded", never as 1.
+
+## Cost is recorded, a cached read is refused (Phase 399)
+
+An operator ruling of 2026-10-08 separated the two questions `-Strict` used to conflate.
+
+- **A budget overrun is never a red leg**, with `-Strict` or without it. It is a slow cold check,
+  the opposite of the failure a gate is for. It is printed as a `COST` finding, and `-SummaryFile`
+  records every module's time against its budget, with the percentage, so the caller's strict record
+  names the over-budget modules and a scheduled strict run can trend them. Do not raise a budget to
+  quiet a finding, and do not delete budgets: they are the trend's reference. Re-seeding is still the
+  recorded act it always was.
+- **The hard gate is "this was not a real cold verification".** The cache provenance check (Phase
+  402) is the primary signal. Its backstop, for a writer active only DURING one invocation, is one
+  absolute number in the budget file: `cachedRead.thresholdSeconds`. A check that finishes under it
+  fails the leg as a probable cached read, before its green line is printed. It applies to the
+  modules whose recorded `fastestSeconds` is at least `cachedRead.appliesFromFastestSeconds`. A
+  module that genuinely checks in under a second cannot be told from a cached read by the clock,
+  so it rests on the provenance check alone, and the leg's start-up line names those modules.
+- **Seed the threshold from a measurement.** Cold-check a few modules of different sizes into one
+  cache, re-run each against it with the leg's flags, and set the threshold to about twice the
+  slowest read. Set `appliesFromFastestSeconds` to about three times that. The reference repository
+  measured 0.18-0.51s for every cached read, against cold checks of 0.4s to 184s; its
+  `proofs/README.md` section "Cached read or cold check" has the table.
+- **The per-module floors are retired** (`floorSeconds`, `floorSeeding`, `floorSeeding.os`, and
+  `-NoFloor`). A budget file still carrying them is refused by name; delete `floorSeconds` and
+  `floorSeeding`, keep each entry's `fastestSeconds`, add the `cachedRead` block, and move
+  `zeroBelowSeconds` to `contentionSeeding.minimumSeconds`. A floor was a per-machine number. A
+  cached read costs prover start-up whatever the module costs cold, so there is nothing for a floor
+  to see that one threshold does not.
+- **What `-Strict` still turns red:** a coverage or shape finding, which is a gap in the declaration
+  rather than a measurement. Examples are a module with no budget, a budget for a module the leg does
+  not check, and a budget file with no `cachedRead` block.
 
 ## The oracle is independent of production (Phase 399)
 

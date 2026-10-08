@@ -1069,9 +1069,8 @@ backend's edges (findings 2–4), each closed in a few lines, not on the modelli
 pwsh ./proofs/check.ps1            # check (once), re-extract + diff, run the oracle host
 pwsh ./proofs/check.ps1 -Runs 3    # what CI runs
 pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*.fs, then commit it
-pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning into a red leg
+pwsh ./proofs/check.ps1 -Strict    # the recorded run: cost overruns stay findings; an incomplete budget declaration is red
 pwsh ./proofs/check.ps1 -Runs 3 -Strict   # what the weekly proofs-strict workflow runs; records the strict baseline
-pwsh ./proofs/check.ps1 -NoFloor   # do not enforce the per-module time floors (below)
 pwsh ./proofs/check.ps1 -CacheDir <dir>   # put the checked-module cache somewhere you name
 pwsh ./proofs/check.ps1 -Since origin/main  # only the module CONE that changed against a tree (below)
 pwsh ./proofs/check.ps1 -Modules TreeOps,Skeleton   # a cone named by hand
@@ -1148,7 +1147,7 @@ written as what a module's verdict *reads*:
 - a production source under `src/<Package>/` for a package its `modules.json` entry names — Phase
   203's `packages`, which is where the map from subject to model lives (`../proofs.json`'s rows name
   models and theorems, never a source path);
-- its `modules.json` entry (the floor there is a gate), its registration in `$modules`, or its
+- its `modules.json` entry (its `fastestSeconds` decides whether the cached-read gate applies), its registration in `$modules`, or its
   membership of `$proofOnly`.
 
 **Every** module is in when a shared input of the whole leg moved: `fstar-pin.json`, the kit's
@@ -1242,7 +1241,7 @@ What a green `check.ps1` means now, step by step:
 
 | Step | Green means | Refused (non-zero exit, no `green`) when |
 |---|---|---|
-| CHECK | every `$modules` entry verified, `-Runs` times, from a cold cache, above its floor | the prover exits non-zero (a refutation, exit 1; an abort twice, exit 3), or a run beats its floor |
+| CHECK | every `$modules` entry verified, `-Runs` times, from a cold cache, and no check faster than a cached read | the prover exits non-zero (a refutation, exit 1; an abort twice, exit 3), a second writer is caught in the cache, or a check finishes under the cached-read threshold |
 | EXTRACT | every non-`$proofOnly` model's fresh extraction is byte-identical to its committed oracle | the prover exits non-zero, no `.fs` is produced (an APPARATUS fault is exit 4), or the diff is non-empty |
 | HOST | the host project built and every `$hostFilters` family passed | the build or any family exits non-zero — the verdict line says `HOST step` and names the project or filter |
 | leg-tests | the leg itself refused a failed host build, an unrunnable host filter and a refuted model, beside a green control | any of those came back exit 0 or printed `green` |
@@ -1257,7 +1256,8 @@ What it does **not** cover, said so a ship record citing it does not over-claim:
   the Phase-166 discriminator only CLASSIFIES a non-zero one. F* was measured exiting 0 over an
   error at the EXTRACT step (Error 317), which is why that step also asks whether the file exists;
   no such case has been observed at the CHECK step, so none is guarded against.
-- **Cost.** A budget overshoot is a finding and the leg stays green unless `-Strict` is passed.
+- **Cost.** A budget overshoot is a finding and the leg stays green, with `-Strict` or without it
+  (Phase 399). A strict run records each module's time against its budget instead.
 - **The claims ladder and the coverage predicate** are host families (`Proofs.Ladder`,
   `Proofs.Coverage`), so they stand behind the word only when the host step ran.
 
@@ -1331,6 +1331,10 @@ classified.
 
 ### "Cold cache" means it, and "verified" has a floor (Phase 164)
 
+> **Superseded in part by Phase 399.** The per-module floors described at the end of this section
+> are retired. One absolute **cached-read threshold** answers the question they answered; see
+> "Cached read or cold check" below. The per-invocation cache and the cache provenance check stand.
+
 On 2026-09-14 a background `check.ps1` was orphaned at a turn boundary and went on writing the
 then-shared `proofs/obj/cache` while a replacement run started in the same worktree; the
 replacement found the orphan's `.checked` files, reported `TreeOps 0s`, `Skeleton 0s`, `Chain 0s`
@@ -1384,6 +1388,66 @@ What it does **not** check is this prose. Row-to-README agreement stays a human 
 mechanical is row-to-tree agreement, which is the half a check can settle. Editing a ladder still
 means editing both.
 
+### Cached read or cold check — one threshold instead of a floor per module (Phase 399)
+
+**The ruling.** On 2026-10-08 the operator separated the two questions `-Strict` had been
+conflating. A budget overrun is a slow cold check, the opposite of a warm one, so it is a recorded
+finding and never a red leg. The hard gate is the other question: *was this a real cold
+verification?* The primary answer is the cache provenance check (Phase 402): nothing may appear,
+change or vanish in the cache between this run's invocations, and a module's own `.checked` may not
+be there before its check. What that check cannot see is a writer active only DURING one invocation.
+The backstop for that case is now one absolute number, `cachedRead.thresholdSeconds` in
+`modules.json`. A module whose check finishes under it fails the leg as a **probable cached read**,
+before its green line is printed.
+
+**What a cached read costs, measured** (2026-10-08, the pinned prover, a local Windows dev machine
+with other sessions active). Ten modules were cold-checked in roster order into one fresh cache, as
+the leg does, and each was then re-run three times against the populated cache with the leg's own
+flags:
+
+| module | cold check | three cached reads |
+|---|---|---|
+| `DagFold` | 75.1s | 0.44s, 0.34s, 0.34s |
+| `WireDecode` | 36.1s | 0.24s, 0.24s, 0.23s |
+| `TreeOps` | 83.1s | 0.43s, 0.43s, 0.44s |
+| `Skeleton` | 1.61s | 0.43s, 0.44s, 0.46s |
+| `Chain` | 39.9s | 0.28s, 0.28s, 0.32s |
+| `JsonParse` | 146.4s | 0.23s, 0.25s, 0.24s |
+| `Preservation` | 77.3s | 0.51s, 0.49s, 0.51s |
+| `Limits` | 0.38s | 0.18s, 0.18s, 0.18s |
+| `Utf8` | 29.8s | 0.20s, 0.18s, 0.20s |
+| `WireCanon` | 184.0s | 0.38s, 0.37s, 0.38s |
+
+A cached read costs prover start-up and deserialisation: 0.18s to 0.51s, whatever the module costs
+cold. So the threshold is **1.0s**, about twice the slowest read. Two modules check genuinely faster
+than that cold (`Limits` at 0.38s here; the kit tests' one-line models at about 0.2s), so the
+threshold cannot judge every module. It applies to a module whose recorded `fastestSeconds` is at
+least `cachedRead.appliesFromFastestSeconds`, which is **3s**, three times the threshold. `Skeleton`,
+`Limits` and `WireVersioning` fall below that and rest on the provenance check alone. The margin
+covers a machine about twice as fast as this one, which is what the Linux runner measured
+(`WireColumn` at 16s there).
+
+**Why the floors are retired.** A floor (Phase 164) was the fastest cold run observed, halved: one
+number per module, and in practice per machine. The first Linux run broke one, and Phase 402 switched
+floors off on every OS but the one they were seeded on. The measurement above shows there is nothing
+between a cached read and a cold check for a per-module number to see: a module is either read back
+in half a second or checked. A faster machine reads a cache faster still and stays under the
+threshold, so no OS gate is needed. A much slower machine could take more than a second to read a
+cache, so the threshold would miss; that is the safe direction, and the provenance check still runs.
+A budget file still carrying `floorSeeding` or a `floorSeconds` is refused by name, so a declaration
+cannot keep describing a gate that no longer exists. `fastestSeconds` stays as the threshold's input.
+
+**Observed and not adopted.** Every cold check above printed at least three `Quake:` query lines
+and every cached read printed none. That is a second discriminator that needs no clock, but this
+phase did not adopt it, because the ruling asked for a threshold. `DECISIONS.md` D130 records it as
+an open option.
+
+**Held by** the `C` arms of `kit/check-proof-leg.tests.ps1`: a genuine checked file put in front of
+its module is refused, a check under the threshold is refused before its green line, a module
+recorded as genuinely fast is not judged by the threshold, a retired `floorSeconds` is refused, a
+cold check several times over budget under `-Strict` is green with the finding recorded, and a
+missing budget is still red under `-Strict`.
+
 ### What the leg costs — the budget, and the two cliffs (Phase 148)
 
 Prover time is this leg's real cost, and it moves for reasons the author of a model does not see, so
@@ -1408,8 +1472,9 @@ nothing about the tree changed (`TreeOps` 45s → 77s, `JsonParse` 52s → 99s, 
 pass). So a single overshoot is noise and only a persistent one is a regression, and the budgets are
 seeded from the SLOWEST observed cold run rather than a median for exactly that reason — a budget
 that fires on a busy afternoon teaches a reader to ignore it. **A budget is a smoke detector, not a
-gate.** `check.ps1 -Strict` promotes every cost finding to a red leg for a session that wants one;
-CI deliberately does not pass it. It is also not a job timeout: a timeout says a run died and
+gate.** Since Phase 399 that holds under `check.ps1 -Strict` as well: an overshoot is a slow COLD check, the
+opposite of the failure a gate exists for, so it is recorded with its percentage and never turns the
+leg red. It is also not a job timeout: a timeout says a run died and
 nothing about which module, where an overshoot is attributable.
 
 Coverage is checked both ways, and both are findings rather than failures: a module in `$modules`
@@ -1423,10 +1488,14 @@ a budget at all.
 **The strict run is scheduled (Phase 399).** CI's `proofs` job does not pass `-Strict`, so on a push
 an overshoot is only ever a warning, and a real regression could stay a warning forever. The
 `proofs-strict` workflow (`.github/workflows/proofs-strict.yml`) runs `check.ps1 -Runs 3 -Strict` on
-a Windows runner every Monday and on demand, never on a push or a tag. A **red** run is a named
-`COST` finding against `modules.json`, and the job summary lists each one: the remedy is the
-re-seeding act in the next paragraph, once a quiet re-measurement confirms the module really grew. A **green** run records the strict
-baseline and uploads it as the `strict-baseline` artefact. The workflow commits nothing; a
+a Windows runner every Monday and on demand, never on a push or a tag. Its job summary lists every
+`COST` finding against `modules.json` with its percentage, and those are the trend: a module that is
+over budget week after week is the case for the re-seeding act in the next paragraph, once a quiet
+re-measurement confirms the module really grew. A cost finding never makes the run red. The run is
+**red** when a model does not verify, when the cache provenance check catches a second writer, or
+when a check finishes under the cached-read threshold. A **green** run records the strict
+baseline (each module's time against its budget, the over-budget modules named) and uploads it as
+the `strict-baseline` artefact. The workflow commits nothing; a
 maintainer commits the file when `-Since` should lean on that run.
 
 **Bumping a budget is a deliberate, recorded act.** Time the module on a cold, otherwise-quiet run,
@@ -1486,10 +1555,10 @@ Above the threshold, every cost finding from that run is **labelled** where the 
 prints it, and the label carries the whole consequence: **a labelled finding is not a re-seed
 obligation.** Re-seeding a budget from a contended run raises a ceiling to fit a slow afternoon,
 which is how a budget stops meaning anything — the judgement Phase 162 had to make by hand and argue
-in prose. What is new is that the leg makes it, and says so. `check.ps1 -Strict` promotes only the
-**unlabelled** findings: a session that asked for a red leg on cost asked to be stopped by a
-regression, and a contended pass is not one, so reddening on it would make the flag a coin toss on a
-shared machine. Coverage and shape findings belong to no run, are never labelled, and always promote.
+in prose. What is new is that the leg makes it, and says so. Until Phase 399 `check.ps1 -Strict`
+promoted the **unlabelled** findings to a red leg; since then it promotes no cost finding at all, and
+the label is what tells a reader of the strict record which overruns measure the machine. Coverage and
+shape findings belong to no run, are never labelled, and are still red under `-Strict`.
 
 **The number's scale is not the obvious one, and this was measured rather than assumed.**
 `measuredSeconds` is not a typical cost — by `seeding`'s own rule it is the **slowest** cold run ever
@@ -1520,8 +1589,8 @@ Four more things about it are worth knowing before reading a factor:
   touched".
 - **A module too cheap to time does not vote.** The clock is whole seconds, so `Skeleton` at 0s
   against a recorded 2s is a ratio of 0 and 1s is a ratio of 0.5, and neither says anything about the
-  machine. The cut is `floorSeeding.zeroBelowSeconds`, reused rather than minted again so there is one
-  number and one argument for it; `Skeleton`, `Limits` and `WireVersioning` are the three it excludes
+  machine. The cut is `contentionSeeding.minimumSeconds` (until Phase 399 the retired floors'
+  `floorSeeding.zeroBelowSeconds`, moved with its argument); `Skeleton`, `Limits` and `WireVersioning` are the three it excludes
   here. A run with fewer than `contentionSeeding.minimumSamples` contributors reports the factor as
   **not computed** rather than taking a median of one.
 - **The label arrives after the finding, and that ordering is deliberate.** A ceiling finding prints

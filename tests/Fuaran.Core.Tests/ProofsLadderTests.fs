@@ -1997,6 +1997,24 @@ let describeStrictRun (record: JsonElement) : string =
 
                   if not (List.isEmpty factors) then
                       sprintf "contention %s" (String.concat ", " factors)
+              | _ -> ()
+              // Phase 399: a cost overrun is recorded, never red, so the line names the modules
+              // that ran over budget and the worst percentage each reached.
+              match run.TryGetProperty "costs" with
+              | true, c when c.ValueKind = JsonValueKind.Array ->
+                  let over =
+                      [ for r in c.EnumerateArray() do
+                            match str r "module", r.TryGetProperty "percent" with
+                            | Some m, (true, pc) when pc.ValueKind = JsonValueKind.Number && pc.GetInt32() > 100 ->
+                                m, pc.GetInt32()
+                            | _ -> () ]
+                      |> List.groupBy fst
+                      |> List.map (fun (m, xs) -> sprintf "%s %d%%" m (xs |> List.map snd |> List.max))
+
+                  if List.isEmpty over then
+                      "every module within budget"
+                  else
+                      sprintf "over budget: %s" (String.concat ", " over)
               | _ -> () ]
 
         if List.isEmpty parts then
@@ -2180,7 +2198,7 @@ let recordStrictBaseline
 
                     match runFactsDoc with
                     | Some doc ->
-                        for name in [ "machine"; "contention" ] do
+                        for name in [ "machine"; "contention"; "costs"; "findings" ] do
                             match doc.RootElement.TryGetProperty name with
                             | true, v ->
                                 w.WritePropertyName name
@@ -2719,7 +2737,7 @@ let proofsConeTests =
 
                   File.WriteAllText(
                       factsFile,
-                      """{ "machine": { "kind": "ci", "runner": "quiet-box", "os": "Toy OS 1", "processors": 4 }, "contention": [ { "run": 1, "factor": 0.31 }, { "run": 2, "factor": null } ] }"""
+                      """{ "machine": { "kind": "ci", "runner": "quiet-box", "os": "Toy OS 1", "processors": 4 }, "contention": [ { "run": 1, "factor": 0.31 }, { "run": 2, "factor": null } ], "costs": [ { "module": "A", "run": 1, "percent": 50 }, { "module": "B", "run": 1, "percent": 110 }, { "module": "B", "run": 2, "percent": 125 } ] }"""
                   )
 
                   try
@@ -2748,7 +2766,7 @@ let proofsConeTests =
                   | Ok line ->
                       Expect.stringContains
                           line
-                          "run 2026-09-30T00:00:00Z, on CI runner quiet-box (Toy OS 1, 4 processors), contention x0.31, not computed"
+                          "run 2026-09-30T00:00:00Z, on CI runner quiet-box (Toy OS 1, 4 processors), contention x0.31, not computed, over budget: B 125%"
                           "the empty cone's line says over which run it is green"
 
                   // A model edit: A and B (which opens A) are in; C only names B in prose.

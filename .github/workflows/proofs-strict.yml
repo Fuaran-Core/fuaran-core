@@ -2,23 +2,20 @@ name: proofs-strict
 
 # Phase 399 — the proof leg's STRICT run, on a schedule.
 #
-# The `proofs` job in ci.yml runs `./proofs/check.ps1 -Runs 3` WITHOUT -Strict, deliberately: a
-# budget overshoot on a busy runner is a warning, because prover time varies by machine and by load
-# (proofs/README.md, "What the leg costs"). That is the right default for a push, and it is also why
-# a real regression could stay a warning forever. This workflow is the counterpart: once a week, and
-# on demand, it runs the same leg with -Strict, so every UNLABELLED cost finding (one the run's
-# contention factor does not explain) turns the run red.
+# The `proofs` job in ci.yml runs `./proofs/check.ps1 -Runs 3` on every push. This workflow runs the
+# same leg with -Strict once a week and on demand. That run is the RECORDED one: a green strict
+# full run writes proofs/last-strict.json (the tree it verified, the machine, each run's contention
+# factor and every module's time against its budget), and this workflow uploads it as the
+# `strict-baseline` artefact. It commits nothing; a maintainer who wants `check.ps1 -Since` to lean
+# on this run downloads the artefact and commits the file.
 #
-# A RED run is a named COST finding against proofs/modules.json. The job summary lists each one,
-# and the remedy is the recorded act the README describes: re-measure on a quiet machine, then
-# re-seed that module's budgetSeconds / measuredSeconds with your phase and a note saying what grew.
-#
-# A GREEN run records the strict baseline, proofs/last-strict.json — the tree it verified, the
-# machine, and each run's contention factor — and uploads it as the `strict-baseline` artefact.
-# The workflow commits nothing: a maintainer who wants `check.ps1 -Since` to lean on this run
-# downloads the artefact and commits the file. It is green only over the tree the run verified, so a
-# baseline from a commit `main` has since moved past still stands for every module the move did not
-# touch, and `-Since` names any it did.
+# WHAT MAKES IT RED (DECISIONS.md D130, an operator ruling): a model that does not verify, a second
+# writer caught by the cache provenance check, a check that finishes under the cached-read threshold
+# (`modules.json` `cachedRead`), or an incomplete budget declaration. A COST overrun never makes it
+# red: a module over its budget is a slow cold check. The job summary lists every cost finding with
+# its percentage on every run, red or green, so a module that is over budget week after week is
+# visible; re-seeding it is the recorded act proofs/README.md describes, after a quiet
+# re-measurement.
 #
 # It never runs on a push or a tag: the strict leg is too slow to gate a push, and the publish
 # workflow already runs the leg on the tagged commit.
@@ -34,8 +31,8 @@ permissions:
 jobs:
   strict:
     name: proofs strict (windows-latest)
-    # Windows because that is the OS the floors in modules.json were seeded on (`floorSeeding.os`),
-    # so the floors are enforced here as well as the budgets.
+    # Windows because the budgets in modules.json were measured on Windows, so the cost trend is read
+    # against numbers from the same OS.
     runs-on: windows-latest
     timeout-minutes: 300
     steps:
@@ -70,29 +67,30 @@ jobs:
           $global:LASTEXITCODE = 0
           pwsh -NoProfile -File ./proofs/check.ps1 -Runs 3 -Strict 2>&1 | Tee-Object -FilePath proofs-strict.log
           exit $LASTEXITCODE
-      - name: Name the cost findings
-        if: failure()
+      - name: Summarise the run (cost findings, and why it is red if it is)
+        if: always()
         shell: pwsh
         run: |
           $lines = if (Test-Path proofs-strict.log) { Get-Content proofs-strict.log } else { @() }
-          $cost = @($lines | Where-Object { $_ -match '==== proofs: COST' -or $_ -match 'cost finding\(s\) against the budgets' -or $_ -match 'cost budget is exceeded' -or $_ -match 'CONTENDED PASS' })
+          $cost = @($lines | Where-Object { $_ -match '==== proofs: COST' })
+          $contention = @($lines | Where-Object { $_ -match '==== proofs: contention' })
           $verdict = @($lines | Where-Object { $_ -match '^==== proofs: ' }) | Select-Object -Last 1
-          $summary = @('## The strict proof leg is red', '')
-          if ($cost.Count -gt 0) {
-            $summary += 'A **COST** finding against `proofs/modules.json`: a module ran over its budget on a run the contention factor does not explain.'
-            $summary += 'Re-measure on a quiet machine, then re-seed its `budgetSeconds` / `measuredSeconds` with your phase and a note saying what grew (`proofs/README.md`, "What the leg costs").'
-            $summary += ''
-            $summary += '```'
-            $summary += $cost
-            $summary += '```'
-          }
-          else {
-            $summary += 'Not a cost finding: the leg failed before its cost verdict. Its last verdict line:'
+          $summary = @("## Strict proof leg: $(if ('${{ job.status }}' -eq 'success') { 'green' } else { 'RED' })", '')
+          if ('${{ job.status }}' -ne 'success') {
+            $summary += 'Red means a model did not verify, a second writer or a probable cached read was caught, or the budget declaration is incomplete. A cost overrun never makes this run red. The last verdict line:'
             $summary += ''
             $summary += '```'
             $summary += $(if ($verdict) { $verdict } else { '(no verdict line; read the log artefact)' })
             $summary += '```'
+            $summary += ''
           }
+          $summary += "### $($cost.Count) cost finding(s) against ``proofs/modules.json``"
+          $summary += 'Recorded, not failed. A module over budget week after week is the case for a re-seed after a quiet re-measurement (`proofs/README.md`, "What the leg costs").'
+          $summary += ''
+          $summary += '```'
+          $summary += $(if ($cost.Count -gt 0) { $cost } else { '(none)' })
+          $summary += $contention
+          $summary += '```'
           $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Upload the refreshed strict baseline
         if: success()

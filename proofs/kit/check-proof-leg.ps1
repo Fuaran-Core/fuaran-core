@@ -18,22 +18,27 @@
 #               -BudgetFile says what each module is expected to cost, every green line prints
 #               the measured seconds beside that budget, and an overshoot is a named COST warning
 #               rather than a failure — prover time varies by machine and by load, so the budget
-#               is a smoke detector and not a gate. -Strict promotes every UNLABELLED cost finding
-#               to a red leg, for a session that wants one — see the contention factor below for
-#               what a labelled one is. A fixed CI job timeout is deliberately NOT what
-#               this is: a timeout says a run died and nothing about which module.
-#               The clock is also measured against a declared FLOOR (Phase 164), and that one
-#               IS a gate: a module that verifies in less than its floorSeconds FAILS the leg on
-#               the spot, naming the module and the time. The two directions are not symmetric.
-#               An overshoot is a real measurement of a real cost; an undershoot means the
-#               measuring apparatus is broken — almost always a second writer in the cache — so
-#               everything after it would be measured with the same broken apparatus. -NoFloor
-#               is the deliberate opt-out for a machine genuinely that fast.
-#               A floor is a number measured on ONE kind of machine, so since Phase 402 the budget
-#               file's `floorSeeding.os` names the OS its floors were seeded on, and on any other
-#               OS they are not enforced (one line says so): a Windows-seeded floor broke the first
-#               Linux run, whose runner is simply faster. The second writer the floor stands in for
-#               is caught DIRECTLY, on every OS and whatever the clock says, by the CACHE
+#               is a smoke detector and not a gate. Since Phase 399 that holds under -Strict too:
+#               an overshoot is a slow COLD check, the opposite of the failure a gate exists for,
+#               so it is a recorded finding (printed, written to -SummaryFile with its percentage)
+#               and never a red leg. -Strict promotes only the COVERAGE and SHAPE findings — a
+#               module with no budget, a budget for no module — which are defects in a declaration
+#               rather than measurements. A fixed CI job timeout is deliberately NOT what this is:
+#               a timeout says a run died and nothing about which module.
+#               The clock IS a gate in the other direction, and only there (Phase 399): a module
+#               that verifies in less than the budget file's CACHED-READ THRESHOLD
+#               (`cachedRead.thresholdSeconds`) FAILS the leg on the spot as a probable cached
+#               read. Measured on the pinned prover, reading a checked module back from a populated
+#               cache costs F* start-up and deserialisation and nothing else — 0.18-0.51s across
+#               ten modules whose cold checks took 0.4s to 184s — so one absolute number separates a
+#               read from a check for every module whose genuine cold check is well above it. Which
+#               modules that is, is read off each entry's recorded `fastestSeconds` (the threshold
+#               applies at `cachedRead.appliesFromFastestSeconds` and above); a module that can
+#               genuinely check in under a second is guarded by the provenance check alone. This
+#               replaces the per-module FLOORS of Phases 164 and 402, which answered the same
+#               question with one number per module per OS and broke on the first faster machine.
+#               The second writer the threshold backstops is caught DIRECTLY, on every OS and
+#               whatever the clock says, by the CACHE
 #               PROVENANCE check (Phase 402): between two of this run's prover invocations nothing
 #               in the cache may appear, change or vanish, and a module's own `.checked` file may
 #               not be in the cache before its cold check starts. Either is a refusal naming the
@@ -177,7 +182,7 @@ param(
     [string] $RepoRoot,
     # The pinned prover declaration. Defaults to <ProofsDir>/fstar-pin.json.
     [string] $PinFile,
-    # The per-module cost budgets and time floors. Defaults to <ProofsDir>/modules.json.
+    # The per-module cost budgets and the cached-read threshold. Defaults to <ProofsDir>/modules.json.
     [string] $BudgetFile,
     # The committed extractions the fresh ones are diffed against. Defaults to <ProofsDir>/oracle.
     [string] $OracleDir,
@@ -201,7 +206,6 @@ param(
     [switch] $Extract,
     [switch] $SkipOracleHost,
     [switch] $Strict,
-    [switch] $NoFloor,
     [string] $CacheDir,
     [int]    $Runs = 1,
     # Phase 402 — THE KIT'S OWN TEST SEAM, and nothing else: a script block run after each prover
@@ -867,12 +871,11 @@ if (-not (Test-Path $BudgetFile)) {
 # still be read as a budget at all. An entry with no `budgetSeconds` would otherwise arrive as 0 and
 # every run would be infinitely over it — a flood of findings, and a division by zero rendering the
 # percentage. A declared artefact is held to its shape by the code that consumes it.
-# The FLOOR beside it (Phase 164) is held to its shape the same way WHEN IT IS THERE, and is a
-# cost finding when it is ABSENT — a sibling adding a model should no more go red for a floor
-# nobody has measured than for a budget nobody has measured. An absent floor degrades to exactly
-# the pre-164 behaviour for that module, which is the safe direction; a floor of 0 is legal and
-# means "this module genuinely checks in about a second", which is NOT the same statement as an
-# absent one and reads differently in the file.
+# The `fastestSeconds` beside it (Phase 399: the fastest genuine cold check recorded, which decides
+# whether the cached-read threshold applies to the module) is held to its shape the same way WHEN
+# IT IS THERE, and is a coverage finding when it is ABSENT — a sibling adding a model should no more
+# go red for a measurement nobody has taken than for a budget nobody has measured. An absent one
+# leaves that module to the cache provenance check alone, which is the safe direction.
 #
 # Two more per-entry numbers are READ here since Phase 171, and neither is required. The
 # `measuredSeconds` this file has always recorded beside a budget — the observation the budget was
@@ -883,9 +886,17 @@ if (-not (Test-Path $BudgetFile)) {
 # a quiet machine from one seeded on a busy one. Nothing multiplies it into anything — see the
 # note on section 3c for why the measurement stays the wall clock.
 $budgets = @{}
-$floors = @{}
+$fastest = @{}
 $measurements = @{}
 $budgetDocument = Get-Content $BudgetFile -Raw | ConvertFrom-Json
+
+# Phase 399 RETIRED the per-module time floors. A budget file still carrying one is refused rather
+# than read past: a key the leg no longer acts on, left in a declaration, reads to its next editor as
+# a gate that is still there.
+if ($null -ne $budgetDocument.PSObject.Properties['floorSeeding']) {
+    Fail ("$budgetName still carries a floorSeeding block. The per-module floors were retired by Phase 399 for one absolute CACHED-READ threshold: " +
+        'replace the block with cachedRead (thresholdSeconds, appliesFromFastestSeconds), keep each entry''s fastestSeconds, delete floorSeconds — see the kit README')
+}
 foreach ($entry in $budgetDocument.modules) {
     $name = $entry.module
     if ([string]::IsNullOrWhiteSpace($name)) { Fail "$budgetName carries an entry with no module name" }
@@ -899,16 +910,16 @@ foreach ($entry in $budgetDocument.modules) {
 
     $budgets[$name] = [int]$declaredBudget
 
-    $declaredFloor = $entry.floorSeconds
-    if ($null -ne $declaredFloor) {
-        if ($declaredFloor -isnot [int] -and $declaredFloor -isnot [long] -and $declaredFloor -isnot [double]) {
-            Fail "$budgetName entry '$name' has a non-numeric floorSeconds"
+    if ($null -ne $entry.PSObject.Properties['floorSeconds']) {
+        Fail "$budgetName entry '$name' still carries a floorSeconds — the per-module floors were retired by Phase 399 for the cachedRead threshold; delete it (keep fastestSeconds)"
+    }
+    $declaredFastest = $entry.fastestSeconds
+    if ($null -ne $declaredFastest) {
+        if ($declaredFastest -isnot [int] -and $declaredFastest -isnot [long] -and $declaredFastest -isnot [double]) {
+            Fail "$budgetName entry '$name' has a non-numeric fastestSeconds"
         }
-        if ([int]$declaredFloor -lt 0) { Fail "$budgetName entry '$name' has a floorSeconds of $declaredFloor — a floor is a non-negative number of seconds" }
-        if ([int]$declaredFloor -ge [int]$declaredBudget) {
-            Fail "$budgetName entry '$name' has a floorSeconds of $declaredFloor at or above its budgetSeconds of $([int]$declaredBudget) — no run could satisfy both"
-        }
-        $floors[$name] = [int]$declaredFloor
+        if ([double]$declaredFastest -lt 0) { Fail "$budgetName entry '$name' has a fastestSeconds of $declaredFastest — a measurement is a non-negative number of seconds" }
+        $fastest[$name] = [double]$declaredFastest
     }
 
     $declaredMeasured = $entry.measuredSeconds
@@ -929,12 +940,33 @@ foreach ($entry in $budgetDocument.modules) {
     }
 }
 
+# THE CACHED-READ THRESHOLD (Phase 399). Declared in the budget file, like every other number here,
+# because what a cached read costs is a fact about the prover and the machine; see the header.
+$cachedReadThreshold = $null
+$cachedReadFrom = $null
+if ($null -ne $budgetDocument.cachedRead) {
+    $block = $budgetDocument.cachedRead
+    foreach ($key in 'thresholdSeconds', 'appliesFromFastestSeconds') {
+        $v = $block.$key
+        if ($v -isnot [int] -and $v -isnot [long] -and $v -isnot [double]) { Fail "$budgetName cachedRead.$key is missing or not numeric" }
+        if ([double]$v -le 0) { Fail "$budgetName cachedRead.$key is $v — it must be a positive number of seconds" }
+    }
+    $cachedReadThreshold = [double]$block.thresholdSeconds
+    $cachedReadFrom = [double]$block.appliesFromFastestSeconds
+    if ($cachedReadFrom -lt $cachedReadThreshold) {
+        Fail "$budgetName cachedRead.appliesFromFastestSeconds ($cachedReadFrom) is under its thresholdSeconds ($cachedReadThreshold) — a module whose genuine cold check can be under the threshold would be refused as a cached read"
+    }
+}
+else {
+    Add-CostFinding "$budgetName declares no cachedRead threshold — nothing but the cache provenance check can tell a cached read from a cold check; seed one per the kit README and cite your phase"
+}
+
 foreach ($module in $Modules) {
     if (-not $budgets.ContainsKey($module)) {
         Add-CostFinding "$module is checked by the leg and $budgetName declares no budget for it — time a cold run, budget it per the file's seeding rule, and cite your phase"
     }
-    elseif (-not $floors.ContainsKey($module)) {
-        Add-CostFinding "$module is checked by the leg and $budgetName declares no floorSeconds for it — nothing can tell an implausibly fast run of it from a real one; seed one per the file's floorSeeding rule and cite your phase"
+    elseif ($null -ne $cachedReadThreshold -and -not $fastest.ContainsKey($module)) {
+        Add-CostFinding "$module is checked by the leg and $budgetName records no fastestSeconds for it — the cached-read threshold cannot be applied to it without one; record its fastest genuine cold run and cite your phase"
     }
 }
 foreach ($declared in $budgets.Keys) {
@@ -966,28 +998,16 @@ foreach ($declared in $budgets.Keys) {
 # normalised measurement would be a number nobody observed, and the whole value of this leg's cost
 # half is that every figure in it is one somebody's machine really produced.
 #
-# THE FLOORS' OS (Phase 402). A floor is the fastest cold run ever observed on the machine that
-# seeded it, halved — a fact about that machine as much as about the module. The first Linux run
-# verified WireColumn in 16s against a 17s floor seeded on Windows: a faster runner, not a second
-# writer. So `floorSeeding.os` names the OS the floors were seeded on, and they are enforced there
-# only. ABSENT means every OS, which is how an adopter's file without the key has always read. Not
-# enforcing them elsewhere does NOT leave the cold claim unchecked: the cache provenance check in
-# section 3 is what catches a second writer, on every OS, and the floor is its backstop where a
-# floor has been measured. Seeding floors for a second OS is a change to this file's format, made
-# when a reader wants that backstop there, with that OS's own cold runs as its evidence.
-$hostPlatform = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'macos' } else { '' }
-$floorsSeededOn = $null
-if ($null -ne $budgetDocument.floorSeeding -and $null -ne $budgetDocument.floorSeeding.os) {
-    $floorsSeededOn = [string]$budgetDocument.floorSeeding.os
-    if (@('windows', 'linux', 'macos') -notcontains $floorsSeededOn) {
-        Fail "$budgetName floorSeeding.os is '$floorsSeededOn' — it names the OS the floors were seeded on: windows, linux or macos"
-    }
-}
-$floorsApplyHere = ($null -eq $floorsSeededOn) -or ($floorsSeededOn -eq $hostPlatform)
+# THE FLOORS' OS (Phase 402) is RETIRED with the floors (Phase 399). A floor was the fastest cold
+# run ever observed on the machine that seeded it, halved, so it was a fact about that machine: the
+# first Linux run verified WireColumn in 16s against a 17s floor seeded on Windows, and the floors
+# had to be switched off on every OS but one. The cached-read threshold has no such dependence in
+# the direction that matters: a faster machine reads a cache faster still, so it stays under the
+# threshold, and `appliesFromFastestSeconds` keeps a fast genuine check above it (see section 2).
 
 # THE THRESHOLD is declared, in this file's own `contentionSeeding` block, for the same reason the
-# budget and floor rules are: a number the engine baked in would be a number no repository could
-# re-seed from its own machine. An ABSENT block is NOT a finding — unlike an absent budget or floor,
+# budget and cached-read rules are: a number the engine baked in would be a number no repository could
+# re-seed from its own machine. An ABSENT block is NOT a finding — unlike an absent budget,
 # which fire per module when a model is added, this one is per FILE and one-off, and a finding that
 # is present on every run of an unseeded repository is one people learn to scroll past. The factor
 # is still computed and still printed; nothing is labelled, and the line says so and names the
@@ -997,12 +1017,12 @@ $contentionThreshold = $null
 $contentionMinimumSamples = 3
 # A module whose recorded measurement is a second or two contributes noise rather than signal: the
 # clock is whole seconds, so 0s against a recorded 2s is a ratio of 0 and 1s is a ratio of 0.5, and
-# neither says anything about the machine. `floorSeeding.zeroBelowSeconds` already carries this
-# repository's answer to "below what is a reading process-start noise" — reused here rather than
-# minted again, so there is one number and one argument for it.
+# neither says anything about the machine. `contentionSeeding.minimumSeconds` carries this
+# repository's answer to "below what is a reading process-start noise" (until Phase 399 it was the
+# retired floors' `zeroBelowSeconds`, and the number moved with its argument).
 $contentionMinimumSeconds = 5
-if ($null -ne $budgetDocument.floorSeeding -and $null -ne $budgetDocument.floorSeeding.zeroBelowSeconds) {
-    $contentionMinimumSeconds = [double]$budgetDocument.floorSeeding.zeroBelowSeconds
+if ($null -ne $budgetDocument.contentionSeeding -and $null -ne $budgetDocument.contentionSeeding.minimumSeconds) {
+    $contentionMinimumSeconds = [double]$budgetDocument.contentionSeeding.minimumSeconds
 }
 if ($null -ne $budgetDocument.contentionSeeding) {
     $block = $budgetDocument.contentionSeeding
@@ -1168,11 +1188,11 @@ else {
 $script:invocationCache = $cache
 Write-Host "==== proofs: cache $cache$(if (-not $script:invocationCacheIsOurs) { ' (-CacheDir; left in place at exit)' })" -ForegroundColor Cyan
 
-if ($NoFloor) {
-    Write-Host "==== proofs: -NoFloor — the per-module time floors in $budgetName are NOT enforced on this run" -ForegroundColor Yellow
-}
-elseif (-not $floorsApplyHere) {
-    Write-Host "==== proofs: the time floors in $budgetName were seeded on $floorsSeededOn and are NOT enforced on $(if ($hostPlatform) { $hostPlatform } else { 'this OS' }) — a floor measures one kind of machine; the cache provenance check is what refuses a second writer here" -ForegroundColor Cyan
+if ($null -ne $cachedReadThreshold) {
+    $guarded = @($Modules | Where-Object { $fastest.ContainsKey($_) -and $fastest[$_] -ge $cachedReadFrom })
+    $unguarded = @($Modules | Where-Object { $guarded -notcontains $_ })
+    Write-Host ("==== proofs: cached-read threshold ${cachedReadThreshold}s, applied to the $($guarded.Count) module(s) whose recorded fastest cold check is ${cachedReadFrom}s or more" +
+        $(if ($unguarded.Count -gt 0) { "; $($unguarded -join ', ') can genuinely check faster and rest on the cache provenance check alone" } else { '' })) -ForegroundColor Cyan
 }
 
 # THE CACHE PROVENANCE CHECK (Phase 402) — the second writer, caught directly rather than inferred
@@ -1186,7 +1206,7 @@ elseif (-not $floorsApplyHere) {
 # or one that restored the old time, would read as unchanged. The bytes cannot. The cost is one read
 # of the cache per invocation, which is small beside the prover's. What it cannot see is a writer active only DURING one
 # invocation and silent after it, whose files the next record takes as this run's own; that is the
-# window the floor still backstops where one is enforced, and a writer whose files include a model
+# window the cached-read threshold backstops (Phase 399), and a writer whose files include a model
 # not yet checked is caught anyway, by that model's own `.checked` file.
 function Get-CacheState([string] $dir) {
     $state = @{}
@@ -1230,6 +1250,7 @@ function Assert-CacheProvenance([hashtable] $recorded, [string] $module, [int] $
 # section 3c computes (or why it computed none). Collected whatever -SummaryFile says; written only
 # on a green leg.
 $runFacts = [System.Collections.Generic.List[object]]::new()
+$moduleCosts = [System.Collections.Generic.List[object]]::new()
 
 for ($run = 1; $run -le $Runs; $run++) {
     if (Test-Path $cache) { Remove-Item $cache -Recurse -Force }
@@ -1284,7 +1305,7 @@ for ($run = 1; $run -le $Runs; $run++) {
                         "Read $($checked.LogPath) and the attempt before it, and the pre-flight lines above for what else was on the machine.") $ExitAbort
                 }
 
-                Write-Host "==== proofs: retrying $module.fst once — the retry is BOUNDED (one per module per run) and its timing is a WARM measurement, so it feeds neither the budget nor the floor" -ForegroundColor Yellow
+                Write-Host "==== proofs: retrying $module.fst once — the retry is BOUNDED (one per module per run) and its timing is a WARM measurement, so it is compared to neither the budget nor the cached-read threshold" -ForegroundColor Yellow
                 continue
             }
 
@@ -1304,10 +1325,24 @@ for ($run = 1; $run -le $Runs; $run++) {
             # is not a cold run and must not be read as one — by a person or by either gate. It is
             # printed, marked, and recorded as a finding; it is compared to nothing.
             if ($isRetry) {
-                $finding = "$module.fst ABORTED once on run $run of $Runs and verified on the bounded retry in ${seconds}s — a WARM measurement, compared to neither its budget nor its floor"
+                $finding = "$module.fst ABORTED once on run $run of $Runs and verified on the bounded retry in ${seconds}s — a WARM measurement, compared to neither its budget nor the cached-read threshold"
                 $abortFindings.Add($finding)
                 Write-Host "==== proofs: $module.fst verified ON RETRY — run $run of $Runs, ${seconds}s (warm cache: NOT a cold measurement), every query $Quake/$Quake under --quake" -ForegroundColor Yellow
                 break
+            }
+
+            # THE CACHED-READ GATE (Phase 399) fails HERE, before the green line, rather than joining
+            # the cost findings at the end, and the asymmetry with the ceiling below it is deliberate. An overshoot
+            # is a true measurement of a true cost. A check faster than a cached read costs is not a
+            # measurement of anything: the prover read the module back instead of checking it, so
+            # every module after it is measured by the same broken apparatus and carrying on would
+            # print green lines a reader is entitled to take as evidence. The wall clock is compared
+            # unrounded, since the threshold is a fraction of a second.
+            if ($null -ne $cachedReadThreshold -and $fastest.ContainsKey($module) -and $fastest[$module] -ge $cachedReadFrom -and
+                $sw.Elapsed.TotalSeconds -lt $cachedReadThreshold) {
+                Fail ("$module.fst verified in $([Math]::Round($sw.Elapsed.TotalSeconds, 2))s on run $run of $Runs, under the ${cachedReadThreshold}s cached-read threshold — a PROBABLE CACHED READ, not a cold verification " +
+                    "(its fastest genuine cold check is $($fastest[$module])s). The cache provenance check saw no second writer between invocations, so suspect one that wrote DURING this one: " +
+                    "check for another check.ps1 or fstar process against this cache. If the module genuinely got that fast, record its new fastestSeconds in $budgetName and cite your phase.")
             }
 
             $cost = if ($null -eq $budget) { "${seconds}s (no budget)" } else { "${seconds}s/${budget}s" }
@@ -1326,21 +1361,18 @@ for ($run = 1; $run -le $Runs; $run++) {
             # never populated from a measured time, and `-Strict` had nothing to promote — while the
             # budget file's comments and the README both went on describing a ceiling that fired. A
             # measured 32s against a 30s budget said nothing at all. It is a WARNING and the run
-            # continues, which is the half the floor below is deliberately not.
+            # continues, which is the half the cached-read gate above is deliberately not. Since
+            # Phase 399 it is never red, under -Strict or otherwise: the run's every module time is
+            # recorded beside its budget for -SummaryFile, and the overshoot is a finding there.
+            $moduleCosts.Add([ordered]@{
+                    module  = $module
+                    run     = $run
+                    seconds = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
+                    budget  = $budget
+                    percent = if ($null -ne $budget) { [int](100 * $seconds / $budget) } else { $null }
+                })
             if ($null -ne $budget -and $seconds -gt $budget) {
                 Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget" $run
-            }
-
-            # The floor fails HERE rather than joining the cost findings at the end, and the asymmetry
-            # with the ceiling just above it is deliberate. An overshoot is a true measurement of a
-            # true cost, so the run should continue and produce the rest of the evidence. An
-            # undershoot says the measurement itself is not to be believed — the cache was not cold —
-            # and every module after it is measured by the same apparatus, so carrying on would print
-            # more green lines that a reader is entitled to read as evidence and that are not.
-            if (-not $NoFloor -and $floorsApplyHere -and $floors.ContainsKey($module) -and $seconds -lt $floors[$module]) {
-                Fail ("$module.fst verified in ${seconds}s on run $run of $Runs, under its $($floors[$module])s floor — that is not a cold verification. " +
-                    'The cache provenance check saw no second writer between invocations, so suspect one that wrote DURING this one: check for another check.ps1 or fstar process against this cache; ' +
-                    "if this machine really is that fast, re-seed the floor per $budgetName floorSeeding and cite your phase, or pass -NoFloor for this run.")
             }
 
             break
@@ -1577,17 +1609,19 @@ if ($costFindings.Count -gt 0) {
         Write-Host '     raises a ceiling to fit a slow afternoon. Re-measure on a quiet run before touching a number.' -ForegroundColor Yellow
     }
 
-    # -Strict promotes the UNLABELLED findings only. A session that asked for a red leg on cost
-    # asked to be stopped by a regression, and a contended pass is not one; reddening on it would
-    # make -Strict a coin toss on a shared machine, which is how a flag gets passed once and never
-    # again. Coverage and shape findings belong to no run, are never labelled, and so always
-    # promote — which is the half of -Strict's power this must not quietly remove.
+    # -Strict and a COST finding (Phase 399, an operator ruling). A measured overshoot is a slow
+    # COLD check — the opposite of the failure a gate exists for — so it is recorded and never red,
+    # under -Strict or not: the strict run's record carries every module's time against its budget,
+    # and the scheduled strict run is what trends them. What -Strict still promotes are the findings
+    # that belong to no run: a module with no budget or no recorded fastest cold check, a budget for
+    # a module the leg does not check, a budget file with no cached-read threshold. Those are
+    # defects in a declaration, not measurements of a machine.
+    $declarationFindings = @($costFindings | Where-Object { $_.Run -eq 0 })
+    if ($Strict -and $declarationFindings.Count -gt 0) {
+        Fail "the budget declaration is incomplete and -Strict is on ($($declarationFindings.Count) coverage finding(s) above)"
+    }
     if ($Strict) {
-        if ($unlabelledFindings.Count -gt 0) {
-            Fail "the cost budget is exceeded and -Strict is on ($($unlabelledFindings.Count) unlabelled finding(s) above)"
-        }
-        Write-Host "     -Strict is on and the leg stays GREEN: every finding above is labelled CONTENDED PASS, which is a" -ForegroundColor Yellow
-        Write-Host '     measurement of the machine rather than of a module. Re-run on a quiet machine to promote a real one.' -ForegroundColor Yellow
+        Write-Host '     -Strict is on and the leg stays GREEN: a cost overrun is a slow cold check, recorded as a finding, never a red leg (Phase 399).' -ForegroundColor Yellow
     }
 }
 
@@ -1616,6 +1650,8 @@ if ($SummaryFile) {
             memory     = $memory
         }
         contention = @($runFacts)
+        costs      = @($moduleCosts)
+        findings   = @($costFindings | ForEach-Object { [ordered]@{ run = $_.Run; text = $_.Text; label = $_.Label } })
     }
     # Resolved through PowerShell, not [IO.Path]::GetFullPath: the .NET call reads the PROCESS's
     # directory, which `Set-Location` above does not move.

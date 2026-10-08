@@ -17,8 +17,8 @@
 # apart again.
 #
 # FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, since Phase 393 the PIN-RESOLUTION arms,
-# R, which need no prover and run first, and since Phase 402 the FLOOR-OS arms, O, and the CACHE
-# PROVENANCE arms, P; since Phase 399 the MIRROR arms, M, and the ORACLE-INDEPENDENCE arms, I, which
+# R, which need no prover and run first, and since Phase 402 the CACHE PROVENANCE arms, P (its
+# FLOOR-OS arms, O, retired with the floors in Phase 399, for the CACHED-READ and COST arms, C); since Phase 399 the MIRROR arms, M, and the ORACLE-INDEPENDENCE arms, I, which
 # need no prover either, the GUARD-IN-THE-LEG arms, Q, and the RUN-FACTS arms, S). The first prover arm is the control that
 # makes the other three mean something:
 #
@@ -312,13 +312,13 @@ Set-Content (Join-Path $scratch 'LegBad.fst') "module LegBad`n`nlet minus_one : 
 # A TRUE model whose query name contains "fails": a success line naming it must not read as a failure.
 Set-Content (Join-Path $scratch 'LegFailsName.fst') "module LegFailsName`n`nlet this_never_fails (x: nat) : nat = x + 1`n"
 
-# Budgets for both, with floors of 0 — a module that checks in a second must not trip the floor.
+# Budgets for each. No cachedRead threshold is declared here, so none applies: the C arms declare one.
 @{
     kind    = 'proofModules'
     modules = @(
-        @{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegBad'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegFailsName'; budgetSeconds = 60; floorSeconds = 0 }
+        @{ module = 'LegGood'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegBad'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegFailsName'; budgetSeconds = 60; fastestSeconds = 0 }
     )
 } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.json')
 
@@ -434,10 +434,10 @@ let _ = assert_norm (twins_hold twins == true)
 @{
     kind    = 'proofModules'
     modules = @(
-        @{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegBad'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegFailsName'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegTwinned'; budgetSeconds = 60; floorSeconds = 0 }
+        @{ module = 'LegGood'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegBad'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegFailsName'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegTwinned'; budgetSeconds = 60; fastestSeconds = 0 }
     )
 } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.json')
 
@@ -488,34 +488,6 @@ Remove-Item $factsPath -Force -ErrorAction SilentlyContinue
 $s2 = Invoke-Leg ($base + @{ Modules = @('LegBad'); ProofOnly = @('LegBad'); SummaryFile = $factsPath })
 Assert-That 'S. RUN FACTS — a red leg writes none' ($s2.Exit -ne 0 -and -not (Test-Path $factsPath)) "exit $($s2.Exit): $(Show-Tail $s2)"
 
-# ---- O. THE FLOORS' OS (Phase 402) -----------------------------------------------------------------
-
-# A floor is enforced on the OS `floorSeeding.os` names and on no other. LegGood checks in about a
-# second, so a 50s floor is a breach wherever it is enforced: red on the host's own OS, and on any
-# other OS not enforced, the leg green and saying why.
-$otherOs = if ($hostOs -eq 'linux') { 'windows' } else { 'linux' }
-function Set-FloorBudget([string] $os) {
-    @{
-        kind         = 'proofModules'
-        floorSeeding = @{ os = $os }
-        modules      = @(@{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 50 })
-    } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.floor.json')
-}
-
-Set-FloorBudget $hostOs
-$o1 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.floor.json') })
-Assert-That "O. FLOOR — a floor seeded on this OS ($hostOs) is enforced: a breach exits NON-ZERO" ($o1.Exit -ne 0 -and -not $o1.Green) "exit $($o1.Exit): $(Show-Tail $o1)"
-Assert-That 'O. FLOOR — and names the floor it broke' ([bool](@($o1.Lines -match 'under its 50s floor').Count)) (Show-Tail $o1)
-
-Set-FloorBudget $otherOs
-$o2 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.floor.json') })
-Assert-That "O. FLOOR — a floor seeded on $otherOs is not enforced on $($hostOs): exit 0 and green" ($o2.Exit -eq 0 -and $o2.Green) "exit $($o2.Exit): $(Show-Tail $o2)"
-Assert-That 'O. FLOOR — and says the floors are not enforced here, and why' ([bool](@($o2.Lines -match "seeded on $otherOs and are NOT enforced").Count)) (Show-Tail $o2)
-
-Set-FloorBudget 'solaris'
-$o3 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.floor.json') })
-Assert-That 'O. FLOOR — a floorSeeding.os naming no OS is refused, naming the key' ($o3.Exit -ne 0 -and -not $o3.Green -and [bool](@($o3.Lines -match 'floorSeeding.os').Count)) "exit $($o3.Exit): $(Show-Tail $o3)"
-
 # ---- P. CACHE PROVENANCE (Phase 402) ----------------------------------------------------------------
 
 # The second writer, caught directly. LegUses depends on LegGood; LegThird depends on nothing.
@@ -524,10 +496,10 @@ Set-Content (Join-Path $scratch 'LegThird.fst') "module LegThird`n`nlet three : 
 @{
     kind    = 'proofModules'
     modules = @(
-        @{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegFailsName'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegUses'; budgetSeconds = 60; floorSeconds = 0 }
-        @{ module = 'LegThird'; budgetSeconds = 60; floorSeconds = 0 }
+        @{ module = 'LegGood'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegFailsName'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegUses'; budgetSeconds = 60; fastestSeconds = 0 }
+        @{ module = 'LegThird'; budgetSeconds = 60; fastestSeconds = 0 }
     )
 } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.provenance.json')
 $provenance = $base + @{ BudgetFile = (Join-Path $scratch 'modules.provenance.json') }
@@ -588,6 +560,83 @@ $p4 = Invoke-Leg ($provenance + @{
         AfterInvocation = { param($module, $run, $cacheDir) }
     })
 Assert-That 'P. SEAM CONTROL — an -AfterInvocation that writes nothing leaves the leg green' ($p4.Exit -eq 0 -and $p4.Green) "exit $($p4.Exit): $(Show-Tail $p4)"
+
+# ---- C. THE CACHED-READ GATE, AND COST NEVER RED (Phase 399) ------------------------------------------
+
+# A warm re-run is red. The leg empties its cache at the head of every run, so the only way a
+# module can be read back rather than checked is a writer putting a REAL checked file in front of
+# it. Here that file is genuine: LegFailsName's own `.checked`, produced by a green run into a
+# -CacheDir (which the leg leaves in place), and copied into the next run's cache just before
+# LegFailsName's turn. The cache provenance check — the PRIMARY signal — refuses it before the
+# prover can read it back.
+$warmCache = Join-Path $WorkDir 'warm-cache'
+$c0 = Invoke-Leg ($base + @{ Modules = @('LegFailsName'); ProofOnly = @('LegFailsName'); CacheDir = $warmCache })
+$warmChecked = Join-Path $WorkDir 'LegFailsName.fst.checked'
+Copy-Item (Join-Path $warmCache 'LegFailsName.fst.checked') $warmChecked -ErrorAction SilentlyContinue
+Assert-That 'C. WARM RE-RUN — a green run leaves a genuine LegFailsName.fst.checked to re-run against' ($c0.Exit -eq 0 -and $c0.Green -and (Test-Path $warmChecked)) "exit $($c0.Exit): $(Show-Tail $c0)"
+$c1 = Invoke-Leg ($base + @{
+        Modules = @('LegGood', 'LegFailsName'); ProofOnly = @('LegGood', 'LegFailsName')
+        AfterInvocation = {
+            param($module, $run, $cacheDir)
+            if ($module -eq 'LegGood') { Copy-Item $warmChecked (Join-Path $cacheDir 'LegFailsName.fst.checked') }
+        }
+    })
+Assert-That 'C. WARM RE-RUN — a module whose genuine checked file is already in the cache is red, never green' ($c1.Exit -ne 0 -and -not $c1.Green -and [bool](@($c1.Lines -match 'SECOND WRITER.*LegFailsName\.fst\.checked').Count)) "exit $($c1.Exit): $(Show-Tail $c1)"
+Assert-That 'C. WARM RE-RUN — and prints no LegFailsName.fst verified line' (-not [bool](@($c1.Lines -match 'LegFailsName\.fst verified').Count)) (Show-Tail $c1)
+
+# The BACKSTOP: a check that finishes under the cached-read threshold is red as a probable cached
+# read. LegGood genuinely checks in about a second, so a 30s threshold applied to it stands in for a
+# read back from a cache a writer filled DURING the invocation, which no between-invocation check can
+# see. Applied only from the module's recorded fastestSeconds: the same threshold over the same
+# module, recorded as genuinely that fast, leaves it to the provenance check and stays green.
+function Set-CachedReadBudget([double] $fastestSeconds) {
+    @{
+        kind       = 'proofModules'
+        cachedRead = @{ thresholdSeconds = 30; appliesFromFastestSeconds = 90 }
+        modules    = @(@{ module = 'LegGood'; budgetSeconds = 60; fastestSeconds = $fastestSeconds })
+    } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.cached.json')
+}
+Set-CachedReadBudget 120
+$c2 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.cached.json') })
+Assert-That 'C. CACHED READ — a check under the threshold, of a module recorded as slower, is red' ($c2.Exit -ne 0 -and -not $c2.Green) "exit $($c2.Exit): $(Show-Tail $c2)"
+Assert-That 'C. CACHED READ — and names it a probable cached read, with the threshold' ([bool](@($c2.Lines -match 'under the 30s cached-read threshold .* PROBABLE CACHED READ').Count)) (Show-Tail $c2)
+Assert-That 'C. CACHED READ — and prints no green LegGood.fst verified line before refusing it' (-not [bool](@($c2.Lines -match 'LegGood\.fst verified — run').Count)) (Show-Tail $c2)
+Set-CachedReadBudget 2
+$c3 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.cached.json') })
+Assert-That 'C. CACHED READ CONTROL — a module recorded as genuinely that fast is not judged by the threshold: green' ($c3.Exit -eq 0 -and $c3.Green) "exit $($c3.Exit): $(Show-Tail $c3)"
+Assert-That 'C. CACHED READ CONTROL — and says it rests on the provenance check alone' ([bool](@($c3.Lines -match 'LegGood can genuinely check faster and rest(s)? on the cache provenance check alone').Count)) (Show-Tail $c3)
+
+# A retired floor is refused, not read past.
+@{ kind = 'proofModules'; modules = @(@{ module = 'LegGood'; budgetSeconds = 60; floorSeconds = 0 }) } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.retired.json')
+$c4 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.retired.json') })
+Assert-That 'C. RETIRED — a budget entry still carrying floorSeconds is refused, naming the key' ($c4.Exit -ne 0 -and -not $c4.Green -and [bool](@($c4.Lines -match 'still carries a floorSeconds').Count)) "exit $($c4.Exit): $(Show-Tail $c4)"
+
+# A COST OVERRUN IS NEVER RED, under -Strict. LegSlow is a true model that takes a couple of seconds
+# to normalise; against a 1s budget it is a slow cold check, several times over budget. Under -Strict
+# the leg is green, the COST finding is printed, and -SummaryFile records the module's time against
+# its budget with the percentage and the finding.
+Set-Content (Join-Path $scratch 'LegSlow.fst') "module LegSlow`n`nlet rec fib (n: nat) : nat = if n < 2 then n else fib (n - 1) + fib (n - 2)`n`nlet _ = assert_norm (fib 26 > 0)`n"
+@{
+    kind       = 'proofModules'
+    cachedRead = @{ thresholdSeconds = 0.1; appliesFromFastestSeconds = 0.3 }
+    modules    = @(@{ module = 'LegSlow'; budgetSeconds = 1; fastestSeconds = 1 })
+} | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.slow.json')
+$slowFacts = Join-Path $WorkDir 'slow-facts.json'
+$c5 = Invoke-Leg ($base + @{ Modules = @('LegSlow'); ProofOnly = @('LegSlow'); Strict = $true; SummaryFile = $slowFacts; BudgetFile = (Join-Path $scratch 'modules.slow.json') })
+$slow = if (Test-Path $slowFacts) { Get-Content $slowFacts -Raw | ConvertFrom-Json } else { $null }
+$slowCost = if ($slow) { @($slow.costs | Where-Object { $_.module -eq 'LegSlow' }) | Select-Object -First 1 } else { $null }
+Assert-That 'C. COST — a cold check over its budget under -Strict is GREEN' ($c5.Exit -eq 0 -and $c5.Green) "exit $($c5.Exit): $(Show-Tail $c5)"
+Assert-That 'C. COST — and the overrun is printed as a COST finding' ([bool](@($c5.Lines -match 'COST — LegSlow\.fst took \d+s against its 1s budget').Count)) (Show-Tail $c5)
+Assert-That 'C. COST — and recorded in the run facts with its percentage and the finding' (
+    $null -ne $slowCost -and $slowCost.budget -eq 1 -and $slowCost.percent -gt 100 -and [bool](@($slow.findings | Where-Object { $_.text -match 'LegSlow\.fst took' }).Count)) "$(if ($slow) { $slow | ConvertTo-Json -Compress -Depth 6 } else { 'no facts file' })"
+
+# What -Strict still promotes: a declaration defect. LegGood with no budget entry at all is a
+# coverage finding, which is red under -Strict and a warning without it.
+@{ kind = 'proofModules'; cachedRead = @{ thresholdSeconds = 1; appliesFromFastestSeconds = 3 }; modules = @() } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.empty.json')
+$c6 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); Strict = $true; BudgetFile = (Join-Path $scratch 'modules.empty.json') })
+Assert-That 'C. DECLARATION — under -Strict a module with no budget is red' ($c6.Exit -ne 0 -and -not $c6.Green -and [bool](@($c6.Lines -match 'budget declaration is incomplete').Count)) "exit $($c6.Exit): $(Show-Tail $c6)"
+$c7 = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); BudgetFile = (Join-Path $scratch 'modules.empty.json') })
+Assert-That 'C. DECLARATION — and without -Strict the same leg is green, with the finding printed' ($c7.Exit -eq 0 -and $c7.Green -and [bool](@($c7.Lines -match 'declares no budget for it').Count)) "exit $($c7.Exit): $(Show-Tail $c7)"
 
 Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 
