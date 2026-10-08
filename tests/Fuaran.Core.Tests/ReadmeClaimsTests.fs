@@ -48,6 +48,7 @@ open System.IO
 open System.Text.Json
 open System.Text.RegularExpressions
 open Expecto
+open Fuaran.Core
 
 // ---- the surface index -----------------------------------------------------
 
@@ -317,6 +318,39 @@ let internal stampFaults (standing: string option) (ledger: string) (readme: str
             Some(sprintf "`%s` is stamped as arriving in %s, which no release-ledger entry header names" claim v)
         else
             None)
+
+/// Phase 400 - the stranger's-clone claims. What a first-time contributor reads in CONTRIBUTING.md and what
+/// a reporter reads in SECURITY.md are held to the files they describe: the prerequisites table names the
+/// corpus pin file and the configuration switch the launcher really has, and the nesting bound SECURITY.md
+/// states is the parser's own default. Faults are sentences; empty is green.
+let internal strangerClaimFaults
+    (contributing: string)
+    (security: string)
+    (verify: string)
+    (pinFile: string)
+    (defaultDepth: int)
+    : string list =
+    let has (needle: string) (doc: string) =
+        doc.Contains(needle, StringComparison.Ordinal)
+
+    [ if not (has (sprintf "`%s`" pinFile) contributing) then
+          yield sprintf "CONTRIBUTING.md does not name the corpus pin file `%s`" pinFile
+
+      if not (has "-Configuration Release" contributing) then
+          yield "CONTRIBUTING.md does not name the `-Configuration Release` switch"
+
+      if not (has "[ValidateSet('Debug', 'Release')]" verify) then
+          yield "verify.ps1 no longer takes -Configuration Debug|Release, which CONTRIBUTING.md documents"
+
+      for needle in [ "global.json"; "pwsh"; "full clone with tags"; "FSTAR_HOME" ] do
+          if not (has needle contributing) then
+              yield sprintf "CONTRIBUTING.md's prerequisites do not name `%s`" needle
+
+      if not (has (sprintf "`Json.defaultMaxDepth` (%d)" defaultDepth) security) then
+          yield
+              sprintf
+                  "SECURITY.md does not state the parser's default nesting bound as `Json.defaultMaxDepth` (%d)"
+                  defaultDepth ]
 
 let private repoRoot () : string =
     Path.GetDirectoryName(Snapshots.repoFile "Fuaran.Core.slnx")
@@ -1303,6 +1337,55 @@ let tests =
                   Expect.isEmpty
                       (dependencyFaults documented graph)
                       "README.md places each package over exactly its direct project references"
+          }
+
+          test "CONTRIBUTING.md and SECURITY.md state what the clone and the parser really do" {
+              let read name =
+                  File.ReadAllText(Snapshots.repoFile name)
+
+              let pinFile = "copies.json"
+
+              Expect.isTrue
+                  (File.Exists(Snapshots.repoFile pinFile))
+                  "the file CONTRIBUTING.md names as the corpus pin exists"
+
+              Expect.isEmpty
+                  (strangerClaimFaults
+                      (read "CONTRIBUTING.md")
+                      (read "SECURITY.md")
+                      (read "verify.ps1")
+                      pinFile
+                      Json.defaultMaxDepth)
+                  "the prerequisites and the nesting bound are the ones the repository has"
+          }
+
+          test "the stranger's-clone reader reds what drifted (go-red over synthetic input)" {
+              let contributing =
+                  "global.json pwsh full clone with tags FSTAR_HOME `copies.json` ./verify.ps1 -Configuration Release"
+
+              let security = "refuses past `Json.defaultMaxDepth` (512)"
+              let verify = "[ValidateSet('Debug', 'Release')]"
+
+              Expect.isEmpty
+                  (strangerClaimFaults contributing security verify "copies.json" 512)
+                  "the matching documents are green"
+
+              Expect.equal
+                  (strangerClaimFaults contributing security verify "copies.json" 256
+                   |> List.length)
+                  1
+                  "a changed default depth reds the SECURITY.md sentence"
+
+              Expect.equal
+                  (strangerClaimFaults (contributing.Replace("FSTAR_HOME", "")) security verify "copies.json" 512
+                   |> List.length)
+                  1
+                  "a prerequisite dropped from CONTRIBUTING.md is red"
+
+              Expect.equal
+                  (strangerClaimFaults contributing security "" "copies.json" 512 |> List.length)
+                  1
+                  "a launcher that lost the configuration switch is red"
           }
 
           test "the count readers red what drifted (go-red over synthetic input)" {

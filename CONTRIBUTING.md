@@ -7,7 +7,22 @@ is the whole design, not an accident.
 
 ## Building and testing
 
-Requirements: the .NET SDK pinned in [`global.json`](global.json).
+Prerequisites. The first three are needed by every contributor; the rest are needed only by the legs
+named beside them, and a leg whose prerequisite is absent is **skipped by name** in the Expecto summary
+(never silently passed), except where the table says it fails.
+
+| Prerequisite | Needed for | Without it |
+|---|---|---|
+| The .NET SDK pinned in [`global.json`](global.json) | everything | nothing builds |
+| PowerShell 7 (`pwsh`) | `run.ps1`, `verify.ps1`, `proofs/check.ps1` | the launchers do not run |
+| A **full clone with tags** (`git clone`, then `git fetch --tags` in a shallow or tag-less one; CI uses `fetch-depth: 0`) | the release-ledger and since-tag legs (`ReleaseRecord`, the STABILITY per-tag and draft-slot checks, the since-tag class report) | those legs skip with "this clone holds no `vX.Y.Z` tag" |
+| `git` on `PATH` | the working-copy line-ending and main-tree anchoring legs | those legs skip |
+| `node` on `PATH`, and `FUARAN_CORE_TSC` naming a TypeScript compiler | the executed TypeScript legs of the IDL suites (round trip, byte identity, type-check) | those legs skip |
+| The shared conformance corpus, **pinned** by [`copies.json`](copies.json) (`corpus.sha`) | the copy-freshness legs and the proof-oracle differentials that read the corpus's fixtures | unasked: the legs report NOT CHECKED or skip. Asked for (`FUARAN_CORE_CORPUS_FRESHNESS`, as CI does): an absent or off-pin corpus **fails** |
+| Windows or Linux, or a matching F\* release named by `FSTAR_HOME` (about 200 MB downloaded on the first `-Proofs` run into `proofs/.fstar/`) | `./verify.ps1 -Proofs` and `pwsh ./proofs/check.ps1` | not part of the default gate; macOS has no pinned prover and must set `FSTAR_HOME` |
+
+The skipped legs are counted and named on the gate's last line, so a green run says how much of the
+suite it did not read.
 
 ```powershell
 ./run.ps1        # restore tools, format, build, test, sample
@@ -22,11 +37,13 @@ A release is verified in `Release` and the packages are packed from that same ou
 surface and documentation checks read the assemblies that ship. CI runs both configurations; run
 `./verify.ps1 -Configuration Release` locally when a change could behave differently under the optimiser.
 
-Two of the suites certify against a conformance corpus that lives in a separate repository, and an
-absent corpus **fails** the gate rather than skipping it — a skipped comparison is indistinguishable
-from a passing one in a green report. [`docs/conformance-corpus.md`](docs/conformance-corpus.md) has
-the one-line clone command, the variable that names a clone kept elsewhere, and the documented
-opt-out.
+Two of the suites certify against a conformance corpus that lives in a separate repository, at the
+commit [`copies.json`](copies.json) pins (Phase 394; `docs/conformance-corpus.md`, "Bumping the pin").
+Where the corpus is not asked for and not present, the legs say NOT CHECKED or skip by name; once it is
+asked for, an absent corpus **fails** the gate rather than skipping it, because a skipped comparison is
+indistinguishable from a passing one in a green report.
+[`docs/conformance-corpus.md`](docs/conformance-corpus.md) has the one-line clone command and the
+variable that names a clone kept elsewhere.
 
 ## Regenerating a committed artefact
 

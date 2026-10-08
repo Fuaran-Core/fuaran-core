@@ -9,6 +9,10 @@
   speed. It runs inside the ordinary suite, so `verify.ps1` runs it on every gate. It fails when escape,
   render or parse stops being linear in its input.
 
+The harness project is in `Fuaran.Core.slnx`, so the gate BUILDS the whole program (a harness that drifts
+from the API it times fails the build, not a later run by hand) and never RUNS it; the by-hand run below is
+the only place it is timed.
+
 The two answer different questions. A phase that makes the wire layer faster or slower cites the
 harness tables before and after. The clock leg only catches the accidental quadratic.
 
