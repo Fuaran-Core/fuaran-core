@@ -43,7 +43,7 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `templates/Instance.fst.template` | The instantiation template (Phase 175): `../Skeleton.fst` with fourteen named holes. Drop the preamble, fill the holes, and the result is a domain's fold-confluence composite; the one obligation is `{{DIAMOND}}`, a proof of `independence_diamond` at the domain's own footprint and apply. Held to `../Skeleton.fst` byte for byte by the `Proofs.Kit` family, so the template and its first instance cannot drift apart. | copy and instantiate |
 | `extraction-post-pass.ps1` | **The extraction post-pass** (Phase 169): two functions, dot-sourced by the engine's EXTRACT stage, that re-indent a mutual type group's `and` to the column F\# expects and touch nothing else. See "The extraction post-pass" below. | copy verbatim |
 | `extraction-post-pass.tests.ps1` | Its go-red proof: four arms, two of which need the pinned prover and `dotnet` and are reported NOT RUN where either is absent. Also the machinery that answers the retirement condition. | copy verbatim |
-| `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Reports NOT RUN (exit 2) where there is no prover. | copy verbatim |
+| `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Its pin-resolution, mirror and oracle-guard arms (`R`, `M`, `I`) need no prover and run first; the rest report NOT RUN (exit 2) where there is no prover. | copy verbatim |
 | `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | copy verbatim |
 
 The rest of what an adopter needs is **not duplicated here**, deliberately, and lives where it is
@@ -263,6 +263,45 @@ so a later reader can tell a budget seeded on a quiet machine from one seeded on
 **provenance only** — the engine holds it to its shape and computes nothing from it, for the same
 reason the factor is never multiplied into a measurement. Absent reads as "not recorded", never as 1.
 
+## The oracle is independent of production (Phase 399)
+
+This is the paragraph an adopting repository copies into its own proofs README, unchanged but for
+the project name:
+
+> **The oracle cannot see production.** A differential test compares the extracted model with the
+> production code over the same inputs, and it is worth something only if the two sides are
+> independent. An oracle that referenced a production assembly, compiled a production source, or
+> opened a production namespace would pass every differential case by comparing production with
+> itself, and the claims ladder would still say "differentially tested". So after extraction and
+> before the host step, the leg refuses an oracle project that, as MSBuild evaluates it, carries any
+> `ProjectReference`, any `Reference`, a `PackageReference` other than `FSharp.Core`, or a `Compile`
+> item outside the oracle directory, and an oracle source that `open`s, abbreviates or qualifies a
+> name whose first segment is not `Prims`, an `FStar` module or one of the oracle's own modules (the
+> hand-written runtime floor may also name `System` and `Microsoft.FSharp`, which is what it defines
+> the primitives as). Each refusal names the file, the line and the text. Production is opened by
+> the test host alone.
+
+Why it is here. Chakraborty et al., *Towards Neural Synthesis for SMT-Assisted Proof-Oriented
+Programming* (ICSE 2025), name two ways a proof harness reports success falsely: an escape hatch
+(`admit`, `assume`), which this leg has always refused with `--report_assumes error`, and a definition
+that closes only because the original it was meant to reproduce is still in scope. Under F\* the
+second cannot happen, because no production F\# is in scope there. The differential half is where
+it can: the oracle project is compiled beside production, and before this guard nothing stopped an
+agent-written oracle from calling the function it was meant to model. No oracle here did. The guard
+makes that a checked claim rather than an observed one.
+
+How it reads. The project half evaluates the project (`dotnet msbuild -getItem`), so a reference
+inherited from a `Directory.Build.props` counts as much as one in the project file; it is what
+makes production unreachable. The source half is lexical: comments and string and character
+literals are blanked first, so a production name in prose or in a message is not a finding, and a
+lower-case first segment is a value's member access and is not judged. A name the source half
+refuses would not compile anyway once the project half holds; the source half exists to name the
+line that tried.
+
+`-GuardOnly` runs the guard alone and needs no prover. The `I` arms of `check-proof-leg.tests.ps1`
+plant each kind of breach in a scratch oracle and hold the refusal and the named line; the `Q` arms
+plant one inside a full leg and show it fails after extraction and before the host step.
+
 ## Adopting it
 
 1. **Copy `proofs/kit/` wholesale** into `<repo>/proofs/kit/`, and the three files above into
@@ -383,6 +422,33 @@ byte. An unrecognised value is refused rather than defaulted. A model's record i
 
 The sweep is warn-first and offline: it names a drifted copy and the command that regenerates it,
 and it never edits anything.
+
+**The pin's mirror (Phase 399).** An entry may carry a `mirror` beside its `url`: the same asset at a
+second address. The kit tries `url`, then `mirror`. A source that cannot serve the archive is
+reported and the next is tried. A source that serves bytes that do not match the entry's `sha256` is
+refused on the spot, naming the source and the pin's hash, and the other source is not tried: a
+mismatch is a replaced asset, not an outage. A mirror must name the pin's release and end in the
+entry's asset name, and the kit refuses one that does not. `file://` sources work too, so a mirror can
+be a file share. `-ResolveOnly` prints both sources in order; `-FetchOnly` fetches and verifies the
+archive and stops. In this repository the mirror is a `prover-fstar-<release>` release of the
+repository itself, never a `v*` tag, so attaching assets to it cannot fire a publish. A pin bump
+therefore has one more step: before the bump lands, download each new asset from upstream, check it
+against the sha256 you are about to commit, and attach it to a new mirror release:
+
+```powershell
+$release = 'v2026.09.06'                      # the pin's `fstar`
+gh release create "prover-fstar-$release" --repo <owner>/<repo> --target main --latest=false `
+    --title "Pinned F* $release (proof-leg mirror)" --notes "The proof leg's pinned prover, mirrored. See proofs/fstar-pin.json"
+gh release upload "prover-fstar-$release" --repo <owner>/<repo> <each downloaded, hash-checked asset>
+```
+
+**The run facts (Phase 399).** `-SummaryFile <path>` makes a GREEN leg write a JSON summary: the
+machine (`kind` = `ci` or `local`, a CI runner's name, the OS, the processor count and the memory;
+never a local host name, because callers commit what they record) and one `contention` entry per run
+(the pre-flight line, the factor or why none was computed, the threshold, and whether the run was
+contended). A red leg writes nothing. This repository's `check.ps1` copies it into the strict
+baseline it records, so the record says what kind of machine and what kind of afternoon stand behind
+an empty cone.
 
 ## What this kit does not solve
 

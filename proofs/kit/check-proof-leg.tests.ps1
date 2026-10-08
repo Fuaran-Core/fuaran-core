@@ -18,7 +18,9 @@
 #
 # FOUR ARMS (and, since Phase 309, three TWIN arms, F-H, since Phase 393 the PIN-RESOLUTION arms,
 # R, which need no prover and run first, and since Phase 402 the FLOOR-OS arms, O, and the CACHE
-# PROVENANCE arms, P). The first prover arm is the control that makes the other three mean something:
+# PROVENANCE arms, P; since Phase 399 the MIRROR arms, M, and the ORACLE-INDEPENDENCE arms, I, which
+# need no prover either, the GUARD-IN-THE-LEG arms, Q, and the RUN-FACTS arms, S). The first prover arm is the control that
+# makes the other three mean something:
 #
 #   A. GREEN CONTROL — a true model, no host step: exit 0 AND `proofs: green`. If this is red, the
 #                      scratch apparatus is broken and a red B–D would prove nothing.
@@ -26,7 +28,7 @@
 #   C. HOST RUN      — a host project that builds and cannot run the filter: exit non-zero, no green.
 #   D. CHECK         — a model with a type error: exit non-zero, no green.
 #
-# The R arms run anywhere. The rest need the pinned prover; where there is none it says NOT RUN
+# The R, M and I arms run anywhere. The rest need the pinned prover; where there is none it says NOT RUN
 # and exits 2 — never 0, because "nothing was checked" must not read as "everything held". `proofs/check.ps1` runs it after a
 # green leg, when the prover is by construction present.
 [CmdletBinding()]
@@ -128,6 +130,160 @@ $stale = New-ScratchPin 'stale.json' { param($p) $p.linux.asset = $p.linux.asset
 $r = Invoke-Resolve $stale 'linux'
 Assert-That "R. REFUSE — an entry naming a different release than the pin is refused" ($r.Exit -eq 2 -and $r.Text.Contains('different release')) "exit $($r.Exit): $($r.Text)"
 
+# The committed pin carries a MIRROR per OS (Phase 399), and -ResolveOnly names both sources in the
+# order they are tried.
+foreach ($os in 'windows', 'linux') {
+    $r = Invoke-Resolve $pinFile $os
+    $mirror = $committedPin.$os.mirror
+    Assert-That "R. MIRROR — the committed '$os' entry names a mirror, tried after its url" ($r.Exit -eq 0 -and $mirror -and $r.Text.Contains("2 source(s) in order: $($committedPin.$os.url) then $mirror")) "exit $($r.Exit): $($r.Text)"
+}
+$staleMirror = New-ScratchPin 'stale-mirror.json' { param($p) $p.linux.mirror = $p.linux.mirror.Replace($p.fstar, 'v2000.01.01') }
+$r = Invoke-Resolve $staleMirror 'linux'
+Assert-That 'R. REFUSE — a mirror naming a different release than the pin is refused' ($r.Exit -eq 2 -and $r.Text.Contains('its mirror is')) "exit $($r.Exit): $($r.Text)"
+$otherAsset = New-ScratchPin 'other-asset.json' { param($p) $p.linux.mirror = $p.linux.mirror -replace '[^/]+$', "other-$($p.fstar).zip" }
+$r = Invoke-Resolve $otherAsset 'linux'
+Assert-That 'R. REFUSE — a mirror serving a different asset than the entry is refused' ($r.Exit -eq 2 -and $r.Text.Contains('does not serve the pinned asset')) "exit $($r.Exit): $($r.Text)"
+
+# ---- M. THE MIRROR, FETCHED (Phase 399) -------------------------------------------------------------
+
+# -FetchOnly fetches the archive the way the download path does and stops. The archive here is a few
+# scratch bytes served from a file:// source; the unreachable source is a closed local port, so it
+# fails fast and for an availability reason. No prover and no network are needed.
+$fetchHome = Join-Path $WorkDir 'fetch'
+$served = Join-Path $WorkDir "served/$($committedPin.fstar)"
+New-Item -ItemType Directory -Force $fetchHome, $served | Out-Null
+$fetchOs = if ($hostOs -and $committedPin.$hostOs) { $hostOs } else { 'linux' }
+$fetchAsset = $committedPin.$fetchOs.asset
+$goodBytes = Join-Path $served $fetchAsset
+Set-Content -LiteralPath $goodBytes 'the pinned bytes' -NoNewline
+$goodHash = (Get-FileHash -Algorithm SHA256 $goodBytes).Hash.ToLowerInvariant()
+$badDir = Join-Path $WorkDir "replaced/$($committedPin.fstar)"
+New-Item -ItemType Directory -Force $badDir | Out-Null
+Set-Content -LiteralPath (Join-Path $badDir $fetchAsset) 'replaced bytes' -NoNewline
+$closed = "http://127.0.0.1:9/$($committedPin.fstar)/$fetchAsset"
+$closedMirror = "http://127.0.0.1:9/mirror/$($committedPin.fstar)/$fetchAsset"
+$goodUri = [Uri]::new($goodBytes).AbsoluteUri
+$badUri = [Uri]::new((Join-Path $badDir $fetchAsset)).AbsoluteUri
+
+function Invoke-Fetch([string] $url, [string] $mirror) {
+    $pinPath = New-ScratchPin 'fetch.json' { param($p) $p.$fetchOs.url = $url; $p.$fetchOs.mirror = $mirror; $p.$fetchOs.sha256 = $goodHash }
+    if (Test-Path (Join-Path $fetchHome '.fstar')) { Remove-Item (Join-Path $fetchHome '.fstar') -Recurse -Force }
+    Push-Location $WorkDir
+    try {
+        $global:LASTEXITCODE = 0
+        $lines = @(& $Kit -Modules Fetch -ProofsDir $fetchHome -PinFile $pinPath -Platform $fetchOs -FetchOnly *>&1 | ForEach-Object { [string]$_ })
+        $code = $global:LASTEXITCODE
+    }
+    catch { $lines = @($_.ToString()); $code = 1 }
+    finally { Pop-Location }
+    [pscustomobject]@{ Exit = $code; Text = ($lines -join ' '); Fetched = (Test-Path (Join-Path $fetchHome ".fstar/$fetchAsset")) }
+}
+
+$m = Invoke-Fetch $closed $goodUri
+Assert-That 'M. MIRROR — a url that cannot serve falls through to the mirror, which is fetched and verified' ($m.Exit -eq 0 -and $m.Fetched -and $m.Text.Contains("from $goodUri matches the pinned sha256")) "exit $($m.Exit): $($m.Text)"
+Assert-That 'M. MIRROR — and the url''s failure is reported, not swallowed' ($m.Text.Contains("$closed could not serve")) $m.Text
+
+$m = Invoke-Fetch $goodUri $closedMirror
+Assert-That 'M. ORDER — a url that serves is used, and the mirror is never asked' ($m.Exit -eq 0 -and $m.Fetched -and -not $m.Text.Contains($closedMirror)) "exit $($m.Exit): $($m.Text)"
+
+$m = Invoke-Fetch $closed $badUri
+Assert-That 'M. REFUSE — a mirror serving the wrong bytes is refused with the pin''s sha256, and nothing is left behind' ($m.Exit -ne 0 -and -not $m.Fetched -and $m.Text.Contains("pinned $goodHash") -and $m.Text.Contains($badUri)) "exit $($m.Exit): $($m.Text)"
+
+$m = Invoke-Fetch $badUri $goodUri
+Assert-That 'M. REFUSE — a url serving the wrong bytes is refused on the spot: the mirror is NOT tried' ($m.Exit -ne 0 -and -not $m.Fetched -and $m.Text.Contains("pinned $goodHash") -and -not $m.Text.Contains("from $goodUri")) "exit $($m.Exit): $($m.Text)"
+
+$m = Invoke-Fetch $closed $closedMirror
+Assert-That 'M. REFUSE — when no source can serve, the leg fails naming every source it tried' ($m.Exit -ne 0 -and -not $m.Fetched -and $m.Text.Contains('no source could serve') -and $m.Text.Contains($closedMirror)) "exit $($m.Exit): $($m.Text)"
+
+# ---- I. THE ORACLE IS INDEPENDENT OF PRODUCTION (Phase 399) ------------------------------------------
+
+# -GuardOnly runs the guard over a scratch oracle and stops. The CONTROL is an oracle shaped like a
+# real one — a runtime floor naming System, an extracted model naming Prims and its sibling module,
+# and production names in a comment, a string and beside a character literal — and it must hold.
+# Each plant below then breaks it in exactly one way, and must be refused naming the line.
+$guardRoot = Join-Path $WorkDir 'guard'
+$guardOracle = Join-Path $guardRoot 'oracle'
+
+function Reset-GuardOracle {
+    if (Test-Path $guardRoot) { Remove-Item $guardRoot -Recurse -Force }
+    New-Item -ItemType Directory -Force $guardOracle | Out-Null
+    Set-Content (Join-Path $guardOracle 'Prims.fs') "module Prims`n`ntype string = System.String`ntype list<'a> = Microsoft.FSharp.Collections.List<'a>`nlet strcat (a: string) (b: string) : string = a + b`n"
+    Set-Content (Join-Path $guardOracle 'LegModel.fs') @'
+module LegModel
+
+(* The production Fuaran.Core.Canon.render is what this models (* nested *) — named in prose only. *)
+// Fuaran.Core.Ops.apply, likewise.
+let label = Prims.strcat "Fuaran.Core.Canon." "render"
+let quote = '"'
+let x' = 1
+let quoted = @"Fuaran.Core.Verbatim ""still a string"""
+let twice (s: Prims.string) = LegSibling.dup s
+'@
+    Set-Content (Join-Path $guardOracle 'LegSibling.fs') "module LegSibling`n`nlet dup (s: Prims.string) = Prims.strcat s s`n"
+    Set-Content (Join-Path $guardOracle 'Oracle.fsproj') @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Prims.fs" />
+    <Compile Include="LegSibling.fs" />
+    <Compile Include="LegModel.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+</Project>
+'@
+}
+
+function Invoke-Guard {
+    Push-Location $WorkDir
+    try {
+        $global:LASTEXITCODE = 0
+        $lines = @(& $Kit -Modules LegModel, LegSibling -ProofsDir $guardRoot -PinFile $pinFile -GuardOnly *>&1 | ForEach-Object { [string]$_ })
+        $code = $global:LASTEXITCODE
+    }
+    catch { $lines = @($_.ToString()); $code = 1 }
+    finally { Pop-Location }
+    [pscustomobject]@{ Exit = $code; Lines = $lines; Text = ($lines -join ' ') }
+}
+
+function Edit-GuardFile([string] $name, [string] $find, [string] $replace) {
+    $path = Join-Path $guardOracle $name
+    $text = Get-Content -LiteralPath $path -Raw
+    if (-not $text.Contains($find)) { throw "the plant cannot find '$find' in $name" }
+    Set-Content -LiteralPath $path $text.Replace($find, $replace) -NoNewline
+}
+
+Reset-GuardOracle
+$i = Invoke-Guard
+Assert-That 'I. GUARD CONTROL — an independent oracle (production named only in prose and strings) holds: exit 0' ($i.Exit -eq 0 -and $i.Text.Contains('oracle independence — the oracle project and its 3 source file(s)')) "exit $($i.Exit): $($i.Text)"
+
+$plants = @(
+    @{ What = 'an extracted file that OPENS a production namespace'; File = 'LegModel.fs'; Find = "let x' = 1"; Replace = "open Fuaran.Core.Wire`nlet x' = 1"; Expect = "LegModel\.fs:7: names 'Fuaran'.*open Fuaran\.Core\.Wire" }
+    @{ What = 'an extracted file that QUALIFIES a production function'; File = 'LegModel.fs'; Find = 'LegSibling.dup s'; Replace = 'Fuaran.Core.Canon.render s'; Expect = "LegModel\.fs:9: names 'Fuaran'.*Fuaran\.Core\.Canon\.render" }
+    @{ What = 'an extracted file that abbreviates a production module'; File = 'LegModel.fs'; Find = "let x' = 1"; Replace = "module C = Fuaran.Core.Canon`nlet x' = 1"; Expect = "LegModel\.fs:7: names 'Fuaran'" }
+    @{ What = 'an extracted file reaching past every module with global.'; File = 'LegModel.fs'; Find = 'LegSibling.dup s'; Replace = 'global.Fuaran.Core.Canon.render s'; Expect = 'LegModel\.fs:9: `global\.`' }
+    @{ What = 'an EXTRACTED file naming System, which only the runtime floor may'; File = 'LegModel.fs'; Find = "let x' = 1"; Replace = "let x' = System.IO.File.ReadAllText ""p"""; Expect = "LegModel\.fs:7: names 'System'" }
+    @{ What = 'a ProjectReference in the oracle project'; File = 'Oracle.fsproj'; Find = '<PackageReference Include="FSharp.Core" />'; Replace = "<PackageReference Include=`"FSharp.Core`" />`n    <ProjectReference Include=`"../../src/Prod/Prod.fsproj`" />"; Expect = 'Oracle\.fsproj:\d+: a ProjectReference.*Prod\.fsproj' }
+    @{ What = 'a PackageReference other than FSharp.Core'; File = 'Oracle.fsproj'; Find = '<PackageReference Include="FSharp.Core" />'; Replace = "<PackageReference Include=`"FSharp.Core`" />`n    <PackageReference Include=`"Fuaran.Core.Wire`" />"; Expect = 'Oracle\.fsproj:\d+: a PackageReference other than FSharp\.Core' }
+    @{ What = 'production source compiled into the oracle'; File = 'Oracle.fsproj'; Find = '<Compile Include="LegModel.fs" />'; Replace = "<Compile Include=`"LegModel.fs`" />`n    <Compile Include=`"../../src/Canon.fs`" />"; Expect = 'Oracle\.fsproj:\d+: a Compile item outside the oracle directory' }
+)
+foreach ($plant in $plants) {
+    Reset-GuardOracle
+    Edit-GuardFile $plant.File $plant.Find $plant.Replace
+    $i = Invoke-Guard
+    $named = [bool](@($i.Lines -match $plant.Expect).Count)
+    Assert-That "I. GUARD — $($plant.What) is refused, naming the line" ($i.Exit -ne 0 -and $named -and $i.Text.Contains('NOT INDEPENDENT')) "exit $($i.Exit): $($i.Text)"
+}
+
+# A reference INHERITED from a Directory.Build.props above the oracle counts as much as one written in
+# the project: the guard reads the project as MSBuild evaluates it.
+Reset-GuardOracle
+Set-Content (Join-Path $guardRoot 'Directory.Build.props') "<Project>`n  <ItemGroup>`n    <PackageReference Include=`"Inherited.Production`" />`n  </ItemGroup>`n</Project>`n"
+$i = Invoke-Guard
+Assert-That 'I. GUARD — a PackageReference inherited from a Directory.Build.props is refused, naming that file' ($i.Exit -ne 0 -and [bool](@($i.Lines -match 'Directory\.Build\.props:3: a PackageReference other than FSharp\.Core').Count)) "exit $($i.Exit): $($i.Text)"
+Remove-Item $guardRoot -Recurse -Force -ErrorAction SilentlyContinue
+
 # The prover, resolved the way the leg resolves it, WITHOUT the leg's download: a test that fetched
 # a 100 MB release as a side effect would be a surprise, and `check.ps1` has already fetched it.
 $fstarHome = $null
@@ -136,10 +292,10 @@ elseif (Test-Path (Join-Path $ProofsDir '.fstar/fstar/bin/fstar.exe')) { $fstarH
 if (-not $fstarHome -or -not (Test-Path (Join-Path $fstarHome 'bin/fstar.exe'))) {
     Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
     if ($script:failures.Count -gt 0) {
-        Write-Host "==== leg-tests: RED — $($script:failures.Count) of $script:cases pin-resolution assertion(s) failed" -ForegroundColor Red
+        Write-Host "==== leg-tests: RED — $($script:failures.Count) of $script:cases prover-free assertion(s) failed" -ForegroundColor Red
         exit 1
     }
-    Write-Host "==== leg-tests: NOT RUN — no pinned prover ($script:cases pin-resolution assertions held; the prover arms need it). Set FSTAR_HOME to an F* $pinnedVersion release, or run ``pwsh ./proofs/check.ps1`` once to install it under proofs/.fstar/." -ForegroundColor Yellow
+    Write-Host "==== leg-tests: NOT RUN — no pinned prover ($script:cases prover-free assertions held: pin resolution, the mirror and the oracle guard; the prover arms need it). Set FSTAR_HOME to an F* $pinnedVersion release, or run ``pwsh ./proofs/check.ps1`` once to install it under proofs/.fstar/." -ForegroundColor Yellow
     exit 2
 }
 
@@ -297,6 +453,40 @@ Assert-That 'G. TWINS — and does not print proofs: green' (-not $g.Green) (Sho
 
 $h = Invoke-Leg ($base + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); Twins = $true })
 Assert-That 'H. TWINS — a -ProofOnly model needs no twins' ($h.Exit -eq 0) "exit $($h.Exit): $(Show-Tail $h)"
+
+# ---- Q. THE GUARD IN THE LEG (Phase 399) -------------------------------------------------------------
+
+# The guard runs AFTER extraction and BEFORE the host step. LegTwinned's oracle is the one arm F
+# extracted; a planted oracle file beside it that opens a production namespace must fail the leg at
+# the guard, naming the line — and the host step, here a project that does not exist, must never be
+# reached, or the arm would be red for arm B's reason instead.
+$planted = Join-Path $scratch 'oracle/Planted.fs'
+Set-Content $planted "module Planted`n`nopen Fuaran.Core.Canon`n`nlet shortcut x = render x`n"
+$q = Invoke-Leg ($base + @{
+        Modules = @('LegTwinned'); Twins = $true
+        HostProject = 'nosuch'; HostProjectFile = 'nosuch/NoSuchProject.fsproj'; HostFilters = $hostFilters
+    })
+Remove-Item $planted -Force
+Assert-That 'Q. GUARD — a planted oracle file that opens production fails the leg' ($q.Exit -ne 0 -and -not $q.Green) "exit $($q.Exit): $(Show-Tail $q)"
+Assert-That 'Q. GUARD — naming the file, the line and the text' ([bool](@($q.Lines -match 'Planted\.fs:3: .*open Fuaran\.Core\.Canon').Count)) (Show-Tail $q)
+Assert-That 'Q. GUARD — after extraction (the oracle diff ran) and before the host step (no host build was attempted)' (
+    [bool](@($q.Lines -match 'oracle/LegTwinned\.fs is byte-identical').Count) -and -not [bool](@($q.Lines -match 'the test project did not build').Count)) (Show-Tail $q)
+$q2 = Invoke-Leg ($base + @{ Modules = @('LegTwinned'); Twins = $true })
+Assert-That 'Q. GUARD CONTROL — the same leg without the plant is green, and says the guard held' ($q2.Exit -eq 0 -and $q2.Green -and [bool](@($q2.Lines -match 'oracle independence — the oracle project and its 1 source file').Count)) "exit $($q2.Exit): $(Show-Tail $q2)"
+
+# ---- S. THE RUN FACTS (Phase 399) -------------------------------------------------------------------
+
+# -SummaryFile is what a strict baseline records about its machine: a green leg writes the machine and
+# one contention entry per run, and a red leg writes nothing, so no record can describe a failed run.
+$factsPath = Join-Path $WorkDir 'run-facts.json'
+$twoRuns = $base.Clone(); $twoRuns.Runs = 2
+$s1 = Invoke-Leg ($twoRuns + @{ Modules = @('LegGood'); ProofOnly = @('LegGood'); SummaryFile = $factsPath })
+$facts = if (Test-Path $factsPath) { Get-Content $factsPath -Raw | ConvertFrom-Json } else { $null }
+Assert-That 'S. RUN FACTS — a green leg writes the machine and one contention entry per run' (
+    $s1.Exit -eq 0 -and $null -ne $facts -and $facts.machine.kind -and $facts.machine.os -and $facts.machine.processors -and @($facts.contention).Count -eq 2 -and @($facts.contention)[1].run -eq 2) "exit $($s1.Exit): $(if ($facts) { $facts | ConvertTo-Json -Compress -Depth 6 } else { 'no file' })"
+Remove-Item $factsPath -Force -ErrorAction SilentlyContinue
+$s2 = Invoke-Leg ($base + @{ Modules = @('LegBad'); ProofOnly = @('LegBad'); SummaryFile = $factsPath })
+Assert-That 'S. RUN FACTS — a red leg writes none' ($s2.Exit -ne 0 -and -not (Test-Path $factsPath)) "exit $($s2.Exit): $(Show-Tail $s2)"
 
 # ---- O. THE FLOORS' OS (Phase 402) -----------------------------------------------------------------
 

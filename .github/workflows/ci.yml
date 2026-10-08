@@ -98,6 +98,11 @@ jobs:
   # or a leg change that only works on one OS, is red here on the push that made it, not on the day
   # someone first needs the other runner. publish-packages.yml runs the same leg on the tagged
   # commit before it packs.
+  #
+  # Phase 399 — WITHOUT -Strict, on purpose: on a push a budget overshoot is a warning, because a
+  # busy runner is not a regression. proofs-strict.yml is the counterpart that can go red on cost —
+  # the same leg with -Strict, weekly and on demand, which also refreshes proofs/last-strict.json.
+  # The prover the cache below misses on is fetched from the pin's `url`, then from its `mirror`.
   proofs:
     name: proofs (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

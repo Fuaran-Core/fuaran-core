@@ -31,7 +31,9 @@
 #   -Modules <list>  name a cone by hand (`-Modules TreeOps,Skeleton`): exactly those modules.
 #   -PlanOnly        print what the kit would be handed, and stop before the prover runs.
 # And a green -Strict FULL run now records itself in proofs/last-strict.json (commit the file),
-# which is the baseline an empty cone leans on. The selector section below says how the cone is
+# which is the baseline an empty cone leans on. Since Phase 399 the record also carries the machine
+# the run was on and each run's contention factor, and .github/workflows/proofs-strict.yml makes
+# that run weekly and hands the refreshed record over as an artefact. The selector section below says how the cone is
 # computed and why each input puts a module in it.
 [CmdletBinding()]
 param(
@@ -472,6 +474,17 @@ if ($PlanOnly) {
     exit 0
 }
 
+# Phase 399 — a -Strict FULL run asks the kit for its run facts (the machine, each run's contention
+# factor), so the baseline it records says what kind of machine and what kind of afternoon stand
+# behind it. Outside the cone's work directory, which is removed before the record is written.
+$runFactsPath = $null
+if ($Strict -and $null -eq $selected) {
+    $runFactsPath = Join-Path $PSScriptRoot "obj/run-facts-$PID.json"
+    New-Item -ItemType Directory -Force (Split-Path $runFactsPath -Parent) | Out-Null
+    if (Test-Path $runFactsPath) { Remove-Item $runFactsPath -Force }
+    $legArgs.SummaryFile = $runFactsPath
+}
+
 if ($null -ne $coneBudget) {
     New-Item -ItemType Directory -Force $coneWork | Out-Null
     $coneBudget | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $legArgs.BudgetFile -Encoding utf8NoBOM
@@ -499,8 +512,11 @@ if ($refusalsExit -ne 0 -or -not $Strict -or $null -ne $selected) { exit $refusa
 # Phase 328 — a green -Strict FULL run records itself as the baseline an empty cone may lean on.
 # It never changes the verdict: the leg is green whatever the record says, and a record that could
 # not be written says why in yellow.
-$record = Invoke-ConeTool @('--record-strict', "$Runs") -Soft
+$recordArgs = @('--record-strict', "$Runs")
+if ($runFactsPath -and (Test-Path $runFactsPath)) { $recordArgs += @('--run-facts', $runFactsPath) }
+$record = Invoke-ConeTool $recordArgs -Soft
 Remove-ConeWork
+if ($runFactsPath -and (Test-Path $runFactsPath)) { Remove-Item $runFactsPath -Force }
 if ($null -ne $record) {
     if ($record.recorded) { Write-Host "==== proofs: $($record.message)" -ForegroundColor Green }
     else { Write-Host "==== proofs: strict baseline $($record.message)" -ForegroundColor Yellow }

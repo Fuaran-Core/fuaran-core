@@ -1070,6 +1070,7 @@ pwsh ./proofs/check.ps1            # check (once), re-extract + diff, run the or
 pwsh ./proofs/check.ps1 -Runs 3    # what CI runs
 pwsh ./proofs/check.ps1 -Extract   # after editing a model: rewrite its oracle/*.fs, then commit it
 pwsh ./proofs/check.ps1 -Strict    # turn a cost finding (below) from a warning into a red leg
+pwsh ./proofs/check.ps1 -Runs 3 -Strict   # what the weekly proofs-strict workflow runs; records the strict baseline
 pwsh ./proofs/check.ps1 -NoFloor   # do not enforce the per-module time floors (below)
 pwsh ./proofs/check.ps1 -CacheDir <dir>   # put the checked-module cache somewhere you name
 pwsh ./proofs/check.ps1 -Since origin/main  # only the module CONE that changed against a tree (below)
@@ -1100,6 +1101,21 @@ on that OS rather than quietly running the old prover there. A macOS machine has
 `FSTAR_HOME`. `pwsh ./proofs/kit/check-proof-leg.tests.ps1` holds the resolution (its `R` arms need
 no prover), and `-ResolveOnly [-Platform <os>]` on the kit prints the entry an OS would fetch. CI's
 `proofs` job runs on both a Windows and a Linux runner.
+
+**Where the prover comes from (Phase 399).** Each entry carries a second source, `mirror`: the same
+asset attached to this repository's `prover-fstar-<release>` release (a tag that never starts with
+`v`, so it cannot fire the publish workflow). The kit tries `url`, then `mirror`. A source that
+cannot serve the archive is reported and the next one is tried; the leg fails only when both have
+failed, and it names each source and why. A source that serves **different bytes** is refused on the
+spot, naming the source, the digest it served and the pin's sha256, and the other source is **not**
+tried: different bytes mean the asset was replaced, which is a finding about that source, not an
+outage to route around. Before this, the archive had one upstream source and CI cached it by the
+pin's hash, so a deleted upstream asset would have broken the leg only when the cache was evicted,
+with a message about a download rather than about the pin. The `M` arms of
+`kit/check-proof-leg.tests.ps1` hold the order and both refusals, with no prover and no network.
+**A pin bump attaches the new release's assets to a new `prover-fstar-<release>` release** in the
+same change that moves the pin (`kit/README.md`, "The pin moves in one place", has the commands);
+the kit refuses a mirror that names a different release than the pin.
 
 **Which run gates a publish (Phase 393).** The tag workflow (`.github/workflows/publish-packages.yml`)
 runs its own `proofs` job — `./proofs/check.ps1 -Runs 3`, step for step the ci job — on the tagged
@@ -1171,6 +1187,10 @@ verdict cannot move — `-PlanOnly` prints those arguments, and the family holds
 
 **An empty cone is green only over a recorded strict run.** A green `-Strict` *full* run writes
 `proofs/last-strict.json` — the tree it verified, and the run — and whoever ran it commits the file.
+Since Phase 399 the run includes the machine (a CI runner or a local machine, its OS, processor count
+and memory; never a local host name, since the file is committed) and each run's contention factor,
+and the green empty-cone line repeats them, so a reader can see what stands behind it. The weekly
+`proofs-strict` workflow (below) produces a fresh record as an artefact.
 An empty cone exits green only when that tree is an ancestor of HEAD **and** the cone against it is
 empty too, so an empty cone against some later tree cannot lean on a baseline that predates a change
 nobody verified. Otherwise the leg says it has **no strict baseline** and exits 1. The record is
@@ -1399,6 +1419,15 @@ cannot leave a budget behind pretending to measure something. The entry's SHAPE 
 here that IS a failure: a missing or duplicate module name, or a `budgetSeconds` that is not a
 positive number, fails the leg with the entry named, because a file in that state cannot be read as
 a budget at all.
+
+**The strict run is scheduled (Phase 399).** CI's `proofs` job does not pass `-Strict`, so on a push
+an overshoot is only ever a warning, and a real regression could stay a warning forever. The
+`proofs-strict` workflow (`.github/workflows/proofs-strict.yml`) runs `check.ps1 -Runs 3 -Strict` on
+a Windows runner every Monday and on demand, never on a push or a tag. A **red** run is a named
+`COST` finding against `modules.json`, and the job summary lists each one: the remedy is the
+re-seeding act in the next paragraph, once a quiet re-measurement confirms the module really grew. A **green** run records the strict
+baseline and uploads it as the `strict-baseline` artefact. The workflow commits nothing; a
+maintainer commits the file when `-Since` should lean on that run.
 
 **Bumping a budget is a deliberate, recorded act.** Time the module on a cold, otherwise-quiet run,
 then edit that module's entry: the new `budgetSeconds`, the `measuredSeconds` it was seeded from,
