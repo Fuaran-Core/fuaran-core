@@ -38,7 +38,8 @@
 #               in the cache may appear, change or vanish, and a module's own `.checked` file may
 #               not be in the cache before its cold check starts. Either is a refusal naming the
 #               files — the 2026-09-14 incident (another run's `.checked` files found by this one)
-#               is exactly both.
+#               is exactly both. A file's state is its length and the hash of its bytes, never its
+#               timestamp.
 #               The cache the cold runs use is PER INVOCATION (<WorkDir>/cache-<pid>, or
 #               -CacheDir), created and removed by this script, so that "cold cache" cannot be
 #               quietly falsified by another run in the same worktree. See "Running it" in the
@@ -197,6 +198,12 @@ param(
     [switch] $NoFloor,
     [string] $CacheDir,
     [int]    $Runs = 1,
+    # Phase 402 — THE KIT'S OWN TEST SEAM, and nothing else: a script block run after each prover
+    # invocation, once its cache state is recorded and before the next one is checked against it —
+    # exactly where a second writer would act. It is called with the module, the run and the cache
+    # directory. `check-proof-leg.tests.ps1` plants its second writer here, synchronously, so the
+    # refusal it asserts cannot depend on scheduling. A caller that names nothing is unaffected.
+    [scriptblock] $AfterInvocation,
     # Phase 393 — the OS whose pin entry is resolved; defaults to the host's. Naming another OS is
     # only meaningful with -ResolveOnly: a prover built for one OS does not run on another.
     [ValidateSet('windows', 'linux', 'macos')][string] $Platform,
@@ -876,8 +883,11 @@ elseif (-not $floorsApplyHere) {
 # state is RECORDED after each invocation and must be found unchanged before the next; and the pinned
 # prover writes a module's `.checked` file only when it checks that module itself — never for a
 # dependency it checks on the way, measured 2026-10-07 and held by the kit tests' P arms — so a
-# module's own file cannot legitimately be there before its cold check. A file's state is its length and last write time — enough to see a write,
-# and nothing that costs a read of its bytes. What it cannot see is a writer active only DURING one
+# module's own file cannot legitimately be there before its cold check. A file's state is its length
+# and the SHA-256 of its bytes, NOT its last write time: a timestamp is as coarse as the filesystem
+# keeps it and can be set back by whoever wrote the file, so a same-size rewrite inside one clock tick,
+# or one that restored the old time, would read as unchanged. The bytes cannot. The cost is one read
+# of the cache per invocation, which is small beside the prover's. What it cannot see is a writer active only DURING one
 # invocation and silent after it, whose files the next record takes as this run's own; that is the
 # window the floor still backstops where one is enforced, and a writer whose files include a model
 # not yet checked is caught anyway, by that model's own `.checked` file.
@@ -885,7 +895,7 @@ function Get-CacheState([string] $dir) {
     $state = @{}
     if (Test-Path $dir) {
         foreach ($f in Get-ChildItem $dir -File -Recurse -Force) {
-            $state[[System.IO.Path]::GetRelativePath($dir, $f.FullName)] = "$($f.Length):$($f.LastWriteTimeUtc.Ticks)"
+            $state[[System.IO.Path]::GetRelativePath($dir, $f.FullName)] = "$($f.Length):$((Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash)"
         }
     }
     $state
@@ -950,6 +960,7 @@ for ($run = 1; $run -le $Runs; $run++) {
             $sw.Stop()
             # Whatever this invocation wrote — verified, refuted or aborted — is this run's own.
             $cacheState = Get-CacheState $cache
+            if ($AfterInvocation) { & $AfterInvocation $module $run $cache }
             $seconds = [int]$sw.Elapsed.TotalSeconds
 
             if ($checked.ExitCode -ne 0) {

@@ -354,34 +354,50 @@ Assert-That 'P. PROVENANCE CONTROL — a dependency checked before its dependent
 $p1 = Invoke-Leg ($provenance + @{ Modules = @('LegUses', 'LegGood'); ProofOnly = @('LegUses', 'LegGood') })
 Assert-That 'P. PROVENANCE CONTROL — a dependent checked before its dependency leaves the dependency cold: exit 0 and green' ($p1.Exit -eq 0 -and $p1.Green) "exit $($p1.Exit): $(Show-Tail $p1)"
 
-# A SECOND WRITER: another runspace forges LegThird's `.checked` file into the cache the moment
-# LegGood's appears, which is a whole LegFailsName check before LegThird's turn.
-$pcache = Join-Path $WorkDir 'pcache'
-$writer = [powershell]::Create()
-$null = $writer.AddScript({
-        param($dir)
-        $deadline = [DateTime]::UtcNow.AddMinutes(5)
-        while ([DateTime]::UtcNow -lt $deadline) {
-            if (Test-Path (Join-Path $dir 'LegGood.fst.checked')) {
-                Set-Content (Join-Path $dir 'LegThird.fst.checked') 'forged by a second writer'
-                return
-            }
-            Start-Sleep -Milliseconds 20
+# A SECOND WRITER, planted SYNCHRONOUSLY through the leg's -AfterInvocation seam: after LegGood's
+# invocation, at the one point between invocations where a foreign writer acts. Until Phase 402's
+# rework this was a concurrent runspace polling for LegGood's `.checked` file; on a Linux runner,
+# where these models check in well under a second, it could start after the leg had already reached
+# LegThird, and the arm read green on some runs. Nothing here depends on scheduling now: the plant
+# runs on the leg's own thread, before the leg reads the cache again.
+
+# 1. A file APPEARS — LegThird's own `.checked`, before LegThird's turn.
+$p2 = Invoke-Leg ($provenance + @{
+        Modules = @('LegGood', 'LegFailsName', 'LegThird'); ProofOnly = @('LegGood', 'LegFailsName', 'LegThird')
+        AfterInvocation = {
+            param($module, $run, $cacheDir)
+            if ($module -eq 'LegGood') { Set-Content (Join-Path $cacheDir 'LegThird.fst.checked') 'forged by a second writer' }
         }
-    }).AddArgument($pcache)
-$writerRun = $writer.BeginInvoke()
-try {
-    $p2 = Invoke-Leg ($provenance + @{
-            Modules = @('LegGood', 'LegFailsName', 'LegThird'); ProofOnly = @('LegGood', 'LegFailsName', 'LegThird'); CacheDir = $pcache
-        })
-}
-finally {
-    $writer.Stop()
-    $writer.Dispose()
-}
-Assert-That 'P. SECOND WRITER — a file another process wrote into the cache is refused' ($p2.Exit -ne 0 -and -not $p2.Green) "exit $($p2.Exit): $(Show-Tail $p2)"
-Assert-That 'P. SECOND WRITER — before LegThird is checked, and naming what it found' ([bool](@($p2.Lines -match 'SECOND WRITER.*LegThird\.fst\.checked appeared|LegThird\.fst is NOT about to be checked cold').Count)) (Show-Tail $p2)
-Assert-That 'P. SECOND WRITER — and prints no LegThird.fst verified line' (-not [bool](@($p2.Lines -match 'LegThird\.fst verified').Count)) (Show-Tail $p2)
+    })
+Assert-That 'P. SECOND WRITER — a file another writer put in the cache is refused' ($p2.Exit -ne 0 -and -not $p2.Green) "exit $($p2.Exit): $(Show-Tail $p2)"
+Assert-That 'P. SECOND WRITER — before the next module is checked, naming the file' ([bool](@($p2.Lines -match 'SECOND WRITER.*before LegFailsName\.fst.*LegThird\.fst\.checked appeared').Count)) (Show-Tail $p2)
+Assert-That 'P. SECOND WRITER — and prints no LegFailsName.fst or LegThird.fst verified line' (-not [bool](@($p2.Lines -match '(LegFailsName|LegThird)\.fst verified').Count)) (Show-Tail $p2)
+
+# 2. A file is REWRITTEN with the same length and its old timestamp restored — invisible to any
+# check that reads the clock, which is why the state is the bytes' hash.
+$p3 = Invoke-Leg ($provenance + @{
+        Modules = @('LegGood', 'LegFailsName'); ProofOnly = @('LegGood', 'LegFailsName')
+        AfterInvocation = {
+            param($module, $run, $cacheDir)
+            if ($module -eq 'LegGood') {
+                $path = Join-Path $cacheDir 'LegGood.fst.checked'
+                $stamp = (Get-Item -LiteralPath $path).LastWriteTimeUtc
+                $bytes = [System.IO.File]::ReadAllBytes($path)
+                $bytes[$bytes.Length - 1] = $bytes[$bytes.Length - 1] -bxor 0xFF
+                [System.IO.File]::WriteAllBytes($path, $bytes)
+                (Get-Item -LiteralPath $path).LastWriteTimeUtc = $stamp
+            }
+        }
+    })
+Assert-That 'P. SECOND WRITER — a same-length rewrite with its timestamp restored is refused' ($p3.Exit -ne 0 -and -not $p3.Green) "exit $($p3.Exit): $(Show-Tail $p3)"
+Assert-That 'P. SECOND WRITER — naming the rewritten file' ([bool](@($p3.Lines -match 'SECOND WRITER.*LegGood\.fst\.checked was rewritten').Count)) (Show-Tail $p3)
+
+# 3. The seam itself changes nothing: a plant that writes nothing leaves the leg green.
+$p4 = Invoke-Leg ($provenance + @{
+        Modules = @('LegGood', 'LegFailsName'); ProofOnly = @('LegGood', 'LegFailsName')
+        AfterInvocation = { param($module, $run, $cacheDir) }
+    })
+Assert-That 'P. SEAM CONTROL — an -AfterInvocation that writes nothing leaves the leg green' ($p4.Exit -eq 0 -and $p4.Green) "exit $($p4.Exit): $(Show-Tail $p4)"
 
 Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 
