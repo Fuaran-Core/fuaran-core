@@ -2451,7 +2451,24 @@ own doc comment. Emptying the default would have changed what already-published 
 every host that reads them, with a green build. [`DECISIONS.md`](DECISIONS.md) D40 carries the full
 measurement, the compat promise, and the migration route if the flip is ever wanted.
 
-## 0.36.0 — DRAFT
+## 0.36.0 — released 2026-10-08 as `v0.36.0`
+
+**Release record — the receiving gate: GREEN, both legs, against the candidate; tagged `v0.36.0` at
+the commit that turns this heading.** On 2026-10-08 the conformance corpus was re-emitted from
+`1848f7c` (`--emit-laws` and `--emit-apply`) and nothing moved: the slot's re-stamp had already
+landed. The candidate was packed from the clean tree at `1848f7c` (the 18 packable projects, version
+`0.36.0`, into a folder) and the downstream host's Fable gate was run against it in its cut-time mode
+(`tests/core-fable/core-fable.ps1 -CoreVersion 0.36.0 -CoreFeed <folder>`), a Core-only cut with the
+compute packages skipped. The first run FAILED at the compile leg on three source moves this draft
+records: `Query` gained `Where` (`FS0764` at a full literal, Phase 398), `Sample.sampleNodes` is gone
+(Phase 384), and `laneFoldLaws` is deprecated for `laneFoldLawsAt` (Phase 390). The host adapted its
+smoke program to the candidate. The second run was green: the compile leg transpiled the 16
+Fable-facing packages at `0.36.0` (the two build-time packages excluded by name), and the value leg
+compared 426 of 426 `ParityVectors` rows byte-identical between .NET and node.
+
+**Receiving gate run:** `fuaran-dotnet` at `38ee204`, `core-fable.ps1 -CoreVersion 0.36.0 -CoreFeed
+<folder>`; compile leg 16 packages green; value leg 426/426 vectors byte-identical. (Nothing under
+`src/` moved after the candidate was packed, so the packed surfaces are the released ones.)
 
 ### Seven defects on the untrusted and gated paths, each pinned by a go-red plant (Phase 383) — BREAKING-SOURCE: `CapabilityLookup` gains `Policy` (`record-widening`) and `PipelineEvalError` gains `EvalPolicyRefused` (`union-widening`); the rest `additive`; the wire `none`
 
