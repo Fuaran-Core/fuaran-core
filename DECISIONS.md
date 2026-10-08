@@ -1,5 +1,84 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D137: the surface marks a static member of a type with a ` (static)` suffix outside its identity, so an instance/static flip is one `retype`; a module's members carry no marker
+
+**Recorded by Phase 408. `tests/Fuaran.Core.Tests/PublicSurfaceTests.fs`, `api/Fuaran.Core.Idl.txt`
+and `api/Fuaran.Core.Idl.Codegen.txt`; no package source moves.**
+
+*The defect.* IL leaves `this` out of a method's signature, so `member x.M(a)` and
+`static member M(a)` rendered the same `method` token. Turning one into the other changes every call
+site, and the surface family read it as `unchanged`. It is the member-level twin of the blindness
+D134 removed at the type level, and it had to close before the `1.0.0` baselines freeze and Phase 391
+reshapes surfaces on that slot.
+
+*Decided: a suffix, ` (static)`, on a static method, property or non-literal field of a type.* The
+precedent is the field's ` (literal)`. A suffix and not a prefix, because `identity` cuts a token at
+its signature: the marker lies outside it, so a flip on a member both sides publish pairs into one
+`retype` through the existing pairing step, with no new rule in the classifier. A prefix, or a new
+token kind, would have changed the identity and split the flip into a `removal` beside an
+`additive`. Both classes are breaking, but the pair misnames the move. The report recognises a
+flip — a `retype` whose two tokens differ by the marker alone — and prints its direction and what it
+costs a caller. A property is static when its visible accessors are, since IL carries the flag on
+the accessor methods. The baseline readers that parse member tokens (`PackageDocsTests`'
+documentation ids, `ProofCoverageTests`' census, `ReadmeClaimsTests`' declared names) all stop at
+the signature or the return type, so the suffix is invisible to them, and the full suite says so.
+
+*Decided: a module's members carry no marker.* F# cannot declare an instance member in a module.
+Every module function and value is static by construction, and the `type … (module)` line already
+records that. A marker there would write one fact on most lines of every baseline, and it could
+never move unless the module itself became a type, which the `type` line reports. The cost is one
+rule in the renderer (`staticMarkerOf` reads the owner's rendered kind), and the format test pins
+it.
+
+*Decided: `CompilationRepresentation(Static | Instance | UseNullAsTrueValue)` stays refused (D134),
+for a sharper reason.* Each moves a member between instance and static in IL WITHOUT moving its F#
+call syntax. The marker reads IL, so it would report a flip no F# caller sees. The refusal keeps
+that case from ever being drawn wrongly.
+
+*Measured, not assumed.* The shard expected the regeneration to move the `Wire`, `Function` and
+`Conformance` baselines. It moved neither of those. It moved `Fuaran.Core.Idl` (`WireShape.Default`,
+`HardenPolicy.Undeclared`, `Annotations.Empty`) and `Fuaran.Core.Idl.Codegen` (`Gen.GenSupport.Empty`,
+`SupportDocument.Empty`), five lines, each gaining the marker and nothing else. With the marker
+stripped, both files are byte-identical to their predecessors. These five are every `static member`
+in `src/`, and the same five were static at `v0.36.0`. So the since-tag report's stripped comparison
+against that tag, which prints a note as Phases 237 and 406 do, hides no flip. The strip applies
+only to a tag none of whose baselines carries the marker, and it expires at the first tag cut after
+this phase.
+
+## 2026-10-08 — D136: the failure families are written down; `ResolveFault` keeps its name, `SampleRefusal` is ruled `SampleFault`
+
+**Recorded by Phase 389. `STABILITY.md` ("Vocabulary"); the `1.0.0` slot
+(`docs/releases/1.0.0.md`). No public type, member or wire byte moves in this phase.**
+
+*Decided: seven suffixes, one question each.* `…Rejection` (the algebra or the domain refuses a
+well-formed request against the state it meets), `…Break` (stored or received evidence does not
+verify), `…Fault` (an operation ran over the material it was given and could not complete, and says
+where it stopped), `…Error` (the call itself is refused: its input does not parse, or names what the
+seam does not hold), `…Failure` (a composite flow's outcome, wrapping the others), `…Denial` (a
+policy said no) and `Defect` (a finding reported beside an answer). The split was already the
+code's; the 2026-10-07 design review found it written nowhere, and a vocabulary nobody wrote down
+is the one the next package invents an eighth suffix beside. The contract now states it, with the
+three exception postures and the capability-argument order, so a new type is placed by rule.
+
+*Decided: `ResolveFault` is a fault, and keeps its name.* The review read it as a misfit beside
+the replay and snapshot faults and suggested `ResolveError`. Measured against the rule it is not a
+misfit: it is the host resolver's report that its fetch could not complete (a source missing, a
+time-out, a failure, a predicate or order it cannot honour), and the dispatcher translates it into
+the caller-facing `QueryError`, as every other fault is translated at its boundary. Renamed
+`ResolveError`, one dispatch would carry two `…Error` unions, host-facing and caller-facing, with
+nothing in the vocabulary to tell them apart. So no `retype` is filed for it on the `1.0.0` slot.
+
+*Decided: `Idl.Sample.SampleRefusal` is renamed `SampleFault` on the `1.0.0` slot.* It is the one
+public failure type outside the seven suffixes, and by the rule it is a fault: the sampler could not
+complete on the vocabulary it was given, and the value names the slot where it stopped. The rename
+is a `retype` of `Fuaran.Core.Idl`'s surface and is free only on this slot. It is not carried by
+this phase, whose work moves no `api/` line; the slot's ledger records the ruling as owed, so the
+release cannot close over it unnoticed.
+
+*Rejected: renaming every type to one suffix per package.* The suffix answers what went wrong,
+not where; a package that both refuses a request and fails an operation carries both, as the query
+seam does.
+
 ## 2026-10-08 — D135: a value space has ONE reader spelling at `1.0.0` — the descriptor read D133 kept leaves, model and oracle with it (amends D133)
 
 **Recorded by Phase 405. `Fuaran.Core.Function` (`SpaceCodec.decoder`), `proofs/Capability.fst` and

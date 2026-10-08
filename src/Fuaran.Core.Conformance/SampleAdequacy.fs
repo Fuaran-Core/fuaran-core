@@ -55,11 +55,11 @@ module SampleAdequacy =
     /// parsing law prose: the guard writes the opening, so the guard can recognise it.
     ///
     /// The recognition is on the OPENING and not on the whole `sample adequacy (<family>): `
-    /// prefix, because a delegating family emits its delegate's name — `columnarOpLaws` runs
-    /// `columnarOpLawsWith`, `IncrementalDelta.laws` runs `lawsWith`, `snapshotLaws` runs
-    /// `snapshotLawsWith` — and that guard is still the caller's own verdict, which is exactly
-    /// what the census's "(delegates to …)" rows already say. Keying on the name would read those
-    /// as subject laws and lose the starvation they report.
+    /// prefix, because a delegating family emits its delegate's name — `snapshotLaws` runs
+    /// `snapshotLawsWith`, as the compute repository's columnar and incremental families run theirs —
+    /// and that guard is still the caller's own verdict, which is exactly what the census's "(delegates
+    /// to …)" rows already say. Keying on the name would read those as subject laws and lose the
+    /// starvation they report.
     [<Literal>]
     let guardOpening = "sample adequacy ("
 
@@ -302,7 +302,7 @@ module SampleAdequacy =
                 && (match r.Counterexample with
                     | Some cx -> hasPrefix neverReached cx
                     | None -> false))
-            |> List.map (fun r -> r.Law)
+            |> List.map _.Law
 
         let guardStarved =
             match klass with

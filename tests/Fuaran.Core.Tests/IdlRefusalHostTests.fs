@@ -339,11 +339,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
         // the document ill-formed UTF-16 rather than truncated JSON.
         let cut = rng.Next(1, bytes.Length)
 
-        let cut =
-            if Char.IsHighSurrogate bytes.[cut - 1] then
-                cut - 1
-            else
-                cut
+        let cut = if Char.IsHighSurrogate bytes[cut - 1] then cut - 1 else cut
 
         Some(bytes.Substring(0, max 1 cut))
     | 1 -> Some(bytes.Replace("{", "{\"__n\":null,"))
@@ -370,7 +366,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
             else
                 spots
 
-        let path, value = candidates.[rng.Next candidates.Length]
+        let path, value = candidates[rng.Next candidates.Length]
 
         match draw, value, List.rev path with
         // Phase 347 — a whole number written as a FLOAT token: an int slot refuses `7.0` and `7e0`
@@ -386,7 +382,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
                 replacements |> List.filter (fun r -> kindOf r <> kindOf value) |> List.toArray
 
             let mine = Canon.render value
-            let other = Canon.render others.[rng.Next others.Length]
+            let other = Canon.render others[rng.Next others.Length]
             let key = Canon.render (JStr k)
 
             Some(
@@ -401,7 +397,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
         // Phase 347 — a member renamed `__proto__`: a map entry like any other, a record's
         // undeclared member.
         | 5, JObj fields, _ when not fields.IsEmpty ->
-            let name, _ = fields.[rng.Next fields.Length]
+            let name, _ = fields[rng.Next fields.Length]
 
             if List.contains name verbatim then
                 None
@@ -422,7 +418,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
                 match rng.Next 3, value with
                 // Delete a member of an object.
                 | 0, JObj fields when not fields.IsEmpty ->
-                    let name, _ = fields.[rng.Next fields.Length]
+                    let name, _ = fields[rng.Next fields.Length]
 
                     if List.contains name verbatim then
                         None
@@ -436,7 +432,7 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
                     let others =
                         replacements |> List.filter (fun r -> kindOf r <> kindOf value) |> List.toArray
 
-                    Some(edit path (fun _ -> Some others.[rng.Next others.Length]) doc)
+                    Some(edit path (fun _ -> Some others[rng.Next others.Length]) doc)
 
             mutated |> Option.map Canon.render
 
@@ -457,7 +453,7 @@ let private mutationsOf (c: Certified) (count: int) : string list =
 
     seq {
         while true do
-            yield mutate rng c.Verbatim valid.[rng.Next valid.Length]
+            yield mutate rng c.Verbatim valid[rng.Next valid.Length]
     }
     |> Seq.choose id
     |> Seq.truncate count

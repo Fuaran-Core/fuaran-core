@@ -12,7 +12,7 @@ open Fuaran.Core.Tests.Reference.Counter
 let private sw = witness
 let private h = OpStream.defaultHash
 
-let private nodeIds (ns: DagNode<'Op> list) = ns |> List.map (fun n -> n.Id)
+let private nodeIds (ns: DagNode<'Op> list) = ns |> List.map _.Id
 
 /// genesis g; a and b fork off g; c extends a; m merges c and b.
 let private forkMerge () =
@@ -77,16 +77,16 @@ module Measure =
                 let other = (lane + 1 + rng.Next(lanes - 1)) % lanes
 
                 let id, r' =
-                    take (Dag.mergeIndexed hash sw (actor lane) (Inc count) heads.[lane] heads.[other] reach)
+                    take (Dag.mergeIndexed hash sw (actor lane) (Inc count) heads[lane] heads[other] reach)
 
-                heads.[lane] <- id
+                heads[lane] <- id
                 reach <- r'
                 mergesDone <- mergesDone + 1
             else
                 let id, r' =
-                    take (Dag.appendIndexed hash sw (actor lane) (Inc(1 + count % 7)) heads.[lane] reach)
+                    take (Dag.appendIndexed hash sw (actor lane) (Inc(1 + count % 7)) heads[lane] reach)
 
-                heads.[lane] <- id
+                heads[lane] <- id
                 reach <- r'
 
             count <- count + 1
@@ -100,7 +100,7 @@ module Measure =
         let mutable made = 0
 
         while made < n && sw.Elapsed < budget do
-            f args.[made] |> ignore
+            f args[made] |> ignore
             made <- made + 1
 
         made, sw.Elapsed.TotalMilliseconds * 1000.0 / float (max 1 made)
@@ -125,17 +125,17 @@ module Measure =
         let rng = Random(2890)
 
         let pairs =
-            Array.init queries (fun _ -> ids.[rng.Next ids.Length], ids.[rng.Next ids.Length])
+            Array.init queries (fun _ -> ids[rng.Next ids.Length], ids[rng.Next ids.Length])
 
         let heads = List.toArray laneHeads
 
         let headPairs =
-            Array.init queries (fun _ -> heads.[rng.Next heads.Length], heads.[rng.Next heads.Length])
+            Array.init queries (fun _ -> heads[rng.Next heads.Length], heads[rng.Next heads.Length])
 
         let row (name: string) (args: 'a array) (indexed: 'a -> 'b) (unindexed: 'a -> 'b) =
             // agreement on the first calls, so the numbers compare the same answers
             for i in 0..2 do
-                if indexed args.[i] <> unindexed args.[i] then
+                if indexed args[i] <> unindexed args[i] then
                     failwithf "%s: the index and the unindexed function disagree at call %d" name i
 
             let ni, ti = time budget queries args indexed
@@ -242,7 +242,7 @@ module Measure =
         report (
             row
                 "between (base, lane head)"
-                (Array.init queries (fun i -> fst pairs.[i], snd headPairs.[i]))
+                (Array.init queries (fun i -> fst pairs[i], snd headPairs[i]))
                 (fun (b, x) -> Dag.Reach.between reach b x |> nodeIds)
                 (fun (b, x) -> Dag.between dag b x |> nodeIds)
         )
@@ -369,7 +369,7 @@ let tests =
           testCase "a cyclic load and a dangling parent are answered as the unindexed functions answer"
           <| fun _ ->
               let g, a, _, _, m, dag = forkMerge ()
-              let template = dag.Nodes.[g]
+              let template = dag.Nodes[g]
 
               let forged: Dag.T<CounterOp> =
                   [ "cx", [ "cy"; a ]

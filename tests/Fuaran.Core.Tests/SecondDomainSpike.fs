@@ -200,12 +200,10 @@ let docIdl: Idl =
           KeyOrder = KeyOrder.Declared }
       Harden = HardenPolicy.Undeclared }
 
-let private nodeTags = docIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
+let private nodeTags = docIdl.Kinds |> List.map _.Tag |> Set.ofList
 
 let private runTags =
-    docIdl.Unions
-    |> List.collect (fun u -> u.Cases |> List.map (fun c -> c.Tag))
-    |> Set.ofList
+    docIdl.Unions |> List.collect (fun u -> u.Cases |> List.map _.Tag) |> Set.ofList
 
 let private declaredTags = Set.union nodeTags runTags
 
@@ -513,12 +511,12 @@ let tests =
               Expect.isEmpty (Declare.wireShapeErrors docIdl) "the declared wire shape is well-formed"
 
               Expect.equal
-                  (List.length (List.distinct (docIdl.Kinds |> List.map (fun k -> k.Tag))))
+                  (List.length (List.distinct (docIdl.Kinds |> List.map _.Tag)))
                   (List.length docIdl.Kinds)
                   "kind tags are distinct"
 
-              let enumNames = docIdl.Enums |> List.map (fun e -> e.Name) |> Set.ofList
-              let unionNames = docIdl.Unions |> List.map (fun u -> u.Name) |> Set.ofList
+              let enumNames = docIdl.Enums |> List.map _.Name |> Set.ofList
+              let unionNames = docIdl.Unions |> List.map _.Name |> Set.ofList
 
               let rec referenced t =
                   match t with
@@ -714,7 +712,7 @@ let tests =
                           Gen.GenSupport.Empty
                           "Fuaran.Core.Tests.DocGenerated"
                           docIdl
-                          (docIdl.Kinds |> List.map (fun k -> k.Tag))
+                          (docIdl.Kinds |> List.map _.Tag)
                   with
                   | Ok s -> s
                   | Error e -> failtestf "codegen rejected the second vocabulary: %A" e
@@ -770,7 +768,7 @@ let tests =
               | Error e -> failtestf "corpus: %s" e
               | Ok corpus ->
                   let fixtures = inSliceFixtures corpus
-                  let tags = docIdl.Kinds |> List.map (fun k -> k.Tag)
+                  let tags = docIdl.Kinds |> List.map _.Tag
                   let tsModule = emitTsModule docIdl tags
 
                   let jsStr (s: string) = Text.Json.JsonSerializer.Serialize s
@@ -820,7 +818,7 @@ let tests =
                               |> Array.filter (fun l -> l <> "")
                               |> Array.map (fun l ->
                                   let parts = l.Split('\u0001')
-                                  parts.[0], parts.[1])
+                                  parts[0], parts[1])
                               |> Map.ofArray
 
                           for (name, root) in fixtures do

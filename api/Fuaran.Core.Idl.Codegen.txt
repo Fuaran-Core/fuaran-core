@@ -187,8 +187,8 @@ property Fuaran.Core.Idl.Diff.declaredRoster : Microsoft.FSharp.Collections.FSha
 property Fuaran.Core.Idl.Diff.mappingTable : System.String { get }
 property Fuaran.Core.Idl.FStarTarget+ProvenanceModule.supplied : Fuaran.Core.Idl.FStarTarget+Provenance { get }
 property Fuaran.Core.Idl.FStarTarget.presenceSplitAt : System.Int32 { get }
-property Fuaran.Core.Idl.Gen+GenSupport.Empty : Fuaran.Core.Idl.Gen+GenSupport { get }
-property Fuaran.Core.Idl.SupportDocument.Empty : Fuaran.Core.Idl.SupportDocument { get }
+property Fuaran.Core.Idl.Gen+GenSupport.Empty : Fuaran.Core.Idl.Gen+GenSupport { get } (static)
+property Fuaran.Core.Idl.SupportDocument.Empty : Fuaran.Core.Idl.SupportDocument { get } (static)
 record-field Fuaran.Core.Idl.Diff+CaseSnap.Annotations #1 : System.String
 record-field Fuaran.Core.Idl.Diff+CaseSnap.Fields #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Diff+FieldSnap>
 record-field Fuaran.Core.Idl.Diff+Classification.Change #0 : Fuaran.Core.Idl.Diff+Change

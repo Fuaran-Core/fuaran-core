@@ -841,8 +841,9 @@ module Query =
         | DecimalType, Int v -> Cell.decimal (string v) |> Option.defaultValue c
         | _ -> c
 
-    /// The Phase 27 determinism label this query keys its captures on (`"deterministic"` /
-    /// `"clock"` / `"random"` / `"network"`).
+    /// The Phase 27 determinism label this query keys its captures on: `Effect.determinismTag` of its
+    /// determinism set — `"deterministic"` for the empty set, else its factors joined by `+` in canonical
+    /// order (`"clock"`, `"clock+random"`, …; Phase 319).
     let determinismTag (q: Query) : string =
         Effect.determinismTag q.Effect.Determinism
 
@@ -925,7 +926,7 @@ module Query =
     /// in that order and the first refusal is the answer. Default-deny by shape (FGP 3) — the host
     /// validates this before running any resolver.
     let validateParams (q: Query) (args: (string * Cell) list) : Result<unit, QueryError> =
-        let declared = q.Params |> List.map (fun p -> p.Name)
+        let declared = q.Params |> List.map _.Name
         let argMap = Map.ofList args
 
         let rec checkArgs =
@@ -948,7 +949,7 @@ module Query =
             let unbound =
                 q.Params
                 |> List.filter (fun p -> p.Required && not (Map.containsKey p.Name argMap))
-                |> List.map (fun p -> p.Name)
+                |> List.map _.Name
 
             if List.isEmpty unbound then
                 Ok()
@@ -968,7 +969,7 @@ module Query =
             let nullBound =
                 q.Params
                 |> List.filter (fun p -> p.Required && not (boundToValue p.Name))
-                |> List.map (fun p -> p.Name)
+                |> List.map _.Name
 
             if List.isEmpty nullBound then
                 Ok()
@@ -1023,7 +1024,7 @@ module Query =
     /// form is kept, and the two agree by construction of that order: the head of this list is
     /// exactly `validateParams`'s refusal, and `Ok ()` here is `Ok ()` there.
     let validateParamsAll (q: Query) (args: (string * Cell) list) : Result<unit, QueryError list> =
-        let declared = q.Params |> List.map (fun p -> p.Name)
+        let declared = q.Params |> List.map _.Name
         let argMap = Map.ofList args
 
         let argFault (name: string, cell: Cell) : QueryError option =
@@ -1044,7 +1045,7 @@ module Query =
         let unbound =
             q.Params
             |> List.filter (fun p -> p.Required && not (Map.containsKey p.Name argMap))
-            |> List.map (fun p -> p.Name)
+            |> List.map _.Name
 
         let boundToValue (name: string) =
             args |> List.exists (fun (n, c) -> n = name && (cellType c).IsSome)
@@ -1052,7 +1053,7 @@ module Query =
         let nullBound =
             q.Params
             |> List.filter (fun p -> p.Required && Map.containsKey p.Name argMap && not (boundToValue p.Name))
-            |> List.map (fun p -> p.Name)
+            |> List.map _.Name
 
         let all =
             faults
@@ -1168,7 +1169,7 @@ module Query =
               "title", JStr q.Id
               "x-effect", EffectCodec.toJson q.Effect
               "properties", JObj(q.Params |> List.map (fun p -> p.Name, columnSchema p.Type))
-              "required", JArr(q.Params |> List.filter (fun p -> p.Required) |> List.map (fun p -> JStr p.Name))
+              "required", JArr(q.Params |> List.filter _.Required |> List.map (fun p -> JStr p.Name))
               "x-result",
               JObj
                   [ "type", JStr "object"
@@ -1935,7 +1936,7 @@ module QueryCodec =
     let decodeArgsJson (q: Query) (el: JVal) : Result<(string * Cell) list, QueryError list> =
         match el with
         | JObj fields ->
-            let declared = q.Params |> List.map (fun p -> p.Name)
+            let declared = q.Params |> List.map _.Name
 
             // A JSON object may repeat a member; a repeated parameter is `DuplicateParam` (Phase
             // 307), at its second occurrence, exactly as `validateParams` refuses it.

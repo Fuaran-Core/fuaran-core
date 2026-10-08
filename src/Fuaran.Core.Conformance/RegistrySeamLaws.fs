@@ -185,11 +185,10 @@ module internal RegistrySeamLaws =
 
                 let bySub =
                     FunctionRegistry.findBySignature Subsumes fullQuery r
-                    |> List.map (fun e -> e.Capability.Id)
+                    |> List.map _.Capability.Id
 
                 let byExact =
-                    FunctionRegistry.findBySignature Exact fullQuery r
-                    |> List.map (fun e -> e.Capability.Id)
+                    FunctionRegistry.findBySignature Exact fullQuery r |> List.map _.Capability.Id
 
                 findable.Check(
                     List.contains cap.Id bySub && List.contains cap.Id byExact,
@@ -235,12 +234,10 @@ module internal RegistrySeamLaws =
 
                      let ids =
                          FunctionRegistry.findBySignature Subsumes smallQuery r2
-                         |> List.map (fun e -> e.Capability.Id)
+                         |> List.map _.Capability.Id
 
                      let packRequired =
-                         pack.Capability.Signature.Holes
-                         |> List.filter (fun h -> h.Required)
-                         |> List.map (fun h -> h.Addr)
+                         pack.Capability.Signature.Holes |> List.filter _.Required |> List.map _.Addr
 
                      narrowing.Check(
                          List.contains pack.Capability.Id ids
@@ -345,10 +342,10 @@ module internal RegistrySeamLaws =
             xs |> List.fold (fun acc x -> acc |> Result.bind (add x)) (Ok empty)
 
         let capIds (r: CapabilityRegistry) =
-            CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
+            CapabilityRegistry.enumerate r |> List.map _.Id
 
         let qIds (r: QueryRegistry) =
-            QueryRegistry.enumerate r |> List.map (fun q -> q.Id)
+            QueryRegistry.enumerate r |> List.map _.Id
 
         // Both associations of a union agree: refused together, or equal under `same`.
         let associates (same: 'r -> 'r -> bool) (left: Result<'r, 'e>) (right: Result<'r, 'e>) : bool =
@@ -368,7 +365,7 @@ module internal RegistrySeamLaws =
                 |> List.tryFind (fun id -> not (List.contains id held))
                 |> Option.defaultValue "z"
 
-            let kindOf (id: string) = kinds.[(int id.[0] + i) % 2]
+            let kindOf (id: string) = kinds[(int id[0] + i) % 2]
 
             match
                 build CapabilityRegistry.register CapabilityRegistry.empty (held |> List.map (fun id -> capOf id 9)),
@@ -605,8 +602,8 @@ module internal RegistrySeamLaws =
                                     sprintf
                                         "findBySignature %s found %A; the enumeration holds %A"
                                         kind
-                                        (found |> List.map (fun e -> e.Capability.Id))
-                                        (enumerated |> List.map (fun e -> e.Capability.Id))
+                                        (found |> List.map _.Capability.Id)
+                                        (enumerated |> List.map _.Capability.Id)
                                 )
                         )
                 | _ -> unions.Check(false, fun () -> at "a drawn registry did not build")
@@ -710,7 +707,7 @@ module internal RegistrySeamLaws =
 
                      let ids =
                          FunctionRegistry.findBySignature Subsumes smallQuery loaded
-                         |> List.map (fun e -> e.Capability.Id)
+                         |> List.map _.Capability.Id
 
                      roundTrip.Check(
                          List.contains pf.NewId ids,

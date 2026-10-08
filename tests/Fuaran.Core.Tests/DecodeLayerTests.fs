@@ -823,7 +823,7 @@ let tests =
                         Corpus.refusalLaws
                             CapabilityCodec.encodeJson
                             (CapabilityCodec.decodeJsonDetailedWith ReadPolicy.Strict)
-                            (fun seed -> arr.[abs seed % arr.Length])
+                            (fun seed -> arr[abs seed % arr.Length])
                             0
                             arr.Length
                     )

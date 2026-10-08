@@ -623,7 +623,7 @@ module ApplyVectorExport =
             let rows = ownRowLine().TrimEnd(',') :: foreign
             let last = rows.Length - 1
             let body = rows |> List.mapi (fun i r -> if i = last then r else r + ",")
-            Ok(String.concat "\n" (Array.toList own.[..headerEnd] @ body @ [ "  ]"; "}"; "" ]))
+            Ok(String.concat "\n" (Array.toList own[..headerEnd] @ body @ [ "  ]"; "}"; "" ]))
 
     let write (corpusDir: string) : unit =
         Directory.CreateDirectory(familyDir corpusDir) |> ignore

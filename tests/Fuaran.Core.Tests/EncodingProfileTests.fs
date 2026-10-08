@@ -108,7 +108,7 @@ let private allGreen (what: string) (laws: LawResult list) =
     | None -> ()
 
 let private redLaws (laws: LawResult list) : string list =
-    laws |> List.filter (fun l -> not l.Passed) |> List.map (fun l -> l.Law)
+    laws |> List.filter (fun l -> not l.Passed) |> List.map _.Law
 
 [<Tests>]
 let tests =
@@ -262,12 +262,12 @@ let tests =
                   Expect.equal (Map.count ids) 3 "every stored hash is mapped"
 
                   Expect.equal
-                      (recs |> List.map (fun r -> ids.[r.Hash]))
-                      (migrated |> List.map (fun r -> r.Hash))
+                      (recs |> List.map (fun r -> ids[r.Hash]))
+                      (migrated |> List.map _.Hash)
                       "the map names each record's new hash"
 
                   Expect.isFalse
-                      (recs |> List.exists (fun r -> r.Hash = ids.[r.Hash]))
+                      (recs |> List.exists (fun r -> r.Hash = ids[r.Hash]))
                       "every record follows a moved one, so every hash moved"
 
                   match
@@ -308,7 +308,7 @@ let tests =
               | Ok(migrated, ids) ->
                   Expect.isTrue (Dag.verifyDag h jvalWitness migrated) "the result verifies under the current profile"
                   Expect.equal (Map.count ids) 4 "every node is mapped"
-                  Expect.equal (Dag.heads migrated) [ ids.[dagHead030] ] "the head is the old head's new id"
+                  Expect.equal (Dag.heads migrated) [ ids[dagHead030] ] "the head is the old head's new id"
 
                   match Dag.rehashEncoding pV2 jvalWitness pV1 v1Witness h migrated with
                   | Error f -> failtestf "the rehash back refused: %A" f
@@ -322,9 +322,9 @@ let tests =
               | Error f -> failtestf "lanes refused: %A" f
               | Ok(d', ids) ->
                   let laneOf =
-                      loaded.LaneOf |> Map.toList |> List.map (fun (k, l) -> ids.[k], l) |> Map.ofList
+                      loaded.LaneOf |> Map.toList |> List.map (fun (k, l) -> ids[k], l) |> Map.ofList
 
-                  Expect.equal laneOf.[ids.[dagHead030]] "merge" "the head's lane moves with its id"
+                  Expect.equal laneOf[ids[dagHead030]] "merge" "the head's lane moves with its id"
 
                   Expect.isTrue
                       (Dag.verifyLanes h jvalWitness ({ Dag = d'; LaneOf = laneOf }: Dag.Loaded<JVal>)
@@ -348,10 +348,7 @@ let tests =
                   Expect.isTrue (OpStream.verifyCaptures h migrated) "the result verifies under the live walker"
                   Expect.equal (Map.count ids) 2 "both hashes mapped"
 
-                  Expect.equal
-                      (migrated |> List.map (fun c -> c.Value))
-                      (caps |> List.map (fun c -> c.Value))
-                      "values carried byte for byte"
+                  Expect.equal (migrated |> List.map _.Value) (caps |> List.map _.Value) "values carried byte for byte"
 
                   match OpStream.rehashCapturesEncoding pV2 pV1 OpStream.canonicalConfig h migrated with
                   | Error b -> failtestf "the rehash back refused: %A" b

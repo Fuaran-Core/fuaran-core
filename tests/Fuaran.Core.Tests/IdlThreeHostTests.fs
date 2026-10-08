@@ -139,7 +139,7 @@ let private pascal (s: string) =
     if s.Length = 0 then
         s
     else
-        string (Char.ToUpperInvariant s.[0]) + s.Substring 1
+        string (Char.ToUpperInvariant s[0]) + s.Substring 1
 
 let private prop (o: obj) (name: string) : obj =
     match o.GetType().GetProperty name with
@@ -152,7 +152,7 @@ let private someOf (o: obj) : obj option =
         None
     else
         let _, fields = FSharpValue.GetUnionFields(o, o.GetType())
-        Some fields.[0]
+        Some fields[0]
 
 let rec private toIdl (hosted: Map<string, obj -> JVal>) (idl: Idl) (t: IdlType) (o: obj) : IdlValue =
     let recur = toIdl hosted idl
@@ -193,7 +193,7 @@ let rec private toIdl (hosted: Map<string, obj -> JVal>) (idl: Idl) (t: IdlType)
         let byName =
             List.zip (c.Fields |> List.map _.Name) (List.ofArray values) |> Map.ofList
 
-        VUnion(case.Name, fieldsOf hosted idl subst c.Fields (fun f -> byName.[f.Name]))
+        VUnion(case.Name, fieldsOf hosted idl subst c.Fields (fun f -> byName[f.Name]))
     | TNode ->
         let kindVal = prop o "Kind"
         let case, specs = FSharpValue.GetUnionFields(kindVal, kindVal.GetType())
@@ -203,7 +203,7 @@ let rec private toIdl (hosted: Map<string, obj -> JVal>) (idl: Idl) (t: IdlType)
             if List.isEmpty k.Fields then
                 []
             else
-                fieldsOf hosted idl Map.empty k.Fields (fun f -> prop specs.[0] (pascal f.Name))
+                fieldsOf hosted idl Map.empty k.Fields (fun f -> prop specs[0] (pascal f.Name))
 
         let env =
             fieldsOf hosted idl Map.empty idl.NodeFields (fun f -> prop o (pascal f.Name))
@@ -314,7 +314,7 @@ let private adversarial (idl: Idl) (rng: Random) : IdlValue -> IdlValue =
         (fun t v ->
             match t, v with
             | TFloat, (VFloat _ | VInt _) when rng.Next 3 = 0 ->
-                Some(VFloat adversarialFloats.[rng.Next adversarialFloats.Length])
+                Some(VFloat adversarialFloats[rng.Next adversarialFloats.Length])
             | TMap _, VMap entries ->
                 let keys =
                     adversarialKeys
@@ -371,7 +371,7 @@ type private Certified =
 /// hosted value has no canonical rendering of its own and the interpreter refuses it (Phase 292).
 let private seriesDraw (rng: Random) : JVal =
     let pool = [ 0.0; 1.0; -2.5; 2.0; 1e21; 5e-324; 0.1; -0.0 ]
-    JArr [ for _ in 1 .. rng.Next 4 -> JFloat pool.[rng.Next pool.Length] ]
+    JArr [ for _ in 1 .. rng.Next 4 -> JFloat pool[rng.Next pool.Length] ]
 
 let private certified: Certified list =
     [ { Name = "document"

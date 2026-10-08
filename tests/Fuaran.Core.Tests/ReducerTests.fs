@@ -49,8 +49,8 @@ let private decode (q: string) : Result<Op, string> =
         Error("short: " + s)
     else
         match System.Int32.TryParse(s.Substring 1) with
-        | true, n when s.[0] = 'i' -> Ok(Inc n)
-        | true, n when s.[0] = 'd' -> Ok(Dec n)
+        | true, n when s[0] = 'i' -> Ok(Inc n)
+        | true, n when s[0] = 'd' -> Ok(Dec n)
         | _ -> Error("bad op: " + s)
 
 let private sw: StreamWitness<Op, int, Rej> =
@@ -65,7 +65,7 @@ let tests =
         [ testCase "a total, deterministic reducer passes"
           <| fun _ ->
               let results = Conformance.reducer apply gen None 314 200
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "totality + determinism pass"
+              Expect.isTrue (results |> List.forall _.Passed) "totality + determinism pass"
 
               Expect.equal
                   (List.length results)
@@ -100,7 +100,7 @@ let tests =
                   5
                   "envelope law added when a predicate is supplied (3 laws + 2 Phase 220 guards)"
 
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "all three pass"
+              Expect.isTrue (results |> List.forall _.Passed) "all three pass"
 
           testCase "the envelope-shape law fails when a rejection is judged empty"
           <| fun _ ->
@@ -151,10 +151,7 @@ let tests =
 
               let report = Conformance.certifyStream sw incOnly OpStream.defaultHash 271 200
 
-              let red =
-                  report.Results
-                  |> List.filter (fun r -> not r.Passed)
-                  |> List.map (fun r -> r.Law)
+              let red = report.Results |> List.filter (fun r -> not r.Passed) |> List.map _.Law
 
               Expect.isFalse report.AllPassed "the verdict moves: this domain certified green before Phase 220"
 

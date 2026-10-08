@@ -269,6 +269,73 @@ no open base type can give). A shared base node type
 in the core would destroy that property. Any change that introduces a concrete node/kind
 type into a core package is a breaking architectural regression, not a feature.
 
+## Vocabulary — the failure families, the exception postures, the argument order
+
+These are rules the code already follows; written here so the next type lands in the right place
+without a reader opening the code. A new public type or function that cannot be placed by them is a
+reason to amend this section in the same commit, not to invent a further family.
+
+**The failure families, by suffix.** Every typed failure in `Fuaran.Core.*` is one of seven, and the
+suffix says which question it answers:
+
+- **`…Rejection`** — the algebra or the domain refuses a well-formed request against the state it
+  meets: the op algebra's `Rejection`, `AppendRejection`, `VerifiedAppendRejection`,
+  `ArbitrationRejection`, `DagAppendRejection`, `DagAppendIfRejection`, `LaneRejection`. Retrying
+  the same request against the same state is refused again; a different state may admit it.
+- **`…Break`** — integrity: stored or received evidence does not verify (`ChainBreak`, `DagBreak`,
+  `SnapshotBreak`, `CheckpointBreak`, `LaneBreak`, each detailed by a `…BreakReason` where it has
+  several). A break means the material was altered or corrupted, never that a request was wrong.
+- **`…Fault`** — an operation ran over the material it was given and could not complete, and the fault
+  says where it stopped: a replay, a capture replay, a reconcile, a rehash, a checkpoint, a lane or
+  JSONL load, a DAG append or attestation, a total order, a declaration set, and a host's own fetch
+  answered through a seam (`ResolveFault`, the query resolver's account of a fetch that could not
+  complete). A fault is typically translated into the calling seam's `…Error` at the boundary.
+- **`…Error`** — the call itself is refused: its input does not parse or decode (`JsonError`,
+  `DecodeError`, `ReadError`), or it names what the seam does not hold or binds it wrongly — the seam
+  unions a caller receives (`InvokeError`, `QueryError`, `PipelineError`, `ColumnError`,
+  `SchemaError`, `RegistrationError`, …).
+- **`…Failure`** — the outcome of a composite flow, whose cases wrap the other families
+  (`GatedApplyFailure` is a denial or a rejection; `ProposeFailure`, `ApprovalFailure`).
+- **`…Denial`** — a policy said no (`WriteDenial`, `PolicyDenial`); the request was valid and would
+  otherwise have run.
+- **`Defect`** (and `…Defect`) — a finding reported in a list beside an answer, never a refusal: the
+  validator's `Defect`, `VerifyDefect`, `ObserverDefect`, `ReferenceDefect`.
+
+`ResolveFault` was reviewed against this rule on the `1.0.0` slot (Phase 389, DECISIONS.md D136) and
+keeps its name: it is the host's report that its fetch could not complete, which is a fault, and the
+caller-facing refusal it becomes is `QueryError`. A `ResolveError` would have put two `…Error` unions
+on one dispatch with no rule to tell them apart. `Idl.Sample.SampleRefusal` is the one type outside
+the seven suffixes: by this rule it is a fault (the sampler could not complete on the vocabulary it
+was given, and names the slot), and its rename to `SampleFault`, a `retype`, is ruled for the `1.0.0`
+slot by the same decision.
+
+**The exception postures.** A typed failure is the rule; an exception crosses a Core boundary in
+exactly three shapes, each in a fixed place:
+
+1. **Host code Core calls on the host's behalf is not wrapped.** A capability body, a query resolver,
+   an evaluator, a witness function: Core neither catches nor converts what it throws, because
+   catching every exception also catches the ones a host means to escape (cancellation, its own fatal
+   faults). The obligation is totality, stated at each seam (`Capability.invoke`: "the body must be
+   TOTAL"), and a body reports failure by answering `Failed`.
+2. **Host code Core runs in order to REPORT on it converts a throw into a finding.** The validator
+   runs each rule family guarded: a family that throws contributes one `RULE-FAULT` defect carrying the
+   exception's message, and the families after it still run. The conformance kit does the same where a
+   throw is what a law watches for: a dispatch that throws is a red law naming the throw.
+3. **Core's own misuse checks raise.** A programming error that no input data can cause raises at
+   the call that commits it — `Json.Reader` read twice or left unread (`invalidOp`), the kit's
+   `ConfRng.choose` over an empty alphabet (`invalidArg`). Where data can reach the same check, the
+   surface is the `try…` form, which answers a typed failure instead.
+
+**The capability-argument order.** A function that takes domain capabilities and witnesses takes
+them in one order, outermost first, so that partial application peels them in the same order
+everywhere: (1) the companion witness that selects the variant (`KeyedWitness`, `RefWitness`); (2)
+the domain capabilities, grammar before containment — `allowedChildren` (which kinds a parent kind
+admits) before `canHold` (whether a node holds children at all); (3) the `NodeWitness`, then the
+`IdWitness`; (4) the request (the op, the proposals); (5) the subject last (the root, the base tree),
+so the call pipes. `applyReferenced refw allowedChildren canHold w idw op root`,
+`arbitrateGrammar allowedChildren canHold nodew idw baseTree proposals` and
+`applyContainedKeyed keyw canHold nodew idw op root` are the same rule with steps left out.
+
 ## Stability-critical surfaces
 
 These thread through multiple packages; changing their shape is a breaking change
@@ -464,7 +531,7 @@ is reserved for the case where a *frozen* witness is found fundamentally insuffi
 "a new layer wants more," which composition already covers. That is a major-version event and must be
 justified against why composition could not express it.
 
-**Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the twelve frozen records is a
+**Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the sixteen frozen records is a
 review-blocking regression (the same class as introducing a concrete node type, per *The load-bearing
 invariant* above). The mechanical backstop is the law family **`Conformance.witnessSurfaceLaws`**
 (Phase 232), which this repository's suite runs on every gate: one law per frozen record, holding

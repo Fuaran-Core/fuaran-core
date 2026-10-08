@@ -116,8 +116,7 @@ let concurrencyLawTests =
               // "failed" on coverage alone would be this check passing for the opposite of its
               // reason. What has to lose is totality or confluence — the two laws that assert
               // something about a pair the footprint declared independent.
-              let failed =
-                  results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
+              let failed = results |> List.filter (fun r -> not r.Passed) |> List.map _.Law
 
               Expect.isNonEmpty
                   failed

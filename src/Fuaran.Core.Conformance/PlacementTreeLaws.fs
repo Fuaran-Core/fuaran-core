@@ -112,7 +112,7 @@ module internal PlacementTreeLaws =
 
                     let sourceOk =
                         match sourceParent with
-                        | Some sp -> Map.tryFind sp after = Some(before.[sp] |> List.filter (fun c -> c <> movedKey))
+                        | Some sp -> Map.tryFind sp after = Some(before[sp] |> List.filter (fun c -> c <> movedKey))
                         | None -> true
 
                     let restOk =

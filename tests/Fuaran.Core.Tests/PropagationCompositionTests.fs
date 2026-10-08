@@ -36,11 +36,10 @@ let private tree () : RNode =
           RNode.node "b" "section" [ RNode.node "b1" "para" [] ] ]
 
 let private kindOf (id: string) (t: RNode) =
-    Tree.tryFind nodew idw id t |> Option.map (fun n -> n.Kind)
+    Tree.tryFind nodew idw id t |> Option.map _.Kind
 
 let private childIds (id: string) (t: RNode) =
-    Tree.tryFind nodew idw id t
-    |> Option.map (fun n -> n.Children |> List.map (fun c -> c.Id))
+    Tree.tryFind nodew idw id t |> Option.map (fun n -> n.Children |> List.map _.Id)
 
 let private updateNodeTests =
     testList
@@ -204,7 +203,7 @@ let private changedForOpTests =
 
               let prior =
                   Propagation.eval ev preDeps
-                  |> Result.map (fun o -> o.Values)
+                  |> Result.map _.Values
                   |> Result.defaultValue Map.empty
 
               let prior = Map.remove "y" prior
@@ -232,7 +231,7 @@ let private changedForOpTests =
 
               let prior =
                   Propagation.eval ev preDeps
-                  |> Result.map (fun o -> o.Values)
+                  |> Result.map _.Values
                   |> Result.defaultValue Map.empty
 
               // (a) the pre-edit dirty set, handed over whole, names the removed id and is refused.
@@ -511,14 +510,13 @@ let private sheetReads (n: SheetNode) : Propagation.PartRead<string> seq =
             { Propagation.Read = t
               Parts = Some(Set.singleton col) }
 
-let private nodeReads (n: SheetNode) : string seq =
-    sheetReads n |> Seq.map (fun r -> r.Read)
+let private nodeReads (n: SheetNode) : string seq = sheetReads n |> Seq.map _.Read
 
 let private depsOf (s: Sheet) =
     Propagation.nodeDependencies (Propagation.partDependencyMap sheetw idw sheetReads s.Tree)
 
 let private defOf (s: Sheet) (id: string) =
-    Tree.tryFind sheetw idw id s.Tree |> Option.map (fun n -> n.Def)
+    Tree.tryFind sheetw idw id s.Tree |> Option.map _.Def
 
 let private sumColumn (t: Table) (col: string) : Cell =
     match Table.tryColumn col t with

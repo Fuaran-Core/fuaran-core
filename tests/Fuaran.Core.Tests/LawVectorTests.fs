@@ -577,7 +577,7 @@ let tests =
 
                   Expect.equal
                       captured
-                      (LawVectorExport.Capabilities.draws () |> List.map (fun d -> d.Realized))
+                      (LawVectorExport.Capabilities.draws () |> List.map _.Realized)
                       "each invocation-key vector carries its iteration's drawn capture value"
 
           testCase "the capability checker names a perturbed vector — the oracle leg can go red"
@@ -764,7 +764,7 @@ let tests =
                       [ "\"accept\""; "\"reject\"" ]
                       (sprintf "the %s vectors carry an accept and a refusal" case)
 
-              let ids = vectors |> List.map (fun v -> v.Id)
+              let ids = vectors |> List.map _.Id
               Expect.equal (List.distinct ids) ids "vector ids are unique"
 
           testCase "the decimal checker names a perturbed vector — the oracle leg can go red"

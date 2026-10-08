@@ -56,9 +56,9 @@ let private opcodes: OpCode[] * OpCode[] =
         let v = uint16 op.Value
 
         if v < 0x100us then
-            one.[int v] <- op
+            one[int v] <- op
         elif v &&& 0xff00us = 0xfe00us then
-            two.[int (v &&& 0xffus)] <- op
+            two[int (v &&& 0xffus)] <- op
 
     one, two
 
@@ -132,12 +132,12 @@ let private operands (m: MethodBase) : MemberInfo list =
 
         while i < il.Length do
             let op =
-                if il.[i] = 0xFEuy then
+                if il[i] = 0xFEuy then
                     i <- i + 2
-                    two.[int il.[i - 1]]
+                    two[int il[i - 1]]
                 else
                     i <- i + 1
-                    one.[int il.[i - 1]]
+                    one[int il[i - 1]]
 
             let size =
                 match op.OperandType with
@@ -235,7 +235,7 @@ let private grants (assemblies: (string * Assembly) list) : (string * string) li
 
     [ for id, asm in assemblies do
           for a in asm.GetCustomAttributes<InternalsVisibleToAttribute>() do
-              let friend = a.AssemblyName.Split(',').[0].Trim()
+              let friend = (a.AssemblyName.Split(',')[0]).Trim()
 
               if names.Contains friend then
                   id, friend ]

@@ -267,5 +267,5 @@ let tests =
                       Corpus.Tag = "unknown-tolerance" } ]
 
               let outcomes = Corpus.runCorpus tolerantCodec cases
-              Expect.isTrue (outcomes |> List.forall (fun o -> o.Passed)) "all corpus cases pass"
+              Expect.isTrue (outcomes |> List.forall _.Passed) "all corpus cases pass"
               Expect.isOk (Corpus.coverageGate [ "known"; "unknown-tolerance" ] cases) "both tags covered" ]

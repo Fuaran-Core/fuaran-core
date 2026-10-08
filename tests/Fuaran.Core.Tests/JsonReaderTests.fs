@@ -229,12 +229,12 @@ let private grammarChars = "[]{},:\"\\-0123456789.eEtfn x\n"
 
 /// A string literal from up to three bodies (some ill-formed: the parser refuses those).
 let private stringLit (x: int) =
-    let a = stringBodies.[x % stringBodies.Length]
-    let b = stringBodies.[(x / 7) % stringBodies.Length]
+    let a = stringBodies[x % stringBodies.Length]
+    let b = stringBodies[(x / 7) % stringBodies.Length]
 
     let c =
         if x % 3 = 0 then
-            stringBodies.[(x / 11) % stringBodies.Length]
+            stringBodies[(x / 11) % stringBodies.Length]
         else
             ""
 
@@ -256,7 +256,7 @@ let private document (seed: int) : string =
     let str () = stringLit (draw ())
 
     let num () =
-        numberTokens.[draw () % numberTokens.Length]
+        numberTokens[draw () % numberTokens.Length]
 
     let int () = string (draw () - 32000)
 
@@ -304,7 +304,7 @@ let private variants (seed: int) (doc: string) : string list =
     let at () = if n = 0 then 0 else draw () % n
 
     let ch () =
-        string grammarChars.[draw () % grammarChars.Length]
+        string grammarChars[draw () % grammarChars.Length]
 
     [ doc
       " " + doc + "\n"
@@ -363,7 +363,7 @@ let private shifted (outcome: string) : string =
         )
 
     if m.Success then
-        m.Groups.[1].Value + string (int m.Groups.[2].Value + 1) + m.Groups.[3].Value
+        m.Groups[1].Value + string (int m.Groups[2].Value + 1) + m.Groups[3].Value
     else
         outcome
 

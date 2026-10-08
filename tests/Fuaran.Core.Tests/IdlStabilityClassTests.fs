@@ -237,7 +237,7 @@ let private generatedModule (idl: Idl) : string =
 /// source spells them.
 let private constructorHeads (src: string) =
     src.Replace("\r\n", "\n").Split('\n')
-    |> Array.map (fun l -> l.Trim())
+    |> Array.map _.Trim()
     |> Array.filter (fun l -> l.StartsWith "let mk")
     |> Set.ofArray
 
@@ -529,13 +529,13 @@ let tests =
               /// spells them — read off the text, never re-derived from the IDL.
               let members (src: string) =
                   src.Replace("\r\n", "\n").Split('\n')
-                  |> Array.map (fun l -> l.Trim())
+                  |> Array.map _.Trim()
                   |> Array.filter (fun l -> l.Contains ": " && not (l.StartsWith "///"))
                   |> Set.ofArray
 
               let duCases (src: string) =
                   src.Replace("\r\n", "\n").Split('\n')
-                  |> Array.map (fun l -> l.Trim())
+                  |> Array.map _.Trim()
                   |> Array.filter (fun l -> l.StartsWith "| ")
                   |> Set.ofArray
 

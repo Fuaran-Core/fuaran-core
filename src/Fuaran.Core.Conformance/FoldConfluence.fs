@@ -193,7 +193,7 @@ module FoldConfluence =
         | Error(ReconcileFault.SharedHistoryRejected(nodeId, rej)) ->
             LaneRejected(
                 "shared history rejected at "
-                + w.Encode dag.Nodes.[nodeId].Op
+                + w.Encode dag.Nodes[nodeId].Op
                 + ": "
                 + sprintf "%A" rej
             )
@@ -296,10 +296,10 @@ module FoldConfluence =
 
         let candidates (ls: 'Op list list) =
             [ for i in 0 .. List.length ls - 1 do
-                  yield dropLane i ls
+                  dropLane i ls
               for li in 0 .. List.length ls - 1 do
                   for oi in 0 .. List.length (List.item li ls) - 1 do
-                      yield dropOp li oi ls ]
+                      dropOp li oi ls ]
 
         let rec go steps ls =
             if steps <= 0 then
@@ -551,4 +551,4 @@ outcomes:
         let results = laneFoldLawsAt w footprintOf hashState gen laneCount seed iterations
 
         { Results = results
-          AllPassed = results |> List.forall (fun r -> r.Passed) }
+          AllPassed = results |> List.forall _.Passed }

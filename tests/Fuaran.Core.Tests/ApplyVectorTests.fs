@@ -80,7 +80,7 @@ let tests =
 
               let firstHash =
                   match ApplyVectorExport.parseVectors rendered with
-                  | Ok vs -> vs |> List.tryPick (fun v -> v.ExpectedHash)
+                  | Ok vs -> vs |> List.tryPick _.ExpectedHash
                   | Error m -> failtest m
 
               match firstHash with
@@ -89,7 +89,7 @@ let tests =
                   // flip one hex digit of the first recorded digest
                   let flipped =
                       let tail = h.Substring(7)
-                      "sha256:" + (if tail.[0] = '0' then "1" else "0") + tail.Substring(1)
+                      "sha256:" + (if tail[0] = '0' then "1" else "0") + tail.Substring(1)
 
                   let perturbed = rendered.Replace(h, flipped)
                   Expect.notEqual perturbed rendered "the perturbation changed the rendered bytes"

@@ -157,7 +157,7 @@ module internal DagStreamLaws =
                     (fun acc id ->
                         acc
                         |> Result.bind (fun st ->
-                            sw.Apply dag.Nodes.[id].Op st
+                            sw.Apply dag.Nodes[id].Op st
                             |> Result.mapError (fun e -> Dag.ReplayFault.Rejected(id, e))))
                     (Ok s0)
 
@@ -320,7 +320,7 @@ module internal DagStreamLaws =
               Reaches = fun a d -> Set.contains a (Dag.ancestorsOf dag d)
               Order = Dag.tryTopoOrder dag
               MergeBase = Dag.mergeBase dag
-              Between = fun b h -> Dag.between dag b h |> List.map (fun n -> n.Id)
+              Between = fun b h -> Dag.between dag b h |> List.map _.Id
               Replay = Dag.tryReplayTo sw gen.State0 dag }
 
         let indexed (reach: Dag.Reach<'Op>) : ReachAsker<'State, 'Rej> =
@@ -328,7 +328,7 @@ module internal DagStreamLaws =
               Reaches = Dag.Reach.reaches reach
               Order = Dag.Reach.tryTopoOrder reach
               MergeBase = Dag.Reach.mergeBase reach
-              Between = fun b h -> Dag.Reach.between reach b h |> List.map (fun n -> n.Id)
+              Between = fun b h -> Dag.Reach.between reach b h |> List.map _.Id
               Replay = Dag.tryReplayToWith sw gen.State0 reach }
 
         // The first question of one kind the two askers answer differently, over `ids` and every
@@ -523,7 +523,7 @@ module internal DagStreamLaws =
             | [] -> ()
             | first :: _ ->
                 let last = List.last nodes
-                let template = dag.Nodes.[first]
+                let template = dag.Nodes[first]
 
                 let forgedNode id parents =
                     id,
@@ -737,8 +737,8 @@ module internal DagStreamLaws =
             let laneMergeIn (ids: string list) =
                 ids
                 |> List.exists (fun id ->
-                    match full.Nodes.[id].Parents with
-                    | [ p; q ] -> p <> q && not (anc.[q].Contains p) && not (anc.[p].Contains q)
+                    match full.Nodes[id].Parents with
+                    | [ p; q ] -> p <> q && not (anc[q].Contains p) && not (anc[p].Contains q)
                     | _ -> false)
 
             if not (laneMergeIn nodes) then
@@ -748,7 +748,7 @@ module internal DagStreamLaws =
             let otherState (st: 'State) =
                 nodes
                 |> List.tryPick (fun o ->
-                    match replayed.[o] with
+                    match replayed[o] with
                     | Ok s when stateEncode s <> stateEncode st -> Some s
                     | _ -> None)
 
@@ -756,7 +756,7 @@ module internal DagStreamLaws =
             let expected (c: string) (h: string) : Result<'State, Dag.CheckpointFault<'Rej>> =
                 if not (full.Nodes.ContainsKey h) then
                     Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.UnknownHead h))
-                elif not (anc.[h].Contains c) then
+                elif not (anc[h].Contains c) then
                     Error(Dag.CheckpointFault.Unreached h)
                 else
                     let order =
@@ -766,32 +766,32 @@ module internal DagStreamLaws =
 
                     match
                         order
-                        |> List.filter (fun d -> not (anc.[c].Contains d))
-                        |> List.tryFind (fun d -> not (anc.[d].Contains c))
+                        |> List.filter (fun d -> not (anc[c].Contains d))
+                        |> List.tryFind (fun d -> not (anc[d].Contains c))
                     with
                     | Some u -> Error(Dag.CheckpointFault.Uncovered u)
-                    | None -> asFault replayed.[h]
+                    | None -> asFault replayed[h]
 
             // the first node (id order) a compaction at `c` would strand
             let stranded (c: string) =
                 full.Nodes
                 |> Map.toList
                 |> List.map fst
-                |> List.tryFind (fun id -> not (anc.[c].Contains id) && not (anc.[id].Contains c))
+                |> List.tryFind (fun id -> not (anc[c].Contains id) && not (anc[id].Contains c))
 
             for c in nodes do
                 match Dag.checkpointAt hashFn stateEncode sw gen.State0 full c with
                 | Error f ->
                     takeCell.Check(
-                        (match replayed.[c] with
+                        (match replayed[c] with
                          | Error g -> f = Dag.CheckpointFault.Replay g
                          | Ok _ -> false),
-                        fun () -> at (sprintf "checkpointAt %s refused %A where tryReplayTo gave %A" c f replayed.[c])
+                        fun () -> at (sprintf "checkpointAt %s refused %A where tryReplayTo gave %A" c f replayed[c])
                     )
                 | Ok cp ->
                     takeCell.Check(
-                        (cp.Node = c && Ok cp.State = replayed.[c]),
-                        fun () -> at (sprintf "checkpointAt %s sealed %A where tryReplayTo gave %A" c cp replayed.[c])
+                        (cp.Node = c && Ok cp.State = replayed[c]),
+                        fun () -> at (sprintf "checkpointAt %s sealed %A where tryReplayTo gave %A" c cp replayed[c])
                     )
 
                     // ---- the seal ----
@@ -852,14 +852,14 @@ module internal DagStreamLaws =
                         )
 
                         match r with
-                        | Ok _ when laneMergeIn (Dag.between full c h |> List.map (fun n -> n.Id)) ->
+                        | Ok _ when laneMergeIn (Dag.between full c h |> List.map _.Id) ->
                             coveredMerge <- coveredMerge + 1
                         | Error(Dag.CheckpointFault.Uncovered _) -> uncovered <- uncovered + 1
                         | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Rejected _)) -> rejected <- rejected + 1
                         | _ -> ()
 
                     // ---- truncation ----
-                    let later = nodes |> List.filter (fun id -> id <> c && anc.[id].Contains c)
+                    let later = nodes |> List.filter (fun id -> id <> c && anc[id].Contains c)
 
                     match Dag.compactAt hashFn stateEncode sw gen.State0 full c with
                     | Error(Dag.CheckpointFault.Uncovered u) ->
@@ -931,7 +931,7 @@ module internal DagStreamLaws =
                         | [] -> ()
                         | _ ->
                             let victim = rng.Choose later
-                            let n = small.Nodes.[victim]
+                            let n = small.Nodes[victim]
 
                             // Phase 302 — redrawn until it encodes differently, and COUNTED: this
                             // cell is also asserted unconditionally below, so without the count a
@@ -1237,10 +1237,10 @@ module internal DagStreamLaws =
                     && Map.count pos = List.length o
                     && o
                        |> List.forall (fun id ->
-                           dag.Nodes.[id].Parents
+                           dag.Nodes[id].Parents
                            |> List.forall (fun p ->
                                match Map.tryFind p pos with
-                               | Some pp -> pp < pos.[id]
+                               | Some pp -> pp < pos[id]
                                | None -> not (dag.Nodes.ContainsKey p)))
 
             let constant = Dag.totalOrderBy (fun _ -> 0) dag
@@ -1256,7 +1256,7 @@ module internal DagStreamLaws =
 
             orderCell.Check(
                 isExtension order0
-                && isExtension (Dag.totalOrderBy (fun (n: DagNode<'Op>) -> drawn.[n.Id]) dag)
+                && isExtension (Dag.totalOrderBy (fun (n: DagNode<'Op>) -> drawn[n.Id]) dag)
                 && isExtension constant
                 && restricts,
                 fun () -> at (sprintf "order %A, constant-key order %A" order0 constant)
@@ -1274,7 +1274,7 @@ module internal DagStreamLaws =
 
             match forkLane with
             | lane, tip ->
-                let tipNode = dag.Nodes.[tip]
+                let tipNode = dag.Nodes[tip]
 
                 match LawKit.drawDistinct rng gen.Op (fun op -> sw.Encode op <> sw.Encode tipNode.Op) with
                 | Some op ->
@@ -1312,9 +1312,7 @@ module internal DagStreamLaws =
 
                     let expected =
                         Error(
-                            sprintf
-                                "%A"
-                                (Dag.LaneLoadFault.Collision(held.Id, [ store.LaneOf.[held.Id]; "zz-forged" ]))
+                            sprintf "%A" (Dag.LaneLoadFault.Collision(held.Id, [ store.LaneOf[held.Id]; "zz-forged" ]))
                         )
 
                     let got = renderLoad (Dag.loadLanes sw (rng.Shuffle(texts @ [ forged ])))
@@ -1403,7 +1401,7 @@ module internal DagStreamLaws =
                     match back with
                     | Ok(d, ids2) ->
                         Dag.toJsonl sw.Encode d = Dag.toJsonl sw.Encode dag
-                        && ids |> List.forall (fun id -> ids2.[ids1.[id]] = id)
+                        && ids |> List.forall (fun id -> ids2[ids1[id]] = id)
                     | Error _ -> false
 
                 rehashCell.Check(
@@ -1424,7 +1422,7 @@ module internal DagStreamLaws =
             )
 
             let victim = rng.Choose ids
-            let vNode = dag.Nodes.[victim]
+            let vNode = dag.Nodes[victim]
 
             match LawKit.drawDistinct rng gen.Op (fun op -> sw.Encode op <> sw.Encode vNode.Op) with
             | Some op ->
@@ -1432,7 +1430,7 @@ module internal DagStreamLaws =
                     { store with
                         Dag = dagOf (Map.add victim { vNode with Op = op } dag.Nodes) }
 
-                let lane = store.LaneOf.[victim]
+                let lane = store.LaneOf[victim]
 
                 verifyCell.Check(
                     (match Dag.verifyLanes hashFn sw tampered with

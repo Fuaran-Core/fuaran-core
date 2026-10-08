@@ -269,7 +269,7 @@ let witnessSurfaceLawTests =
 
                   let reflected =
                       Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
-                      |> Array.map (fun p -> p.Name)
+                      |> Array.map _.Name
                       |> Array.toList
 
                   Expect.equal

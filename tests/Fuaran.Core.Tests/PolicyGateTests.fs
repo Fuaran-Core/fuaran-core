@@ -89,8 +89,7 @@ let tests =
               let results =
                   Conformance.policyLawsAt permissive noteRegistry state0 genNoteOp actors privileged 4242 300
 
-              let failed =
-                  results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
+              let failed = results |> List.filter (fun r -> not r.Passed) |> List.map _.Law
 
               Expect.equal failed.Length 1 "exactly one law reddens"
               Expect.stringContains failed.Head "host-writing capability" "the no-unapproved-write law"
@@ -143,7 +142,7 @@ let tests =
 
               Expect.isFalse ran "no body ran"
               Expect.equal seen.Count 1 "the observer was told once"
-              Expect.equal seen.[0].Id "store-note" "of the invocation it refused"
+              Expect.equal seen[0].Id "store-note" "of the invocation it refused"
 
               Expect.equal
                   (InvokeError.describe (

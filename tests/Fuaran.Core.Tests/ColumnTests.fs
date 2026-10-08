@@ -326,7 +326,7 @@ let tests =
                       Tag = "reject" } ]
 
               let outcomes = Corpus.runCorpus ColumnCodec.codec cases
-              Expect.all outcomes (fun o -> o.Passed) "every corpus case passes"
+              Expect.all outcomes _.Passed "every corpus case passes"
 
               match Corpus.coverageGate [ "all"; "ref"; "reject" ] cases with
               | Ok() -> ()

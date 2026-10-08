@@ -270,8 +270,7 @@ module internal Core =
     /// Whether any hosted slot in the vocabulary declares a FORMAT — the condition the
     /// F# and TypeScript decoder preludes emit their `dFormat` helper on, so a vocabulary
     /// that declares none emits byte-for-byte what it did.
-    let declaresHostedFormat (idl: Idl) : bool =
-        declaresHostedWhere (fun h -> h.Format.IsSome) idl
+    let declaresHostedFormat (idl: Idl) : bool = declaresHostedWhere _.Format.IsSome idl
 
     /// Whether the vocabulary declares any hosted slot — the condition the F# decoder prelude
     /// emits `dHosted` on (Phase 337), the lift of a host codec's sentence-refusal.
@@ -302,7 +301,7 @@ module internal Core =
         if s.Length = 0 then
             s
         else
-            string (System.Char.ToUpperInvariant s.[0]) + s.Substring 1
+            string (System.Char.ToUpperInvariant s[0]) + s.Substring 1
 
     /// F# reserved keywords that can collide with an IDL field name used *verbatim* as an
     /// identifier. Spec / record fields are `pascal`-cased (first letter upper — no F# keyword

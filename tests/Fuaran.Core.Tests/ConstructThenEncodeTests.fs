@@ -145,7 +145,7 @@ let tests =
               Expect.equal (List.length results) 3 "three laws: non-vacuity, acceptance, the law itself"
 
               Expect.isTrue
-                  (results |> List.forall (fun r -> r.Passed))
+                  (results |> List.forall _.Passed)
                   (sprintf
                       "rebuilding through RNode.node / RNode.leaf re-encodes every corpus document: %A"
                       (results |> List.filter (fun r -> not r.Passed)))
@@ -158,7 +158,7 @@ let tests =
               let codecOutcomes = Corpus.runCorpus codec corpus
 
               Expect.isTrue
-                  (codecOutcomes |> List.forall (fun o -> o.Passed))
+                  (codecOutcomes |> List.forall _.Passed)
                   (sprintf
                       "the codec certifies over this corpus: %A"
                       (codecOutcomes |> List.filter (fun o -> not o.Passed)))

@@ -135,8 +135,7 @@ module internal QuerySeamLaws =
 
             let allNull = qOpt.Params |> List.map (fun p -> p.Name, Null)
 
-            let requiredNames =
-                qOpt.Params |> List.filter (fun p -> p.Required) |> List.map (fun p -> p.Name)
+            let requiredNames = qOpt.Params |> List.filter _.Required |> List.map _.Name
 
             (match Query.validateParams qOpt allNull with
              | Error(RequiredParamsNull names) when names = requiredNames -> validation.Saw()
@@ -235,7 +234,7 @@ module internal QuerySeamLaws =
                         | Error _ -> acc @ [ None ], caps)
                     ([], journal)
 
-            let pageNums = served |> List.map (Option.map (fun r -> r.PageNum))
+            let pageNums = served |> List.map (Option.map _.PageNum)
 
             paging.Check(
                 pageNums = List.init pages Some
@@ -278,7 +277,7 @@ module internal QuerySeamLaws =
                 |> Result.bind (QueryRegistry.register qB)
              with
              | Ok r ->
-                 let ids = QueryRegistry.enumerate r |> List.map (fun x -> x.Id)
+                 let ids = QueryRegistry.enumerate r |> List.map _.Id
                  enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
              | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
@@ -653,7 +652,7 @@ module internal QuerySeamLaws =
               typedReach
               shape ]
 
-    /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsWith`'s three laws, over
+    /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsAt`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`
     /// with its `Resolver`, counted, and the family certifies that a dispatch has exactly three
     /// outcomes (`Ok(Failed _)` never escapes, and an `ExecutionFailed` carries the resolver's own
@@ -669,7 +668,7 @@ module internal QuerySeamLaws =
     /// The query instance of `LawKit.seamLaws` (Phase 297); `capabilityLawsAt` is the capability one.
     /// `family` labels the guard, as there.
     let queryLawsAt (family: string) (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
-        let known = QueryRegistry.enumerate w.Queries |> List.map (fun q -> q.Id)
+        let known = QueryRegistry.enumerate w.Queries |> List.map _.Id
 
         // Phase 302 — the result law. Nothing bound a resolver's answer to the query's declared
         // `ResultSchema`: `Query.invoke` hands a `Ready` result back as the resolver built it, and the

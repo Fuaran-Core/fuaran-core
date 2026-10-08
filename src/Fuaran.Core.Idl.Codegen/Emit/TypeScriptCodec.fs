@@ -681,7 +681,7 @@ module internal TypeScriptCodec =
                 "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
                 + arms
                 + "\n      default: return dUnknown("
-                + SourceLit.tsString (oneOf (u.Cases |> List.map (fun c -> c.Tag)))
+                + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
                 + ", "
                 + SourceLit.tsString ("unknown " + u.Name + " case: ")
                 + " + "
@@ -1386,7 +1386,7 @@ const plain = (pairs) =>
                 "function decKind(j) {\n  if (!isObj(j)) return dFail('WrongKind', 'object', 'expected a kind object');\n  switch (dTag(j)) {\n"
                 + arms
                 + "\n    default: return dUnknown("
-                + SourceLit.tsString (oneOf (kinds |> List.map (fun k -> k.Tag)))
+                + SourceLit.tsString (oneOf (kinds |> List.map _.Tag))
                 + ", 'unknown node kind: ' + "
                 + tsDiscProp disc "j"
                 + ");\n  }\n}\n\n"

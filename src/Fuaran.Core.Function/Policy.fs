@@ -194,7 +194,7 @@ module RegistryPolicy =
           Observers = a.Observers @ b.Observers }
 
     /// The gate names, in the order they run.
-    let gates (p: RegistryPolicy<'Decl, 'Args>) : string list = p.Gates |> List.map (fun g -> g.Policy)
+    let gates (p: RegistryPolicy<'Decl, 'Args>) : string list = p.Gates |> List.map _.Policy
 
     /// The decision for one declaration and its arguments, with the name of the gate that made it:
     /// the join over every gate, in order, so the deciding gate is the FIRST of the most restrictive
@@ -235,7 +235,8 @@ module RegistryPolicy =
                   Args = args
                   Decision = d }
 
-            p.Observers |> List.iter (fun observe -> observe denial)
+            for observe in p.Observers do
+                observe denial
 
             match d with
             | PolicyDecision.Deny g -> Error(refused name g)

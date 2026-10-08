@@ -383,18 +383,21 @@ module Function =
         { sg with
             Holes = sg.Holes |> List.filter (fun e -> not (boundAddrs.Contains e.Addr)) }
 
+    /// One entry's half of the totality law: a repeat hole ranges over a count space, and the entry
+    /// is a hole kind. What `isTotal` asks of every entry and `Capability`'s admission gate asks of
+    /// each, to name the ones that fail.
+    let internal isTotalEntry (e: SigEntry) : bool =
+        match e.HoleKind with
+        | Some(RepeatHole s) -> Space.isCount s
+        | Some _ -> true
+        // An entry that projects to no hole kind — an unknown tag, or a tag without the payload
+        // it needs, which only a hand-built entry can be — is not certified total (Phase 295).
+        | None -> false
+
     /// Totality law: every repeat hole ranges over a count space (`Space.isCount` — a capped,
     /// non-empty, non-negative `IntRange`, Phase 307), and every entry is a hole kind
     /// (`SigEntry.HoleKind`).
-    let isTotal (sg: Signature) : bool =
-        sg.Holes
-        |> List.forall (fun e ->
-            match e.HoleKind with
-            | Some(RepeatHole s) -> Space.isCount s
-            | Some _ -> true
-            // An entry that projects to no hole kind — an unknown tag, or a tag without the payload
-            // it needs, which only a hand-built entry can be — is not certified total (Phase 295).
-            | None -> false)
+    let isTotal (sg: Signature) : bool = sg.Holes |> List.forall isTotalEntry
 
     /// The data holes of a tree — every declared hole but the action holes, which `bindHandlers`
     /// fills on the behaviour axis.
@@ -501,7 +504,7 @@ module Function =
         match guardTotal holes with
         | Some e -> Error e
         | None ->
-            let declared = holes |> List.map (fun h -> h.Addr)
+            let declared = holes |> List.map _.Addr
 
             // Reject args that don't address a declared hole.
             match
@@ -544,7 +547,7 @@ module Function =
                             | SlotArg sub ->
                                 match dataHoles w sub with
                                 | [] -> None
-                                | hs -> Some(SlotArgOpen(a, hs |> List.map (fun o -> o.Addr)))
+                                | hs -> Some(SlotArgOpen(a, hs |> List.map _.Addr))
                             | ValueArg _ -> None)
 
                 match openSlot with
@@ -595,7 +598,7 @@ module Function =
         | Some e -> Error e
         | None ->
             match holes |> List.tryFind (fun h -> h.Addr = slotAddr) with
-            | None -> Error(UnknownHoleAddr(slotAddr, holes |> List.map (fun h -> h.Addr)))
+            | None -> Error(UnknownHoleAddr(slotAddr, holes |> List.map _.Addr))
             | Some h ->
                 match h.Kind with
                 | SlotHole constraintOpt ->
@@ -668,7 +671,7 @@ module Function =
                 let holes = wa.Holes outer
 
                 match holes |> List.tryFind (fun h -> h.Addr = slotAddr) with
-                | None -> Error(UnknownHoleAddr(slotAddr, holes |> List.map (fun h -> h.Addr)))
+                | None -> Error(UnknownHoleAddr(slotAddr, holes |> List.map _.Addr))
                 | Some h ->
                     match h.Kind with
                     | SlotHole constraintOpt ->
@@ -708,7 +711,7 @@ module Function =
         (handlers: Map<string, HandlerBinding<'Handler>>)
         (node: 'Node)
         : Result<HandlerTable<'Handler>, BindHandlerError> =
-        let allAddrs = w.Holes node |> List.map (fun h -> h.Addr)
+        let allAddrs = w.Holes node |> List.map _.Addr
 
         let actionHoles =
             w.Holes node
@@ -848,7 +851,7 @@ module Function =
             [ "name", JStr sg.Name
               "effect", EffectCodec.toJson sg.Effect
               "holes", JArr(sg.Holes |> List.map entryJson)
-              "required", JArr(sg.Holes |> List.filter (fun h -> h.Required) |> List.map (fun h -> JStr h.Addr)) ]
+              "required", JArr(sg.Holes |> List.filter _.Required |> List.map (fun h -> JStr h.Addr)) ]
 
     // ---- signature → standard JSON Schema projection ----
 
@@ -915,12 +918,7 @@ module Function =
               "title", JStr sg.Name
               "x-effect", EffectCodec.toJson sg.Effect
               "properties", JObj(dataHoles |> List.map (fun e -> e.Addr, propSchema e))
-              "required",
-              JArr(
-                  dataHoles
-                  |> List.filter (fun h -> h.Required)
-                  |> List.map (fun h -> JStr h.Addr)
-              ) ]
+              "required", JArr(dataHoles |> List.filter _.Required |> List.map (fun h -> JStr h.Addr)) ]
             @ (match actionHoles with
                | [] -> []
                | _ -> [ "x-actions", JArr(actionHoles |> List.map actionEntryJson) ])
@@ -1043,9 +1041,9 @@ module Function =
     /// `compose`d into the outer; then the outer's own holes are bound, also through `applyMemo`. An edit
     /// to an outer hole leaves every inner's key unchanged — the inner subtrees come straight from the
     /// cache (hits) and only the outer re-derives; an edit to one inner misses only that inner's key (and
-    /// the outer, whose composed content then changed). Single-witness `compose`; the
-    /// cross-witness `composeAcross` (Phase 47) analogue threads the same memo identically — the memo is
-    /// witness-agnostic, keyed on content hashes, not on which witness produced the node.
+    /// the outer, whose composed content then changed). Single-witness `compose` only: there is no
+    /// memoised `composeAcross`, though the memo itself is witness-agnostic — keyed on content hashes,
+    /// not on which witness produced the node.
     let applyMemoComposed
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)

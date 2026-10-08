@@ -764,7 +764,7 @@ let vacuityTests =
               // Both directions, for the reason the roster's own completeness check runs both: a
               // missing run is a family measured by nobody, and a run naming nothing is a census
               // cell for a family that no longer exists.
-              let ran = runs.Value |> List.map (fun r -> r.Id) |> Set.ofList
+              let ran = runs.Value |> List.map _.Id |> Set.ofList
               let rostered = Set.ofList KitRoster.ids
 
               Expect.isEmpty
@@ -823,7 +823,7 @@ let vacuityTests =
                       not (r.Law.StartsWith(SampleAdequacy.lawPrefix "Conformance.attestationLawsAt")))
 
               Expect.isTrue
-                  (subject |> List.forall (fun r -> r.Passed))
+                  (subject |> List.forall _.Passed)
                   "the five subject laws are green under the no-op sink — which is the problem, not the fix"
 
               let measured =
@@ -1074,7 +1074,7 @@ let vacuityTests =
               // The audit is data so the next audit can diff it; a family missing from it is a
               // family nobody asked the question of, and a row naming nothing is a verdict about a
               // family that no longer exists.
-              let audited = KitRoster.refusalAudit |> List.map (fun a -> a.Family)
+              let audited = KitRoster.refusalAudit |> List.map _.Family
               let rostered = Set.ofList KitRoster.ids
 
               Expect.isEmpty
@@ -1106,7 +1106,7 @@ let vacuityTests =
                       match classOf a.Family with
                       | Guarded _ -> false
                       | Unconditional _ -> true)
-                  |> List.map (fun a -> a.Family)
+                  |> List.map _.Family
 
               Expect.isEmpty
                   unguardedDrawn
@@ -1121,7 +1121,7 @@ let vacuityTests =
 
               for id in [ "Conformance.opAlgebra"; "Conformance.reducer" ] do
                   Expect.equal
-                      (KitRoster.tryRefusal id |> Option.map (fun a -> a.Population))
+                      (KitRoster.tryRefusal id |> Option.map _.Population)
                       (Some Families.Drawn)
                       (sprintf "%s is audited Drawn" id)
 
@@ -1142,7 +1142,7 @@ let vacuityTests =
               let id = "Conformance.streamLaws"
 
               Expect.equal
-                  (KitRoster.tryRefusal id |> Option.map (fun a -> a.Population))
+                  (KitRoster.tryRefusal id |> Option.map _.Population)
                   (Some Families.Drawn)
                   "streamLaws is audited Drawn"
 
@@ -1173,7 +1173,7 @@ let vacuityTests =
 
               for id, dims in drawnRefusalSix do
                   Expect.equal
-                      (KitRoster.tryRefusal id |> Option.map (fun a -> a.Population))
+                      (KitRoster.tryRefusal id |> Option.map _.Population)
                       (Some Families.Drawn)
                       (sprintf "%s is audited Drawn" id)
 
@@ -1247,7 +1247,7 @@ let vacuityTests =
 // below is one cell of that matrix that was GREEN, and is the go-red that keeps it red.
 
 let private redLaws (results: LawResult list) =
-    results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
+    results |> List.filter (fun r -> not r.Passed) |> List.map _.Law
 
 let private hasRed (fragment: string) (results: LawResult list) =
     results |> List.exists (fun r -> not r.Passed && r.Law.Contains fragment)
@@ -1281,10 +1281,7 @@ let private coveredDimensions () : (string * string) list =
           let text = System.IO.File.ReadAllText file
 
           for m in pattern.Matches text do
-              let dim =
-                  [ 1; 2; 3 ]
-                  |> List.map (fun g -> m.Groups.[g])
-                  |> List.find (fun g -> g.Success)
+              let dim = [ 1; 2; 3 ] |> List.map (fun g -> m.Groups[g]) |> List.find _.Success
 
               yield System.IO.Path.GetFileName file, dim.Value ]
 
@@ -1421,7 +1418,7 @@ let floorTests =
                   let guard =
                       results
                       |> List.filter (fun r -> not r.Passed)
-                      |> List.choose (fun r -> r.Counterexample)
+                      |> List.choose _.Counterexample
                       |> List.exists (fun cx -> cx.Contains "never reached" && cx.Contains "encode-distinguished node")
 
                   Expect.isTrue guard (sprintf "%s names the starved encode: %A" name (redLaws results))
@@ -1621,7 +1618,7 @@ let vectorFamilyTests =
               let declared =
                   Families.families
                   |> List.filter (fun f -> Set.contains f.Module vectorModules)
-                  |> List.map (fun f -> f.Id)
+                  |> List.map _.Id
                   |> set
 
               let planted = zeroVectorRuns |> List.map (fun (id, _, _) -> id) |> set
@@ -1696,7 +1693,7 @@ let vectorFamilyTests =
                         let lines = File.ReadAllLines file
 
                         for i in 0 .. lines.Length - 1 do
-                            if pattern.IsMatch lines.[i] then
+                            if pattern.IsMatch lines[i] then
                                 yield sprintf "%s:%d" (Path.GetFileName file) (i + 1) ]
 
               Expect.isNonEmpty (Directory.GetFiles(dir, "*.fs")) "the scan read the kit's sources"
@@ -1735,7 +1732,7 @@ module ObsoleteDecoy =
 /// Every way a roster breaks the rule, named. Pure over its inputs so the go-red below can plant one.
 let private namingDefects (families: Families.LawFamily list) (obsolete: string -> string -> bool) : string list =
     let live = families |> List.filter (fun f -> not (obsolete f.Module f.Entry))
-    let ids = families |> List.map (fun f -> f.Id) |> set
+    let ids = families |> List.map _.Id |> set
 
     [ for f in live do
           let witnessTaking = f.Reason = Some Families.NeedsWitnessCapability

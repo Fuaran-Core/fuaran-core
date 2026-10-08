@@ -181,13 +181,13 @@ module RunBoundaries =
         let mutable start = 0
 
         for i in 0 .. s.Length - 1 do
-            let code = int s.[i]
+            let code = int s[i]
 
             if code < 0x20 || code = 0x22 || code = 0x5C then
                 if i - start > 1 then
                     sb.Append(s, start, i - start - 1) |> ignore
 
-                sb.Append(oracle (string s.[i])) |> ignore
+                sb.Append(oracle (string s[i])) |> ignore
                 start <- i + 1
 
         if s.Length > start then

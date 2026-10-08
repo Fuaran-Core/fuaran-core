@@ -549,7 +549,9 @@ module FStarTarget =
                             | Error e -> fail e
                             | Ok ms ->
                                 memberMap[key] <- ms
-                                ms |> List.iter (fun m -> visitSlot m.Slot)
+
+                                for m in ms do
+                                    visitSlot m.Slot
                 | SUnion(n, args) ->
                     let key = slotName s
 
@@ -613,14 +615,18 @@ module FStarTarget =
                                         )
                                 | None -> ()
 
-                                cs |> List.iter (fun (_, ms) -> ms |> List.iter (fun m -> visitSlot m.Slot))
+                                for _, ms in cs do
+                                    for m in ms do
+                                        visitSlot m.Slot
 
         and visitEnvelope () =
             match members idl Map.empty "node envelope" idl.NodeFields with
             | Error e -> fail e
             | Ok ms ->
                 memberMap["node"] <- ms
-                ms |> List.iter (fun m -> visitSlot m.Slot)
+
+                for m in ms do
+                    visitSlot m.Slot
 
         and visitKinds () =
             let resolved =
@@ -645,7 +651,10 @@ module FStarTarget =
             | Error e -> fail e
             | Ok ks ->
                 caseMap["vkind"] <- ks
-                ks |> List.iter (fun (_, ms) -> ms |> List.iter (fun m -> visitSlot m.Slot))
+
+                for _, ms in ks do
+                    for m in ms do
+                        visitSlot m.Slot
 
         visitSlot SNode
 
@@ -842,7 +851,7 @@ module FStarTarget =
     /// A kind is in exactly when it is expressible and [[beyondEnvelope]] answers it empty.
     let proofKinds (idl: Idl) : string list =
         partition idl
-        |> List.filter (fun v -> v.Refusal.IsNone)
+        |> List.filter _.Refusal.IsNone
         |> List.map _.Tag
         |> List.filter (fun tag -> List.isEmpty (beyondEnvelope idl tag))
 
@@ -935,8 +944,7 @@ module FStarTarget =
 
     /// Phase 204 — a constructor whose member list is emitted as bound SUFFIXES (8a below).
     let private suffixed (ms: Member list) =
-        (ms |> List.filter (fun m -> m.Presence.IsSome) |> List.length)
-        >= presenceSplitAt
+        (ms |> List.filter _.Presence.IsSome |> List.length) >= presenceSplitAt
 
     /// One conditional member's suffix: the top-level definition that conses the member onto
     /// the rest of the list, or passes the rest through when the encoder omits it.
@@ -2316,7 +2324,7 @@ module FStarTarget =
                 let bind = bindOf ms
 
                 let fuel =
-                    lookupFuel (List.length c.Fixed) (ms |> List.filter (fun m -> m.Presence.IsNone) |> List.length)
+                    lookupFuel (List.length c.Fixed) (ms |> List.filter _.Presence.IsNone |> List.length)
 
                 let start = firstConditional entries
 
@@ -3295,10 +3303,7 @@ module FStarTarget =
 
             // The kinds the committed model declares: every kind the target can express.
             let modelled =
-                partition vm.Idl
-                |> List.filter (fun verdict -> verdict.Refusal.IsNone)
-                |> List.map _.Tag
-                |> Set.ofList
+                partition vm.Idl |> List.filter _.Refusal.IsNone |> List.map _.Tag |> Set.ofList
             // A top-level F* binding must start lower-case; the abbreviation must not.
             let b = vm.Prefix.ToLowerInvariant()
 

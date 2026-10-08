@@ -177,7 +177,7 @@ let private pool: string list =
                 [ s; "-" + s ]
             else
                 let b = BigInteger.Parse s
-                let last = int s.[s.Length - 1] - int '0'
+                let last = int s[s.Length - 1] - int '0'
 
                 [ s
                   "-" + s
@@ -208,7 +208,7 @@ let private reachesCheck (tok: string) : bool =
 
     digits.Length > 0
     && digits |> Seq.forall System.Char.IsAsciiDigit
-    && not (digits.Length > 1 && digits.[0] = '0')
+    && not (digits.Length > 1 && digits[0] = '0')
     && (digits.Length > 16
         || (digits.Length = 16
             && System.String.CompareOrdinal(digits, "9007199254740992") > 0))

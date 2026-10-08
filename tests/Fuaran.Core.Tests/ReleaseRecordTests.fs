@@ -332,7 +332,7 @@ let private mergedTags (root: string) : Result<Set<string>, string> =
     ChildProcess.git root "tag --list --merged HEAD"
     |> Result.map (fun out ->
         out.Split('\n')
-        |> Array.map (fun l -> l.Trim())
+        |> Array.map _.Trim()
         |> Array.filter (fun l -> l <> "")
         |> Set.ofArray)
 

@@ -200,9 +200,7 @@ let tests =
                             Message = Some "use Note" })
                       "the kind's own set round-trips"
 
-                  Expect.isTrue
-                      (k.Fields |> List.forall (fun fld -> fld.Annotations.IsEmpty))
-                      "and none of it leaked onto a field")
+                  Expect.isTrue (k.Fields |> List.forall _.Annotations.IsEmpty) "and none of it leaked onto a field")
 
           testCase "an OP is annotatable on identical terms — it is an IdlKind" (fun _ ->
               let text = Artifact.render (withOpAnn (since "0.18.0"))

@@ -74,7 +74,7 @@ module internal PropagationLaws =
                                 let coin = rng.IntBelow 3
 
                                 if coin = 0 then
-                                    yield string j ]
+                                    string j ]
 
                       string k, Set.ofList reads ]
                 |> Map.ofList
@@ -266,7 +266,7 @@ module internal PropagationLaws =
                                 let coin = rng.IntBelow 3
 
                                 if coin = 0 then
-                                    yield string j ]
+                                    string j ]
 
                       string k, Set.ofList reads ]
                 |> Map.ofList
@@ -636,7 +636,7 @@ module internal PropagationLaws =
 
                               for a in asked do
                                   if not (Set.contains a declared) then
-                                      yield which, id, a, declared ]
+                                      which, id, a, declared ]
 
             let removed = Set.difference (Set.ofList (keysOf deps0)) (Set.ofList (keysOf deps1))
 

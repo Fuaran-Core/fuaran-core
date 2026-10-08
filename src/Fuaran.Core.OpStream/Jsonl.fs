@@ -206,16 +206,16 @@ module internal OpStreamJsonl =
         let private unicodeAt (s: string) (i: int) : int =
             if
                 i + 5 < s.Length
-                && s.[i + 1] = 'u'
-                && isHex s.[i + 2]
-                && isHex s.[i + 3]
-                && isHex s.[i + 4]
-                && isHex s.[i + 5]
+                && s[i + 1] = 'u'
+                && isHex s[i + 2]
+                && isHex s[i + 3]
+                && isHex s[i + 4]
+                && isHex s[i + 5]
             then
-                (hexVal s.[i + 2] <<< 12)
-                + (hexVal s.[i + 3] <<< 8)
-                + (hexVal s.[i + 4] <<< 4)
-                + hexVal s.[i + 5]
+                (hexVal s[i + 2] <<< 12)
+                + (hexVal s[i + 3] <<< 8)
+                + (hexVal s[i + 4] <<< 4)
+                + hexVal s[i + 5]
             else
                 -1
 
@@ -233,7 +233,7 @@ module internal OpStreamJsonl =
                 if i >= n then
                     fail start JsonlFaultReason.UnterminatedString
 
-                match s.[i] with
+                match s[i] with
                 | '"' ->
                     i <- i + 1
                     fin <- true
@@ -241,7 +241,7 @@ module internal OpStreamJsonl =
                     if i + 1 >= n then
                         fail start JsonlFaultReason.UnterminatedString
 
-                    match s.[i + 1] with
+                    match s[i + 1] with
                     | '"'
                     | '\\'
                     | '/'
@@ -257,7 +257,7 @@ module internal OpStreamJsonl =
                             fail i (JsonlFaultReason.InvalidEscape(escapeText s i 6))
                         elif code >= 0xD800 && code <= 0xDBFF then
                             let low =
-                                if i + 6 < n && s.[i + 6] = '\\' then
+                                if i + 6 < n && s[i + 6] = '\\' then
                                     unicodeAt s (i + 6)
                                 else
                                     -1
@@ -284,15 +284,15 @@ module internal OpStreamJsonl =
         /// raw half beside an escaped one) is carried through unit for unit, across runs and escapes.
         let private decodeString (s: string) (start: int) (stop: int) : string =
             let first = start + 1
-            // The closing quote: the body is `s.[first .. last - 1]`.
+            // The closing quote: the body is `s[first .. last - 1]`.
             let last = stop - 1
 
-            // The index of the first backslash in `s.[from .. last - 1]`, or `last` when there is none.
+            // The index of the first backslash in `s[from .. last - 1]`, or `last` when there is none.
             // A loop, not `IndexOf(char, int, int)`: Fable maps no count argument.
             let runEnd (from: int) =
                 let mutable j = from
 
-                while j < last && s.[j] <> '\\' do
+                while j < last && s[j] <> '\\' do
                     j <- j + 1
 
                 j
@@ -308,7 +308,7 @@ module internal OpStreamJsonl =
                 let mutable i = firstEscape
 
                 while i < last do
-                    match s.[i + 1] with
+                    match s[i + 1] with
                     | 'u' ->
                         sb.Append(char (unicodeAt s i)) |> ignore
                         i <- i + 6
@@ -341,14 +341,14 @@ module internal OpStreamJsonl =
             else
                 let n = t.Length
                 let mutable i = 0
-                let digit k = k < n && t.[k] >= '0' && t.[k] <= '9'
+                let digit k = k < n && t[k] >= '0' && t[k] <= '9'
 
-                if i < n && t.[i] = '-' then
+                if i < n && t[i] = '-' then
                     i <- i + 1
 
                 let intStart = i
 
-                if i < n && t.[i] = '0' then
+                if i < n && t[i] = '0' then
                     i <- i + 1
                 else
                     while digit i do
@@ -356,7 +356,7 @@ module internal OpStreamJsonl =
 
                 let mutable ok = i > intStart
 
-                if ok && i < n && t.[i] = '.' then
+                if ok && i < n && t[i] = '.' then
                     i <- i + 1
                     let fracStart = i
 
@@ -365,10 +365,10 @@ module internal OpStreamJsonl =
 
                     ok <- i > fracStart
 
-                if ok && i < n && (t.[i] = 'e' || t.[i] = 'E') then
+                if ok && i < n && (t[i] = 'e' || t[i] = 'E') then
                     i <- i + 1
 
-                    if i < n && (t.[i] = '+' || t.[i] = '-') then
+                    if i < n && (t[i] = '+' || t[i] = '-') then
                         i <- i + 1
 
                     let expStart = i
@@ -387,7 +387,7 @@ module internal OpStreamJsonl =
             if start >= n then
                 fail start JsonlFaultReason.Truncated
 
-            match s.[start] with
+            match s[start] with
             | '"' -> skipString s start
             | '{'
             | '[' ->
@@ -398,7 +398,7 @@ module internal OpStreamJsonl =
                     if i >= n then
                         fail start JsonlFaultReason.UnterminatedContainer
 
-                    match s.[i] with
+                    match s[i] with
                     | '"' -> i <- skipString s i
                     | '{'
                     | '[' ->
@@ -417,7 +417,7 @@ module internal OpStreamJsonl =
             | _ ->
                 let mutable i = start
 
-                while i < n && not (let c = s.[i] in c = ',' || c = '}' || c = ']' || isWs c) do
+                while i < n && not (let c = s[i] in c = ',' || c = '}' || c = ']' || isWs c) do
                     i <- i + 1
 
                 let token = s.Substring(start, i - start)
@@ -438,14 +438,14 @@ module internal OpStreamJsonl =
             let mutable k = 0
 
             while brk < 0 && k < n do
-                if raw.[k] = '\n' || raw.[k] = '\r' then
+                if raw[k] = '\n' || raw[k] = '\r' then
                     brk <- k
 
                 k <- k + 1
 
             if brk >= 0 then
                 Error(JsonlWriteFaultReason.MultiLine brk)
-            elif n > 0 && isWs raw.[0] then
+            elif n > 0 && isWs raw[0] then
                 Error JsonlWriteFaultReason.NotTrimStable
             else
                 try
@@ -457,7 +457,7 @@ module internal OpStreamJsonl =
                         let mutable allWs = true
 
                         for j in e .. n - 1 do
-                            if not (isWs raw.[j]) then
+                            if not (isWs raw[j]) then
                                 allWs <- false
 
                         if allWs then
@@ -475,13 +475,13 @@ module internal OpStreamJsonl =
             let mutable i = 0
 
             let skipWs () =
-                while i < n && isWs s.[i] do
+                while i < n && isWs s[i] do
                     i <- i + 1
 
             let at k = offset + k
             skipWs ()
 
-            if i >= n || s.[i] <> '{' then
+            if i >= n || s[i] <> '{' then
                 fail (at i) JsonlFaultReason.NotAnObject
 
             i <- i + 1
@@ -491,7 +491,7 @@ module internal OpStreamJsonl =
             if i >= n then
                 fail (at i) JsonlFaultReason.Truncated
 
-            if s.[i] = '}' then
+            if s[i] = '}' then
                 i <- i + 1
             else
                 let mutable go = true
@@ -502,7 +502,7 @@ module internal OpStreamJsonl =
                     if i >= n then
                         fail (at i) JsonlFaultReason.Truncated
 
-                    if s.[i] <> '"' then
+                    if s[i] <> '"' then
                         fail (at i) JsonlFaultReason.ExpectedKey
 
                     let ks =
@@ -518,7 +518,7 @@ module internal OpStreamJsonl =
                     if i >= n then
                         fail (at i) JsonlFaultReason.Truncated
 
-                    if s.[i] <> ':' then
+                    if s[i] <> ':' then
                         fail (at i) JsonlFaultReason.ExpectedColon
 
                     i <- i + 1
@@ -540,9 +540,9 @@ module internal OpStreamJsonl =
                     if i >= n then
                         fail (at i) JsonlFaultReason.Truncated
 
-                    if s.[i] = ',' then
+                    if s[i] = ',' then
                         i <- i + 1
-                    elif s.[i] = '}' then
+                    elif s[i] = '}' then
                         i <- i + 1
                         go <- false
                     else
@@ -557,7 +557,7 @@ module internal OpStreamJsonl =
 
             [ for (k, v, p) in fields do
                   if seen.Add k then
-                      yield (k, v, p) ]
+                      (k, v, p) ]
 
         let private faultAt (line: int) (pos: int) (reason: JsonlFaultReason) : JsonlFault =
             { Line = line
@@ -582,7 +582,7 @@ module internal OpStreamJsonl =
             |> Result.map (fun l -> l.Fields |> List.tryPick (fun (k, v, _) -> if k = field then Some v else None))
 
         let unquote (raw: string) : Result<string, JsonlFaultReason> =
-            if raw.Length < 2 || raw.[0] <> '"' then
+            if raw.Length < 2 || raw[0] <> '"' then
                 Error(JsonlFaultReason.ExpectedString "")
             else
                 try
@@ -625,13 +625,14 @@ module internal OpStreamJsonl =
             match memberOf key line with
             | None -> Error(faultAt line.Number 0 (JsonlFaultReason.MissingField key))
             | Some(v, p) ->
-                let digits = if v.StartsWith "-" then v.Substring 1 else v
+                let negative = v.Length > 0 && v[0] = '-'
+                let digits = if negative then v.Substring 1 else v
 
                 let grammatical =
                     digits.Length > 0
                     && digits.Length <= 10
                     && Seq.forall (fun c -> c >= '0' && c <= '9') digits
-                    && (digits = "0" || digits.[0] <> '0')
+                    && (digits = "0" || digits[0] <> '0')
 
                 // Read from the DIGITS, never through a host number reader (Phase 306). The
                 // `System.Int64.Parse v` this replaces read under the CURRENT culture: under one
@@ -643,7 +644,7 @@ module internal OpStreamJsonl =
                         let magnitude =
                             digits |> Seq.fold (fun acc c -> acc * 10L + int64 (int c - int '0')) 0L
 
-                        if v.StartsWith "-" then -magnitude else magnitude
+                        if negative then -magnitude else magnitude
                     else
                         0L
 
@@ -665,7 +666,7 @@ module internal OpStreamJsonl =
 
                 let n = v.Length
 
-                if n < 2 || v.[0] <> '[' || v.[n - 1] <> ']' then
+                if n < 2 || v[0] <> '[' || v[n - 1] <> ']' then
                     bad ()
                 else
                     let items = ResizeArray<string>()
@@ -677,7 +678,7 @@ module internal OpStreamJsonl =
                     let mutable scanFault: JsonlFault option = None
 
                     let skipWs () =
-                        while i < n - 1 && isWs v.[i] do
+                        while i < n - 1 && isWs v[i] do
                             i <- i + 1
 
                     skipWs ()
@@ -689,7 +690,7 @@ module internal OpStreamJsonl =
                             skipWs ()
 
                             if expectItem then
-                                if i < n - 1 && v.[i] = '"' then
+                                if i < n - 1 && v[i] = '"' then
                                     let e =
                                         try
                                             skipString v i
@@ -705,7 +706,7 @@ module internal OpStreamJsonl =
                                         expectItem <- false
                                 else
                                     ok <- false
-                            elif v.[i] = ',' then
+                            elif v[i] = ',' then
                                 i <- i + 1
                                 expectItem <- true
                             else
@@ -763,7 +764,7 @@ module internal OpStreamJsonl =
             let mutable k = 0
 
             while fault.IsNone && k < lines.Length do
-                let text = lines.[k]
+                let text = lines[k]
 
                 if text.Trim() <> "" then
                     match parseLine (k + 1) text |> Result.bind decode with

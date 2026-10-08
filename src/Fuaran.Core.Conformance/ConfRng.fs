@@ -114,8 +114,8 @@ module ConfRng =
         for i in (arr.Length - 1) .. -1 .. 1 do
             let j, r' = intBelow (i + 1) rng
             rng <- r'
-            let tmp = arr.[i]
-            arr.[i] <- arr.[j]
-            arr.[j] <- tmp
+            let tmp = arr[i]
+            arr[i] <- arr[j]
+            arr[j] <- tmp
 
         List.ofArray arr, rng

@@ -143,17 +143,17 @@ method Fuaran.Core.Idl.SourceLit.tsStringSingle(System.String) : System.String
 method Fuaran.Core.Idl.TransparentUnion.tag(Fuaran.Core.Idl.HardenPolicy, Fuaran.Core.Idl.IdlUnion) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.TypeParams.bind(Fuaran.Core.Idl.IdlUnion, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>>
 method Fuaran.Core.Idl.TypeParams.substitute(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>, Fuaran.Core.Idl.IdlType) : Fuaran.Core.Idl.IdlType
-property Fuaran.Core.Idl.Annotations.Empty : Fuaran.Core.Idl.Annotations { get }
+property Fuaran.Core.Idl.Annotations.Empty : Fuaran.Core.Idl.Annotations { get } (static)
 property Fuaran.Core.Idl.Annotations.IsEmpty : System.Boolean { get }
 property Fuaran.Core.Idl.Artifact.defaultDescription : System.String { get }
 property Fuaran.Core.Idl.Artifact.defaultIdentity : Fuaran.Core.Idl.Artifact+Identity { get }
-property Fuaran.Core.Idl.HardenPolicy.Undeclared : Fuaran.Core.Idl.HardenPolicy { get }
+property Fuaran.Core.Idl.HardenPolicy.Undeclared : Fuaran.Core.Idl.HardenPolicy { get } (static)
 property Fuaran.Core.Idl.HostedFormat.known : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Idl.IdlEnum.HasCaseAnnotations : System.Boolean { get }
 property Fuaran.Core.Idl.IdlEnum.WireCases : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Idl.ProposalModule.requiredAlternatives : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.Idl.Sample+SampleRefusal.Describe : System.String { get }
-property Fuaran.Core.Idl.WireShape.Default : Fuaran.Core.Idl.WireShape { get }
+property Fuaran.Core.Idl.WireShape.Default : Fuaran.Core.Idl.WireShape { get } (static)
 record-field Fuaran.Core.Idl.Annotations.Deprecated #0 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>
 record-field Fuaran.Core.Idl.Annotations.Doc #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Annotations.InProcessOnly #1 : System.Boolean

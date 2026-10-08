@@ -683,7 +683,7 @@ module Dag =
             indeg
             |> Map.toSeq
             |> Seq.filter (fun (_, d) -> d = 0)
-            |> Seq.map (fun (id, _) -> key nodes.[id], id)
+            |> Seq.map (fun (id, _) -> key nodes[id], id)
             |> Set.ofSeq
 
         let placed = ResizeArray<string>()
@@ -697,11 +697,11 @@ module Dag =
             match Map.tryFind id children with
             | Some kids ->
                 for k in kids do
-                    let d = indeg.[k] - 1
+                    let d = indeg[k] - 1
                     indeg <- Map.add k d indeg
 
                     if d = 0 then
-                        ready <- Set.add (key nodes.[k], k) ready
+                        ready <- Set.add (key nodes[k], k) ready
             | None -> ()
 
         let placedSet = Set.ofSeq placed
@@ -725,7 +725,7 @@ module Dag =
         let placed, unplaced = drainBy (fun _ -> 0) dag
 
         placed @ unplaced
-        |> List.map (fun id -> id, dag.Nodes.[id])
+        |> List.map (fun id -> id, dag.Nodes[id])
         |> List.tryPick (fun (id, n) ->
             let h = nodeHashAs actorText hashFn w.Encode n.Parents n.Actor n.Op
 
@@ -938,7 +938,7 @@ module Dag =
     ///
     /// A constant key is the smallest-id drain — the order `Reach.ofDag` numbers its slots in, and on
     /// one head's closure exactly `tryTopoOrder`'s. A consumer with its own order passes its own key:
-    /// a Lamport-rank order is `totalOrderBy (fun n -> ranks.[n.Id], lane n)`, a domain-rank order
+    /// a Lamport-rank order is `totalOrderBy (fun n -> ranks[n.Id], lane n)`, a domain-rank order
     /// `totalOrderBy (fun n -> rankOf n.Op)`. The lane store's default is `totalOrder` (`laneKey`).
     let totalOrderBy (key: DagNode<'Op> -> 'K) (dag: T<'Op>) : Result<string list, TotalOrderFault> =
         match drainBy key dag with
@@ -956,7 +956,7 @@ module Dag =
             |> List.fold
                 (fun (acc: Map<string, int>) id ->
                     let r =
-                        dag.Nodes.[id].Parents
+                        dag.Nodes[id].Parents
                         |> List.fold
                             (fun m p ->
                                 match Map.tryFind p acc with
@@ -986,7 +986,7 @@ module Dag =
                 function
                 | [] -> Ok st
                 | (id: string) :: rest ->
-                    match w.Apply dag.Nodes.[id].Op st with
+                    match w.Apply dag.Nodes[id].Op st with
                     | Ok st' -> go st' rest
                     | Error e -> Error(ReplayAllFault.Rejected(id, e))
 
@@ -1264,7 +1264,7 @@ module Dag =
             match drainNodes (fun _ -> 0) (dag.Nodes |> Map.filter (fun id _ -> Set.contains id common)) with
             | _, [] ->
                 let below =
-                    closureOf dag (common |> Set.toList |> List.collect (fun id -> dag.Nodes.[id].Parents))
+                    closureOf dag (common |> Set.toList |> List.collect (fun id -> dag.Nodes[id].Parents))
 
                 Set.difference common below
             | _ -> common
@@ -1320,14 +1320,14 @@ module Dag =
 
         topoOrder dag head
         |> List.filter (fun id -> not (Set.contains id baseClosure))
-        |> List.map (fun id -> dag.Nodes.[id])
+        |> List.map (fun id -> dag.Nodes[id])
 
     /// The branch delta's *ops*, in the same topological order as `between` (Phase 26) — the op
     /// sequence a domain replays through its own reducer / `OpStream` to fast-forward `baseId` to
     /// `head`. A thin projection of `between` (the reconciliation itself stays domain-side, GP6):
     /// `base = head` ⇒ `[]`; an unrelated base ⇒ the whole head closure's ops.
     let betweenOps (dag: T<'Op>) (baseId: string) (head: string) : 'Op list =
-        between dag baseId head |> List.map (fun n -> n.Op)
+        between dag baseId head |> List.map _.Op
 
     // ---- merge-conflict enumeration (Phase 64) ----
     // The generic DETECTION half of a merge. #08 gives the two branch deltas that diverge from a
@@ -1405,32 +1405,28 @@ module Dag =
                   let c3 = Set.difference (Set.difference moveRemove c1) c2
 
                   for addr in c1 do
-                      yield
-                          { Left = a
-                            Right = b
-                            Address = addr
-                            Shape = MergeConflictShape.ConcurrentUpdate }
+                      { Left = a
+                        Right = b
+                        Address = addr
+                        Shape = MergeConflictShape.ConcurrentUpdate }
 
                   for addr in c2 do
-                      yield
-                          { Left = a
-                            Right = b
-                            Address = addr
-                            Shape = MergeConflictShape.InsertPositionClash }
+                      { Left = a
+                        Right = b
+                        Address = addr
+                        Shape = MergeConflictShape.InsertPositionClash }
 
                   for addr in c3 do
-                      yield
-                          { Left = a
-                            Right = b
-                            Address = addr
-                            Shape = MergeConflictShape.MoveVsRemove }
+                      { Left = a
+                        Right = b
+                        Address = addr
+                        Shape = MergeConflictShape.MoveVsRemove }
 
                   for (node, slot) in slotClash do
-                      yield
-                          { Left = a
-                            Right = b
-                            Address = node
-                            Shape = MergeConflictShape.SlotClash slot } ]
+                      { Left = a
+                        Right = b
+                        Address = node
+                        Shape = MergeConflictShape.SlotClash slot } ]
 
     /// `conflicts` over NODES rather than ops (Phase 311): the same report — every shape, the Phase 340
     /// slot clash included, at the same addresses, in the same order — with `Left` and `Right` the
@@ -1497,7 +1493,7 @@ module Dag =
             |> List.map (fun (h, c) -> h, above |> List.filter (fun id -> Set.contains id c && owners id = 1)) }
 
     let private opsOf (dag: T<'Op>) (ids: string list) : 'Op list =
-        ids |> List.map (fun id -> dag.Nodes.[id].Op)
+        ids |> List.map (fun id -> dag.Nodes[id].Op)
 
     /// Every UNORDERED pair of deltas, i < j, checked with `conflicts` — the report both reconcilers
     /// return.
@@ -1550,7 +1546,7 @@ module Dag =
 
         let deltas =
             r.Exclusive
-            |> List.map (fun (_, ids) -> ids |> List.map (fun id -> dag.Nodes.[id]))
+            |> List.map (fun (_, ids) -> ids |> List.map (fun id -> dag.Nodes[id]))
 
         let indexed = List.indexed deltas
 
@@ -1589,7 +1585,7 @@ module Dag =
             match ids with
             | [] -> Ok st
             | id :: rest ->
-                match w.Apply dag.Nodes.[id].Op st with
+                match w.Apply dag.Nodes[id].Op st with
                 | Ok st' -> replayIds st' rest
                 | Error e -> Error(id, e)
 
@@ -1712,7 +1708,7 @@ module Dag =
 
         let private hasBit (bits: int array) (j: int) : bool =
             let w = j >>> 5
-            w < bits.Length && ((bits.[w] >>> (j &&& 31)) &&& 1) = 1
+            w < bits.Length && ((bits[w] >>> (j &&& 31)) &&& 1) = 1
 
         let private popCount (bits: int array) : int =
             let mutable c = 0
@@ -1732,9 +1728,9 @@ module Dag =
 
             for pb in parentBits do
                 for k in 0 .. pb.Length - 1 do
-                    own.[k] <- own.[k] ||| pb.[k]
+                    own[k] <- own[k] ||| pb[k]
 
-            own.[s >>> 5] <- own.[s >>> 5] ||| (1 <<< (s &&& 31))
+            own[s >>> 5] <- own[s >>> 5] ||| (1 <<< (s &&& 31))
             own
 
         /// Build the index over `dag` in one traversal: one drain of the whole node set, each node's
@@ -1776,8 +1772,8 @@ module Dag =
                 let slotNow = slot
 
                 let parentBits =
-                    dag.Nodes.[id].Parents
-                    |> List.choose (fun p -> Map.tryFind p slotNow |> Option.map (fun ps -> bits.[ps]))
+                    dag.Nodes[id].Parents
+                    |> List.choose (fun p -> Map.tryFind p slotNow |> Option.map (fun ps -> bits[ps]))
 
                 ids.Add id
                 bits.Add(closureBits parentBits s)
@@ -1786,7 +1782,7 @@ module Dag =
                 match Map.tryFind id children with
                 | Some kids ->
                     for k in kids do
-                        let d = indeg.[k] - 1
+                        let d = indeg[k] - 1
                         indeg <- Map.add k d indeg
 
                         if d = 0 then
@@ -1813,12 +1809,12 @@ module Dag =
         let ancestors (reach: Reach<'Op>) (id: string) : Set<string> =
             match Map.tryFind id reach.Slot with
             | Some s ->
-                let b = reach.Bits.[s]
+                let b = reach.Bits[s]
                 let acc = ResizeArray<string>()
 
                 for j in 0..s do
                     if hasBit b j then
-                        acc.Add reach.Ids.[j]
+                        acc.Add reach.Ids[j]
 
                 Set.ofSeq acc
             | None -> ancestorsOf reach.Graph id
@@ -1830,19 +1826,19 @@ module Dag =
             match Map.tryFind descendant reach.Slot with
             | Some sd ->
                 match Map.tryFind ancestor reach.Slot with
-                | Some sa -> hasBit reach.Bits.[sd] sa
+                | Some sa -> hasBit reach.Bits[sd] sa
                 | None -> false
             | None -> Set.contains ancestor (ancestorsOf reach.Graph descendant)
 
         /// The drain restricted to one slot's closure: every orderable id in it, in order.
         let private closureInOrder (reach: Reach<'Op>) (s: int) (keep: int -> bool) : string list =
-            let b = reach.Bits.[s]
+            let b = reach.Bits[s]
 
-            [ for t in 0 .. reach.Pos.[s] do
-                  let j = reach.Order.[t]
+            [ for t in 0 .. reach.Pos[s] do
+                  let j = reach.Order[t]
 
                   if hasBit b j && keep j then
-                      yield reach.Ids.[j] ]
+                      reach.Ids[j] ]
 
         /// `Dag.tryTopoOrder`, from the index: `Ok` the head's closure in the deterministic
         /// topological order (`Ok []` for a head the DAG does not hold), or the cyclic-history error.
@@ -1859,21 +1855,21 @@ module Dag =
             else
                 match Map.tryFind left reach.Slot, Map.tryFind right reach.Slot with
                 | Some sl, Some sr ->
-                    let bl = reach.Bits.[sl]
-                    let br = reach.Bits.[sr]
+                    let bl = reach.Bits[sl]
+                    let br = reach.Bits[sr]
                     let mutable best = -1
 
                     for j in 0 .. min sl sr do
                         if hasBit bl j && hasBit br j then
                             if
                                 best < 0
-                                || reach.Count.[j] > reach.Count.[best]
-                                || (reach.Count.[j] = reach.Count.[best]
-                                    && System.String.CompareOrdinal(reach.Ids.[j], reach.Ids.[best]) > 0)
+                                || reach.Count[j] > reach.Count[best]
+                                || (reach.Count[j] = reach.Count[best]
+                                    && System.String.CompareOrdinal(reach.Ids[j], reach.Ids[best]) > 0)
                             then
                                 best <- j
 
-                    if best < 0 then None else Some reach.Ids.[best]
+                    if best < 0 then None else Some reach.Ids[best]
                 | _ -> mergeBase reach.Graph left right
 
         /// `Dag.commonBase`, from the index (Phase 311): the node common to every head's closure with
@@ -1897,16 +1893,16 @@ module Dag =
                     let mutable best = -1
 
                     for j in 0..top do
-                        if ss |> List.forall (fun s -> hasBit reach.Bits.[s] j) then
+                        if ss |> List.forall (fun s -> hasBit reach.Bits[s] j) then
                             if
                                 best < 0
-                                || reach.Count.[j] > reach.Count.[best]
-                                || (reach.Count.[j] = reach.Count.[best]
-                                    && System.String.CompareOrdinal(reach.Ids.[j], reach.Ids.[best]) > 0)
+                                || reach.Count[j] > reach.Count[best]
+                                || (reach.Count[j] = reach.Count[best]
+                                    && System.String.CompareOrdinal(reach.Ids[j], reach.Ids[best]) > 0)
                             then
                                 best <- j
 
-                    if best < 0 then None else Some reach.Ids.[best]
+                    if best < 0 then None else Some reach.Ids[best]
 
         /// `Dag.between`, from the index: the nodes in `head`'s closure and not in `baseId`'s, in
         /// topological order; `[]` for a head the DAG does not hold.
@@ -1918,10 +1914,10 @@ module Dag =
             | Some sh when baseSlot.IsSome || not (reach.Graph.Nodes.ContainsKey baseId) ->
                 let notInBase =
                     match baseSlot with
-                    | Some sb -> fun j -> not (hasBit reach.Bits.[sb] j)
+                    | Some sb -> fun j -> not (hasBit reach.Bits[sb] j)
                     | None -> fun _ -> true
 
-                closureInOrder reach sh notInBase |> List.map (fun id -> reach.Graph.Nodes.[id])
+                closureInOrder reach sh notInBase |> List.map (fun id -> reach.Graph.Nodes[id])
             | _ -> between reach.Graph baseId head
 
         /// The index for `dag'`, which is `reach`'s DAG with node `id` added (or already held) — the
@@ -1937,7 +1933,7 @@ module Dag =
             elif reach.Dangling.Contains id then
                 ofDag dag'
             else
-                let node = dag'.Nodes.[id]
+                let node = dag'.Nodes[id]
                 let parentSlots = node.Parents |> List.map (fun p -> Map.tryFind p reach.Slot)
 
                 if parentSlots |> List.exists Option.isNone then
@@ -1946,14 +1942,14 @@ module Dag =
                     let ps = parentSlots |> List.choose (fun p -> p)
                     let n = reach.Ids.Length
                     let s = n
-                    let after = ps |> List.fold (fun acc p -> max acc reach.Pos.[p]) -1
+                    let after = ps |> List.fold (fun acc p -> max acc reach.Pos[p]) -1
 
                     let mutable q = after + 1
 
-                    while q < n && System.String.CompareOrdinal(id, reach.Ids.[reach.Order.[q]]) > 0 do
+                    while q < n && System.String.CompareOrdinal(id, reach.Ids[reach.Order[q]]) > 0 do
                         q <- q + 1
 
-                    let own = closureBits (ps |> List.map (fun p -> reach.Bits.[p])) s
+                    let own = closureBits (ps |> List.map (fun p -> reach.Bits[p])) s
 
                     { Graph = dag'
                       Slot = Map.add id s reach.Slot
@@ -1962,14 +1958,14 @@ module Dag =
                       Count = Array.append reach.Count [| popCount own |]
                       Order =
                         Array.init (n + 1) (fun t ->
-                            if t < q then reach.Order.[t]
+                            if t < q then reach.Order[t]
                             elif t = q then s
-                            else reach.Order.[t - 1])
+                            else reach.Order[t - 1])
                       Pos =
                         Array.init (n + 1) (fun j ->
                             if j = s then q
-                            elif reach.Pos.[j] >= q then reach.Pos.[j] + 1
-                            else reach.Pos.[j])
+                            elif reach.Pos[j] >= q then reach.Pos[j] + 1
+                            else reach.Pos[j])
                       Dangling = reach.Dangling }
 
     /// `append`, extending an index with the new node (Phase 289): `Ok(id, dag', reach')` where
@@ -2024,7 +2020,7 @@ module Dag =
                     function
                     | [] -> Ok st
                     | id :: rest ->
-                        match w.Apply reach.Graph.Nodes.[id].Op st with
+                        match w.Apply reach.Graph.Nodes[id].Op st with
                         | Ok st' -> go st' rest
                         | Error e -> Error(ReplayFault.Rejected(id, e))
 
@@ -2053,7 +2049,7 @@ module Dag =
         else
             let has (s: int option) (j: int) =
                 match s with
-                | Some s -> j <= s && ((reach.Bits.[s].[j >>> 5] >>> (j &&& 31)) &&& 1) = 1
+                | Some s -> j <= s && ((reach.Bits[s][j >>> 5] >>> (j &&& 31)) &&& 1) = 1
                 | None -> false
 
             let hs = List.distinct heads
@@ -2066,31 +2062,31 @@ module Dag =
             let last =
                 closures
                 |> List.fold
-                    (fun acc (_, c) -> max acc (c |> Option.map (fun s -> reach.Pos.[s]) |> Option.defaultValue -1))
+                    (fun acc (_, c) -> max acc (c |> Option.map (fun s -> reach.Pos[s]) |> Option.defaultValue -1))
                     -1
 
             let above =
                 [ for t in 0..last do
-                      let j = reach.Order.[t]
+                      let j = reach.Order[t]
 
                       if not (has baseSlot j) then
                           let o = owners j
 
                           if o > 0 then
-                              yield j, o ]
+                              j, o ]
 
             let r =
                 { Shared =
                     above
                     |> List.filter (fun (_, o) -> o >= 2)
-                    |> List.map (fun (j, _) -> reach.Ids.[j])
+                    |> List.map (fun (j, _) -> reach.Ids[j])
                   Exclusive =
                     closures
                     |> List.map (fun (h, c) ->
                         h,
                         above
                         |> List.filter (fun (j, o) -> o = 1 && has c j)
-                        |> List.map (fun (j, _) -> reach.Ids.[j])) }
+                        |> List.map (fun (j, _) -> reach.Ids[j])) }
 
             reconcileRegion w footprintOf dag r baseState
 
@@ -2297,7 +2293,7 @@ module Dag =
             function
             | [] -> Ok delta
             | (id: string) :: rest ->
-                if dag.Nodes.[id].Parents |> List.exists (fun p -> p = node || Set.contains p desc) then
+                if dag.Nodes[id].Parents |> List.exists (fun p -> p = node || Set.contains p desc) then
                     go (Set.add id desc) rest
                 else
                     Error id
@@ -2330,7 +2326,7 @@ module Dag =
                         function
                         | [] -> Ok st
                         | (id: string) :: rest ->
-                            match w.Apply dag.Nodes.[id].Op st with
+                            match w.Apply dag.Nodes[id].Op st with
                             | Ok st' -> go st' rest
                             | Error e -> Error(CheckpointFault.Replay(ReplayFault.Rejected(id, e)))
 
@@ -2431,7 +2427,7 @@ module Dag =
             let side =
                 later
                 |> Set.toList
-                |> List.collect (fun id -> dag.Nodes.[id].Parents)
+                |> List.collect (fun id -> dag.Nodes[id].Parents)
                 |> List.filter (fun p -> p <> node && Set.contains p behind)
                 |> List.distinct
 
@@ -2713,7 +2709,7 @@ module Dag =
                             { Dag = { NodeMap = Map.add id n l.Dag.Nodes }
                               LaneOf = Map.add id lane l.LaneOf }
                     | Some held when sameNode w.Encode held n.Parents n.Actor n.Op -> Ok l
-                    | Some _ -> Error(LaneLoadFault.Collision(id, ordinalSort [ l.LaneOf.[id]; lane ])))
+                    | Some _ -> Error(LaneLoadFault.Collision(id, ordinalSort [ l.LaneOf[id]; lane ])))
 
             let rec go (acc: Loaded<'Op>) =
                 function
@@ -2777,7 +2773,7 @@ module Dag =
 
         let bitOf (bits: int array) (j: int) =
             let w = j >>> 5
-            w < bits.Length && ((bits.[w] >>> (j &&& 31)) &&& 1) = 1
+            w < bits.Length && ((bits[w] >>> (j &&& 31)) &&& 1) = 1
 
         lanePartition loaded
         |> List.map (fun (lane, d) ->
@@ -2791,29 +2787,29 @@ module Dag =
                 let below = Array.zeroCreate<int> width
 
                 for s in ss do
-                    mask.[s >>> 5] <- mask.[s >>> 5] ||| (1 <<< (s &&& 31))
-                    let b = reach.Bits.[s]
+                    mask[s >>> 5] <- mask[s >>> 5] ||| (1 <<< (s &&& 31))
+                    let b = reach.Bits[s]
 
                     for k in 0 .. b.Length - 1 do
                         let v =
                             if k = (s >>> 5) then
-                                b.[k] &&& ~~~(1 <<< (s &&& 31))
+                                b[k] &&& ~~~(1 <<< (s &&& 31))
                             else
-                                b.[k]
+                                b[k]
 
-                        below.[k] <- below.[k] ||| v
+                        below[k] <- below[k] ||| v
 
                 lane,
                 ss
                 |> List.map (fun s ->
-                    let b = reach.Bits.[s]
+                    let b = reach.Bits[s]
                     let mutable c = 0
 
                     for j in 0 .. s - 1 do
                         if bitOf b j && bitOf mask j then
                             c <- c + 1
 
-                    reach.Ids.[s], c, bitOf below s)
+                    reach.Ids[s], c, bitOf below s)
             else
                 lane,
                 ids
@@ -2854,7 +2850,7 @@ module Dag =
                     ancestorsOf dag h
                     |> Set.toList
                     |> List.filter (fun id ->
-                        dag.Nodes.[id].Parents |> List.forall (fun p -> not (dag.Nodes.ContainsKey p)))
+                        dag.Nodes[id].Parents |> List.forall (fun p -> not (dag.Nodes.ContainsKey p)))
                     |> List.tryHead
                     |> Option.defaultValue h
 
@@ -2949,8 +2945,8 @@ module Dag =
                     function
                     | [] -> Ok(d, ids)
                     | (id: string) :: rest ->
-                        let n = dag.Nodes.[id]
-                        let parents = n.Parents |> List.map (fun p -> ids.[p])
+                        let n = dag.Nodes[id]
+                        let parents = n.Parents |> List.map (fun p -> ids[p])
                         let id' = idOf parents n.Actor n.Op
 
                         match addNodeAs id' encode n.Actor n.Op parents d with

@@ -120,9 +120,7 @@ let private proofsPath (g: Generated) =
 /// there is nothing for a cost control to control. The rule itself is unchanged, because it is
 /// the adopter's (`fuaran#1754`) instrument at the scale it was measured at.
 let private selection (idl: Idl) : string list =
-    FStarTarget.partition idl
-    |> List.filter (fun v -> v.Refusal.IsNone)
-    |> List.map _.Tag
+    FStarTarget.partition idl |> List.filter _.Refusal.IsNone |> List.map _.Tag
 
 /// A minimal vocabulary with one kind, used by the refusal cases. Written by hand rather
 /// than cut down from a certification vocabulary, so a change there cannot quietly make a
@@ -681,7 +679,7 @@ let idlFStarTargetTests =
                   // The rule is a SUBSET of what the target can express, never a second opinion
                   // about expressibility — a kind it selects that the target then refuses would
                   // be a generator that contradicts its own partition.
-                  let expressible = verdicts |> List.filter (fun v -> v.Refusal.IsNone)
+                  let expressible = verdicts |> List.filter _.Refusal.IsNone
 
                   for tag in FStarTarget.proofKinds g.Idl do
                       Expect.isTrue
@@ -703,9 +701,7 @@ let idlFStarTargetTests =
               // is modelled: a sample whose kinds started falling out of the proof vocabulary
               // would be a backend that had stopped covering the shape the reference one lacks.
               let refused (g: Generated) =
-                  FStarTarget.partition g.Idl
-                  |> List.filter (fun v -> v.Refusal.IsSome)
-                  |> List.map _.Tag
+                  FStarTarget.partition g.Idl |> List.filter _.Refusal.IsSome |> List.map _.Tag
 
               let byModule = generated |> List.map (fun g -> g.Module, g) |> Map.ofList
 

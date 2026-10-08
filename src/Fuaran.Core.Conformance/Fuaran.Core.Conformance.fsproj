@@ -21,8 +21,8 @@
     <Compile Include="SampleAdequacy.fs" />
     <!-- Phase 297 — the kit is split by topic behind a facade. `ConfRng` (the generator) and the
          witness records come first because every family reads them; `LawKit` (the runner —
-         internal) next; then the eight topic modules, each internal, in an order that is free
-         except where one family runs another (`SurfaceLaws` last of them only by habit); and
+         internal) next; then the twenty-one topic modules, each internal, in an order that is free
+         except where one family runs another (the suite holds this count to the list below); and
          `Conformance.fs` LAST — the public facade of one-line forwards plus `certify` /
          `certifyStream`, whose bodies the suite reads to derive which families are base-run. -->
     <Compile Include="ConfRng.fs" />

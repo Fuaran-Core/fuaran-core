@@ -416,7 +416,7 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
 
 /// `Sample.trySampleNodes` then each node's canonical encoding — or the refusal, as one line.
 let private sampledLines (idl: Fuaran.Core.Idl.Idl) (seed: int) (count: int) : string list =
-    match Fuaran.Core.Idl.Sample.trySampleNodes idl (idl.Kinds |> List.map (fun k -> k.Tag)) seed count with
+    match Fuaran.Core.Idl.Sample.trySampleNodes idl (idl.Kinds |> List.map _.Tag) seed count with
     | Error refusal -> [ "refused:" + refusal.Describe ]
     | Ok nodes ->
         nodes

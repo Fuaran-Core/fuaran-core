@@ -1187,12 +1187,12 @@ module Families =
 
     /// The roster's keys, sorted — the enumeration a census, a ladder or a projection quantifies
     /// over.
-    let ids: string list = families |> List.map (fun f -> f.Id) |> List.sort
+    let ids: string list = families |> List.map _.Id |> List.sort
 
     /// The modules the roster covers, sorted. A reflection check reads THIS rather than a second
     /// list, so a module added to the kit is covered by adding its families here and nothing else.
     let modules: string list =
-        families |> List.map (fun f -> f.Module) |> List.distinct |> List.sort
+        families |> List.map _.Module |> List.distinct |> List.sort
 
     /// The family with this id, if the kit ships one.
     let tryFind (id: string) : LawFamily option =

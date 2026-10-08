@@ -650,7 +650,7 @@ module internal TypeScriptDerived =
 
         let categories =
             ctx.Kinds
-            |> List.map (fun k -> k.Category)
+            |> List.map _.Category
             |> List.distinct
             |> List.map (fun c -> c, ctx.Kinds |> List.filter (fun k -> k.Category = c) |> List.map _.Tag)
 
@@ -759,7 +759,7 @@ module internal TypeScriptDerived =
                 "  if (isObj(j)) {\n    const fs = j;\n    switch (dTag(j)) {\n"
                 + arms
                 + "\n      default: return dUnknown("
-                + SourceLit.tsString (oneOf (u.Cases |> List.map (fun c -> c.Tag)))
+                + SourceLit.tsString (oneOf (u.Cases |> List.map _.Tag))
                 + ", "
                 + SourceLit.tsString ("unknown " + u.Name + " case: ")
                 + " + "
@@ -895,7 +895,7 @@ const cDef = (name, fs, dec, dflt) => hasOwn(fs, name) ? cAt(name, () => dec(dRe
                |> List.map (fun k -> "    case " + SourceLit.tsString k.Tag + ": return col" + k.Tag + "Spec(j);")
                |> String.concat "\n")
             + "\n    default: return dUnknown("
-            + SourceLit.tsString (oneOf (kinds |> List.map (fun k -> k.Tag)))
+            + SourceLit.tsString (oneOf (kinds |> List.map _.Tag))
             + ", 'unknown node kind: ' + "
             + tsDiscProp disc "j"
             + ");\n  }\n}"

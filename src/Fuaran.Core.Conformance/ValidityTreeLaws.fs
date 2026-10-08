@@ -252,7 +252,7 @@ module internal ValidityTreeLaws =
                             |> Result.mapError (fun (i, e, _) -> i, e)))
                     (Ok cur)
 
-            let scripts = verdict.Accepted |> List.map (fun p -> p.Ops)
+            let scripts = verdict.Accepted |> List.map _.Ops
             let forward = landAll scripts
             let backward = landAll (List.rev scripts)
 
@@ -360,7 +360,7 @@ module internal ValidityTreeLaws =
             [ for n in Tree.preorder nodew t do
                   for r in refw.RefsOf n do
                       if not (declared.Contains(key r)) then
-                          yield nodeKey n, key r ]
+                          nodeKey n, key r ]
 
         let unused (t: 'Node) =
             let referenced =
@@ -369,7 +369,7 @@ module internal ValidityTreeLaws =
             [ for n in Tree.preorder nodew t do
                   for d in refw.DeclsOf n do
                       if not (referenced.Contains(key d)) then
-                          yield nodeKey n, key d ]
+                          nodeKey n, key d ]
 
         let declarersOf (t: 'Node) (r: 'Id) =
             Tree.preorder nodew t
@@ -410,8 +410,8 @@ module internal ValidityTreeLaws =
 
                   for r in refw.RefsOf n do
                       for d in declarersOf t r do
-                          if index.[nodeKey d] > index.[nodeKey n] && not (below.Contains(nodeKey d)) then
-                              yield nodeKey n, key r, nodeKey d ]
+                          if index[nodeKey d] > index[nodeKey n] && not (below.Contains(nodeKey d)) then
+                              nodeKey n, key r, nodeKey d ]
 
         let checkDefects (at: string -> string) (t: 'Node) =
             let reported = Validator.referenceDefects refw idw nodew t
@@ -563,7 +563,7 @@ module internal ValidityTreeLaws =
                       for r in refw.RefsOf n do
                           for d in declarersOf cur r do
                               if nodeKey d = key r && not (idw.Equals (nodew.Id d) (nodew.Id cur)) then
-                                  yield n, r, d ]
+                                  n, r, d ]
 
             match candidates with
             | (n, r, d) :: _ ->

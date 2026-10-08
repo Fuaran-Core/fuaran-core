@@ -233,7 +233,7 @@ let private releaseIndexes (root: string) : Result<(string * Set<string>) list, 
     |> Result.bind (fun out ->
         let tags =
             out.Split('\n')
-            |> Array.map (fun t -> t.Trim())
+            |> Array.map _.Trim()
             |> Array.choose (fun t -> PackageRosterTests.releaseTagVersion t |> Option.map (fun v -> v, t))
             |> Array.sortBy fst
             |> Array.toList
@@ -448,10 +448,27 @@ let private numberWords =
        "nineteen"
        "twenty" |]
 
-/// A count as the documents spell it: a word up to twenty, digits beyond.
+let private tensWords =
+    [| "twenty"
+       "thirty"
+       "forty"
+       "fifty"
+       "sixty"
+       "seventy"
+       "eighty"
+       "ninety" |]
+
+/// A count as the documents spell it: words below a hundred (`twenty-one`), digits beyond.
 let internal numberWord (n: int) : string =
     if n >= 0 && n < numberWords.Length then
         numberWords[n]
+    elif n > 20 && n < 100 then
+        let tens = tensWords[n / 10 - 2]
+
+        if n % 10 = 0 then
+            tens
+        else
+            tens + "-" + numberWords[n % 10]
     else
         string n
 
@@ -655,6 +672,175 @@ let internal absentFromBaselines (baselines: string) (names: string list) : stri
             [ "("; " "; "`"; "\n" ]
             |> List.exists (fun after -> baselines.Contains(n + after, StringComparison.Ordinal))
         ))
+
+// ---- counts held to the tree (Phase 389) -----------------------------------------
+//
+// The counts the 2026-10-07 design review found wrong — "twelve frozen records" over sixteen, "eight
+// topic modules" over twenty-one, a dependency order four rows stale — each read here against the
+// thing it counts, so the next record frozen or module split is a red gate rather than a review
+// finding.
+
+/// What is wrong with the contract's witness-freeze counts: the freeze paragraph and the enforcement
+/// paragraph each state the frozen list's length, and the freeze paragraph names every frozen record.
+let internal frozenCountFaults (contract: string) (frozen: string list) : string list =
+    let n = numberWord frozen.Length
+    let ps = paragraphs contract
+
+    let find (marker: string) =
+        ps |> List.tryFind (fun p -> p.Contains(marker, StringComparison.Ordinal))
+
+    let freeze =
+        match find "public witness records (" with
+        | None -> [ "STABILITY.md has no paragraph naming the public witness records" ]
+        | Some p ->
+            [ if not (p.Contains(sprintf "The %s public witness records" n, StringComparison.Ordinal)) then
+                  sprintf "the freeze paragraph does not say \"The %s public witness records\"" n
+              for r in frozen do
+                  if not (p.Contains(sprintf "`%s`" r, StringComparison.Ordinal)) then
+                      sprintf "the freeze paragraph does not name `%s`, a frozen record" r ]
+
+    let enforcement =
+        match find "frozen records is a" with
+        | None -> [ "STABILITY.md has no enforcement paragraph counting the frozen records" ]
+        | Some p when p.Contains(sprintf "any of the %s frozen records" n, StringComparison.Ordinal) -> []
+        | Some _ -> [ sprintf "the enforcement paragraph does not say \"any of the %s frozen records\"" n ]
+
+    freeze @ enforcement
+
+/// The Conformance kit's topic modules: the compile items strictly between the runner (`LawKit.fs`)
+/// and the facade (`Conformance.fs`), in compile order.
+let internal topicModules (fsproj: string) : string list =
+    let items =
+        Regex.Matches(fsproj, @"<Compile\s+Include=""([^""]+)\.fs""")
+        |> Seq.map (fun m -> m.Groups[1].Value)
+        |> Seq.toList
+
+    match List.tryFindIndex ((=) "LawKit") items, List.tryFindIndex ((=) "Conformance") items with
+    | Some a, Some b when a < b -> items[a + 1 .. b - 1]
+    | _ -> []
+
+/// What is wrong with the two sentences that count the topic modules: the project's compile-order
+/// comment states the count, and the facade's header states it and names every module.
+let internal topicModuleFaults (fsproj: string) (facade: string) (modules: string list) : string list =
+    let claim = sprintf "the %s topic modules" (numberWord modules.Length)
+
+    let joined (text: string) =
+        Regex.Replace(text.Replace("\r\n", "\n"), @"\n\s*(//\s*)?", " ")
+
+    let comment = joined fsproj
+    let header = joined facade
+
+    [ if not (comment.Contains(claim, StringComparison.Ordinal)) then
+          sprintf "Fuaran.Core.Conformance.fsproj's compile-order comment does not say \"%s\"" claim
+      if not (header.Contains(claim, StringComparison.Ordinal)) then
+          sprintf "Conformance.fs's header does not say \"%s\"" claim
+      for m in modules do
+          if not (header.Contains(sprintf "`%s`" m, StringComparison.Ordinal)) then
+              sprintf "Conformance.fs's header does not name `%s`, a topic module" m ]
+
+/// The project graph under `src/`: each project's name without its `Fuaran.Core.` prefix, and the
+/// same names of its direct project references.
+let internal projectGraph (root: string) : Map<string, Set<string>> =
+    let short (name: string) =
+        if name.StartsWith("Fuaran.Core.", StringComparison.Ordinal) then
+            name.Substring "Fuaran.Core.".Length
+        else
+            name
+
+    Directory.GetDirectories(Path.Combine(root, "src"))
+    |> Array.collect (fun d -> Array.append (Directory.GetFiles(d, "*.fsproj")) (Directory.GetFiles(d, "*.csproj")))
+    |> Array.map (fun f ->
+        let refs =
+            Regex.Matches(File.ReadAllText f, @"<ProjectReference\s+Include=""([^""]+)""")
+            |> Seq.map (fun m -> short (Path.GetFileNameWithoutExtension(m.Groups[1].Value.Replace('\\', '/'))))
+            |> Set.ofSeq
+
+        short (Path.GetFileNameWithoutExtension f), refs)
+    |> Map.ofArray
+
+/// The README's dependency sentence, read as data: each package and the packages it is said to be
+/// over. A clause this reader does not know is an `Error`, so a reworded sentence cannot pass unread.
+let internal documentedDependencies (readme: string) : Result<Map<string, Set<string>>, string> =
+    let name = @"`([A-Za-z][\w.]*)`"
+
+    let names (s: string) =
+        Regex.Matches(s, name) |> Seq.map (fun m -> m.Groups[1].Value) |> Seq.toList
+
+    let over = Regex(@"^" + name + @" over ((?:`[A-Za-z][\w.]*`(?: \+ )?)+)$")
+    let alone = Regex(@"^((?:`[A-Za-z][\w.]*`(?:, | and )?)+) standalone$")
+
+    let read (clause: string) =
+        let o = over.Match clause
+        let a = alone.Match clause
+
+        if o.Success then
+            Ok [ o.Groups[1].Value, Set.ofList (names o.Groups[2].Value) ]
+        elif a.Success then
+            Ok(names a.Groups[1].Value |> List.map (fun n -> n, Set.empty))
+        else
+            Error(sprintf "a clause of the dependency sentence the reader does not know: '%s'" clause)
+
+    match
+        paragraphs readme
+        |> List.tryFind (fun p -> p.StartsWith("Dependency order", StringComparison.Ordinal))
+    with
+    | None -> Error "README.md has no paragraph opening `Dependency order`"
+    | Some p ->
+        let body =
+            match p.IndexOf(": ", StringComparison.Ordinal) with
+            | -1 -> p
+            | i -> p.Substring(i + 2)
+
+        let clauses =
+            Regex.Replace(body, @" \(since `[^`]+`(, unreleased)?\)", "").Trim().TrimEnd('.').Split("; ")
+            |> Array.toList
+
+        (Ok [], clauses)
+        ||> List.fold (fun acc clause ->
+            match acc, read clause with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok xs, Ok ys -> Ok(xs @ ys))
+        |> Result.bind (fun pairs ->
+            match pairs |> List.countBy fst |> List.filter (fun (_, c) -> c > 1) with
+            | [] -> Ok(Map.ofList pairs)
+            | twice ->
+                Error(
+                    sprintf
+                        "the dependency sentence places %s more than once"
+                        (twice |> List.map fst |> String.concat ", ")
+                ))
+
+/// Where the README's dependency sentence and the project graph disagree, one line per package.
+let internal dependencyFaults (documented: Map<string, Set<string>>) (graph: Map<string, Set<string>>) : string list =
+    let missing =
+        graph
+        |> Map.toList
+        |> List.filter (fun (p, _) -> not (documented.ContainsKey p))
+        |> List.map (fun (p, _) -> sprintf "`%s` is a project under src/ the sentence does not place" p)
+
+    let unknown =
+        documented
+        |> Map.toList
+        |> List.filter (fun (p, _) -> not (graph.ContainsKey p))
+        |> List.map (fun (p, _) -> sprintf "`%s` is placed by the sentence and is no project under src/" p)
+
+    let wrong =
+        documented
+        |> Map.toList
+        |> List.choose (fun (p, said) ->
+            match graph.TryFind p with
+            | Some refs when refs <> said ->
+                Some(
+                    sprintf
+                        "`%s` is said to be over {%s} and references {%s}"
+                        p
+                        (String.concat ", " said)
+                        (String.concat ", " refs)
+                )
+            | _ -> None)
+
+    missing @ unknown @ wrong
 
 // ---- the suite -----------------------------------------------------------------
 
@@ -1082,4 +1268,94 @@ let tests =
                           "- **`Fuaran.Core.Memo.isMemoisable`** — kept\n- **`Fuaran.Core.DataFrame.cellString`** — moved"))
                   [ "Fuaran.Core.DataFrame.cellString" ]
                   "a member no baseline carries is red"
+          }
+
+          test "the witness-freeze counts are the frozen list's length, and the freeze names every frozen record" {
+              let root = repoRoot ()
+              let frozen = Fuaran.Core.SurfaceLaws.frozenWitnessFields |> List.map fst
+              Expect.isNonEmpty frozen "the frozen witness list was read"
+
+              Expect.isEmpty
+                  (frozenCountFaults (File.ReadAllText(Path.Combine(root, "STABILITY.md"))) frozen)
+                  "STABILITY.md's witness-freeze counts are the tree's"
+          }
+
+          test "the Conformance topic-module count is the project's compile list, and the facade names each" {
+              let root = repoRoot ()
+              let dir = Path.Combine(root, "src", "Fuaran.Core.Conformance")
+              let fsproj = File.ReadAllText(Path.Combine(dir, "Fuaran.Core.Conformance.fsproj"))
+              let modules = topicModules fsproj
+              Expect.isNonEmpty modules "the topic modules were read from the compile list"
+
+              Expect.isEmpty
+                  (topicModuleFaults fsproj (File.ReadAllText(Path.Combine(dir, "Conformance.fs"))) modules)
+                  "the compile-order comment and the facade header count and name the topic modules"
+          }
+
+          test "the README's dependency sentence is the project graph under src/" {
+              let root = repoRoot ()
+              let graph = projectGraph root
+              Expect.isNonEmpty graph "the projects under src/ were read"
+
+              match documentedDependencies (File.ReadAllText(readmePath ())) with
+              | Error why -> failtest why
+              | Ok documented ->
+                  Expect.isEmpty
+                      (dependencyFaults documented graph)
+                      "README.md places each package over exactly its direct project references"
+          }
+
+          test "the count readers red what drifted (go-red over synthetic input)" {
+              Expect.equal (numberWord 21) "twenty-one" "a compound count is spelt as the documents spell it"
+              Expect.equal (numberWord 16) "sixteen" "a count below twenty is one word"
+
+              let contract =
+                  "The two public witness records (`AWitness`, `BWitness`) are plain.\n\n**Enforcement.** Code that adds a field to any of the two frozen records is a regression.\n"
+
+              Expect.isEmpty (frozenCountFaults contract [ "AWitness"; "BWitness" ]) "the matching contract is green"
+
+              Expect.equal
+                  (frozenCountFaults contract [ "AWitness"; "BWitness"; "CWitness" ] |> List.length)
+                  3
+                  "a third frozen record reds both counts and the missing name"
+
+              let fsproj =
+                  "<Compile Include=\"LawKit.fs\" />\n<Compile Include=\"ALaws.fs\" />\n<Compile Include=\"BLaws.fs\" />\n<Compile Include=\"Conformance.fs\" />\n<!-- then the two topic modules,\n     each internal -->"
+
+              let facade = "//  live in the two topic\n//  modules ahead of it — `ALaws`, `BLaws`"
+              Expect.equal (topicModules fsproj) [ "ALaws"; "BLaws" ] "the modules between the runner and the facade"
+              Expect.isEmpty (topicModuleFaults fsproj facade [ "ALaws"; "BLaws" ]) "a count split across lines is read"
+
+              Expect.equal
+                  (topicModuleFaults fsproj facade [ "ALaws"; "BLaws"; "CLaws" ] |> List.length)
+                  3
+                  "a third module reds both counts and the unnamed module"
+
+              let readme =
+                  "Dependency order — prose: `A` and `B` standalone; `C` (since `0.35.2`) over `A` + `B`.\n"
+
+              let graph = Map.ofList [ "A", Set.empty; "B", Set.empty; "C", set [ "A"; "B" ] ]
+
+              match documentedDependencies readme with
+              | Error why -> failtest why
+              | Ok documented ->
+                  Expect.isEmpty (dependencyFaults documented graph) "the matching sentence is green, stamps read past"
+
+                  Expect.equal
+                      (dependencyFaults documented (Map.add "C" (set [ "A" ]) graph))
+                      [ "`C` is said to be over {A, B} and references {A}" ]
+                      "a reference the graph does not have is red"
+
+                  Expect.equal
+                      (dependencyFaults documented (Map.add "D" Set.empty graph))
+                      [ "`D` is a project under src/ the sentence does not place" ]
+                      "an unplaced project is red"
+
+              Expect.isError
+                  (documentedDependencies "Dependency order: `A` sits under `B`.")
+                  "a clause the reader does not know is red, so a reworded sentence cannot pass unread"
+
+              Expect.isError
+                  (documentedDependencies "Dependency order: `A` standalone; `A` over `B`.")
+                  "a package placed twice is red"
           } ]

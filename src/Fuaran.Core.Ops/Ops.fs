@@ -866,7 +866,7 @@ module Ops =
                 // before)
                 let permute (p: 'Node) =
                     let byId = w.Children p |> List.map (fun c -> idw.ToString(w.Id c), c) |> Map.ofList
-                    w.ReplaceChildren p (order |> List.map (fun i -> byId.[idw.ToString i]))
+                    w.ReplaceChildren p (order |> List.map (fun i -> byId[idw.ToString i]))
 
                 Tree.updateNode t idw parent permute root
                 |> Option.map Ok
@@ -1377,8 +1377,8 @@ module Ops =
 
     /// Derive the inverse of an op from the **pre-state** tree (the tree the op applied to)
     /// — Phase 242. Every skeleton op's inverse is recoverable from the pre-state:
-    /// insert↔remove, remove↔insert (capturing the removed subtree + its parent + index),
-    /// move↔move-back (prior parent + index), reorder↔reorder (prior order), update↔update (the
+    /// insert↔remove, remove↔insert (capturing the removed subtree, its parent and its sibling order),
+    /// move↔move-back (prior parent and sibling order), reorder↔reorder (prior order), update↔update (the
     /// pre-state node, whose content the undo restores — Phase 250). `Batch` inverts to its
     /// inverses in reverse order (each derived against the state that op saw). Total: a non-applyable op has no inverse — its `Rejection` is
     /// returned. The defining law: `apply (invert op pre) (apply op pre) = pre`. Undo/redo
@@ -1494,9 +1494,9 @@ module Ops =
     /// The defining law (certified by `Conformance.normalizeLaws`): for any script applyable to a
     /// tree, `applyAll (normalize ops) = applyAll ops` — normalisation never changes the result.
     /// Collapses, all on adjacent ops so no intervening op observes the discarded state:
-    ///   - `InsertChild(p,i,node)` then `RemoveNode(id node)` — insert-then-remove of the same node
-    ///     nets to nothing (the insert+remove cancel `p`'s child-shift, so later ops are unaffected);
-    ///   - `MoveNode(t,_,_)` then `MoveNode(t,p,i)` — the first relocation is superseded by the
+    ///   - `InsertChild(p, node)` then `RemoveNode(id node)` — insert-then-remove of the same node
+    ///     nets to nothing (the insert appends and the remove takes it back, so later ops are unaffected);
+    ///   - `MoveNode(t, _)` then `MoveNode(t, p)` — the first relocation is superseded by the
     ///     second (the intermediate parent is restored, since `t` is not in `p`'s subtree in any
     ///     applyable script), so only the net move survives;
     ///   - `ReorderChildren(p,_)` then `ReorderChildren(p,o)` — a reorder sets the full order, so the

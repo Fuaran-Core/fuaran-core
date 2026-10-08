@@ -18,7 +18,7 @@ let treeLawTests =
         [ testCase "op-algebra laws run standalone (no stream)"
           <| fun _ ->
               let results = Conformance.opAlgebra nodew idw opGen 999 200
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "all algebra laws pass"
+              Expect.isTrue (results |> List.forall _.Passed) "all algebra laws pass"
 
           testCase "diff laws certify the reference witness green (Phase 03)"
           <| fun _ ->
@@ -98,7 +98,7 @@ let treeLawTests =
               let results = Conformance.diffContainedLaws nodew idw refuseAll 4242 200
 
               Expect.isTrue
-                  (results |> List.forall (fun r -> r.Passed))
+                  (results |> List.forall _.Passed)
                   (sprintf
                       "a predicate that refuses everything must still be certified — every diff is a refusal and the refusal must be exact: %A"
                       (results |> List.filter (fun r -> not r.Passed)))
@@ -107,8 +107,7 @@ let treeLawTests =
               // same witness, so the difference between the two reports is the container check and
               // nothing else.
               Expect.isTrue
-                  (Conformance.diffLaws nodew idw refuseAll 4242 200
-                   |> List.forall (fun r -> r.Passed))
+                  (Conformance.diffLaws nodew idw refuseAll 4242 200 |> List.forall _.Passed)
                   "the PLAIN diff laws are unaffected by the predicate — the container check is the only difference"
 
           testCase
@@ -119,7 +118,7 @@ let treeLawTests =
               let results = Conformance.diffContainedLaws nodew idw opGen 4242 200
 
               Expect.equal
-                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map _.Law)
                   [ SampleAdequacy.lawPrefix "Conformance.diffContainedLaws"
                     + "the sample reached every refused pair the laws distinguish" ]
                   "exactly the refused-pair guard is red"
@@ -133,13 +132,13 @@ let treeLawTests =
                       ReplaceChildren = fun n _ -> n }
 
               let results = Conformance.opAlgebra brokenW idw opGen 7 200
-              Expect.isFalse (results |> List.forall (fun r -> r.Passed)) "the broken witness must fail a law"
+              Expect.isFalse (results |> List.forall _.Passed) "the broken witness must fail a law"
 
               let failed = results |> List.filter (fun r -> not r.Passed)
               Expect.isNonEmpty failed "at least one law failed"
 
               Expect.isTrue
-                  (failed |> List.forall (fun r -> r.Counterexample.IsSome))
+                  (failed |> List.forall _.Counterexample.IsSome)
                   "every failure carries a seeded counterexample"
 
               // determinism: the same seed reproduces the identical verdict
@@ -269,7 +268,7 @@ let keyedChildrenLawTests =
           <| fun _ ->
               let results = Conformance.keyedChildrenLawsAt noKeyed nodew idw opGen 1890 100
 
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "a domain with no keyed position is not failed"
+              Expect.isTrue (results |> List.forall _.Passed) "a domain with no keyed position is not failed"
 
               Expect.equal (List.length results) 4 "the report keeps its shape whatever the witness declares"
 
@@ -315,9 +314,7 @@ let opAlgebraGuardTests =
               // Phase 297 — the accept-side laws are COVERED by the accepted-op guard, so a run that
               // never accepted an op reads them through the guard (green here, red there) rather
               // than as three "never reached" reds beside a red guard.
-              Expect.isTrue
-                  (subjectOf results |> List.forall (fun r -> r.Passed))
-                  "every subject law is green over one drawn op"
+              Expect.isTrue (subjectOf results |> List.forall _.Passed) "every subject law is green over one drawn op"
 
               let starved =
                   [ "accepted op and op kind"; "refused op" ]

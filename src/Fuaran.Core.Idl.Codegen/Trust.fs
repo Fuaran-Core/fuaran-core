@@ -73,6 +73,11 @@ module Trust =
     let private fieldOf (name: string) (fields: (string * IdlValue) list) : IdlValue option =
         fields |> List.tryPick (fun (k, v) -> if k = name then Some v else None)
 
+    /// The one `strictness` case under which a hash mismatch stays live (advisory): the case name the
+    /// gated kind's `contentHash.strictness` enum declares, compared ordinally with the value read.
+    [<Literal>]
+    let private AdvisoryStrictness = "AdvisoryWarning"
+
     /// Gate a gated-kind node's fields. Unhashed → inert; hashed-but-not-allowlisted
     /// → inert; allowlisted + hash matches → live; allowlisted + hash MISMATCH →
     /// inert under `StrictReplay` / `Enforced`, live (advisory) under
@@ -103,7 +108,7 @@ module Trust =
             with
             | None -> InertPlaceholder "not in codegen allowlist"
             | Some e when e.Hash = hash -> Allowed
-            | Some _ when strictness = "AdvisoryWarning" -> Allowed
+            | Some _ when strictness = AdvisoryStrictness -> Allowed
             | Some _ -> InertPlaceholder "content-hash mismatch"
         | _ -> InertPlaceholder "unhashed Custom"
 
@@ -325,7 +330,7 @@ module Trust =
             else
                 idl.Kinds
                 |> List.tryFind (fun k ->
-                    let names = k.Fields |> List.map (fun f -> f.Name) |> Set.ofList
+                    let names = k.Fields |> List.map _.Name |> Set.ofList
                     names.Contains "moduleId" && names.Contains "componentId")
 
         let needed =

@@ -417,7 +417,7 @@ module internal ChainStreamLaws =
                     && not (OpStream.verifyChainWith otherPayload hashFn sw recs)
                     && not (OpStream.verifyChainWith cfg otherHash sw recs)
                     && not (OpStream.verifyChainWith cfg hashFn sw tampered)
-                    && (breakAt |> Option.map (fun b -> b.Index)) = Some victim,
+                    && (breakAt |> Option.map _.Index) = Some victim,
                     fun () ->
                         at (
                             sprintf

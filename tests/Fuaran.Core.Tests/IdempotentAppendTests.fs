@@ -285,7 +285,7 @@ let tests =
                   Conformance.idempotencyLaws keyOf sw refusalFreeStreamGen OpStream.defaultHash 8282 200
 
               Expect.equal
-                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map _.Law)
                   [ SampleAdequacy.lawPrefix "Conformance.idempotencyLaws"
                     + "the sample reached every refused fresh op the laws distinguish" ]
                   "exactly the refused-op guard is red" ]

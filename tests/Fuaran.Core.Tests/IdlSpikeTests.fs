@@ -419,7 +419,7 @@ let tests =
 
                   let defects = G.runValidator reg tree
                   Expect.equal (List.length defects) 1 "one empty-id defect found via the generated scaffold"
-                  Expect.equal defects.[0].Code "GEN001" "the registered domain rule fired"
+                  Expect.equal defects[0].Code "GEN001" "the registered domain rule fired"
 
                   // A clean tree yields no defects.
                   let clean: G.Node<unit> =
@@ -551,7 +551,7 @@ let tests =
                           |> Array.filter (fun l -> l <> "")
                           |> Array.map (fun l ->
                               let parts = l.Split('')
-                              parts.[0], parts.[1])
+                              parts[0], parts[1])
                           |> Map.ofArray
 
                       for name, expectedWire in expected do
@@ -621,7 +621,7 @@ let tests =
                           |> Array.filter (fun l -> l <> "")
                           |> Array.map (fun l ->
                               let parts = l.Split('')
-                              parts.[0], parts.[1])
+                              parts[0], parts[1])
                           |> Map.ofArray
 
                       for name, expectedWire in expected do
@@ -717,7 +717,7 @@ let tests =
                           |> Array.filter (fun l -> l <> "")
                           |> Array.map (fun l ->
                               let parts = l.Split('')
-                              int parts.[0], parts.[1])
+                              int parts[0], parts[1])
                           |> Map.ofArray
 
                       // Report the FIRST divergence with its index, so a failing

@@ -96,12 +96,10 @@ let private componentTypes (t: Type) : Type list =
     elif FSharpType.IsTuple t then
         FSharpType.GetTupleElements t |> Array.toList
     elif FSharpType.IsRecord(t, true) then
-        FSharpType.GetRecordFields(t, true)
-        |> Array.map (fun p -> p.PropertyType)
-        |> Array.toList
+        FSharpType.GetRecordFields(t, true) |> Array.map _.PropertyType |> Array.toList
     elif FSharpType.IsUnion(t, true) then
         FSharpType.GetUnionCases(t, true)
-        |> Array.collect (fun c -> c.GetFields() |> Array.map (fun p -> p.PropertyType))
+        |> Array.collect (fun c -> c.GetFields() |> Array.map _.PropertyType)
         |> Array.toList
     else
         []
@@ -137,7 +135,7 @@ let private reachableUnionSets (t: Type) : Type list =
     let rec walk (x: Type) =
         if seen.Add x then
             if isSet x then
-                let elemT = x.GetGenericArguments().[0]
+                let elemT = x.GetGenericArguments()[0]
 
                 if isDocUnion elemT && FSharpType.GetUnionCases(elemT, true).Length >= 2 then
                     found.Add x
@@ -226,11 +224,11 @@ let rec private build
         Enum.GetValues(t).GetValue(0)
     elif isOption t then
         let cases = FSharpType.GetUnionCases t
-        FSharpValue.MakeUnion(cases.[1], [| recur (t.GetGenericArguments().[0]) |])
+        FSharpValue.MakeUnion(cases[1], [| recur (t.GetGenericArguments()[0]) |])
     elif isList t then
         let cases = FSharpType.GetUnionCases t
-        let empty = FSharpValue.MakeUnion(cases.[0], [||])
-        FSharpValue.MakeUnion(cases.[1], [| recur (t.GetGenericArguments().[0]); empty |])
+        let empty = FSharpValue.MakeUnion(cases[0], [||])
+        FSharpValue.MakeUnion(cases[1], [| recur (t.GetGenericArguments()[0]); empty |])
     elif t.IsArray then
         let arr = Array.CreateInstance(t.GetElementType(), 1)
         arr.SetValue(recur (t.GetElementType()), 0)
@@ -239,10 +237,10 @@ let rec private build
         let args = t.GetGenericArguments()
         let tupleT = FSharpType.MakeTupleType args
         let arr = Array.CreateInstance(tupleT, 1)
-        arr.SetValue(FSharpValue.MakeTuple([| recur args.[0]; recur args.[1] |], tupleT), 0)
+        arr.SetValue(FSharpValue.MakeTuple([| recur args[0]; recur args[1] |], tupleT), 0)
         Activator.CreateInstance(t, [| box arr |])
     elif isSet t then
-        let elemT = t.GetGenericArguments().[0]
+        let elemT = t.GetGenericArguments()[0]
 
         let members =
             match shape, target with
@@ -281,13 +279,13 @@ let rec private build
                 // Inside itself: the first case that ends the recursion.
                 cases
                 |> Array.tryFind (fun c -> not (fieldTypes c |> Array.exists (mentions (t :: stack))))
-                |> Option.defaultValue cases.[0]
+                |> Option.defaultValue cases[0]
             | Some(u, _) ->
                 // On the way to the target: the first case whose fields reach it.
                 cases
                 |> Array.tryFind (fun c -> fieldTypes c |> Array.exists (reaches (t :: stack) u))
-                |> Option.defaultValue cases.[0]
-            | None -> cases.[0]
+                |> Option.defaultValue cases[0]
+            | None -> cases[0]
 
         log.Add(t, case.Name)
         FSharpValue.MakeUnion(case, fieldTypes case |> Array.map recur, true)
@@ -416,9 +414,9 @@ let internal documentsOf (r: WireRoot) : (string * string) list * (string * Type
         let perSetShape =
             [ for st in
                   reachableUnionSets rootType
-                  |> List.sortBy (fun st -> friendly (st.GetGenericArguments().[0])) do
-                  let u = st.GetGenericArguments().[0]
-                  let first = FSharpType.GetUnionCases(u, true).[0]
+                  |> List.sortBy (fun st -> friendly (st.GetGenericArguments()[0])) do
+                  let u = st.GetGenericArguments()[0]
+                  let first = FSharpType.GetUnionCases(u, true)[0]
 
                   for shape in [ NoMembers; TwoMembers ] do
                       let log = ResizeArray()
@@ -625,8 +623,7 @@ let internal classifyPackage (before: WireDoc list) (after: WireDoc list) : Wire
     let b = byName before
     let a = byName after
 
-    let bytesOf (ds: WireDoc list) =
-        ds |> List.map (fun d -> d.Hash) |> Set.ofList
+    let bytesOf (ds: WireDoc list) = ds |> List.map _.Hash |> Set.ofList
 
     let onlyBefore = before |> List.filter (fun d -> not (a.ContainsKey d.Name))
     let onlyAfter = after |> List.filter (fun d -> not (b.ContainsKey d.Name))

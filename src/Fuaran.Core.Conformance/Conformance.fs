@@ -11,14 +11,15 @@ namespace Fuaran.Core
 //
 //  ---- The facade (Phase 297) ------------------------------------------------
 //  This module is the kit's PUBLIC surface and is compiled LAST. The families
-//  themselves live in the topic modules ahead of it — the tree families
-//  (`AlgebraTreeLaws`, `PlacementTreeLaws`, `ValidityTreeLaws`), the stream
-//  families (`ChainStreamLaws`, `DagStreamLaws`, `CaptureStreamLaws`),
-//  `IntegrityLaws`, `ConcurrencyLaws`, the seam families (`CapabilitySeamLaws`,
+//  themselves live in the twenty-one topic modules ahead of it — the tree
+//  families (`AlgebraTreeLaws`, `PlacementTreeLaws`, `ValidityTreeLaws`,
+//  `KeyedApplyLaws`), the stream families (`ChainStreamLaws`, `DagStreamLaws`,
+//  `CaptureStreamLaws`), `IntegrityLaws`, `ConcurrencyLaws`,
+//  `KeyedArbitrationLaws`, the seam families (`CapabilitySeamLaws`,
 //  `QuerySeamLaws`, `RegistrySeamLaws`, `ColumnarSeamLaws`, `PipelineSeamLaws`,
-//  `PolicySeamLaws`; `TreeLaws`, `StreamLaws` and `SeamLaws` until Phase 388
-//  split them along their banners), `FunctionLaws`,
-//  `PropagationLaws`, `SurfaceLaws` — every one of them internal, written over
+//  `PolicySeamLaws`), `FunctionLaws`, `PropagationLaws`, `SurfaceLaws`,
+//  `ObserverLaws` and `SanitizeLaws` (Phase 388 split the tree, stream and
+//  seam files along their banners) — every one of them internal, written over
 //  the `LawKit` runner, and reachable by a domain only through the forwards
 //  here. A forward is one line with the family's full signature, so this file
 //  IS the contract a reader can read top to bottom, and the roster ids
@@ -926,7 +927,7 @@ module Conformance =
             |> List.filter (fun r -> r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p)
 
         let rest =
-            if witness |> List.forall (fun r -> r.Passed) then
+            if witness |> List.forall _.Passed then
                 opAlgebra nodew idw opGen (seed + 1) iterations
                 @ diffLaws nodew idw opGen (seed + 3) iterations
                 @ streamLaws sw streamGen hashFn (seed + 2) iterations
@@ -937,7 +938,7 @@ module Conformance =
         let results = witness @ rest
 
         { Results = results
-          AllPassed = results |> List.forall (fun r -> r.Passed) }
+          AllPassed = results |> List.forall _.Passed }
 
     /// Certify a **reducer-only / heterogeneous-tree** domain — one with no single uniform node
     /// type for a `NodeWitness` (a layered `Model → Sheet → Region` tree, an op-stream with no
@@ -979,7 +980,7 @@ module Conformance =
             r.Law.Length >= p.Length && r.Law.Substring(0, p.Length) = p
 
         let stream =
-            if red |> List.filter (isGuard >> not) |> List.forall (fun r -> r.Passed) then
+            if red |> List.filter (isGuard >> not) |> List.forall _.Passed then
                 streamLaws sw streamGen hashFn (seed + 1) iterations
             else
                 []
@@ -987,4 +988,4 @@ module Conformance =
         let results = red @ stream
 
         { Results = results
-          AllPassed = results |> List.forall (fun r -> r.Passed) }
+          AllPassed = results |> List.forall _.Passed }

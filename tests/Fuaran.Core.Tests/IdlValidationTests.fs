@@ -581,7 +581,7 @@ let codecTotalityTests =
 
           test "Decode, Encode and Sample raise no exception over the adversarial vocabulary corpus" {
               for name, _, idl in adversarial do
-                  let tags = idl.Kinds |> List.map (fun k -> k.Tag)
+                  let tags = idl.Kinds |> List.map _.Tag
 
                   match noThrow (name + ": trySampleNodes") (fun () -> Sample.trySampleNodes idl tags 7 24) with
                   | Some(Ok vs) ->
@@ -647,7 +647,7 @@ let samplerTotalityTests =
                   |> withKinds [ kind "Holder" [ f "k" TKind Required; f "op" TOp Required ] ]
 
               Expect.isEmpty (Declare.errors idl) "the vocabulary is well-formed"
-              let tags = idl.Kinds |> List.map (fun k -> k.Tag)
+              let tags = idl.Kinds |> List.map _.Tag
 
               match Sample.trySampleNodes idl tags 292 400 with
               | Error r -> failtestf "refused: %s" r.Describe

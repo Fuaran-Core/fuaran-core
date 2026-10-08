@@ -327,7 +327,7 @@ let containerLawTests =
                   Conformance.containerLaws nodew idw { containerGen with CanHold = None } 1610 20
 
               Expect.equal (List.length results) 1 "one law, and it is the refusal"
-              Expect.isFalse (results |> List.forall (fun r -> r.Passed)) "CanHold = None must not certify green"
+              Expect.isFalse (results |> List.forall _.Passed) "CanHold = None must not certify green"
 
           testCase "a generator that can never build the graft arm fails the adequacy guard"
           <| fun _ ->

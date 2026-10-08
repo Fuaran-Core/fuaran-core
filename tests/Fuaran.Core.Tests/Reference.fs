@@ -63,7 +63,7 @@ let nodew: NodeWitness<RNode, string> =
 /// surface. Two same-named holes get distinct addresses by construction.
 let holesOf (root: RNode) : HoleDecl list =
     Tree.preorder nodew root
-    |> List.filter (fun n -> n.Hole.IsSome)
+    |> List.filter _.Hole.IsSome
     |> List.map (fun n ->
         let addr =
             match Tree.path nodew idw n.Id root with
@@ -95,7 +95,7 @@ let artw: ArtifactWitness<RNode, string> =
     { Tree = nodew
       IdW = idw
       Holes = holesOf
-      Effect = (fun n -> n.Eff)
+      Effect = _.Eff
       Bind = bind }
 
 /// A canonical per-node content encoder for `Tree.encodeHash` — the node's LOCAL content (id, kind,

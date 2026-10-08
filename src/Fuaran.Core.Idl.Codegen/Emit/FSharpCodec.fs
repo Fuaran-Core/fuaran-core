@@ -607,7 +607,7 @@ let private encFloat (f: float) : JVal =
                 sprintf
                     "    | JObj __fs ->\n        dTag __fs |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> dUnknown %s (%s + __other))"
                     arms
-                    (SourceLit.fsString (oneOf (u.Cases |> List.map (fun c -> c.Tag))))
+                    (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
                     (SourceLit.fsString ("unknown " + u.Name + " case: ")))
 
         let fallthrough =
@@ -828,7 +828,7 @@ let private encFloat (f: float) : JVal =
                 sprintf
                     "    | JObj __fs ->\n        dTag __fs |> cOne |> Result.bind (fun __t ->\n        match __t with\n%s\n        | __other -> cOne (dUnknown %s (%s + __other)))"
                     arms
-                    (SourceLit.fsString (oneOf (u.Cases |> List.map (fun c -> c.Tag))))
+                    (SourceLit.fsString (oneOf (u.Cases |> List.map _.Tag)))
                     (SourceLit.fsString ("unknown " + u.Name + " case: ")))
 
         let fallthrough =
@@ -994,7 +994,7 @@ let private cDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<
             + arms
             + sprintf
                 "\n    | __other -> cOne (dUnknown %s (\"unknown node kind: \" + __other))))"
-                (SourceLit.fsString (oneOf (kinds |> List.map (fun k -> k.Tag))))
+                (SourceLit.fsString (oneOf (kinds |> List.map _.Tag)))
 
         let colNodeDecl =
             let envelopeAssigns =
@@ -1673,7 +1673,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
                 + arms
                 + sprintf
                     "\n    | __other -> dUnknown %s (\"unknown node kind: \" + __other)))"
-                    (SourceLit.fsString (oneOf (kinds |> List.map (fun k -> k.Tag))))
+                    (SourceLit.fsString (oneOf (kinds |> List.map _.Tag)))
 
             let decNodeDecl =
                 // Phase 690 — the envelope binds through the same `bindChain` /
@@ -1825,7 +1825,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
                     |> List.map fst
                     |> List.filter (fun k -> not (caseKeys.Contains k))
 
-                let kindTagSet = kinds |> List.map (fun k -> k.Tag) |> Set.ofList
+                let kindTagSet = kinds |> List.map _.Tag |> Set.ofList
 
                 let unknownProjections =
                     sup.KindProjections

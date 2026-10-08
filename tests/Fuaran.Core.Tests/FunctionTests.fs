@@ -5,10 +5,10 @@ open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
 let private valueOf id (n: RNode) =
-    Tree.tryFind nodew idw id n |> Option.map (fun x -> x.Value)
+    Tree.tryFind nodew idw id n |> Option.map _.Value
 
 let private holeAt id (n: RNode) =
-    Tree.tryFind nodew idw id n |> Option.bind (fun x -> x.Hole)
+    Tree.tryFind nodew idw id n |> Option.bind _.Hole
 
 // ---- Phase 57 content-pack fixtures: a 2-hole base function in a registry ----
 
@@ -43,9 +43,9 @@ let tests =
         [ testCase "signature enumerates the declared holes"
           <| fun _ ->
               let sg = Function.signature artw "tpl" (template ())
-              Expect.equal (sg.Holes |> List.map (fun h -> h.Name)) [ "title"; "count"; "body" ] "names"
-              Expect.equal (sg.Holes |> List.map (fun h -> h.Kind)) [ "value"; "value"; "slot" ] "kinds"
-              Expect.equal (sg.Holes |> List.map (fun h -> h.Addr)) [ "tpl/t"; "tpl/c"; "tpl/s" ] "absolute addresses"
+              Expect.equal (sg.Holes |> List.map _.Name) [ "title"; "count"; "body" ] "names"
+              Expect.equal (sg.Holes |> List.map _.Kind) [ "value"; "value"; "slot" ] "kinds"
+              Expect.equal (sg.Holes |> List.map _.Addr) [ "tpl/t"; "tpl/c"; "tpl/s" ] "absolute addresses"
 
           testCase "apply binds every hole by absolute address"
           <| fun _ ->
@@ -110,14 +110,14 @@ let tests =
               match Function.curry artw (Map.ofList [ "tpl/t", ValueArg "Hi" ]) (template ()) with
               | Ok curried ->
                   let sg = Function.signature artw "tpl" curried
-                  Expect.equal (sg.Holes |> List.map (fun h -> h.Addr)) [ "tpl/c"; "tpl/s" ] "tpl/t dropped"
+                  Expect.equal (sg.Holes |> List.map _.Addr) [ "tpl/c"; "tpl/s" ] "tpl/t dropped"
               | Error e -> failtestf "unexpected %A" e
 
           testCase "signatureExcluding narrows the projection explicitly"
           <| fun _ ->
               let full = Function.signature artw "tpl" (template ())
               let narrowed = Function.signatureExcluding (Set.ofList [ "tpl/t" ]) full
-              Expect.equal (narrowed.Holes |> List.map (fun h -> h.Addr)) [ "tpl/c"; "tpl/s" ] "tpl/t excluded"
+              Expect.equal (narrowed.Holes |> List.map _.Addr) [ "tpl/c"; "tpl/s" ] "tpl/t excluded"
 
               // the JSON Schema lists only the still-open holes in both properties and required
               let json = Json.render (Function.toJsonSchema narrowed)
@@ -159,7 +159,7 @@ let tests =
               | Ok r ->
                   let bodyChildren =
                       Tree.tryFind nodew idw "s" r
-                      |> Option.map (fun s -> s.Children |> List.map (fun c -> c.Id))
+                      |> Option.map (fun s -> s.Children |> List.map _.Id)
 
                   Expect.equal bodyChildren (Some [ "p" ]) "inner wired into the slot"
               | Error e -> failtestf "unexpected %A" e
@@ -382,7 +382,7 @@ let tests =
                   | Ok r -> r
                   | Error e -> failtestf "a slotted capability did not register: %A" e
 
-              Expect.equal (CapabilityRegistry.enumerate reg |> List.map (fun c -> c.Id)) [ "tpl-cap" ] "enumerated"
+              Expect.equal (CapabilityRegistry.enumerate reg |> List.map _.Id) [ "tpl-cap" ] "enumerated"
 
               let para = """{"kind":"para","text":"hi"}"""
 
@@ -503,7 +503,7 @@ let tests =
                       | Error e -> failtestf "register failed: %A" e
 
               Expect.equal
-                  (CapabilityRegistry.enumerate reg |> List.map (fun c -> c.Id))
+                  (CapabilityRegistry.enumerate reg |> List.map _.Id)
                   [ "apple"; "zebra" ]
                   "enumerate id-sorted"
 
@@ -763,7 +763,7 @@ let composeAcrossTests =
               | Ok r ->
                   let bodyChildren =
                       Tree.tryFind nodew idw "s" r
-                      |> Option.map (fun s -> s.Children |> List.map (fun c -> c.Id))
+                      |> Option.map (fun s -> s.Children |> List.map _.Id)
 
                   Expect.equal bodyChildren (Some [ "p" ]) "inner wired into the slot across the boundary"
               | Error e -> failtestf "unexpected %A" e
@@ -943,8 +943,8 @@ let memoTests =
                   | Error e -> failtestf "the move was refused: %A" e
 
               Expect.equal
-                  (Tree.preorder nodew nested |> List.map (fun n -> n.Id))
-                  (Tree.preorder nodew flat |> List.map (fun n -> n.Id))
+                  (Tree.preorder nodew nested |> List.map _.Id)
+                  (Tree.preorder nodew flat |> List.map _.Id)
                   "the premise: one preorder"
 
               Expect.notEqual
@@ -985,7 +985,7 @@ let memoTests =
                       Tree.tryFind nodew idw "s" r1
                       |> Option.bind (fun s -> s.Children |> List.tryHead)
                       |> Option.bind (fun inn -> inn.Children |> List.tryHead)
-                      |> Option.map (fun v -> v.Value)
+                      |> Option.map _.Value
 
                   Expect.equal bodyKid (Some "deep") "the inner hole was bound under the slot"
 
@@ -1269,7 +1269,7 @@ let memoTests =
                           { ResultType = Some "doc"
                             Available = [ packIntHole "h1" ] }
                           loaded
-                      |> List.map (fun e -> e.Capability.Id)
+                      |> List.map _.Capability.Id
 
                   Expect.contains ids "house-style" "narrowed pack entry findable from the smaller context"
                   Expect.isFalse (List.contains "doc-fn" ids) "un-narrowed base still needs h0 — not findable from {h1}"
@@ -1422,7 +1422,7 @@ let convergenceTests =
                   RNode.node "root" "doc" [ RNode.hole "r" "region" "rep" (RepeatHole(IntRange(0, 5))) ]
 
               let sg = Function.signature artw "r" tree
-              Expect.isTrue (sg.Holes |> List.forall (fun h -> h.Required)) "the repeat is required"
+              Expect.isTrue (sg.Holes |> List.forall _.Required) "the repeat is required"
 
               match Function.apply artw Map.empty tree with
               | Error(RequiredHolesUnbound [ _ ]) -> ()
@@ -1454,8 +1454,7 @@ let convergenceTests =
               let inner =
                   RNode.node "ir" "para" [ RNode.hole "irr" "region" "rep" (RepeatHole AnyString) ]
 
-              let slotAddr =
-                  (Function.signature artw "o" outer).Holes |> List.head |> (fun h -> h.Addr)
+              let slotAddr = (Function.signature artw "o" outer).Holes |> List.head |> _.Addr
 
               match Function.compose artw slotAddr inner outer with
               | Error(NonTotal _) -> ()
@@ -1528,7 +1527,7 @@ let convergenceTests =
               | other -> failtestf "expected UnknownBoundAddr, got %A" other
 
               match FunctionRegistry.partiallyApply "x" (Set.ofList [ "h0" ]) (packBaseEntry ()) with
-              | Ok e -> Expect.equal (e.Capability.Signature.Holes |> List.map (fun h -> h.Addr)) [ "h1" ] "narrowed"
+              | Ok e -> Expect.equal (e.Capability.Signature.Holes |> List.map _.Addr) [ "h1" ] "narrowed"
               | Error e -> failtestf "a bindable hole was refused: %A" e
 
           testCase "a pipeline refuses a self-edge, a cycle and a forward edge by name, and eval type-checks first"
@@ -1708,7 +1707,7 @@ let validatedDeclarationTests =
 
               let sg = Function.signature artw "f" art
               Expect.isFalse (Function.isTotal sg) "not total"
-              Expect.isFalse (sg.Holes |> List.forall (fun h -> h.Required)) "and not required"
+              Expect.isFalse (sg.Holes |> List.forall _.Required) "and not required"
 
               Expect.equal
                   (Function.apply artw (Map.ofList [ "root/r", ValueArg "1e300" ]) art)

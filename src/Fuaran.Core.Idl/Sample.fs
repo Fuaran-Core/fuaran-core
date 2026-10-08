@@ -222,8 +222,8 @@ module Sample =
                 |> List.forall (fun f -> f.Opt <> Required || not (reachesNodeAtFloor idl Set.empty f.Type)))
 
         match leaves with
-        | [] -> idl.Kinds |> List.map (fun k -> k.Tag)
-        | ks -> ks |> List.map (fun k -> k.Tag)
+        | [] -> idl.Kinds |> List.map _.Tag
+        | ks -> ks |> List.map _.Tag
 
     /// The op tags an op may take AT THE DEPTH FLOOR — [[floorKindTags]]' rule over the op
     /// vocabulary, with the same fallback.
@@ -339,7 +339,7 @@ module Sample =
                 if depth <= 0 then
                     floorKindTags idl
                 else
-                    idl.Kinds |> List.map (fun k -> k.Tag)
+                    idl.Kinds |> List.map _.Tag
 
             sampleNode idl r (depth - 1) (pickAt r "a node slot (the vocabulary's kinds)" tags)
         // A bare kind and an op draw their fields through [[sampleFields]] (Phase 292), so

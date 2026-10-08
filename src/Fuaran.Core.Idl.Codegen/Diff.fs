@@ -2998,7 +2998,7 @@ module Diff =
                         snap.Kinds
                         |> Map.tryFind kind
                         |> Option.bind (fun fs -> fs |> List.tryFind (fun f -> f.Name = fieldName))
-                        |> Option.map (fun f -> f.OptClass))
+                        |> Option.map _.OptClass)
               HasDefault =
                 fun kind fieldName ->
                     [ after; before ]

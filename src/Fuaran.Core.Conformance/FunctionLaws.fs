@@ -90,16 +90,14 @@ module internal FunctionLaws =
                  let copies =
                      (Function.signature wa "comp" composed).Holes
                      |> List.filter (fun h -> h.Name = s.OpenHoleName)
-                     |> List.map (fun h -> h.Addr)
+                     |> List.map _.Addr
 
                  match copies with
                  | [ a1; a2 ] when a1 <> a2 ->
                      match Function.curry wa (Map.ofList [ a1, ValueArg s.OpenHoleArg ]) composed with
                      | Ok bound ->
                          let after =
-                             (Function.signature wa "comp" bound).Holes
-                             |> List.map (fun h -> h.Addr)
-                             |> Set.ofList
+                             (Function.signature wa "comp" bound).Holes |> List.map _.Addr |> Set.ofList
 
                          hygiene.Check(
                              not (after.Contains a1 || not (after.Contains a2)),

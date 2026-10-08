@@ -920,8 +920,8 @@ module OpStream =
                 cfg.Genesis
                 0
                 (fun (c: EffectCapture) -> c.Seq)
-                (fun c -> c.PrevHash)
-                (fun c -> c.Hash)
+                _.PrevHash
+                _.Hash
                 (fun c -> capturePayloadWith (captureQuote profile) c.Seq c.Eff c.Determinism c.Value)
                 captures
 

@@ -190,7 +190,7 @@ module internal SurfaceLaws =
                     "proposal soundness under the domain's own policy (approved applies via the domain reducer; denied/rejected never mutates)"
             )
 
-        let catalogued = w.OpKinds |> List.map (fun o -> o.Kind) |> Set.ofList
+        let catalogued = w.OpKinds |> List.map _.Kind |> Set.ofList
         let mutable seenKinds = Set.empty
         // Phase 223 — the reducer's outcome populations over the caller's DRAWN ops:
         // `explainRejection` and the rejected arms of the allow / approve parity read a reducer
@@ -247,12 +247,12 @@ module internal SurfaceLaws =
             let mutable i = 0
 
             while i < anchor.Length do
-                if anchor.[i] = '{' then
+                if anchor[i] = '{' then
                     let close = anchor.IndexOf('}', i)
                     sb.Append token |> ignore
                     i <- (if close < 0 then anchor.Length else close + 1)
                 else
-                    sb.Append anchor.[i] |> ignore
+                    sb.Append anchor[i] |> ignore
                     i <- i + 1
 
             sb.ToString()
@@ -539,10 +539,10 @@ module internal SurfaceLaws =
     // ---- Phase 232 — the witness-record field freeze, held by a law --------------------------------
     //
     // STABILITY.md's "Witness-record field freeze" names the public witness records whose field sets
-    // freeze at 1.0 (six at Phase 232, twelve since Phase 330), and until this family nothing
-    // mechanical held them: the Phase 183 surface gate classes a field add as `record-widening` and
-    // refuses only an UNCLASSIFIED move, so a field add landed with its baseline regenerated passed
-    // the gate and the freeze rested on a reviewer.
+    // freeze at 1.0 (six at Phase 232, twelve at Phase 330, sixteen with the four frozen at birth
+    // since), and until this family nothing mechanical held them: the Phase 183 surface gate classes
+    // a field add as `record-widening` and refuses only an UNCLASSIFIED move, so a field add landed
+    // with its baseline regenerated passed the gate and the freeze rested on a reviewer.
     //
     // The family takes NO witness. It reads the records the kit was compiled against by reflection
     // (`FSharpType.GetRecordFields`, in declaration order) and holds each to the pinned list below by
@@ -737,7 +737,7 @@ module internal SurfaceLaws =
             )
         else
             Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
-            |> Array.map (fun p -> p.Name)
+            |> Array.map _.Name
             |> Array.toList
             |> checkFrozenFields law record pinned
 
@@ -829,7 +829,7 @@ module internal SurfaceLaws =
                         visit (System.Reflection.Assembly.Load reference)
 
         visit typeof<LawResult>.Assembly
-        found |> Seq.sortBy (fun t -> t.FullName) |> Seq.toList
+        found |> Seq.sortBy _.FullName |> Seq.toList
 #endif
 
     /// Phase 232 — the witness-record field freeze, as a law family: one law per frozen record and,

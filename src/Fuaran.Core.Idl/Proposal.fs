@@ -587,59 +587,54 @@ module Proposal =
     /// thing this pipeline must never do.
     let validate (p: Proposal) : string list =
         [ if System.String.IsNullOrWhiteSpace p.Id then
-              yield "id is empty"
+              "id is empty"
 
           if List.isEmpty p.Delta then
-              yield "delta is empty — a proposal that changes nothing cannot be spiked"
+              "delta is empty — a proposal that changes nothing cannot be spiked"
 
           if List.isEmpty p.Fixtures then
-              yield "candidateFixtures is empty — nothing states what the change makes expressible"
+              "candidateFixtures is empty — nothing states what the change makes expressible"
 
           if List.isEmpty p.Evidence then
-              yield
-                  "evidence is empty — a proposal with no cited demand is not admissible under any \
+              "evidence is empty — a proposal with no cited demand is not admissible under any \
                demand-gated law"
 
           for e in p.Evidence do
               if System.String.IsNullOrWhiteSpace e.RunId then
-                  yield sprintf "evidence '%s' cites no runId — absence of a reference is not a reference" e.Signal
+                  sprintf "evidence '%s' cites no runId — absence of a reference is not a reference" e.Signal
 
               if System.String.IsNullOrWhiteSpace e.PromptDigest then
-                  yield
-                      sprintf
-                          "evidence '%s' cites no promptDigest — the sighting cannot be re-read against the prompt \
+                  sprintf
+                      "evidence '%s' cites no promptDigest — the sighting cannot be re-read against the prompt \
                            that produced it"
-                          e.Signal
+                      e.Signal
 
               if e.Count <= 0 then
-                  yield sprintf "evidence '%s' cites a count of %d" e.Signal e.Count
+                  sprintf "evidence '%s' cites a count of %d" e.Signal e.Count
 
           if System.String.IsNullOrWhiteSpace p.Irreducibility then
-              yield "irreducibility is empty"
+              "irreducibility is empty"
 
           let priced =
-              p.Alternatives
-              |> List.map (fun a -> a.Disposition.ToLowerInvariant())
-              |> Set.ofList
+              p.Alternatives |> List.map _.Disposition.ToLowerInvariant() |> Set.ofList
 
           for required in requiredAlternatives do
               if not (priced.Contains required) then
-                  yield sprintf "no alternative disposition priced as '%s' — the cheap axes are mandatory" required
+                  sprintf "no alternative disposition priced as '%s' — the cheap axes are mandatory" required
 
           for a in p.Alternatives do
               if System.String.IsNullOrWhiteSpace a.Argument then
-                  yield sprintf "alternative '%s' carries no argument" a.Disposition
+                  sprintf "alternative '%s' carries no argument" a.Disposition
 
           if
               priced.Contains "normalisation"
               && System.String.IsNullOrWhiteSpace p.NormalisationDistinction
           then
-              yield
-                  "a normalisation alternative is priced but normalisationDistinction is empty — re-admitting a retired \
+              "a normalisation alternative is priced but normalisationDistinction is empty — re-admitting a retired \
                spelling and admitting a new one are different acts and must be told apart explicitly"
 
           if System.String.IsNullOrWhiteSpace p.ConfusionPlan then
-              yield "confusionPlan is empty — every vocabulary change owes a pre/post confusion delta" ]
+              "confusionPlan is empty — every vocabulary change owes a pre/post confusion delta" ]
 
     // -- applying ------------------------------------------------------------
 
@@ -816,7 +811,4 @@ module Proposal =
                 | AddField(OwnerKind _, _) -> false
                 | _ -> true)
 
-        if indirect then
-            idl.Kinds |> List.map (fun k -> k.Tag)
-        else
-            direct
+        if indirect then idl.Kinds |> List.map _.Tag else direct

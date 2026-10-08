@@ -59,7 +59,7 @@ let integrityLawTests =
                   "a codec that erases the case fails BOTH the collision law and the left-inverse law"
 
               Expect.isTrue
-                  (failed |> List.forall (fun r -> r.Counterexample.IsSome))
+                  (failed |> List.forall _.Counterexample.IsSome)
                   "every failure carries a seeded counterexample"
 
               Expect.isTrue
@@ -112,9 +112,7 @@ let integrityLawTests =
               let good = Conformance.encoderInjectivityLawsAt artw encNode genTree 4242 200
               Expect.equal (List.length good) 2 "one injectivity law and its searched-size guard reported (Phase 297)"
 
-              Expect.isTrue
-                  (good |> List.forall (fun r -> r.Passed))
-                  (sprintf "sound encoder is collision-free: %A" good)
+              Expect.isTrue (good |> List.forall _.Passed) (sprintf "sound encoder is collision-free: %A" good)
 
               // a lossy encoder that drops the node value — two trees differing only in a leaf value collide.
               let lossy (n: RNode) = n.Id + "|" + n.Kind
@@ -128,10 +126,10 @@ let integrityLawTests =
                   (if flip then a else b), rng
 
               let bad = Conformance.encoderInjectivityLawsAt artw lossy twoTrees 1 10
-              Expect.isFalse (bad |> List.forall (fun r -> r.Passed)) "a lossy encoder must fail injectivity"
+              Expect.isFalse (bad |> List.forall _.Passed) "a lossy encoder must fail injectivity"
 
               Expect.isTrue
-                  (bad |> List.exists (fun r -> r.Counterexample.IsSome))
+                  (bad |> List.exists _.Counterexample.IsSome)
                   "the lossy failure carries a (tree, tree) counterexample"
 
           // Phase 60 — the attestation / replay-as-provenance laws.
@@ -161,7 +159,7 @@ let integrityLawTests =
               let wide = Conformance.attestationLawsAt sw streamGen sink wideHash 4242 200
 
               Expect.isTrue
-                  (wide |> List.forall (fun r -> r.Passed))
+                  (wide |> List.forall _.Passed)
                   (sprintf "attestationLaws green under a wide HashFn: %A" (wide |> List.filter (fun r -> not r.Passed)))
 
               // seed-replay determinism
@@ -185,7 +183,7 @@ let integrityLawTests =
                   r.Law.StartsWith SampleAdequacy.guardOpening
 
               Expect.isTrue
-                  (results |> List.filter (guardOf >> not) |> List.forall (fun r -> r.Passed))
+                  (results |> List.filter (guardOf >> not) |> List.forall _.Passed)
                   (sprintf
                       "the five subject laws still hold over nothing: %A"
                       (results |> List.filter (fun r -> not r.Passed)))
@@ -195,7 +193,7 @@ let integrityLawTests =
               Expect.equal (List.length guard) 1 "one adequacy guard is reported"
 
               Expect.isFalse
-                  (guard |> List.forall (fun r -> r.Passed))
+                  (guard |> List.forall _.Passed)
                   "and it is RED — a sink that never signs leaves four of the five laws asserting nothing"
 
               Expect.isTrue
@@ -251,7 +249,7 @@ let integrityLawTests =
               let wide = Conformance.hashFnLaws sw streamGen wideHash 4242 200
 
               Expect.isTrue
-                  (wide |> List.forall (fun r -> r.Passed))
+                  (wide |> List.forall _.Passed)
                   (sprintf "hashFnLaws green under a wide HashFn: %A" (wide |> List.filter (fun r -> not r.Passed)))
 
               // seed-replay determinism
@@ -302,7 +300,7 @@ let integrityLawTests =
               let wide = Conformance.attributedLaws sw streamGen wideHash 4242 200
 
               Expect.isTrue
-                  (wide |> List.forall (fun r -> r.Passed))
+                  (wide |> List.forall _.Passed)
                   (sprintf "attributedLaws green under a wide HashFn: %A" (wide |> List.filter (fun r -> not r.Passed)))
 
               // seed-replay determinism

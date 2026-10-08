@@ -388,7 +388,7 @@ module internal ProposalSpike =
                   Defects = defects
                   Legs = legs
                   CostReport = cost
-                  Green = legs |> List.forall (fun l -> l.Passed) }
+                  Green = legs |> List.forall _.Passed }
 
     /// Render a report for a human reader.
     ///

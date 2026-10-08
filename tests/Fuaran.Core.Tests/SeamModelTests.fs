@@ -162,9 +162,7 @@ let private emptyResult: QueryResult =
 
 /// Every case of a union, by name — the coverage guard for the sample lists below.
 let private caseNames<'T> () =
-    FSharpType.GetUnionCases(typeof<'T>)
-    |> Array.map (fun c -> c.Name)
-    |> Set.ofArray
+    FSharpType.GetUnionCases(typeof<'T>) |> Array.map _.Name |> Set.ofArray
 
 let private caseNameOf (v: 'T) =
     (fst (FSharpValue.GetUnionFields(v, typeof<'T>))).Name

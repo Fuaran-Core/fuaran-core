@@ -319,7 +319,7 @@ let familiesTests =
               let baseWitnesses =
                   KitRoster.families
                   |> List.filter (fun f -> not f.OptIn)
-                  |> List.collect (fun f -> f.Witness)
+                  |> List.collect _.Witness
                   |> Set.ofList
 
               for f in KitRoster.families do
@@ -349,7 +349,7 @@ let familiesTests =
               let conformance =
                   KitRoster.families |> List.filter (fun f -> f.Module = "Conformance")
 
-              let entries = conformance |> List.map (fun f -> f.Entry)
+              let entries = conformance |> List.map _.Entry
 
               let folded =
                   Set.union (invokedBy "certify" entries) (invokedBy "certifyStream" entries)
@@ -577,7 +577,7 @@ let familiesTests =
 
                   Expect.equal
                       rebuilt
-                      (KitRoster.families |> List.sortBy (fun f -> f.Id))
+                      (KitRoster.families |> List.sortBy _.Id)
                       "the roster recovered from the export is the roster it was rendered from"
               | Ok other -> failtestf "the export is not a JSON object: %A" other
 

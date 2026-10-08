@@ -37,7 +37,7 @@ type StreamGen<'Op, 'State> =
 // the witness-taking forms instead. They COMPOSE the seam's own types rather than growing any
 // frozen witness (STABILITY's "compose, never grow").
 
-/// A domain's capability seam, as `Conformance.capabilityLawsWith` certifies it (Phase 246).
+/// A domain's capability seam, as `Conformance.capabilityLawsAt` certifies it (Phase 246).
 ///
 /// - `Registry` — the registry the domain dispatches against. The laws read it as the ORACLE: a
 ///   call whose id is registered and whose arguments `Capability.validateArgs` accepts must reach
@@ -71,7 +71,7 @@ type CapabilitySeamWitness<'v> =
         GenCall: ConfRng.T -> (string * (string * string) list) * ConfRng.T
     }
 
-/// A domain's query seam, as `Conformance.queryLawsWith` certifies it (Phase 246) — the query
+/// A domain's query seam, as `Conformance.queryLawsAt` certifies it (Phase 246) — the query
 /// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Resolver` the domain's resolver
 /// (handed the call's arguments first), `Dispatch` the host path (`QueryRegistry.dispatch queries`
 /// for a host that delegates to Core), and `GenQuery` the calls a model could make.
@@ -95,7 +95,7 @@ type QuerySeamWitness =
         GenQuery: ConfRng.T -> (string * (string * Cell) list) * ConfRng.T
     }
 
-/// A domain's capability pipelines, as `Conformance.capabilityPipelineLawsWith` certifies them
+/// A domain's capability pipelines, as `Conformance.capabilityPipelineLawsAt` certifies them
 /// (Phase 246): the registry they compose against, and the pipelines the domain builds.
 type CapabilityPipelineWitness =
     {
@@ -107,11 +107,11 @@ type CapabilityPipelineWitness =
         GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T
     }
 
-// `LawResult` — one law's verdict — is defined in `SampleAdequacy.fs`, which is compiled ahead of
-// this file. It moved there in Phase 121 for one reason: the adequacy guard produces `LawResult`s
-// like every family here does, and every family here declares its demands through the guard, so the
-// guard has to precede them — and it deliberately depends on no family, which makes it the right
-// place for the type they all share.
+// `LawResult` — one law's verdict — is defined in `LawResult.fs`, which is compiled first of the
+// kit (Phase 297 moved it there from `SampleAdequacy.fs`, where Phase 121 had put it): the roster and
+// the adequacy guard both read it, the guard reads the roster, and every family here produces
+// `LawResult`s and declares its demands through the guard, so the type they all share precedes them
+// all and depends on no family.
 
 /// The domain-supplied AUTHORING surface (Phase 126): how to rebuild a decoded value through the
 /// smart constructors / builders a program actually writes against, rather than through the decoded

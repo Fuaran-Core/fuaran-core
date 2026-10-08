@@ -89,9 +89,9 @@ let tests =
           <| fun _ ->
               match build () with
               | Ok(_, recs) ->
-                  Expect.equal recs.[0].Actor (Human "alice") "first op is a human"
+                  Expect.equal recs[0].Actor (Human "alice") "first op is a human"
 
-                  match recs.[1].Actor with
+                  match recs[1].Actor with
                   | Agent(model, version, id) ->
                       Expect.equal model "claude-opus-4-8" "model recorded"
                       Expect.equal version "2026-06" "version recorded"
@@ -185,8 +185,8 @@ let tests =
                               "the migrated chain verifies under the canonical typed-actor config"
 
                           Expect.equal
-                              (migrated |> List.map (fun r -> r.Actor))
-                              (legacy |> List.map (fun r -> r.Actor))
+                              (migrated |> List.map _.Actor)
+                              (legacy |> List.map _.Actor)
                               "actors are preserved (still Human) — only the hash chain changed"
 
                           Expect.equal (OpStream.replay sw 0 migrated) (Ok live) "replay reproduces the same state"

@@ -300,7 +300,7 @@ let tests =
 // ---------------------------------------------------------------------------
 
 let private foreignShaped (k: IdlKind) =
-    let names = k.Fields |> List.map (fun f -> f.Name) |> Set.ofList
+    let names = k.Fields |> List.map _.Name |> Set.ofList
     names.Contains "moduleId" && names.Contains "componentId"
 
 /// `refIdl` with no gated kind declared and its foreign-component kind removed.

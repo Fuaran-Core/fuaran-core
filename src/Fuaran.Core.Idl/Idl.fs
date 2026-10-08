@@ -1253,7 +1253,7 @@ module Encode =
         (fields: IdlField list)
         (authored: (string * IdlValue) list)
         : Result<(string * JVal) list, string> =
-        let known = fields |> List.map (fun f -> f.Name) |> Set.ofList
+        let known = fields |> List.map _.Name |> Set.ofList
 
         let extra =
             authored |> List.filter (fun (n, v) -> v <> VAbsent && not (known.Contains n))
@@ -1531,10 +1531,7 @@ module Decode =
                     |> Result.bind (fun tag ->
                         match u.Cases |> List.tryFind (fun c -> c.Tag = tag) with
                         | None ->
-                            unknownTag
-                                idl
-                                (u.Cases |> List.map (fun c -> c.Tag))
-                                (sprintf "union '%s' has no case '%s'" name tag)
+                            unknownTag idl (u.Cases |> List.map _.Tag) (sprintf "union '%s' has no case '%s'" name tag)
                         | Some c ->
                             let caseFields =
                                 c.Fields
@@ -1624,13 +1621,13 @@ module Decode =
             dollarType idl fs
             |> Result.bind (fun tag ->
                 match IdlLookup.tryKind idl tag with
-                | None -> unknownTag idl (idl.Kinds |> List.map (fun k -> k.Tag)) (sprintf "unknown kind '%s'" tag)
+                | None -> unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" tag)
                 | Some k -> decodeFields idl k.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
         | TOp, JObj fs ->
             dollarType idl fs
             |> Result.bind (fun tag ->
                 match idl.Ops |> List.tryFind (fun o -> o.Tag = tag) with
-                | None -> unknownTag idl (idl.Ops |> List.map (fun o -> o.Tag)) (sprintf "unknown op '%s'" tag)
+                | None -> unknownTag idl (idl.Ops |> List.map _.Tag) (sprintf "unknown op '%s'" tag)
                 | Some o -> decodeFields idl o.Fields fs |> Result.map (fun flds -> VUnion(tag, flds)))
         | TList inner, JArr xs ->
             let rec go i acc =
@@ -1719,7 +1716,7 @@ module Decode =
                 |> Result.bind (fun kindTag ->
                     match IdlLookup.tryKind idl kindTag with
                     | None ->
-                        unknownTag idl (idl.Kinds |> List.map (fun k -> k.Tag)) (sprintf "unknown kind '%s'" kindTag)
+                        unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" kindTag)
                         |> under (PathSegment.Key "kind")
                     | Some k ->
                         decodeFields idl k.Fields kindFs
@@ -1750,7 +1747,7 @@ module Decode =
             match field "id" fs, dollarType idl fs with
             | Some(JStr id), Ok kindTag ->
                 match IdlLookup.tryKind idl kindTag with
-                | None -> unknownTag idl (idl.Kinds |> List.map (fun k -> k.Tag)) (sprintf "unknown kind '%s'" kindTag)
+                | None -> unknownTag idl (idl.Kinds |> List.map _.Tag) (sprintf "unknown kind '%s'" kindTag)
                 | Some k ->
                     decodeFields idl k.Fields fs
                     |> Result.bind (fun fields ->
@@ -2008,7 +2005,7 @@ module Declare =
           // Flat only: the envelope and every kind body share one object, so an
           // envelope name reappearing as a kind field is ambiguous on the wire.
           if flat then
-              let envNames = idl.NodeFields |> List.map (fun f -> f.Name) |> Set.ofList
+              let envNames = idl.NodeFields |> List.map _.Name |> Set.ofList
 
               yield!
                   idl.Kinds
@@ -2119,8 +2116,8 @@ module Declare =
     ///
     /// A field-less kind or record is well-formed: a marker carries its meaning in its tag.
     let errors (idl: Idl) : string list =
-        let enumNames = idl.Enums |> List.map (fun e -> e.Name) |> Set.ofList
-        let recordNames = idl.Records |> List.map (fun r -> r.Name) |> Set.ofList
+        let enumNames = idl.Enums |> List.map _.Name |> Set.ofList
+        let recordNames = idl.Records |> List.map _.Name |> Set.ofList
 
         let unionOf (n: string) = IdlLookup.tryUnion idl n
 
@@ -2208,7 +2205,7 @@ module Declare =
                   sprintf "%s '%s' is declared more than once" what n ]
 
         let fieldErrors (owner: string) (pars: string list) (fields: IdlField list) : string list =
-            [ yield! nameErrors (owner + ": field") (fields |> List.map (fun f -> f.Name))
+            [ yield! nameErrors (owner + ": field") (fields |> List.map _.Name)
 
               for f in fields do
                   if inheritedMemberNames.Contains f.Name then
@@ -2251,15 +2248,15 @@ module Declare =
           yield! hostedWireErrors idl
 
           // Names, and the namespaces they share.
-          yield! nameErrors "kind" (idl.Kinds |> List.map (fun k -> k.Tag))
-          yield! nameErrors "op" (idl.Ops |> List.map (fun o -> o.Tag))
+          yield! nameErrors "kind" (idl.Kinds |> List.map _.Tag)
+          yield! nameErrors "op" (idl.Ops |> List.map _.Tag)
 
           yield!
               nameErrors
                   "type name"
-                  ((idl.Enums |> List.map (fun e -> e.Name))
-                   @ (idl.Unions |> List.map (fun u -> u.Name))
-                   @ (idl.Records |> List.map (fun r -> r.Name)))
+                  ((idl.Enums |> List.map _.Name)
+                   @ (idl.Unions |> List.map _.Name)
+                   @ (idl.Records |> List.map _.Name))
 
           for k in idl.Kinds do
               yield! kindErrors "kind" k
@@ -2273,7 +2270,7 @@ module Declare =
           for u in idl.Unions do
               let owner = sprintf "union '%s'" u.Name
               yield! nameErrors (owner + ": type parameter") u.Params
-              yield! nameErrors (owner + ": case") (u.Cases |> List.map (fun c -> c.Tag))
+              yield! nameErrors (owner + ": case") (u.Cases |> List.map _.Tag)
 
               for c in u.Cases do
                   let caseOwner = sprintf "union '%s' case '%s'" u.Name c.Tag
@@ -2317,9 +2314,7 @@ module Declare =
                   if d.Kind = "" then
                       Some idl.NodeFields
                   else
-                      idl.Kinds
-                      |> List.tryFind (fun k -> k.Tag = d.Kind)
-                      |> Option.map (fun k -> k.Fields)
+                      idl.Kinds |> List.tryFind (fun k -> k.Tag = d.Kind) |> Option.map _.Fields
 
               let at =
                   if d.Kind = "" then

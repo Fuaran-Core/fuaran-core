@@ -101,7 +101,7 @@ module internal ObserverLaws =
                 rs <- fst (ObserverWitness.register w id input (Some parent) rs))
 
             for id in members do
-                let walked = ObserverWitness.observeTree rs id |> List.map (fun o -> o.NodeId)
+                let walked = ObserverWitness.observeTree rs id |> List.map _.NodeId
 
                 cyclic.Check(
                     (List.sort walked = List.sort members),
