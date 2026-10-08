@@ -449,6 +449,11 @@
          tag-reading family. Reads PackageRosterTests.fs, ReleaseRecordTests.fs and
          PublicSurfaceTests.fs. Appended (append-only). -->
     <Compile Include="GateProbeTagTests.fs" />
+    <!-- Phase 386 - the OneDotZero family: what 1.0 promises, read off the major of <Version> -
+         no obsolete member, every witness frozen, the frozen field lists as the major's tag carries
+         them, no breaking surface move within a major; vacuous by name at major 0. Reads
+         PackageRosterTests.fs, PublicSurfaceTests.fs and ChildProcess.fs. Appended (append-only). -->
+    <Compile Include="OneDotZeroTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

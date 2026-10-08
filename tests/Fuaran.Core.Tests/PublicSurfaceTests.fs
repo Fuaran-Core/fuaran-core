@@ -247,7 +247,7 @@ let private mappingInts (r: MetadataReader) (attrs: CustomAttributeHandleCollect
         with _ ->
             None)
 
-let private hasAttribute (r: MetadataReader) (attrs: CustomAttributeHandleCollection) (name: string) : bool =
+let internal hasAttribute (r: MetadataReader) (attrs: CustomAttributeHandleCollection) (name: string) : bool =
     let attributeName (ca: CustomAttribute) : string =
         try
             let ctor = ca.Constructor
@@ -1051,6 +1051,54 @@ let internal newestVersionTag (tagLines: string list) : string option =
 let private roster () =
     PackageRosterTests.packableProjects (repoRoot ())
 
+/// One packable package's baseline read against a tag's (Phase 386 — the comparison the since-tag
+/// report prints and the `OneDotZero` family's within-a-major law asserts, written once).
+type internal SinceTag =
+    {
+        PackageId: string
+        /// The moves from the tag's baseline to the committed one; `None` when the tag carries no
+        /// baseline for this package (its first snapshot).
+        Moves: Move list option
+        /// The tag's baseline predates union field names (Phase 237), so both sides were compared
+        /// without them and a field rename since that tag is not visible.
+        NamesStripped: bool
+    }
+
+/// Every packable package whose committed baseline exists, read against `tag`'s baseline.
+let internal sinceTag (root: string) (tag: string) : SinceTag list =
+    [ for id in roster () |> List.map _.PackageId do
+          let path = baselinePath id
+
+          if File.Exists path then
+              let current = baselineTokens (File.ReadAllText path)
+
+              match git root (sprintf "show %s:api/%s.txt" tag id) with
+              | Error _ ->
+                  yield
+                      { PackageId = id
+                        Moves = None
+                        NamesStripped = false }
+              | Ok text ->
+                  // A tag cut before Phase 237 carries nameless union cases. Read against it,
+                  // today's named baseline would report every carrying case as a `retype` that no
+                  // consumer ever saw. So the comparison drops the names — and says so, because a
+                  // field rename since that tag is invisible to it, exactly as it was to the gate
+                  // then. This expires by itself: the first tag cut after 237 carries named
+                  // baselines, and nothing is stripped against it.
+                  let tagged = baselineTokens text
+                  let stripped = predatesFieldNames tagged
+
+                  let current =
+                      if stripped then
+                          current |> List.map stripFieldNames
+                      else
+                          current
+
+                  yield
+                      { PackageId = id
+                        Moves = Some(classify tagged current)
+                        NamesStripped = stripped } ]
+
 [<Tests>]
 let tests =
     testList
@@ -1237,64 +1285,43 @@ let tests =
                       printfn ""
                       printfn "==== public surface: class of every baseline moved since %s" tag
 
-                      let mutable read = 0
+                      let read = sinceTag root tag
                       let mutable moved = 0
 
-                      for id in packable do
-                          let path = baselinePath id
+                      for r in read do
+                          if r.NamesStripped then
+                              printfn
+                                  "  %-28s (%s's baseline predates union field names — compared without them; a field rename since %s is not visible here)"
+                                  r.PackageId
+                                  tag
+                                  tag
 
-                          if File.Exists path then
-                              read <- read + 1
-                              let current = baselineTokens (File.ReadAllText path)
+                          match r.Moves with
+                          | None ->
+                              printfn "  %-28s first snapshot — %s carries no baseline for this package" r.PackageId tag
+                          | Some [] -> ()
+                          | Some moves ->
+                              moved <- moved + 1
 
-                              match git root (sprintf "show %s:api/%s.txt" tag id) with
-                              | Error _ ->
-                                  printfn "  %-28s first snapshot — %s carries no baseline for this package" id tag
-                              | Ok text ->
-                                  // A tag cut before Phase 237 carries nameless union cases. Read
-                                  // against it, today's named baseline would report every carrying
-                                  // case as a `retype` that no consumer ever saw. So the comparison
-                                  // drops the names — and says so, because a field rename since
-                                  // that tag is invisible to it, exactly as it was to the gate then.
-                                  // This expires by itself: the first tag cut after 237 carries
-                                  // named baselines, and nothing is stripped against it.
-                                  let tagged = baselineTokens text
+                              let cls = headline moves |> Option.map className |> Option.defaultValue "unchanged"
 
-                                  let current =
-                                      if predatesFieldNames tagged then
-                                          printfn
-                                              "  %-28s (%s's baseline predates union field names — compared without them; a field rename since %s is not visible here)"
-                                              id
-                                              tag
-                                              tag
+                              printfn
+                                  "  %-28s %-18s %d move(s)%s"
+                                  r.PackageId
+                                  cls
+                                  moves.Length
+                                  (if isBreaking (headline moves |> Option.defaultValue Additive) then
+                                       "   ADVANCE <Version> — this move is breaking"
+                                   else
+                                       "   may RIDE a draft slot")
 
-                                          current |> List.map stripFieldNames
-                                      else
-                                          current
+                              for m in moves |> List.truncate 8 do
+                                  printfn "      %s" (describe m)
 
-                                  match classify tagged current with
-                                  | [] -> ()
-                                  | moves ->
-                                      moved <- moved + 1
+                              if moves.Length > 8 then
+                                  printfn "      ... and %d more" (moves.Length - 8)
 
-                                      let cls =
-                                          headline moves |> Option.map className |> Option.defaultValue "unchanged"
-
-                                      printfn
-                                          "  %-28s %-18s %d move(s)%s"
-                                          id
-                                          cls
-                                          moves.Length
-                                          (if isBreaking (headline moves |> Option.defaultValue Additive) then
-                                               "   ADVANCE <Version> — this move is breaking"
-                                           else
-                                               "   may RIDE a draft slot")
-
-                                      for m in moves |> List.truncate 8 do
-                                          printfn "      %s" (describe m)
-
-                                      if moves.Length > 8 then
-                                          printfn "      ... and %d more" (moves.Length - 8)
+                      let read = read.Length
 
                       if moved = 0 then
                           printfn "  (no baseline has moved since %s)" tag
