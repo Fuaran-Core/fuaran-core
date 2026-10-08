@@ -216,7 +216,7 @@ type CompositionSample<'A, 'B> =
 // ---- artifact-function property-verification (Phase 48) ----
 // Lift verification from "is this *tree* valid?" to "does this *function* produce a valid tree
 // for ALL (sampled / symbolic) valid param sets?" — property-test an artifact-function against
-// a domain `Validator.Registry` (the validity oracle the verifier *drives*, read-only). The
+// a domain `Validator.RuleRegistry` (the validity oracle the verifier *drives*, read-only). The
 // correct-by-construction property no freeform code-gen can offer: a saved typed-tree function
 // is certified valid across its whole binding space, not just one instance. The function-under-
 // test, the validator registry, and the param-set source all ride as per-call parameters (GP2);

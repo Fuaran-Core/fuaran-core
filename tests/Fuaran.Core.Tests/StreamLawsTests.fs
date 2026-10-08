@@ -22,7 +22,7 @@ let streamLawTests =
               let encInt (n: int) = Json.render (JInt n)
 
               let decInt (s: string) =
-                  Decode.parse s |> Result.bind Decode.asInt
+                  Decode.parse s |> Result.bind (Decoder.describing Decoder.int)
 
               let results =
                   Conformance.captureReplayLaws encInt decInt ConfRng.next OpStream.defaultHash 31337 200

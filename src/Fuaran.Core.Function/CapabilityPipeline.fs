@@ -55,6 +55,7 @@ type CapabilityPipeline =
 /// registration's, so a pipeline refusal says what the equivalent invocation refusal says. It
 /// replaced `PipelineUnknownArg`, `PipelineArgOutOfSpace` and `PipelineRequiredUnbound`, which
 /// carried the address alone.
+[<RequireQualifiedAccess>]
 type PipelineError =
     /// Two nodes share this id; checked before anything else.
     | DuplicateNode of id: string
@@ -90,6 +91,7 @@ type PipelineArg<'v> =
 /// which is also what retired `EvalUnknownNode`, since a forward reference is now a typeCheck refusal.
 /// An upstream value outside the space of the hole it feeds is `EvalArgRefused`, wrapping the
 /// `ArgOutOfSpace` the capability gives it; a host `body` failure is `EvalNodeFailed`.
+[<RequireQualifiedAccess>]
 type PipelineEvalError =
     /// `typeCheck` refused the pipeline; no body ran.
     | EvalIllTyped of reason: PipelineError
@@ -222,7 +224,7 @@ module CapabilityPipeline =
             |> List.tryPick (fun (k, c) -> if c > 1 then Some k else None)
 
         match dup with
-        | Some d -> Error(DuplicateNode d)
+        | Some d -> Error(PipelineError.DuplicateNode d)
         | None ->
             let rec go =
                 function
@@ -230,38 +232,43 @@ module CapabilityPipeline =
                 | Source _ :: rest -> go rest
                 | Invoke(nid, capId, _, args) :: rest ->
                     match lookup.TryFind capId with
-                    | None -> Error(PipelineNoSuchCapability(capId, lookup.Known))
+                    | None -> Error(PipelineError.PipelineNoSuchCapability(capId, lookup.Known))
                     | Some cap ->
                         let holes = cap.Signature.Holes
                         let declared = holes |> List.map (fun h -> h.Addr)
 
                         let edgeFault (addr: string) (up: string) (argSpace: ValueSpace) =
                             match Map.tryFind up nodeById with
-                            | None -> Some(UnknownNode up)
-                            | Some _ when up = nid -> Some(PipelineCycle(nid, [ nid ]))
+                            | None -> Some(PipelineError.UnknownNode up)
+                            | Some _ when up = nid -> Some(PipelineError.PipelineCycle(nid, [ nid ]))
                             | Some upNode ->
                                 if position.[up] > position.[nid] then
                                     match pathTo nid up with
-                                    | Some path -> Some(PipelineCycle(nid, nid :: path))
-                                    | None -> Some(PipelineForwardEdge(nid, addr, up))
+                                    | Some path -> Some(PipelineError.PipelineCycle(nid, nid :: path))
+                                    | None -> Some(PipelineError.PipelineForwardEdge(nid, addr, up))
                                 elif spaceFeeds (nodeOutputType upNode) argSpace then
                                     None
                                 else
                                     Some(
-                                        EdgeTypeMismatch(nid, addr, spaceTag (nodeOutputType upNode), spaceTag argSpace)
+                                        PipelineError.EdgeTypeMismatch(
+                                            nid,
+                                            addr,
+                                            spaceTag (nodeOutputType upNode),
+                                            spaceTag argSpace
+                                        )
                                     )
 
                         let argFault (addr: string, src: ArgSource) =
                             match src with
                             | Literal v ->
                                 Capability.argFault cap declared (addr, v)
-                                |> Option.map (fun e -> PipelineArgRefused(nid, e))
+                                |> Option.map (fun e -> PipelineError.PipelineArgRefused(nid, e))
                             | FromNode up ->
                                 match holes |> List.tryFind (fun h -> h.Addr = addr) with
-                                | None -> Some(PipelineArgRefused(nid, UnknownArg(addr, declared)))
+                                | None -> Some(PipelineError.PipelineArgRefused(nid, UnknownArg(addr, declared)))
                                 | Some h ->
                                     match h.Space with
-                                    | None -> Some(PipelineArgRefused(nid, UninvocableArg addr))
+                                    | None -> Some(PipelineError.PipelineArgRefused(nid, UninvocableArg addr))
                                     | Some argSpace -> edgeFault addr up argSpace
 
                         // Phase 307: an address bound twice is `DuplicateArg`, as `validateArgs`
@@ -270,7 +277,7 @@ module CapabilityPipeline =
 
                         match
                             duplicate
-                            |> Option.map (fun a -> PipelineArgRefused(nid, DuplicateArg a))
+                            |> Option.map (fun a -> PipelineError.PipelineArgRefused(nid, DuplicateArg a))
                             |> Option.orElse (args |> List.tryPick argFault)
                         with
                         | Some e -> Error e
@@ -285,7 +292,7 @@ module CapabilityPipeline =
                             if List.isEmpty unbound then
                                 go rest
                             else
-                                Error(PipelineArgRefused(nid, RequiredArgsUnbound unbound))
+                                Error(PipelineError.PipelineArgRefused(nid, RequiredArgsUnbound unbound))
 
             go p.Nodes
 
@@ -477,11 +484,19 @@ module CapabilityPipeline =
                                 if Space.validate space spelled then
                                     Ok((addr, FromUpstream v) :: xs)
                                 else
-                                    Error(EvalArgRefused(nid, ArgOutOfSpace(addr, space, spelled)))
+                                    Error(PipelineEvalError.EvalArgRefused(nid, ArgOutOfSpace(addr, space, spelled)))
                             // Unreachable after `typeCheck`: an edge names an earlier node into a
                             // spaced hole of a resolved capability. Refused as the type-check would.
-                            | None, _ -> Error(EvalIllTyped(PipelineForwardEdge(nid, addr, up)))
-                            | Some _, None -> Error(EvalIllTyped(PipelineArgRefused(nid, UninvocableArg addr)))))
+                            | None, _ ->
+                                Error(
+                                    PipelineEvalError.EvalIllTyped(PipelineError.PipelineForwardEdge(nid, addr, up))
+                                )
+                            | Some _, None ->
+                                Error(
+                                    PipelineEvalError.EvalIllTyped(
+                                        PipelineError.PipelineArgRefused(nid, UninvocableArg addr)
+                                    )
+                                )))
                 |> Result.map List.rev
 
         // Phase 383 — the admission gate (D111: one gate at every reader). An `Invoke` passes the
@@ -494,7 +509,8 @@ module CapabilityPipeline =
             | Invoke(_, capId, _, _) ->
                 match lookup.TryFind capId with
                 // Unreachable after `typeCheck`, which refused an unresolved id; refused as it would.
-                | None -> Error(EvalIllTyped(PipelineNoSuchCapability(capId, lookup.Known)))
+                | None ->
+                    Error(PipelineEvalError.EvalIllTyped(PipelineError.PipelineNoSuchCapability(capId, lookup.Known)))
                 | Some c ->
                     let spelled =
                         args
@@ -504,14 +520,14 @@ module CapabilityPipeline =
                             | FromUpstream v -> addr, spell v)
 
                     RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired lookup.Policy capId c spelled
-                    |> Result.mapError (fun e -> EvalPolicyRefused(nid, e))
+                    |> Result.mapError (fun e -> PipelineEvalError.EvalPolicyRefused(nid, e))
 
         resolved
         |> Result.bind (fun args -> admitted args |> Result.map (fun () -> args))
         |> Result.bind (fun args ->
             match body n args with
             | Ok v -> Ok v
-            | Error m -> Error(EvalNodeFailed(nid, m)))
+            | Error m -> Error(PipelineEvalError.EvalNodeFailed(nid, m)))
 
     /// The reference evaluator (Phase 62): fold the host `body` over the pipeline in declaration
     /// (topological) order, threading an `id → value` result map. `body` receives each node and its args
@@ -544,7 +560,7 @@ module CapabilityPipeline =
         (p: CapabilityPipeline)
         : Result<Map<string, 'v>, PipelineEvalError> =
         match typeCheck lookup p with
-        | Error e -> Error(EvalIllTyped e)
+        | Error e -> Error(PipelineEvalError.EvalIllTyped e)
         | Ok() ->
             let rec go (results: Map<string, 'v>) =
                 function
@@ -609,7 +625,7 @@ module CapabilityPipeline =
         (p: CapabilityPipeline)
         : Result<Map<string, 'v>, PipelineEvalError> =
         match typeCheck lookup p with
-        | Error e -> Error(EvalIllTyped e)
+        | Error e -> Error(PipelineEvalError.EvalIllTyped e)
         | Ok() ->
             let dirty = dirtySet changed p
 

@@ -194,14 +194,14 @@ let private checkCapabilityVector (v: JVal) : string option =
                 |> List.fold
                     (fun acc d ->
                         match acc, d with
-                        | Ok r, Some(Ok c) -> Registry.register c r |> Result.mapError (sprintf "%A")
+                        | Ok r, Some(Ok c) -> CapabilityRegistry.register c r |> Result.mapError (sprintf "%A")
                         | Error e, _ -> Error e
                         | _, Some(Error m) -> Error m
                         | _, None -> Error "a declaration is not a string")
-                    (Ok Registry.empty)
+                    (Ok CapabilityRegistry.empty)
             with
             | Error m -> Some(sprintf "%s: the declarations did not register (%s)" id m)
-            | Ok r -> differs [ "ids", JArr(Registry.enumerate r |> List.map (fun c -> JStr c.Id)) ]
+            | Ok r -> differs [ "ids", JArr(CapabilityRegistry.enumerate r |> List.map (fun c -> JStr c.Id)) ]
         | _ -> Some(sprintf "%s: input.declarations missing" id)
     | Some other, _ -> Some(sprintf "%s: unknown case `%s`" id other)
     | None, _ -> Some(sprintf "%s: no case" id)

@@ -236,7 +236,11 @@ module Space =
 /// `descriptorJson`. That spelling is FROZEN, not merely kept: `ContentPack.signatureFingerprint` is
 /// a hash over `toSchema`'s bytes, so moving the descriptor onto the document spelling would re-pin
 /// every published pack (DECISIONS D104). The reader takes the descriptor spelling too, leniently,
-/// for the 0.34.0 draft; nothing writes it into a document.
+/// and nothing writes it into a document. The lenient read was scheduled to leave with the 0.34.0
+/// draft; Phase 386 KEPT it through the 1.x line, because the verified model of this reader
+/// (`proofs/Capability.fst`, the `the-descriptor-spelling-of-a-space-is-read-leniently` vector)
+/// pins it as an accepted input, and the extracted oracle is held to production. It leaves at
+/// `2.0.0`, with that vector (DECISIONS.md D132).
 module SpaceCodec =
 
     /// Write a value space as a wire document (`"$type"`, `min` / `max`).
@@ -285,7 +289,7 @@ module SpaceCodec =
           "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree ]
 
     /// Read a value space. A `"$type"` document is read as `toJson` writes it; an object with no
-    /// `"$type"` and a `"kind"` is read in the descriptor spelling (lenient, for the 0.34.0 draft).
+    /// `"$type"` and a `"kind"` is read in the descriptor spelling (lenient, through the 1.x line).
     ///
     /// `typeMiss` is the sentence an unknown `"$type"` is refused in (`<typeMiss><tag>`), so a codec
     /// that embeds a value space keeps its own (Phase 388: `CapabilityPipelineCodec` reads through

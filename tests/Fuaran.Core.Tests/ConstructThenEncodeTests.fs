@@ -20,15 +20,25 @@ let rec private encodeNode (n: RNode) : JVal =
 
 let private encode (n: RNode) = Json.render (encodeNode n)
 
+/// Every item of a JSON array through `d`, stopping at the first refusal — the string-error
+/// `Decode.mapList` this file used until it left at `1.0.0` (Phase 386), kept local to the test.
+let private itemsThrough (d: JVal -> Result<'T, string>) (el: JVal) : Result<'T list, string> =
+    let rec go acc xs =
+        match xs with
+        | [] -> Ok(List.rev acc)
+        | x :: rest -> d x |> Result.bind (fun v -> go (v :: acc) rest)
+
+    Decoder.describing Decoder.items el |> Result.bind (go [])
+
 let rec private decodeNode el : Result<RNode, string> =
-    Decode.kindOf el
+    Decoder.describing (Decoder.field "kind" Decoder.str) el
     |> Result.bind (fun kind ->
-        Decode.strField "id" el
+        Decoder.describing (Decoder.field "id" Decoder.str) el
         |> Result.bind (fun id ->
-            Decode.strField "value" el
+            Decoder.describing (Decoder.field "value" Decoder.str) el
             |> Result.bind (fun value ->
-                Decode.getProp "children" el
-                |> Result.bind (Decode.mapList decodeNode)
+                Decoder.describing (Decoder.field "children" Decoder.json) el
+                |> Result.bind (itemsThrough decodeNode)
                 |> Result.map (fun kids ->
                     { Id = id
                       Kind = kind

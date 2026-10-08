@@ -378,11 +378,11 @@ let tests =
               let cap = Capability.create "tpl-cap" sg Server
 
               let reg =
-                  match Registry.register cap Registry.empty with
+                  match CapabilityRegistry.register cap CapabilityRegistry.empty with
                   | Ok r -> r
                   | Error e -> failtestf "a slotted capability did not register: %A" e
 
-              Expect.equal (Registry.enumerate reg |> List.map (fun c -> c.Id)) [ "tpl-cap" ] "enumerated"
+              Expect.equal (CapabilityRegistry.enumerate reg |> List.map (fun c -> c.Id)) [ "tpl-cap" ] "enumerated"
 
               let para = """{"kind":"para","text":"hi"}"""
 
@@ -390,14 +390,14 @@ let tests =
                   [ "tpl/t", "Hello"; "tpl/c", "5"; "tpl/s", s ]
 
               Expect.equal
-                  (Registry.dispatch reg "tpl-cap" (args para) (fun _ () -> Ready "ran"))
+                  (CapabilityRegistry.dispatch reg "tpl-cap" (args para) (fun _ () -> Ready "ran"))
                   (Ok(Ready "ran"))
                   "a conforming slot argument dispatches"
 
               let ran = ref false
 
               match
-                  Registry.dispatch reg "tpl-cap" (args """{"kind":"heading"}""") (fun _ () ->
+                  CapabilityRegistry.dispatch reg "tpl-cap" (args """{"kind":"heading"}""") (fun _ () ->
                       ran.Value <- true
                       Ready "ran")
               with
@@ -495,28 +495,28 @@ let tests =
                       Server
 
               let reg =
-                  Registry.empty
-                  |> Registry.register (mk "zebra")
-                  |> Result.bind (Registry.register (mk "apple"))
+                  CapabilityRegistry.empty
+                  |> CapabilityRegistry.register (mk "zebra")
+                  |> Result.bind (CapabilityRegistry.register (mk "apple"))
                   |> function
                       | Ok r -> r
                       | Error e -> failtestf "register failed: %A" e
 
               Expect.equal
-                  (Registry.enumerate reg |> List.map (fun c -> c.Id))
+                  (CapabilityRegistry.enumerate reg |> List.map (fun c -> c.Id))
                   [ "apple"; "zebra" ]
                   "enumerate id-sorted"
 
-              match Registry.register (mk "apple") reg with
+              match CapabilityRegistry.register (mk "apple") reg with
               | Error(DuplicateCapability "apple") -> ()
               | other -> failtestf "expected DuplicateCapability, got %A" other
 
-              match Registry.dispatch reg "ghost" [] (fun _ () -> Ready 1) with
+              match CapabilityRegistry.dispatch reg "ghost" [] (fun _ () -> Ready 1) with
               | Error(NoSuchCapability("ghost", _)) -> ()
               | other -> failtestf "expected NoSuchCapability, got %A" other
 
               Expect.equal
-                  (Registry.dispatch reg "apple" [] (fun _ () -> Ready 42))
+                  (CapabilityRegistry.dispatch reg "apple" [] (fun _ () -> Ready 42))
                   (Ok(Ready 42))
                   "registered id dispatches, settled"
 
@@ -524,12 +524,12 @@ let tests =
               // pending inside an `Ok`, and a failing one is the typed `BodyFailed`, never
               // `Ok(Failed _)`.
               Expect.equal
-                  (Registry.dispatch reg "apple" [] (fun _ () -> Pending))
+                  (CapabilityRegistry.dispatch reg "apple" [] (fun _ () -> Pending))
                   (Ok Pending: Result<Deferred<int>, InvokeError>)
                   "a pending body stays pending"
 
               Expect.equal
-                  (Registry.dispatch reg "apple" [] (fun _ () -> Failed "boom"))
+                  (CapabilityRegistry.dispatch reg "apple" [] (fun _ () -> Failed "boom"))
                   (Error(BodyFailed "boom"): Result<Deferred<int>, InvokeError>)
                   "a failing body is the typed BodyFailed"
 
@@ -1102,15 +1102,15 @@ let memoTests =
                             Invoke("n2", "cons", IntRange(0, 100), [ "x", FromNode "n1" ]) ] }
 
               match CapabilityPipeline.typeCheck reg bad with
-              | Error(EdgeTypeMismatch("n2", "x", "anyString", "int")) -> ()
-              | other -> failtestf "expected EdgeTypeMismatch, got %A" other
+              | Error(PipelineError.EdgeTypeMismatch("n2", "x", "anyString", "int")) -> ()
+              | other -> failtestf "expected PipelineError.EdgeTypeMismatch, got %A" other
 
               // an unregistered capability is default-deny
               let unreg = { Nodes = [ Invoke("n1", "ghost", IntRange(0, 100), []) ] }
 
               match CapabilityPipeline.typeCheck reg unreg with
-              | Error(PipelineNoSuchCapability("ghost", _)) -> ()
-              | other -> failtestf "expected PipelineNoSuchCapability, got %A" other
+              | Error(PipelineError.PipelineNoSuchCapability("ghost", _)) -> ()
+              | other -> failtestf "expected PipelineError.PipelineNoSuchCapability, got %A" other
 
           testCase "CapabilityPipeline round-trips the wire"
           <| fun _ ->
@@ -1534,33 +1534,33 @@ let convergenceTests =
 
               Expect.equal
                   (check [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ])
-                  (Error(PipelineCycle("a", [ "a" ])))
+                  (Error(PipelineError.PipelineCycle("a", [ "a" ])))
                   "self-edge"
 
               Expect.equal
                   (check
                       [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "b" ])
                         Invoke("b", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ])
-                  (Error(PipelineCycle("a", [ "a"; "b" ])))
+                  (Error(PipelineError.PipelineCycle("a", [ "a"; "b" ])))
                   "cycle"
 
               Expect.equal
                   (check
                       [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "s" ])
                         Source("s", "ref", IntRange(0, 100)) ])
-                  (Error(PipelineForwardEdge("a", "x", "s")))
+                  (Error(PipelineError.PipelineForwardEdge("a", "x", "s")))
                   "forward edge"
 
               Expect.equal
                   (check [ Invoke("a", "cons", IntRange(0, 100), [ "x", Literal "500" ]) ])
-                  (Error(PipelineArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))))
+                  (Error(PipelineError.PipelineArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))))
                   "an out-of-space literal carries the space and the value"
 
               Expect.equal
                   (check
                       [ Source("s", "ref", IntRange(0, 1000))
                         Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "s" ]) ])
-                  (Error(EdgeTypeMismatch("a", "x", "int", "int")))
+                  (Error(PipelineError.EdgeTypeMismatch("a", "x", "int", "int")))
                   "a wider producer range does not feed a narrower argument"
 
               let mutable ran = false
@@ -1576,8 +1576,8 @@ let convergenceTests =
                       body
                       { Nodes = [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ] }
               with
-              | Error(EvalIllTyped(PipelineCycle _)) when not ran -> ()
-              | other -> failtestf "expected EvalIllTyped before any body, got %A (ran %b)" other ran
+              | Error(PipelineEvalError.EvalIllTyped(PipelineError.PipelineCycle _)) when not ran -> ()
+              | other -> failtestf "expected PipelineEvalError.EvalIllTyped before any body, got %A (ran %b)" other ran
 
               let narrow =
                   { Nodes =
@@ -1588,8 +1588,8 @@ let convergenceTests =
                   Ok(if CapabilityPipeline.nodeId n = "s" then 500 else 0)
 
               match CapabilityPipeline.eval lookup string overflow narrow with
-              | Error(EvalArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))) -> ()
-              | other -> failtestf "expected EvalArgRefused, got %A" other
+              | Error(PipelineEvalError.EvalArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))) -> ()
+              | other -> failtestf "expected PipelineEvalError.EvalArgRefused, got %A" other
 
           testCase "Deferred.settled keeps Pending apart from a failure that says pending"
           <| fun _ ->
@@ -1787,7 +1787,7 @@ let validatedDeclarationTests =
 
               Expect.equal
                   (CapabilityPipeline.typeCheck lookup p)
-                  (Error(PipelineArgRefused("i", DuplicateArg "n")))
+                  (Error(PipelineError.PipelineArgRefused("i", DuplicateArg "n")))
                   "typeCheck"
 
           testCase "a pre-229 spaceless slot entry is invocable like a derived one"

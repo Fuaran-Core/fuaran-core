@@ -126,8 +126,8 @@ admission pair, `laneFoldLawsWith`'s `HashFn`, `lawsWith`'s vector set). There i
 `sanitizeLaws`, `attestationLaws`, `compositionLaws`, `compositionPilot`, `memoLaws`,
 `memoSoundnessLaws`, `functionVerifyLaws`, `verifyHonestyLaws`, `encoderInjectivityLaws`,
 `keyedApplyLaws`, `keyedArbitrationLaws`, `aiSurfaceLawsUnderKitPolicy` — now
-`aiSurfaceKitPolicyLawsAt` — and `FoldConfluence.laneFoldLaws`) are obsolete forwards removed at
-`1.0.0`; call the `…At` form.
+`aiSurfaceKitPolicyLawsAt` — and `FoldConfluence.laneFoldLaws`) were obsolete forwards and left at
+`1.0.0`; call the `…At` form ([the 1.0.0 migration](migrations/1.0.0.md)).
 
 ## 3. Re-express the op-stream
 

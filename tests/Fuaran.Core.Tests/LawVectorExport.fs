@@ -210,11 +210,11 @@ module LawVectorExport =
 
             let registryIds =
                 match
-                    Registry.empty
-                    |> Registry.register d.Cap
-                    |> Result.bind (Registry.register d.CapB)
+                    CapabilityRegistry.empty
+                    |> CapabilityRegistry.register d.Cap
+                    |> Result.bind (CapabilityRegistry.register d.CapB)
                 with
-                | Ok r -> Registry.enumerate r |> List.map (fun c -> c.Id)
+                | Ok r -> CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
                 | Error _ -> []
 
             [ { Id = sprintf "capability-%d-accept" d.Iteration

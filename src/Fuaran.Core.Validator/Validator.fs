@@ -123,9 +123,6 @@ module Validator =
             Families: RuleFamily<'Node, 'Id> list
         }
 
-    /// The pre-298 name of `RuleRegistry` — an alias kept for one draft, removed in the next.
-    type Registry<'Node, 'Id> = RuleRegistry<'Node, 'Id>
-
     /// A registry holding no family, so `runAll` over it finds nothing; the seed `ofFamilies` folds from.
     let empty<'Node, 'Id> : RuleRegistry<'Node, 'Id> = { Families = [] }
 

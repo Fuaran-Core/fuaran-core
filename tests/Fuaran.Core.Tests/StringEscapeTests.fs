@@ -21,7 +21,7 @@ let private sw: StreamWitness<NoteOp, string list, string> =
       Decode =
         fun json ->
             Decode.parse json
-            |> Result.bind (fun el -> Decode.strField "text" el |> Result.map Note) }
+            |> Result.bind (fun el -> Decoder.describing (Decoder.field "text" Decoder.str) el |> Result.map Note) }
 
 let private h = OpStream.defaultHash
 
@@ -139,13 +139,14 @@ module RunBoundaries =
             sb.Append(">").ToString()
 
         let dag: Dag.T<unit> =
-            { Nodes =
+            DagOf.nodes (
                 Map.ofList
                     [ s,
                       { Id = s
                         Parents = [ s ]
                         Actor = Human s
-                        Op = () } ] }
+                        Op = () } ]
+            )
 
         let human = "{\"kind\":\"human\",\"id\":" + q + "}"
 

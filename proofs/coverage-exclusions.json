@@ -297,9 +297,7 @@
     },
     {
       "members": [
-        "Conformance.witnessCoverageLaw",
-        "Conformance.witnessDeclaredFieldsLaw",
-        "Conformance.witnessFieldsLaw"
+        "Conformance.witnessDeclaredFieldsLaw"
       ],
       "class": "measured-elsewhere",
       "reason": "Single-law helpers the witness-surface family is built from; exercised by the kit's own tests. witnessDeclaredFieldsLaw (Phase 387) is the reflection-free law the Fable pipeline runs over the committed declaredWitnessFields, which SurfaceLawsTests holds equal to reflection.",
@@ -616,8 +614,7 @@
         "CapabilityRegistry.dispatchWithArgs"
       ],
       "class": "measured-elsewhere",
-      "reason": "The argument-typed dispatch; the seam-model tests reach it through the obsolete `Registry` alias, which forwards to it.",
-      "through": "Registry.dispatchWithArgs",
+      "reason": "The argument-typed dispatch; the seam-model tests drive it directly.",
       "standIn": "tests/Fuaran.Core.Tests/SeamModelTests.fs"
     },
     {
@@ -747,46 +744,6 @@
       "class": "measured-elsewhere",
       "reason": "The frozen descriptor spelling `toSchema` writes; round-trip tests stand in. The document spelling's writer and the reader left this entry for the ladder at Phase 354 (`capability-codec-signature-roundtrip`).",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "Registry.dispatchWithArgs"
-      ],
-      "class": "obsolete",
-      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
-      "forwardsTo": "CapabilityRegistry.dispatchWithArgs"
-    },
-    {
-      "members": [
-        "Registry.dispatch"
-      ],
-      "class": "obsolete",
-      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
-      "forwardsTo": "CapabilityRegistry.dispatch"
-    },
-    {
-      "members": [
-        "Registry.enumerate"
-      ],
-      "class": "obsolete",
-      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
-      "forwardsTo": "CapabilityRegistry.enumerate"
-    },
-    {
-      "members": [
-        "Registry.register"
-      ],
-      "class": "obsolete",
-      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
-      "forwardsTo": "CapabilityRegistry.register"
-    },
-    {
-      "members": [
-        "Registry.tryFind"
-      ],
-      "class": "obsolete",
-      "reason": "The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295); each member forwards to `CapabilityRegistry`.",
-      "forwardsTo": "CapabilityRegistry.tryFind"
     },
     {
       "members": [
@@ -1277,30 +1234,11 @@
     },
     {
       "members": [
-        "Observer.IObserver.Observe",
-        "Observer.IObserver.ObserveTree",
-        "Observer.IObserver.Register",
-        "Observer.IObserver.Subscribe",
-        "Observer.IObserver.Unregister"
-      ],
-      "class": "host-seam",
-      "reason": "An interface member: its content is the implementer's. `InMemoryObserver` is the shipped implementation and the observer family certifies the pure witness it delegates to."
-    },
-    {
-      "members": [
         "ObserverWitness.create"
       ],
       "class": "measured-elsewhere",
       "reason": "Constructs the in-memory observer over the pure witness; example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/ConformanceVacuityTests.fs"
-    },
-    {
-      "members": [
-        "Observer.InMemoryObserver.create"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Constructs the in-memory observer over the pure witness; example-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/ObserverTests.fs"
     },
     {
       "members": [
@@ -1321,23 +1259,6 @@
     },
     {
       "members": [
-        "Observer.InMemoryObserver.RegisterNode"
-      ],
-      "class": "forward",
-      "reason": "Forwards to the pure witness under the observer's lock (Phase 298); the witness is rostered.",
-      "forwardsTo": "ObserverWitness.register"
-    },
-    {
-      "members": [
-        "Observer.InMemoryObserver.Update"
-      ],
-      "class": "forward",
-      "reason": "Forwards to the pure witness under the observer's lock (Phase 298); the witness is rostered.",
-      "forwardsTo": "ObserverWitness.update"
-    },
-    {
-      "members": [
-        "Observer.ObserverOptions.defaults",
         "ObserverOptions.defaults"
       ],
       "class": "trivial",
@@ -1464,158 +1385,6 @@
       "class": "measured-elsewhere",
       "reason": "Stream operations beside the rostered append / replay / verify / capture / attestation core: batched and conditional appends, chain-only and hash-parameterised forms, snapshots, legacy and verified readers, rehash, cross-chain verification. The stream tests stand in.",
       "standIn": "tests/Fuaran.Core.Tests/ProvenanceTests.fs"
-    },
-    {
-      "members": [
-        "OpStream.compactChainOnlyWith"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.compact"
-    },
-    {
-      "members": [
-        "OpStream.compactWith"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.compact"
-    },
-    {
-      "members": [
-        "OpStream.snapshotAtOptWith"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.take"
-    },
-    {
-      "members": [
-        "OpStream.verifyAcrossChainOnlyWith"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.verify"
-    },
-    {
-      "members": [
-        "OpStream.verifyAcrossWith"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.verify"
-    },
-    {
-      "members": [
-        "OpStream.compact"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.compact"
-    },
-    {
-      "members": [
-        "OpStream.compactChainOnly"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.compact"
-    },
-    {
-      "members": [
-        "OpStream.replayFrom"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.replayFrom"
-    },
-    {
-      "members": [
-        "OpStream.snapshotAt"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.take"
-    },
-    {
-      "members": [
-        "OpStream.snapshotAtChainOnly"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.take"
-    },
-    {
-      "members": [
-        "OpStream.snapshotAtOpt"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.take"
-    },
-    {
-      "members": [
-        "OpStream.snapshotFromJsonl"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.ofJsonl"
-    },
-    {
-      "members": [
-        "OpStream.snapshotFromJsonlResult"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.ofJsonl"
-    },
-    {
-      "members": [
-        "OpStream.snapshotStateHashedFromJsonl"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.ofJsonl"
-    },
-    {
-      "members": [
-        "OpStream.snapshotToJsonl"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.toJsonl"
-    },
-    {
-      "members": [
-        "OpStream.snapshotToJsonlChainOnly"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.toJsonl"
-    },
-    {
-      "members": [
-        "OpStream.verifyAcross"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.verify"
-    },
-    {
-      "members": [
-        "OpStream.verifyAcrossChainOnly"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.verify"
-    },
-    {
-      "members": [
-        "OpStream.verifyAcrossWithOpt"
-      ],
-      "class": "obsolete",
-      "reason": "A pre-Phase-296 snapshot entry point carrying `System.Obsolete`, kept for one draft; it forwards to `OpStream.Snapshots`, whose laws (`snapshotLawsWith`, run at a non-canonical config and a non-default hash since Phase 349) are its coverage.",
-      "forwardsTo": "OpStream.Snapshots.verify"
     },
     {
       "members": [
@@ -2311,22 +2080,6 @@
     },
     {
       "members": [
-        "Decode.asBool",
-        "Decode.asFloat",
-        "Decode.asInt",
-        "Decode.asString",
-        "Decode.getProp",
-        "Decode.intField",
-        "Decode.kindOf",
-        "Decode.mapList",
-        "Decode.strField"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The untyped decode helpers the older readers are written in; example- and refusal-tested.",
-      "standIn": "tests/Fuaran.Core.Tests/ProofOracleTests.fs"
-    },
-    {
-      "members": [
         "Decode.arrayWith",
         "Decode.propWith",
         "Decode.stringWith"
@@ -2364,9 +2117,8 @@
         "Decode.describe"
       ],
       "class": "measured-elsewhere",
-      "reason": "A decode fault in the words the string-error helpers use; `getProp` and its siblings return it.",
-      "through": "Decode.getProp",
-      "standIn": "tests/Fuaran.Core.Tests/ConstructThenEncodeTests.fs"
+      "reason": "A decode fault in the words the retired string-error helpers used; a `…With` combinator handed it answers in those words.",
+      "standIn": "tests/Fuaran.Core.Tests/WireSurfaceTests.fs"
     },
     {
       "members": [
@@ -2655,15 +2407,6 @@
     },
     {
       "members": [
-        "RowCodec.decodeRows",
-        "RowCodec.encodeRows"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The row codec over columnar tables; round-trip tests stand in.",
-      "standIn": "tests/Fuaran.Core.Tests/WireTests.fs"
-    },
-    {
-      "members": [
         "Versioning.decodeTolerant",
         "Versioning.negotiate",
         "Versioning.parse",
@@ -2775,6 +2518,14 @@
       "class": "measured-elsewhere",
       "reason": "The profile-pinned constructor (Phase 382, D122 route B): SHA-256 over `Canonical`'s guarded text under the named profile, pinned under both profiles with the positive control that a control character moves the digest, and held to every stored result hash in the apply corpus; its refusals are `Canonical.tryWrite`'s and `isCanonical`'s.",
       "standIn": "tests/Fuaran.Core.Tests/CodecTests.fs"
+    },
+    {
+      "members": [
+        "Dag.ofNodes"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Builds a DAG from a node map — the one way in since the constructor went private at 1.0.0 — refusing a key that is not its node's id; example-tested, the refusal by a go-red vector.",
+      "standIn": "tests/Fuaran.Core.Tests/DagTests.fs"
     }
   ]
 }

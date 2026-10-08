@@ -2312,18 +2312,18 @@ module Decode =
     type Decoder<'T> = JVal -> Result<'T, string>
 
     /// The structural fault a decode combinator meets, BEFORE any codec spells it (Phase 299). The
-    /// combinators below come in two forms: the `string`-error ones every codec has always used,
-    /// and a `…With` form generic over the error type, which takes the codec's own spelling of a
-    /// `Fault`. A codec with a typed error envelope (the columnar codec's `ColumnError`) reuses the
-    /// same traversal and keeps its own codes, rather than carrying a private copy of each
-    /// combinator — which is what it did until this phase.
+    /// `…With` combinators below are generic over the error type and take the codec's own spelling
+    /// of a `Fault`. A codec with a typed error envelope (the columnar codec's `ColumnError`) reuses
+    /// the same traversal and keeps its own codes, rather than carrying a private copy of each
+    /// combinator — which is what it did until this phase. (Their `string`-error twins, `getProp`
+    /// to `mapList`, left at `1.0.0`: `Decoder` reads the same members with a coded refusal.)
     type Fault =
         /// An object had no member of this name.
         | MissingProperty of name: string
         /// A value was of the wrong JSON kind: the kind expected, and the kind found (`JVal.kindName`).
         | WrongKind of expected: string * got: string
 
-    /// A `Fault` in the words the `string`-error combinators have always used (`missing property:
+    /// A `Fault` in the words the `string`-error combinators always used (`missing property:
     /// <name>`, `expected <kind>, got <kind>`) — byte-identical to before this type existed.
     let describe (fault: Fault) : string =
         match fault with
@@ -2356,160 +2356,14 @@ module Decode =
         | JArr xs -> Ok xs
         | other -> Error(fault (WrongKind("array", JVal.kindName other)))
 
-    let private kindName (v: JVal) = JVal.kindName v
-
     /// Parse a JSON string to a `JVal` root.
     let parse (json: string) : Result<JVal, string> = Json.parse json
 
     /// Parse a **foreign** JSON string that spells absent members `null` — object-member `null` is
-    /// erased to absence, so every combinator below (`getProp` → `missing property: <name>`) behaves
+    /// erased to absence, so every decoder (`Decoder.field` → `missing property: <name>`) behaves
     /// exactly as it does against the same document written without the token. The one-word swap a
     /// consumer makes to read a spec-conformant foreign document; everything downstream is unchanged.
     let parseTolerantOfNull (json: string) : Result<JVal, string> = Json.parseTolerantOfNull json
-
-    // The string-error combinators below are FORWARDS onto the typed layer since Phase 310 — each is
-    // `Decoder.describing` over its `Decoder` twin, and answers the sentence it always answered. They
-    // are kept for one draft and removed at the next breaking draft (STABILITY.md, 0.34.0); new code
-    // reads through `Decoder`, whose refusal carries a code and a path.
-
-    /// Forward: `Decoder.field name Decoder.json`.
-    let getProp (name: string) (el: JVal) : Result<JVal, string> =
-        Decoder.describing (Decoder.field name Decoder.json) el
-
-    /// Forward: `Decoder.str`.
-    let asString (el: JVal) : Result<string, string> = Decoder.describing Decoder.str el
-
-    /// Forward: `Decoder.int`.
-    let asInt (el: JVal) : Result<int, string> = Decoder.describing Decoder.int el
-
-    /// Forward: `Decoder.bool`.
-    let asBool (el: JVal) : Result<bool, string> = Decoder.describing Decoder.bool el
-
-    /// Forward: `Decoder.float`.
-    let asFloat (el: JVal) : Result<float, string> = Decoder.describing Decoder.float el
-
-    /// The discriminating `"kind"` tag of an object. Forward: `Decoder.field "kind" Decoder.str`.
-    let kindOf (el: JVal) : Result<string, string> =
-        Decoder.describing (Decoder.field "kind" Decoder.str) el
-
-    /// Forward: `Decoder.field name Decoder.str`.
-    let strField (name: string) (el: JVal) : Result<string, string> =
-        Decoder.describing (Decoder.field name Decoder.str) el
-
-    /// Forward: `Decoder.field name Decoder.int`.
-    let intField (name: string) (el: JVal) : Result<int, string> =
-        Decoder.describing (Decoder.field name Decoder.int) el
-
-    /// Decode every element of a JSON array with `d`. Short-circuits on the first error.
-    let mapList (d: Decoder<'T>) (el: JVal) : Result<'T list, string> =
-        arrayWith describe el
-        |> Result.bind (fun xs ->
-            let rec go acc =
-                function
-                | [] -> Ok(List.rev acc)
-                | x :: rest ->
-                    match d x with
-                    | Ok v -> go (v :: acc) rest
-                    | Error m -> Error m
-
-            go [] xs)
-
-/// A single grid / chart / table row: an *open* name→value map (unlike a `TRecord`, whose
-/// field set is fixed). Cells are boxed scalars — the shape the UI tier's decoded path and
-/// its `Binding.Transform` resolution have always produced at runtime; naming it here makes
-/// the rows slot wire-expressible without changing the representation (fuaran#665).
-type Row = Map<string, obj>
-
-/// Canonical codec for the typed row-source payload (fuaran#665 — rows leave the
-/// residual-`"<opaque>"` boundary). Encodes a `Row seq` as a JSON array of row objects with
-/// scalar cells (WIRE_FORMAT §2 rules 5/11); decode accepts the typed form **and** the legacy
-/// `"<opaque>"` sentinel indefinitely (read-compat — a pre-typed emission decodes to the empty
-/// feed, exactly the old behaviour). Canonicality (Ordinal key sort, float layout, escaping) is
-/// inherited from `Canon.render`, never re-implemented here.
-///
-/// OBSOLETE since Phase 299, removed at the next breaking draft after `0.33.0` (DECISIONS.md "the
-/// parser holds to the JSON grammar, NaN sorts last, and `RowCodec` is obsoleted"). Two hazards are
-/// in its bytes and cannot be fixed without changing them: a `DateTime` of `Unspecified` kind goes
-/// through `ToUniversalTime()`, which reads the MACHINE's time zone, so one value encodes to
-/// different seconds on two servers; and an `int64` is widened to a double, so every value past
-/// 2^53 is silently a different number. And it is a boxed `Map<string, obj>` row — a UI-tier
-/// representation — in the spine.
-[<System.Obsolete("RowCodec is obsolete and is removed at the next breaking draft. Its bytes carry two hazards: a DateTime of Unspecified kind is encoded through ToUniversalTime(), so the Unix seconds depend on the machine's time zone; and an int64 is widened to a double, so any value past 2^53 is silently a different number. Carry rows as a Fuaran.Core.Column DataSource (ColumnCodec), declare a typed row as a Fuaran.Core.Codec<'T>, or host a row codec in the UI tier.")>]
-module RowCodec =
-
-    /// The residual-opaque sentinel the rows slot carried before the typed encoding.
-    [<Literal>]
-    let opaqueSentinel = "<opaque>"
-
-    let private kindName (v: JVal) = JVal.kindName v
-
-    /// Best-effort scalar cell encode over the boxed-cell seam — the rule-11 recognised set
-    /// (string / bool / int / int64 / float / float32 / DateTimeOffset / DateTime → Unix
-    /// seconds), anything else the `"<opaque>"` sentinel, a `null` cell omitted (rule 4:
-    /// absence is structural). The `float` test runs FIRST: under Fable every number satisfies
-    /// every numeric type test (`typeof x === "number"`), so float-first routes all JS numbers
-    /// through the canonical float layout — byte-identical to .NET, where the boxed types are
-    /// exact and the arm order is immaterial. Integral floats render in integer form (rule 5
-    /// shortest round-trip), so a .NET `box 42` (→ `JInt`) and a Fable `42` (→ `JFloat`) emit
-    /// the same bytes.
-    let private encodeCell (v: obj) : JVal option =
-        match v with
-        | null -> None
-        | :? string as s -> Some(JStr s)
-        | :? bool as b -> Some(JBool b)
-        | :? float as f -> Some(JFloat f)
-        | :? int as n -> Some(JInt n)
-        | :? int64 as n -> Some(JFloat(float n))
-        | :? float32 as f -> Some(JFloat(float f))
-        | :? System.DateTimeOffset as t -> Some(JFloat(float (t.ToUnixTimeSeconds())))
-        | :? System.DateTime as t ->
-            Some(JFloat(float (System.DateTimeOffset(t.ToUniversalTime(), System.TimeSpan.Zero).ToUnixTimeSeconds())))
-        | _ -> Some(JStr opaqueSentinel)
-
-    /// Encode a row feed as a JSON array of row objects. An empty feed encodes `[]`, never
-    /// `null`. No runtime test recognises a *row* (the slot is statically typed — the point
-    /// of fuaran#665 design C); only the cell seam is best-effort.
-    let encodeRows (rows: Row seq) : JVal =
-        JArr
-            [ for row in rows ->
-                  JObj(
-                      row
-                      |> Map.toList
-                      |> List.choose (fun (k, v) -> encodeCell v |> Option.map (fun jv -> k, jv))
-                  ) ]
-
-    /// A decoded cell is a boxed scalar: numbers surface as `float` (JSON has one number
-    /// population — see the `JVal` numeric-normalization note), strings/bools as themselves.
-    /// Nested arrays / objects are carried structurally (boxed `obj list` / `Row`) so a lenient
-    /// ingest is not rejected — but they are display-opaque and re-encode as `"<opaque>"`
-    /// cells (the residual boundary, narrowed to the cell seam).
-    let rec private decodeCell (j: JVal) : obj =
-        match j with
-        | JStr s -> box s
-        | JBool b -> box b
-        | JInt n -> box (float n)
-        | JFloat f -> box f
-        | JArr xs -> box (xs |> List.map decodeCell)
-        | JObj fields -> box (fields |> List.map (fun (k, v) -> k, decodeCell v) |> Map.ofList)
-
-    /// Decode a rows payload: the typed array form, or the legacy `"<opaque>"` sentinel
-    /// (→ the empty feed, read-compat with every pre-typed emission). Any other shape is a
-    /// named error.
-    let decodeRows (j: JVal) : Result<Row seq, string> =
-        match j with
-        | JStr s when s = opaqueSentinel -> Ok Seq.empty
-        | JArr xs ->
-            let rec go acc rest =
-                match rest with
-                | [] -> Ok(List.rev acc |> Seq.ofList)
-                | JObj fields :: tail ->
-                    let row = fields |> List.map (fun (k, v) -> k, decodeCell v) |> Map.ofList
-
-                    go (row :: acc) tail
-                | other :: _ -> Error("rows: expected a row object, got " + kindName other)
-
-            go [] xs
-        | other -> Error("rows: expected an array of row objects or \"<opaque>\", got " + kindName other)
 
 /// Wire versioning + the forward/backward-compatibility contract (Phase 319). A versioned
 /// wire format lets an *older* consumer meet a *newer* artifact and **detect → preserve →
@@ -2791,6 +2645,7 @@ module Versioning =
     /// renamed — is a *minor* bump an older consumer tolerates via must-ignore-but-preserve. Any
     /// removal or rename (a tag present `before` and absent `after`) is *breaking* — a new `/vN/`
     /// major boundary requiring migration shims.
+    [<RequireQualifiedAccess>]
     type Evolution =
         /// Tags only added, in ascending order — possibly none, which `bump` treats as no change.
         | Additive of added: string list
@@ -2805,9 +2660,9 @@ module Versioning =
         let removed = Set.difference before after |> Set.toList
 
         if List.isEmpty removed then
-            Additive added
+            Evolution.Additive added
         else
-            Breaking(removed, added)
+            Evolution.Breaking(removed, added)
 
     /// The profile a `baseProfile` bumps to under an `Evolution`: a no-op additive leaves it
     /// untouched; an additive bumps the minor (same major — older consumers stay compatible); a
@@ -2821,8 +2676,8 @@ module Versioning =
     /// counter; `bump` is the saturating form for a caller with no error channel.
     let tryBump (baseProfile: Profile) (ev: Evolution) : Result<Profile, string> =
         match ev with
-        | Additive [] -> Ok baseProfile
-        | Additive _ ->
+        | Evolution.Additive [] -> Ok baseProfile
+        | Evolution.Additive _ ->
             if baseProfile.Minor = System.Int32.MaxValue then
                 Error(
                     "the minor of "
@@ -2833,7 +2688,7 @@ module Versioning =
                 Ok
                     { baseProfile with
                         Minor = baseProfile.Minor + 1 }
-        | Breaking _ ->
+        | Evolution.Breaking _ ->
             if baseProfile.Major = System.Int32.MaxValue then
                 Error(
                     "the major of "

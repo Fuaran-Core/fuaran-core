@@ -23,6 +23,7 @@ module WireNullTolerance =
     /// What a vector claims, stated against **both** read policies at once — the point being
     /// that a tolerance is only meaningful as a difference, so every claim pins what the strict
     /// path does as well as what the tolerant path does.
+    [<RequireQualifiedAccess>]
     type Claim =
         /// The tolerant read of the vector's JSON is structurally equal to the **strict** read of
         /// `nullFree` (its `null`-free spelling); the strict read of the vector's own JSON is a
@@ -73,63 +74,63 @@ module WireNullTolerance =
     let vectors: Vector list =
         [ { Name = "sole member erases to the empty object"
             Json = """{"a":null}"""
-            Claim = ErasesTo "{}" }
+            Claim = Claim.ErasesTo "{}" }
 
           { Name = "erased member's siblings are preserved in author order"
             Json = """{"a":1,"b":null,"c":"x"}"""
-            Claim = ErasesTo """{"a":1,"c":"x"}""" }
+            Claim = Claim.ErasesTo """{"a":1,"c":"x"}""" }
 
           { Name = "every member null erases"
             Json = """{"a":null,"b":null}"""
-            Claim = ErasesTo "{}" }
+            Claim = Claim.ErasesTo "{}" }
 
           { Name = "erasure reaches nested objects"
             Json = """{"o":{"p":null,"q":[1,2]},"r":null}"""
-            Claim = ErasesTo """{"o":{"q":[1,2]}}""" }
+            Claim = Claim.ErasesTo """{"o":{"q":[1,2]}}""" }
 
           { Name = "member position inside an array element is still member position"
             Json = """{"a":[{"b":null,"c":true}]}"""
-            Claim = ErasesTo """{"a":[{"c":true}]}""" }
+            Claim = Claim.ErasesTo """{"a":[{"c":true}]}""" }
 
           { Name = "whitespace around the erased member is absorbed"
             Json = """{ "a" :  null , "b" : 2 }"""
-            Claim = ErasesTo """{"b":2}""" }
+            Claim = Claim.ErasesTo """{"b":2}""" }
 
           { Name = "foreign document of the motivating shape"
             Json = foreignDocument
-            Claim = ErasesTo foreignDocumentNullFree }
+            Claim = Claim.ErasesTo foreignDocumentNullFree }
 
           { Name = "a bare null has no absence to erase to"
             Json = "null"
-            Claim = NoAbsenceHere }
+            Claim = Claim.NoAbsenceHere }
 
           { Name = "an array element null has no absence to erase to"
             Json = "[1,null,3]"
-            Claim = NoAbsenceHere }
+            Claim = Claim.NoAbsenceHere }
 
           { Name = "an array element null under a member has no absence to erase to"
             Json = """{"a":[null]}"""
-            Claim = NoAbsenceHere }
+            Claim = Claim.NoAbsenceHere }
 
           { Name = "a truncated near-miss of the token is not absorbed"
             Json = """{"a":nul}"""
-            Claim = Rejected(NullNotRepresentable, NullNotRepresentable) }
+            Claim = Claim.Rejected(NullNotRepresentable, NullNotRepresentable) }
 
           { Name = "a trailing-garbage near-miss of the token is not absorbed"
             Json = """{"a":nullish}"""
-            Claim = Rejected(NullNotRepresentable, ExpectedToken) }
+            Claim = Claim.Rejected(NullNotRepresentable, ExpectedToken) }
 
           { Name = "control: a null-free object is read identically under both policies"
             Json = """{"a":1,"b":[true,"s",2.5],"c":{"d":"e"}}"""
-            Claim = UnaffectedByPolicy }
+            Claim = Claim.UnaffectedByPolicy }
 
           { Name = "control: the null-free spelling of the foreign document"
             Json = foreignDocumentNullFree
-            Claim = UnaffectedByPolicy }
+            Claim = Claim.UnaffectedByPolicy }
 
           { Name = "control: a malformed document fails identically under both policies"
             Json = """{"a":}"""
-            Claim = UnaffectedByPolicy } ]
+            Claim = Claim.UnaffectedByPolicy } ]
 
     let private checkErasesTo (v: Vector) (nullFree: string) : Corpus.Outcome =
         match Json.parseDetailedTolerantOfNull v.Json, Json.parseDetailed nullFree with
@@ -192,10 +193,10 @@ module WireNullTolerance =
     /// Run one vector.
     let runVector (v: Vector) : Corpus.Outcome =
         match v.Claim with
-        | ErasesTo nullFree -> checkErasesTo v nullFree
-        | NoAbsenceHere -> checkNoAbsenceHere v
-        | Rejected(s, t) -> checkRejected v s t
-        | UnaffectedByPolicy -> checkUnaffected v
+        | Claim.ErasesTo nullFree -> checkErasesTo v nullFree
+        | Claim.NoAbsenceHere -> checkNoAbsenceHere v
+        | Claim.Rejected(s, t) -> checkRejected v s t
+        | Claim.UnaffectedByPolicy -> checkUnaffected v
 
     /// Run a vector set.
     let run (vs: Vector list) : Corpus.Outcome list = vs |> List.map runVector

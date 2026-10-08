@@ -133,7 +133,7 @@ module internal FunctionLaws =
     /// and `auditEffect` returns a typed `Result` — no stage throws.
     let private verifyCase
         (w: ArtifactWitness<'Node, 'Id>)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (fn: 'Node)
         (seed: int)
         (iter: int)
@@ -158,7 +158,7 @@ module internal FunctionLaws =
                 | Error(declared, observed) -> mk (EffectObserved(declared, observed))
                 | Ok() -> None
 
-    /// Property-verify an artifact-function against a domain `Validator.Registry` over a *supplied*
+    /// Property-verify an artifact-function against a domain `Validator.RuleRegistry` over a *supplied*
     /// param-set generator (Phase 48): draw up to `iterations` valid param-sets, `apply` the
     /// function, and assert the validator passes (no `Severity.Error`) AND the result observes no
     /// undeclared effect (Fork-3) on every one. The first failure stops the run and is returned as a
@@ -179,7 +179,7 @@ module internal FunctionLaws =
     let verifyFunction
         (w: ArtifactWitness<'Node, 'Id>)
         (fn: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
         (seed: int)
         (iterations: int)
@@ -296,7 +296,7 @@ module internal FunctionLaws =
     let verifyFunctionSymbolic
         (w: ArtifactWitness<'Node, 'Id>)
         (fn: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (fixedArgs: Map<string, Arg<'Node>>)
         (maxCases: int)
         (seed: int)
@@ -472,7 +472,7 @@ module internal FunctionLaws =
         (w: ArtifactWitness<'Node, 'Id>)
         (sound: 'Node)
         (broken: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
         (seed: int)
         (iterations: int)
@@ -856,7 +856,7 @@ module internal FunctionLaws =
         (w: ArtifactWitness<'Node, 'Id>)
         (mkSound: DeterminismSource -> 'Node)
         (mkBroken: DeterminismSource -> 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
         (seed: int)
         (iterations: int)

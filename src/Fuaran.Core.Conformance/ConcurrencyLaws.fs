@@ -456,7 +456,7 @@ module internal ConcurrencyLaws =
     ///    applied to the base replays to the SAME tree (Phase-06 content hash) as delta A then delta B
     ///    AND as delta B then delta A: a conflict-free merge folds order-independently;
     ///  - **shared history once** — on the three shared-history shapes, the clean script applied to
-    ///    `Dag.replayTo` of the base replays to the same tree as `Dag.replayTo` of a merge node over the
+    ///    `Dag.tryReplayTo` of the base replays to the same tree as `Dag.tryReplayTo` of a merge node over the
     ///    two heads: history both heads hold is applied exactly once;
     ///  - **footprint cross-validation (#78)** — footprint-independent EXCLUSIVE deltas are always
     ///    conflict-free (`independent ⇒ reconcile = Ok`); the converse is not claimed;
@@ -521,7 +521,7 @@ module internal ConcurrencyLaws =
 
         let sharedOnce =
             LawKit.LawCell(
-                "reconcile applies shared history once (a clean fast-forward, duplicate-head or criss-cross script replays to Dag.replayTo of the merge node)",
+                "reconcile applies shared history once (a clean fast-forward, duplicate-head or criss-cross script replays to Dag.tryReplayTo of the merge node)",
                 Some "reconcile shape"
             )
 
@@ -555,7 +555,7 @@ module internal ConcurrencyLaws =
         let kinds = LawKit.OpKindTally()
         // Phase 302 — does `encode` tell drawn nodes apart at all? See `LawKit.EncodeSpread`.
         let spread = LawKit.EncodeSpread(nodew, encode)
-        // The no-op the base node and the merge nodes carry, so `Dag.replayTo` of either is the
+        // The no-op the base node and the merge nodes carry, so `Dag.tryReplayTo` of either is the
         // history above it and nothing else.
         let noOp: SkeletonOp<'Node, 'Id> = Batch []
 
@@ -724,7 +724,7 @@ module internal ConcurrencyLaws =
                             )
                     )
                 else
-                    // shared history once: the script from replayTo(base) ≡ replayTo(merge of the heads).
+                    // shared history once: the script from tryReplayTo(base) ≡ tryReplayTo(merge of the heads).
                     let m, dm =
                         Dag.merge hashFn sw (Human "merge") noOp headA headB dag |> LawKit.dagBuilt
 

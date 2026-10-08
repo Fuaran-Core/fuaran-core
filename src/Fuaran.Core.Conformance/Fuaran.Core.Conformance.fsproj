@@ -115,4 +115,10 @@
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 386 — `witnessFieldsLaw` and `witnessCoverageLaw` left the facade at 1.0.0 (they take
+         a System.Type); the suite's go-red plants still drive them with decoy records, through
+         `SurfaceLaws`. Nothing else sees the kit's internals. -->
+    <InternalsVisibleTo Include="Fuaran.Core.Tests" />
+  </ItemGroup>
 </Project>

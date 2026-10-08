@@ -208,7 +208,7 @@ let tests =
               let template = dag.Nodes.[a]
 
               let cyclic: Dag.T<CounterOp> =
-                  { Nodes =
+                  DagOf.nodes (
                       dag.Nodes
                       |> Map.add
                           "p"
@@ -219,7 +219,8 @@ let tests =
                           "q"
                           { template with
                               Id = "q"
-                              Parents = [ "p" ] } }
+                              Parents = [ "p" ] }
+                  )
 
               Expect.equal
                   (Dag.replayFrom sw cpA cyclic "q")
@@ -362,9 +363,7 @@ let tests =
                   "a is not folded twice"
 
               // drop the band and w names a parent the DAG does not hold
-              let banless =
-                  { small with
-                      Nodes = small.Nodes |> Map.remove a }
+              let banless = DagOf.nodes (small.Nodes |> Map.remove a)
 
               Expect.equal
                   (Dag.firstBreakFrom h enc sw cp banless)

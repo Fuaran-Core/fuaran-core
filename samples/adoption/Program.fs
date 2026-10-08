@@ -121,8 +121,10 @@ let encodeOp (SetText(id, text)) =
 let decodeOp (s: string) : Result<DomainOp, string> =
     Decode.parse s
     |> Result.bind (fun el ->
-        Decode.strField "id" el
-        |> Result.bind (fun id -> Decode.strField "text" el |> Result.map (fun t -> SetText(id, t))))
+        Decoder.describing (Decoder.field "id" Decoder.str) el
+        |> Result.bind (fun id ->
+            Decoder.describing (Decoder.field "text" Decoder.str) el
+            |> Result.map (fun t -> SetText(id, t))))
 
 let streamW: StreamWitness<DomainOp, Item, string> =
     { Apply = applyOp

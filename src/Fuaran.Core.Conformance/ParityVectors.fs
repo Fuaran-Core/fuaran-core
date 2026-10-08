@@ -136,7 +136,7 @@ let private witness: JVal =
 let private streamWitness: StreamWitness<int, int, string> =
     { Apply = fun op st -> Ok(st + op)
       Encode = fun op -> Json.render (JInt op)
-      Decode = fun s -> Decode.parse s |> Result.bind Decode.asInt }
+      Decode = fun s -> Decode.parse s |> Result.bind (Decoder.describing Decoder.int) }
 
 /// A two-op chain under `OpStream.defaultHash`, with a `Human` and an `Agent` actor so the typed
 /// attribution folded into the pre-image (Phase 320) is exercised on both shapes. Two ops, not one:

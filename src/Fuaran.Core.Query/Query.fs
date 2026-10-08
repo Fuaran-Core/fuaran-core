@@ -1177,16 +1177,20 @@ module Query =
 /// A typed query registry — the discovery surface an agent enumerates (the data-acquisition analogue
 /// of node-introspection / capability discovery): "what data may I acquire, with what typed params,
 /// producing what schema". Default-deny by shape on dispatch — only a registered id resolves.
+///
+/// OPAQUE since `1.0.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
+/// policy are reachable only through this module's verbs, so `register` — and its admission gate —
+/// is the only way a query gets in.
 type QueryRegistry =
-    {
-        /// The registered queries keyed by `Query.Id`. Build it with `QueryRegistry.register`,
-        /// which refuses a duplicate id, rather than adding to the map directly.
-        Queries: Map<string, Query>
-        /// The gates every dispatch runs after the parameters validate and before the resolver, and
-        /// the observers a refusal reaches (Phase 318). `RegistryPolicy.none` in `empty`; only
-        /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
-        Policy: RegistryPolicy<Query, (string * Cell) list>
-    }
+    private
+        {
+            /// The registered queries keyed by `Query.Id`; each was admitted by `register`.
+            Queries: Map<string, Query>
+            /// The gates every dispatch runs after the parameters validate and before the resolver,
+            /// and the observers a refusal reaches (Phase 318). `RegistryPolicy.none` in `empty`; only
+            /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
+            Policy: RegistryPolicy<Query, (string * Cell) list>
+        }
 
 /// Building, enumerating and dispatching through a `QueryRegistry`.
 module QueryRegistry =

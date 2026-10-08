@@ -1,10 +1,10 @@
 # Fuaran.Core — API stability
 
-**Status:** pre-1.0. The released version is single-sourced from `<Version>` in
-`Directory.Build.props` — this document deliberately does not restate the number (restated
-versions drift; the props file cannot). The surface may change as the first domain adopters
-(UI, Calc, Documents, CAD, Office) re-express their machinery over these packages and
-surface friction. Once adopted, the witness contracts harden.
+**Status:** the `1.x` line — semantic versioning from `1.0.0` (Phase 386); the `0.x` line ended at
+`0.36.0`. The released version is single-sourced from `<Version>` in `Directory.Build.props` — this
+document deliberately does not restate the number (restated versions drift; the props file cannot).
+Within a major the surface grows additively and the witness contracts are frozen; a breaking move
+waits for the next major (the `OneDotZero` family, below).
 
 ## Versioning policy
 
@@ -13,6 +13,20 @@ Per-release semver: `0.0.1-alpha` → `0.0.1-alpha.2` → … → `1.0.0`. Publi
 tag workflow [`RELEASING.md`](RELEASING.md) describes (its gates, the Trusted Publishing policy, the
 post-push registry probe). The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
+
+**Semantic versioning from `1.0.0`; obsolete forwards leave at a major, and `1.0.0` is one (Phase
+386, DECISIONS.md D132).** Through the `0.x` line a breaking class (below) advanced the MINOR and an
+additive one rode the standing draft slot. From `1.0.0` the version is semver: a breaking class —
+`removal`, `retype` or any `*-widening` — advances the MAJOR, an additive one the minor, and a change
+that moves no public surface the patch. A member a minor retires stays as a `System.Obsolete` forward
+naming its replacement, and every forward leaves at the next major: a major freezes with none
+standing. The `OneDotZero` test family makes that a gate output. It reads the major of `<Version>`
+and, from major 1, holds four laws — no public member of a shipped assembly carries
+`System.ObsoleteAttribute`; `Conformance.unfrozenWitnesses` is empty; `Conformance.frozenWitnessFields`
+is byte-equal to the list the major's `vN.0.0` tag carries (through the committed render
+`tests/Fuaran.Core.Tests/frozen-witness-fields.txt`); and no `api/` baseline has moved by a breaking
+class since the newest tag unless the major advanced past that tag's. At major 0 each law reported
+itself vacuous by name.
 
 **Every version cut cites a green run of the Core Fable gate against the candidate (Phase 217,
 DECISIONS.md D55).** This repository runs no Fable compiler, so before the release gesture the
@@ -258,7 +272,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   accessors the whole tree/ops/validator surface operates through.
 - **`StreamWitness<'Op, 'State, 'Rej>`** (`{ Apply; Encode; Decode }`) — the two-seam
   op-stream witness. `Decode : string -> Result<'Op, string>` as of `0.0.1-alpha.3` —
-  the recoverable-envelope discipline; `fromJsonl`/`snapshotFromJsonl` return
+  the recoverable-envelope discipline; `fromJsonl`/`Snapshots.ofJsonl` return
   `Result` (migration notes shipped with that release).
 - **`Actor`** (`Human of id | Agent of model * version * id`) + the `OpRecord` / `DagNode` /
   `StreamConfig` / `append` / `merge` actor field+parameter (typed since Phase 320, `0.0.1-alpha.13`).
@@ -363,16 +377,17 @@ stale* — the dependency structure, the cycle enumeration, and the dirty `Set` 
 the actual re-evaluation stays domain-side. The dependency relation is a per-call `readsOf` function, not
 a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its public surface (`dependencyMap`
 / `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp` / `staleSet`) is
-FSharp.Core-only + Fable-clean and carries the same pre-1.0 additive-growth commitment as the rest of the
-substrate.
+FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the
+rest of the substrate.
 
 ### Public because a sibling Core package calls it (`0.19.0`)
 
 `Fuaran.Core.*` is eighteen packable assemblies. Between them it grants `InternalsVisibleTo` in
 exactly four declarations — `Fuaran.Core.Function` to `Fuaran.Core.Query`, `Fuaran.Core.Tree` to
 `Fuaran.Core.ContentAddress`, and `Fuaran.Core.Idl` to `Fuaran.Core.Idl.Codegen` and to
-`Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (DECISIONS.md D129); the one
-further declaration, `Fuaran.Core.Idl.Cli` to the test project, grants nothing a consumer reaches.
+`Fuaran.Core.Conformance` — each read only from a `NoInlining` boundary (DECISIONS.md D129); the two
+further declarations, `Fuaran.Core.Idl.Cli` and `Fuaran.Core.Conformance` to the test project, grant
+nothing a consumer reaches.
 Everywhere else a function one Core package needs from another has to be public — `internal` cannot
 express it. Three members are exactly that and nothing else: no caller outside these packages, no test, and until
 `0.19.0` no document saying why they were public. A reading that classifies surface by caller count
@@ -549,7 +564,7 @@ camelCase `{"actor":…,"session":…,"turn":…,"at":…,"op":<inner>}` envelop
   certifies replay-preservation, chain-covers-attribution (tamper), and envelope round-trip; `byActor` /
   `bySession` are pure projection folds.
 
-**Attested provenance is now a conformance-certified claim (Phase 60).** `Conformance.attestationLaws`
+**Attested provenance is now a conformance-certified claim (Phase 60).** `Conformance.attestationLawsAt`
 is a seed-replayable law kit a domain (or host) runs against its `StreamWitness` + sink to prove the
 three-stage guarantee end-to-end: **checkpoint round-trip** (a signed head verifies against its chain),
 **prefix attestation** (one signature is bound to the whole prefix its head folds — O(commits)),
@@ -659,21 +674,21 @@ and do not verify — a tampered, dangling-parent, or cyclic input decodes to a 
 explicitly before trusting a decoded stream/DAG.
 
 **Compaction reads the boundary, it does not check it — verify, then compact (Phase 227).**
-`OpStream.compact` / `compactChainOnly` (and their `...With` forms) read the boundary record's hash
-and TRUST it. The compacted stream verifies exactly when the original does only over a prefix that
+`OpStream.Snapshots.compact`, in either mode and under any config, reads the boundary record's hash
+and TRUSTS it. The compacted stream verifies exactly when the original does only over a prefix that
 was verified BEFORE it was discarded (`compact_preserves_verify` / `compact_verifies_iff_original`,
 `proofs/Chain.fst`). A tamper in the prefix of an unverified stream survives compaction, verifies
 across, and cannot be found once the prefix is gone. A host that compacts an unverified stream has
 compacted whatever it was handed, so run `verifyChain` / `verifyChainWith cfg` first.
 
 **A snapshot at sequence zero carries the configured genesis (Phase 227).** The boundary hash at zero
-is the genesis every chain walker starts from. `snapshotAtOptWith cfg` / `compactWith cfg` /
-`compactChainOnlyWith cfg` write `cfg.Genesis` there. The canonical entry points (`snapshotAt`,
-`snapshotAtOpt`, `snapshotAtChainOnly`, `compact`, `compactChainOnly`) write `""`, which is
-`canonicalConfig.Genesis` and `legacyActorConfig.Genesis`. So under both shipped configs every
-snapshot byte is unchanged. A stream appended under a config with any other genesis must compact
-through the `...With` form under that config. The canonical form's snapshot at zero does not verify
-across such a stream.
+is the genesis every chain walker starts from. `OpStream.Snapshots.take` and `compact` write
+`cfg.Genesis` there for the config they are handed; under `canonicalConfig` that is `""`, which is
+`canonicalConfig.Genesis` and `legacyActorConfig.Genesis`, so under both shipped configs every
+snapshot byte is unchanged. A stream appended under a config with any other genesis must be
+compacted under that config; a snapshot at zero taken under the canonical config does not verify
+across such a stream. (The pre-Phase-296 entry points this paragraph named — `snapshotAt`,
+`compactWith` and the rest — left at `1.0.0`.)
 
 ### Chain pre-image portability
 
@@ -744,7 +759,7 @@ declaration doesn't cover). It is **scoped deliberately and must not be read mor
   **structural validity only**, never output determinism or quality. A structurally-valid but
   value-varying output still verifies.
 - The verdict is **effect-class-agnostic** — the determinism axis does not change it; verify keys on
-  structure, not on the effect class. The `Conformance.verifyHonestyLaws` guard law proves this.
+  structure, not on the effect class. The `Conformance.verifyHonestyLawsAt` guard law proves this.
 
 Advertising "verified" as a quality or determinism guarantee is an **over-claim** the statistical
 domains must not make. This is a contract/scope clarification, not a behaviour change: the shipped
@@ -758,12 +773,12 @@ domains must not make. This is a contract/scope clarification, not a behaviour c
   (`Function.observedEffect` — the widest effect walked over the whole subtree), not the declared root.
   A function whose root declares `Pure`/`Deterministic` while a descendant leaks `Clock`/`Random`/
   `ReadsHost` is bypassed (never cached/served), so the cache cannot serve a stale result for an
-  actually-impure function even when the root under-declares. `Conformance.memoSoundnessLaws` proves it.
+  actually-impure function even when the root under-declares. `Conformance.memoSoundnessLawsAt` proves it.
 - **Encoder injectivity (Phase 56, caller precondition + certifiable).** The cache key is
   `Tree.encodeHash w.Tree encode node`; the caller-supplied `encode` MUST be injective over the node
   space, or two distinct trees collide and the cache serves the wrong one. Core cannot enforce this for
   an arbitrary host encoder, so it is a documented precondition (`applyMemo` / `Tree.encodeHash`
-  doc-comments) that a domain certifies with `Conformance.encoderInjectivityLaws` (the
+  doc-comments) that a domain certifies with `Conformance.encoderInjectivityLawsAt` (the
   "certify-your-codec" posture, like `Corpus.codecLaws`).
 
 ## Op-script footprint + independence (Phase 78)
@@ -805,7 +820,7 @@ doc-comments), each a place where an exact set is a *tree fact the pure script c
 
 The `Footprint` record's four address sets (`Reads`, `StructureWrites`, `ContentWrites`,
 `UnknownParentWrites`) are keyed by the `IdWitness.ToString` string form (no `comparison` demanded of
-`'Id`) and grow additively like the rest of the pre-1.0 surface.
+`'Id`) and grow additively within a major like the rest of the surface.
 
 ## Branch merge: conflict enumeration + reconciliation (Phases 64, 83)
 
@@ -1156,7 +1171,7 @@ Two surfaces, one in each half of the boundary.
   Folding by repeated pairwise `reconcile` is deliberately NOT the same operation: it would mint
   intermediate merge nodes and let the pairing order leak into the result.
 
-- **`FoldConfluence.laneFoldLaws`** (in `Fuaran.Core.Conformance`) — the teeth. Given a domain's
+- **`FoldConfluence.laneFoldLawsAt`** (in `Fuaran.Core.Conformance`) — the teeth. Given a domain's
   `StreamWitness`, its footprint projection, a state hash and a lane generator, it folds each
   generated lane set under every sampled arrival order and certifies five laws: **lane-fold
   determinism** (a folding set folds to one state hash under every order — a reducer that rejects
@@ -1191,14 +1206,14 @@ means "certified over the sampled orders", never "proved for all N!".
 order-invariant, never that it was correct, and picks no winner (GP6). Not **necessity** — as with
 Phase 80, footprint independence is sufficient for a clean fold and never necessary, so a lane set
 the footprints declare interfering is required to halt *consistently*, not required to be genuinely
-unmergeable. Both surfaces are additive; `laneFoldLaws` is opt-in like `footprintLaws` — a domain
+unmergeable. Both surfaces are additive; `laneFoldLawsAt` is opt-in like `footprintLaws` — a domain
 that converges concurrent lanes runs it.
 
 **How a domain runs it.** Supply a `StreamWitness<'Op, 'State, 'Rej>`, an address projection
 `'Op -> Footprint` over the domain's own vocabulary (a tree domain feeds `Ops.footprint`; a non-tree
 domain writes its own), a canonical `'State -> string` hash, and a `LaneGen` naming the base state, a
 genesis op and a lane source; then call
-`FoldConfluence.laneFoldLaws witness footprintOf hashState gen laneCount seed iterations` (or
+`FoldConfluence.laneFoldLawsAt witness footprintOf hashState gen laneCount seed iterations` (or
 `certifyFold` for the aggregate verdict). The in-repo suite certifies the reference witness and a
 second, non-tree domain whose state is a `Map` and whose footprint is its own, and proves the pack
 can FAIL: an openly order-sensitive reducer whose footprint declares everything independent produces

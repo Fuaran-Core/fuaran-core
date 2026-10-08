@@ -1457,7 +1457,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             "\n"
             [ "// Validator scaffold — register domain RuleFamilies into `reg`; rule content stays domain-side."
               sprintf
-                  "let runValidator (reg: Validator.Registry<Node%s, string>) (root: Node%s) : Defect<string> list ="
+                  "let runValidator (reg: Validator.RuleRegistry<Node%s, string>) (root: Node%s) : Defect<string> list ="
                   nodeArgs
                   nodeArgs
               "    Validator.runAll nodeWitness reg root" ]

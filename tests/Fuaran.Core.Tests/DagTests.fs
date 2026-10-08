@@ -67,8 +67,7 @@ let tests =
               let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               let _, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
 
-              let tampered =
-                  { Dag.T.Nodes = d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 99 }) }
+              let tampered = DagOf.nodes (d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 99 }))
 
               Expect.isFalse (Dag.verifyDag h sw tampered) "a tampered op breaks the content hash"
 
@@ -179,11 +178,12 @@ let tests =
               let a, d1 = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               // rewrite the stored id so it no longer matches the content hash
               let tampered =
-                  { Dag.T.Nodes =
+                  DagOf.nodes (
                       d1.Nodes
                       |> Map.toList
                       |> List.map (fun (_, n) -> "forged", { n with Id = "forged" })
-                      |> Map.ofList }
+                      |> Map.ofList
+                  )
 
               Expect.isError
                   (Dag.fromJsonlVerified h sw (Dag.toJsonl sw.Encode tampered))
@@ -241,7 +241,7 @@ let tests =
 
               // tamper a node's op without rewriting its id ⇒ content-id mismatch
               let tampered =
-                  { Dag.T.Nodes = d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }) }
+                  DagOf.nodes (d2.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }))
 
               match Dag.firstBreak h sw tampered with
               | Some b -> Expect.equal b.Reason DagBreakReason.ContentIdMismatch "names a content-id mismatch"
@@ -251,7 +251,7 @@ let tests =
               // hash, so the *missing-parent* check (not content-id) is what trips
               let ra, dra = Dag.append h sw (Human "x") (Inc 5) "" Dag.empty |> Reference.built
               let _, drab = Dag.append h sw (Human "x") (Inc 3) ra dra |> Reference.built
-              let orphaned = { Dag.T.Nodes = drab.Nodes |> Map.remove ra }
+              let orphaned = DagOf.nodes (drab.Nodes |> Map.remove ra)
 
               match Dag.firstBreak h sw orphaned with
               | Some b ->
@@ -282,7 +282,7 @@ let tests =
               | Ok _ -> failtest "expected the dangling-parent DAG to be refused on load"
 
               let tampered =
-                  { Dag.T.Nodes = d1.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }) }
+                  DagOf.nodes (d1.Nodes |> Map.map (fun _ n -> { n with Op = Inc 999 }))
 
               match Dag.firstBreak h sw tampered with
               | Some br ->
@@ -342,7 +342,7 @@ let tests =
                     Actor = Human "x"
                     Op = Inc 1 }
 
-              let cyclic: Dag.T<CounterOp> = { Nodes = Map.ofList [ "a", nodeA; "b", nodeB ] }
+              let cyclic: Dag.T<CounterOp> = DagOf.nodes (Map.ofList [ "a", nodeA; "b", nodeB ])
 
               Expect.isFalse (Dag.isAcyclic cyclic "a") "the closure is cyclic"
 
@@ -372,7 +372,30 @@ let refusalTests =
 
     testList
         "Dag refusals (Phase 296)"
-        [ testCase "tryReplayTo refuses a head the DAG does not hold; the replayTo bridge raises"
+        [ testCase "ofNodes admits a map filed by node id and refuses a key that is not its node's id (Phase 386)"
+          <| fun _ ->
+              let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
+              let node = d1.Nodes.[a]
+
+              match Dag.ofNodes d1.Nodes with
+              | Ok d -> Expect.equal d d1 "a map filed by node id rebuilds the same DAG"
+              | Error m -> failtestf "a well-filed map was refused: %A" m
+
+              // go-red: the same node filed under another key — the map a public record let a
+              // consumer build until 1.0.0, out of step with the id every walk looks parents up by.
+              Expect.equal
+                  (Dag.ofNodes (Map.ofList [ "elsewhere", node ]))
+                  (Error { Key = "elsewhere"; NodeId = a })
+                  "a key that is not its node's id is refused, naming both"
+
+              // a node whose id does not match its CONTENT is admitted: that is firstBreak's question
+              let tampered = Map.ofList [ a, { node with Op = Inc 6 } ]
+
+              match Dag.ofNodes tampered with
+              | Ok d -> Expect.isFalse (Dag.verifyDag h sw d) "admitted, and verifyDag catches the tamper"
+              | Error m -> failtestf "a content tamper is firstBreak's to report, not ofNodes': %A" m
+
+          testCase "tryReplayTo refuses a head the DAG does not hold"
           <| fun _ ->
               let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
 
@@ -382,10 +405,6 @@ let refusalTests =
                   (Dag.tryReplayTo sw 0 d1 (a + "typo"))
                   (Error(Dag.ReplayFault.UnknownHead(a + "typo")))
                   "a typo'd head is named, never the initial state"
-
-              Expect.throwsT<System.ArgumentException>
-                  (fun () -> Dag.replayTo sw 0 d1 "absent" |> ignore)
-                  "the obsolete bridge cannot carry the fault, so it raises rather than answering Ok 0"
 
           testCase "append and merge refuse a parent the DAG does not hold"
           <| fun _ ->
@@ -613,7 +632,7 @@ let verifiedTests =
                     Op = Inc 1 }
 
               let cyclic: Dag.T<CounterOp> =
-                  { Nodes = Map.ofList [ "p", node "p" "q"; "q", node "q" "p" ] }
+                  DagOf.nodes (Map.ofList [ "p", node "p" "q"; "q", node "q" "p" ])
 
               Expect.equal
                   (Dag.appendVerified h sw 0 x (Inc 1) 0 "p" cyclic)

@@ -537,19 +537,6 @@ outcomes:
         : LawResult list =
         laneFoldLawsWith w footprintOf hashState gen laneCount OpStream.defaultHash seed iterations
 
-    /// Obsolete — `laneFoldLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed laneFoldLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use laneFoldLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let laneFoldLaws
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (footprintOf: 'Op -> Footprint)
-        (hashState: 'State -> string)
-        (gen: LaneGen<'Op, 'State>)
-        (laneCount: int)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        laneFoldLawsWith w footprintOf hashState gen laneCount OpStream.defaultHash seed iterations
-
     /// The aggregate verdict, matching `Conformance.certify`'s shape: run the laws and report
     /// whether every one passed.
     let certifyFold

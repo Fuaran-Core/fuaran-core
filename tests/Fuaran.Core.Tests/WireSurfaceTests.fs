@@ -358,18 +358,6 @@ let internal roots: WireRoot list =
       derived<Dag.T<string>> "Fuaran.Core.OpStream.Dag" "dag" (Dag.toJsonl stringStream.Encode)
       derived<JVal> "Fuaran.Core.Wire" "jval" Canon.render
       derived<Versioning.Envelope> "Fuaran.Core.Wire" "envelope" Versioning.render
-      Specimens(
-          "Fuaran.Core.Wire",
-          "rows",
-          fun () ->
-              // `Row` is `Map<string, obj>`: the cell's RUNTIME type is the discriminator, so the
-              // specimen names one row per cell kind the codec renders.
-              [ "rows",
-                Canon.render (
-                    RowCodec.encodeRows
-                        [ Map.ofList [ "int", box 1; "float", box 1.5; "string", box "s"; "bool", box true ] ]
-                ) ]
-      )
       derived<Fuaran.Core.Idl.Idl> "Fuaran.Core.Idl" "artifact" Fuaran.Core.Idl.Artifact.render
       derived<Fuaran.Core.Idl.SupportDocument>
           "Fuaran.Core.Idl.Codegen"
@@ -1133,8 +1121,20 @@ let grammarTests =
               Expect.equal (Decode.stringWith fault (JBool true)) (Error(Decode.WrongKind("string", "bool"))) "a bool"
 
               Expect.equal
-                  (Decode.getProp "x" (JObj []))
+                  (Decoder.describing (Decoder.field "x" Decoder.json) (JObj []))
                   (Error "missing property: x")
                   "the string form keeps its words"
 
-              Expect.equal (Decode.asString (JInt 1)) (Error "expected string, got int") "…all of them" ]
+              Expect.equal (Decoder.describing Decoder.str (JInt 1)) (Error "expected string, got int") "…all of them"
+
+              // `Decode.describe` spells a `Fault` in those same words, so a `…With` combinator handed
+              // it answers what the retired string-error helpers answered (Phase 386).
+              Expect.equal
+                  (Decode.arrayWith Decode.describe (JInt 1))
+                  (Error "expected array, got int")
+                  "describe spells a wrong kind"
+
+              Expect.equal
+                  (Decode.propWith Decode.describe "x" (JObj []))
+                  (Error "missing property: x")
+                  "describe spells a missing member" ]

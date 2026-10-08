@@ -142,7 +142,7 @@ let witnessSurfaceLawTests =
           testCase "go-red: a record with one field more than its pin fails, naming the record and the field"
           <| fun _ ->
               let r =
-                  Conformance.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyWidenedWitness>
+                  SurfaceLaws.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyWidenedWitness>
 
               Expect.isFalse r.Passed "a widened NodeWitness passed the freeze"
               Expect.stringContains r.Law "(NodeWitness)" "the law names the record"
@@ -151,14 +151,14 @@ let witnessSurfaceLawTests =
               // ...and the control: the real record under the same law is green, so the red above is
               // the extra field and not the law.
               let control =
-                  Conformance.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<NodeWitness<obj, obj>>
+                  SurfaceLaws.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<NodeWitness<obj, obj>>
 
               Expect.isTrue control.Passed "the real NodeWitness fails its own pin"
 
           testCase "go-red: a reordered record fails too — the compiler accepts it, the freeze does not"
           <| fun _ ->
               let r =
-                  Conformance.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyReorderedWitness>
+                  SurfaceLaws.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyReorderedWitness>
 
               Expect.isFalse r.Passed "a reordered NodeWitness passed the freeze"
               Expect.stringContains (defaultArg r.Counterexample "") "reordered" "the counterexample says what moved"
@@ -166,14 +166,14 @@ let witnessSurfaceLawTests =
           testCase "go-red: a record Phase 330 froze fails with two of its fields swapped"
           <| fun _ ->
               let r =
-                  Conformance.witnessFieldsLaw "KeyedWitness" (pinnedOf "KeyedWitness") typeof<DecoySwappedKeyedWitness>
+                  SurfaceLaws.witnessFieldsLaw "KeyedWitness" (pinnedOf "KeyedWitness") typeof<DecoySwappedKeyedWitness>
 
               Expect.isFalse r.Passed "a KeyedWitness with two fields swapped passed the freeze"
               Expect.stringContains r.Law "(KeyedWitness)" "the law names the record"
               Expect.stringContains (defaultArg r.Counterexample "") "reordered" "the counterexample says what moved"
 
               let control =
-                  Conformance.witnessFieldsLaw "KeyedWitness" (pinnedOf "KeyedWitness") typeof<KeyedWitness<obj, obj>>
+                  SurfaceLaws.witnessFieldsLaw "KeyedWitness" (pinnedOf "KeyedWitness") typeof<KeyedWitness<obj, obj>>
 
               Expect.isTrue control.Passed "the real KeyedWitness fails its own pin"
 
@@ -204,18 +204,18 @@ let witnessSurfaceLawTests =
 
           testCase "go-red: a type that is not a record fails rather than reading as an empty field set"
           <| fun _ ->
-              let r = Conformance.witnessFieldsLaw "IdWitness" (pinnedOf "IdWitness") typeof<int>
+              let r = SurfaceLaws.witnessFieldsLaw "IdWitness" (pinnedOf "IdWitness") typeof<int>
               Expect.isFalse r.Passed "a non-record passed the freeze"
 
           testCase "every public witness record the repository ships is classified — wider than the kit's own closure"
           <| fun _ ->
-              let r = Conformance.witnessCoverageLaw shippedPublicTypes.Value
+              let r = SurfaceLaws.witnessCoverageLaw shippedPublicTypes.Value
               Expect.isTrue r.Passed (defaultArg r.Counterexample r.Law)
 
           testCase "go-red: the coverage law refuses an unclassified witness, and a pin with no record behind it"
           <| fun _ ->
               let unclassified =
-                  Conformance.witnessCoverageLaw (typeof<DecoyUnclassifiedWitness> :: shippedPublicTypes.Value)
+                  SurfaceLaws.witnessCoverageLaw (typeof<DecoyUnclassifiedWitness> :: shippedPublicTypes.Value)
 
               Expect.isFalse unclassified.Passed "a new, unclassified witness record passed"
 
@@ -227,7 +227,7 @@ let witnessSurfaceLawTests =
               let withoutId =
                   shippedPublicTypes.Value
                   |> List.filter (fun t -> t <> typedefof<IdWitness<_>>)
-                  |> Conformance.witnessCoverageLaw
+                  |> SurfaceLaws.witnessCoverageLaw
 
               Expect.isFalse withoutId.Passed "a frozen pin over a missing record passed"
               Expect.stringContains (defaultArg withoutId.Counterexample "") "IdWitness" "the stale pin is named"
@@ -301,7 +301,7 @@ let witnessSurfaceLawTests =
                   "the counterexample names the field"
 
               let reflecting =
-                  Conformance.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyWidenedWitness>
+                  SurfaceLaws.witnessFieldsLaw "NodeWitness" (pinnedOf "NodeWitness") typeof<DecoyWidenedWitness>
 
               Expect.equal widened.Law reflecting.Law "one law name on both pipelines"
               Expect.equal widened.Counterexample reflecting.Counterexample "one counterexample on both pipelines" ]

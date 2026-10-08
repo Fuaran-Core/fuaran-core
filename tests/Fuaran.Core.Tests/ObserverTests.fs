@@ -1,7 +1,7 @@
 module Fuaran.Core.Tests.ObserverTests
 
 open Expecto
-open Fuaran.Core.Observer
+open Fuaran.Core
 
 // ─── Reference verification packs (flag CONTENT is domain-side) ─────
 //
@@ -41,212 +41,146 @@ let private deriveDrift (input: CellInput) : DriftFlag list =
 
     if abs delta > 1e-9 then [ RecomputeDrift delta ] else []
 
+// Until `1.0.0` these drove the `InMemoryObserver` adapter; it left with the
+// `Fuaran.Core.Observer` namespace (Phase 386), so each now drives the witness
+// functions the adapter wrapped. Subscription is host state: an emission is the
+// value a function returns, so "what a subscriber hears" is that value.
+
+let private box w h c =
+    { Width = w
+      Height = h
+      ContentWidth = c }
+
+/// Register `id` with no parent, keeping the state.
+let private reg w id input st =
+    fst (ObserverWitness.register w id input None st)
+
 [<Tests>]
 let tests =
     testList
         "Fuaran.Core.Observer"
-        [ test "register + observe derives the domain flags" {
-              let obs = InMemoryObserver.create deriveBox
+        [ test "register + snapshot derives the domain flags" {
+              let w = ObserverWitness.create deriveBox
+              let st = reg w "a" (box 0.0 10.0 5.0) ObserverWitness.empty
 
-              obs.RegisterNode(
-                  "a",
-                  { Width = 0.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
-              )
-
-              match (obs :> IObserver<_, _>).Observe("a") with
+              match ObserverWitness.snapshot st "a" with
               | Some o ->
                   Expect.equal o.NodeId "a" "node id round-trips"
                   Expect.equal o.Flags [ ZeroWidth; OverflowX ] "derives zero-width + overflow"
               | None -> failtest "expected an observation for a registered node"
           }
 
-          test "observe of an unknown node is None" {
-              let obs = InMemoryObserver.create deriveBox
-              Expect.isNone ((obs :> IObserver<_, _>).Observe("missing")) "unknown node → None"
+          test "snapshot of an unknown node is None" {
+              Expect.isNone
+                  (ObserverWitness.snapshot ObserverWitness.empty<BoxInput, BoxFlag> "missing")
+                  "unknown node → None"
           }
 
           test "derivation is pure — identical input yields identical flags" {
-              let input =
-                  { Width = 0.0
-                    Height = 0.0
-                    ContentWidth = 1.0 }
-
+              let input = box 0.0 0.0 1.0
               Expect.equal (deriveBox input) (deriveBox input) "pure: repeated calls agree"
 
-              // Two independent engines agree from the same input — the
-              // determinism contract behind an automatable gate.
-              let a = InMemoryObserver.create deriveBox
-              let b = InMemoryObserver.create deriveBox
-              a.RegisterNode("n", input)
-              b.RegisterNode("n", input)
+              // Two independent states agree from the same input — the determinism contract
+              // behind an automatable gate.
+              let w = ObserverWitness.create deriveBox
+              let a = reg w "n" input ObserverWitness.empty
+              let b = reg w "n" input ObserverWitness.empty
 
-              let fa = ((a :> IObserver<_, _>).Observe("n")).Value.Flags
-              let fb = ((b :> IObserver<_, _>).Observe("n")).Value.Flags
-              Expect.equal fa fb "two engines agree from identical input"
+              Expect.equal
+                  (ObserverWitness.snapshot a "n").Value.Flags
+                  (ObserverWitness.snapshot b "n").Value.Flags
+                  "two states agree from identical input"
           }
 
           test "EmitOnFlagChangeOnly: initial always emits, updates emit only on flag-set change" {
-              let obs = InMemoryObserver.create deriveBox
-              let received = ResizeArray<string * BoxFlag list>()
-              use _ = (obs :> IObserver<_, _>).Subscribe(fun (id, o) -> received.Add(id, o.Flags))
+              let w = ObserverWitness.create deriveBox
 
               // Initial registration always emits (initial-emission rule).
-              obs.RegisterNode(
-                  "a",
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
-              )
+              let st, first =
+                  ObserverWitness.register w "a" (box 10.0 10.0 5.0) None ObserverWitness.empty
 
-              Expect.equal received.Count 1 "initial registration emits"
+              Expect.equal first.Flags [] "initial registration emits"
 
               // Update with the SAME derived flag set → no emit.
-              obs.Update(
-                  "a",
-                  { Width = 20.0
-                    Height = 20.0
-                    ContentWidth = 5.0 }
-              )
+              let st, same = ObserverWitness.update w "a" (box 20.0 20.0 5.0) st
+              Expect.isNone same "no flag-set change → no emit"
 
-              Expect.equal received.Count 1 "no flag-set change → no emit"
+              // Update that flips a flag on → emit. ContentWidth ≤ Width so only ZeroWidth fires
+              // (no incidental overflow flag).
+              let _, flipped = ObserverWitness.update w "a" (box 0.0 20.0 0.0) st
 
-              // Update that flips a flag on → emit. ContentWidth ≤ Width
-              // so only ZeroWidth fires (no incidental overflow flag).
-              obs.Update(
-                  "a",
-                  { Width = 0.0
-                    Height = 20.0
-                    ContentWidth = 0.0 }
-              )
-
-              Expect.equal received.Count 2 "flag-set change → emit"
-              Expect.equal (snd received[1]) [ ZeroWidth ] "emitted the new flag set"
+              match flipped with
+              | Some o -> Expect.equal o.Flags [ ZeroWidth ] "emitted the new flag set"
+              | None -> failtest "a flag-set change must emit"
           }
 
           test "EmitOnFlagChangeOnly = false emits on every update" {
-              let opts =
-                  { ObserverOptions.defaults with
-                      EmitOnFlagChangeOnly = false }
+              let w =
+                  ObserverWitness.createWith
+                      deriveBox
+                      { ObserverOptions.defaults with
+                          EmitOnFlagChangeOnly = false }
 
-              let obs = InMemoryObserver.createWith deriveBox opts
-              let mutable count = 0
-              use _ = (obs :> IObserver<_, _>).Subscribe(fun _ -> count <- count + 1)
+              let input = box 10.0 10.0 5.0
+              let st, _ = ObserverWitness.register w "a" input None ObserverWitness.empty
+              let st, u1 = ObserverWitness.update w "a" input st
+              let _, u2 = ObserverWitness.update w "a" input st
 
-              obs.RegisterNode(
-                  "a",
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
-              )
-
-              obs.Update(
-                  "a",
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
-              )
-
-              obs.Update(
-                  "a",
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
-              )
-
-              Expect.equal count 3 "every register + update emits when change-gating is off"
+              Expect.isSome u1 "the first unchanged update emits when change-gating is off"
+              Expect.isSome u2 "and so does the second"
           }
 
           test "update on an unregistered node is a no-op" {
-              let obs = InMemoryObserver.create deriveBox
-              let mutable count = 0
-              use _ = (obs :> IObserver<_, _>).Subscribe(fun _ -> count <- count + 1)
-
-              obs.Update(
-                  "ghost",
-                  { Width = 0.0
-                    Height = 0.0
-                    ContentWidth = 0.0 }
-              )
-
-              Expect.equal count 0 "no emission for an unknown node"
+              let w = ObserverWitness.create deriveBox
+              let st, o = ObserverWitness.update w "ghost" (box 0.0 0.0 0.0) ObserverWitness.empty
+              Expect.isNone o "no emission for an unknown node"
+              Expect.isNone (ObserverWitness.snapshot st "ghost") "and nothing is registered"
           }
 
-          test "ObserveTree walks the parent-pointer graph, root-inclusive, deterministically" {
-              let obs = InMemoryObserver.create deriveBox
+          test "observeTree walks the parent-pointer graph, root-inclusive, deterministically" {
+              let w = ObserverWitness.create deriveBox
+              let i = box 10.0 10.0 5.0
 
-              let i =
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
+              let st =
+                  ObserverWitness.empty
+                  |> reg w "root" i
+                  |> fun st -> fst (ObserverWitness.register w "child1" i (Some "root") st)
+                  |> fun st -> fst (ObserverWitness.register w "child2" i (Some "root") st)
+                  |> fun st -> fst (ObserverWitness.register w "grandchild" i (Some "child1") st)
 
-              obs.RegisterNode("root", i)
-              obs.RegisterNode("child1", i, parent = "root")
-              obs.RegisterNode("child2", i, parent = "root")
-              obs.RegisterNode("grandchild", i, parent = "child1")
-
-              let ids =
-                  (obs :> IObserver<_, _>).ObserveTree("root") |> List.map (fun o -> o.NodeId)
-
+              let ids = ObserverWitness.observeTree st "root" |> List.map (fun o -> o.NodeId)
               Expect.equal ids [ "root"; "child1"; "child2"; "grandchild" ] "BFS, level-then-order, root first"
           }
 
-          test "ObserveTree of an unknown root is empty" {
-              let obs = InMemoryObserver.create deriveBox
-              Expect.isEmpty ((obs :> IObserver<_, _>).ObserveTree("nope")) "unknown root → empty"
+          test "observeTree of an unknown root is empty" {
+              Expect.isEmpty
+                  (ObserverWitness.observeTree ObserverWitness.empty<BoxInput, BoxFlag> "nope")
+                  "unknown root → empty"
           }
 
-          test "Unregister removes the node and is idempotent" {
-              let obs = InMemoryObserver.create deriveBox
-
-              obs.RegisterNode(
-                  "a",
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 5.0 }
-              )
-
-              let io = obs :> IObserver<_, _>
-              io.Unregister("a")
-              Expect.isNone (io.Observe("a")) "node gone after unregister"
-              io.Unregister("a") // idempotent — must not throw
-          }
-
-          test "Dispose of a subscription removes the handler" {
-              let obs = InMemoryObserver.create deriveBox
-              let mutable count = 0
-              let sub = (obs :> IObserver<_, _>).Subscribe(fun _ -> count <- count + 1)
-
-              obs.RegisterNode(
-                  "a",
-                  { Width = 0.0
-                    Height = 0.0
-                    ContentWidth = 0.0 }
-              )
-
-              Expect.equal count 1 "received the initial emission"
-              sub.Dispose()
-
-              obs.Update(
-                  "a",
-                  { Width = 10.0
-                    Height = 10.0
-                    ContentWidth = 99.0 }
-              )
-
-              Expect.equal count 1 "no more emissions after dispose"
+          test "unregister removes the node and is idempotent" {
+              let w = ObserverWitness.create deriveBox
+              let st = reg w "a" (box 10.0 10.0 5.0) ObserverWitness.empty
+              let gone = ObserverWitness.unregister "a" st
+              Expect.isNone (ObserverWitness.snapshot gone "a") "node gone after unregister"
+              Expect.equal (ObserverWitness.unregister "a" gone) gone "idempotent — a second unregister changes nothing"
           }
 
           test "a second, unrelated domain pack drives the same engine (verification-pack genericity)" {
               // Different `'Input` + `'Flag` entirely — same Core engine.
-              let obs = InMemoryObserver.create deriveDrift
-              obs.RegisterNode("cell!A1", { Cached = 1.0; Recomputed = 1.0 })
-              obs.RegisterNode("cell!A2", { Cached = 1.0; Recomputed = 4.0 })
+              let w = ObserverWitness.create deriveDrift
 
-              let io = obs :> IObserver<_, _>
-              Expect.equal (io.Observe("cell!A1")).Value.Flags [] "no drift when cached == recomputed"
-              Expect.equal (io.Observe("cell!A2")).Value.Flags [ RecomputeDrift 3.0 ] "drift flagged with delta"
+              let st =
+                  ObserverWitness.empty
+                  |> reg w "cell!A1" { Cached = 1.0; Recomputed = 1.0 }
+                  |> reg w "cell!A2" { Cached = 1.0; Recomputed = 4.0 }
+
+              Expect.equal (ObserverWitness.snapshot st "cell!A1").Value.Flags [] "no drift when cached == recomputed"
+
+              Expect.equal
+                  (ObserverWitness.snapshot st "cell!A2").Value.Flags
+                  [ RecomputeDrift 3.0 ]
+                  "drift flagged with delta"
           } ]
 
 // ---- Phase 383 — observeTree is total over a hand-built state ----

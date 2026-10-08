@@ -12,6 +12,9 @@
     <!-- Phase 396 - the ONE reading of the approval switches (CORE_APPROVE_*, FUARAN_REGEN). Registered first:
          every family below that regenerates a committed artefact reads it, and it reads nothing here. -->
     <Compile Include="Approval.fs" />
+    <!-- Phase 386 - a Dag.T is built through Dag.ofNodes (the constructor is private); the fixtures'
+         one spelling of it. Depends on nothing here. -->
+    <Compile Include="DagOf.fs" />
     <Compile Include="Reference.fs" />
     <Compile Include="Reference2.fs" />
     <!-- Phase 257 — the law-family roster as the suite reads it (one share since Phase 258 moved
@@ -31,6 +34,10 @@
     <Compile Include="ContentDiffTests.fs" />
     <Compile Include="OpStreamTests.fs" />
     <Compile Include="IdempotentAppendTests.fs" />
+    <!-- Phase 386 - the retired pre-Phase-296 snapshot matrix as a test-local translation onto
+         OpStream.Snapshots: the snapshot suite and the proof-oracle differentials speak its shape and
+         the compaction model's fault strings. Placed before its first reader. -->
+    <Compile Include="SnapshotMatrix.fs" />
     <Compile Include="SnapshotTests.fs" />
     <Compile Include="WireTests.fs" />
     <Compile Include="DecodeTests.fs" />

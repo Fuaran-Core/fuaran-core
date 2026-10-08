@@ -372,10 +372,11 @@ let tests =
                             descendantFirst <- descendantFirst + 1
 
                         let tampered: Dag.T<CounterOp> =
-                            { Nodes =
+                            DagOf.nodes (
                                 d3.Nodes
                                 |> Map.add a { d3.Nodes.[a] with Op = Inc 99 }
-                                |> Map.add b { d3.Nodes.[b] with Op = Inc 98 } }
+                                |> Map.add b { d3.Nodes.[b] with Op = Inc 98 }
+                            )
 
                         match Dag.firstBreak h sw tampered with
                         | Some br -> Expect.equal br.NodeId a "the ancestor"
@@ -435,7 +436,7 @@ let tests =
                     let n = dag.Nodes.[g]
 
                     let cyclic: Dag.T<CounterOp> =
-                        { Nodes =
+                        DagOf.nodes (
                             dag.Nodes
                             |> Map.add
                                 "cy-1"
@@ -451,7 +452,8 @@ let tests =
                                 "cy-3"
                                 { n with
                                     Id = "cy-3"
-                                    Parents = [ "cy-2" ] } }
+                                    Parents = [ "cy-2" ] }
+                        )
 
                     let expected = [ "cy-1"; "cy-2"; "cy-3" ]
 
@@ -545,13 +547,15 @@ let tests =
                         |> List.find (fun (id, _) -> loaded.LaneOf.[id] = "beta")
                         |> snd
 
-                    let copy = "zeta", Dag.toJsonl sw.Encode { Nodes = Map.ofList [ some.Id, some ] }
+                    let copy =
+                        "zeta", Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, some ]))
+
                     let l = Dag.loadLanes sw (copy :: texts) |> ok
                     Expect.equal l.LaneOf.[some.Id] "beta" "an identical node keeps the smaller lane"
 
                     let forged =
                         "aardvark",
-                        Dag.toJsonl sw.Encode { Nodes = Map.ofList [ some.Id, { some with Op = Inc 1000 } ] }
+                        Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, { some with Op = Inc 1000 } ]))
 
                     Expect.equal
                         (Dag.loadLanes sw (texts @ [ forged ]))
@@ -572,12 +576,13 @@ let tests =
                     let tampered =
                         { loaded with
                             Dag =
-                                { Nodes =
+                                DagOf.nodes (
                                     loaded.Dag.Nodes
                                     |> Map.add
                                         victim
                                         { loaded.Dag.Nodes.[victim] with
-                                            Op = Inc 77 } } }
+                                            Op = Inc 77 }
+                                ) }
 
                     match Dag.verifyLanes h sw tampered with
                     | Error b ->
@@ -664,12 +669,13 @@ let tests =
                     let victim = loaded.Dag.Nodes |> Map.toList |> List.head |> fst
 
                     let tampered: Dag.T<CounterOp> =
-                        { Nodes =
+                        DagOf.nodes (
                             loaded.Dag.Nodes
                             |> Map.add
                                 victim
                                 { loaded.Dag.Nodes.[victim] with
-                                    Op = Inc 31 } }
+                                    Op = Inc 31 }
+                        )
 
                     match Dag.rehashWith h OpStream.sha256Hash sw tampered with
                     | Error(Dag.RehashFault.Unverified b) -> Expect.equal b.NodeId victim "the break"
@@ -720,7 +726,7 @@ let tests =
                     Expect.equal dropped [ z ] "only the abandoned node"
 
                     let pruned: Dag.T<CounterOp> =
-                        { Nodes = dag.Nodes |> Map.filter (fun id _ -> id <> z) }
+                        DagOf.nodes (dag.Nodes |> Map.filter (fun id _ -> id <> z))
 
                     Expect.isTrue (Dag.verifyDag h sw pruned) "verifies"
 

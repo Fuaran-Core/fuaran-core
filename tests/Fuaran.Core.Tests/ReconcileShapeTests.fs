@@ -78,10 +78,16 @@ let private chain (actor: string) (ops: COp list) (parent: string) (d: Dag.T<COp
 let private replayFrom (s: int) (script: COp list) =
     script |> List.fold (fun acc op -> acc |> Result.bind (apply op)) (Ok s)
 
+/// The state at `id`: a domain rejection is the comparison's subject; an unknown head or a cyclic
+/// history is a defect in the fixture, failed as one.
 let private stateAt (dag: Dag.T<COp>) (id: string) =
-    Dag.replayTo w 0 dag id |> Result.mapError snd
+    Dag.tryReplayTo w 0 dag id
+    |> Result.mapError (fun fault ->
+        match fault with
+        | Dag.ReplayFault.Rejected(_, e) -> e
+        | other -> failwithf "the fixture's DAG cannot be replayed to %s: %A" id other)
 
-/// `replayTo base` then the script, beside `replayTo` of a merge node over the two heads.
+/// `tryReplayTo base` then the script, beside `tryReplayTo` of a merge node over the two heads.
 let private againstMerge (dag: Dag.T<COp>) (baseId: string) (a: string) (b: string) (script: COp list) =
     let m, dm = Dag.merge h w (Human "merge") Nop a b dag |> Reference.built
     stateAt dm baseId |> Result.bind (fun s -> replayFrom s script), stateAt dm m

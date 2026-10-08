@@ -1,5 +1,72 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D132: `1.0.0` freezes with no obsolete forward, three shapes close, D101 becomes a gate, and the `OneDotZero` family makes "1.0" a test output
+
+**Recorded by Phase 386. Every package with a forward, `Fuaran.Core.Function`, `Fuaran.Core.Query`,
+`Fuaran.Core.OpStream.Dag`, the conformance kit and the suite; opens the `1.0.0` slot
+(`docs/releases/1.0.0.md`, `docs/migrations/1.0.0.md`). No wire byte moves except the retired
+`RowCodec` document.**
+
+*Decided: a forward leaves at a major, and `1.0.0` is one.* Through the `0.x` line every forward was
+written "for one draft" or "removed at 1.0.0" and nothing held the promise. This slot removes every
+`System.Obsolete` member the shipped assemblies carry — 44, found by reflection — and the one-draft
+items that carried no attribute: the string-error `Decode` helpers, the `Validator.Registry` alias
+and the `Fuaran.Core.Observer` adapter namespace. The adapter is not "zero uses", as the shard read
+it: the observer family certified it and its own suite drove it. Both went with it, because D101
+already decided the adapter was leaving and subscription is host state. The observer family keeps
+the witness half of its first law — every emission and snapshot is the derivation of its input —
+and its cycle law.
+
+*Decided: the version is semver from `1.0.0`.* A breaking surface class advances the major, an
+additive one the minor. A member a minor retires stays as a `System.Obsolete` forward to the next
+major (STABILITY.md, "Versioning policy").
+
+*Decided: `OneDotZero` is the gate, and it is vacuous by name at major 0.* Four laws over the live
+tree: no public member carries `ObsoleteAttribute` (reflection over the packable roster — the API
+baselines do not render attributes, so `grep Obsolete api/*.txt` would have certified nothing);
+`unfrozenWitnesses` is empty; `frozenWitnessFields` is byte-equal to the major's `vN.0.0` tag,
+through a committed render the suite holds to the live list at every major (so the tag carries the
+list as it stood); and no baseline moved by a breaking class since the newest tag unless the major
+advanced. While the `vN.0.0` tag does not exist yet the third law says so by name rather than
+passing. Each law has a go-red plant, and the first was watched red at `<Version>1.0.0` before the
+sweep.
+
+*Decided: the registries and the DAG close.* `CapabilityRegistry` and `QueryRegistry` take
+`FunctionRegistry`'s opaque shape (Phase 316): `register` is the only way in, so no capability
+reaches dispatch without the admission gate. `Dag.T`'s constructor is private and `Dag.ofNodes`
+refuses a key that is not its node's id; a node whose id does not match its content is admitted,
+because that is what `firstBreak` exists to find. `Nodes` stays readable as a member.
+
+*Decided: D101 is a gate, and its rule is the shadowing one.* No case name may be carried
+UNQUALIFIED by two public unions of the shipped assemblies or FSharp.Core's option and result (a
+qualified union may share any name). Qualifying `PipelineError`, `PipelineEvalError` and
+`SchemaCompat` — the shard's three — left three more collisions the rule names. `Versioning.Evolution`
+(`Additive`, `Breaking`), `WireNullTolerance.Claim` (`Rejected`) and `Diff.Strength` (`Required`) are
+qualified too. `Strength` and not `Idl.Optionality`, because every IDL declaration spells
+`Required`. The case was live: `Diff.fs` read `Required` as `Strength.Required` only because its
+union was declared later.
+
+*Found: the surface gate cannot see a qualification.* `[<RequireQualifiedAccess>]` changes no IL
+token the renderer draws, so six source-breaking moves read as `unchanged` against `v0.36.0`. The
+release ledger names them by hand. The renderer drawing the attribute is the successor's to build;
+every RQA union's baseline line would move once, in the same commit.
+
+*Kept: the lenient descriptor read of a value space, to `2.0.0`.* The shard listed it as a one-draft
+item. The verified model of that reader (`proofs/Capability.fst`) pins the descriptor spelling as an
+accepted input, with a named vector, and the extracted oracle is held to production. Removing it is
+a model edit, a re-verification and a re-extraction. It is not a deletion, so the read stays,
+documented as leaving at `2.0.0` with its vector.
+
+*Kept, not built: `witnessFieldsLaw` and `witnessCoverageLaw`.* They left the facade, so the
+conformance facade no longer publishes a `System.Type`, but they stay in the kit (`SurfaceLaws`):
+`witnessSurfaceLaws ()` runs both, and the suite reaches them through a test-only
+`InternalsVisibleTo` to drive its decoy records.
+
+*Not built: a test-only copy of the retired snapshot matrix as a forward.* The snapshot suite and
+the compaction oracle's differentials still speak the matrix's shape, and the model pins its fault
+strings, so the suite keeps a test-local translation onto `OpStream.Snapshots`
+(`tests/Fuaran.Core.Tests/SnapshotMatrix.fs`). Nothing ships from it.
+
 ## 2026-10-08 — D131: a strict proof run records cost and refuses a cached read; one cached-read threshold replaces the per-module floors
 
 **Recorded by Phase 399, on an operator ruling of 2026-10-08. `proofs/kit/check-proof-leg.ps1`,

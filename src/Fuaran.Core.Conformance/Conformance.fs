@@ -182,18 +182,6 @@ module Conformance =
         : LawResult list =
         AlgebraTreeLaws.keyedChildrenLawsAt "Conformance.keyedChildrenLawsAt" keyw nodew idw gen seed iterations
 
-    /// Obsolete — `keyedChildrenLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed keyedChildrenLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use keyedChildrenLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let keyedChildrenLaws
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (gen: OpGen<'Node, 'Id>)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        AlgebraTreeLaws.keyedChildrenLawsAt "Conformance.keyedChildrenLaws" keyw nodew idw gen seed iterations
-
     /// Forward — see `PlacementTreeLaws.placementLaws` (Phase 312).
     let placementLaws
         (nodew: NodeWitness<'Node, 'Id>)
@@ -226,18 +214,6 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         ValidityTreeLaws.referenceLawsAt "Conformance.referenceLawsAt" refw nodew idw gen seed iterations
-
-    /// Obsolete — `referenceLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed referenceLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use referenceLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let referenceLaws
-        (refw: RefWitness<'Node, 'Id>)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (gen: OpGen<'Node, 'Id>)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        ValidityTreeLaws.referenceLawsAt "Conformance.referenceLaws" refw nodew idw gen seed iterations
 
     /// Forward — see `PlacementTreeLaws.loweringLaws` (Phase 312).
     let loweringLaws
@@ -273,18 +249,6 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         KeyedApplyLaws.keyedApplyLawsAt "Conformance.keyedApplyLawsAt" keyw nodew idw gen seed iterations
-
-    /// Obsolete — `keyedApplyLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed keyedApplyLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use keyedApplyLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let keyedApplyLaws
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (gen: OpGen<'Node, 'Id>)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        KeyedApplyLaws.keyedApplyLawsAt "Conformance.keyedApplyLaws" keyw nodew idw gen seed iterations
 
     /// Forward — see `ChainStreamLaws.streamLaws`.
     let streamLaws
@@ -436,17 +400,6 @@ module Conformance =
         : LawResult list =
         IntegrityLaws.encoderInjectivityLawsAt "Conformance.encoderInjectivityLawsAt" w encode gen seed iterations
 
-    /// Obsolete — `encoderInjectivityLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed encoderInjectivityLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use encoderInjectivityLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let encoderInjectivityLaws
-        (w: ArtifactWitness<'Node, 'Id>)
-        (encode: 'Node -> string)
-        (gen: ConfRng.T -> 'Node * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        IntegrityLaws.encoderInjectivityLawsAt "Conformance.encoderInjectivityLaws" w encode gen seed iterations
-
     /// Forward — see `IntegrityLaws.codecInjectivityLaws`.
     let codecInjectivityLaws
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -466,18 +419,6 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         IntegrityLaws.attestationLawsAt "Conformance.attestationLawsAt" sw gen sink hashFn seed iterations
-
-    /// Obsolete — `attestationLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed attestationLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use attestationLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let attestationLaws
-        (sw: StreamWitness<'Op, 'State, 'Rej>)
-        (gen: StreamGen<'Op, 'State>)
-        (sink: IAttestationSink)
-        (hashFn: HashFn)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        IntegrityLaws.attestationLawsAt "Conformance.attestationLaws" sw gen sink hashFn seed iterations
 
     /// Forward — see `IntegrityLaws.noAttestationVacuityLaws`.
     let noAttestationVacuityLaws
@@ -667,29 +608,6 @@ module Conformance =
             seed
             iterations
 
-    /// Obsolete — `keyedArbitrationLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed keyedArbitrationLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use keyedArbitrationLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let keyedArbitrationLaws
-        (keyw: KeyedWitness<'Node, 'Id>)
-        (nodew: NodeWitness<'Node, 'Id>)
-        (idw: IdWitness<'Id>)
-        (gen: OpGen<'Node, 'Id>)
-        (encode: 'Node -> string)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        KeyedArbitrationLaws.keyedArbitrationLawsWith
-            "Conformance.keyedArbitrationLawsWith"
-            keyw
-            nodew
-            idw
-            gen
-            encode
-            (Ops.footprintKeyed keyw nodew idw)
-            (Ops.canApplyAllKeyed keyw (LawKit.canHoldOf gen) nodew idw)
-            seed
-            iterations
-
     /// Forward — see `CapabilitySeamLaws.capabilityLaws`.
     let capabilityLaws (seed: int) (iterations: int) : LawResult list =
         CapabilitySeamLaws.capabilityLaws seed iterations
@@ -698,22 +616,12 @@ module Conformance =
     let capabilityLawsAt (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
         CapabilitySeamLaws.capabilityLawsAt "Conformance.capabilityLawsAt" w seed iterations
 
-    /// Obsolete — `capabilityLawsAt` (Phase 297's naming rule).
-    [<System.Obsolete("Renamed capabilityLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
-    let capabilityLawsWith (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
-        CapabilitySeamLaws.capabilityLawsAt "Conformance.capabilityLawsWith" w seed iterations
-
     /// Forward — see `QuerySeamLaws.queryLaws`.
     let queryLaws (seed: int) (iterations: int) : LawResult list = QuerySeamLaws.queryLaws seed iterations
 
     /// Forward — see `QuerySeamLaws.queryLawsAt`: the query seam laws at a DOMAIN'S seam.
     let queryLawsAt (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
         QuerySeamLaws.queryLawsAt "Conformance.queryLawsAt" w seed iterations
-
-    /// Obsolete — `queryLawsAt` (Phase 297's naming rule).
-    [<System.Obsolete("Renamed queryLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
-    let queryLawsWith (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
-        QuerySeamLaws.queryLawsAt "Conformance.queryLawsWith" w seed iterations
 
     /// Forward — see `RegistrySeamLaws.registryLaws`.
     let registryLaws (seed: int) (iterations: int) : LawResult list =
@@ -791,11 +699,6 @@ module Conformance =
     let capabilityPipelineLawsAt (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
         PipelineSeamLaws.capabilityPipelineLawsAt "Conformance.capabilityPipelineLawsAt" w seed iterations
 
-    /// Obsolete — `capabilityPipelineLawsAt` (Phase 297's naming rule).
-    [<System.Obsolete("Renamed capabilityPipelineLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
-    let capabilityPipelineLawsWith (w: CapabilityPipelineWitness) (seed: int) (iterations: int) : LawResult list =
-        PipelineSeamLaws.capabilityPipelineLawsAt "Conformance.capabilityPipelineLawsWith" w seed iterations
-
     /// Forward — see `PipelineSeamLaws.capabilityPipelineIncrementalLaws`.
     let capabilityPipelineIncrementalLaws (seed: int) (iterations: int) : LawResult list =
         PipelineSeamLaws.capabilityPipelineIncrementalLaws seed iterations
@@ -811,23 +714,11 @@ module Conformance =
         : LawResult list =
         FunctionLaws.compositionLaws wa wb embed draw seed iterations
 
-    /// Obsolete — `compositionLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed compositionLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use compositionLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let compositionLaws
-        (wa: ArtifactWitness<'A, 'IdA>)
-        (wb: ArtifactWitness<'B, 'IdB>)
-        (embed: 'B -> 'A)
-        (draw: ConfRng.T -> CompositionSample<'A, 'B> * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        FunctionLaws.compositionLaws wa wb embed draw seed iterations
-
     /// Forward — see `FunctionLaws.verifyFunction`.
     let verifyFunction
         (w: ArtifactWitness<'Node, 'Id>)
         (fn: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
         (seed: int)
         (iterations: int)
@@ -838,7 +729,7 @@ module Conformance =
     let verifyFunctionSymbolic
         (w: ArtifactWitness<'Node, 'Id>)
         (fn: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (fixedArgs: Map<string, Arg<'Node>>)
         (maxCases: int)
         (seed: int)
@@ -854,20 +745,7 @@ module Conformance =
         (w: ArtifactWitness<'Node, 'Id>)
         (sound: 'Node)
         (broken: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
-        (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        FunctionLaws.functionVerifyLaws w sound broken reg genParams seed iterations
-
-    /// Obsolete — `functionVerifyLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed functionVerifyLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use functionVerifyLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let functionVerifyLaws
-        (w: ArtifactWitness<'Node, 'Id>)
-        (sound: 'Node)
-        (broken: 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
         (seed: int)
         (iterations: int)
@@ -876,18 +754,6 @@ module Conformance =
 
     /// Forward — see `FunctionLaws.memoLaws`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let memoLawsAt
-        (w: ArtifactWitness<'Node, 'Id>)
-        (encode: 'Node -> string)
-        (draw: ConfRng.T -> MemoSample<'Node> * ConfRng.T)
-        (hashFn: HashFn)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        FunctionLaws.memoLaws w encode draw hashFn seed iterations
-
-    /// Obsolete — `memoLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed memoLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use memoLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let memoLaws
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
         (draw: ConfRng.T -> MemoSample<'Node> * ConfRng.T)
@@ -910,39 +776,12 @@ module Conformance =
         : LawResult list =
         FunctionLaws.compositionPilot wa wb embed encodeA encodeB draw seed iterations
 
-    /// Obsolete — `compositionPilotAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed compositionPilotAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use compositionPilotAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let compositionPilot
-        (wa: ArtifactWitness<'A, 'IdA>)
-        (wb: ArtifactWitness<'B, 'IdB>)
-        (embed: 'B -> 'A)
-        (encodeA: 'A -> string)
-        (encodeB: 'B -> string)
-        (draw: ConfRng.T -> CompositionSample<'A, 'B> * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        FunctionLaws.compositionPilot wa wb embed encodeA encodeB draw seed iterations
-
     /// Forward — see `FunctionLaws.verifyHonestyLaws`: the family at a DOMAIN'S `ArtifactWitness` (Phase 390's spelling).
     let verifyHonestyLawsAt
         (w: ArtifactWitness<'Node, 'Id>)
         (mkSound: DeterminismSource -> 'Node)
         (mkBroken: DeterminismSource -> 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
-        (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        FunctionLaws.verifyHonestyLaws w mkSound mkBroken reg genParams seed iterations
-
-    /// Obsolete — `verifyHonestyLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed verifyHonestyLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use verifyHonestyLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let verifyHonestyLaws
-        (w: ArtifactWitness<'Node, 'Id>)
-        (mkSound: DeterminismSource -> 'Node)
-        (mkBroken: DeterminismSource -> 'Node)
-        (reg: Validator.Registry<'Node, 'Id>)
+        (reg: Validator.RuleRegistry<'Node, 'Id>)
         (genParams: 'Node -> ConfRng.T -> Map<string, Arg<'Node>> * ConfRng.T)
         (seed: int)
         (iterations: int)
@@ -956,21 +795,9 @@ module Conformance =
         (underDeclaredFn: 'Node)
         (underDeclaredArgs: Map<string, Arg<'Node>>)
         (seed: int)
-        (_iterations: int)
+        (iterations: int)
         : LawResult list =
-        FunctionLaws.memoSoundnessLaws w encode underDeclaredFn underDeclaredArgs seed _iterations
-
-    /// Obsolete — `memoSoundnessLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed memoSoundnessLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use memoSoundnessLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let memoSoundnessLaws
-        (w: ArtifactWitness<'Node, 'Id>)
-        (encode: 'Node -> string)
-        (underDeclaredFn: 'Node)
-        (underDeclaredArgs: Map<string, Arg<'Node>>)
-        (seed: int)
-        (_iterations: int)
-        : LawResult list =
-        FunctionLaws.memoSoundnessLaws w encode underDeclaredFn underDeclaredArgs seed _iterations
+        FunctionLaws.memoSoundnessLaws w encode underDeclaredFn underDeclaredArgs seed iterations
 
     /// Forward — see `PropagationLaws.dirtyPropagationLaws`.
     let dirtyPropagationLaws (seed: int) (iterations: int) : LawResult list =
@@ -984,11 +811,6 @@ module Conformance =
     /// DOMAIN'S `EvaluatorWitness`.
     let propagationEvaluatorLawsAt (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
         PropagationLaws.propagationEvaluatorLawsAt "Conformance.propagationEvaluatorLawsAt" evw seed iterations
-
-    /// Obsolete — `propagationEvaluatorLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed propagationEvaluatorLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use propagationEvaluatorLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let propagationEvaluatorLaws (evw: EvaluatorWitness<'Model, 'V>) (seed: int) (iterations: int) : LawResult list =
-        PropagationLaws.propagationEvaluatorLawsAt "Conformance.propagationEvaluatorLaws" evw seed iterations
 
     /// Forward — see `PropagationLaws.propagationEvaluatorLawsWith`: `propagationEvaluatorLawsAt` with
     /// the domain's prior-aware evaluator pinned, last before the seed.
@@ -1012,32 +834,10 @@ module Conformance =
         : LawResult list =
         SurfaceLaws.projectionLaws pw applyOps wireEncode gen seed iterations
 
-    /// Obsolete — `projectionLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed projectionLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use projectionLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let projectionLaws
-        (pw: ProjectionWitness<'Node, 'Id, 'Op>)
-        (applyOps: 'Op list -> Result<'Node, string>)
-        (wireEncode: 'Node -> string)
-        (gen: ConfRng.T -> 'Node * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        SurfaceLaws.projectionLaws pw applyOps wireEncode gen seed iterations
-
     /// Forward — see `ObserverLaws.observerLaws` (Phase 298): in-memory equals live, a cyclic parent
     /// declaration terminates, and re-entrant subscribers are isolated, at a DOMAIN'S
     /// `ObserverWitness` and input generator.
     let observerLawsAt<'Input, 'Flag when 'Input: equality and 'Flag: equality>
-        (w: ObserverWitness<'Input, 'Flag>)
-        (genInput: ConfRng.T -> 'Input * ConfRng.T)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        ObserverLaws.observerLaws w genInput seed iterations
-
-    /// Obsolete — `observerLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed observerLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use observerLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let observerLaws<'Input, 'Flag when 'Input: equality and 'Flag: equality>
         (w: ObserverWitness<'Input, 'Flag>)
         (genInput: ConfRng.T -> 'Input * ConfRng.T)
         (seed: int)
@@ -1051,11 +851,6 @@ module Conformance =
     let sanitizeLawsAt (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
         SanitizeLaws.sanitizeLaws w seed iterations
 
-    /// Obsolete — `sanitizeLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed sanitizeLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use sanitizeLawsAt. This forward keeps its own roster id and is removed at 1.0.0.")>]
-    let sanitizeLaws (w: SanitizeWitness) (seed: int) (iterations: int) : LawResult list =
-        SanitizeLaws.sanitizeLaws w seed iterations
-
     /// Forward — see `SurfaceLaws.aiSurfaceLawsAt`: the AI-surface laws under the DOMAIN'S own
     /// policy. `aiSurfaceLawsUnderKitPolicy` is the kit-fixture form beside it.
     let aiSurfaceLawsAt
@@ -1067,20 +862,6 @@ module Conformance =
         : LawResult list =
         SurfaceLaws.aiSurfaceLawsAt "Conformance.aiSurfaceLawsAt" w genOp state0 seed iterations
 
-    /// Obsolete — `aiSurfaceLawsAt` (Phase 297's naming rule). The bare name carried the domain's
-    /// policy, the INVERSE of every other bare name in the kit (a bare name is the kit-fixture or
-    /// pinned-default form); it is retired rather than reassigned, because a name that changes
-    /// meaning under a caller is worse than one that disappears.
-    [<System.Obsolete("Renamed aiSurfaceLawsAt by the Phase 297 naming rule: an At suffix is the domain-witness form, a With suffix a pinned parameter last before the seed. This forward keeps its own roster id and guard label through the 0.33.0 draft and is then removed.")>]
-    let aiSurfaceLaws
-        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
-        (genOp: ConfRng.T -> 'Op * ConfRng.T)
-        (state0: 'State)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        SurfaceLaws.aiSurfaceLawsAt "Conformance.aiSurfaceLaws" w genOp state0 seed iterations
-
     /// Forward — see `SurfaceLaws.aiSurfaceKitPolicyLawsAt`: the AI-surface laws with the KIT'S policy swapped
     /// in for the domain's, at the domain's witness — the proposal plumbing, beside `aiSurfaceLawsAt`.
     let aiSurfaceKitPolicyLawsAt
@@ -1091,17 +872,6 @@ module Conformance =
         (iterations: int)
         : LawResult list =
         SurfaceLaws.aiSurfaceKitPolicyLawsAt "Conformance.aiSurfaceKitPolicyLawsAt" w genOp state0 seed iterations
-
-    /// Obsolete — `aiSurfaceKitPolicyLawsAt` (Phase 390's application of the naming rule).
-    [<System.Obsolete("Renamed aiSurfaceKitPolicyLawsAt by the Phase 390 naming rule (an At suffix is the domain-witness form): use aiSurfaceKitPolicyLawsAt. This forward keeps its own roster id and guard label and is removed at 1.0.0.")>]
-    let aiSurfaceLawsUnderKitPolicy
-        (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
-        (genOp: ConfRng.T -> 'Op * ConfRng.T)
-        (state0: 'State)
-        (seed: int)
-        (iterations: int)
-        : LawResult list =
-        SurfaceLaws.aiSurfaceKitPolicyLawsAt "Conformance.aiSurfaceLawsUnderKitPolicy" w genOp state0 seed iterations
 
     /// Forward — see `SurfaceLaws.frozenWitnessFields`.
     let frozenWitnessFields: (string * string list) list =
@@ -1118,14 +888,9 @@ module Conformance =
     let witnessDeclaredFieldsLaw (record: string) (pinned: string list) (declared: string list) : LawResult =
         SurfaceLaws.witnessDeclaredFieldsLaw record pinned declared
 
-#if !FABLE_COMPILER
-    /// Forward — see `SurfaceLaws.witnessFieldsLaw`. .NET-only since Phase 387: it reads by reflection.
-    let witnessFieldsLaw (record: string) (pinned: string list) (t: System.Type) : LawResult =
-        SurfaceLaws.witnessFieldsLaw record pinned t
-
-    /// Forward — see `SurfaceLaws.witnessCoverageLaw`. .NET-only since Phase 387: it reads by reflection.
-    let witnessCoverageLaw (records: System.Type list) : LawResult = SurfaceLaws.witnessCoverageLaw records
-#endif
+    // `witnessFieldsLaw` and `witnessCoverageLaw` left this facade at `1.0.0` (Phase 386): they take a
+    // `System.Type`, a reflection handle no domain hands the kit, and `witnessSurfaceLaws ()` below
+    // runs both over the records the kit was compiled against. They stay internal to the kit.
 
     /// Forward — see `SurfaceLaws.witnessSurfaceLaws`.
     let witnessSurfaceLaws () : LawResult list = SurfaceLaws.witnessSurfaceLaws ()

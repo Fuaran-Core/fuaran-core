@@ -232,7 +232,7 @@ let private validatorTests =
 
           testCase "the Registry alias still names the registry"
           <| fun _ ->
-              let reg: Validator.Registry<RNode, string> = Validator.empty
+              let reg: Validator.RuleRegistry<RNode, string> = Validator.empty
               Expect.isEmpty (Validator.enumerate reg) "one type under two names"
 
           testCase "column rule ids are injective over their parameters"

@@ -451,28 +451,29 @@ let tests =
               Expect.equal delta.Retyped [ "a", IntType, FloatType ] "a retyped int→float"
               Expect.isTrue delta.Reordered "a/b swapped relative order"
 
-          testCase "Schema.classify: widening a depended-on column is Compatible, narrowing is Breaking"
+          testCase "Schema.classify: widening a depended-on column is SchemaCompat.Compatible, narrowing is Breaking"
           <| fun _ ->
               let widened =
                   Schema.diff [ "a", IntType; "b", StringType ] [ "a", FloatType; "b", StringType ]
 
-              Expect.equal (Schema.classify [ "a"; "b" ] widened) Compatible "int→float is a safe widening"
+              Expect.equal (Schema.classify [ "a"; "b" ] widened) SchemaCompat.Compatible "int→float is a safe widening"
 
               let narrowed = Schema.diff [ "a", FloatType ] [ "a", IntType ]
 
               match Schema.classify [ "a" ] narrowed with
-              | Breaking reasons -> Expect.isNonEmpty reasons "narrowing names a reason"
-              | other -> failtestf "expected Breaking, got %A" other
+              | SchemaCompat.Breaking reasons -> Expect.isNonEmpty reasons "narrowing names a reason"
+              | other -> failtestf "expected SchemaCompat.Breaking, got %A" other
 
-          testCase "Schema.classify: removing a depended-on column is Breaking; an un-depended change is Compatible"
+          testCase
+              "Schema.classify: removing a depended-on column is SchemaCompat.Breaking; an un-depended change is Compatible"
           <| fun _ ->
               let delta = Schema.diff [ "a", IntType; "b", IntType ] [ "a", IntType ]
 
               match Schema.classify [ "b" ] delta with
-              | Breaking _ -> ()
-              | other -> failtestf "expected Breaking (b removed), got %A" other
+              | SchemaCompat.Breaking _ -> ()
+              | other -> failtestf "expected SchemaCompat.Breaking (b removed), got %A" other
 
-              Expect.equal (Schema.classify [ "a" ] delta) Compatible "an un-depended-on removal is safe"
+              Expect.equal (Schema.classify [ "a" ] delta) SchemaCompat.Compatible "an un-depended-on removal is safe"
 
           testCase "Schema.fingerprint is stable + order-sensitive + type-sensitive"
           <| fun _ ->
@@ -732,11 +733,11 @@ let tests =
               Expect.isFalse (ColumnType.widens DecimalType IntType) "narrowing is not a widening"
 
               let widened = Schema.diff [ "a", IntType ] [ "a", DecimalType ]
-              Expect.equal (Schema.classify [ "a" ] widened) Compatible "int→decimal is compatible"
+              Expect.equal (Schema.classify [ "a" ] widened) SchemaCompat.Compatible "int→decimal is compatible"
 
               match Schema.classify [ "a" ] (Schema.diff [ "a", FloatType ] [ "a", DecimalType ]) with
-              | Breaking reasons -> Expect.isNonEmpty reasons "float→decimal names a reason"
-              | other -> failtestf "expected Breaking, got %A" other
+              | SchemaCompat.Breaking reasons -> Expect.isNonEmpty reasons "float→decimal names a reason"
+              | other -> failtestf "expected SchemaCompat.Breaking, got %A" other
 
           testCase "the type tag set names decimal, last"
           <| fun _ ->

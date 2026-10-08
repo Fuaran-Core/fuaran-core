@@ -15,12 +15,12 @@ let private sw = witness
 let private encInt (n: int) = Json.render (JInt n)
 
 let private decInt (s: string) : Result<int, string> =
-    Decode.parse s |> Result.bind Decode.asInt
+    Decode.parse s |> Result.bind (Decoder.describing Decoder.int)
 
 let private encStr (s: string) = Json.render (JStr s)
 
 let private decStr (s: string) : Result<string, string> =
-    Decode.parse s |> Result.bind Decode.asString
+    Decode.parse s |> Result.bind (Decoder.describing Decoder.str)
 
 let private build () =
     let step acc op =

@@ -20,9 +20,9 @@ let private encodeOp =
 let private decodeOp (s: string) : Result<CounterOp, string> =
     Decode.parse s
     |> Result.bind (fun el ->
-        Decode.kindOf el
+        Decoder.describing (Decoder.field "kind" Decoder.str) el
         |> Result.bind (fun k ->
-            Decode.intField "n" el
+            Decoder.describing (Decoder.field "n" Decoder.int) el
             |> Result.map (fun n -> if k = "dec" then Dec n else Inc n)))
 
 let private sw: StreamWitness<CounterOp, int, string> =
@@ -272,15 +272,15 @@ let tests =
               Expect.isTrue (Dag.verifyDag h sw dag) "(1) every node id is the content hash of its (parents, actor, op)"
               Expect.isTrue (sink.Verify att m) "(2) the signed head id checks out"
 
-              match Dag.replayTo sw 0 dag m with
+              match Dag.tryReplayTo sw 0 dag m with
               | Ok state ->
                   Expect.equal state 12 "(3) replay folds genesis(5)+b(3)+c(4)+merge(0) once"
-                  Expect.equal (Dag.replayTo sw 0 dag m) (Dag.replayTo sw 0 dag m) "replay is deterministic"
-              | Error e -> failtestf "replayTo failed: %A" e
+                  Expect.equal (Dag.tryReplayTo sw 0 dag m) (Dag.tryReplayTo sw 0 dag m) "replay is deterministic"
+              | Error e -> failtestf "tryReplayTo failed: %A" e
 
               // re-attributing a node changes its content id, so the attested head id no longer
               // names a node the recomputed DAG contains — provenance broken
               let tampered =
-                  { Dag.T.Nodes = dag.Nodes |> Map.map (fun _ n -> { n with Actor = Human "mallory" }) }
+                  DagOf.nodes (dag.Nodes |> Map.map (fun _ n -> { n with Actor = Human "mallory" }))
 
               Expect.isFalse (Dag.verifyDag h sw tampered) "re-attribution breaks every node's content id" ]
