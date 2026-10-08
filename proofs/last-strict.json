@@ -1,0 +1,45 @@
+{
+  "kind": "proofStrictBaseline",
+  "$comment": "The last green -Strict FULL run of the proof leg, written by proofs/check.ps1 (Phase 328) and committed by whoever ran it. An EMPTY module cone (check.ps1 -Since <tree>) is green only when `tree` is an ancestor of HEAD and the cone against it is empty too. Never hand-edited: a record no run produced is exactly the stale evidence the selector must not lean on.",
+  "tree": "fe507426932679be50f5650eb904f7c621adb25c",
+  "run": {
+    "strict": true,
+    "runs": 3,
+    "modules": 28,
+    "prover": "v2026.09.06",
+    "recordedAt": "2026-10-08T10:02:38Z",
+    "machine": {
+      "kind": "local",
+      "runner": null,
+      "os": "Microsoft Windows 10.0.26200",
+      "processors": 12,
+      "memory": "16 GB"
+    },
+    "contention": [
+      {
+        "run": 1,
+        "preflight": "0 fstar process(es) on this machine, 0.8 GB free physical memory",
+        "factor": 1.03,
+        "samples": 24,
+        "threshold": 0.8,
+        "contended": true
+      },
+      {
+        "run": 2,
+        "preflight": "0 fstar process(es) on this machine, 2.3 GB free physical memory",
+        "factor": 0.82,
+        "samples": 24,
+        "threshold": 0.8,
+        "contended": true
+      },
+      {
+        "run": 3,
+        "preflight": "0 fstar process(es) on this machine, 1.5 GB free physical memory",
+        "factor": 0.89,
+        "samples": 24,
+        "threshold": 0.8,
+        "contended": true
+      }
+    ]
+  }
+}
