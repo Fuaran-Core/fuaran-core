@@ -7,7 +7,20 @@
     <Description>Fuaran.Core.Wire — the "kind"-tag / camelCase wire-envelope discipline, Fable-clean encode helpers + .NET-guarded decode combinators, and the conformance-corpus tooling (manifest + round-trip/reject runner + coverage gate). Per-kind cases stay domain-side. FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Wire.fs" />
+    <Compile Include="JVal.fs" />
+    <Compile Include="FloatLayout.fs" />
+    <Compile Include="EncodingProfile.fs" />
+    <Compile Include="Json.fs" />
+    <Compile Include="Canon.fs" />
+    <Compile Include="DecodePath.fs" />
+    <Compile Include="DecodeError.fs" />
+    <Compile Include="Decoder.fs" />
+    <Compile Include="Decode.fs" />
+    <Compile Include="Versioning.fs" />
+    <Compile Include="Corpus.fs" />
+    <Compile Include="Canonical.fs" />
+    <Compile Include="CodecDeclarationFault.fs" />
+    <Compile Include="Codec.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

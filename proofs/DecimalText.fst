@@ -2,7 +2,7 @@
    DecimalText — the exact decimal's text arithmetic: `Fuaran.Core.DecimalText`'s canonical
    form, order and sum, modelled clause for clause and proved (fuaran-core Phase 279).
 
-   WHAT IS MODELLED. `src/Fuaran.Core.Column/Column.fs`, module `DecimalText` — the carrier of a
+   WHAT IS MODELLED. `src/Fuaran.Core.Column/DecimalText.fs`, module `DecimalText` — the carrier of a
    `Decimal` cell (DECISIONS.md D72) and the only arithmetic the column layer does over it:
 
      - the READ, `parts`: the optional minus, the first point, the two digit runs, the two trims

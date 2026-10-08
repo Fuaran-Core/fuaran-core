@@ -31,7 +31,7 @@
    `reconcileMany` together, not about the theorem.
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it:
-     - `Ops.fs`          — `Footprint`, `Ops.independent`
+     - `Footprint.fs`, `Ops.fs` — `Footprint`, `Ops.independent`
      - `DagOpStream.fs`  — `MergeConflictShape`, `MergeConflict`, `Dag.conflicts`,
                             `Dag.reconcileMany`
      - `FoldConfluence.fs` — `LaneFoldOutcome`, `foldOnce`, `canonicalConflictReport`
@@ -145,7 +145,7 @@ let nil_of_sub (#a:eqtype) (l m:list a)
     | h :: _ -> assert (mem h l)
 
 (* ======================================================================================
-   1. Footprints and independence (F#: `Footprint`, `Ops.independent` in Ops.fs).
+   1. Footprints and independence (F#: `Footprint` in Footprint.fs, `Ops.independent` in Ops.fs).
    ====================================================================================== *)
 
 (* A slot is a (node, slot-name) pair (Phase 340): a named field of the node, or the key a keyed

@@ -2,7 +2,7 @@
    WireColumn — an F* model of the COLUMNAR CODEC, with its image and its round trip as machine-checked
    theorems (fuaran-core Phase 306).
 
-   WHAT IS MODELLED. `src/Fuaran.Core.Column/Column.fs`, clause for clause: `ColumnType.tag` /
+   WHAT IS MODELLED. `src/Fuaran.Core.Column/`, clause for clause: `ColumnType.tag` /
    `ofTag` / `widens`, `Cell.typeOf`, `DecimalText.tryCanonical` / `isCanonical`, `Table.validate`
    with its private `firstUncarriableCell`, and `ColumnCodec.encodeJson` / `decodeJson` /
    `tryEncode` with every private function those three reach (`absentSlot`, `cellJson`,

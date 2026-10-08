@@ -1,0 +1,199 @@
+namespace Fuaran.Core
+
+/// A `(name, type)` ordered schema — the column order of a table follows it.
+type Schema = (string * ColumnType) list
+
+/// An embedded columnar table: its schema + the columns, every column the same length. The
+/// SCHEMA is the order authority: the encoder walks it and looks each column up by name, and the
+/// decoder returns the columns in schema order. The `Columns` list itself may be in any order —
+/// `Table.validate` holds the two name SETS equal and does not ask for one order — so a table built
+/// with its columns in another order encodes correctly and decodes back in schema order
+/// (`proofs/WireColumn.fst`: the round trip is to a normal form, and this is one of its three
+/// reasons).
+type Table =
+    {
+        /// The column names and types, in the table's column order; no name may appear twice.
+        Schema: Schema
+        /// The columns, in any order, matched to `Schema` by name; all the same length.
+        Columns: Column list
+    }
+
+/// THE CODEC ENVELOPE — the closed set of refusals of the columnar codec and of `Table.validate`,
+/// the substrate's recoverable error discipline (GP4/GP5): every failure *names what went wrong*
+/// and, where a closed set is expected, *enumerates the alternatives*. Its size is stated nowhere
+/// but in this type: a new case is a breaking-source change for every exhaustive match (FS0025),
+/// and is classed as one in STABILITY.md.
+type ColumnError =
+    /// The input was not valid JSON at all — the parser's structured failure (`Json.parseDetailed`):
+    /// its classified kind, its message and its position (Phase 299; it carried the string form,
+    /// already prefixed, before).
+    | NotJson of error: JsonError
+    /// A required field was absent from an object (`schema` / `values` / `validity` / `name` / `type`).
+    | MissingField of field: string
+    /// A value had the wrong JSON shape for its position (expected object/array/string where another
+    /// kind appeared), or a cell's TEXT is not its type's canonical form — decimal text, or an
+    /// ISO-8601 date or timestamp (`DecimalText`, `TemporalText`).
+    | MalformedShape of detail: string
+    /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid types, in
+    /// `ColumnType.all`'s order (`ColumnType` since Phase 391; their tags before `1.0.0`).
+    | UnknownType of got: string * expected: ColumnType list
+    /// A present cell's type does not widen into its column's declared type — its JSON kind on
+    /// decode, its `Cell` case in `Table.validate` (Phase 299) — or a column's `Type` disagrees with
+    /// its schema entry. `expected` is the declared type (`ColumnType` since Phase 391; its tag before
+    /// `1.0.0`); `got` is what was found — a JSON value's kind on decode, a `Cell`'s or a column's
+    /// type tag otherwise.
+    | TypeMismatch of column: string * expected: ColumnType * got: string
+    /// A column's `values` and `validity` arrays had different lengths (they must co-index).
+    | LengthMismatch of column: string * values: int * validity: int
+    /// A present `Float` cell was non-finite (`NaN` / `Infinity` / `-Infinity`); the Fuaran wire has no
+    /// non-finite float (the same posture as the tree wire's `Json.tryRender`, Phase 12) — `encode`
+    /// would otherwise emit the JSON *string* `"NaN"`, which fails to decode back to a `FloatType` cell.
+    | NonFiniteFloat of column: string * value: string
+    /// The `Table` was structurally malformed (a duplicate schema or column name, or a schema/column
+    /// name disagreement) — `Table.validate` names the fault.
+    | Malformed of detail: string
+    /// The table's columns are not one length (Phase 299): `column` has `got` rows where the first
+    /// column has `expected`. Distinct from `LengthMismatch`, which is ONE column's `values` and
+    /// `validity` arrays disagreeing on the wire.
+    | RaggedColumns of column: string * expected: int * got: int
+
+/// Table reads and `validate`, the well-formedness check the codec encodes and decodes through.
+module Table =
+
+    /// The row count of a table — the length of its first column, or 0 for a schema-only table.
+    let rowCount (t: Table) : int =
+        match t.Columns with
+        | c :: _ -> Column.length c
+        | [] -> 0
+
+    /// The names in SCHEMA order — the table's column order, whatever order `Columns` holds; read
+    /// from the schema alone, so a name with no column is still listed.
+    let columnNames (t: Table) : string list = t.Schema |> List.map fst
+
+    /// Find a column by name.
+    let tryColumn (name: string) (t: Table) : Column option =
+        t.Columns |> List.tryFind (fun c -> c.Name = name)
+
+    /// The empty table (no columns, no rows).
+    let empty: Table = { Schema = []; Columns = [] }
+
+    /// The first name `names` carries twice, in order.
+    let internal firstDuplicate (names: string list) : string option =
+        let rec go (seen: Set<string>) =
+            function
+            | [] -> None
+            | n :: rest -> if seen.Contains n then Some n else go (seen.Add n) rest
+
+        go Set.empty names
+
+    /// The first present cell of `c` the codec cannot carry as a cell of `c.Type`, as the refusal
+    /// naming it (Phase 299), in row order: a cell whose type does not widen into the column's
+    /// (`TypeMismatch`), a non-finite `Float` (`NonFiniteFloat` — the wire has none), and a
+    /// `Decimal` / `Date` / `Timestamp` whose text is not its type's canonical form (`MalformedShape`).
+    let private firstUncarriableCell (c: Column) : ColumnError option =
+        c.Cells
+        |> List.tryPick (fun cell ->
+            match cell with
+            | Null -> None
+            | _ ->
+                match Cell.typeOf cell with
+                | Some t when not (ColumnType.widens t c.Type) -> Some(TypeMismatch(c.Name, c.Type, ColumnType.tag t))
+                | _ ->
+                    match cell with
+                    | Float f -> JVal.nonFiniteToken f |> Option.map (fun tok -> NonFiniteFloat(c.Name, tok))
+                    | Decimal s when not (DecimalText.isCanonical s) ->
+                        Some(
+                            MalformedShape(
+                                c.Name
+                                + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
+                            )
+                        )
+                    | Date s when not (TemporalText.isCanonicalDate s) ->
+                        Some(
+                            MalformedShape(
+                                c.Name
+                                + ": a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
+                            )
+                        )
+                    | Timestamp s when not (TemporalText.isCanonicalTimestamp s) ->
+                        Some(
+                            MalformedShape(
+                                c.Name
+                                + ": a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ, naming an instant that exists"
+                            )
+                        )
+                    | _ -> None)
+
+    /// Well-formedness — THE TABLE THE CODEC CAN CARRY (Phase 43; widened to the cells by Phase 299).
+    /// `Column.create` does no validation, and `encodeJson` silently papers over a malformed table (a
+    /// schema name with no column emits an empty placeholder; an extra column is dropped; ragged
+    /// columns encode against the first column's length; a repeated name emits a repeated member key
+    /// its readers disagree about). `validate` names the fault instead, first found in this order:
+    ///   (a) no schema name and no column name appears twice (`Malformed`);
+    ///   (b) every schema name has exactly one matching column and vice-versa (`Malformed`);
+    ///   (c) each column's `Type` matches its schema entry (`TypeMismatch`);
+    ///   (d) all columns share one length (`RaggedColumns`);
+    ///   (e) every present cell, column by column in schema order and row by row, is one the codec
+    ///       carries as a cell of its column's type — its type WIDENS into the column's
+    ///       (`ColumnType.widens`: an `Int` in a float or decimal column is a widening, a `Bool` in an
+    ///       int column or a `Float` in a decimal column is a `TypeMismatch`), a `Float` is finite
+    ///       (`NonFiniteFloat`), and a `Decimal`, `Date` or `Timestamp` carries its type's canonical
+    ///       text (`MalformedShape`).
+    /// Over what it accepts, `ColumnCodec.tryEncode` is exactly `Ok (encode src)` — a law pins it —
+    /// and `ColumnCodec.decode` ends in it, so a table that encodes is a table that decodes. It is
+    /// not a data-quality check: those are the columnar validator's rules.
+    let validate (t: Table) : Result<unit, ColumnError> =
+        let schemaNames = t.Schema |> List.map fst
+        let columnNamesList = t.Columns |> List.map _.Name
+
+        let missing =
+            schemaNames |> List.filter (fun n -> not (List.contains n columnNamesList))
+
+        let extra =
+            columnNamesList |> List.filter (fun n -> not (List.contains n schemaNames))
+
+        match firstDuplicate schemaNames, firstDuplicate columnNamesList with
+        | Some n, _ -> Error(Malformed("duplicate schema name: " + n))
+        | None, Some n -> Error(Malformed("duplicate column name: " + n))
+        | None, None ->
+            if not (List.isEmpty missing) then
+                Error(Malformed("schema names with no column: " + String.concat ", " missing))
+            elif not (List.isEmpty extra) then
+                Error(Malformed("columns absent from the schema: " + String.concat ", " extra))
+            else
+                // Type agreement (schema order drives the check).
+                let typeFault =
+                    t.Schema
+                    |> List.tryPick (fun (name, ty) ->
+                        match t.Columns |> List.tryFind (fun c -> c.Name = name) with
+                        | Some c when c.Type <> ty -> Some(TypeMismatch(name, ty, ColumnType.tag c.Type))
+                        | _ -> None)
+
+                match typeFault with
+                | Some e -> Error e
+                | None ->
+                    // Equal lengths across all columns.
+                    let ragged =
+                        match t.Columns with
+                        | [] -> None
+                        | first :: rest ->
+                            let len0 = Column.length first
+
+                            rest
+                            |> List.tryFind (fun c -> Column.length c <> len0)
+                            |> Option.map (fun c -> RaggedColumns(c.Name, len0, Column.length c))
+
+                    match ragged with
+                    | Some e -> Error e
+                    | None ->
+                        // The cells, schema order then row order.
+                        let cellFault =
+                            t.Schema
+                            |> List.tryPick (fun (name, _) ->
+                                t.Columns
+                                |> List.tryFind (fun c -> c.Name = name)
+                                |> Option.bind firstUncarriableCell)
+
+                        match cellFault with
+                        | Some e -> Error e
+                        | None -> Ok()

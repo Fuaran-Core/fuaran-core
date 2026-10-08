@@ -1,5 +1,40 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D139: the long multi-module files are divided one module per file, the 2,000-line rule is a test, and `Families.fs` joins D125's exceptions as the same class
+
+**Recorded by Phase 401. `src/Fuaran.Core.Wire/`, `.Ops/`, `.Idl/`, `.Column/` and `.Query/` (files
+only; no `api/`, `api/wire/` or corpus byte moved), `tests/Fuaran.Core.Tests/SourceLengthTests.fs`.
+Builds on D125.**
+
+*Decided: a top-level module is a file, named for the module (D139.1).* `Wire.fs`, `Ops.fs`, `Idl.fs`
+and `Column.fs` each held several top-level modules. Each module is now a file of its own, and no
+module was renamed and no member moved between modules: the source lines of each package are the
+same lines, as a multiset, before and after. Two rules placed what is not a module. A namespace-level
+type sits in the file of the first declaration that reads it: the module of its own name, or the
+first module in compile order that uses it, or, for the types the IDL model's other types read,
+the model's own file (`Idl.fs`, which holds `Idl`). And a type and a module of the same NAME share a
+file, because F# refuses the pair across files (FS0250) unless the module declares `ModuleSuffix`
+explicitly; so `Column`, `Cell`, `ColumnType`, `Table`, `JVal`, `DecodeError`,
+`CodecDeclarationFault` and `RejectionNouns` sit beside their types. Compile order moved only where
+those two rules demanded it, and the compiler is the check that no reader precedes what it reads.
+`Wire.fs` has no module of that name and is gone.
+
+*Found: two more files were over the line (D139.2).* The shard assumed the three files D125 names
+were the only ones left after the four. Measured, `Conformance/Families.fs` (2,033 lines) and
+`Query/Query.fs` (2,108) had grown past it since D125. `Families.fs` is D125's class exactly: ONE
+public module whose public types are nested in it (`Families+LawFamily`, `Families+Roster` and five
+more), so dividing it renames them; it stays whole and the exception list names it. `Query.fs` holds
+several modules, and is divided at the boundaries its dependency order allows: `QueryRegistry` (with
+its type) and `QueryCodec` are files of their own. The rest cannot be divided at module boundaries:
+`QueryShape` builds `QueryError` cases and the `QueryError` module reads `QueryShape`, and the
+`QueryError` type and module must share a file, so the three share `Query.fs` with the `Query`
+module, which is under the line.
+
+*Decided: the rule is held by a test, exact in both directions (D139.3).* `Source.Length` fails by
+name on any `.fs` under `src/` over 2,000 lines that the exception list does not name, on an entry
+naming a file that no longer exists, and on an entry naming a file at or under the line. Each entry
+carries its reason. A new exception is a ruling, recorded here, not an edit to the list.
+
 ## 2026-10-08 — D138: the surfaces 1.0 freezes carry records, declared unions and per-call inputs; an allowance on a node covers removing it (answers D119.7); `SigEntry.Kind` waits for its model
 
 **Recorded by Phase 391. Nine packages' `api/` baselines, the `Fuaran.Core.Idl` and
