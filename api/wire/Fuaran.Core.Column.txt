@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.32.0: additive
+# class since v0.36.0: unchanged
 doc	dataSource	sha256:2e8e4d639b54ee3e77b1093977e9bd54d0de659a6b3128bda75982e47506ad5e	{"columns":{"s":{"validity":[true],"values":[1]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / Cell.Bool	sha256:ae4a8c51c1b37a23facece3ae0a53081394577fe07ca0adfad4e284359e0cb93	{"columns":{"s":{"validity":[true],"values":[true]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / Cell.Date	sha256:77ca5b3c6ea4da1c93c4e594a016ba975ef7248adeb995d01bd1cedb5b063f60	{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]}

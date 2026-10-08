@@ -4,6 +4,9 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.DecimalText RequireQualifiedAccess
+attribute Fuaran.Core.SchemaCompat RequireQualifiedAccess
+attribute Fuaran.Core.TemporalText RequireQualifiedAccess
 ctor Fuaran.Core.Column..ctor(System.String, Fuaran.Core.ColumnType, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>)
 ctor Fuaran.Core.SchemaDelta..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Table..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Column>)

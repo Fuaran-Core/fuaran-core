@@ -498,4 +498,36 @@ let tests =
                     Expect.stringContains helpOut "spike-proposal" "the command lists the verb"
 
                     let bareCode, _, _ = runCli "spike-proposal"
-                    Expect.equal bareCode 2 "a verb with no document is refused") ] ]
+                    Expect.equal bareCode 2 "a verb with no document is refused")
+
+                // Phase 407 - the bytes, not the decode. A decoded string is only evidence about the
+                // CLI when the decode is the right one; reading the raw pipe asks what the process
+                // wrote, so the console code page of the machine cannot change the answer.
+                testCase
+                    "the help text is UTF-8 bytes with no byte-order mark, whatever the console code page"
+                    (fun _ ->
+                        let psi = ChildProcess.redirected "dotnet" ("\"" + cliDll + "\" --help")
+                        use p = System.Diagnostics.Process.Start psi
+                        let err = p.StandardError.ReadToEndAsync()
+                        use buffer = new System.IO.MemoryStream()
+                        p.StandardOutput.BaseStream.CopyTo buffer
+                        p.WaitForExit()
+                        err.Wait()
+                        let bytes = buffer.ToArray()
+                        Expect.equal p.ExitCode 0 "help exits 0"
+                        Expect.isGreaterThan bytes.Length 3 "the help text is not empty"
+
+                        Expect.notEqual
+                            (Array.truncate 3 bytes)
+                            [| 0xEFuy; 0xBBuy; 0xBFuy |]
+                            "no byte-order mark leads the output"
+
+                        let emDash = System.Text.Encoding.UTF8.GetBytes "—"
+                        Expect.equal emDash [| 0xE2uy; 0x80uy; 0x94uy |] "the em dash is E2 80 94 in UTF-8"
+
+                        let contains = bytes |> Array.windowed 3 |> Array.exists (fun w -> w = emDash)
+
+                        Expect.isTrue contains "the em dash of the usage heading is written as its UTF-8 sequence"
+
+                        let decoded = System.Text.UTF8Encoding(false, true).GetString bytes
+                        Expect.stringContains decoded "fuaran-core-idl — the IDL" "the bytes decode strictly as UTF-8") ] ]

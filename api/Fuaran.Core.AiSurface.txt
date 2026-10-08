@@ -4,6 +4,9 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Proposals+ProposalStatus RequireQualifiedAccess
+attribute Fuaran.Core.Proposals+ProposeFailure RequireQualifiedAccess
+attribute Fuaran.Core.RejectionCodec RequireQualifiedAccess
 ctor Fuaran.Core.AiSurfaceWitness`3..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ReadTool`1<!0>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpKindCard>, Microsoft.FSharp.Core.FSharpFunc`2<!1, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PatternCard`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!2, Fuaran.Core.RejectionGuidance>)
 ctor Fuaran.Core.GuardedSurfaceWitness`3..ctor(Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>>)
 ctor Fuaran.Core.Intent..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)

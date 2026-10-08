@@ -1478,7 +1478,7 @@ let convergenceTests =
               Expect.equal c.Determinism Effect.clock "derived from the signature"
               Expect.equal (Capability.determinismTag c) "clock" "and keyed by it"
 
-          testCase "the capability codec refuses an unknown hole kind; the space reader takes the descriptor spelling"
+          testCase "the capability codec refuses an unknown hole kind; the space reader refuses the descriptor spelling"
           <| fun _ ->
               let c =
                   capOver
@@ -1490,10 +1490,23 @@ let convergenceTests =
               | Error m -> Expect.stringContains m "unknown hole kind: int" "names the kind"
               | Ok _ -> failtest "an unknown kind decoded"
 
-              Expect.equal
-                  (SpaceCodec.decoder (SpaceCodec.descriptorJson (StringLen(1, 4))))
-                  (Ok(StringLen(1, 4)))
-                  "the descriptor spelling reads back"
+              // Phase 405 — ONE reader spelling. The descriptor spelling `toSchema` writes (`"kind"`;
+              // a string length as `minLength` / `maxLength`) is refused for every space, by the
+              // codec's existing fault: a missing `"$type"`, at `$type`. It is never read. (This is
+              // the go-red of the pinning vector it replaces, which read it back.)
+              for s in
+                  [ IntRange(0, 3)
+                    FloatRange(0.5, 1.5)
+                    StringLen(1, 4)
+                    Enum [ "a"; "b" ]
+                    AnyString
+                    SlotTree(Some "card")
+                    SlotTree None ] do
+                  match SpaceCodec.decoder (SpaceCodec.descriptorJson s) with
+                  | Ok v -> failtestf "the descriptor spelling of %A was read, as %A" s v
+                  | Error e ->
+                      Expect.equal e.Code DecodeCode.MissingField (sprintf "%A: refused as a missing tag" s)
+                      Expect.equal e.Path [ PathSegment.Key "$type" ] (sprintf "%A: at the tag it names" s)
 
               Expect.equal
                   (SpaceCodec.decoder (SpaceCodec.toJson (StringLen(1, 4))))

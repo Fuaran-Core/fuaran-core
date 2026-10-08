@@ -3,7 +3,7 @@
 # one line per document — name, sha256 of the emitted bytes, the document rendered canonically.
 # Regenerate with:
 #   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
-# class since v0.35.2: additive
+# class since v0.36.0: unchanged
 doc	deferredQueryResult	sha256:d4153f11108020d1acee7de988d8e650af3b1adb12bc2f29588d75a23cde3f45	{"$type":"pending"}
 doc	deferredQueryResult / Cell.Bool	sha256:4e6cf78d0b09adc2c21d445845433d73836bf9f622212bf75c903f5d088c1c3f	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":[true]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}}
 doc	deferredQueryResult / Cell.Date	sha256:e88b4dca77ad37b9ceb74711065ec1f5aaed7bab6a97b0810c50860a7d861e4a	{"$type":"ready","value":{"$type":"queryResult","nextPageToken":"s","pageNum":1,"rows":{"columns":{"s":{"validity":[true],"values":["s"]}},"schema":[{"name":"s","type":"int"}]},"totalRowCount":1}}

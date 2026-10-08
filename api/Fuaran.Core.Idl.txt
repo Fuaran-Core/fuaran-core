@@ -4,6 +4,13 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Idl.Declare RequireQualifiedAccess
+attribute Fuaran.Core.Idl.HostedFormat RequireQualifiedAccess
+attribute Fuaran.Core.Idl.KeyOrder RequireQualifiedAccess
+attribute Fuaran.Core.Idl.NodeEnvelopeShape RequireQualifiedAccess
+attribute Fuaran.Core.Idl.ProposalModule RequireQualifiedAccess
+attribute Fuaran.Core.Idl.SourceLit RequireQualifiedAccess
+attribute Fuaran.Core.Idl.TypeParams RequireQualifiedAccess
 ctor Fuaran.Core.Idl.Annotations..ctor(Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Deprecation>, System.Boolean, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.Artifact+Identity..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, System.String)
 ctor Fuaran.Core.Idl.ClosureSig..ctor(System.String, System.String, System.String)

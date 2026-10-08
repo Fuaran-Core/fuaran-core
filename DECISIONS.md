@@ -1,5 +1,103 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D135: a value space has ONE reader spelling at `1.0.0` — the descriptor read D133 kept leaves, model and oracle with it (amends D133)
+
+**Recorded by Phase 405. `Fuaran.Core.Function` (`SpaceCodec.decoder`), `proofs/Capability.fst` and
+its extracted oracle, the suite; the `1.0.0` slot (`docs/releases/1.0.0.md`,
+`docs/migrations/1.0.0.md`). A wire `removal` on a reader. No writer, digest, baseline or
+canonical document moves.**
+
+*Amended: D133's "Kept: the lenient descriptor read of a value space, to `2.0.0`."* D133 kept the
+read because removing it was "a model edit, a re-verification and a re-extraction", not a deletion.
+That is a cost, and the major is where it is paid. Keeping it would have frozen two reader spellings
+of one wire type for the whole 1.x line, and every other `1.0.0` move took the opposite rule: one
+spelling, no forwards. So it leaves on the same slot. D133's paragraph stands as the record of why
+it was deferred by one phase, and the `1.0.0` ledger records the removal.
+
+*Decided: `SpaceCodec.decoder` dispatches on `"$type"` only.* A document with a `"kind"` and no
+`"$type"` is refused with the codec's existing fault, `MissingField` at `$type`, the same refusal
+any document without its tag gets. No new fault and no special sentence is added for the old
+spelling. A sentence that names the descriptor would keep the second spelling in the reader's
+vocabulary, which is what this decision removes. The internal case table lost its parameters for
+the string-length member names. They existed only to serve the second arm.
+
+*Decided: the model states the one spelling.* `space_of_j` in `proofs/Capability.fst` is now the
+`"$type"` dispatch itself. The two-arm wrapper and the parameterised `space_cases` are gone, so no
+lemma reasons over an arm production no longer has. `space_roundtrip` and the decoded-value lemmas
+are unchanged in statement and re-verified: `check.ps1 -Modules Capability -Extract -Runs 3`, three
+cold runs (102s, 97s and 97s against the 290s budget), every query 3/3 under `--quake`, at the
+pinned rlimit, on the first iteration. The pinning vector
+`the-descriptor-spelling-of-a-space-is-read-leniently` became
+`the-descriptor-spelling-of-a-space-is-refused-at-type`. It is a twin the prover normalises and the
+oracle host evaluates, and its suite counterpart holds production to the same refusal for every
+space.
+
+*Unchanged, and why: the descriptor WRITER.* `SpaceCodec.descriptorJson` still writes the `"kind"`
+spelling for `Function.toSchema`, because `ContentPack.signatureFingerprint` hashes those bytes
+(D104). It is a descriptor, written and never decoded. Every decode site in the repository
+(`CapabilityCodec`, the typed refusals and `CapabilityPipelineCodec`) already read documents
+`toJson` wrote, and no consumer reads a value space from `toSchema` output. That was checked
+before the reader was cut.
+
+## 2026-10-08 — D134: the surface draws the type attributes that decide what consumer source is legal, classes a move of one `retype`, and refuses the member-level ones it does not draw
+
+**Recorded by Phase 406. `tests/Fuaran.Core.Tests/PublicSurfaceTests.fs` and every `api/*.txt`
+baseline; no package source moves.**
+
+*The defect.* Phase 386 put `[<RequireQualifiedAccess>]` on six public unions. Every consumer that
+names one of their cases bare stops compiling, and the surface family printed `unchanged`, because
+the renderer drew a type by its kind and its members and never by the attributes the F# compiler
+reads off it. The `1.0.0` baselines become the frozen reference for the major, so a gate blind to a
+class of breaking move would carry that blindness for the whole `1.x` line.
+
+*Decided: the rule for what is drawn is "adding or removing it changes which consumer source
+compiles".* Drawn off a type, one `attribute <type> <Name>` line each: `RequireQualifiedAccess`
+(on a union, a record or a module), `AutoOpen`, `NoEquality`, `NoComparison`, `ReferenceEquality`,
+`AllowNullLiteral`, `Sealed`, `AbstractClass` and `Measure`, matched by their FSharp.Core qualified
+names; and `Struct`, read off the IL as a base of `System.ValueType`, because the value-type-ness is
+the fact a consumer meets whatever spelled it. A separate line, not a suffix on the `type` line, so
+the one-time regeneration adds lines and changes none, and a type carrying two attributes moves one
+line when one of them moves.
+
+*Decided: a moved attribute line is a `retype`, in both directions, on a type both sides publish.*
+Removing `RequireQualifiedAccess` breaks no existing call site, but it lets a bare case shadow
+another in the consumer's scope, which is the exact defect D101 records, so the cheaper reading
+would be the wrong one. The line is never paired with another line; it is classed by whether its
+type stays published, so a new qualified type is `additive` and a departed one's line goes with it
+as a `removal`. The report prints, beside each move, what that attribute costs a consumer.
+
+*Not drawn, each with its reason.* `CustomEquality` and `CustomComparison` leave the type satisfying
+`equality` and `comparison`; what moves is the result of `=`, a behaviour this gate never claims.
+`StructuralEquality` and `StructuralComparison` assert the default and fail at the type's own
+definition when it cannot hold. `CompilationRepresentation(ModuleSuffix)` renames the module in IL,
+which the `type` line already shows. A comparison or equality constraint lost by INFERENCE (a field
+gaining a function type) is not an attribute and needs none: it rides a field move the gate already
+classes `retype` or `record-widening`.
+
+*Refused, not drawn: the member- and parameter-level attributes.* `ParamArray`, `[<Optional>]`,
+F# `?arg` (`OptionalArgument`), `[<Extension>]`, `CompilerMessage`, `RequiresExplicitTypeArguments`
+and `CompilationRepresentation` with any flag but `ModuleSuffix` (which moves a member between
+instance and static in IL) change which calls compile. Drawing them needs a per-overload identity the
+token grammar does not have, for a shape nothing ships: a scan of the 18 packable assemblies finds
+none. Leaving them unseen would rebuild the blindness this phase removes, so a test refuses them by
+name, member and parameter; the first one shipped is red until the renderer draws it in the same
+change. Rejected: drawing them now, which would add grammar for a case with no instance to test it
+against beyond a probe.
+
+*The since-tag report.* A tag none of whose baselines carries an attribute line predates this phase;
+against it the report compares without them and prints that it did, as Phase 237 does for field
+names. The test is tag-wide rather than per package, because a current package can carry no drawn
+attribute at all. Against `v0.36.0` this hides the six qualifications from the class lines, so the
+`1.0.0` ledger points at their baseline lines instead, and the six were measured as the whole
+attribute difference by rendering the `0.36.0` packages with this renderer. The live gate never
+strips.
+
+*Evidence.* A compiled go-red pair in the test assembly (one union, bare and qualified) classes the
+gain and the loss each as one `retype` printing its reason, and an identical control as unchanged;
+every drawn attribute has a probe and a perturbation leg; a planted `ParamArray` parameter and F#
+optional argument are named by the refusal scan. The regeneration added 107 `attribute` lines across
+17 baselines and changed no other byte.
+
 ## 2026-10-08 — D133: `1.0.0` freezes with no obsolete forward, three shapes close, D101 becomes a gate, and the `OneDotZero` family makes "1.0" a test output
 
 **Recorded by Phase 386. Every package with a forward, `Fuaran.Core.Function`, `Fuaran.Core.Query`,

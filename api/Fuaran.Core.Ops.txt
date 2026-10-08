@@ -4,6 +4,19 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Anchor`1 RequireQualifiedAccess
+attribute Fuaran.Core.Diff+ChangeKind`1 RequireQualifiedAccess
+attribute Fuaran.Core.FootprintModule RequireQualifiedAccess
+attribute Fuaran.Core.GatedApplyFailure`1 RequireQualifiedAccess
+attribute Fuaran.Core.Interference RequireQualifiedAccess
+attribute Fuaran.Core.NestRelation RequireQualifiedAccess
+attribute Fuaran.Core.Ops+Index RequireQualifiedAccess
+attribute Fuaran.Core.PlaceError`1 RequireQualifiedAccess
+attribute Fuaran.Core.RejectionModule RequireQualifiedAccess
+attribute Fuaran.Core.RejectionNounsModule RequireQualifiedAccess
+attribute Fuaran.Core.TreePlacement RequireQualifiedAccess
+attribute Fuaran.Core.WriteDenial RequireQualifiedAccess
+attribute Fuaran.Core.WriteGateModule RequireQualifiedAccess
 ctor Fuaran.Core.Arbitration`2..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!0, !1>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Fuaran.Core.OpScriptProposal`2<!0, !1>, Fuaran.Core.ArbitrationRejection`1<!1>>>)
 ctor Fuaran.Core.Diff+Change`1..ctor(!0, Fuaran.Core.Diff+ChangeKind`1<!0>)
 ctor Fuaran.Core.Footprint..ctor(Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.String>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Collections.FSharpSet`1<System.Tuple`2<System.String, System.String>>)

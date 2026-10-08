@@ -4,6 +4,24 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Dag+CheckpointBreak RequireQualifiedAccess
+attribute Fuaran.Core.Dag+CheckpointFault`1 RequireQualifiedAccess
+attribute Fuaran.Core.Dag+DagAppendIfRejection`1 RequireQualifiedAccess
+attribute Fuaran.Core.Dag+DagAttestFault RequireQualifiedAccess
+attribute Fuaran.Core.Dag+LaneLoadFault RequireQualifiedAccess
+attribute Fuaran.Core.Dag+ReachModule RequireQualifiedAccess
+attribute Fuaran.Core.Dag+Reach`1 NoComparison
+attribute Fuaran.Core.Dag+Reach`1 NoEquality
+attribute Fuaran.Core.Dag+RehashFault RequireQualifiedAccess
+attribute Fuaran.Core.Dag+ReplayAllFault`1 RequireQualifiedAccess
+attribute Fuaran.Core.Dag+ReplayFault`1 RequireQualifiedAccess
+attribute Fuaran.Core.Dag+TotalOrderFault RequireQualifiedAccess
+attribute Fuaran.Core.Dag+VerifiedAppendRejection`2 RequireQualifiedAccess
+attribute Fuaran.Core.DagAppendFault RequireQualifiedAccess
+attribute Fuaran.Core.DagAppendRejection`1 RequireQualifiedAccess
+attribute Fuaran.Core.DagBreakReason RequireQualifiedAccess
+attribute Fuaran.Core.MergeConflictShape RequireQualifiedAccess
+attribute Fuaran.Core.ReconcileFault`2 RequireQualifiedAccess
 ctor Fuaran.Core.Dag+Checkpoint`1..ctor(System.String, !0, System.String)
 ctor Fuaran.Core.Dag+KeyMismatch..ctor(System.String, System.String)
 ctor Fuaran.Core.Dag+LaneBreak..ctor(System.String, Fuaran.Core.DagBreak)
