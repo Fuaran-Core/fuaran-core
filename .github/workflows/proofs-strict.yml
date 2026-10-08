@@ -9,7 +9,7 @@ name: proofs-strict
 # `strict-baseline` artefact. It commits nothing; a maintainer who wants `check.ps1 -Since` to lean
 # on this run downloads the artefact and commits the file.
 #
-# WHAT MAKES IT RED (DECISIONS.md D130, an operator ruling): a model that does not verify, a second
+# WHAT MAKES IT RED (DECISIONS.md D131, an operator ruling): a model that does not verify, a second
 # writer caught by the cache provenance check, a check that finishes under the cached-read threshold
 # (`modules.json` `cachedRead`), or an incomplete budget declaration. A COST overrun never makes it
 # red: a module over its budget is a slow cold check. The job summary lists every cost finding with

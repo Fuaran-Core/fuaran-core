@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-08 — D130: a strict proof run records cost and refuses a cached read; one cached-read threshold replaces the per-module floors
+## 2026-10-08 — D131: a strict proof run records cost and refuses a cached read; one cached-read threshold replaces the per-module floors
 
 **Recorded by Phase 399, on an operator ruling of 2026-10-08. `proofs/kit/check-proof-leg.ps1`,
 `proofs/modules.json` (`cachedRead`), `proofs/check.ps1`, `.github/workflows/proofs-strict.yml`; held

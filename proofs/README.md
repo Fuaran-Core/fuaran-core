@@ -1439,7 +1439,7 @@ cannot keep describing a gate that no longer exists. `fastestSeconds` stays as t
 
 **Observed and not adopted.** Every cold check above printed at least three `Quake:` query lines
 and every cached read printed none. That is a second discriminator that needs no clock, but this
-phase did not adopt it, because the ruling asked for a threshold. `DECISIONS.md` D130 records it as
+phase did not adopt it, because the ruling asked for a threshold. `DECISIONS.md` D131 records it as
 an open option.
 
 **Held by** the `C` arms of `kit/check-proof-leg.tests.ps1`: a genuine checked file put in front of
