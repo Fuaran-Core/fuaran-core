@@ -214,7 +214,7 @@ module LawVectorExport =
                     |> CapabilityRegistry.register d.Cap
                     |> Result.bind (CapabilityRegistry.register d.CapB)
                 with
-                | Ok r -> CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
+                | Ok r -> CapabilityRegistry.enumerate r |> List.map _.Id
                 | Error _ -> []
 
             [ { Id = sprintf "capability-%d-accept" d.Iteration

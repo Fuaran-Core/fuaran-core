@@ -376,7 +376,7 @@ let private lawNamed (fragment: string) (results: LawResult list) =
     |> List.tryFind (fun r -> r.Law.Contains fragment)
     |> function
         | Some r -> r
-        | None -> failtestf "no law whose name contains %s (laws: %A)" fragment (results |> List.map (fun r -> r.Law))
+        | None -> failtestf "no law whose name contains %s (laws: %A)" fragment (results |> List.map _.Law)
 
 [<Tests>]
 let foldConfluenceTests =
@@ -707,7 +707,7 @@ let rejectedLaneTests =
               Expect.isTrue
                   (results
                    |> List.filter (fun r -> not (r.Law.StartsWith SampleAdequacy.guardOpening))
-                   |> List.forall (fun r -> r.Passed))
+                   |> List.forall _.Passed)
                   "the subject laws hold over lane sets that all reject — which is the problem"
 
               let adequacy = lawNamed "sample adequacy" results

@@ -62,7 +62,7 @@ let genCapabilityCall (rng: ConfRng.T) : (string * (string * string) list) * Con
 
     let holes =
         CapabilityRegistry.tryFind id capabilityRegistry
-        |> Option.map (fun c -> c.Signature.Holes)
+        |> Option.map _.Signature.Holes
         |> Option.defaultValue []
 
     let args, r2 =
@@ -205,7 +205,7 @@ let pipelineWitness: CapabilityPipelineWitness =
 // (DECISIONS.md D66); the compute repository's suite certifies them.
 
 let private failing (rs: LawResult list) =
-    rs |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law)
+    rs |> List.filter (fun r -> not r.Passed) |> List.map _.Law
 
 let private allGreen (what: string) (rs: LawResult list) =
     for r in rs do
@@ -238,7 +238,7 @@ let tests =
                   [ "a refusal precedes the body at the domain's host (refused: no body; dispatched: exactly one)" ]
                   "exactly the refusal-precedes-body law is red at the planted host"
 
-              let counterexample = planted |> List.pick (fun r -> r.Counterexample)
+              let counterexample = planted |> List.pick _.Counterexample
 
               Expect.stringContains counterexample "after the body ran 1 time(s)" "and it says the body ran"
 
@@ -353,6 +353,6 @@ let tests =
                     "Conformance.queryLawsAt", [ "QuerySeamWitness" ]
                     "Conformance.capabilityPipelineLawsAt", [ "CapabilityPipelineWitness" ] ] do
                   Expect.equal
-                      (KitRoster.tryFind id |> Option.map (fun f -> f.Witness))
+                      (KitRoster.tryFind id |> Option.map _.Witness)
                       (Some witness)
                       (sprintf "%s names the witness it takes" id) ]

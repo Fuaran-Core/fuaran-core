@@ -93,7 +93,7 @@ let private rankLaneSort (loaded: Dag.Loaded<'Op>) : string list =
     loaded.Dag.Nodes
     |> Map.toList
     |> List.map fst
-    |> List.sortBy (fun id -> ranks.[id], loaded.LaneOf.[id], id)
+    |> List.sortBy (fun id -> ranks[id], loaded.LaneOf[id], id)
 
 /// A downstream session's order by a domain rank: a Kahn drain taking the smallest (domain rank, id) each
 /// step, the ready list re-sorted after every push.
@@ -111,7 +111,7 @@ let private domainRankDrain (rankOf: 'Op -> int) (dag: Dag.T<'Op>) : string list
         |> List.map (fun (p, cs) -> p, cs |> List.map snd)
         |> Map.ofList
 
-    let rank id = rankOf dag.Nodes.[id].Op, id
+    let rank id = rankOf dag.Nodes[id].Op, id
 
     let mutable ready =
         indeg
@@ -128,9 +128,9 @@ let private domainRankDrain (rankOf: 'Op -> int) (dag: Dag.T<'Op>) : string list
         out.Add id
 
         for k in Map.tryFind id children |> Option.defaultValue [] do
-            indeg <- Map.add k (indeg.[k] - 1) indeg
+            indeg <- Map.add k (indeg[k] - 1) indeg
 
-            if indeg.[k] = 0 then
+            if indeg[k] = 0 then
                 ready <- (k :: ready) |> List.sortBy rank
 
     List.ofSeq out
@@ -146,11 +146,11 @@ let private fixtureStore () : Dag.Loaded<CounterOp> =
         store <- s
         tips <- Map.add lane id tips
 
-    let tip lane = [ tips.[lane] ]
+    let tip lane = [ tips[lane] ]
     let heads () = Dag.heads store.Dag
 
     write "alpha" (Inc 1) []
-    let g = tips.["alpha"]
+    let g = tips["alpha"]
     write "beta" (Inc 2) [ g ]
     write "gamma" (Inc 3) [ g ]
     write "alpha" (Inc 4) (tip "alpha")
@@ -249,7 +249,7 @@ let tests =
                         "two parents"
 
                     let id, d = Dag.appendOn h sw x (Inc 9) [ g; a; b ] dag |> ok
-                    Expect.equal d.Nodes.[id].Parents [ g; a; b ] "the parents are stored as given"
+                    Expect.equal d.Nodes[id].Parents [ g; a; b ] "the parents are stored as given"
                     Expect.equal id (Dag.nodeId h sw.Encode [ b; g; a ] x (Inc 9)) "nodeId is the minted id, order-free"
                     Expect.isTrue (Dag.verifyDag h sw d) "an N-parent node verifies"
 
@@ -277,26 +277,26 @@ let tests =
                     let _, hs, dag = threeHeads ()
                     let m, d = Dag.mergeAll h sw x (Inc 7) hs dag |> ok
 
-                    for perm in [ hs; List.rev hs; [ hs.[1]; hs.[2]; hs.[0]; hs.[1] ] ] do
+                    for perm in [ hs; List.rev hs; [ hs[1]; hs[2]; hs[0]; hs[1] ] ] do
                         let m', d' = Dag.mergeAll h sw x (Inc 7) perm dag |> ok
                         Expect.equal m' m "the same id"
-                        Expect.equal d'.Nodes.[m'].Parents (ordinal hs) "the same stored parents"
+                        Expect.equal d'.Nodes[m'].Parents (ordinal hs) "the same stored parents"
 
                     for perm in [ hs; List.rev hs ] do
                         Expect.equal (Dag.appendOn h sw x (Inc 7) perm dag |> ok |> fst) m "appendOn's id"
 
                     Expect.equal (Dag.heads d) [ m ] "one head"
                     Expect.equal (Dag.tryReplayTo sw 0 d m) (Ok 17) "every lane once, then the merge op"
-                    let one, _ = Dag.mergeAll h sw x (Inc 7) [ hs.[0] ] dag |> ok
-                    Expect.equal one (Dag.append h sw x (Inc 7) hs.[0] dag |> ok |> fst) "one head is an append"
+                    let one, _ = Dag.mergeAll h sw x (Inc 7) [ hs[0] ] dag |> ok
+                    Expect.equal one (Dag.append h sw x (Inc 7) hs[0] dag |> ok |> fst) "one head is an append"
 
                 testCase "mergeWith records the script as the merge node and a chain after it"
                 <| fun _ ->
                     let _, a, b, _, _, dag = forkMerge ()
                     let ids, d = Dag.mergeWith h sw x [ Inc 10; Dec 3; Inc 20 ] a b dag |> ok
                     Expect.equal (List.length ids) 3 "three nodes"
-                    Expect.equal d.Nodes.[ids.[0]].Parents [ a; b ] "the first is the merge"
-                    Expect.equal d.Nodes.[ids.[2]].Parents [ ids.[1] ] "the rest a chain"
+                    Expect.equal d.Nodes[ids[0]].Parents [ a; b ] "the first is the merge"
+                    Expect.equal d.Nodes[ids[2]].Parents [ ids[1] ] "the rest a chain"
 
                     Expect.equal
                         (Dag.tryReplayTo sw 0 d (List.last ids))
@@ -343,8 +343,7 @@ let tests =
                     let nodesB = Dag.between dag g b
                     let byNode = Dag.conflictsOfNodes fp nodesA nodesB
 
-                    let byOp =
-                        Dag.conflicts fp (nodesA |> List.map (fun n -> n.Op)) (nodesB |> List.map (fun n -> n.Op))
+                    let byOp = Dag.conflicts fp (nodesA |> List.map _.Op) (nodesB |> List.map _.Op)
 
                     Expect.equal (asOps byNode) byOp "the same report"
                     Expect.isNonEmpty byNode "the lanes interfere"
@@ -354,7 +353,7 @@ let tests =
                     match Dag.reconcileMany sw fp dag g 1 [ c; b ] with
                     | Error(ReconcileFault.LanesInterfere cs) ->
                         Expect.equal (asOps viaHeads) cs "the reconcile's own report"
-                        Expect.equal (viaHeads |> List.map (fun cf -> cf.Left.Id)) [ a; c ] "named by node"
+                        Expect.equal (viaHeads |> List.map _.Left.Id) [ a; c ] "named by node"
                     | other -> failtestf "expected LanesInterfere, got %A" other
 
                 testCase "firstBreak names the earliest break in the history, not the smallest id"
@@ -374,8 +373,8 @@ let tests =
                         let tampered: Dag.T<CounterOp> =
                             DagOf.nodes (
                                 d3.Nodes
-                                |> Map.add a { d3.Nodes.[a] with Op = Inc 99 }
-                                |> Map.add b { d3.Nodes.[b] with Op = Inc 98 }
+                                |> Map.add a { d3.Nodes[a] with Op = Inc 99 }
+                                |> Map.add b { d3.Nodes[b] with Op = Inc 98 }
                             )
 
                         match Dag.firstBreak h sw tampered with
@@ -408,7 +407,7 @@ let tests =
 
                     // the app: (longest-path rank, lane, id), a sort
                     Expect.equal
-                        (Dag.totalOrderBy (fun (n: DagNode<CounterOp>) -> ranks.[n.Id], loaded.LaneOf.[n.Id]) dag
+                        (Dag.totalOrderBy (fun (n: DagNode<CounterOp>) -> ranks[n.Id], loaded.LaneOf[n.Id]) dag
                          |> ok)
                         (rankLaneSort loaded)
                         "app"
@@ -428,12 +427,12 @@ let tests =
                 <| fun _ ->
                     let g, a, b, c, m, dag = forkMerge ()
                     let r = Dag.ranks dag |> ok
-                    Expect.equal [ r.[g]; r.[a]; r.[b]; r.[c]; r.[m] ] [ 0; 1; 1; 2; 3 ] "depths"
+                    Expect.equal [ r[g]; r[a]; r[b]; r[c]; r[m] ] [ 0; 1; 1; 2; 3 ] "depths"
 
                 testCase "a cycle is a typed refusal naming every unplaced node"
                 <| fun _ ->
                     let g, _, _, _, _, dag = forkMerge ()
-                    let n = dag.Nodes.[g]
+                    let n = dag.Nodes[g]
 
                     let cyclic: Dag.T<CounterOp> =
                         DagOf.nodes (
@@ -514,7 +513,7 @@ let tests =
                     let texts = Dag.lanesToJsonl sw.Encode loaded
                     Expect.equal (texts |> List.map fst) [ "alpha"; "beta"; "gamma" ] "one file per lane"
 
-                    for perm in [ texts; List.rev texts; [ texts.[1]; texts.[2]; texts.[0] ] ] do
+                    for perm in [ texts; List.rev texts; [ texts[1]; texts[2]; texts[0] ] ] do
                         let l = Dag.loadLanes sw perm |> ok
                         Expect.equal (Dag.toJsonl sw.Encode l.Dag) (Dag.toJsonl sw.Encode loaded.Dag) "the union"
                         Expect.equal l.LaneOf loaded.LaneOf "the attribution"
@@ -533,7 +532,7 @@ let tests =
                     let texts = Dag.lanesToJsonl sw.Encode loaded
 
                     Expect.equal
-                        (Dag.loadLanes sw (texts @ [ texts.[0] ]))
+                        (Dag.loadLanes sw (texts @ [ texts[0] ]))
                         (Error(Dag.LaneLoadFault.DuplicateLane "alpha"))
                         "duplicate"
 
@@ -544,14 +543,14 @@ let tests =
                     let some =
                         loaded.Dag.Nodes
                         |> Map.toList
-                        |> List.find (fun (id, _) -> loaded.LaneOf.[id] = "beta")
+                        |> List.find (fun (id, _) -> loaded.LaneOf[id] = "beta")
                         |> snd
 
                     let copy =
                         "zeta", Dag.toJsonl sw.Encode (DagOf.nodes (Map.ofList [ some.Id, some ]))
 
                     let l = Dag.loadLanes sw (copy :: texts) |> ok
-                    Expect.equal l.LaneOf.[some.Id] "beta" "an identical node keeps the smaller lane"
+                    Expect.equal l.LaneOf[some.Id] "beta" "an identical node keeps the smaller lane"
 
                     let forged =
                         "aardvark",
@@ -570,7 +569,7 @@ let tests =
                     let victim =
                         loaded.Dag.Nodes
                         |> Map.toList
-                        |> List.find (fun (id, _) -> loaded.LaneOf.[id] = "gamma")
+                        |> List.find (fun (id, _) -> loaded.LaneOf[id] = "gamma")
                         |> fst
 
                     let tampered =
@@ -580,7 +579,7 @@ let tests =
                                     loaded.Dag.Nodes
                                     |> Map.add
                                         victim
-                                        { loaded.Dag.Nodes.[victim] with
+                                        { loaded.Dag.Nodes[victim] with
                                             Op = Inc 77 }
                                 ) }
 
@@ -598,14 +597,14 @@ let tests =
                     let gammaTip =
                         loaded.Dag.Nodes
                         |> Map.toList
-                        |> List.filter (fun (id, _) -> loaded.LaneOf.[id] = "gamma")
+                        |> List.filter (fun (id, _) -> loaded.LaneOf[id] = "gamma")
                         |> List.map fst
                         |> List.find (fun id ->
                             loaded.Dag.Nodes
                             |> Map.forall (fun _ n ->
-                                not (List.contains id n.Parents) || loaded.LaneOf.[n.Id] <> "gamma"))
+                                not (List.contains id n.Parents) || loaded.LaneOf[n.Id] <> "gamma"))
 
-                    let parents = loaded.Dag.Nodes.[gammaTip].Parents
+                    let parents = loaded.Dag.Nodes[gammaTip].Parents
 
                     let sib, forked =
                         Dag.appendOnLane h sw (Human "gamma") (Inc 555) parents "gamma" loaded |> ok
@@ -639,7 +638,7 @@ let tests =
                         let ns =
                             loaded.Dag.Nodes
                             |> Map.toList
-                            |> List.filter (fun (id, _) -> loaded.LaneOf.[id] = lane)
+                            |> List.filter (fun (id, _) -> loaded.LaneOf[id] = lane)
 
                         let seqs = ns |> List.map (fun (_, n) -> let _, s, _ = key n in s) |> List.sort
                         Expect.equal seqs [ 0 .. List.length ns - 1 ] ("one position per node in " + lane)
@@ -656,7 +655,7 @@ let tests =
                     Expect.equal (Dag.toJsonl sw.Encode back) (Dag.toJsonl sw.Encode loaded.Dag) "round trip"
 
                     for KeyValue(o, n) in ids do
-                        Expect.equal ids'.[n] o "the id map inverts"
+                        Expect.equal ids'[n] o "the id map inverts"
 
                     let relaned, _ = Dag.rehashLanes h OpStream.sha256Hash sw loaded |> ok
                     Expect.equal (Dag.verifyLanes OpStream.sha256Hash sw relaned) (Ok()) "the lanes carried"
@@ -673,7 +672,7 @@ let tests =
                             loaded.Dag.Nodes
                             |> Map.add
                                 victim
-                                { loaded.Dag.Nodes.[victim] with
+                                { loaded.Dag.Nodes[victim] with
                                     Op = Inc 31 }
                         )
 

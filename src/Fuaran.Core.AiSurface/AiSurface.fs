@@ -374,7 +374,7 @@ module Proposals =
         let nextId (q: ProposalQueue<'Op>) : int =
             match q.Proposals with
             | [] -> 1
-            | ps -> (ps |> List.map (fun p -> p.Id) |> List.max) + 1
+            | ps -> (ps |> List.map _.Id |> List.max) + 1
 
     /// Why a proposal could not be parked under a caller-chosen id (Phase 298): the
     /// queue already holds that id; `held` enumerates the ids it holds.
@@ -408,7 +408,7 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         : Result<ProposalQueue<'Op>, ProposeFailure> =
         if q.Proposals |> List.exists (fun p -> p.Id = id) then
-            Error(ProposeFailure.DuplicateProposal(id, q.Proposals |> List.map (fun p -> p.Id)))
+            Error(ProposeFailure.DuplicateProposal(id, q.Proposals |> List.map _.Id))
         else
             Ok(append id author proposedAt intent ops q)
 
@@ -454,7 +454,7 @@ module Proposals =
 
     let private find (id: int) (q: ProposalQueue<'Op>) : Result<Proposal<'Op>, ApprovalFailure<'Rej>> =
         match q.Proposals |> List.tryFind (fun p -> p.Id = id) with
-        | None -> Error(UnknownProposal(id, Queue.pending q |> List.map (fun p -> p.Id)))
+        | None -> Error(UnknownProposal(id, Queue.pending q |> List.map _.Id))
         | Some p ->
             match p.Status with
             | ProposalStatus.Pending -> Ok p
@@ -738,5 +738,5 @@ module AiSurface =
         match w.ReadTools |> List.tryFind (fun t -> t.Name = name) with
         | Some t -> Ok(t.Run state)
         | None ->
-            let known = w.ReadTools |> List.map (fun t -> t.Name) |> String.concat ", "
+            let known = w.ReadTools |> List.map _.Name |> String.concat ", "
             Error("unknown read tool '" + name + "'; available: " + known)

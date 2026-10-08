@@ -303,7 +303,7 @@ let scoreIdl: Idl =
           KeyOrder = KeyOrder.Declared }
       Harden = HardenPolicy.Undeclared }
 
-let private nodeTags = scoreIdl.Kinds |> List.map (fun k -> k.Tag) |> Set.ofList
+let private nodeTags = scoreIdl.Kinds |> List.map _.Tag |> Set.ofList
 
 // ---------------------------------------------------------------------------
 // The shape adapter that used to sit here is DELETED (Phases 108/109) — both
@@ -438,17 +438,17 @@ let tests =
               Expect.isEmpty (Declare.wireShapeErrors scoreIdl) "the declared wire shape is well-formed"
 
               Expect.equal
-                  (List.length (List.distinct (scoreIdl.Kinds |> List.map (fun k -> k.Tag))))
+                  (List.length (List.distinct (scoreIdl.Kinds |> List.map _.Tag)))
                   (List.length scoreIdl.Kinds)
                   "kind tags are distinct"
 
               Expect.equal
-                  (List.length (List.distinct (scoreIdl.Records |> List.map (fun r -> r.Name))))
+                  (List.length (List.distinct (scoreIdl.Records |> List.map _.Name)))
                   (List.length scoreIdl.Records)
                   "record names are distinct"
 
-              let enumNames = scoreIdl.Enums |> List.map (fun e -> e.Name) |> Set.ofList
-              let recordNames = scoreIdl.Records |> List.map (fun r -> r.Name) |> Set.ofList
+              let enumNames = scoreIdl.Enums |> List.map _.Name |> Set.ofList
+              let recordNames = scoreIdl.Records |> List.map _.Name |> Set.ofList
 
               let rec referenced t =
                   match t with

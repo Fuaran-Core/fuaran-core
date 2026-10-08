@@ -803,7 +803,7 @@ let private realCases () =
 let private realLaws () =
     KitRoster.families
     |> List.filter (fun f -> f.Module = "Conformance")
-    |> List.map (fun f -> f.Entry)
+    |> List.map _.Entry
     |> Set.ofList
 
 /// A fixture ladder is measured against a FIXTURE module list, a FIXTURE case set and a FIXTURE law
@@ -1577,7 +1577,7 @@ let classifyConePath (roster: string list) (path: string) : ConeInput =
 /// member instead. Two versions with equal code differ in prose only.
 let scriptCode (text: string) : string =
     text.Replace("\r\n", "\n").Split '\n'
-    |> Array.map (fun l -> l.TrimEnd())
+    |> Array.map _.TrimEnd()
     |> Array.filter (fun l ->
         let t = l.TrimStart()
 

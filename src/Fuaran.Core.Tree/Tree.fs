@@ -12,8 +12,9 @@ type IdWitness<'Id> =
         /// `Tree.Index`, `FreshIds`). Must be injective: two ids that render alike are one id to
         /// every uniqueness check.
         ToString: 'Id -> string
-        /// The inverse of `ToString` (`OfString (ToString id)` equals `id`). In this package only
-        /// `FreshIds` reads it, to turn a minted candidate key back into an id.
+        /// The inverse of `ToString` (`OfString (ToString id)` equals `id`). Read by `FreshIds`, to turn a
+        /// minted candidate key back into an id, and by `WriteGate`, to turn a footprint key back into the
+        /// id it walks to — so a write gate's answer rests on this inverse holding.
         OfString: string -> 'Id
         /// Id equality for the walking lookups (`tryFind`, `parentOf`, `path`, `updateNode`). Must
         /// hold exactly when the two `ToString` keys are equal, or the walks and the keyed index

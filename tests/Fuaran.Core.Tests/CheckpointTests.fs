@@ -61,7 +61,7 @@ let private branchBelow () =
 
 /// One sidecar line with the character at `i` replaced.
 let private flipAt (i: int) (s: string) =
-    let c = s.[i]
+    let c = s[i]
 
     let c' =
         if System.Char.IsDigit c then
@@ -205,7 +205,7 @@ let tests =
                   (Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Rejected(rejecting, "would go negative"))))
                   "the domain's rejection, at the node the full replay names"
 
-              let template = dag.Nodes.[a]
+              let template = dag.Nodes[a]
 
               let cyclic: Dag.T<CounterOp> =
                   DagOf.nodes (
@@ -319,7 +319,7 @@ let tests =
               let lines = lane.Split('\n')
 
               for k in 0 .. lines.Length - 1 do
-                  let line = lines.[k]
+                  let line = lines[k]
 
                   let positions =
                       [ line.IndexOf("\"id\":\"") + 6 // the node id
@@ -331,9 +331,9 @@ let tests =
 
                   for i in positions do
                       let lines' = Array.copy lines
-                      lines'.[k] <- flipAt i line
+                      lines'[k] <- flipAt i line
                       let lane' = String.concat "\n" lines'
-                      Expect.isFalse (verifies lane' side) (sprintf "line %d byte %d changed: %s" k i lines'.[k])
+                      Expect.isFalse (verifies lane' side) (sprintf "line %d byte %d changed: %s" k i lines'[k])
 
               for marker in [ "\"state\":"; "\"prevHash\":\""; "\"hash\":\"" ] do
                   let i = side.IndexOf(marker) + marker.Length

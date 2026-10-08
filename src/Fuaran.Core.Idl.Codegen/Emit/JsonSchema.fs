@@ -138,8 +138,7 @@ module internal JsonSchema =
             :: (wire |> List.map (fun f -> f.Name, schemaOf f.Type))
 
         let required =
-            disc
-            :: (wire |> List.filter (fun f -> f.Opt = Required) |> List.map (fun f -> f.Name))
+            disc :: (wire |> List.filter (fun f -> f.Opt = Required) |> List.map _.Name)
 
         JObj
             [ "type", JStr "object"
@@ -243,7 +242,8 @@ module internal JsonSchema =
                 | _ -> ()
 
             let discoverFields (fields: IdlField list) =
-                wireFields fields |> List.iter (fun f -> discover f.Type)
+                for f in wireFields fields do
+                    discover f.Type
 
             for u in idl.Unions do
                 if List.isEmpty u.Params then
@@ -279,8 +279,8 @@ module internal JsonSchema =
                     | None -> ()
                     | Some(_, u, subst) ->
                         for c in u.Cases do
-                            wireFields c.Fields
-                            |> List.iter (fun f -> discover (TypeParams.substitute subst f.Type))
+                            for f in wireFields c.Fields do
+                                discover (TypeParams.substitute subst f.Type)
 
             if guard > 1000 then
                 Error(

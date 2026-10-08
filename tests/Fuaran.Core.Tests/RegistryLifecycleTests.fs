@@ -70,7 +70,7 @@ let private rules (ids: string list) : Validator.RuleRegistry<unit, string> =
     Validator.ofFamilies (ids |> List.map family) |> orFail
 
 let private capIds r =
-    CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
+    CapabilityRegistry.enumerate r |> List.map _.Id
 
 let private ofKind (kind: string) (r: FunctionRegistry) : string list =
     FunctionRegistry.findBySignature
@@ -78,7 +78,7 @@ let private ofKind (kind: string) (r: FunctionRegistry) : string list =
         { ResultType = Some kind
           Available = [ hole 0 ] }
         r
-    |> List.map (fun e -> e.Capability.Id)
+    |> List.map _.Capability.Id
 
 [<Tests>]
 let tests =
@@ -175,7 +175,7 @@ let tests =
               Expect.equal
                   (QueryRegistry.restrict keep (queries [ "a"; "b" ])
                    |> QueryRegistry.enumerate
-                   |> List.map (fun q -> q.Id))
+                   |> List.map _.Id)
                   [ "b" ]
                   "query"
 

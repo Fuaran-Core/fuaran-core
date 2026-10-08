@@ -52,8 +52,8 @@ let tests =
               | Ok(st, recs) ->
                   Expect.equal st 6 "5 + 3 - 2"
                   Expect.equal (List.length recs) 3 "three records"
-                  Expect.equal recs.[0].PrevHash "" "genesis prev is empty"
-                  Expect.equal recs.[1].PrevHash recs.[0].Hash "chain links"
+                  Expect.equal recs[0].PrevHash "" "genesis prev is empty"
+                  Expect.equal recs[1].PrevHash recs[0].Hash "chain links"
               | Error e -> failtestf "unexpected %A" e
 
           testCase "append surfaces a domain rejection unchanged"
@@ -100,7 +100,7 @@ let tests =
               let state, skipped = OpStream.replayLenient sw 0 recs
               Expect.equal state 8 "the surviving ops (Inc 5, Inc 3) fold to 8"
               Expect.equal (List.length skipped) 1 "one op was skipped"
-              Expect.equal (fst skipped.[0]) 1 "the skipped op was at index 1 (the Dec 9)"
+              Expect.equal (fst skipped[0]) 1 "the skipped op was at index 1 (the Dec 9)"
 
           testCase "toJsonl / fromJsonl round-trips the records"
           <| fun _ ->
@@ -158,12 +158,12 @@ let tests =
                           "the rehashed chain verifies under the default"
 
                       Expect.equal
-                          (canonical |> List.map (fun r -> r.Op))
-                          (legacy |> List.map (fun r -> r.Op))
+                          (canonical |> List.map _.Op)
+                          (legacy |> List.map _.Op)
                           "the ops are preserved — only the hash chain changed"
 
                       Expect.equal (OpStream.replay sw 0 canonical) (Ok st) "replay reproduces the same state"
-                      Expect.equal canonical.[0].PrevHash "" "genesis is now the canonical empty sentinel"
+                      Expect.equal canonical[0].PrevHash "" "genesis is now the canonical empty sentinel"
                   | Error e -> failtestf "rehash failed: %s" e
               | Error e -> failtestf "unexpected %A" e
 
@@ -542,12 +542,12 @@ let attributedTests =
               | Ok(_, recs) ->
                   let byA = OpStream.Attributed.byActor recs
                   Expect.equal (Map.count byA) 2 "two actors"
-                  Expect.equal (byA.["alice"] |> List.map (fun r -> r.Seq)) [ 0; 2 ] "alice's records in stream order"
-                  Expect.equal (byA.["bob"] |> List.map (fun r -> r.Seq)) [ 1 ] "bob's one record"
+                  Expect.equal (byA["alice"] |> List.map _.Seq) [ 0; 2 ] "alice's records in stream order"
+                  Expect.equal (byA["bob"] |> List.map _.Seq) [ 1 ] "bob's one record"
 
                   let byS = OpStream.Attributed.bySession recs
-                  Expect.equal (byS.["s1"] |> List.map (fun r -> r.Seq)) [ 0; 1 ] "session s1 groups two"
-                  Expect.equal (byS.["s2"] |> List.map (fun r -> r.Seq)) [ 2 ] "session s2 one"
+                  Expect.equal (byS["s1"] |> List.map _.Seq) [ 0; 1 ] "session s1 groups two"
+                  Expect.equal (byS["s2"] |> List.map _.Seq) [ 2 ] "session s2 one"
               | Error e -> failtestf "unexpected %A" e
 
           // Phase 79 — compare-and-append (optimistic concurrency).

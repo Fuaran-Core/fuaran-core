@@ -134,7 +134,7 @@ module CapabilityLookup =
 
     /// A function registry as a lookup: each entry's capability, by its id, and the registry's policy.
     let ofFunctionRegistry (r: FunctionRegistry) : CapabilityLookup =
-        { TryFind = fun id -> FunctionRegistry.tryFind id r |> Option.map (fun e -> e.Capability)
+        { TryFind = fun id -> FunctionRegistry.tryFind id r |> Option.map _.Capability
           Known = FunctionRegistry.ids r
           Policy = r.Policy }
 
@@ -235,14 +235,14 @@ module CapabilityPipeline =
                     | None -> Error(PipelineError.PipelineNoSuchCapability(capId, lookup.Known))
                     | Some cap ->
                         let holes = cap.Signature.Holes
-                        let declared = holes |> List.map (fun h -> h.Addr)
+                        let declared = holes |> List.map _.Addr
 
                         let edgeFault (addr: string) (up: string) (argSpace: ValueSpace) =
                             match Map.tryFind up nodeById with
                             | None -> Some(PipelineError.UnknownNode up)
                             | Some _ when up = nid -> Some(PipelineError.PipelineCycle(nid, [ nid ]))
                             | Some upNode ->
-                                if position.[up] > position.[nid] then
+                                if position[up] > position[nid] then
                                     match pathTo nid up with
                                     | Some path -> Some(PipelineError.PipelineCycle(nid, nid :: path))
                                     | None -> Some(PipelineError.PipelineForwardEdge(nid, addr, up))
@@ -287,7 +287,7 @@ module CapabilityPipeline =
                             let unbound =
                                 holes
                                 |> List.filter (fun h -> h.Required && not (bound.Contains h.Addr))
-                                |> List.map (fun h -> h.Addr)
+                                |> List.map _.Addr
 
                             if List.isEmpty unbound then
                                 go rest
@@ -582,7 +582,7 @@ module CapabilityPipeline =
                   | Invoke(id, _, _, args) ->
                       for _, src in args do
                           match src with
-                          | FromNode up -> yield up, id
+                          | FromNode up -> up, id
                           | Literal _ -> ()
                   | Source _ -> () ]
             |> List.groupBy fst

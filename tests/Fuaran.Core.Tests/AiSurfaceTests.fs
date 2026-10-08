@@ -91,7 +91,7 @@ let state0 = { Notes = [ "n1", "hello" ] }
 let notePolicy (_: string) (op: NoteOp) : PolicyDecision =
     match op with
     | RemoveNote _ -> PolicyDecision.NeedsApproval
-    | AddNote(id, _) when id.Length > 0 && int id.[id.Length - 1] % 2 = 1 ->
+    | AddNote(id, _) when id.Length > 0 && int id[id.Length - 1] % 2 = 1 ->
         PolicyDecision.deny "odd note ids are reserved"
     | AddNote _ -> PolicyDecision.Allow
 
@@ -246,7 +246,7 @@ let tests =
                       state0
               with
               | Proposals.SubmitProposed(q, id) ->
-                  Expect.equal (Proposals.Queue.pending q |> List.map (fun p -> p.Id)) [ id ] "parked pending"
+                  Expect.equal (Proposals.Queue.pending q |> List.map _.Id) [ id ] "parked pending"
 
                   match Proposals.approve gated "reviewer" "t1" id q state0 with
                   | Ok(q2, s) ->
@@ -338,12 +338,12 @@ let tests =
               let domain = Conformance.aiSurfaceLawsAt witness genNoteOp state0 1234 200
 
               Expect.equal
-                  (domain |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  (domain |> List.filter (fun r -> not r.Passed) |> List.map _.Law)
                   [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLawsAt"
                     + "the sample reached every policy decision the laws distinguish" ]
                   "exactly the policy-decision guard is red"
 
-              match domain |> List.tryPick (fun r -> r.Counterexample) with
+              match domain |> List.tryPick _.Counterexample with
               | Some c -> Expect.stringContains c "never reached parked, denied" "and it names the unreached decisions"
               | None -> failtest "a red guard carries its counterexample"
 
@@ -373,7 +373,7 @@ let tests =
                   Conformance.aiSurfaceLawsAt policedWitness applicableOnly state0 1234 200
 
               Expect.equal
-                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map _.Law)
                   [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLawsAt"
                     + "the sample reached every rejected op the laws distinguish" ]
                   "exactly the rejected-op guard is red" ]

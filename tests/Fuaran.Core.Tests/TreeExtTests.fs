@@ -7,7 +7,7 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
-let private ids (ns: RNode list) = ns |> List.map (fun n -> n.Id)
+let private ids (ns: RNode list) = ns |> List.map _.Id
 
 [<Tests>]
 let tests =
@@ -152,13 +152,13 @@ let indexTests =
 
               for id in Tree.ids nodew t do
                   Expect.equal
-                      (Tree.Index.tryFind idw id ix |> Option.map (fun n -> n.Id))
-                      (Tree.tryFind nodew idw id t |> Option.map (fun n -> n.Id))
+                      (Tree.Index.tryFind idw id ix |> Option.map _.Id)
+                      (Tree.tryFind nodew idw id t |> Option.map _.Id)
                       (sprintf "tryFind %s" id)
 
                   Expect.equal
-                      (Tree.Index.parentOf idw id ix |> Option.map (fun n -> n.Id))
-                      (Tree.parentOf nodew idw id t |> Option.map (fun n -> n.Id))
+                      (Tree.Index.parentOf idw id ix |> Option.map _.Id)
+                      (Tree.parentOf nodew idw id t |> Option.map _.Id)
                       (sprintf "parentOf %s" id)
 
                   Expect.equal (Tree.Index.path idw id ix) (Tree.path nodew idw id t) (sprintf "path %s" id)

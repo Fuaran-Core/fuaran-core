@@ -114,7 +114,7 @@ let private spike (p: Proposal) =
 let private legOf (r: SpikeReport) (name: string) =
     match r.Legs |> List.tryFind (fun l -> l.Name = name) with
     | Some l -> l
-    | None -> failtestf "no '%s' leg in the report (legs: %A)" name (r.Legs |> List.map (fun l -> l.Name))
+    | None -> failtestf "no '%s' leg in the report (legs: %A)" name (r.Legs |> List.map _.Name)
 
 /// Phase 230 — the operator command the harness now lives behind. The CLI assembly is the one this
 /// suite compiled against, so its own copy in the test output is the one run; it is shelled rather

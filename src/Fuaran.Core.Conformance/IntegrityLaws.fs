@@ -662,7 +662,7 @@ module internal IntegrityLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let chainHashes (rs: OpRecord<'Op> list) = rs |> List.map (fun r -> r.Hash)
+        let chainHashes (rs: OpRecord<'Op> list) = rs |> List.map _.Hash
 
         let determinism =
             LawKit.LawCell "hash determinism (the same op sequence hashes to the same chain across builds)"
@@ -771,7 +771,7 @@ module internal IntegrityLaws =
                     if victim.Hash.Length = 0 then
                         "x"
                     else
-                        let c = victim.Hash.[0]
+                        let c = victim.Hash[0]
                         let c' = if c = '0' then '1' else '0'
                         string c' + victim.Hash.Substring(1)
 

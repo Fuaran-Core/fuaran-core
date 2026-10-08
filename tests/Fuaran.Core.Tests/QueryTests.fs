@@ -102,7 +102,7 @@ let tests =
                   |> Result.toOption
                   |> Option.get
 
-              Expect.equal (QueryRegistry.enumerate r |> List.map (fun q -> q.Id)) [ "aaa"; "zzz" ] "id-sorted"
+              Expect.equal (QueryRegistry.enumerate r |> List.map _.Id) [ "aaa"; "zzz" ] "id-sorted"
 
           testCase "dispatch validates params before running the resolver"
           <| fun _ ->

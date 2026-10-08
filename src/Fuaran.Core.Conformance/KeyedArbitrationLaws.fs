@@ -198,13 +198,13 @@ module internal KeyedArbitrationLaws =
                 fun () -> at "arbitrateWith is not deterministic / permutation-invariant"
             )
 
-            let acceptedIds = result.Accepted |> List.map (fun p -> p.Id)
+            let acceptedIds = result.Accepted |> List.map _.Id
             let rejectedIds = result.Rejected |> List.map (fun (p, _) -> p.Id)
             acceptedSeen <- acceptedSeen + List.length acceptedIds
             rejectedSeen <- rejectedSeen + List.length rejectedIds
 
             partition.Check(
-                List.sort (acceptedIds @ rejectedIds) = (proposals |> List.map (fun p -> p.Id) |> List.sort),
+                List.sort (acceptedIds @ rejectedIds) = (proposals |> List.map _.Id |> List.sort),
                 fun () -> at "accepted+rejected ≠ input (dropped or duplicated)"
             )
 
@@ -244,7 +244,7 @@ module internal KeyedArbitrationLaws =
                     )
 
             // the accepted scripts land under the keyed engine, in any order, to one tree.
-            let scripts = result.Accepted |> List.map (fun p -> p.Ops)
+            let scripts = result.Accepted |> List.map _.Ops
 
             let orders =
                 [ List.concat scripts

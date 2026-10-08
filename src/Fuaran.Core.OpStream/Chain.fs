@@ -743,8 +743,8 @@ module internal OpStreamChain =
             genesis
             seq0
             (fun (r: OpRecord<'Op>) -> r.Seq)
-            (fun r -> r.PrevHash)
-            (fun r -> r.Hash)
+            _.PrevHash
+            _.Hash
             (fun r -> cfg.Payload r.Seq r.Actor (w.Encode r.Op))
             records
 

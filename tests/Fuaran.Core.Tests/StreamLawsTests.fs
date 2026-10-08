@@ -76,7 +76,7 @@ let casLawTests =
               let wide = Conformance.casLaws sw stratifiedStreamGen wideHash 4242 200
 
               Expect.isTrue
-                  (wide |> List.forall (fun r -> r.Passed))
+                  (wide |> List.forall _.Passed)
                   (sprintf "casLaws green under a wide HashFn: %A" (wide |> List.filter (fun r -> not r.Passed)))
 
               // seed-replay determinism
@@ -93,7 +93,7 @@ let casLawTests =
                   Conformance.casLaws sw refusalFreeStreamGen OpStream.defaultHash 4242 200
 
               Expect.equal
-                  (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                  (results |> List.filter (fun r -> not r.Passed) |> List.map _.Law)
                   [ SampleAdequacy.lawPrefix "Conformance.casLaws"
                     + "the sample reached every refused op the laws distinguish" ]
                   "exactly the refused-op guard is red" ]
@@ -117,7 +117,7 @@ let reducerGuardTests =
               let results = Conformance.reducer sw.Apply incOnlyGen None 314 200
 
               Expect.isTrue
-                  (subjectOf results |> List.forall (fun r -> r.Passed))
+                  (subjectOf results |> List.forall _.Passed)
                   "every subject law is green — which is the problem the guard exists for"
 
               Expect.isFalse
@@ -166,7 +166,7 @@ let streamAdequacyTests =
               let results = Conformance.streamLaws sw allRefusedGen OpStream.defaultHash 4242 200
 
               Expect.isTrue
-                  (subjectOf results |> List.forall (fun r -> r.Passed))
+                  (subjectOf results |> List.forall _.Passed)
                   "every subject law holds over an empty chain — which is the problem the guard exists for"
 
               for side in [ "accepted op"; "tampered chain" ] do

@@ -39,9 +39,9 @@ let medianMs (runs: int) (f: unit -> obj) : float =
     let mid = runs / 2
 
     if runs % 2 = 1 then
-        times.[mid]
+        times[mid]
     else
-        (times.[mid - 1] + times.[mid]) / 2.0
+        (times[mid - 1] + times[mid]) / 2.0
 
 /// One corpus prepared and its laws asserted: a corpus that fails is an error, never a missing row.
 let preparedChecked (pins: bool) (name: string) (build: unit -> Fuaran.Core.JVal) : Corpus.Prepared =

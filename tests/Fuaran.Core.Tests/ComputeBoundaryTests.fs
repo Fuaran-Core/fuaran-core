@@ -101,7 +101,7 @@ let crossings (edges: Map<string, string list>) (names: string list) : (string *
 /// The names in a list that ARE compute ids, compared without regard to case (a package id is
 /// case-insensitive, and a directory on this repository's development machines is too).
 let computeNamed (names: string seq) : string list =
-    let lowered = compute |> Set.map (fun c -> c.ToLowerInvariant())
+    let lowered = compute |> Set.map _.ToLowerInvariant()
 
     names
     |> Seq.filter (fun n -> Set.contains (n.ToLowerInvariant()) lowered)

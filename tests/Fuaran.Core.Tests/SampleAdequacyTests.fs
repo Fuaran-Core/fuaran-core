@@ -74,7 +74,7 @@ let guardTests =
 
               let green = SampleAdequacy.check "fam" 1 demands [ 1; 2; 11 ]
               Expect.equal (List.length green) 2 "one law per demand"
-              Expect.isTrue (green |> List.forall (fun r -> r.Passed)) "the sample reached both and spanned far enough"
+              Expect.isTrue (green |> List.forall _.Passed) "the sample reached both and spanned far enough"
 
               let red = SampleAdequacy.check "fam" 1 demands [ 2; 4; 6 ]
               Expect.isFalse (List.item 0 red).Passed "no odd sample"

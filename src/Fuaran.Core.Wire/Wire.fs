@@ -353,7 +353,7 @@ module Json =
     /// once so that no escape formats a number.
     let private controlEscapes: string[] =
         let hex = "0123456789abcdef"
-        Array.init 0x20 (fun c -> "\\u00" + string hex.[c >>> 4] + string hex.[c &&& 0xF])
+        Array.init 0x20 (fun c -> "\\u00" + string hex[c >>> 4] + string hex[c &&& 0xF])
 
     /// The index of the first character of `s` the rule escapes — `"`, `\` or a control character
     /// below `U+0020` — or `-1` when there is none. Under Fable it is one native regex search,
@@ -369,7 +369,7 @@ module Json =
         let mutable found = -1
 
         while found < 0 && i < s.Length do
-            let code = int s.[i]
+            let code = int s[i]
 
             if code < 0x20 || code = 0x22 || code = 0x5C then
                 found <- i
@@ -389,7 +389,7 @@ module Json =
         let mutable start = first
 
         for i in first .. s.Length - 1 do
-            let code = int s.[i]
+            let code = int s[i]
 
             if code < 0x20 || code = 0x22 || code = 0x5C then
                 if i > start then
@@ -397,7 +397,7 @@ module Json =
 
                 (if code = 0x22 then sb.Append("\\\"")
                  elif code = 0x5C then sb.Append("\\\\")
-                 else sb.Append(controlEscapes.[code]))
+                 else sb.Append(controlEscapes[code]))
                 |> ignore
 
                 start <- i + 1
@@ -668,10 +668,10 @@ module Json =
         let mutable found = None
 
         while found.IsNone && k < n do
-            let u = int s.[k]
+            let u = int s[k]
 
             if u >= 0xD800 && u <= 0xDBFF then
-                if k + 1 < n && int s.[k + 1] >= 0xDC00 && int s.[k + 1] <= 0xDFFF then
+                if k + 1 < n && int s[k + 1] >= 0xDC00 && int s[k + 1] <= 0xDFFF then
                     k <- k + 2
                 else
                     found <- Some k
@@ -695,7 +695,7 @@ module Json =
             |> Option.map (fun k ->
                 what
                 + " holds the unpaired surrogate U+"
-                + (int s.[k]).ToString("X4")
+                + (int s[k]).ToString("X4")
                 + " at unit "
                 + string k)
 
@@ -716,7 +716,7 @@ module Json =
     /// both instead.
     let encode (v: JVal) : string = render v
 
-    /// Total, guarded render (Phase 12). `render` formats a `JFloat` with `"{0:R}"`, so a
+    /// Total, guarded render (Phase 12). `render` lays a `JFloat` out with `FloatLayout.roundTrip`, so a
     /// non-finite float (`NaN` / `Infinity` / `-Infinity`) emits a token that is not valid JSON
     /// and that `parse` then rejects — `render` succeeds but produces un-parseable wire, breaking
     /// `render ∘ parse = id`. The Fuaran wire model has no non-finite float (the same posture as
@@ -747,7 +747,7 @@ module Json =
     /// The index of the first digit of `tok` from `k` on that is not `0` (or `tok.Length`): where
     /// `readInt32`'s significant digits begin (Phase 372).
     let rec private firstSignificant (tok: string) (k: int) : int =
-        if k < tok.Length && tok.[k] = '0' then
+        if k < tok.Length && tok[k] = '0' then
             firstSignificant tok (k + 1)
         else
             k
@@ -778,7 +778,7 @@ module Json =
     /// holds the branch the node measurement depends on.
     let readInt32 (tok: string) : int option =
         let digitsFrom =
-            if tok.Length > 0 && (tok.[0] = '-' || tok.[0] = '+') then
+            if tok.Length > 0 && (tok[0] = '-' || tok[0] = '+') then
                 1
             else
                 0
@@ -786,7 +786,7 @@ module Json =
         let mutable shaped = tok.Length > digitsFrom
 
         for k in digitsFrom .. tok.Length - 1 do
-            if tok.[k] < '0' || tok.[k] > '9' then
+            if tok[k] < '0' || tok[k] > '9' then
                 shaped <- false
 
         if not shaped then
@@ -819,21 +819,20 @@ module Json =
     let isJsonNumber (tok: string) : bool =
         let n = tok.Length
 
-        let isDigit (k: int) =
-            k < n && tok.[k] >= '0' && tok.[k] <= '9'
+        let isDigit (k: int) = k < n && tok[k] >= '0' && tok[k] <= '9'
 
         let rec digitsFrom (k: int) =
             if isDigit k then digitsFrom (k + 1) else k
 
         // The integer part from `k`: a lone `0`, or a non-zero digit and any digits after it.
         let afterInt (k: int) =
-            if k < n && tok.[k] = '0' then Some(k + 1)
+            if k < n && tok[k] = '0' then Some(k + 1)
             elif isDigit k then Some(digitsFrom k)
             else None
 
         // An optional `.` and at least one digit.
         let afterFrac (k: int) =
-            if k < n && tok.[k] = '.' then
+            if k < n && tok[k] = '.' then
                 let e = digitsFrom (k + 1)
                 if e > k + 1 then Some e else None
             else
@@ -841,9 +840,9 @@ module Json =
 
         // An optional `e`/`E`, an optional sign, and at least one digit.
         let afterExp (k: int) =
-            if k < n && (tok.[k] = 'e' || tok.[k] = 'E') then
+            if k < n && (tok[k] = 'e' || tok[k] = 'E') then
                 let s =
-                    if k + 1 < n && (tok.[k + 1] = '+' || tok.[k + 1] = '-') then
+                    if k + 1 < n && (tok[k + 1] = '+' || tok[k + 1] = '-') then
                         k + 2
                     else
                         k + 1
@@ -853,7 +852,7 @@ module Json =
             else
                 Some k
 
-        let start = if n > 0 && tok.[0] = '-' then 1 else 0
+        let start = if n > 0 && tok[0] = '-' then 1 else 0
 
         match afterInt start |> Option.bind afterFrac |> Option.bind afterExp with
         | Some k -> k = n
@@ -896,13 +895,13 @@ module Json =
         // matters: `peek ()`'s result is only compared against structural chars
         // ('-', '.', 'e', '}', …), all of which NUL fails, and every consuming loop
         // is bounds-guarded by `i < n`.
-        let peek () = if i < n then input.[i] else '\000'
+        let peek () = if i < n then input[i] else '\000'
 
         let isWs c =
             c = ' ' || c = '\t' || c = '\n' || c = '\r'
 
         let skipWs () =
-            while i < n && isWs input.[i] do
+            while i < n && isWs input[i] do
                 i <- i + 1
 
         // Where a value is due: whitespace skipped, end of input refused, and the character a value
@@ -913,10 +912,10 @@ module Json =
             if i >= n then
                 fail UnexpectedEndOfInput "unexpected end of input"
 
-            input.[i]
+            input[i]
 
         let expect (c: char) =
-            if i < n && input.[i] = c then
+            if i < n && input[i] = c then
                 i <- i + 1
             else
                 fail ExpectedToken ("expected '" + string c + "'")
@@ -964,7 +963,7 @@ module Json =
                 let mutable go = true
 
                 while go && i < n do
-                    let c = input.[i]
+                    let c = input[i]
 
                     if c = '"' || c = '\\' then
                         go <- false
@@ -978,7 +977,7 @@ module Json =
             if i >= n then
                 fail UnterminatedString "unterminated string"
 
-            if input.[i] = '"' then
+            if input[i] = '"' then
                 i <- i + 1
 
                 if pendingHigh then
@@ -1000,7 +999,7 @@ module Json =
                     if i >= n then
                         fail UnterminatedString "unterminated string"
 
-                    let c = input.[i]
+                    let c = input[i]
                     i <- i + 1
 
                     if c = '"' then
@@ -1012,7 +1011,7 @@ module Json =
                         if i >= n then
                             fail UnterminatedEscape "unterminated escape"
 
-                        let e = input.[i]
+                        let e = input[i]
                         i <- i + 1
 
                         match e with
@@ -1029,10 +1028,10 @@ module Json =
                                 fail TruncatedUnicodeEscape "truncated \\u escape"
 
                             let code =
-                                (hexDigit input.[i] <<< 12)
-                                + (hexDigit input.[i + 1] <<< 8)
-                                + (hexDigit input.[i + 2] <<< 4)
-                                + hexDigit input.[i + 3]
+                                (hexDigit input[i] <<< 12)
+                                + (hexDigit input[i + 1] <<< 8)
+                                + (hexDigit input[i + 2] <<< 4)
+                                + hexDigit input[i + 3]
 
                             i <- i + 4
                             append code
@@ -1047,7 +1046,7 @@ module Json =
                 sb.ToString()
 
         let isDigitAt (k: int) =
-            k < n && input.[k] >= '0' && input.[k] <= '9'
+            k < n && input[k] >= '0' && input[k] <= '9'
 
         // The token is SCANNED as it always was — an optional sign, then digits, point, digits,
         // exponent, each optional — so a refusal reports the token and position it always did; it
@@ -1139,7 +1138,7 @@ module Json =
                     // 9007199254740992 (16 digits). Compare the digit string lexically —
                     // the grammar above refuses a leading zero, so for equal length that IS
                     // the numeric order. Fable-clean (string + Double.TryParse only, no Int64).
-                    let digits = if tok.StartsWith "-" then tok.Substring 1 else tok
+                    let digits = if tok[0] = '-' then tok.Substring 1 else tok
 
                     let int53Safe =
                         digits.Length < 16
@@ -1599,8 +1598,8 @@ module Canon =
 
     /// The single canonical, cross-host float → string encoder (Phase 55). Non-finite floats render to
     /// the fixed JSON-string tokens `"NaN"` / `"Infinity"` / `"-Infinity"`; `-0.0` collapses to `0`; a
-    /// finite float uses `Double.ToString("R", InvariantCulture)` on .NET and the byte-identical JS
-    /// shortest-round-trip re-layout (`formatFiniteDouble`) under Fable (WIRE_FORMAT §2 rule 5). Every
+    /// finite float uses `FloatLayout.finite` — `Double.ToString("R", InvariantCulture)` on .NET and the
+    /// byte-identical JS shortest-round-trip re-layout under Fable (WIRE_FORMAT §2 rule 5). Every
     /// float→wire / float→key path in the substrate routes through this one function so the bytes match
     /// across the .NET / Fable / TS / Python hosts. Pinned in `STABILITY.md`.
     let canonicalFloat (f: float) : string =
@@ -2423,7 +2422,7 @@ module Versioning =
         let isValidName (name: string) : bool =
             not (isNull (box name))
             && name.Length > 0
-            && isNameStart name.[0]
+            && isNameStart name[0]
             && name |> Seq.forall isNameChar
 
         /// True where `p` is a profile the wire can carry: a name of the grammar and two
@@ -2473,7 +2472,7 @@ module Versioning =
                     let canonical =
                         t.Length > 0
                         && t |> Seq.forall (fun c -> c >= '0' && c <= '9')
-                        && (t.Length = 1 || t.[0] <> '0')
+                        && (t.Length = 1 || t[0] <> '0')
 
                     if canonical then Json.readInt32 t else None
 
@@ -2805,7 +2804,7 @@ module Corpus =
     /// Coverage gate: every required kind/op tag must be exercised by at least one case.
     /// Surfaces silent corpus gaps (the forward-coupling discipline).
     let coverageGate (required: string list) (cases: Case list) : Result<unit, string> =
-        let seen = cases |> List.map (fun c -> c.Tag) |> Set.ofList
+        let seen = cases |> List.map _.Tag |> Set.ofList
         let missing = required |> List.filter (fun t -> not (seen.Contains t))
 
         if List.isEmpty missing then
@@ -2867,7 +2866,7 @@ module Corpus =
         let randStr () =
             let len = pick 6
 
-            Array.init len (fun _ -> fuzzAtoms.[pick fuzzAtoms.Length]) |> String.concat ""
+            Array.init len (fun _ -> fuzzAtoms[pick fuzzAtoms.Length]) |> String.concat ""
 
         let rec gen (depth: int) : JVal =
             // at the depth limit only scalars are generated (no further nesting)
@@ -3535,7 +3534,7 @@ module Codec =
             [ for c in cases do
                   for n in repeats c.CaseNames do
                       CodecDeclarationFault.RepeatedMember(n, Some c.Tag)
-              for t in repeats (cases |> List.map (fun c -> c.Tag)) do
+              for t in repeats (cases |> List.map _.Tag) do
                   CodecDeclarationFault.RepeatedTag t
               for c in cases do
                   if List.contains key c.CaseNames then

@@ -45,9 +45,9 @@ let private text (heavy: bool) (len: int) (seed: int) : string =
         x <- next x
 
         if heavy && x % 4 = 0 then
-            sb.Append(escaped.[(x / 4) % escaped.Length]) |> ignore
+            sb.Append(escaped[(x / 4) % escaped.Length]) |> ignore
         else
-            sb.Append(plain.[x % plain.Length]) |> ignore
+            sb.Append(plain[x % plain.Length]) |> ignore
 
     sb.ToString()
 
@@ -76,7 +76,7 @@ let private digestText (i: int) : string =
 /// short free-text value with an occasional escape, a non-whole float, a timestamp and a digest.
 let private opRecord (i: int) : JVal =
     JObj
-        [ "kind", JStr opKinds.[i % opKinds.Length]
+        [ "kind", JStr opKinds[i % opKinds.Length]
           "id", JStr("op-" + pad 6 i)
           "lane", JStr("lane-" + string (i % 7))
           "lamport", JInt(i * 3 + 1)

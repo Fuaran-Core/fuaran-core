@@ -308,7 +308,7 @@ let private validatorTests =
               let reg1 = ColumnValidator.ofRules [ ColumnValidator.unique [ "a" ] ] |> orFail
 
               Expect.equal
-                  (ColumnValidator.validate reg1 nulls |> List.map (fun d -> d.Node))
+                  (ColumnValidator.validate reg1 nulls |> List.map _.Node)
                   [ Some "a#2" ]
                   "a repeated Null key is a duplicate"
 
@@ -345,8 +345,8 @@ let private validatorTests =
                     Rules = [ Validator.asCheck nodew (flagAll "A") ] }
 
               let findings = Validator.runPack pack (RNode.leaf "x" "para" "")
-              Expect.equal (findings |> List.map (fun f -> f.Citation)) [ "p@1/A" ] "cited"
-              Expect.equal (findings |> List.map (fun f -> f.Defect.Family)) [ "p/A" ] "the PackRule family id, stamped"
+              Expect.equal (findings |> List.map _.Citation) [ "p@1/A" ] "cited"
+              Expect.equal (findings |> List.map _.Defect.Family) [ "p/A" ] "the PackRule family id, stamped"
 
               let colPack: Validator.Pack<Table, string> =
                   { Name = "q"
@@ -381,9 +381,9 @@ let private projectionTests =
                   RNode.node "root" "doc" [ RNode.node "a\nb" "sec" [ RNode.leaf "c d" "para" "x" ] ]
 
               let byId = Projection.project ppw (Scope.ById "a\nb") tree
-              Expect.equal (byId.Lines |> List.map (fun l -> l.IdKey)) [ "a\\nb" ] "found, escaped"
+              Expect.equal (byId.Lines |> List.map _.IdKey) [ "a\\nb" ] "found, escaped"
               let sub = Projection.project ppw (Scope.Subtree "a\nb") tree
-              Expect.equal (sub.Lines |> List.map (fun l -> l.IdKey)) [ "a\\nb"; "c\\sd" ] "the slice"
+              Expect.equal (sub.Lines |> List.map _.IdKey) [ "a\\nb"; "c\\sd" ] "the slice"
 
               Expect.isEmpty
                   (Projection.project ppw (Scope.ChangedSince(Projection.snapshot ppw tree)) tree).Lines
@@ -414,7 +414,7 @@ let private projectionTests =
 
               Expect.equal
                   ((Projection.project ppw (Scope.ChangedSince snap) reordered).Lines
-                   |> List.map (fun l -> l.IdKey))
+                   |> List.map _.IdKey)
                   [ "p" ]
                   "the parent whose order moved"
 
@@ -427,7 +427,7 @@ let private projectionTests =
 
               Expect.equal
                   ((Projection.project ppw (Scope.ChangedSince snap) moved).Lines
-                   |> List.map (fun l -> l.IdKey))
+                   |> List.map _.IdKey)
                   [ "p"; "q" ]
                   "the parent it left and the parent it joined"
 
@@ -480,7 +480,7 @@ let private aiSurfaceTests =
               let red =
                   Conformance.aiSurfaceKitPolicyLawsAt w (fun r -> Put "x", r) [] 1 4
                   |> List.filter (fun r -> not r.Passed)
-                  |> List.choose (fun r -> r.Counterexample)
+                  |> List.choose _.Counterexample
 
               Expect.isTrue (red |> List.exists (fun c -> c.Contains "has no literal segment")) (sprintf "%A" red)
 
@@ -538,8 +538,7 @@ let private aiSurfaceTests =
               | other -> failtestf "expected DuplicateProposal, got %A" other
 
               match Proposals.proposeWithId 40 "x" "t" None [ Put "4" ] q2 with
-              | Ok q ->
-                  Expect.equal (q.Proposals |> List.map (fun p -> p.Id)) [ 1; 2; 40 ] "appended under the chosen id"
+              | Ok q -> Expect.equal (q.Proposals |> List.map _.Id) [ 1; 2; 40 ] "appended under the chosen id"
               | Error e -> failtestf "refused: %A" e ]
 
 // ---- Tree / Ops ----
@@ -620,10 +619,7 @@ let private observerTests =
 
               Expect.isNone after "the throw surfaces"
 
-              Expect.equal
-                  (ObserverWitness.observeTree st "ok" |> List.map (fun o -> o.NodeId))
-                  [ "ok" ]
-                  "nothing half-registered"
+              Expect.equal (ObserverWitness.observeTree st "ok" |> List.map _.NodeId) [ "ok" ] "nothing half-registered"
 
           testCase "observeTree is registration-ordered after an unregister and re-register"
           <| fun _ ->
@@ -639,7 +635,7 @@ let private observerTests =
                   |> fun s -> fst (ObserverWitness.register w "a" 0 (Some "root") s)
 
               Expect.equal
-                  (ObserverWitness.observeTree st "root" |> List.map (fun o -> o.NodeId))
+                  (ObserverWitness.observeTree st "root" |> List.map _.NodeId)
                   [ "root"; "b"; "c"; "a" ]
                   "a re-registered node joins the end" ]
 

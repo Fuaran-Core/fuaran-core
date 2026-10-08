@@ -72,12 +72,12 @@ let private note: Codec<Note> =
           Priority = p
           Shape = s
           Level = l })
-    |> Codec.field "id" (fun n -> n.Id) Codec.string
-    |> Codec.field "text" (fun n -> n.Text) Codec.string
-    |> Codec.field "tags" (fun n -> n.Tags) (Codec.list Codec.string)
-    |> Codec.optField "priority" (fun n -> n.Priority) Codec.int
-    |> Codec.field "shape" (fun n -> n.Shape) shape
-    |> Codec.field "level" (fun n -> n.Level) level
+    |> Codec.field "id" _.Id Codec.string
+    |> Codec.field "text" _.Text Codec.string
+    |> Codec.field "tags" _.Tags (Codec.list Codec.string)
+    |> Codec.optField "priority" _.Priority Codec.int
+    |> Codec.field "shape" _.Shape shape
+    |> Codec.field "level" _.Level level
     |> Codec.build
     |> declared
 
@@ -134,10 +134,10 @@ let private parsed (text: string) : JVal =
     | Ok j -> j
     | Error e -> failtestf "not JSON: %s" e
 
-let private passed (laws: LawResult list) : bool = laws |> List.forall (fun l -> l.Passed)
+let private passed (laws: LawResult list) : bool = laws |> List.forall _.Passed
 
 let private failing (laws: LawResult list) : string list =
-    laws |> List.filter (fun l -> not l.Passed) |> List.map (fun l -> l.Law)
+    laws |> List.filter (fun l -> not l.Passed) |> List.map _.Law
 
 [<Tests>]
 let tests =
@@ -495,7 +495,7 @@ let tests =
                         [ "stored codec: every stored text is the codec's canonical text of its value under the declared profile, byte for byte" ]
                         "only the recompute law"
 
-                    let detail = laws |> List.pick (fun l -> l.Counterexample)
+                    let detail = laws |> List.pick _.Counterexample
                     Expect.stringContains detail "stored text 0" "names the text"
 
                 testCase "an unknown declaration, a defect and a non-canonical spelling each red their law"

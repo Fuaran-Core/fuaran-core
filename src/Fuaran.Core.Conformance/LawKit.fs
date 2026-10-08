@@ -110,7 +110,7 @@ module internal LawKit =
                   Counterexample = None }
 
     /// The verdicts of several cells, in the order given — the tail of every family.
-    let results (cells: LawCell list) : LawResult list = cells |> List.map (fun c -> c.Result)
+    let results (cells: LawCell list) : LawResult list = cells |> List.map _.Result
 
     /// A cursor over `ConfRng`: the one mutable draw position a family threads through its
     /// iteration, so a body reads `let tree = rng.Draw gen.Tree` where it used to read
@@ -338,7 +338,7 @@ module internal LawKit =
             bump (opKindOf op)
 
             match op with
-            | Batch inner when inner |> List.exists (fun o -> o.IsBatch) -> bump "nested batch"
+            | Batch inner when inner |> List.exists _.IsBatch -> bump "nested batch"
             | _ -> ()
 
         member _.Counts = counts
@@ -557,7 +557,7 @@ module internal LawKit =
         }
 
     /// What the two dispatch-seam families differ in, so that ONE runner (`seamLaws`) certifies both
-    /// the capability seam (`capabilityLawsWith`) and the query seam (`queryLawsWith`) — the body they
+    /// the capability seam (`capabilityLawsAt`) and the query seam (`queryLawsAt`) — the body they
     /// shared, line for line, before Phase 297. `'Entry` is what the registry holds (a `Capability`, a
     /// `Query`), `'Args` a call's arguments, `'v` the body's payload and `'Err` the seam's typed
     /// refusal.

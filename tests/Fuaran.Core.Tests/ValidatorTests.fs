@@ -47,14 +47,14 @@ let tests =
                   RNode.node "root" "doc" [ RNode.node "a" "section" [ RNode.leaf "a1" "para" "" ] ]
 
               let defects = Validator.runAll nodew registry tree
-              Expect.equal (defects |> List.map (fun d -> d.Code)) [ "REF001" ] "one REF001"
-              Expect.equal defects.[0].Node (Some "a1") "located at a1"
+              Expect.equal (defects |> List.map _.Code) [ "REF001" ] "one REF001"
+              Expect.equal defects[0].Node (Some "a1") "located at a1"
 
           testCase "families aggregate in registration order"
           <| fun _ ->
               let tree = RNode.node "root" "doc" [ RNode.node "empty" "section" [] ]
               let defects = Validator.runAll nodew registry tree
-              Expect.equal (defects |> List.map (fun d -> d.Code)) [ "REF002" ] "empty section flagged"
+              Expect.equal (defects |> List.map _.Code) [ "REF002" ] "empty section flagged"
               Expect.isTrue (Validator.hasErrors defects) "REF002 is an Error"
 
           testCase "canonicalCodes is sorted and order-independent (byte-parity surface)"
@@ -174,7 +174,7 @@ let tests =
                   |> Result.defaultWith (fun e -> failwithf "registry: %A" e)
 
               let defects = ColumnValidator.validate reg t
-              let codes = defects |> List.map (fun d -> d.Code)
+              let codes = defects |> List.map _.Code
               Expect.contains codes "COL-NOTNULL" "the null score is caught"
               Expect.contains codes "COL-INRANGE" "the 200 score is out of range"
               Expect.contains codes "COL-UNIQUE" "the duplicate id is caught"
@@ -234,7 +234,7 @@ let tests =
                   let results = Conformance.columnarValidatorLaws seed 1
 
                   Expect.equal
-                      (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
+                      (results |> List.filter (fun r -> not r.Passed) |> List.map _.Law)
                       [ SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"
                         + "the sample reached every injected null the laws distinguish"
                         SampleAdequacy.lawPrefix "Conformance.columnarValidatorLaws"

@@ -1112,7 +1112,7 @@ module internal ConcurrencyLaws =
             // an independent recount; it is empty on the set the law above just ran over; and a
             // twin — the same id and script under another holder — makes arrival order observable.
             let recount (ps: OpScriptProposal<'Node, 'Id> list) =
-                let ids = ps |> List.map (fun p -> p.Id)
+                let ids = ps |> List.map _.Id
 
                 ids
                 |> List.filter (fun x -> (ids |> List.filter (fun y -> y = x) |> List.length) > 1)
@@ -1158,11 +1158,11 @@ module internal ConcurrencyLaws =
                 )
 
             // total partition: accepted + rejected = input, each exactly once.
-            let acceptedIds = result.Accepted |> List.map (fun p -> p.Id)
+            let acceptedIds = result.Accepted |> List.map _.Id
             let rejectedIds = result.Rejected |> List.map (fun (p, _) -> p.Id)
             acceptedSeen <- acceptedSeen + List.length acceptedIds
             rejectedSeen <- rejectedSeen + List.length rejectedIds
-            let inputIds = proposals |> List.map (fun p -> p.Id) |> List.sort
+            let inputIds = proposals |> List.map _.Id |> List.sort
 
             partition.Check(
                 List.sort (acceptedIds @ rejectedIds) = inputIds,
@@ -1208,7 +1208,7 @@ module internal ConcurrencyLaws =
 
             // any-order confluence: pinned, reversed, and shuffled application orders all
             // succeed and agree (content hash) — and MergedScript reproduces the same tree.
-            let scripts = result.Accepted |> List.map (fun p -> p.Ops)
+            let scripts = result.Accepted |> List.map _.Ops
 
             let applyIn (order: SkeletonOp<'Node, 'Id> list list) =
                 order

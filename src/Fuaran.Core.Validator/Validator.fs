@@ -127,8 +127,7 @@ module Validator =
     let empty<'Node, 'Id> : RuleRegistry<'Node, 'Id> = { Families = [] }
 
     /// The registered family ids, in registration order.
-    let enumerate (reg: RuleRegistry<'Node, 'Id>) : string list =
-        reg.Families |> List.map (fun f -> f.Id)
+    let enumerate (reg: RuleRegistry<'Node, 'Id>) : string list = reg.Families |> List.map _.Id
 
     /// The family registered under `id`, if any.
     let tryFind (id: string) (reg: RuleRegistry<'Node, 'Id>) : RuleFamily<'Node, 'Id> option =
@@ -277,7 +276,7 @@ module Validator =
     /// before it not even that. Parity-string-breaking vs both earlier forms: a host that persisted
     /// the old projection re-derives it, and a host twin re-certifies against the new bytes.
     let canonicalCodes (defects: Defect<'Id> list) : string =
-        defects |> List.map (fun d -> d.Code) |> List.sort |> Hash.canonicalFields
+        defects |> List.map _.Code |> List.sort |> Hash.canonicalFields
 
     // ---- Phase 314: the defect-set diff and its gate verdict ----
     // What a merge gate asks is not "is the candidate valid" but "did THIS step make it less valid":
@@ -962,7 +961,7 @@ module ColumnValidator =
     let empty: Registry = { Rules = [] }
 
     /// The registered rule ids, in registration order.
-    let enumerate (reg: Registry) : string list = reg.Rules |> List.map (fun r -> r.Id)
+    let enumerate (reg: Registry) : string list = reg.Rules |> List.map _.Id
 
     /// The rule registered under `id`, if any.
     let tryFind (id: string) (reg: Registry) : ColumnRule option =

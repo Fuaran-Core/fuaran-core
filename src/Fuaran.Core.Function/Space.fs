@@ -60,7 +60,7 @@ module Space =
     /// hands on. Until Phase 295 the read was `Int32.TryParse` under the CURRENT culture, which
     /// admitted `" 5"` and `"+5"` and keyed each spelling apart.
     let internal readInt (s: string) : int option =
-        if s.Length > 0 && s.[0] = '+' then
+        if s.Length > 0 && s[0] = '+' then
             None
         else
             Json.readInt32 s
@@ -72,32 +72,32 @@ module Space =
     /// `Infinity` or `NaN` (the float reader under `NumberStyles.Float` took all of those).
     let internal readFloat (s: string) : float option =
         let n = s.Length
-        let mutable i = if n > 0 && s.[0] = '-' then 1 else 0
+        let mutable i = if n > 0 && s[0] = '-' then 1 else 0
         let digitsFrom = i
 
-        while i < n && isDigit s.[i] do
+        while i < n && isDigit s[i] do
             i <- i + 1
 
         let mutable shaped = i > digitsFrom
 
-        if shaped && i < n && s.[i] = '.' then
+        if shaped && i < n && s[i] = '.' then
             i <- i + 1
             let fracFrom = i
 
-            while i < n && isDigit s.[i] do
+            while i < n && isDigit s[i] do
                 i <- i + 1
 
             shaped <- i > fracFrom
 
-        if shaped && i < n && (s.[i] = 'e' || s.[i] = 'E') then
+        if shaped && i < n && (s[i] = 'e' || s[i] = 'E') then
             i <- i + 1
 
-            if i < n && (s.[i] = '+' || s.[i] = '-') then
+            if i < n && (s[i] = '+' || s[i] = '-') then
                 i <- i + 1
 
             let expFrom = i
 
-            while i < n && isDigit s.[i] do
+            while i < n && isDigit s[i] do
                 i <- i + 1
 
             shaped <- i > expFrom

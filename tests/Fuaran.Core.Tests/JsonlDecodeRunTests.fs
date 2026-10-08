@@ -31,16 +31,16 @@ module private Oracle =
     let unicodeAt (s: string) (i: int) : int =
         if
             i + 5 < s.Length
-            && s.[i + 1] = 'u'
-            && isHex s.[i + 2]
-            && isHex s.[i + 3]
-            && isHex s.[i + 4]
-            && isHex s.[i + 5]
+            && s[i + 1] = 'u'
+            && isHex s[i + 2]
+            && isHex s[i + 3]
+            && isHex s[i + 4]
+            && isHex s[i + 5]
         then
-            (hexVal s.[i + 2] <<< 12)
-            + (hexVal s.[i + 3] <<< 8)
-            + (hexVal s.[i + 4] <<< 4)
-            + hexVal s.[i + 5]
+            (hexVal s[i + 2] <<< 12)
+            + (hexVal s[i + 3] <<< 8)
+            + (hexVal s[i + 4] <<< 4)
+            + hexVal s[i + 5]
         else
             -1
 
@@ -52,10 +52,10 @@ module private Oracle =
         let mutable i = 1
 
         while i < last do
-            let c = token.[i]
+            let c = token[i]
 
             if c = '\\' then
-                match token.[i + 1] with
+                match token[i + 1] with
                 | 'u' ->
                     sb.Append(char (unicodeAt token i)) |> ignore
                     i <- i + 6
@@ -88,7 +88,7 @@ module private Broken =
         let runEnd (from: int) =
             let mutable j = from
 
-            while j < last && token.[j] <> '\\' do
+            while j < last && token[j] <> '\\' do
                 j <- j + 1
 
             j
@@ -107,7 +107,7 @@ module private Broken =
             let mutable i = firstEscape
 
             while i < last do
-                match token.[i + 1] with
+                match token[i + 1] with
                 | 'u' ->
                     sb.Append(char (Oracle.unicodeAt token i)) |> ignore
                     i <- i + 6

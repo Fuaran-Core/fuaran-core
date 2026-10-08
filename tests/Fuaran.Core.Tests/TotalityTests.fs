@@ -320,7 +320,7 @@ let private genColumn (seed: int) : Column =
         int (st >>> 1)
 
     let pick (n: int) = next () % n
-    let ty = ColumnType.all.[pick ColumnType.all.Length]
+    let ty = ColumnType.all[pick ColumnType.all.Length]
 
     let floats =
         [| Float 0.0
@@ -341,7 +341,7 @@ let private genColumn (seed: int) : Column =
         if pick 5 = 0 then
             Null
         elif pick 14 = 0 then
-            [| Bool true; Float 1.5; Str "x"; Decimal "2" |].[pick 4]
+            [| Bool true; Float 1.5; Str "x"; Decimal "2" |][pick 4]
         else
             match ty with
             | IntType ->
@@ -351,7 +351,7 @@ let private genColumn (seed: int) : Column =
                     Int(pick 2001 - 1000)
             | FloatType ->
                 match pick 4 with
-                | 0 -> floats.[pick floats.Length]
+                | 0 -> floats[pick floats.Length]
                 | 1 -> Int(pick 100)
                 | _ -> Float(float (pick 4000 - 2000) / 8.0)
             | BoolType -> Bool(pick 2 = 0)
@@ -362,7 +362,7 @@ let private genColumn (seed: int) : Column =
                 if pick 3 = 0 then
                     Int(pick 50)
                 else
-                    Decimal decimals.[pick decimals.Length]
+                    Decimal decimals[pick decimals.Length]
 
     Column.create "c" ty [ for _ in 1 .. pick 9 -> cellOf () ]
 
@@ -543,7 +543,7 @@ let tests =
                   | Ok got, Some bytes -> Expect.equal got bytes (sprintf "the bytes of %A" s)
                   | Error bad, None ->
                       Expect.equal (Some bad.Index) (Json.firstIllFormedUnit s) (sprintf "the two scans agree on %A" s)
-                      Expect.equal bad.Unit (int s.[bad.Index]) "and the unit is the one at that index"
+                      Expect.equal bad.Unit (int s[bad.Index]) "and the unit is the one at that index"
                   | got, _ -> failtestf "tryUtf8Bytes %A = %A against the strict encoder's %A" s got expected
 
               for u in 0..0xFFFF do
@@ -710,7 +710,7 @@ let tests =
                   // The shape of a profile, each slot drawn from the whole alphabet: most draws
                   // are near misses, and enough are profiles that the accepting side is measured.
                   let slot () =
-                      String.concat "" [ for _ in 0 .. pick 2 -> atoms.[pick atoms.Length] ]
+                      String.concat "" [ for _ in 0 .. pick 2 -> atoms[pick atoms.Length] ]
 
                   let s =
                       slot () + "@" + slot () + "." + slot () + (if pick 6 = 0 then slot () else "")
@@ -871,7 +871,7 @@ let tests =
               let read (text: string) =
                   OpStream.Jsonl.parseLine 1 text
                   |> Result.bind (OpStream.Jsonl.intField "n")
-                  |> Result.mapError (fun f -> f.Reason)
+                  |> Result.mapError _.Reason
 
               let documents =
                   [ "{\"n\":-5}", Ok -5

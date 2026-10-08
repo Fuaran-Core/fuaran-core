@@ -4,10 +4,10 @@ namespace Fuaran.Core
 //  Fuaran.Core.Column (Phase 28) — the relational/columnar data strand, a new
 //  Core substrate parallel to the tree/op-stream spine. A typed, null-aware,
 //  Arrow-compatible columnar model + its canonical wire codec. It is the data
-//  substrate the compute layer operates on (`Fuaran.Core.DataFrame`, produced by
-//  its own repository since 0.33.0 — DECISIONS.md D66), the shape the `Query` seam
-//  produces, and the shape the UI `DataSource` binding serialises (Compute Layer
-//  spec §1).
+//  substrate the compute layer operates on (`Fuaran.Compute.DataFrame`, produced by
+//  its own repository since 0.33.0 and under that id since its 0.36.0 — DECISIONS.md
+//  D66), the shape the `Query` seam produces, and the shape the UI `DataSource`
+//  binding serialises (Compute Layer spec §1).
 //
 //  It introduces no tree-witness field and no base node type — it is a separate,
 //  self-contained data strand. FSharp.Core only; Fable-clean on encode and decode
@@ -185,7 +185,7 @@ module DecimalText =
         if isNull (box s) || s.Length = 0 then
             None
         else
-            let negative = s.[0] = '-'
+            let negative = s[0] = '-'
             let body = if negative then s.Substring 1 else s
             let dot = body.IndexOf '.'
 
@@ -244,11 +244,11 @@ module DecimalText =
         let mutable carry = 0
 
         for i in a.Length - 1 .. -1 .. 0 do
-            let d = digit a.[i] + digit b.[i] + carry
-            out.[i + 1] <- d % 10
+            let d = digit a[i] + digit b[i] + carry
+            out[i + 1] <- d % 10
             carry <- d / 10
 
-        out.[0] <- carry
+        out[0] <- carry
         digitsText out
 
     /// `a - b` over aligned magnitudes with `a >= b`.
@@ -257,13 +257,13 @@ module DecimalText =
         let mutable borrow = 0
 
         for i in a.Length - 1 .. -1 .. 0 do
-            let d = digit a.[i] - digit b.[i] - borrow
+            let d = digit a[i] - digit b[i] - borrow
 
             if d < 0 then
-                out.[i] <- d + 10
+                out[i] <- d + 10
                 borrow <- 1
             else
-                out.[i] <- d
+                out[i] <- d
                 borrow <- 0
 
         digitsText out
@@ -333,7 +333,7 @@ module TemporalText =
             if k = from + count then
                 Some acc
             else
-                let c = s.[k]
+                let c = s[k]
 
                 if c >= '0' && c <= '9' then
                     go (k + 1) (acc * 10 + (int c - int '0'))
@@ -356,8 +356,8 @@ module TemporalText =
 
     // The date part of both forms, over the first ten characters of a string at least that long.
     let private datePart (s: string) : bool =
-        s.[4] = '-'
-        && s.[7] = '-'
+        s[4] = '-'
+        && s[7] = '-'
         && (match digitsAt s 0 4, digitsAt s 5 2, digitsAt s 8 2 with
             | Some y, Some m, Some d -> m >= 1 && m <= 12 && d >= 1 && d <= daysIn y m
             | _ -> false)
@@ -372,10 +372,10 @@ module TemporalText =
         not (isNull (box s))
         && s.Length = 20
         && datePart s
-        && s.[10] = 'T'
-        && s.[13] = ':'
-        && s.[16] = ':'
-        && s.[19] = 'Z'
+        && s[10] = 'T'
+        && s[13] = ':'
+        && s[16] = ':'
+        && s[19] = 'Z'
         && (match digitsAt s 11 2, digitsAt s 14 2, digitsAt s 17 2 with
             | Some h, Some mi, Some se -> h <= 23 && mi <= 59 && se <= 59
             | _ -> false)
@@ -425,10 +425,10 @@ module ColumnType =
 
     /// The pinned type-widening lattice (Phase 33). A `from`→`target` change is a *safe widening* iff it
     /// is the identity or the one lossless promotion the rest of the strand already pins: `Int → Float`
-    /// (`ColumnCodec.decodeCell` decodes a JSON int into a `FloatType` column; the compute layer's
-    /// `DataFrame` arithmetic promotes int operands to float). This is the single source of truth for "is a retype safe" — the
-    /// schema-compatibility check and the codec/evaluator coercion agree by construction, not by a second
-    /// rule-set.
+    /// (`ColumnCodec.decodeCell` decodes a JSON int into a `FloatType` column; the compute
+    /// repository's `Fuaran.Compute.DataFrame` arithmetic promotes int operands to float). This is the
+    /// single source of truth for "is a retype safe" — the schema-compatibility check and the
+    /// codec/evaluator coercion agree by construction, not by a second rule-set.
     ///
     /// `Int → Decimal` is the second lossless promotion (`0.33.0`), and the codec agrees with it the
     /// same way: `ColumnCodec.decodeCell` decodes a JSON int into a `DecimalType` column. `Float →
@@ -911,7 +911,7 @@ module Column =
                         let text =
                             match cell with
                             | Decimal s -> s
-                            | other -> sprintf "%A" other
+                            | other -> Cell.token other
 
                         acc.PastFloat <-
                             Some(
@@ -1179,7 +1179,7 @@ module Table =
     /// not a data-quality check: those are the columnar validator's rules.
     let validate (t: Table) : Result<unit, ColumnError> =
         let schemaNames = t.Schema |> List.map fst
-        let columnNamesList = t.Columns |> List.map (fun c -> c.Name)
+        let columnNamesList = t.Columns |> List.map _.Name
 
         let missing =
             schemaNames |> List.filter (fun n -> not (List.contains n columnNamesList))

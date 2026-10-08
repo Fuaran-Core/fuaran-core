@@ -148,7 +148,7 @@ let tests =
                   |> fun st -> fst (ObserverWitness.register w "child2" i (Some "root") st)
                   |> fun st -> fst (ObserverWitness.register w "grandchild" i (Some "child1") st)
 
-              let ids = ObserverWitness.observeTree st "root" |> List.map (fun o -> o.NodeId)
+              let ids = ObserverWitness.observeTree st "root" |> List.map _.NodeId
               Expect.equal ids [ "root"; "child1"; "child2"; "grandchild" ] "BFS, level-then-order, root first"
           }
 
@@ -202,8 +202,7 @@ let totalityTests =
         |> fst
 
     let walk (st: Fuaran.Core.ObserverState<BoxInput, BoxFlag>) =
-        Fuaran.Core.ObserverWitness.observeTree st "root"
-        |> List.map (fun o -> o.NodeId)
+        Fuaran.Core.ObserverWitness.observeTree st "root" |> List.map _.NodeId
 
     testList
         "ObserverWitness.observeTree is total (Phase 383)"

@@ -16,7 +16,7 @@ let private prop id ops : OpScriptProposal<RNode, string> =
       Holder = sprintf "agent-%d" id
       Ops = ops }
 
-let private acceptedIds (r: Arbitration<RNode, string>) = r.Accepted |> List.map (fun p -> p.Id)
+let private acceptedIds (r: Arbitration<RNode, string>) = r.Accepted |> List.map _.Id
 
 let private rejectedWith (r: Arbitration<RNode, string>) =
     r.Rejected |> List.map (fun (p, reason) -> p.Id, reason)

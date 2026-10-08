@@ -224,7 +224,7 @@ module internal CapabilitySeamLaws =
 
             (match reg with
              | Ok r ->
-                 let ids = CapabilityRegistry.enumerate r |> List.map (fun c -> c.Id)
+                 let ids = CapabilityRegistry.enumerate r |> List.map _.Id
                  enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
              | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
@@ -356,7 +356,7 @@ module internal CapabilitySeamLaws =
                 | Error e -> failSlotted (sprintf "a slotted capability did not register: %A" e)
                 | Ok sreg ->
                     slotted.Check(
-                        CapabilityRegistry.enumerate sreg |> List.map (fun c -> c.Id) = [ slottedCap.Id ],
+                        CapabilityRegistry.enumerate sreg |> List.map _.Id = [ slottedCap.Id ],
                         fun () -> at "a registered slotted capability is not enumerated"
                     )
 
@@ -428,7 +428,7 @@ module internal CapabilitySeamLaws =
         (seed: int)
         (iterations: int)
         : LawResult list =
-        let known = CapabilityRegistry.enumerate w.Registry |> List.map (fun c -> c.Id)
+        let known = CapabilityRegistry.enumerate w.Registry |> List.map _.Id
 
         LawKit.seamLaws
             { Lookup =

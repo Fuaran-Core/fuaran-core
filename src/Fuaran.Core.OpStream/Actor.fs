@@ -50,7 +50,7 @@ module internal JsonString =
     /// once (Phase 365) — the copy of `Wire.Json`'s table.
     let private controlEscapes: string[] =
         let hex = "0123456789abcdef"
-        Array.init 0x20 (fun c -> "\\u00" + string hex.[c >>> 4] + string hex.[c &&& 0xF])
+        Array.init 0x20 (fun c -> "\\u00" + string hex[c >>> 4] + string hex[c &&& 0xF])
 
     /// The index of the first character of `s` the rule escapes, or `-1` (Phase 365) — the copy of
     /// `Wire.Json`'s scan.
@@ -59,7 +59,7 @@ module internal JsonString =
         let mutable found = -1
 
         while found < 0 && i < s.Length do
-            let code = int s.[i]
+            let code = int s[i]
 
             if code < 0x20 || code = 0x22 || code = 0x5C then
                 found <- i
@@ -82,7 +82,7 @@ module internal JsonString =
             let mutable start = first
 
             for i in first .. s.Length - 1 do
-                let code = int s.[i]
+                let code = int s[i]
 
                 if code < 0x20 || code = 0x22 || code = 0x5C then
                     if i > start then
@@ -90,7 +90,7 @@ module internal JsonString =
 
                     (if code = 0x22 then sb.Append("\\\"")
                      elif code = 0x5C then sb.Append("\\\\")
-                     else sb.Append(controlEscapes.[code]))
+                     else sb.Append(controlEscapes[code]))
                     |> ignore
 
                     start <- i + 1

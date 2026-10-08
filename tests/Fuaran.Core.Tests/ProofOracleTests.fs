@@ -977,7 +977,7 @@ let rec private genJ (depth: int) (r: ConfRng.T) : JVal * ConfRng.T =
                     // The key alphabet deliberately includes the names the probes and the
                     // reference decoder ask for, so the hit arms are reached as often as the
                     // miss arms.
-                    let name = [| "kind"; "value"; "on"; "tags"; "id"; "items" |].[k]
+                    let name = [| "kind"; "value"; "on"; "tags"; "id"; "items" |][k]
                     acc @ [ name, v ], rr2)
                 ([], r2)
                 [ 1..count ]
@@ -1462,7 +1462,7 @@ let private replayDisagreement
     : string option * string =
     let p = renderProductionReplay hashState (Dag.tryReplayTo w state0 dag head)
     let m = renderModelReplay hashState (modelReplay w state0 (bridge dag) head)
-    let arm = p.Split(' ').[0]
+    let arm = p.Split(' ')[0]
 
     if p = m then
         None, arm
@@ -1892,7 +1892,7 @@ let private drawnUpdatesAndBatches
     let updates =
         states
         |> List.collect (Tree.preorder nodew)
-        |> List.distinctBy (fun n -> n.Id)
+        |> List.distinctBy _.Id
         |> List.map (fun n -> UpdateNode(RNode.node n.Id ("edited-" + n.Kind) []))
 
     let batches = generated |> List.pairwise |> List.map (fun (a, b) -> Batch [ a; b ])
@@ -2301,7 +2301,7 @@ let private firstBreakWalk (dag: Dag.T<'Op>) : string list =
 /// string `Actor.encode` produces, which is the only thing the hash pre-image ever sees of it.
 let private toChainEntries (dag: Dag.T<'Op>) : Chain.entry<'Op> list =
     firstBreakWalk dag
-    |> List.map (fun k -> k, dag.Nodes.[k])
+    |> List.map (fun k -> k, dag.Nodes[k])
     |> List.map (fun (k, n) ->
         { Chain.ekey = k
           Chain.enode =
@@ -2519,7 +2519,7 @@ let private dagDifferential
             |> List.choose (fun (what, d) ->
                 changedKey d
                 |> Option.filter d.Nodes.ContainsKey
-                |> Option.map (fun k -> k, what, d.Nodes.[k]))
+                |> Option.map (fun k -> k, what, d.Nodes[k]))
             |> List.distinctBy (fun (k, _, _) -> k)
 
         for (i, (k1, w1, n1)) in List.indexed perNode do
@@ -3971,8 +3971,7 @@ module private JsonParseDiff =
         [ for i in 1..count ->
               let len = next () % 24
 
-              let s =
-                  System.String(Array.init len (fun _ -> alphabet.[next () % alphabet.Length]))
+              let s = System.String(Array.init len (fun _ -> alphabet[next () % alphabet.Length]))
 
               sprintf "soup seed=%d #%d" seed i, s ]
 
@@ -5747,9 +5746,9 @@ let private shuffleList (xs: 'a list) (r0: ConfRng.T) : 'a list * ConfRng.T =
     for i in (arr.Length - 1) .. -1 .. 1 do
         let j, r' = ConfRng.intBelow (i + 1) r
         r <- r'
-        let tmp = arr.[i]
-        arr.[i] <- arr.[j]
-        arr.[j] <- tmp
+        let tmp = arr[i]
+        arr[i] <- arr[j]
+        arr[j] <- tmp
 
     List.ofArray arr, r
 
@@ -5934,8 +5933,8 @@ let private shuffleProbe
             let answers = orderFreeAnswers getProp shuffled
 
             for idx in 0 .. baseline.Length - 1 do
-                let name, before = baseline.[idx]
-                let _, after = answers.[idx]
+                let name, before = baseline[idx]
+                let _, after = answers[idx]
 
                 if before <> after then
                     t <-
@@ -6471,12 +6470,12 @@ let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<st
         let rec firstUnpaired (k: int) : int =
             if k >= text.Length then
                 -1
-            elif isHigh text.[k] then
-                (if k + 1 < text.Length && isLow text.[k + 1] then
+            elif isHigh text[k] then
+                (if k + 1 < text.Length && isLow text[k + 1] then
                      firstUnpaired (k + 2)
                  else
                      k)
-            elif isLow text.[k] then
+            elif isLow text[k] then
                 k
             else
                 firstUnpaired (k + 1)
@@ -6490,7 +6489,7 @@ let private guardModelSide (w: WireCanon.wire<int, float>) (v: JVal) : Result<st
                 "ill-formed string has no canonical rendering of its own: "
                 + (if isKey then "a member key" else "a string")
                 + " holds the unpaired surrogate U+"
-                + (int text.[k]).ToString("X4")
+                + (int text[k]).ToString("X4")
                 + " at unit "
                 + string k
                 + " at "
@@ -6831,7 +6830,7 @@ let private utf8Probe (s: string) : string list =
     let guarded =
         match Hash.tryUtf8Bytes s, strictlyEncodable s with
         | Result.Ok bytes, true when bytes = strictUtf8.GetBytes s -> []
-        | Result.Error bad, false when bad.Index < s.Length && int s.[bad.Index] = bad.Unit -> []
+        | Result.Error bad, false when bad.Index < s.Length && int s[bad.Index] = bad.Unit -> []
         | got, strict ->
             [ sprintf
                   "tryUtf8Bytes [%s] = %A where the strict encoder %s"
@@ -6848,7 +6847,7 @@ let private utf8ReadingAnUncheckedLowHalf (s: string) : byte[] =
     let mutable i = 0
 
     while i < s.Length do
-        let c = int s.[i]
+        let c = int s[i]
 
         if c < 0x80 then
             out.Add(byte c)
@@ -6856,7 +6855,7 @@ let private utf8ReadingAnUncheckedLowHalf (s: string) : byte[] =
             out.Add(byte (0xC0 ||| (c >>> 6)))
             out.Add(byte (0x80 ||| (c &&& 0x3F)))
         elif c >= 0xD800 && c <= 0xDBFF && i + 1 < s.Length then
-            let lo = int s.[i + 1]
+            let lo = int s[i + 1]
             let cp = 0x10000 + ((c - 0xD800) <<< 10) + (lo - 0xDC00)
             out.Add(byte (0xF0 ||| (cp >>> 18)))
             out.Add(byte (0x80 ||| ((cp >>> 12) &&& 0x3F)))
@@ -7154,7 +7153,7 @@ let private fieldAddProbe (optClass: string) (beforeText: string) (afterText: st
                     "the `%s` field-add perturbation produced %d rows, not the single FieldAdded it adds — the perturbation moved something else: %A"
                     optClass
                     (List.length rows)
-                    (rows |> List.map (fun r -> r.Change))
+                    (rows |> List.map _.Change)
 
         let declared =
             match row.Change with
@@ -8067,7 +8066,7 @@ let private genInvocation (sg: Signature) (r: ConfRng.T) : (string * string) lis
     rng <- r4
 
     if dup = 0 && args.Count > 0 then
-        args.Add(fst args.[0], "again")
+        args.Add(fst args[0], "again")
 
     List.ofSeq args, rng
 
@@ -8110,7 +8109,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
 
     // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
     let penum = CapabilityRegistry.enumerate preg |> List.map capToModel
-    let menum = ModelCap.enumerate mreg |> List.sortBy (fun c -> c.c_id)
+    let menum = ModelCap.enumerate mreg |> List.sortBy _.c_id
 
     if penum <> menum then
         diffs.Add(sprintf "seed %d: enumerate differs" seedTag)
@@ -8393,7 +8392,7 @@ let private genHandlers (t: RNode) (r: ConfRng.T) : (string * HandlerBinding<int
 
     if dup = 0 && hs.Count > 0 then
         hs.Add(
-            fst hs.[0],
+            fst hs[0],
             ({ Handler = 99
                Effect = Effect.pureDeterministic }
             : HandlerBinding<int>)
@@ -8711,7 +8710,7 @@ let private genPipeline (preg: CapabilityRegistry) (r: ConfRng.T) : CapabilityPi
                     elif how < 9 && nodes.Count > 0 then
                         let k, r5 = ConfRng.intBelow nodes.Count rng
                         rng <- r5
-                        args.Add(e.Addr, ArgSource.FromNode(CapabilityPipeline.nodeId nodes.[k]))
+                        args.Add(e.Addr, ArgSource.FromNode(CapabilityPipeline.nodeId nodes[k]))
                     else
                         let v, r5 = genValueFor sp rng
                         rng <- r5
@@ -8740,7 +8739,7 @@ let private genPipeline (preg: CapabilityRegistry) (r: ConfRng.T) : CapabilityPi
             // LATER node that already reaches it.
             (match List.tryFindIndex isInvokeWithArgs ns with
              | Some i ->
-                 let aId = CapabilityPipeline.nodeId ns.[i]
+                 let aId = CapabilityPipeline.nodeId ns[i]
 
                  (match
                      ns
@@ -8917,7 +8916,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
             let v, ra2 = genValueFor (outputTypeOf n) ra1
             rng <- ra2
 
-            table.[CapabilityPipeline.nodeId n] <-
+            table[CapabilityPipeline.nodeId n] <-
                 (if roll = 0 then Error "boom"
                  elif roll < 10 then Ok(validValueFor (outputTypeOf n))
                  else Ok v)
@@ -8941,7 +8940,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
             =
             fun (n: PipelineNode) (args: (string * PipelineArg<string>) list) ->
                 log.Add(CapabilityPipeline.nodeId n + "(" + renderArgs pArg args + ")")
-                tbl.[CapabilityPipeline.nodeId n]
+                tbl[CapabilityPipeline.nodeId n]
 
         let mBodyOf
             (tbl: System.Collections.Generic.Dictionary<string, Result<string, string>>)
@@ -8950,7 +8949,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
             fun (n: ModelCap.pipeline_node) (args: (string * ModelCap.pipeline_arg<string>) list) ->
                 log.Add(ModelCap.node_id n + "(" + renderArgs mArg args + ")")
 
-                match tbl.[ModelCap.node_id n] with
+                match tbl[ModelCap.node_id n] with
                 | Ok v -> ModelCap.Ok v
                 | Error m -> ModelCap.Error m
 
@@ -9017,7 +9016,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
                 let roll, rb1 = ConfRng.intBelow 12 rng
                 rng <- rb1
 
-                table1.[nid] <-
+                table1[nid] <-
                     (if roll = 0 then
                          Error "boom2"
                      else
@@ -9076,7 +9075,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
                  let table2 =
                      System.Collections.Generic.Dictionary<string, Result<string, string>>(table1)
 
-                 table2.[unnamed] <- Ok "moved-unnamed"
+                 table2[unnamed] <- Ok "moved-unnamed"
 
                  let stale =
                      CapabilityPipeline.evalFrom lookup id (pBodyOf table2 (ResizeArray<string>())) prior changedSet p
@@ -10189,11 +10188,11 @@ let private decodeFields (s: string) : string list option =
         if i = s.Length then
             if sb.Length = 0 then Some(List.rev acc) else None
         else
-            let c = s.[i]
+            let c = s[i]
 
             if c = '\u0010' then
-                if i + 1 < s.Length && (s.[i + 1] = '\u0010' || s.[i + 1] = '\u0001') then
-                    sb.Append(s.[i + 1]) |> ignore
+                if i + 1 < s.Length && (s[i + 1] = '\u0010' || s[i + 1] = '\u0001') then
+                    sb.Append(s[i + 1]) |> ignore
                     go (i + 2) acc
                 else
                     None
@@ -10221,7 +10220,7 @@ let private genAdversarialField (r: ConfRng.T) : string * ConfRng.T =
     for _ in 1..n do
         let k, r2 = ConfRng.intBelow adversarialPieces.Length rng
         rng <- r2
-        sb.Append(adversarialPieces.[k]) |> ignore
+        sb.Append(adversarialPieces[k]) |> ignore
 
     sb.ToString(), rng
 
@@ -10610,7 +10609,7 @@ let private queryProbe
         let q, r3 = genQueryDecl id r2
         rng <- r3
 
-        if (q.Params |> List.map (fun p -> p.Name) |> List.distinct |> List.length) < List.length q.Params then
+        if (q.Params |> List.map _.Name |> List.distinct |> List.length) < List.length q.Params then
             repeatedDecls <- repeatedDecls + 1
 
         match QueryRegistry.register q preg, ModelQuery.register (bridge q) mreg with
@@ -10646,7 +10645,7 @@ let private queryProbe
 
     // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
     let penum = QueryRegistry.enumerate preg |> List.map bridge
-    let menum = ModelQuery.enumerate mreg |> List.sortBy (fun q -> q.q_id)
+    let menum = ModelQuery.enumerate mreg |> List.sortBy _.q_id
 
     if penum <> menum then
         diffs.Add(sprintf "seed %d: enumerate differs" seedTag)
@@ -10948,7 +10947,7 @@ let private modelReconcileOps (dag: Dag.T<'Op>) (baseId: string) (heads: string 
     let union = DagFold.closure_nodes model.nodes (DagFold.concat cs)
     let order = DagFold.drain_order ordLt (drainFuel union) union
 
-    DagFold.reconcile_ids order baseC cs |> List.map (fun id -> dag.Nodes.[id].Op)
+    DagFold.reconcile_ids order baseC cs |> List.map (fun id -> dag.Nodes[id].Op)
 
 let private blindPlanFootprint (_: PlanOp) : Footprint =
     { Reads = Set.empty
@@ -11329,7 +11328,7 @@ module private ColumnDiff =
             match prodValid with
             | Result.Error e ->
                 { t with
-                    Refusals = t.Refusals.Add((prodClass e).Split(' ').[0]) }
+                    Refusals = t.Refusals.Add((prodClass e).Split(' ')[0]) }
             | Result.Ok() -> { t with Valid = t.Valid + 1 }
 
         // encode — of ANY table, valid or not: `encodeJson` is total and papers over a malformed one
@@ -11461,7 +11460,7 @@ module private ColumnDiff =
                     match prod with
                     | Result.Error e ->
                         { t with
-                            Refusals = t.Refusals.Add((prodClass e).Split(' ').[0]) }
+                            Refusals = t.Refusals.Add((prodClass e).Split(' ')[0]) }
                     | Result.Ok _ -> t
 
                 if showProd prod = showModel model then
@@ -11553,7 +11552,7 @@ let private decTexts (seed: int) (count: int) : string list =
           let shape = draw 12
 
           if shape = 0 then
-              refusedForms.[draw (List.length refusedForms)]
+              refusedForms[draw (List.length refusedForms)]
           else
               let sign = if draw 3 = 0 then "-" else ""
               let lead = if draw 3 = 0 then "00" else ""
@@ -12311,7 +12310,7 @@ let proofOracleTests =
                       Expect.equal
                           (List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) ord)
                           (orphaned
-                           |> List.map (fun n -> n.nid)
+                           |> List.map _.nid
                            |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)))
                           "IgnoreDangling places every remaining node — the dropped parent constrains nothing"
                   | DagFold.Refused _ -> failtestf "iter %d: IgnoreDangling refused" i
@@ -12403,7 +12402,7 @@ let proofOracleTests =
                   let kind, r2 =
                       if t.Id <> "root" && flip = 0 then
                           let i, r' = ConfRng.intBelow (List.length containerKinds) r1
-                          containerKinds.[i], r'
+                          containerKinds[i], r'
                       else
                           t.Kind, r1
 
@@ -12508,7 +12507,7 @@ let proofOracleTests =
                   let kind, r2 =
                       if t.Id <> "root" && flip = 0 then
                           let i, r' = ConfRng.intBelow (List.length containerKinds) r1
-                          containerKinds.[i], r'
+                          containerKinds[i], r'
                       else
                           t.Kind, r1
 
@@ -13202,8 +13201,8 @@ let proofOracleTests =
                   | Error e -> failtestf "MoveNode(b, a) was refused: %A" e
 
               Expect.equal
-                  (Tree.preorder nodew flat |> List.map (fun n -> n.Id))
-                  (Tree.preorder nodew nested |> List.map (fun n -> n.Id))
+                  (Tree.preorder nodew flat |> List.map _.Id)
+                  (Tree.preorder nodew nested |> List.map _.Id)
                   "the premise: one preorder"
 
               Expect.notEqual (prodTreeHash flat) (prodTreeHash nested) "production tells them apart"
@@ -13598,8 +13597,7 @@ let proofOracleTests =
               let a = ofModelProposal Arbitrate.dup_a
               let b = ofModelProposal Arbitrate.dup_b
 
-              let holders (r: Arbitration<RNode, string>) =
-                  r.Accepted |> List.map (fun p -> p.Holder)
+              let holders (r: Arbitration<RNode, string>) = r.Accepted |> List.map _.Holder
 
               Expect.equal (Arbitration.duplicateIds [ a; b ]) [ 1 ] "the shipped check names the repeated id"
 
@@ -13652,7 +13650,7 @@ let proofOracleTests =
               // come last, the same three proposals accept 2 and 3. Both results are maximal. The
               // pinned order is a policy choice, and this is what it decides.
               let baseTree = ofModelTree Arbitrate.mx_base
-              let ids (r: Arbitration<RNode, string>) = r.Accepted |> List.map (fun p -> p.Id)
+              let ids (r: Arbitration<RNode, string>) = r.Accepted |> List.map _.Id
 
               let first =
                   Arbitration.arbitrate
@@ -17308,7 +17306,7 @@ let proofOracleTests =
                   | Error e -> failtestf "register refused: %A" e
 
               Expect.equal
-                  (CapabilityRegistry.enumerate reg2 |> List.map (fun c -> c.Id))
+                  (CapabilityRegistry.enumerate reg2 |> List.map _.Id)
                   [ "cap-slot"; "cap-t" ]
                   "the slot-bearing capability enumerates like any other"
 
@@ -18711,7 +18709,7 @@ let proofOracleTests =
 
                       match Tree.tryFind nodew idw p t with
                       | Some n ->
-                          let kidIds = n.Children |> List.map (fun c -> c.Id)
+                          let kidIds = n.Children |> List.map _.Id
                           let order, r' = ConfRng.shuffle kidIds rng
                           rng <- r'
                           ReorderChildren(p, order)
@@ -18735,7 +18733,7 @@ let proofOracleTests =
                   | MoveNode _ -> "move"
                   | ReorderChildren _ -> "reorder"
                   | UpdateNode _ -> "update"
-                  | Batch ops when ops |> List.exists (fun o -> o.IsBatch) -> "nested batch"
+                  | Batch ops when ops |> List.exists _.IsBatch -> "nested batch"
                   | Batch _ -> "batch"
 
               let rec noteKinds (op: SkeletonOp<RNode, string>) =
@@ -18780,7 +18778,7 @@ let proofOracleTests =
                       let before = index pre
                       let after = index post
                       let shell (n: RNode) = { n with Children = [] }
-                      let kidIds (n: RNode) = n.Children |> List.map (fun c -> c.Id)
+                      let kidIds (n: RNode) = n.Children |> List.map _.Id
                       let removedIds = before |> Map.filter (fun k _ -> not (after.ContainsKey k))
 
                       for KeyValue(x, n) in after do

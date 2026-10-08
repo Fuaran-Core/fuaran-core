@@ -223,8 +223,8 @@ module Capability =
     /// space, or an entry that projects to no hole kind. Empty exactly when `Function.isTotal`.
     let internal nonTotalAddrs (sg: Signature) : string list =
         sg.Holes
-        |> List.filter (fun e -> not (Function.isTotal { sg with Holes = [ e ] }))
-        |> List.map (fun e -> e.Addr)
+        |> List.filter (fun e -> not (Function.isTotalEntry e))
+        |> List.map _.Addr
 
     /// THE admission gate (Phase 307; one function since Phase 385, D111): totality first
     /// (`NonTotalCapability`, naming the non-total entries), then well-formedness
@@ -263,8 +263,9 @@ module Capability =
         |> snd
         |> List.rev
 
-    /// The Phase 27 determinism label this capability keys its captures on (`"deterministic"` /
-    /// `"clock"` / `"random"` / `"network"`).
+    /// The Phase 27 determinism label this capability keys its captures on: `Effect.determinismTag` of its
+    /// determinism set — `"deterministic"` for the empty set, else its factors joined by `+` in canonical
+    /// order (`"clock"`, `"clock+random"`, …; Phase 319).
     let determinismTag (c: Capability) : string = Effect.determinismTag c.Determinism
 
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic invocation
@@ -282,11 +283,7 @@ module Capability =
     /// injectivity holds over the canonical argument lists.
     let invocationKey (c: Capability) (args: (string * string) list) : string =
         let spelled (a: string, v: string) =
-            match
-                c.Signature.Holes
-                |> List.tryFind (fun h -> h.Addr = a)
-                |> Option.bind (fun h -> h.Space)
-            with
+            match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = a) |> Option.bind _.Space with
             | Some space -> a, (Space.canonical space v |> Option.defaultValue v)
             | None -> a, v
 
@@ -313,7 +310,7 @@ module Capability =
     /// bound to "no value" the way a `Query` param bound to `Null` could before Phase 226.
     let validateArgs (c: Capability) (args: (string * string) list) : Result<unit, InvokeError> =
         let holes = c.Signature.Holes
-        let declared = holes |> List.map (fun h -> h.Addr)
+        let declared = holes |> List.map _.Addr
         let argMap = Map.ofList args
 
         // 0. every address is bound once (Phase 307): the first repeated address, at its second
@@ -343,7 +340,7 @@ module Capability =
             let unbound =
                 holes
                 |> List.filter (fun h -> h.Required && not (Map.containsKey h.Addr argMap))
-                |> List.map (fun h -> h.Addr)
+                |> List.map _.Addr
 
             if List.isEmpty unbound then
                 Ok()
@@ -403,7 +400,7 @@ module Capability =
     /// `Ok ()` there.
     let validateArgsAll (c: Capability) (args: (string * string) list) : Result<unit, InvokeError list> =
         let holes = c.Signature.Holes
-        let declared = holes |> List.map (fun h -> h.Addr)
+        let declared = holes |> List.map _.Addr
         let argMap = Map.ofList args
 
         // Every repeated address first (Phase 307), as `validateArgs` checks it first; then one
@@ -415,7 +412,7 @@ module Capability =
         let unbound =
             holes
             |> List.filter (fun h -> h.Required && not (Map.containsKey h.Addr argMap))
-            |> List.map (fun h -> h.Addr)
+            |> List.map _.Addr
 
         let all =
             if List.isEmpty unbound then

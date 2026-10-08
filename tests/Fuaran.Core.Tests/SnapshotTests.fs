@@ -133,7 +133,7 @@ let tests =
               let streamGen: StreamGen<CounterOp, int> = { State0 = 0; Op = genOp }
               let results = Conformance.snapshotLaws sw streamGen stateEnc h 321 100
               Expect.equal (List.length results) 2 "bounded replay + verifyAcross"
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "snapshot laws pass"
+              Expect.isTrue (results |> List.forall _.Passed) "snapshot laws pass"
 
           // Phase 13 — verified linear load.
           testCase "fromJsonlVerified accepts an intact stream and rejects a tampered op"
@@ -292,7 +292,7 @@ let tests =
                       "the config is genuinely non-canonical: the canonical walker refuses the stream"
 
                   let flipLast (s: string) =
-                      let c = s.[s.Length - 1]
+                      let c = s[s.Length - 1]
                       s.Substring(0, s.Length - 1) + string (if c = '0' then '1' else '0')
 
                   for atSeq in 0..4 do

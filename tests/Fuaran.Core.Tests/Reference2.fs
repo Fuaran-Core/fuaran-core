@@ -64,7 +64,7 @@ let nodew2: NodeWitness<R2Node, int> =
 /// Enumerate declared holes with their absolute lexical address (id-path) — the hygiene surface.
 let holesOf2 (root: R2Node) : HoleDecl list =
     Tree.preorder nodew2 root
-    |> List.filter (fun n -> n.Slot.IsSome)
+    |> List.filter _.Slot.IsSome
     |> List.map (fun n ->
         let addr =
             match Tree.path nodew2 idw2 n.Ref root with
@@ -93,7 +93,7 @@ let artw2: ArtifactWitness<R2Node, int> =
     { Tree = nodew2
       IdW = idw2
       Holes = holesOf2
-      Effect = (fun n -> n.Effect)
+      Effect = _.Effect
       Bind = bind2 }
 
 /// A canonical per-node content encoder for `Tree.encodeHash` — the node's LOCAL content (id, tag,

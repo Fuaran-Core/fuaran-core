@@ -33,7 +33,7 @@ module private Oracle =
         elif c >= 'A' && c <= 'F' then int c - int 'A' + 10
         else fail BadHexDigit "bad hex digit in \\u escape"
 
-    /// The reader before Phase 366, one unit at a time, clause for clause. `input.[0]` is the
+    /// The reader before Phase 366, one unit at a time, clause for clause. `input[0]` is the
     /// opening quote. `resetAtEscape` and `dropAtBoundary` build the two BROKEN readers the go-red
     /// uses: one forgets a pending high surrogate when an escape begins, one loses the last unit of
     /// a run that an escape ends. Both are false for the reference.
@@ -59,7 +59,7 @@ module private Oracle =
                 if i >= n then
                     fail UnterminatedString "unterminated string"
 
-                let c = input.[i]
+                let c = input[i]
                 i <- i + 1
 
                 match c with
@@ -72,13 +72,13 @@ module private Oracle =
                     if resetAtEscape then
                         pendingHigh <- false
 
-                    if dropAtBoundary && i >= 2 && input.[i - 2] <> '"' && sb.Length > 0 then
+                    if dropAtBoundary && i >= 2 && input[i - 2] <> '"' && sb.Length > 0 then
                         sb.Length <- sb.Length - 1
 
                     if i >= n then
                         fail UnterminatedEscape "unterminated escape"
 
-                    let e = input.[i]
+                    let e = input[i]
                     i <- i + 1
 
                     match e with
@@ -97,10 +97,10 @@ module private Oracle =
                         let hex = hexDigit fail
 
                         let code =
-                            (hex input.[i] <<< 12)
-                            + (hex input.[i + 1] <<< 8)
-                            + (hex input.[i + 2] <<< 4)
-                            + hex input.[i + 3]
+                            (hex input[i] <<< 12)
+                            + (hex input[i + 1] <<< 8)
+                            + (hex input[i + 2] <<< 4)
+                            + hex input[i + 3]
 
                         i <- i + 4
                         append code

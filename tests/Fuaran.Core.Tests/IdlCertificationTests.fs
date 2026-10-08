@@ -389,7 +389,7 @@ let valueCarryingDefaults =
                               |> Array.filter (fun l -> l <> "")
                               |> Array.map (fun l ->
                                   let parts = l.Split('\u0001')
-                                  parts.[0], parts.[1])
+                                  parts[0], parts[1])
                               |> Map.ofArray
 
                           for name, _, wire in cases do
@@ -577,7 +577,7 @@ let artifactRoundTrip =
                   valueCoverageIdl
                   "the coverage vocabulary is authored in canonical order"
 
-              let cases = valueCoverageIdl.Defaults |> List.map (fun d -> d.Field) |> Set.ofList
+              let cases = valueCoverageIdl.Defaults |> List.map _.Field |> Set.ofList
 
               let expected =
                   Set.ofList

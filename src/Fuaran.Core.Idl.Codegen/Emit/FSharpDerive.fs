@@ -1264,7 +1264,7 @@ module internal FSharpDerive =
 
         let categories =
             ctx.Kinds
-            |> List.map (fun k -> k.Category)
+            |> List.map _.Category
             |> List.distinct
             |> List.map (fun c -> c, ctx.Kinds |> List.filter (fun k -> k.Category = c) |> List.map _.Tag)
 

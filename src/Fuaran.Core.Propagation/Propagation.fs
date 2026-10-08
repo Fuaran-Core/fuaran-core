@@ -493,7 +493,7 @@ module Propagation =
             [ for KeyValue(reader, reads) in partDeps do
                   for KeyValue(read, parts) in reads do
                       if Set.contains read changed && meets parts (changedParts read) then
-                          yield reader ]
+                          reader ]
             |> Set.ofList
 
         let deps = nodeDependencies partDeps

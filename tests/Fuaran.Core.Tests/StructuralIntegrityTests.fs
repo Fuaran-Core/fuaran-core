@@ -112,7 +112,7 @@ let genRefTree (rng: ConfRng.T) : RNode * ConfRng.T =
         let count = draw 3
 
         let refs =
-            [ for _ in 1..count -> if draw 6 = 0 then "ghost" else ids.[draw ids.Length] ]
+            [ for _ in 1..count -> if draw 6 = 0 then "ghost" else ids[draw ids.Length] ]
 
         let value =
             if List.isEmpty refs then
@@ -329,7 +329,7 @@ let tests =
                     let verdict =
                         Arbitration.arbitrateGrammar grammar canHold nodew idw (doc ()) proposals
 
-                    Expect.equal (verdict.Accepted |> List.map (fun p -> p.Id)) [ 2 ] "the legal one lands"
+                    Expect.equal (verdict.Accepted |> List.map _.Id) [ 2 ] "the legal one lands"
 
                     match verdict.Rejected with
                     | [ (p, Inapplicable(0, IllegalChild("x", "para", "root", "doc", legal))) ] ->
@@ -348,12 +348,9 @@ let tests =
 
                     let defects = (Validator.containment grammar).Run nodew tree
 
-                    Expect.equal (defects |> List.map (fun d -> d.Node)) [ Some "p0"; Some "n2" ] "both, in preorder"
+                    Expect.equal (defects |> List.map _.Node) [ Some "p0"; Some "n2" ] "both, in preorder"
 
-                    Expect.equal
-                        (defects |> List.map (fun d -> d.Code))
-                        [ "TREE-ILLEGALCHILD"; "TREE-ILLEGALCHILD" ]
-                        "coded"
+                    Expect.equal (defects |> List.map _.Code) [ "TREE-ILLEGALCHILD"; "TREE-ILLEGALCHILD" ] "coded"
 
                     Expect.equal
                         defects.Head.Message
@@ -380,7 +377,7 @@ let tests =
                     let results =
                         Conformance.containmentLaws (fun _ -> None) nodew idw grammarGen 313 50
 
-                    Expect.isFalse (results |> List.forall (fun r -> r.Passed)) "the grammar-refusal guard reds" ]
+                    Expect.isFalse (results |> List.forall _.Passed) "the grammar-refusal guard reds" ]
 
           testList
               "the reference witness"
@@ -639,7 +636,7 @@ let tests =
                           DeclsOf = fun n -> [ n.Id ] }
 
                     let results = Conformance.referenceLawsAt none nodew idw refGen 313 50
-                    Expect.isFalse (results |> List.forall (fun r -> r.Passed)) "the reference-arm guard reds" ]
+                    Expect.isFalse (results |> List.forall _.Passed) "the reference-arm guard reds" ]
 
           testList
               "the envelopes and the graph"

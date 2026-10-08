@@ -203,7 +203,7 @@ let internal bareTestCounts (text: string) : string list =
         + @")\s+(?:[\w`.\-]+\s+){0,2}(?:tests|test\s+cases|testcases|assertions)\b",
         RegexOptions.IgnoreCase
     )
-    |> Seq.map (fun m -> m.Value)
+    |> Seq.map _.Value
     |> Seq.toList
 
 /// `(shipping but undocumented, documented but not shipping)`.
@@ -585,7 +585,7 @@ let private gitTags (root: string) : Result<Set<string>, string> =
         else
             out.Split('\n')
             |> Array.toList
-            |> List.map (fun l -> l.Trim())
+            |> List.map _.Trim()
             |> List.filter (fun l -> l <> "")
             |> Set.ofList
             |> Ok
@@ -659,7 +659,7 @@ let private probeRoster (repo: string) (root: string) : Result<string list, stri
         else
             out.Result.Split('\n')
             |> Array.toList
-            |> List.map (fun l -> l.Trim())
+            |> List.map _.Trim()
             |> List.filter (fun l -> l <> "")
             |> Ok
     with e ->

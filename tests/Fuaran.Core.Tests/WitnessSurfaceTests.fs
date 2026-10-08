@@ -13,10 +13,7 @@ open FSharp.Reflection
 open Fuaran.Core
 
 let private fieldNames (t: System.Type) : string list =
-    FSharpType.GetRecordFields t
-    |> Array.map (fun p -> p.Name)
-    |> Array.toList
-    |> List.sort
+    FSharpType.GetRecordFields t |> Array.map _.Name |> Array.toList |> List.sort
 
 [<Tests>]
 let tests =

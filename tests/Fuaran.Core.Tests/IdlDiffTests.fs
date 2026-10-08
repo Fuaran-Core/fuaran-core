@@ -839,13 +839,13 @@ let descriptorTableTests =
                           typeof<Diff.Change>,
                           System.Reflection.BindingFlags.Public
                       )
-                      |> Array.map (fun c -> c.Name)
+                      |> Array.map _.Name
                       |> Set.ofArray
 
                   let ruled =
                       Diff.mappingTable.Split('\n')
                       |> Array.choose (fun line ->
-                          let cells = line.Split('|') |> Array.map (fun c -> c.Trim())
+                          let cells = line.Split('|') |> Array.map _.Trim()
 
                           // `| Change | Wire severity | F# consequence | Classifier case |` — the last
                           // cell, back-quoted, on every data row.
@@ -989,7 +989,7 @@ let descriptorTableTests =
                                   Wires = []
                                   CaseAnnotations = [] } ] }
 
-                  let cs = diffOf before after |> List.map (fun c -> c.Change)
+                  let cs = diffOf before after |> List.map _.Change
 
                   Expect.equal
                       cs
@@ -1034,10 +1034,7 @@ let supportInputTests =
 
                   let v = supportVerdict (Some support) (Some edited)
 
-                  Expect.equal
-                      (v.Changes |> List.map (fun c -> c.Severity))
-                      [ Diff.HostSurfaceOnly ]
-                      "host-surface, never wire"
+                  Expect.equal (v.Changes |> List.map _.Severity) [ Diff.HostSurfaceOnly ] "host-surface, never wire"
 
                   Expect.equal (Diff.verdictClass v) Diff.VerdictClass.HostSurface "the class a gate reads"
 
@@ -1059,7 +1056,7 @@ let supportInputTests =
                               CaseRefines = support.Support.CaseRefines |> Map.map (fun _ e -> e + " (* refined *)") } }
 
               let v = supportVerdict (Some support) (Some edited)
-              Expect.equal (v.Changes |> List.map (fun c -> c.Severity)) [ Diff.HostSurfaceOnly ] "host-surface"
+              Expect.equal (v.Changes |> List.map _.Severity) [ Diff.HostSurfaceOnly ] "host-surface"
 
               Expect.equal
                   v.FSharpConsequences

@@ -31,7 +31,7 @@ let private fixture () =
 
 let private kidsOf (id: string) (t: RNode) =
     Tree.tryFind nodew idw id t
-    |> Option.map (fun n -> n.Children |> List.map (fun c -> c.Id))
+    |> Option.map (fun n -> n.Children |> List.map _.Id)
     |> Option.defaultValue []
 
 let private applied (script: SkeletonOp<RNode, string> list) (t: RNode) =
@@ -187,7 +187,7 @@ let tests =
               let red =
                   Conformance.freshIdLaws nodew idw ConformanceTests.opGen setId lazyMint 312 100
                   |> List.filter (fun r -> not r.Passed)
-                  |> List.map (fun r -> r.Law)
+                  |> List.map _.Law
 
               Expect.contains red "a minted id's key is absent from the taken set it was minted against" "taken id"
 
@@ -196,7 +196,7 @@ let tests =
               let red2 =
                   Conformance.freshIdLaws nodew idw ConformanceTests.opGen lossySetId (FreshIds.derived idw) 312 100
                   |> List.filter (fun r -> not r.Passed)
-                  |> List.map (fun r -> r.Law)
+                  |> List.map _.Law
 
               Expect.contains red2 "setId sets the id and keeps the kind and the children" "lossy setId"
 

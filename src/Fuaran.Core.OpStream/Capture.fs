@@ -297,8 +297,8 @@ module internal OpStreamCapture =
             cfg.Genesis
             0
             (fun (c: EffectCapture) -> c.Seq)
-            (fun c -> c.PrevHash)
-            (fun c -> c.Hash)
+            _.PrevHash
+            _.Hash
             (fun c -> capturePayload c.Seq c.Eff c.Determinism c.Value)
             captures
 
@@ -538,8 +538,8 @@ module internal OpStreamCapture =
             cfg.Genesis
             0
             (fun (c: KeyedCapture) -> c.Seq)
-            (fun c -> c.PrevHash)
-            (fun c -> c.Hash)
+            _.PrevHash
+            _.Hash
             (fun c -> keyedPayload c.Seq c.Key c.Occurrence c.Determinism c.Phase c.Value)
             captures
 

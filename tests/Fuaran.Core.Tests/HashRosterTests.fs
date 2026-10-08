@@ -146,7 +146,7 @@ let private callers () : Map<string, string> =
         lines
         |> Array.mapi (fun i l -> i, l)
         |> Array.filter (fun (_, l) ->
-            let code = (l.Split("//").[0])
+            let code = (l.Split("//")[0])
             callSite.IsMatch code)
         |> Array.map (fun (i, _) ->
             let name =
@@ -201,7 +201,7 @@ let private bareJoins () : string list =
         let hits =
             lines
             |> Array.mapi (fun i l -> i, l)
-            |> Array.filter (fun (_, l) -> bareJoin.IsMatch(l.Split("//").[0]))
+            |> Array.filter (fun (_, l) -> bareJoin.IsMatch(l.Split("//")[0]))
             |> Array.map (fun (i, l) -> sprintf "%s:%d: %s" (relOf f) (i + 1) (l.Trim()))
             |> Array.toList
 

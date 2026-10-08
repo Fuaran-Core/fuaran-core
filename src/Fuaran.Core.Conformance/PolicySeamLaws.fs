@@ -235,10 +235,10 @@ module internal PolicySeamLaws =
                 observed.Check(
                     (if refusedHere then
                          capTold = 1
-                         && told.[0] = { Policy = gateName
-                                         Id = id
-                                         Args = [ "n", string n ]
-                                         Decision = expected }
+                         && told[0] = { Policy = gateName
+                                        Id = id
+                                        Args = [ "n", string n ]
+                                        Decision = expected }
                          && qTold.Count = 1
                      else
                          capTold = 0 && qTold.Count = 0),

@@ -239,7 +239,7 @@ module FunctionRegistry =
     /// equals the context address set AND each pair is shape-EQUAL (not merely subsumed).
     let private matchesQuery (mode: MatchMode) (query: SignatureQuery) (entry: FunctionEntry) : bool =
         let availByAddr = query.Available |> List.map (fun e -> e.Addr, e) |> Map.ofList
-        let required = entry.Capability.Signature.Holes |> List.filter (fun h -> h.Required)
+        let required = entry.Capability.Signature.Holes |> List.filter _.Required
 
         let resultMatches =
             match query.ResultType with
@@ -255,8 +255,8 @@ module FunctionRegistry =
                    | Some av -> holeSatisfied req av
                    | None -> false)
         | Exact ->
-            let reqAddrs = required |> List.map (fun h -> h.Addr) |> Set.ofList
-            let avAddrs = query.Available |> List.map (fun e -> e.Addr) |> Set.ofList
+            let reqAddrs = required |> List.map _.Addr |> Set.ofList
+            let avAddrs = query.Available |> List.map _.Addr |> Set.ofList
 
             resultMatches
             && reqAddrs = avAddrs
@@ -335,7 +335,7 @@ module FunctionRegistry =
                 | Some(ActionHole _)
                 | None -> false
                 | Some _ -> true)
-            |> List.map (fun h -> h.Addr)
+            |> List.map _.Addr
 
         match
             boundAddrs

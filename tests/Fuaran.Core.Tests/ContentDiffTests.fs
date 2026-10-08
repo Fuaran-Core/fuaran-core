@@ -38,25 +38,23 @@ let drawTree (rng: Random) (pool: string list) : RNode =
     let placed = ResizeArray<string>([ "root" ])
 
     for id in chosen do
-        parentOf.[id] <- placed.[rng.Next(placed.Count)]
+        parentOf[id] <- placed[rng.Next(placed.Count)]
         placed.Add id
 
     let kindOf =
-        chosen |> List.map (fun id -> id, kinds.[rng.Next(kinds.Length)]) |> Map.ofList
+        chosen |> List.map (fun id -> id, kinds[rng.Next(kinds.Length)]) |> Map.ofList
 
     let valueOf =
-        chosen
-        |> List.map (fun id -> id, values.[rng.Next(values.Length)])
-        |> Map.ofList
+        chosen |> List.map (fun id -> id, values[rng.Next(values.Length)]) |> Map.ofList
 
     let rec build (id: string) : RNode =
-        let children = chosen |> List.filter (fun c -> parentOf.[c] = id) |> List.map build
+        let children = chosen |> List.filter (fun c -> parentOf[c] = id) |> List.map build
 
         if id = "root" then
             RNode.node "root" "doc" children
         else
-            let n = RNode.node id kindOf.[id] children
-            { n with Value = valueOf.[id] }
+            let n = RNode.node id kindOf[id] children
+            { n with Value = valueOf[id] }
 
     build "root"
 
@@ -99,7 +97,7 @@ let drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, str
     let cur = ref tree
     let fresh = ref 0
 
-    let pick (xs: 'a list) = xs.[rng.Next(xs.Length)]
+    let pick (xs: 'a list) = xs[rng.Next(xs.Length)]
 
     let tryAdd (op: SkeletonOp<RNode, string>) =
         match Ops.apply nodew idw op cur.Value with
@@ -120,7 +118,7 @@ let drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, str
             InsertChild(n.Id, { shell with Value = pick values })
         | 1 -> RemoveNode n.Id
         | 2 -> MoveNode(n.Id, (pick nodes).Id)
-        | 3 -> ReorderChildren(n.Id, n.Children |> List.map (fun c -> c.Id) |> List.sortBy (fun _ -> rng.Next()))
+        | 3 -> ReorderChildren(n.Id, n.Children |> List.map _.Id |> List.sortBy (fun _ -> rng.Next()))
         | _ -> UpdateNode(n |> withValue (pick values) |> withKind (pick kinds))
 
     let followUp (op: SkeletonOp<RNode, string>) =
@@ -531,7 +529,7 @@ let tests =
                             multi <- multi + 1
 
                         for _ in 1..4 do
-                            let order = shuffled rng result.Accepted |> List.collect (fun p -> p.Ops)
+                            let order = shuffled rng result.Accepted |> List.collect _.Ops
 
                             Expect.equal
                                 (Ops.applyAll nodew idw order tree)

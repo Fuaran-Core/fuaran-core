@@ -89,7 +89,7 @@ let tests =
                       Corpus.Tag = "reject" } ]
 
               let outcomes = Corpus.runCorpus codec cases
-              Expect.isTrue (outcomes |> List.forall (fun o -> o.Passed)) "all corpus cases pass"
+              Expect.isTrue (outcomes |> List.forall _.Passed) "all corpus cases pass"
 
           testCase "coverageGate flags a missing tag"
           <| fun _ ->

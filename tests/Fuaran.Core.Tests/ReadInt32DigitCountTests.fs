@@ -24,7 +24,7 @@ module private Reference =
     /// `Json.readInt32` before Phase 372, verbatim.
     let readInt32 (tok: string) : int option =
         let digitsFrom =
-            if tok.Length > 0 && (tok.[0] = '-' || tok.[0] = '+') then
+            if tok.Length > 0 && (tok[0] = '-' || tok[0] = '+') then
                 1
             else
                 0
@@ -32,7 +32,7 @@ module private Reference =
         let mutable shaped = tok.Length > digitsFrom
 
         for k in digitsFrom .. tok.Length - 1 do
-            if tok.[k] < '0' || tok.[k] > '9' then
+            if tok[k] < '0' || tok[k] > '9' then
                 shaped <- false
 
         if not shaped then
@@ -52,7 +52,7 @@ module private Reference =
     /// `000000000001`, which the reader has always read as 1.
     let rawDigitCount (tok: string) : int option =
         let digitsFrom =
-            if tok.Length > 0 && (tok.[0] = '-' || tok.[0] = '+') then
+            if tok.Length > 0 && (tok[0] = '-' || tok[0] = '+') then
                 1
             else
                 0
@@ -62,14 +62,14 @@ module private Reference =
     /// Wrong answer 2: the edge one digit short — refuses every ten-digit value, in range or not.
     let nineDigits (tok: string) : int option =
         let digitsFrom =
-            if tok.Length > 0 && (tok.[0] = '-' || tok.[0] = '+') then
+            if tok.Length > 0 && (tok[0] = '-' || tok[0] = '+') then
                 1
             else
                 0
 
         let mutable first = digitsFrom
 
-        while first < tok.Length && tok.[first] = '0' do
+        while first < tok.Length && tok[first] = '0' do
             first <- first + 1
 
         if tok.Length - first > 9 then None else readInt32 tok
@@ -121,7 +121,7 @@ let private pool: string list =
           Fuaran.Core.WireBench.Corpus.opStream () ]
         |> List.collect (fun v ->
             System.Text.RegularExpressions.Regex.Matches(Json.render v, "-?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?")
-            |> Seq.map (fun m -> m.Value)
+            |> Seq.map _.Value
             |> Seq.filter (fun t -> t.IndexOfAny [| '.'; 'e'; 'E' |] < 0)
             |> List.ofSeq)
 
@@ -129,11 +129,11 @@ let private pool: string list =
         let ds = draws 372UL 40_000 |> Array.ofList
 
         [ for k in 0 .. ds.Length / 4 - 1 do
-              let a, b, c, d = ds.[4 * k], ds.[4 * k + 1], ds.[4 * k + 2], ds.[4 * k + 3]
+              let a, b, c, d = ds[4 * k], ds[4 * k + 1], ds[4 * k + 2], ds[4 * k + 3]
               let len = int (a % 24UL) + 1
               let digits = string (BigInteger b * BigInteger c) + string d
               let body = string (1UL + b % 9UL) + digits.Substring(0, min (len - 1) digits.Length)
-              let sign = [| ""; "-"; "+" |].[int (c % 3UL)]
+              let sign = [| ""; "-"; "+" |][int (c % 3UL)]
               let zeros = if d % 4UL = 0UL then int (a % 13UL) else 0
               yield sign + System.String('0', zeros) + body ]
 

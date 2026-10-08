@@ -194,10 +194,7 @@ let reconcileShapeTests =
 
               match refusals with
               | [ Error(ReconcileFault.LanesRejected rs) ] ->
-                  Expect.equal
-                      (rs |> List.map (fun r -> r.Head))
-                      (List.sort [ a; c ])
-                      "both rejecting lanes, by head id"
+                  Expect.equal (rs |> List.map _.Head) (List.sort [ a; c ]) "both rejecting lanes, by head id"
 
                   Expect.isTrue (rs |> List.forall (fun r -> r.NodeId = r.Head)) "each at its own node"
               | other -> failtestf "one order-free refusal expected, got %A" other

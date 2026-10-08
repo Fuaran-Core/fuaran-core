@@ -338,7 +338,7 @@ let private sessions (seed: int) (count: int) : (string * string * int) list lis
     [ for _ in 1..count do
           yield
               [ for _ in 0 .. rng.Next 6 do
-                    yield (if rng.Next 2 = 0 then "a" else "b"), labels.[rng.Next labels.Length], rng.Next 100 ] ]
+                    yield (if rng.Next 2 = 0 then "a" else "b"), labels[rng.Next labels.Length], rng.Next 100 ] ]
 
 let private recordProd (session: (string * string * int) list) : EffectCapture list =
     (([]: EffectCapture list), session)

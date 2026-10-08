@@ -60,7 +60,7 @@ let fingerprintLines (text: string) : string[] =
 
     let lines =
         unbom.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
-        |> Array.map (fun l -> l.TrimEnd())
+        |> Array.map _.TrimEnd()
 
     match lines |> Array.tryFindIndexBack (fun l -> l <> "") with
     | Some i -> lines[..i]

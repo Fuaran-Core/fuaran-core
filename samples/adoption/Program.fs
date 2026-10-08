@@ -409,9 +409,7 @@ let main _ =
     printfn "  notes(archive) -> %s" (notes "archive")
 
     let green =
-        (laws |> List.forall (fun r -> r.Passed))
-        && streamOk
-        && (seamLaws |> List.forall (fun r -> r.Passed))
+        (laws |> List.forall _.Passed) && streamOk && (seamLaws |> List.forall _.Passed)
 
     printfn "\nconformance: %s" (if green then "GREEN" else "FAILED")
     if green then 0 else 1

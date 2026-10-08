@@ -10,7 +10,7 @@ let tests =
         "Tree"
         [ testCase "preorder visits node-then-children"
           <| fun _ ->
-              let order = Tree.preorder nodew (sample ()) |> List.map (fun n -> n.Id)
+              let order = Tree.preorder nodew (sample ()) |> List.map _.Id
               Expect.equal order [ "root"; "a"; "a1"; "a2"; "b"; "b1" ] "preorder"
 
           testCase "ids enumerates the whole tree"
@@ -19,7 +19,7 @@ let tests =
           testCase "tryFind locates a node"
           <| fun _ ->
               let n = Tree.tryFind nodew idw "a2" (sample ())
-              Expect.equal (n |> Option.map (fun x -> x.Value)) (Some "y") "a2 value"
+              Expect.equal (n |> Option.map _.Value) (Some "y") "a2 value"
 
           testCase "tryFind misses an absent id"
           <| fun _ -> Expect.isNone (Tree.tryFind nodew idw "nope" (sample ())) "absent"
@@ -27,7 +27,7 @@ let tests =
           testCase "parentOf finds the parent"
           <| fun _ ->
               let p = Tree.parentOf nodew idw "a1" (sample ())
-              Expect.equal (p |> Option.map (fun x -> x.Id)) (Some "a") "parent of a1"
+              Expect.equal (p |> Option.map _.Id) (Some "a") "parent of a1"
 
           testCase "parentOf is None for the root"
           <| fun _ -> Expect.isNone (Tree.parentOf nodew idw "root" (sample ())) "root has no parent"
@@ -40,10 +40,7 @@ let tests =
               let updated =
                   Tree.updateNode nodew idw "a1" (fun n -> { n with Value = "X" }) (sample ())
 
-              let v =
-                  updated
-                  |> Option.bind (Tree.tryFind nodew idw "a1")
-                  |> Option.map (fun n -> n.Value)
+              let v = updated |> Option.bind (Tree.tryFind nodew idw "a1") |> Option.map _.Value
 
               Expect.equal v (Some "X") "a1 updated"
 
@@ -111,9 +108,7 @@ let tests =
                   Tree.updateNode nodew idw "leaf" (fun n -> { n with Value = "Y" }) deep
 
               Expect.equal
-                  (updated
-                   |> Option.bind (Tree.tryFind nodew idw "leaf")
-                   |> Option.map (fun n -> n.Value))
+                  (updated |> Option.bind (Tree.tryFind nodew idw "leaf") |> Option.map _.Value)
                   (Some "Y")
                   "deep leaf updated"
 

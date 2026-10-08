@@ -211,9 +211,9 @@ let tests =
               let b, d2 = Dag.append h sw (Human "x") (Inc 3) a d1 |> Reference.built
               let c, d3 = Dag.append h sw (Human "x") (Inc 4) b d2 |> Reference.built // linear a -> b -> c
 
-              Expect.equal (Dag.between d3 a c |> List.map (fun n -> n.Id)) [ b; c ] "nodes after a, up to c"
+              Expect.equal (Dag.between d3 a c |> List.map _.Id) [ b; c ] "nodes after a, up to c"
               Expect.equal (Dag.between d3 c c) [] "base == head ⇒ empty delta"
-              Expect.equal (Dag.between d3 b c |> List.map (fun n -> n.Id)) [ c ] "single-step delta"
+              Expect.equal (Dag.between d3 b c |> List.map _.Id) [ c ] "single-step delta"
 
           // Phase 26 — branch delta as an applyable op list.
           testCase "betweenOps projects the branch delta's ops in topological order"
@@ -225,7 +225,7 @@ let tests =
               Expect.equal (Dag.betweenOps d3 a c) [ Inc 3; Inc 4 ] "ops of the nodes between a and c"
               Expect.equal (Dag.betweenOps d3 c c) [] "base == head ⇒ no ops"
               // consistent with `between`
-              Expect.equal (Dag.betweenOps d3 a c) (Dag.between d3 a c |> List.map (fun n -> n.Op)) "matches between"
+              Expect.equal (Dag.betweenOps d3 a c) (Dag.between d3 a c |> List.map _.Op) "matches between"
 
           // Phase 21 — DAG break localisation.
           testCase "firstBreak is None for an intact DAG"
@@ -323,7 +323,7 @@ let tests =
                   9
                   "verifyDag + determinism + tamper + JSONL round-trip + the three Phase 296 refusals + the two Phase 329 verified-append laws"
 
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) "dag laws pass"
+              Expect.isTrue (results |> List.forall _.Passed) "dag laws pass"
 
           // ---- Phase 42: DAG acyclicity guard ----
 
@@ -375,7 +375,7 @@ let refusalTests =
         [ testCase "ofNodes admits a map filed by node id and refuses a key that is not its node's id (Phase 386)"
           <| fun _ ->
               let a, d1 = Dag.append h sw x (Inc 5) "" Dag.empty |> Reference.built
-              let node = d1.Nodes.[a]
+              let node = d1.Nodes[a]
 
               match Dag.ofNodes d1.Nodes with
               | Ok d -> Expect.equal d d1 "a map filed by node id rebuilds the same DAG"

@@ -112,7 +112,7 @@ module Arbitration =
     /// arrival order, never the partition, its independence or its justifications.
     let duplicateIds (proposals: OpScriptProposal<'Node, 'Id> list) : int list =
         proposals
-        |> List.countBy (fun p -> p.Id)
+        |> List.countBy _.Id
         |> List.filter (fun (_, n) -> n > 1)
         |> List.map fst
         |> List.sort
@@ -194,7 +194,7 @@ module Arbitration =
         (proposals: OpScriptProposal<'Node, 'Id> list)
         : Arbitration<'Node, 'Id> =
         // the pinned deterministic order — ascending proposal id.
-        let pinned = proposals |> List.sortBy (fun p -> p.Id)
+        let pinned = proposals |> List.sortBy _.Id
 
         // greedy pass: accepted accumulates (proposal, footprint) in reverse pinned
         // order; a conflict at decision time is provisional (re-cited below), and carries the
@@ -229,7 +229,7 @@ module Arbitration =
         let acceptedProposals = accepted |> List.map fst
 
         { Accepted = acceptedProposals
-          MergedScript = acceptedProposals |> List.collect (fun p -> p.Ops)
+          MergedScript = acceptedProposals |> List.collect _.Ops
           Rejected = rejected }
 
     /// The base must be well-formed before anything is decided against it (Phase 305). On a base
@@ -259,7 +259,7 @@ module Arbitration =
               MergedScript = []
               Rejected =
                 proposals
-                |> List.sortBy (fun p -> p.Id)
+                |> List.sortBy _.Id
                 |> List.map (fun p -> p, Inapplicable(0, DuplicateId d)) }
 
     /// Arbitrate N op-script proposals against one base tree (Phase 85) —

@@ -507,13 +507,12 @@ module EncodingProfileVectors =
                                   let moved = Canonical.write o j <> Canonical.write p j
 
                                   if moved <> carriesShortForm j then
-                                      yield
-                                          sprintf
-                                              "stored text %d: under %s its bytes %s, but its value %s a line feed, carriage return or tab"
-                                              i
-                                              (EncodingProfile.name o)
-                                              (if moved then "move" else "do not move")
-                                              (if moved then "carries no" else "carries") ]
+                                      sprintf
+                                          "stored text %d: under %s its bytes %s, but its value %s a line feed, carriage return or tab"
+                                          i
+                                          (EncodingProfile.name o)
+                                          (if moved then "move" else "do not move")
+                                          (if moved then "carries no" else "carries") ]
                 |> List.tryHead
 
             control.Check(wrong.IsNone, (fun () -> Option.defaultValue "" wrong))

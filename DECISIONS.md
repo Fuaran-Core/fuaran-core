@@ -1,5 +1,39 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D136: the failure families are written down; `ResolveFault` keeps its name, `SampleRefusal` is ruled `SampleFault`
+
+**Recorded by Phase 389. `STABILITY.md` ("Vocabulary"); the `1.0.0` slot
+(`docs/releases/1.0.0.md`). No public type, member or wire byte moves in this phase.**
+
+*Decided: seven suffixes, one question each.* `…Rejection` (the algebra or the domain refuses a
+well-formed request against the state it meets), `…Break` (stored or received evidence does not
+verify), `…Fault` (an operation ran over the material it was given and could not complete, and says
+where it stopped), `…Error` (the call itself is refused: its input does not parse, or names what the
+seam does not hold), `…Failure` (a composite flow's outcome, wrapping the others), `…Denial` (a
+policy said no) and `Defect` (a finding reported beside an answer). The split was already the
+code's; the 2026-10-07 design review found it written nowhere, and a vocabulary nobody wrote down
+is the one the next package invents an eighth suffix beside. The contract now states it, with the
+three exception postures and the capability-argument order, so a new type is placed by rule.
+
+*Decided: `ResolveFault` is a fault, and keeps its name.* The review read it as a misfit beside
+the replay and snapshot faults and suggested `ResolveError`. Measured against the rule it is not a
+misfit: it is the host resolver's report that its fetch could not complete (a source missing, a
+time-out, a failure, a predicate or order it cannot honour), and the dispatcher translates it into
+the caller-facing `QueryError`, as every other fault is translated at its boundary. Renamed
+`ResolveError`, one dispatch would carry two `…Error` unions, host-facing and caller-facing, with
+nothing in the vocabulary to tell them apart. So no `retype` is filed for it on the `1.0.0` slot.
+
+*Decided: `Idl.Sample.SampleRefusal` is renamed `SampleFault` on the `1.0.0` slot.* It is the one
+public failure type outside the seven suffixes, and by the rule it is a fault: the sampler could not
+complete on the vocabulary it was given, and the value names the slot where it stopped. The rename
+is a `retype` of `Fuaran.Core.Idl`'s surface and is free only on this slot. It is not carried by
+this phase, whose work moves no `api/` line; the slot's ledger records the ruling as owed, so the
+release cannot close over it unnoticed.
+
+*Rejected: renaming every type to one suffix per package.* The suffix answers what went wrong,
+not where; a package that both refuses a request and fails an operation carries both, as the query
+seam does.
+
 ## 2026-10-08 — D135: a value space has ONE reader spelling at `1.0.0` — the descriptor read D133 kept leaves, model and oracle with it (amends D133)
 
 **Recorded by Phase 405. `Fuaran.Core.Function` (`SpaceCodec.decoder`), `proofs/Capability.fst` and

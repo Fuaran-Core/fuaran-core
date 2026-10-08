@@ -6,7 +6,7 @@ open Fuaran.Core.Tests.Reference
 
 let private childIds (w: NodeWitness<RNode, string>) (parentId: string) (root: RNode) =
     Tree.tryFind w idw parentId root
-    |> Option.map (fun p -> p.Children |> List.map (fun c -> c.Id))
+    |> Option.map (fun p -> p.Children |> List.map _.Id)
     |> Option.defaultValue []
 
 /// One random (possibly-invalid) skeleton op against `tree` — test-local, as every law-test file
@@ -211,7 +211,7 @@ let tests =
                   4
                   "preservation + idempotence + non-growth + the non-identity-script guard (Phase 302)"
 
-              Expect.isTrue (results |> List.forall (fun r -> r.Passed)) (sprintf "all pass: %A" results) ]
+              Expect.isTrue (results |> List.forall _.Passed) (sprintf "all pass: %A" results) ]
 
 // ---------------------------------------------------------------------------
 //  Phase 137 — insert-subtree id uniqueness

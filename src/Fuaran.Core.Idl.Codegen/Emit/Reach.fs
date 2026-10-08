@@ -28,12 +28,17 @@ module internal Reach =
 
                 if unions.Add n then
                     match CodegenLookup.tryUnion idl n with
-                    | Some u -> u.Cases |> List.iter (fun c -> c.Fields |> List.iter (fun f -> visit f.Type))
+                    | Some u ->
+                        for c in u.Cases do
+                            for f in c.Fields do
+                                visit f.Type
                     | None -> ()
             | TRecord n ->
                 if records.Add n then
                     match CodegenLookup.tryRecord idl n with
-                    | Some r -> r.Fields |> List.iter (fun f -> visit f.Type)
+                    | Some r ->
+                        for f in r.Fields do
+                            visit f.Type
                     | None -> ()
             | TList inner -> visit inner
             | TMap vt -> visit vt
@@ -76,11 +81,14 @@ module internal Reach =
                         visit (TUnion(u.Name, []))
             | _ -> ()
 
-        kinds |> List.iter (fun k -> k.Fields |> List.iter (fun f -> visit f.Type))
+        for k in kinds do
+            for f in k.Fields do
+                visit f.Type
         // Phase 690 — the node envelope is a reachability ROOT too. Its records are
         // reachable from no kind (nothing nests a `SemanticStyle`), so walking only
         // the kinds emits a `Node` whose field types were never declared.
-        idl.NodeFields |> List.iter (fun f -> visit f.Type)
+        for f in idl.NodeFields do
+            visit f.Type
 
         idl.Enums |> List.filter (fun e -> enums.Contains e.Name),
         idl.Unions |> List.filter (fun u -> unions.Contains u.Name),

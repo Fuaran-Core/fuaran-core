@@ -165,7 +165,7 @@ let main argv =
             "Fuaran.Core.Tests.DocGenerated"
             Fuaran.Core.Idl.Gen.GenSupport.Empty
             SecondDomainSpike.docIdl
-            (SecondDomainSpike.docIdl.Kinds |> List.map (fun k -> k.Tag))
+            (SecondDomainSpike.docIdl.Kinds |> List.map _.Tag)
 
         // Phase 303 — the other two certification vocabularies' generated F# modules, so
         // every certification vocabulary's F# backend is COMPILED by the suite, not only
@@ -177,14 +177,14 @@ let main argv =
             "Fuaran.Core.Tests.ScoreGenerated"
             Fuaran.Core.Idl.Gen.GenSupport.Empty
             ScoreDomainSpike.scoreIdl
-            (ScoreDomainSpike.scoreIdl.Kinds |> List.map (fun k -> k.Tag))
+            (ScoreDomainSpike.scoreIdl.Kinds |> List.map _.Tag)
 
         writeGen
             "tests/Fuaran.Core.Tests/ReferenceGenerated.fs"
             "Fuaran.Core.Tests.ReferenceGenerated"
             ReferenceIdl.support.Support
             ReferenceIdl.refIdl
-            (ReferenceIdl.refIdl.Kinds |> List.map (fun k -> k.Tag))
+            (ReferenceIdl.refIdl.Kinds |> List.map _.Tag)
 
         // Phase 337 — the decode vectors' vocabulary, so the decode error contract is held
         // against a COMPILED generated host as well as the interpreter and the TypeScript one.
@@ -195,7 +195,7 @@ let main argv =
             DecodeVectorsIdl.moduleName
             Fuaran.Core.Idl.Gen.GenSupport.Empty
             decodeIdl
-            (decodeIdl.Kinds |> List.map (fun k -> k.Tag))
+            (decodeIdl.Kinds |> List.map _.Tag)
 
         // Phase 347 — the refusal corners' vocabulary, so every corner is read by a COMPILED
         // generated host beside the interpreter and the TypeScript one.
@@ -204,7 +204,7 @@ let main argv =
             RefusalCornersIdl.moduleName
             Fuaran.Core.Idl.Gen.GenSupport.Empty
             RefusalCornersIdl.idl
-            (RefusalCornersIdl.idl.Kinds |> List.map (fun k -> k.Tag))
+            (RefusalCornersIdl.idl.Kinds |> List.map _.Tag)
 
         // Phase 374 — the derivations vocabulary, with every structural derivation requested, so
         // each one is COMPILED by the suite and held to its laws over the compiled module.

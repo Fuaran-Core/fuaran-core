@@ -134,7 +134,7 @@ type ObserverDefect =
 /// The observer functions over the witness (Phase 298). Every function is
 /// pure: a registration or update returns the new state and the emission it
 /// produced, and the host delivers emissions to whatever subscribers it
-/// keeps (the adapter below keeps a list).
+/// keeps beside the state it threads.
 module ObserverWitness =
 
     /// The witness for `derive` under the change-only structural defaults.
@@ -258,7 +258,7 @@ module ObserverWitness =
             let children =
                 (Map.empty, List.rev st.Order)
                 ||> List.fold (fun (acc: Map<string, string list>) id ->
-                    match Map.tryFind id st.Entries |> Option.bind (fun e -> e.ParentId) with
+                    match Map.tryFind id st.Entries |> Option.bind _.ParentId with
                     | Some p -> Map.add p (id :: (Map.tryFind p acc |> Option.defaultValue [])) acc
                     | None -> acc)
 
