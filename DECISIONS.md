@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-08 — D136: the surface marks a static member of a type with a ` (static)` suffix outside its identity, so an instance/static flip is one `retype`; a module's members carry no marker
+## 2026-10-08 — D137: the surface marks a static member of a type with a ` (static)` suffix outside its identity, so an instance/static flip is one `retype`; a module's members carry no marker
 
 **Recorded by Phase 408. `tests/Fuaran.Core.Tests/PublicSurfaceTests.fs`, `api/Fuaran.Core.Idl.txt`
 and `api/Fuaran.Core.Idl.Codegen.txt`; no package source moves.**

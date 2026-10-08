@@ -523,7 +523,7 @@ let private visibleMethodAccess =
 // A module's members carry no marker. Every one of them is static by construction — F# cannot
 // declare an instance member in a module — and its `type … (module)` token already says so, so a
 // marker there would be the same fact written on every line, and no move of it could happen
-// without the module itself becoming a type, which that token reports (DECISIONS.md D136).
+// without the module itself becoming a type, which that token reports (DECISIONS.md D137).
 
 /// The suffix a static member's token carries.
 [<Literal>]
@@ -2465,7 +2465,7 @@ let tests =
                     + prefix
                     + "ProbeStaticModule.probeHelper(System.Int32) : System.Int32"
                     "property " + prefix + "ProbeStaticModule.probeValue : System.Int32 { get }" ]
-                  "a module's members are static by construction and carry no marker (DECISIONS.md D136)"
+                  "a module's members are static by construction and carry no marker (DECISIONS.md D137)"
 
               let make = List.head (members "ProbeStaticMembers")
 
