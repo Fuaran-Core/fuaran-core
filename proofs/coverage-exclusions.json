@@ -667,17 +667,8 @@
         "HoleKind.tag"
       ],
       "class": "measured-elsewhere",
-      "reason": "The hole-kind spelling `Function.signature` writes into every entry; measured through the signature tests (and the ladder's `capability-slot-hole-invocable-in-space`).",
-      "through": "Function.signature",
-      "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
-    },
-    {
-      "members": [
-        "HoleKind.tryOf"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The typed reading behind `SigEntry.HoleKind`; the totality check dispatches on it, and the function tests call `isTotal`.",
-      "through": "Function.isTotal",
+      "reason": "The hole-kind spelling the descriptor and the capability codec write for every entry's kind (Phase 409); measured through the schema and signature tests (and the ladder's `capability-slot-hole-invocable-in-space`).",
+      "through": "Function.toSchema",
       "standIn": "tests/Fuaran.Core.Tests/FunctionTests.fs"
     },
     {

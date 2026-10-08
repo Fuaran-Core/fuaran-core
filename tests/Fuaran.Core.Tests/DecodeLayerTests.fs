@@ -390,10 +390,7 @@ module DecodeRejectCorpus =
 let private intHole (addr: string) : SigEntry =
     { Addr = addr
       Name = addr
-      Kind = "value"
-      Space = Some(IntRange(0, 9))
-      Slot = None
-      Action = None
+      Kind = ValueHole(IntRange(0, 9))
       Required = true }
 
 let private capabilities: Capability list =
@@ -412,7 +409,7 @@ let private capabilities: Capability list =
           { Name = "label"
             Holes =
               [ { intHole "text" with
-                    Space = Some(Enum [ "x"; "y" ]) } ]
+                    Kind = ValueHole(Enum [ "x"; "y" ]) } ]
             Effect = effect }
         Placement = ClientIsland Fable } ]
 

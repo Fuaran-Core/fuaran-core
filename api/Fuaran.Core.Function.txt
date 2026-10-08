@@ -28,7 +28,7 @@ ctor Fuaran.Core.PackedFunction..ctor(System.String, System.String, System.Strin
 ctor Fuaran.Core.PolicyDenial`1..ctor(System.String, System.String, !0, Fuaran.Core.PolicyDecision)
 ctor Fuaran.Core.PolicyGate`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>)
 ctor Fuaran.Core.ReplayedDispatch`2..ctor(Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!0>, Fuaran.Core.ReplayFailure`1<!1>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Int32>)
-ctor Fuaran.Core.SigEntry..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ValueSpace>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EffectClass>, System.Boolean)
+ctor Fuaran.Core.SigEntry..ctor(System.String, System.String, Fuaran.Core.HoleKind, System.Boolean)
 ctor Fuaran.Core.Signature..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SigEntry>, Fuaran.Core.EffectClass)
 ctor Fuaran.Core.SignatureQuery..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SigEntry>)
 field Fuaran.Core.ApplyError+Tags.BindFailed : System.Int32 (literal)
@@ -236,7 +236,6 @@ method Fuaran.Core.FunctionRegistryModule.union(Fuaran.Core.FunctionRegistry, Fu
 method Fuaran.Core.FunctionRegistryModule.unregister(System.String, Fuaran.Core.FunctionRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.FunctionRegistry, Fuaran.Core.InvokeError>
 method Fuaran.Core.FunctionRegistryModule.withGate(Fuaran.Core.PolicyGate`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>, Fuaran.Core.FunctionRegistry) : Fuaran.Core.FunctionRegistry
 method Fuaran.Core.HoleKindModule.tag(Fuaran.Core.HoleKind) : System.String
-method Fuaran.Core.HoleKindModule.tryOf(System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ValueSpace>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EffectClass>) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.HoleKind>
 method Fuaran.Core.InvokeErrorModule.describe(Fuaran.Core.InvokeError) : System.String
 method Fuaran.Core.InvokeErrorModule.describeAll(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.InvokeError>) : System.String
 method Fuaran.Core.Memo.count`1(Fuaran.Core.MemoCache`1<!!0>) : System.Int32
@@ -283,7 +282,7 @@ property Fuaran.Core.EffectCodec.hostDecoder : Microsoft.FSharp.Core.FSharpFunc`
 property Fuaran.Core.EffectCodec.members : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.FunctionRegistryModule.empty : Fuaran.Core.FunctionRegistry { get }
 property Fuaran.Core.HoleKindModule.tags : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
-property Fuaran.Core.SigEntry.HoleKind : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.HoleKind> { get }
+property Fuaran.Core.SigEntry.Space : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ValueSpace> { get }
 record-field Fuaran.Core.ArtifactWitness`2.Bind #4 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Arg`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>>>
 record-field Fuaran.Core.ArtifactWitness`2.Effect #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.EffectClass>
 record-field Fuaran.Core.ArtifactWitness`2.Holes #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.HoleDecl>>
@@ -332,13 +331,10 @@ record-field Fuaran.Core.PolicyGate`2.Decide #1 : Microsoft.FSharp.Core.FSharpFu
 record-field Fuaran.Core.PolicyGate`2.Policy #0 : System.String
 record-field Fuaran.Core.ReplayedDispatch`2.Cursor #1 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.Int32>
 record-field Fuaran.Core.ReplayedDispatch`2.Outcome #0 : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!0>, Fuaran.Core.ReplayFailure`1<!1>>
-record-field Fuaran.Core.SigEntry.Action #5 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.EffectClass>
 record-field Fuaran.Core.SigEntry.Addr #0 : System.String
-record-field Fuaran.Core.SigEntry.Kind #2 : System.String
+record-field Fuaran.Core.SigEntry.Kind #2 : Fuaran.Core.HoleKind
 record-field Fuaran.Core.SigEntry.Name #1 : System.String
-record-field Fuaran.Core.SigEntry.Required #6 : System.Boolean
-record-field Fuaran.Core.SigEntry.Slot #4 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
-record-field Fuaran.Core.SigEntry.Space #3 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ValueSpace>
+record-field Fuaran.Core.SigEntry.Required #3 : System.Boolean
 record-field Fuaran.Core.Signature.Effect #2 : Fuaran.Core.EffectClass
 record-field Fuaran.Core.Signature.Holes #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SigEntry>
 record-field Fuaran.Core.Signature.Name #0 : System.String

@@ -7482,10 +7482,7 @@ let private holeDeclToModel (h: HoleDecl) : ModelCap.hole_decl =
 let private sigEntryToModel (e: SigEntry) : ModelCap.sig_entry =
     { ModelCap.sig_entry.s_addr = e.Addr
       ModelCap.sig_entry.s_name = e.Name
-      ModelCap.sig_entry.s_kind = e.Kind
-      ModelCap.sig_entry.s_space = toMOpt (Option.map spaceToModel e.Space)
-      ModelCap.sig_entry.s_slot = toMOpt e.Slot
-      ModelCap.sig_entry.s_action = toMOpt (Option.map effToModel e.Action)
+      ModelCap.sig_entry.s_kind = holeKindToModel e.Kind
       ModelCap.sig_entry.s_required = e.Required }
 
 let private sigToModel (sg: Signature) : ModelCap.signature =
@@ -9238,7 +9235,7 @@ type private CodecTally =
       CoAccepted: int
       CoRefused: int
       CoWellFormed: int
-      CoNormalised: int
+      CoPayloadRefused: int
       CoBytes: int
       CoSignatures: int
       CoNodes: int
@@ -9253,7 +9250,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
     let mutable accepted = 0
     let mutable refused = 0
     let mutable wellFormed = 0
-    let mutable normalised = 0
+    let mutable payloadRefused = 0
     let mutable bytes = 0
     let mutable signatures = 0
     let mutable nodesCompared = 0
@@ -9270,25 +9267,12 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
           ClientIsland Js ]
 
     for i in 1..trials do
-        // ---- a capability: a derived signature, sometimes with the two shapes only a hand-built
-        //      one has — a slot entry without its space, an entry whose kind is no hole kind's ----
-        let sg0, r1 = genCapSignature (sprintf "c%d" i) rng
+        // ---- a capability: a derived signature. Since Phase 409 an entry IS its hole kind, so the
+        //      two shapes only a hand-built entry had (a spaceless slot, a kind that is no hole kind's)
+        //      cannot be built; the reader meets their documents below, as targeted mutations ----
+        let sg, r1 = genCapSignature (sprintf "c%d" i) rng
         let placement, r2 = ConfRng.choose placements r1
-        let shape, r3 = ConfRng.intBelow 10 r2
-        rng <- r3
-
-        let sg =
-            match shape with
-            | 0
-            | 1 ->
-                { sg0 with
-                    Holes =
-                        sg0.Holes
-                        |> List.map (fun e -> if e.Kind = "slot" then { e with Space = None } else e) }
-            | 2 ->
-                { sg0 with
-                    Holes = sg0.Holes |> List.mapi (fun k e -> if k = 0 then { e with Kind = "int" } else e) }
-            | _ -> sg0
+        rng <- r2
 
         let cap = Capability.create (sprintf "cap-%d" i) sg placement
         let mcap = capToModel cap
@@ -9310,11 +9294,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
          | Ok c when c = cap ->
              if not wf then
                  diffs.Add(sprintf "seed %d: a capability that is not well-formed read back as itself" i)
-         | Ok _ ->
-             normalised <- normalised + 1
-
-             if wf then
-                 diffs.Add(sprintf "seed %d: a well-formed capability read back as another" i)
+         | Ok _ -> diffs.Add(sprintf "seed %d: a capability read back as another (Phase 409: no normal form)" i)
          | Error e ->
              if wf then
                  diffs.Add(sprintf "seed %d: a well-formed capability was refused (%s)" i (prodDecodeErrRender e)))
@@ -9335,13 +9315,53 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
                      diffs.Add(sprintf "seed %d: through the bytes, a well-formed capability did not read back" i)
          | Error _ -> ())
 
-        // ---- the reader, over the encoding and three mutations of it ----
+        // ---- the reader, over the encoding, three mutations of it, and the targeted ones: each
+        //      entry's kind payload removed (a value or repeat entry without its `space`, an action
+        //      entry without its `actionEffect`, a slot without its `slotKind`), and its tag replaced
+        //      by one outside `HoleKind.tags` ----
         let mutable docs = [ j0 ]
 
         for _ in 1..3 do
             let m, rm = jmutate j0 rng
             rng <- rm
             docs <- m :: docs
+
+        let withEntry (k: int) (f: (string * JVal) list -> (string * JVal) list) (j: JVal) : JVal =
+            let onHoles =
+                List.map (fun (name, v) ->
+                    match name, v with
+                    | "holes", JArr es ->
+                        name,
+                        JArr(
+                            es
+                            |> List.mapi (fun n e ->
+                                match e with
+                                | JObj fs when n = k -> JObj(f fs)
+                                | other -> other)
+                        )
+                    | _ -> name, v)
+
+            match j with
+            | JObj fs ->
+                JObj(
+                    fs
+                    |> List.map (fun (name, v) ->
+                        match name, v with
+                        | "signature", JObj sfs -> name, JObj(onHoles sfs)
+                        | _ -> name, v)
+                )
+            | other -> other
+
+        let payload = set [ "space"; "actionEffect"; "slotKind" ]
+
+        for k in 0 .. List.length sg.Holes - 1 do
+            docs <-
+                withEntry k (List.filter (fun (name, _) -> not (payload.Contains name))) j0
+                :: docs
+
+            docs <-
+                withEntry k (List.map (fun (name, v) -> if name = "kind" then name, JStr "int" else name, v)) j0
+                :: docs
 
         for j in docs do
             documents <- documents + 1
@@ -9361,6 +9381,11 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
              | Error pe, ModelCap.Error me ->
                  refused <- refused + 1
                  codes <- Set.add (sprintf "%A" pe.Code) codes
+
+                 match pe.Code, List.tryLast pe.Path with
+                 | DecodeCode.MissingField, Some(PathSegment.Key("space" | "actionEffect")) ->
+                     payloadRefused <- payloadRefused + 1
+                 | _ -> ()
 
                  if prodDecodeErrRender pe <> modelDecodeErrRender me then
                      diffs.Add(
@@ -9471,7 +9496,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
       CoAccepted = accepted
       CoRefused = refused
       CoWellFormed = wellFormed
-      CoNormalised = normalised
+      CoPayloadRefused = payloadRefused
       CoBytes = bytes
       CoSignatures = signatures
       CoNodes = nodesCompared
@@ -17240,7 +17265,12 @@ let proofOracleTests =
 
               let sg =
                   { full with
-                      Holes = full.Holes |> List.filter (fun e -> e.Kind <> "slot") }
+                      Holes =
+                          full.Holes
+                          |> List.filter (fun e ->
+                              match e.Kind with
+                              | SlotHole _ -> false
+                              | _ -> true) }
 
               let cap = Capability.create "cap-t" sg Server
 
@@ -18160,11 +18190,11 @@ let proofOracleTests =
                       (sprintf "well-formed capabilities read back as themselves (wellFormed=%d)" t.CoWellFormed)
 
                   Expect.isGreaterThan
-                      t.CoNormalised
-                      8
+                      t.CoPayloadRefused
+                      100
                       (sprintf
-                          "a spaceless slot read back in its normal form, as another value (normalised=%d)"
-                          t.CoNormalised)
+                          "an entry without the member its kind needs was refused at that member (payloadRefused=%d)"
+                          t.CoPayloadRefused)
 
                   Expect.isGreaterThan
                       t.CoBytes

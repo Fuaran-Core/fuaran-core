@@ -22,10 +22,7 @@ open Fuaran.Core
 let private valueHole (addr: string) (space: ValueSpace) (required: bool) : SigEntry =
     { Addr = addr
       Name = addr
-      Kind = "value"
-      Space = Some space
-      Slot = None
-      Action = None
+      Kind = ValueHole space
       Required = required }
 
 let private sigOf (name: string) (holes: SigEntry list) : Signature =
@@ -56,10 +53,7 @@ let private wide =
               valueHole "t" AnyString false
               { Addr = "tree"
                 Name = "tree"
-                Kind = "slot"
-                Space = Some(SlotTree(Some "para"))
-                Slot = Some "para"
-                Action = None
+                Kind = SlotHole(Some "para")
                 Required = false } ])
         Server
 
@@ -72,10 +66,7 @@ let private withAction =
             [ valueHole "n" (IntRange(0, 3)) true
               { Addr = "onDone"
                 Name = "onDone"
-                Kind = "action"
-                Space = None
-                Slot = None
-                Action = Some Effect.pureDeterministic
+                Kind = ActionHole Effect.pureDeterministic
                 Required = false } ]
           Effect =
             { Host = ReadsHost

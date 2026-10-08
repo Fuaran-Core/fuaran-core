@@ -1,5 +1,88 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D139: `SigEntry.Kind` is the `HoleKind`, and the entry keeps no second copy of what the kind carries; the reader refuses a tag without the member its kind needs (answers D138.7; amends D104's rejected retype)
+
+**Recorded by Phase 409. `Fuaran.Core.Function` (`SigEntry`, `HoleKind`, `Function`,
+`CapabilityCodec`, `FunctionRegistry`), the `Conformance` seam laws, `proofs/Capability.fst` and its
+extracted oracle, the `Function` API and wire baselines, the suite; the `1.0.0` slot
+(`docs/releases/1.0.0.md`, `docs/migrations/1.0.0.md`).**
+
+*Amended: D104's "Rejected — retyping `SigEntry.Kind` to `HoleKind`".* D104 rejected the retype
+because `HoleKind` carries the space and the effect ceiling the entry already carried in `Space` and
+`Action`, so the retype would have made a second copy of each that could disagree. That reason is
+right, and it rules out the retype BESIDE the fields, not the retype. At `1.0.0` the fields go with
+it.
+
+*Decided: `SigEntry = { Addr; Name; Kind: HoleKind; Required }` (D139.1).* `Space`, `Slot` and
+`Action` were all derivable from the kind: a value or repeat hole's space, the `SlotTree` of a
+slot's constraint (Phase 229 already derived it), a slot's constraint, an action hole's ceiling. So
+they leave as fields. `Space` stays as a MEMBER, `SigEntry.Space`, because it names a concept the
+seams read by itself: the space an argument must lie in (`validateArgs`, `Signature.validate`, the
+pipeline's edge check, `invocationKey`, both schema projections). It cannot disagree with the kind,
+because it is computed from it. `Slot` and `Action` have no reader that is not already matching on
+the kind, so they are not kept as members. `HoleKind.tryOf` and the `SigEntry.HoleKind` member go,
+because nothing is left for them to project. `Required` stays a field: it is not derivable. A
+signature derives it from the kind, but a hand-built entry may mark a value hole optional, and the
+seams honour that.
+
+*Decided: the reader refuses an entry that cannot be its kind, at the member it lacks (D139.2).* A
+`value` or `repeat` entry without `space`, and an `action` entry without `actionEffect`, is refused
+`MissingField` at that member: the codec's existing fault for an absent member, with no new code
+and no new sentence. A `slot` needs no member. Its `slotKind` is optional, as it always was. The
+reader still reads `space`, `actionEffect` and `slotKind` in that order before it reads the kind.
+So a malformed member is refused exactly where it was, and the only new refusals are the three
+missing payloads. A member the kind does not read is not part of the entry: a `space` on a slot, a
+`slotKind` on a value. It is read, refused if malformed, and dropped. The shard named one refusal,
+the value without a space. The type admits three, and all three ship.
+
+*Premise checked: "the reader accepts it today".* It is TRUE of the signature reader and FALSE of
+the capability reader. The go-red was measured against the tree this phase started from
+(`f4f186f`): an `.fsx` over that build's `Fuaran.Core.Function` decoded the `value`, `repeat` and
+`action` entries with no payload. `CapabilityCodec.signatureOf` READ all three, as entries of no hole
+kind. `decodeDetailedWith` refused all three as non-total, `OutOfRange` at `signature.holes`
+(Phase 385's totality check). So the capability reader moves from a refusal at the wrong place to
+a refusal at the member, and `signatureOf` moves from a read to a refusal. The suite pins the new
+refusal on both readers.
+
+*Decided: the descriptor and the codec write a kind from one table (D139.3).* `Function.kindMembers`
+(internal) is the members a kind writes after the four fixed ones, parameterised by the space
+spelling: `SpaceCodec.descriptorJson` for `toSchema`, `SpaceCodec.toJson` for the codec. Each kind
+writes exactly what the two writers wrote before, in the same order. So every document either writer
+produces, and with it `ContentPack.signatureFingerprint` (D104), is byte-identical.
+
+*Decided: the model carries the kind (D139.4).* `sig_entry` holds the `hole_kind`, and
+`entry_space` reads the space from it. `arg_space` is `entry_space`. `entry_total` matches on the
+kind, and only a repeat over no count space is non-total. `entry_of_j` ends in `hole_kind_of`, which
+is production's last step. The signature round trip has NO normal form any more: `normal_entry`,
+`canonical_entry`, `first_bad_kind` and the lemmas over them are gone, because an entry of no hole
+kind and a spaceless slot cannot be built. `signature_roundtrip` is the identity on every signature
+`Signature.validate` admits and `OutOfRange` at `holes` on the rest. The Phase 229 slot lemmas are
+restated over the kind (`slot_entry_shape`, `slot_hole_invocable_in_space`) or over `entry_space`
+(`slot_wrong_kind_refused`, `slot_scalar_uninvocable`), with no change to what they say. The model
+verified on the first iteration and then under `check.ps1 -Modules Capability -Extract -Runs 3`:
+three cold runs (184s, 239s and 161s against the 290s budget; this machine was running other
+workers' legs), every query 3/3 under `--quake`, at the pinned rlimit. The oracle is the fresh
+extraction. Twins: `a-value-entry-without-a-space-is-refused-at-space`,
+`an-action-entry-without-its-effect-is-refused-at-actionEffect`,
+`a-slot-entry-reads-back-as-its-constraint` (it replaces
+`a-spaceless-slot-reads-back-with-its-derived-space`), and `a-repeat-over-no-count-is-not-total` (it
+replaces `an-entry-of-no-hole-kind-is-not-total`). The codec differential no longer builds the two
+hand-built shapes. It mutates each generated entry instead, with its kind payload removed or its tag
+replaced, and it counts the payload refusals as an adequacy floor where it used to count normal
+forms.
+
+*Measured: the `Function` wire baseline moves, and no writer's byte does.* The wire surface's
+document set is generated from the types. While `Kind` was a `string`, it built one entry with tag
+`"s"` and every member present, a document no writer produces. Over `HoleKind` it reaches each case,
+so the baseline now shows each kind with its own members and tag. The family classes the move
+`breaking` against `v0.36.0`, and the class is recorded rather than argued with: it is the
+projection's reading of a closed tag.
+
+**Consequences.** The `1.0.0` ledger records `Fuaran.Core.Function` `removal` (9 moves) and the
+`breaking` wire class. The migration gains one row. The conformance seam laws, the registry's
+signature search (`holeSatisfied`, the exact match) and `narrow` match on the kind. `ParityVectors`,
+the law corpora, every digest and every other wire baseline are unchanged.
+
 ## 2026-10-08 — D138: the surfaces 1.0 freezes carry records, declared unions and per-call inputs; an allowance on a node covers removing it (answers D119.7); `SigEntry.Kind` waits for its model
 
 **Recorded by Phase 391. Nine packages' `api/` baselines, the `Fuaran.Core.Idl` and

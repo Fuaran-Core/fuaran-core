@@ -105,10 +105,7 @@ module internal CapabilitySeamLaws =
             let hole: SigEntry =
                 { Addr = "h0"
                   Name = "x"
-                  Kind = "value"
-                  Space = Some(IntRange(lo, hi))
-                  Slot = None
-                  Action = None
+                  Kind = ValueHole(IntRange(lo, hi))
                   Required = true }
 
             let sg: Signature =

@@ -108,10 +108,7 @@ module internal RegistrySeamLaws =
             let holeOf (sp: ValueSpace) : SigEntry =
                 { Addr = "h"
                   Name = "h"
-                  Kind = "value"
-                  Space = Some sp
-                  Slot = None
-                  Action = None
+                  Kind = ValueHole sp
                   Required = true }
 
             (match
@@ -157,10 +154,7 @@ module internal RegistrySeamLaws =
             let mkHole addr : SigEntry =
                 { Addr = addr
                   Name = addr
-                  Kind = "value"
-                  Space = Some(IntRange(lo, hi))
-                  Slot = None
-                  Action = None
+                  Kind = ValueHole(IntRange(lo, hi))
                   Required = true }
 
             let h0 = mkHole "h0"
@@ -314,10 +308,7 @@ module internal RegistrySeamLaws =
                   Holes =
                     [ { Addr = "h"
                         Name = "h"
-                        Kind = "value"
-                        Space = Some(IntRange(0, hi))
-                        Slot = None
-                        Action = None
+                        Kind = ValueHole(IntRange(0, hi))
                         Required = true } ]
                   Effect = Effect.pureDeterministic }
                 BuildTime
@@ -668,10 +659,7 @@ module internal RegistrySeamLaws =
             let mkHole addr : SigEntry =
                 { Addr = addr
                   Name = addr
-                  Kind = "value"
-                  Space = Some(IntRange(lo, hi))
-                  Slot = None
-                  Action = None
+                  Kind = ValueHole(IntRange(lo, hi))
                   Required = true }
 
             let h0 = mkHole "h0"

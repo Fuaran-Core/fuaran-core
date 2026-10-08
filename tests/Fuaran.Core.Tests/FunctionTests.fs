@@ -15,10 +15,7 @@ let private holeAt id (n: RNode) =
 let private packIntHole addr : SigEntry =
     { Addr = addr
       Name = addr
-      Kind = "value"
-      Space = Some(IntRange(0, 100))
-      Slot = None
-      Action = None
+      Kind = ValueHole(IntRange(0, 100))
       Required = true }
 
 let private packBaseSig: Signature =
@@ -44,7 +41,7 @@ let tests =
           <| fun _ ->
               let sg = Function.signature artw "tpl" (template ())
               Expect.equal (sg.Holes |> List.map _.Name) [ "title"; "count"; "body" ] "names"
-              Expect.equal (sg.Holes |> List.map _.Kind) [ "value"; "value"; "slot" ] "kinds"
+              Expect.equal (sg.Holes |> List.map (_.Kind >> HoleKind.tag)) [ "value"; "value"; "slot" ] "kinds"
               Expect.equal (sg.Holes |> List.map _.Addr) [ "tpl/t"; "tpl/c"; "tpl/s" ] "absolute addresses"
 
           testCase "apply binds every hole by absolute address"
@@ -311,10 +308,7 @@ let tests =
                     Holes =
                       [ { Addr = "p"
                           Name = "p"
-                          Kind = "value"
-                          Space = Some(IntRange(0, 10))
-                          Slot = None
-                          Action = None
+                          Kind = ValueHole(IntRange(0, 10))
                           Required = true } ]
                     Effect =
                       { Host = ReadsHost
@@ -331,17 +325,11 @@ let tests =
                     Holes =
                       [ { Addr = "n"
                           Name = "n"
-                          Kind = "value"
-                          Space = Some(IntRange(1, 5))
-                          Slot = None
-                          Action = None
+                          Kind = ValueHole(IntRange(1, 5))
                           Required = true }
                         { Addr = "slot"
                           Name = "s"
-                          Kind = "slot"
-                          Space = None
-                          Slot = Some "para"
-                          Action = None
+                          Kind = SlotHole(Some "para")
                           Required = false } ]
                     Effect = Effect.pureDeterministic }
 
@@ -418,18 +406,13 @@ let tests =
           // Phase 229's wire promise: the slot's space is DERIVED from its constraint, so the tool
           // schema, the capability codec and the pack fingerprint of a slotted signature are the
           // bytes they were before 229 — pinned against the literal pre-229 schema — and a pre-229
-          // document decodes to the post-229 signature.
+          // document decodes to the post-229 signature. Since Phase 409 the space is read from the
+          // kind (`SigEntry.Space`), so no entry can carry a slot space its constraint disagrees with.
           testCase "a slotted signature's wire bytes and fingerprint are unchanged by Phase 229"
           <| fun _ ->
               let derived = Function.signature artw "tpl" (template ())
-
-              // the pre-229 shape of the same signature: the slot entered spaceless
-              let pre229 =
-                  { derived with
-                      Holes =
-                          derived.Holes
-                          |> List.map (fun h -> if h.Kind = "slot" then { h with Space = None } else h) }
-
+              let slot = derived.Holes |> List.find (fun h -> h.Addr = "tpl/s")
+              Expect.equal slot.Space (Some(SlotTree(Some "para"))) "the slot's space is its constraint's tree"
               let schema = Json.render (Function.toSchema derived)
 
               Expect.equal
@@ -437,37 +420,28 @@ let tests =
                   """{"kind":"signature","name":"tpl","effect":{"host":"pure","determinism":"deterministic"},"holes":[{"addr":"tpl/t","name":"title","kind":"value","required":true,"space":{"kind":"stringLen","minLength":1,"maxLength":20}},{"addr":"tpl/c","name":"count","kind":"value","required":true,"space":{"kind":"intRange","min":0,"max":10}},{"addr":"tpl/s","name":"body","kind":"slot","required":true,"slotKind":"para"}],"required":["tpl/t","tpl/c","tpl/s"]}"""
                   "the literal pre-229 tool schema"
 
-              Expect.equal schema (Json.render (Function.toSchema pre229)) "toSchema bytes"
-
-              Expect.equal
-                  (ContentPack.signatureFingerprint derived)
-                  (ContentPack.signatureFingerprint pre229)
-                  "the pack fingerprint"
-
               let enc sg =
                   CapabilityCodec.encode (Capability.create "tpl-cap" sg Server)
 
-              Expect.equal (enc derived) (enc pre229) "capability codec bytes"
               Expect.isFalse ((enc derived).Contains "slotTree") "the derived space is not written"
 
-              match CapabilityCodec.decode (enc pre229) with
+              match CapabilityCodec.decode (enc derived) with
               | Ok c -> Expect.equal c.Signature derived "a pre-229 document decodes to the post-229 signature"
               | Error e -> failtestf "decode failed: %s" e
 
-              // a space that says something the entry does not IS written, and round-trips
-              let odd =
-                  { derived with
-                      Holes =
-                          derived.Holes
-                          |> List.map (fun h ->
-                              if h.Kind = "slot" then
-                                  { h with
-                                      Space = Some(SlotTree(Some "other")) }
-                              else
-                                  h) }
+              // Phase 409: a `space` member on a slot entry is not part of the slot, whose space is its
+              // constraint's tree, so a document that writes one reads as the slot its `slotKind` says.
+              let withSpace =
+                  (enc derived)
+                      .Replace(
+                          "\"slotKind\":\"para\"",
+                          "\"slotKind\":\"para\",\"space\":{\"$type\":\"slotTree\",\"slotKind\":\"other\"}"
+                      )
 
-              match CapabilityCodec.decode (enc odd) with
-              | Ok c -> Expect.equal c.Signature odd "an explicit slot space round-trips"
+              Expect.notEqual withSpace (enc derived) "the probe document carries the member"
+
+              match CapabilityCodec.decode withSpace with
+              | Ok c -> Expect.equal c.Signature derived "a slot's written space is not read as its space"
               | Error e -> failtestf "decode failed: %s" e
 
           testCase "invocationKey is arg-order-independent but arg-value-sensitive"
@@ -540,10 +514,7 @@ let tests =
                     Holes =
                       [ { Addr = "x"
                           Name = "x"
-                          Kind = "value"
-                          Space = Some(FloatRange(0.0, 1.0))
-                          Slot = None
-                          Action = None
+                          Kind = ValueHole(FloatRange(0.0, 1.0))
                           Required = true } ]
                     Effect =
                       { Host = ReadsHost
@@ -617,10 +588,17 @@ let actionHoleTests =
         [ testCase "signature surfaces an action hole with its effect ceiling, non-required on the data axis"
           <| fun _ ->
               let sg = Function.signature artw "btn" (buttonTpl ())
-              let action = sg.Holes |> List.find (fun h -> h.Kind = "action")
+
+              let action =
+                  sg.Holes
+                  |> List.find (fun h ->
+                      match h.Kind with
+                      | ActionHole _ -> true
+                      | _ -> false)
+
               Expect.equal action.Addr "btn/click" "absolute address"
               Expect.equal action.Name "onClick" "name"
-              Expect.equal action.Action (Some writesHost) "effect ceiling surfaced"
+              Expect.equal action.Kind (ActionHole writesHost) "effect ceiling surfaced"
               Expect.isFalse action.Required "an action hole is non-required on the data-binding axis"
 
           testCase "apply binds the data hole and ignores the action hole — the artifact stays apply-able"
@@ -1078,10 +1056,7 @@ let memoTests =
                     Holes =
                       [ { Addr = "x"
                           Name = "x"
-                          Kind = "value"
-                          Space = Some(IntRange(0, 100))
-                          Slot = None
-                          Action = None
+                          Kind = ValueHole(IntRange(0, 100))
                           Required = true } ]
                     Effect = Effect.pureDeterministic }
 
@@ -1157,10 +1132,7 @@ let memoTests =
                         Holes =
                           [ { Addr = "x"
                               Name = "x"
-                              Kind = "value"
-                              Space = Some(IntRange(0, 1000))
-                              Slot = None
-                              Action = None
+                              Kind = ValueHole(IntRange(0, 1000))
                               Required = true } ]
                         Effect = Effect.pureDeterministic }
                       Server
@@ -1375,10 +1347,7 @@ let memoTests =
 let private intEntry (addr: string) (sp: ValueSpace) : SigEntry =
     { Addr = addr
       Name = addr
-      Kind = "value"
-      Space = Some sp
-      Slot = None
-      Action = None
+      Kind = ValueHole sp
       Required = true }
 
 let private capOver (id: string) (holes: SigEntry list) : Capability =
@@ -1483,15 +1452,73 @@ let convergenceTests =
               Expect.equal c.Determinism Effect.clock "derived from the signature"
               Expect.equal (Capability.determinismTag c) "clock" "and keyed by it"
 
+          // Phase 409: an entry IS its hole kind, so the reader refuses a tag without the member its
+          // kind needs, at that member. Before 409 the bare signature reader READ each of these
+          // documents (as an entry of no hole kind) and the capability reader refused it only as
+          // non-total, `OutOfRange` at `signature.holes` — the go-red, measured against the tree this
+          // phase started from, is recorded in DECISIONS.md D139.
+          testCase "the capability reader refuses an entry without the member its kind needs, at that member"
+          <| fun _ ->
+              let entryJson (kind: string) (members: string) =
+                  "{\"addr\":\"h\",\"name\":\"h\",\"kind\":\""
+                  + kind
+                  + "\",\"required\":"
+                  + (if kind = "action" then "false" else "true")
+                  + members
+                  + "}"
+
+              let capJson (entry: string) =
+                  CapabilityCodec
+                      .encode(capOver "c" [ intEntry "h" (IntRange(0, 3)) ])
+                      .Replace(
+                          "{\"addr\":\"h\",\"kind\":\"value\",\"name\":\"h\",\"required\":true,\"space\":{\"$type\":\"intRange\",\"max\":3,\"min\":0}}",
+                          entry
+                      )
+
+              let detailed (text: string) =
+                  match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient text with
+                  | Ok _ -> None
+                  | Error e -> Some(e.Code, e.Path)
+
+              let at (members: string list) =
+                  [ PathSegment.Key "signature"; PathSegment.Key "holes"; PathSegment.Index 0 ]
+                  @ (members |> List.map PathSegment.Key)
+
+              // the probe's control: the well-formed entry reads
+              Expect.isNone
+                  (detailed (capJson (entryJson "value" ",\"space\":{\"$type\":\"intRange\",\"min\":0,\"max\":3}")))
+                  "the well-formed entry reads"
+
+              for kind, needed in [ "value", "space"; "repeat", "space"; "action", "actionEffect" ] do
+                  let doc = capJson (entryJson kind "")
+                  Expect.notEqual doc (CapabilityCodec.encode (capOver "c" [ intEntry "h" (IntRange(0, 3)) ])) "probed"
+
+                  Expect.equal
+                      (detailed doc)
+                      (Some(DecodeCode.MissingField, at [ needed ]))
+                      (kind + ": refused MissingField at the member its kind needs")
+
+                  // the bare signature reader refuses it too: it ran no totality check, so it read it
+                  match Decoder.tryMember "signature" (Json.parse doc |> Result.defaultWith failwith) with
+                  | Some sj ->
+                      Expect.isError (CapabilityCodec.signatureOf sj) (kind + ": the signature reader refuses it")
+                  | None -> failtest "the probe carries a signature"
+
+              // a slot needs no member: an unconstrained slot reads, its space the tree of any kind
+              match CapabilityCodec.decode (capJson (entryJson "slot" "")) with
+              | Ok c ->
+                  Expect.equal (c.Signature.Holes |> List.map _.Kind) [ SlotHole None ] "an unconstrained slot"
+                  Expect.equal (c.Signature.Holes |> List.map _.Space) [ Some(SlotTree None) ] "its derived space"
+              | Error e -> failtestf "an unconstrained slot was refused: %s" e
+
           testCase "the capability codec refuses an unknown hole kind; the space reader refuses the descriptor spelling"
           <| fun _ ->
-              let c =
-                  capOver
-                      "odd"
-                      [ { intEntry "n" (IntRange(0, 3)) with
-                            Kind = "int" } ]
+              // Phase 409: no entry carries a tag outside `HoleKind.tags`, so the probe is a document.
+              let text = CapabilityCodec.encode (capOver "odd" [ intEntry "n" (IntRange(0, 3)) ])
+              let odd = text.Replace("\"kind\":\"value\"", "\"kind\":\"int\"")
+              Expect.notEqual odd text "the probe document carries the tag"
 
-              match CapabilityCodec.decode (CapabilityCodec.encode c) with
+              match CapabilityCodec.decode odd with
               | Error m -> Expect.stringContains m "unknown hole kind: int" "names the kind"
               | Ok _ -> failtest "an unknown kind decoded"
 
@@ -1617,13 +1644,10 @@ let convergenceTests =
 
 // ---- Phase 307: validated declarations on the invocable seams ----
 
-let private entry307 addr kind space : SigEntry =
+let private entry307 addr kind : SigEntry =
     { Addr = addr
       Name = addr
       Kind = kind
-      Space = space
-      Slot = None
-      Action = None
       Required = true }
 
 let private sig307 holes : Signature =
@@ -1644,29 +1668,29 @@ let private registerFn307 (holes: SigEntry list) : Result<unit, InvokeError> =
 /// The value-hole and repeat-hole declarations the probes built, each with the refusal both
 /// registries must give it.
 let private probes307: (string * SigEntry list * InvokeError) list =
-    [ "an infinite count", [ entry307 "r" "repeat" (Some(FloatRange(0.0, infinity))) ], NonTotalCapability("c", [ "r" ])
+    [ "an infinite count", [ entry307 "r" (RepeatHole(FloatRange(0.0, infinity))) ], NonTotalCapability("c", [ "r" ])
       "a count past the cap",
-      [ entry307 "r" "repeat" (Some(IntRange(0, Space.maxRepeatCount + 1))) ],
+      [ entry307 "r" (RepeatHole(IntRange(0, Space.maxRepeatCount + 1))) ],
       NonTotalCapability("c", [ "r" ])
-      "a negative count", [ entry307 "r" "repeat" (Some(IntRange(-1, 3))) ], NonTotalCapability("c", [ "r" ])
+      "a negative count", [ entry307 "r" (RepeatHole(IntRange(-1, 3))) ], NonTotalCapability("c", [ "r" ])
       "an empty int range",
-      [ entry307 "n" "value" (Some(IntRange(5, 1))) ],
+      [ entry307 "n" (ValueHole(IntRange(5, 1))) ],
       IllFormedCapability("c", EmptySpace("n", IntRange(5, 1)))
-      "an empty enum", [ entry307 "e" "value" (Some(Enum [])) ], IllFormedCapability("c", EmptySpace("e", Enum []))
+      "an empty enum", [ entry307 "e" (ValueHole(Enum [])) ], IllFormedCapability("c", EmptySpace("e", Enum []))
       "an empty string length",
-      [ entry307 "s" "value" (Some(StringLen(0, -1))) ],
+      [ entry307 "s" (ValueHole(StringLen(0, -1))) ],
       IllFormedCapability("c", EmptySpace("s", StringLen(0, -1)))
-      "a NaN bound", [ entry307 "x" "value" (Some(FloatRange(nan, 1.0))) ], IllFormedCapability("c", NonFiniteBound "x")
+      "a NaN bound", [ entry307 "x" (ValueHole(FloatRange(nan, 1.0))) ], IllFormedCapability("c", NonFiniteBound "x")
       "an infinite bound",
-      [ entry307 "x" "value" (Some(FloatRange(-infinity, 1.0))) ],
+      [ entry307 "x" (ValueHole(FloatRange(-infinity, 1.0))) ],
       IllFormedCapability("c", NonFiniteBound "x")
       "two holes at one address",
-      [ entry307 "a" "value" (Some AnyString); entry307 "a" "value" (Some AnyString) ],
+      [ entry307 "a" (ValueHole AnyString); entry307 "a" (ValueHole AnyString) ],
       IllFormedCapability("c", DuplicateHoleAddr "a") ]
 
 /// A capability over one integer hole, for the reader and duplicate checks.
 let private intCap307 =
-    Capability.create "n" (sig307 [ entry307 "n" "value" (Some(IntRange(-10, 10))) ]) Server
+    Capability.create "n" (sig307 [ entry307 "n" (ValueHole(IntRange(-10, 10))) ]) Server
 
 [<Tests>]
 let validatedDeclarationTests =
@@ -1748,9 +1772,7 @@ let validatedDeclarationTests =
               let finite = FloatRange(-1e300, 1e300)
 
               let sg =
-                  sig307
-                      [ entry307 "x" "value" (Some finite)
-                        entry307 "n" "value" (Some(IntRange(-5, 5))) ]
+                  sig307 [ entry307 "x" (ValueHole finite); entry307 "n" (ValueHole(IntRange(-5, 5))) ]
 
               Expect.isOk (register307 sg.Holes) "it registers"
               Expect.isOk (Canon.tryRender (Function.toJsonSchema sg)) "and its schema renders"
@@ -1759,7 +1781,7 @@ let validatedDeclarationTests =
               Expect.equal (CapabilityCodec.tryEncode cap) (Ok(CapabilityCodec.encode cap)) "tryEncode is encode"
 
               let bad =
-                  Capability.create "c" (sig307 [ entry307 "x" "value" (Some(FloatRange(0.0, infinity))) ]) Server
+                  Capability.create "c" (sig307 [ entry307 "x" (ValueHole(FloatRange(0.0, infinity))) ]) Server
 
               Expect.isError (CapabilityCodec.tryEncode bad) "a non-finite bound is refused by the guarded encode"
 
@@ -1808,11 +1830,9 @@ let validatedDeclarationTests =
                   (Error(PipelineError.PipelineArgRefused("i", DuplicateArg "n")))
                   "typeCheck"
 
-          testCase "a pre-229 spaceless slot entry is invocable like a derived one"
+          testCase "a slot entry is invocable at the tree of its constraint"
           <| fun _ ->
-              let slot =
-                  { entry307 "s" "slot" None with
-                      Slot = Some "para" }
+              let slot = entry307 "s" (SlotHole(Some "para"))
 
               let c = Capability.create "c" (sig307 [ slot ]) Server
               Expect.equal (Capability.validateArgs c [ "s", """{"kind":"para"}""" ]) (Ok()) "a tree of its kind"
@@ -1825,7 +1845,7 @@ let validatedDeclarationTests =
           testCase "the capability decoder checks its $type and refuses an ill-formed signature"
           <| fun _ ->
               let good =
-                  Capability.create "c" (sig307 [ entry307 "n" "value" (Some(IntRange(0, 3))) ]) Server
+                  Capability.create "c" (sig307 [ entry307 "n" (ValueHole(IntRange(0, 3))) ]) Server
 
               let text = CapabilityCodec.encode good
               Expect.equal (CapabilityCodec.decode text) (Ok good) "round trip"
@@ -1895,7 +1915,7 @@ let validatedDeclarationTests =
               let up = Capability.create "up" (sig307 []) Server
 
               let down =
-                  Capability.create "down" (sig307 [ entry307 "x" "value" (Some AnyString) ]) Server
+                  Capability.create "down" (sig307 [ entry307 "x" (ValueHole AnyString) ]) Server
 
               let lookup =
                   [ up; down ]
@@ -1977,7 +1997,7 @@ let readerAdmissionTests =
 
           testCase "a non-total declaration is NonTotalCapability at the reader, not a well-formedness refusal"
           <| fun _ ->
-              let holes = [ entry307 "r" "repeat" (Some(IntRange(-1, 3))) ]
+              let holes = [ entry307 "r" (RepeatHole(IntRange(-1, 3))) ]
               let text = CapabilityCodec.encode (Capability.create "c" (sig307 holes) Server)
 
               match

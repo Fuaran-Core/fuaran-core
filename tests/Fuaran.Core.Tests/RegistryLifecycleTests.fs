@@ -15,10 +15,7 @@ open Fuaran.Core
 let private hole (hi: int) : SigEntry =
     { Addr = "h"
       Name = "h"
-      Kind = "value"
-      Space = Some(IntRange(0, hi))
-      Slot = None
-      Action = None
+      Kind = ValueHole(IntRange(0, hi))
       Required = true }
 
 let private cap (id: string) (hi: int) : Capability =

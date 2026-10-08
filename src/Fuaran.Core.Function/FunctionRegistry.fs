@@ -224,13 +224,11 @@ module FunctionRegistry =
     /// so an int context now fills a number hole, as validation always accepted); slot: kinds agree
     /// and the available slot constraint satisfies the required one.
     let private holeSatisfied (req: SigEntry) (av: SigEntry) : bool =
-        req.Kind = av.Kind
-        && (match req.HoleKind with
-            | Some(SlotHole _) -> slotSubsumes req.Slot av.Slot
-            | _ ->
-                match req.Space, av.Space with
-                | Some rs, Some avs -> Space.subsumes rs avs
-                | _ -> false)
+        match req.Kind, av.Kind with
+        | SlotHole rc, SlotHole ac -> slotSubsumes rc ac
+        | ValueHole rs, ValueHole avs
+        | RepeatHole rs, RepeatHole avs -> Space.subsumes rs avs
+        | _ -> false
 
     /// The core signature-search predicate (Phase 50) — does `entry` match `query` under `mode`? Only
     /// the entry's REQUIRED holes gate a match (optional holes never block); hygiene — holes match by
@@ -263,10 +261,7 @@ module FunctionRegistry =
             && required
                |> List.forall (fun req ->
                    match Map.tryFind req.Addr availByAddr with
-                   | Some av ->
-                       req.Kind = av.Kind
-                       && Function.slotSpaceOf req = Function.slotSpaceOf av
-                       && req.Slot = av.Slot
+                   | Some av -> HoleKind.tag req.Kind = HoleKind.tag av.Kind && req.Space = av.Space
                    | None -> false)
 
     /// Find every registered function whose signature matches the query under `mode` (Phase 50). A
@@ -329,10 +324,11 @@ module FunctionRegistry =
         let bindable =
             source.Capability.Signature.Holes
             |> List.filter (fun h ->
-                match h.HoleKind with
-                | Some(ActionHole _)
-                | None -> false
-                | Some _ -> true)
+                match h.Kind with
+                | ActionHole _ -> false
+                | ValueHole _
+                | SlotHole _
+                | RepeatHole _ -> true)
             |> List.map _.Addr
 
         match
