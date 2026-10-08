@@ -124,9 +124,10 @@
    capture key `nodeInvocationKey`; the BYTES of any codec — `Canon.render` and `Json.parse` are
    `WireCanon.fst`'s and `JsonParse.fst`'s — the `Strict` read policy, the invocation, `Deferred`
    and `InvokeError` codecs, and a refusal's sentence. And NOT that a reader refuses whatever its
-   writer never produces: the readers are lenient — an extra member, another member order, the
-   descriptor spelling of a space are all read — so what is proved is that everything a reader
-   ACCEPTS is a well-formed value, which is the claim that is true.
+   writer never produces: the readers are lenient — an extra member and another member order are
+   both read — so what is proved is that everything a reader ACCEPTS is a well-formed value, which
+   is the claim that is true. (The descriptor spelling of a space was read too until Phase 405,
+   which refuses it: a value space has one reader spelling, `"$type"`.)
 
    HOW TO READ IT. Every definition names its F# counterpart, as in `Preservation.fst` and
    `ColumnOps.fst`. The module is SELF-CONTAINED like `ColumnOps.fst` — it opens nothing,
@@ -4200,12 +4201,13 @@ let space_json (s:value_space) : Tot jval =
            | Some k -> [("slotKind", JStr k)]
            | None -> []))
 
-(* F#: `SpaceCodec`'s `cases` under `dispatchOn key` — `Decoder.tagDispatch`: the discriminator read
-   as a string, then the case's decoder over the SAME object; an unknown tag is `UnknownTag` at the
-   discriminator. `len_lo` / `len_hi` are a string length's bound names in the spelling read. *)
-let space_cases (cr:codec_readers) (key len_lo len_hi:string) (el:jval)
-  : Tot (outcome value_space decode_error) =
-  match field key d_str el with
+(* F#: `SpaceCodec.decoder` — `Decoder.tagDispatch` under `"$type"`: the discriminator read as a
+   string, then the case's decoder over the SAME object; an absent `"$type"` is `MissingField` and an
+   unknown one `UnknownTag`, both at `$type`. This is the ONE reader spelling (Phase 405): the
+   descriptor spelling `toSchema` writes (`"kind"`, `minLength` / `maxLength`) carries no `"$type"`,
+   so it is refused, never read. *)
+let space_of_j (cr:codec_readers) (el:jval) : Tot (outcome value_space decode_error) =
+  match field "$type" d_str el with
   | Error e -> Error e
   | Ok t ->
     if t = "intRange" then
@@ -4223,10 +4225,10 @@ let space_cases (cr:codec_readers) (key len_lo len_hi:string) (el:jval)
           | Error e -> Error e
           | Ok hi -> Ok (FloatRange lo hi)))
     else if t = "stringLen" then
-      (match field len_lo d_int el with
+      (match field "min" d_int el with
        | Error e -> Error e
        | Ok lo ->
-         (match field len_hi d_int el with
+         (match field "max" d_int el with
           | Error e -> Error e
           | Ok hi -> Ok (StringLen lo hi)))
     else if t = "enum" then
@@ -4238,14 +4240,7 @@ let space_cases (cr:codec_readers) (key len_lo len_hi:string) (el:jval)
       (match opt_field "slotKind" d_str el with
        | Error e -> Error e
        | Ok c -> Ok (SlotTree c))
-    else Error (under (Key key) (refuse UnknownTag))
-
-(* F#: `SpaceCodec.decoder` — a `"$type"` document as `toJson` writes it; an object with no
-   `"$type"` and a `"kind"` in the descriptor spelling, leniently. *)
-let space_of_j (cr:codec_readers) (el:jval) : Tot (outcome value_space decode_error) =
-  match member "$type" el, member "kind" el with
-  | None, Some _ -> space_cases cr "kind" "minLength" "maxLength" el
-  | _ -> space_cases cr "$type" "min" "max" el
+    else Error (under (Key "$type") (refuse UnknownTag))
 
 (* ---- the effect class: `EffectCodec` ---- *)
 
@@ -4985,10 +4980,11 @@ let twins : list twin = [
                        s_action = None; s_required = true }))
         = Ok ({ s_addr = "s"; s_name = "s"; s_kind = "slot"; s_space = Some (SlotTree (Some "card"));
                 s_slot = Some "card"; s_action = None; s_required = true })) };
-  { tname = "the-descriptor-spelling-of-a-space-is-read-leniently";
+  { tname = "the-descriptor-spelling-of-a-space-is-refused-at-type";
     tholds = (fun () ->
       space_of_j ({ float_of_int = (fun _ -> "0") })
-        (JObj [("kind", JStr "stringLen"); ("minLength", JInt 1); ("maxLength", JInt 3)]) = Ok (StringLen 1 3)) };
+        (JObj [("kind", JStr "stringLen"); ("minLength", JInt 1); ("maxLength", JInt 3)])
+        = Error ({ d_code = MissingField; d_path = [Key "$type"] })) };
   { tname = "a-node-with-an-empty-output-space-is-refused-at-outputType";
     tholds = (fun () ->
       node_of_j ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);

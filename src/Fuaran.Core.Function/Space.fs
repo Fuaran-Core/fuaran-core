@@ -235,12 +235,11 @@ module Space =
 /// spelling — `"kind"`, and a string length's bounds as `minLength` / `maxLength` — through
 /// `descriptorJson`. That spelling is FROZEN, not merely kept: `ContentPack.signatureFingerprint` is
 /// a hash over `toSchema`'s bytes, so moving the descriptor onto the document spelling would re-pin
-/// every published pack (DECISIONS D104). The reader takes the descriptor spelling too, leniently,
-/// and nothing writes it into a document. The lenient read was scheduled to leave with the 0.34.0
-/// draft; Phase 386 KEPT it through the 1.x line, because the verified model of this reader
-/// (`proofs/Capability.fst`, the `the-descriptor-spelling-of-a-space-is-read-leniently` vector)
-/// pins it as an accepted input, and the extracted oracle is held to production. It leaves at
-/// `2.0.0`, with that vector (DECISIONS.md D133).
+/// every published pack (DECISIONS D104). That spelling is WRITTEN and never READ: `decoder` takes
+/// the document spelling only, and an object with a `"kind"` and no `"$type"` is refused as a
+/// missing `"$type"`. The lenient read of the descriptor spelling left at `1.0.0` (Phase 405),
+/// together with the arm of the verified model (`proofs/Capability.fst`, `space_of_j`) that pinned
+/// it, so the 1.x line freezes ONE reader spelling of a value space (DECISIONS.md D133, amended).
 module SpaceCodec =
 
     /// Write a value space as a wire document (`"$type"`, `min` / `max`).
@@ -259,7 +258,7 @@ module SpaceCodec =
                  | None -> [])
 
     /// The frozen descriptor spelling `toSchema` writes (`"kind"`; a string length's bounds as
-    /// `minLength` / `maxLength`). Never a document: `decoder` reads it only leniently.
+    /// `minLength` / `maxLength`). Never a document, and never read: `decoder` refuses it.
     let descriptorJson (s: ValueSpace) : JVal =
         match s with
         | IntRange(lo, hi) -> Json.kindObj "intRange" [ "min", JInt lo; "max", JInt hi ]
@@ -274,7 +273,7 @@ module SpaceCodec =
                  | Some k -> [ "slotKind", JStr k ]
                  | None -> [])
 
-    let private cases (lenLo: string) (lenHi: string) : (string * Decoder<ValueSpace>) list =
+    let private cases: (string * Decoder<ValueSpace>) list =
         let int name = Decoder.field name Decoder.int
         let num name = Decoder.field name Decoder.float
 
@@ -283,26 +282,22 @@ module SpaceCodec =
 
         [ "intRange", pair (int "min") (int "max") (fun lo hi -> IntRange(lo, hi))
           "floatRange", pair (num "min") (num "max") (fun lo hi -> FloatRange(lo, hi))
-          "stringLen", pair (int lenLo) (int lenHi) (fun lo hi -> StringLen(lo, hi))
+          "stringLen", pair (int "min") (int "max") (fun lo hi -> StringLen(lo, hi))
           "enum", Decoder.field "values" (Decoder.list Decoder.str) |> Decoder.map Enum
           "anyString", Decoder.succeed AnyString
           "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree ]
 
-    /// Read a value space. A `"$type"` document is read as `toJson` writes it; an object with no
-    /// `"$type"` and a `"kind"` is read in the descriptor spelling (lenient, through the 1.x line).
+    /// Read a value space as `toJson` writes it, dispatched on `"$type"` — the ONE reader spelling
+    /// (Phase 405). A document with no `"$type"`, the descriptor spelling `toSchema` writes among
+    /// them, is refused `MissingField` at `$type`; it is never read.
     ///
     /// `typeMiss` is the sentence an unknown `"$type"` is refused in (`<typeMiss><tag>`), so a codec
     /// that embeds a value space keeps its own (Phase 388: `CapabilityPipelineCodec` reads through
-    /// this rather than re-wording the refusal after it); an unknown descriptor `"kind"` is always
-    /// `unknown value-space kind: <tag>`.
+    /// this rather than re-wording the refusal after it).
     let internal decoderSaying (typeMiss: string) : Decoder<ValueSpace> =
-        fun el ->
-            match Decoder.tryMember "$type" el, Decoder.tryMember "kind" el with
-            | None, Some _ ->
-                Decoder.tagDispatchWith "unknown value-space kind: " "kind" (cases "minLength" "maxLength") el
-            | _ -> Decoder.tagDispatchWith typeMiss "$type" (cases "min" "max") el
+        Decoder.tagDispatchWith typeMiss "$type" cases
 
-    /// Read a value space — `decoderSaying`, an unknown tag refused as
-    /// `unknown value-space kind: <tag>` under either discriminator.
+    /// Read a value space — `decoderSaying`, an unknown `"$type"` refused as
+    /// `unknown value-space kind: <tag>`.
     let decoder: Decoder<ValueSpace> =
         fun el -> decoderSaying "unknown value-space kind: " el
