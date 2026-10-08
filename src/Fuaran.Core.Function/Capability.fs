@@ -246,7 +246,7 @@ module Capability =
     /// The space an argument for this entry is checked against: its own, or — for a slot entry built
     /// by hand before Phase 229, which carries none — the `SlotTree` of its constraint, so the
     /// spaceless slot is invocable exactly as a derived one is (Phase 307). An action entry has none.
-    let private argSpace (h: SigEntry) : ValueSpace option = Function.slotSpaceOf h
+    let private argSpace (h: SigEntry) : ValueSpace option = h.Space
 
     /// Every address an argument list binds more than once, at each repeat, in list order (Phase
     /// 307) — empty exactly when the addresses are distinct. The one duplicate check both seams and
@@ -845,18 +845,9 @@ module CapabilityCodec =
     let private entryJson (e: SigEntry) : JVal =
         [ "addr", JStr e.Addr
           "name", JStr e.Name
-          "kind", JStr e.Kind
+          "kind", JStr(HoleKind.tag e.Kind)
           "required", JBool e.Required ]
-        @ (match e.Space with
-           | Some _ when Function.derivedSlotSpace e -> []
-           | Some s -> [ "space", SpaceCodec.toJson s ]
-           | None -> [])
-        @ (match e.Slot with
-           | Some k -> [ "slotKind", JStr k ]
-           | None -> [])
-        @ (match e.Action with
-           | Some eff -> [ "actionEffect", EffectCodec.toJson eff ]
-           | None -> [])
+        @ Function.kindMembers SpaceCodec.toJson e.Kind
         |> JObj
 
     let private entryOf (el: JVal) : Result<SigEntry, DecodeError> =
@@ -876,21 +867,26 @@ module CapabilityCodec =
                             Decoder.optField "actionEffect" EffectCodec.decoder el
                             |> Result.bind (fun ac ->
                                 Decoder.optField "slotKind" Decoder.str el
-                                |> Result.map (fun slot ->
-                                    // A slot entry travels without its derived space (Phase 229), so
-                                    // decoding restores it from the constraint.
-                                    let sp =
-                                        match sp with
-                                        | None when kind = HoleKind.tag (SlotHole slot) -> Some(SlotTree slot)
-                                        | other -> other
+                                |> Result.bind (fun slot ->
+                                    // Phase 409: the entry is read AS its hole kind, so a tag without
+                                    // the member its kind needs is refused `MissingField` at that
+                                    // member. A slot travels without its derived space (Phase 229);
+                                    // a member the kind does not read is not part of the entry.
+                                    let holeKind =
+                                        match kind, sp, ac with
+                                        | "value", Some s, _ -> Ok(ValueHole s)
+                                        | "repeat", Some s, _ -> Ok(RepeatHole s)
+                                        | "slot", _, _ -> Ok(SlotHole slot)
+                                        | "action", _, Some e -> Ok(ActionHole e)
+                                        | "action", _, None -> Error(Decoder.missing "actionEffect")
+                                        | _ -> Error(Decoder.missing "space")
 
-                                    { Addr = addr
-                                      Name = name
-                                      Kind = kind
-                                      Space = sp
-                                      Slot = slot
-                                      Action = ac
-                                      Required = required })))))))
+                                    holeKind
+                                    |> Result.map (fun k ->
+                                        { Addr = addr
+                                          Name = name
+                                          Kind = k
+                                          Required = required }))))))))
 
     let internal signatureJson (sg: Signature) : JVal =
         JObj
@@ -930,8 +926,9 @@ module CapabilityCodec =
                 ))
 
     /// Read a signature object (`name`, `effect`, `holes`) leniently, refusing a hole-kind tag
-    /// outside `HoleKind.tags` and a signature `Signature.validate` refuses (Phase 307); a slot
-    /// entry written without its space gets `SlotTree` of its constraint back.
+    /// outside `HoleKind.tags`, an entry without the member its kind needs (`space` for a value or
+    /// repeat hole, `actionEffect` for an action hole; Phase 409) and a signature `Signature.validate`
+    /// refuses (Phase 307). A slot's space is its constraint's tree, and is never read.
     let signatureOf (el: JVal) : Result<Signature, string> =
         Decoder.describing signatureOfDetailed el
 

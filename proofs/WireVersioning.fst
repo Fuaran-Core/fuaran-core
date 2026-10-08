@@ -5,7 +5,7 @@
    WHAT THIS IS. §15.4 classifies a vocabulary change by an IDL diff — no removed tags means
    additive, any removal or rename means breaking — and §15.3 promises that a `Behind` consumer
    PRESERVES what it does not understand. Since Phase 127 that classification is COMPUTED, by
-   `Versioning.classify` / `Versioning.bump` in `src/Fuaran.Core.Wire/Wire.fs`, and it is exercised
+   `Versioning.classify` / `Versioning.bump` in `src/Fuaran.Core.Wire/Versioning.fs`, and it is exercised
    by tests that perturb the real vocabulary. What no test can say is that the classification is
    SOUND: that an "additive" verdict really does leave every old document decoding to the same
    value, and that preservation really does reproduce the producer's bytes. A test samples; a

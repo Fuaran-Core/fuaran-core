@@ -473,16 +473,23 @@ type hole_kind =
 (* F#: `HoleDecl` — `Addr` is the absolute lexical address, the hygiene surface. *)
 type hole_decl = { h_addr: string; h_name: string; h_kind: hole_kind }
 
-(* F#: `SigEntry`. *)
+(* F#: `SigEntry` — since Phase 409 its kind IS the hole kind, so a space, a slot constraint and an
+   effect ceiling are read from it and an entry has one copy of each. *)
 type sig_entry = {
   s_addr: string;
   s_name: string;
-  s_kind: string;
-  s_space: option value_space;
-  s_slot: option string;
-  s_action: option effect_class;
+  s_kind: hole_kind;
   s_required: bool
 }
+
+(* F#: `SigEntry.Space` (Phase 409) — the space an argument must lie in, read from the kind: a value
+   or repeat hole's space, the tree space of a slot's constraint, none for an action hole. *)
+let entry_space (e:sig_entry) : Tot (option value_space) =
+  match e.s_kind with
+  | ValueHole s -> Some s
+  | SlotHole c -> Some (SlotTree c)
+  | RepeatHole s -> Some s
+  | ActionHole _ -> None
 
 (* F#: `Signature`. *)
 type signature = { sg_name: string; sg_holes: list sig_entry; sg_effect: effect_class }
@@ -579,21 +586,15 @@ noeq type witness (node:Type) = {
 
 (* F#: `Function.signature`'s local `entry`. *)
 let entry_of (h:hole_decl) : Tot sig_entry =
-  match h.h_kind with
-  | ValueHole s ->
-    { s_addr = h.h_addr; s_name = h.h_name; s_kind = "value";
-      s_space = Some s; s_slot = None; s_action = None; s_required = true }
-  | SlotHole c ->
-    { s_addr = h.h_addr; s_name = h.h_name; s_kind = "slot";
-      s_space = Some (SlotTree c); s_slot = c; s_action = None; s_required = true }
-  | RepeatHole s ->
-    (* Phase 295: a TOTAL repeat is required, as strict `bind_args` demands it (Phase 307: a
-       repeat over a count space). *)
-    { s_addr = h.h_addr; s_name = h.h_name; s_kind = "repeat";
-      s_space = Some s; s_slot = None; s_action = None; s_required = is_count s }
-  | ActionHole e ->
-    { s_addr = h.h_addr; s_name = h.h_name; s_kind = "action";
-      s_space = None; s_slot = None; s_action = Some e; s_required = false }
+  { s_addr = h.h_addr; s_name = h.h_name; s_kind = h.h_kind;
+    s_required =
+      (match h.h_kind with
+       | ValueHole _ -> true
+       | SlotHole _ -> true
+       (* Phase 295: a TOTAL repeat is required, as strict `bind_args` demands it (Phase 307: a
+          repeat over a count space). *)
+       | RepeatHole s -> is_count s
+       | ActionHole _ -> false) }
 
 (* F#: `Function.signature`. *)
 let signature_of (#node:Type) (w:witness node) (name:string) (n:node) : Tot signature =
@@ -603,16 +604,15 @@ let signature_of (#node:Type) (w:witness node) (name:string) (n:node) : Tot sign
 let signature_excluding (bound:list string) (sg:signature) : Tot signature =
   { sg with sg_holes = excluding bound sg.sg_holes }
 
-(* F#: `Function.isTotal`'s per-entry predicate, over `SigEntry.HoleKind` (Phase 295): a repeat over a
-   bounded count is total, every other hole kind is, and an entry that projects to no hole kind (an
-   unknown tag, or a tag without the payload it needs) is not. *)
+(* F#: `Function.isTotal`'s per-entry predicate (Phase 295): a repeat over a bounded count is total,
+   and every other hole kind is. Since Phase 409 every entry IS a hole kind — the reader refuses a tag
+   without the member its kind needs (`entry_of_j`) — so there is no entry that projects to none. *)
 let entry_total (e:sig_entry) : Tot bool =
-  match e.s_kind, e.s_space, e.s_action with
-  | "value", Some _, _ -> true
-  | "slot", _, _ -> true
-  | "repeat", Some s, _ -> is_count s
-  | "action", _, Some _ -> true
-  | _ -> false
+  match e.s_kind with
+  | RepeatHole s -> is_count s
+  | ValueHole _ -> true
+  | SlotHole _ -> true
+  | ActionHole _ -> true
 
 (* F#: `Function.isTotal`. *)
 let is_total (sg:signature) : Tot bool = for_all entry_total sg.sg_holes
@@ -620,7 +620,7 @@ let is_total (sg:signature) : Tot bool = for_all entry_total sg.sg_holes
 (* F#: `Signature.validate`'s per-entry space check — the fault `Space.wellFormed` gives the entry's
    space, by address. *)
 let entry_space_fault (rd:readers) (e:sig_entry) : Tot (option decl_fault) =
-  match e.s_space with
+  match entry_space e with
   | None -> None
   | Some sp ->
     (match space_wf rd sp with
@@ -866,12 +866,8 @@ let capture_covers_exercised (c:capability) (host:host_effect) (exercised:determ
 (* F#: `(string * string) list` — a typed invocation's args, addr → value. *)
 type invocation = list (string & string)
 
-(* F#: `Capability.argSpace` (Phase 307) — `Function.slotSpaceOf`: an entry's own space, or for a
-   slot entry built by hand before Phase 229 (spaceless) the tree space of its constraint. *)
-let arg_space (e:sig_entry) : Tot (option value_space) =
-  match e.s_kind, e.s_space with
-  | "slot", None -> Some (SlotTree e.s_slot)
-  | _, sp -> sp
+(* F#: `Capability.argSpace` (Phase 307) — `SigEntry.Space` since Phase 409. *)
+let arg_space (e:sig_entry) : Tot (option value_space) = entry_space e
 
 (* F#: `Capability.repeatedAddrs` — every key the list binds again, at each repeat, in order. *)
 let rec repeated (seen:list string) (ks:list string) : Tot (list string) (decreases ks) =
@@ -1200,8 +1196,8 @@ let spaceless_required_uninvocable (rd:readers) (c:capability) (a:invocation) (h
 let slot_entry_shape (h:hole_decl)
   : Lemma (requires SlotHole? h.h_kind)
           (ensures (entry_of h).s_required /\
-                   (entry_of h).s_space == Some (SlotTree (SlotHole?._0 h.h_kind)) /\
-                   (entry_of h).s_slot == SlotHole?._0 h.h_kind)
+                   entry_space (entry_of h) == Some (SlotTree (SlotHole?._0 h.h_kind)) /\
+                   (entry_of h).s_kind == h.h_kind)
   = ()
 
 (* The tree space admits exactly the wire documents of the constrained kind (any kind when
@@ -1246,9 +1242,9 @@ let validate_args_complete (rd:readers) (c:capability) (a:invocation)
    over a slotted artifact is invocable. *)
 let slot_hole_invocable_in_space (rd:readers) (c:capability) (a:invocation) (h:sig_entry) (v:string)
   : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
-                    h.s_space == Some (SlotTree h.s_slot) /\
+                    SlotHole? h.s_kind /\
                     Some? (rd.kind_of v) /\
-                    (None? h.s_slot \/ h.s_slot == rd.kind_of v) /\
+                    (None? (SlotHole?._0 h.s_kind) \/ SlotHole?._0 h.s_kind == rd.kind_of v) /\
                     repeated [] (keys ((h.s_addr, v) :: a)) == [] /\
                     args_in_space rd c.c_signature.sg_holes a /\
                     unbound_required c.c_signature.sg_holes ((h.s_addr, v) :: a) == [])
@@ -1259,14 +1255,14 @@ let slot_hole_invocable_in_space (rd:readers) (c:capability) (a:invocation) (h:s
    the slot's constraint, and anything that is no tree is `UninvocableArg`. *)
 let slot_wrong_kind_refused (rd:readers) (c:capability) (h:sig_entry) (kc:string) (v:string)
   : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
-                    h.s_space == Some (SlotTree (Some kc)) /\
+                    entry_space h == Some (SlotTree (Some kc)) /\
                     Some? (rd.kind_of v) /\ Some?.v (rd.kind_of v) <> kc)
           (ensures validate_args rd c [(h.s_addr, v)] == Error (ArgOutOfSpace h.s_addr (SlotTree (Some kc)) v))
   = ()
 
 let slot_scalar_uninvocable (rd:readers) (c:capability) (h:sig_entry) (sc:option string) (v:string)
   : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
-                    h.s_space == Some (SlotTree sc) /\ None? (rd.kind_of v))
+                    entry_space h == Some (SlotTree sc) /\ None? (rd.kind_of v))
           (ensures validate_args rd c [(h.s_addr, v)] == Error (UninvocableArg h.s_addr))
   = ()
 
@@ -1846,7 +1842,7 @@ let spell (kr:key_renderers) (c:capability) (b:(string & string)) : Tot (string 
   let (a, v) = b in
   match find_entry a c.c_signature.sg_holes with
   | Some e ->
-    (match e.s_space with
+    (match entry_space e with
      | Some sp -> (match kr.k_canonical sp v with Some v' -> (a, v') | None -> (a, v))
      | None -> (a, v))
   | None -> (a, v)
@@ -2154,7 +2150,7 @@ let spell_addr (kr:key_renderers) (c:capability) (b:(string & string))
   = let (a, v) = b in
     match find_entry a c.c_signature.sg_holes with
     | Some e ->
-      (match e.s_space with
+      (match entry_space e with
        | Some sp -> (match kr.k_canonical sp v with Some _ -> () | None -> ())
        | None -> ())
     | None -> ()
@@ -2206,7 +2202,7 @@ let accepted_invocation_key_deterministic (rd:readers) (kr:key_renderers) (c:cap
 let lift (#node:Type) (tree:string -> node) (holes:list sig_entry) (b:(string & string)) : Tot (string & arg node) =
   let (k, v) = b in
   match find_entry k holes with
-  | Some e -> if e.s_kind = "slot" then (k, SlotArg (tree v)) else (k, ValueArg v)
+  | Some e -> if SlotHole? e.s_kind then (k, SlotArg (tree v)) else (k, ValueArg v)
   | None -> (k, ValueArg v)
 
 let lifted (#node:Type) (tree:string -> node) (holes:list sig_entry) (a:invocation) : Tot (args node) =
@@ -3144,7 +3140,7 @@ let pipe_arg_fault (fr:feed_readers) (rd:readers) (ns:list pipeline_node) (all_i
     (match find_entry addr cap.c_signature.sg_holes with
      | None -> Some (PipelineArgRefused nid (UnknownArg addr declared))
      | Some h ->
-       (match h.s_space with
+       (match entry_space h with
         | None -> Some (PipelineArgRefused nid (UninvocableArg addr))
         | Some sp -> edge_fault fr rd ns all_ids nid addr up sp))
 
@@ -3208,7 +3204,7 @@ let rec space_of (addr:string) (holes:list sig_entry) : Tot (option value_space)
   | [] -> None
   | h :: t ->
     if h.s_addr = addr then
-      (match h.s_space with
+      (match entry_space h with
        | Some s -> Some s
        | None -> space_of addr t)
     else space_of addr t
@@ -3809,7 +3805,7 @@ let rec eval_from_empty_prior (#v:Type) (rd:readers) (lk:capability_lookup) (spe
    address carries a space. *)
 let rec space_of_find (addr:string) (holes:list sig_entry)
   : Lemma (match find_entry addr holes with
-           | Some h -> (Some? h.s_space ==> space_of addr holes == h.s_space)
+           | Some h -> (Some? (entry_space h) ==> space_of addr holes == entry_space h)
            | None -> True)
   = match holes with
     | [] -> ()
@@ -4288,30 +4284,28 @@ let effect_of_j (el:jval) : Tot (outcome effect_class decode_error) =
 (* F#: `HoleKind.tags`. *)
 let hole_tags : list string = ["value"; "slot"; "repeat"; "action"]
 
-(* F#: `Function.derivedSlotSpace` — a slot entry carrying exactly the space its constraint derives. *)
-let derived_slot_space (e:sig_entry) : Tot bool =
-  e.s_kind = "slot" && e.s_space = Some (SlotTree e.s_slot)
+(* F#: `HoleKind.tag`. *)
+let kind_tag (k:hole_kind) : Tot string =
+  match k with
+  | ValueHole _ -> "value"
+  | SlotHole _ -> "slot"
+  | RepeatHole _ -> "repeat"
+  | ActionHole _ -> "action"
 
-(* F#: `entryJson`'s three conditional member lists. *)
-let space_members (e:sig_entry) : Tot (list (string & jval)) =
-  match e.s_space with
-  | Some s -> if derived_slot_space e then [] else [("space", space_json s)]
-  | None -> []
-
-let slot_members (e:sig_entry) : Tot (list (string & jval)) =
-  match e.s_slot with
-  | Some k -> [("slotKind", JStr k)]
-  | None -> []
-
-let action_members (e:sig_entry) : Tot (list (string & jval)) =
-  match e.s_action with
-  | Some eff -> [("actionEffect", effect_json eff)]
-  | None -> []
+(* F#: `Function.kindMembers` (Phase 409) — the members an entry's kind writes after the four fixed
+   ones: a value or repeat hole's `space`, a constrained slot's `slotKind`, an action hole's
+   `actionEffect`. A slot's space is derived from its constraint (Phase 229), so it is never written. *)
+let kind_members (k:hole_kind) : Tot (list (string & jval)) =
+  match k with
+  | ValueHole s -> [("space", space_json s)]
+  | RepeatHole s -> [("space", space_json s)]
+  | SlotHole (Some c) -> [("slotKind", JStr c)]
+  | SlotHole None -> []
+  | ActionHole eff -> [("actionEffect", effect_json eff)]
 
 let entry_fields (e:sig_entry) : Tot (list (string & jval)) =
-  ("addr", JStr e.s_addr) :: ("name", JStr e.s_name) :: ("kind", JStr e.s_kind) ::
-  ("required", JBool e.s_required) ::
-  app (space_members e) (app (slot_members e) (action_members e))
+  ("addr", JStr e.s_addr) :: ("name", JStr e.s_name) :: ("kind", JStr (kind_tag e.s_kind)) ::
+  ("required", JBool e.s_required) :: kind_members e.s_kind
 
 (* F#: `CapabilityCodec.entryJson`. *)
 let entry_json (e:sig_entry) : Tot jval = JObj (entry_fields e)
@@ -4322,8 +4316,24 @@ let kind_of_j (el:jval) : Tot (outcome string decode_error) =
   | Error e -> Error e
   | Ok s -> if mem s hole_tags then Ok s else Error (refuse UnknownTag)
 
-(* F#: `CapabilityCodec.entryOf`. A slot entry travels without its derived space (Phase 229), so
-   decoding restores it from the constraint. *)
+(* F#: `Decoder.missing` — an absent required member, its path naming the member. *)
+let missing (name:string) : Tot decode_error = { d_code = MissingField; d_path = [Key name] }
+
+(* F#: `CapabilityCodec.entryOf`'s last step (Phase 409) — the entry read AS its hole kind: a tag
+   without the member its kind needs is refused `MissingField` at that member. A slot travels without
+   its derived space (Phase 229), and a member the kind does not read is not part of the entry. *)
+let hole_kind_of (kind:string) (sp:option value_space) (slot:option string) (ac:option effect_class)
+  : Tot (outcome hole_kind decode_error) =
+  match kind, sp, ac with
+  | "value", Some s, _ -> Ok (ValueHole s)
+  | "repeat", Some s, _ -> Ok (RepeatHole s)
+  | "slot", _, _ -> Ok (SlotHole slot)
+  | "action", _, Some e -> Ok (ActionHole e)
+  | "action", _, None -> Error (missing "actionEffect")
+  | _ -> Error (missing "space")
+
+(* F#: `CapabilityCodec.entryOf`. The members are read in production's order — `space`,
+   `actionEffect`, `slotKind`, each refused where present and malformed — and then the kind. *)
 let entry_of_j (cr:codec_readers) (el:jval) : Tot (outcome sig_entry decode_error) =
   match field "addr" d_str el with
   | Error e -> Error e
@@ -4346,13 +4356,9 @@ let entry_of_j (cr:codec_readers) (el:jval) : Tot (outcome sig_entry decode_erro
   match opt_field "slotKind" d_str el with
   | Error e -> Error e
   | Ok slot ->
-    let sp' : option value_space =
-      match sp with
-      | None -> if kind = "slot" then Some (SlotTree slot) else None
-      | Some s -> Some s
-    in
-    Ok ({ s_addr = addr; s_name = name; s_kind = kind; s_space = sp'; s_slot = slot;
-          s_action = ac; s_required = required })
+  match hole_kind_of kind sp slot ac with
+  | Error e -> Error e
+  | Ok k -> Ok ({ s_addr = addr; s_name = name; s_kind = k; s_required = required })
 
 (* F#: `sg.Holes |> List.map entryJson`. *)
 let rec entries_json (es:list sig_entry) : Tot (list jval) =
@@ -4603,162 +4609,51 @@ let placement_roundtrip (p:placement)
   : Lemma (placement_of_j (placement_json p) == Ok p)
   = ()
 
-(* The three conditional members of an entry, looked up through the four fixed ones. *)
-let lk_space (e:sig_entry)
-  : Lemma (assoc "space" (entry_fields e) ==
-           (match e.s_space with
-            | Some s -> if derived_slot_space e then None else Some (space_json s)
-            | None -> None))
-  = assoc_app "space" (space_members e) (app (slot_members e) (action_members e));
-    assoc_app "space" (slot_members e) (action_members e)
-
-let lk_slot (e:sig_entry)
-  : Lemma (assoc "slotKind" (entry_fields e) ==
-           (match e.s_slot with
-            | Some k -> Some (JStr k)
-            | None -> None))
-  = assoc_app "slotKind" (space_members e) (app (slot_members e) (action_members e));
-    assoc_app "slotKind" (slot_members e) (action_members e)
-
-let lk_action (e:sig_entry)
-  : Lemma (assoc "actionEffect" (entry_fields e) ==
-           (match e.s_action with
-            | Some eff -> Some (effect_json eff)
-            | None -> None))
-  = assoc_app "actionEffect" (space_members e) (app (slot_members e) (action_members e));
-    assoc_app "actionEffect" (slot_members e) (action_members e)
-
-(* The entry a decode yields for an entry: its space filled in where it is a slot's derived one
-   (`Function.slotSpaceOf`, `arg_space` here). *)
-let normal_entry (e:sig_entry) : Tot sig_entry = { e with s_space = arg_space e }
-
-(* An entry the codec carries unchanged: its kind is a hole kind's tag, and it is not the spaceless
-   slot a hand-built signature may hold. *)
-let canonical_entry (e:sig_entry) : Tot bool = mem e.s_kind hole_tags && arg_space e = e.s_space
-
-(* DECODE AFTER ENCODE, AN ENTRY, EXACTLY. A kind outside `HoleKind.tags` is refused `UnknownTag`
-   at `kind`; every other entry reads back as its normal form — itself, unless it is the spaceless
-   slot, which reads back with the `SlotTree` of its constraint. *)
+(* DECODE AFTER ENCODE, AN ENTRY, EXACTLY (Phase 409: every entry is a hole kind, so there is no
+   normal form — every entry reads back as itself). *)
 let entry_roundtrip (cr:codec_readers) (e:sig_entry)
-  : Lemma (entry_of_j cr (entry_json e) ==
-           (if mem e.s_kind hole_tags then Ok (normal_entry e)
-            else Error ({ d_code = UnknownTag; d_path = [Key "kind"] })))
-  = lk_space e; lk_slot e; lk_action e;
-    (match e.s_space with
-     | Some s -> space_roundtrip cr s
-     | None -> ());
-    (match e.s_action with
-     | Some eff -> effect_roundtrip eff
-     | None -> ())
-
-(* A decoded entry is canonical — whatever document it was read from. *)
-let entry_decoded_canonical (cr:codec_readers) (el:jval) (e:sig_entry)
-  : Lemma (requires entry_of_j cr el == Ok e) (ensures canonical_entry e)
-  = ()
-
-(* The index of the first entry whose kind is no hole kind's tag, counted from `i`. *)
-let rec first_bad_kind (i:nat) (es:list sig_entry) : Tot (option nat) (decreases es) =
-  match es with
-  | [] -> None
-  | e :: t -> if mem e.s_kind hole_tags then first_bad_kind (i + 1) t else Some i
+  : Lemma (entry_of_j cr (entry_json e) == Ok e)
+  = match e.s_kind with
+    | ValueHole s -> space_roundtrip cr s
+    | RepeatHole s -> space_roundtrip cr s
+    | SlotHole _ -> ()
+    | ActionHole eff -> effect_roundtrip eff
 
 let rec entries_roundtrip (cr:codec_readers) (i:nat) (es:list sig_entry)
-  : Lemma (ensures list_from (entry_of_j cr) i (entries_json es) ==
-                   (match first_bad_kind i es with
-                    | Some j -> Error ({ d_code = UnknownTag; d_path = [Index j; Key "kind"] })
-                    | None -> Ok (map normal_entry es)))
-          (decreases es)
+  : Lemma (ensures list_from (entry_of_j cr) i (entries_json es) == Ok es) (decreases es)
   = match es with
     | [] -> ()
     | e :: t -> entry_roundtrip cr e; entries_roundtrip cr (i + 1) t
 
-let rec entries_decoded_canonical (cr:codec_readers) (i:nat) (xs:list jval) (es:list sig_entry)
-  : Lemma (requires list_from (entry_of_j cr) i xs == Ok es)
-          (ensures for_all canonical_entry es)
-          (decreases xs)
-  = match xs with
-    | [] -> ()
-    | x :: rest ->
-      (match entry_of_j cr x with
-       | Error _ -> ()
-       | Ok e ->
-         entry_decoded_canonical cr x e;
-         (match list_from (entry_of_j cr) (i + 1) rest with
-          | Ok es' -> entries_decoded_canonical cr (i + 1) rest es'
-          | Error _ -> ()))
-
-(* Normalising changes nothing the admission check reads: a slot's derived space is well-formed. *)
-let rec validate_normal (rd:readers) (seen:list string) (es:list sig_entry)
-  : Lemma (ensures validate_entries rd seen (map normal_entry es) == validate_entries rd seen es)
-          (decreases es)
-  = match es with
-    | [] -> ()
-    | e :: t -> validate_normal rd (e.s_addr :: seen) t
-
-let rec normal_canonical (es:list sig_entry)
-  : Lemma (requires for_all canonical_entry es) (ensures map normal_entry es == es)
-  = match es with
-    | [] -> ()
-    | _ :: t -> normal_canonical t
-
-(* The signature a decode yields for a signature. *)
-let normal_signature (sg:signature) : Tot signature = { sg with sg_holes = map normal_entry sg.sg_holes }
-
-(* A signature the codec carries unchanged: every entry canonical, and one `Signature.validate`
-   admits. *)
-let wf_signature (rd:readers) (sg:signature) : Tot bool =
-  for_all canonical_entry sg.sg_holes && None? (validate_signature rd sg)
+(* A signature the codec carries unchanged: one `Signature.validate` admits. *)
+let wf_signature (rd:readers) (sg:signature) : Tot bool = None? (validate_signature rd sg)
 
 (* THE FIFTEENTH THEOREM (Phase 354), `signature_roundtrip`. F#: `CapabilityCodec.signatureOf` after
-   `signatureJson`. DECODE AFTER ENCODE, EXACTLY, for every signature:
-     - an entry whose kind is no hole kind's tag is refused `UnknownTag`, the path naming the first
-       such entry and its `kind`;
-     - otherwise a signature `Signature.validate` refuses is refused `OutOfRange` at `holes` — the
-       reader runs the admission check the registries run;
-     - otherwise it reads back as its normal form: itself, with each spaceless slot entry given the
-       `SlotTree` of its constraint.
-   So on a well-formed signature the round trip is the IDENTITY (`signature_roundtrip_identity`),
-   and the hand-built spaceless slot is the one value that reads back as another. *)
+   `signatureJson`. DECODE AFTER ENCODE, EXACTLY, for every signature: a signature
+   `Signature.validate` refuses is refused `OutOfRange` at `holes` — the reader runs the admission
+   check the registries run — and every other reads back as ITSELF. Since Phase 409 an entry is its
+   hole kind, so the two shapes that used to read back otherwise (an entry of no hole kind, refused at
+   its `kind`, and the spaceless slot, read back with the `SlotTree` of its constraint) cannot be
+   built: `signature_roundtrip_identity` is the identity on every well-formed signature. *)
 let signature_roundtrip (rd:readers) (cr:codec_readers) (sg:signature)
   : Lemma (signature_of_j rd cr (signature_json sg) ==
-           (match first_bad_kind 0 sg.sg_holes with
-            | Some j -> Error ({ d_code = UnknownTag; d_path = [Key "holes"; Index j; Key "kind"] })
-            | None ->
-              (match validate_signature rd sg with
-               | None -> Ok (normal_signature sg)
-               | Some _ -> Error ({ d_code = OutOfRange; d_path = [Key "holes"] }))))
+           (match validate_signature rd sg with
+            | None -> Ok sg
+            | Some _ -> Error ({ d_code = OutOfRange; d_path = [Key "holes"] })))
   = effect_roundtrip sg.sg_effect;
-    entries_roundtrip cr 0 sg.sg_holes;
-    validate_normal rd [] sg.sg_holes
-
-let rec canonical_no_bad_kind (i:nat) (es:list sig_entry)
-  : Lemma (requires for_all canonical_entry es) (ensures first_bad_kind i es == None) (decreases es)
-  = match es with
-    | [] -> ()
-    | _ :: t -> canonical_no_bad_kind (i + 1) t
+    entries_roundtrip cr 0 sg.sg_holes
 
 let signature_roundtrip_identity (rd:readers) (cr:codec_readers) (sg:signature)
   : Lemma (requires wf_signature rd sg)
           (ensures signature_of_j rd cr (signature_json sg) == Ok sg)
-  = signature_roundtrip rd cr sg;
-    canonical_no_bad_kind 0 sg.sg_holes;
-    normal_canonical sg.sg_holes
+  = signature_roundtrip rd cr sg
 
 (* EVERY DOCUMENT THE READER ACCEPTS IS A WELL-FORMED SIGNATURE — one a registry could admit on
    well-formedness, and one that encodes and reads back as itself. *)
 let signature_decoded_wf (rd:readers) (cr:codec_readers) (el:jval) (sg:signature)
   : Lemma (requires signature_of_j rd cr el == Ok sg)
           (ensures wf_signature rd sg /\ signature_of_j rd cr (signature_json sg) == Ok sg)
-  = (match el with
-     | JObj fields ->
-       (match assoc "holes" fields with
-        | Some (JArr xs) ->
-          (match list_from (entry_of_j cr) 0 xs with
-           | Ok es -> entries_decoded_canonical cr 0 xs es
-           | Error _ -> ())
-        | _ -> ())
-     | _ -> ());
-    signature_roundtrip_identity rd cr sg
+  = signature_roundtrip_identity rd cr sg
 
 (* A capability the codec carries unchanged: a well-formed signature, a TOTAL one (Phase 385 — the
    reader runs the registries' whole admission gate), and the determinism the signature's effect
@@ -4906,10 +4801,9 @@ let twins : list twin = [
       (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange 0 3) })).s_required = true) };
   { tname = "an-unbounded-repeat-is-not-required";
     tholds = (fun () -> (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole AnyString })).s_required = false) };
-  { tname = "an-entry-of-no-hole-kind-is-not-total";
+  { tname = "a-repeat-over-no-count-is-not-total";
     tholds = (fun () ->
-      entry_total ({ s_addr = "x"; s_name = "x"; s_kind = "int"; s_space = Some AnyString; s_slot = None;
-                     s_action = None; s_required = true }) = false) };
+      entry_total ({ s_addr = "r"; s_name = "r"; s_kind = RepeatHole AnyString; s_required = false }) = false) };
   (* Phase 307 — the count space, the duplicate scan and the admission check. *)
   { tname = "a-repeat-over-a-float-range-is-not-required";
     tholds = (fun () ->
@@ -4922,10 +4816,9 @@ let twins : list twin = [
     tholds = (fun () ->
       validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
                           kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) }) []
-        [ { s_addr = "a"; s_name = "a"; s_kind = "value"; s_space = Some (IntRange 0 1); s_slot = None;
-            s_action = None; s_required = true };
-          { s_addr = "a"; s_name = "b"; s_kind = "value"; s_space = Some (IntRange 5 1); s_slot = None;
-            s_action = None; s_required = true } ] = Some (DuplicateHoleAddr "a")) };
+        [ { s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange 0 1); s_required = true };
+          { s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange 5 1); s_required = true } ]
+        = Some (DuplicateHoleAddr "a")) };
   (* Phase 354 — the handler table, the pipeline and the codecs. *)
   { tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key";
     tholds = (fun () ->
@@ -4970,16 +4863,26 @@ let twins : list twin = [
   { tname = "an-entry-kind-outside-the-tags-is-refused-at-kind";
     tholds = (fun () ->
       entry_of_j ({ float_of_int = (fun _ -> "0") })
-        (entry_json ({ s_addr = "x"; s_name = "x"; s_kind = "int"; s_space = Some AnyString; s_slot = None;
-                       s_action = None; s_required = true }))
+        (JObj [("addr", JStr "x"); ("name", JStr "x"); ("kind", JStr "int"); ("required", JBool true);
+               ("space", space_json AnyString)])
         = Error ({ d_code = UnknownTag; d_path = [Key "kind"] })) };
-  { tname = "a-spaceless-slot-reads-back-with-its-derived-space";
+  (* Phase 409. Before it, the reader READ this document, as an entry of no hole kind that only the
+     admission gate's totality check refused; the suite's go-red vector pins that it was read. *)
+  { tname = "a-value-entry-without-a-space-is-refused-at-space";
     tholds = (fun () ->
       entry_of_j ({ float_of_int = (fun _ -> "0") })
-        (entry_json ({ s_addr = "s"; s_name = "s"; s_kind = "slot"; s_space = None; s_slot = Some "card";
-                       s_action = None; s_required = true }))
-        = Ok ({ s_addr = "s"; s_name = "s"; s_kind = "slot"; s_space = Some (SlotTree (Some "card"));
-                s_slot = Some "card"; s_action = None; s_required = true })) };
+        (JObj [("addr", JStr "v"); ("name", JStr "v"); ("kind", JStr "value"); ("required", JBool true)])
+        = Error ({ d_code = MissingField; d_path = [Key "space"] })) };
+  { tname = "an-action-entry-without-its-effect-is-refused-at-actionEffect";
+    tholds = (fun () ->
+      entry_of_j ({ float_of_int = (fun _ -> "0") })
+        (JObj [("addr", JStr "a"); ("name", JStr "a"); ("kind", JStr "action"); ("required", JBool false)])
+        = Error ({ d_code = MissingField; d_path = [Key "actionEffect"] })) };
+  { tname = "a-slot-entry-reads-back-as-its-constraint";
+    tholds = (fun () ->
+      entry_of_j ({ float_of_int = (fun _ -> "0") })
+        (entry_json ({ s_addr = "s"; s_name = "s"; s_kind = SlotHole (Some "card"); s_required = true }))
+        = Ok ({ s_addr = "s"; s_name = "s"; s_kind = SlotHole (Some "card"); s_required = true })) };
   { tname = "the-descriptor-spelling-of-a-space-is-refused-at-type";
     tholds = (fun () ->
       space_of_j ({ float_of_int = (fun _ -> "0") })

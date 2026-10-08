@@ -13,7 +13,7 @@
          implementation and a disagreement is about the schemas, not the validators. -->
     <PackageVersion Include="JsonSchema.Net" Version="9.2.1" />
     <!-- Fable.Core: used ONLY under `#if FABLE_COMPILER` for the `[<Emit>]` JS-number-toString in
-         `Canon` (Wire.fs). A no-op netstandard package on .NET (the runtime stays FSharp.Core-only);
+         `Canon`'s float layout (FloatLayout.fs). A no-op netstandard package on .NET (the runtime stays FSharp.Core-only);
          present so the Fable-distributed source compiles the float-layout port. Matches the UI host. -->
     <PackageVersion Include="Fable.Core" Version="5.0" />
   </ItemGroup>

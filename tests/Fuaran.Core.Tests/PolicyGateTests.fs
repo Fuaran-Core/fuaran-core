@@ -22,10 +22,7 @@ let private noteCap (id: string) (host: HostEffect) : Capability =
           Holes =
             [ { Addr = "id"
                 Name = "id"
-                Kind = "value"
-                Space = Some AnyString
-                Slot = None
-                Action = None
+                Kind = ValueHole AnyString
                 Required = true } ]
           Effect =
             { Effect.pureDeterministic with

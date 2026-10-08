@@ -21,10 +21,7 @@ open Fuaran.Core
 let private hole (addr: string) (space: ValueSpace) : SigEntry =
     { Addr = addr
       Name = addr
-      Kind = "value"
-      Space = Some space
-      Slot = None
-      Action = None
+      Kind = ValueHole space
       Required = true }
 
 let private capability (id: string) (holes: SigEntry list) : Capability =

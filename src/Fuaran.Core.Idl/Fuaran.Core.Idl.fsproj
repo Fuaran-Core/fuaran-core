@@ -21,6 +21,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Idl.fs" />
+    <Compile Include="HostedFormat.fs" />
+    <Compile Include="TypeParams.fs" />
+    <Compile Include="SourceLit.fs" />
+    <Compile Include="TransparentUnion.fs" />
+    <Compile Include="IdlLookup.fs" />
+    <Compile Include="Encode.fs" />
+    <Compile Include="FloatToken.fs" />
+    <Compile Include="Decode.fs" />
+    <Compile Include="Declare.fs" />
     <Compile Include="Sanitize.fs" />
     <Compile Include="Xorshift32.fs" />
     <Compile Include="Sample.fs" />

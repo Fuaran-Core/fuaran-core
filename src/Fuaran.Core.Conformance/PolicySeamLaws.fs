@@ -57,10 +57,7 @@ module internal PolicySeamLaws =
                   Holes =
                     [ { Addr = "n"
                         Name = "n"
-                        Kind = "value"
-                        Space = Some(IntRange(0, 9))
-                        Slot = None
-                        Action = None
+                        Kind = ValueHole(IntRange(0, 9))
                         Required = true } ]
                   Effect = Effect.pureDeterministic }
                 BuildTime
@@ -637,10 +634,7 @@ module internal PolicySeamLaws =
                   Holes =
                     [ { Addr = "n"
                         Name = "n"
-                        Kind = "value"
-                        Space = Some(IntRange(0, 9))
-                        Slot = None
-                        Action = None
+                        Kind = ValueHole(IntRange(0, 9))
                         Required = true } ]
                   Effect =
                     { Effect.pureDeterministic with

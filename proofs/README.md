@@ -968,7 +968,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
 | `Fuaran.Core.Conformance` | 148 | 1 | 101 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
-| `Fuaran.Core.Function` | 143 | 33 | 64 | 5 | 0 | 0 | 0 | 41 |
+| `Fuaran.Core.Function` | 142 | 33 | 64 | 5 | 0 | 0 | 0 | 40 |
 | `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
@@ -982,7 +982,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1110 | 141 | 385 | 30 | 13 | 0 | 3 | 538 |
+| **Total** | 1109 | 141 | 385 | 30 | 13 | 0 | 3 | 537 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -3647,7 +3647,7 @@ theorem 15). What follows is the finding as it stood, and it is still true of th
 `int53_guard_conservative` is still a lemma — but no longer of the parser: the witness below is now
 refused as a malformed number (`padded_token_is_refused_by_the_grammar`)._
 
-`Wire.fs` justifies comparing the digit string lexically with "JSON forbids leading zeros, so for
+`Json.fs` justifies comparing the digit string lexically with "JSON forbids leading zeros, so for
 equal length that IS the numeric order". **This parser does not enforce that.** `parseNumber`'s
 digit loop accepts `007`, and for a token `Int32.TryParse` refuses, leading zeros lengthen the
 string without changing the value — so `0009007199254740992`, which is exactly 2^53 and therefore
@@ -4205,7 +4205,7 @@ contrapositive is the sentence the phase exists for and is stated as its own lem
 `diff_never_target_not_a_container` closes the envelope the way `apply_total` closes `apply`'s: the
 third error class is `toOpsContained`'s alone and the plain diff cannot reach it.
 
-**The emission order.** `Ops.fs`'s doc comment argues, in prose, that the emitted order is always
+**The emission order.** `Diff.fs`'s doc comment argues, in prose, that the emitted order is always
 applyable: added nodes go in as leaf shells top-down, every survivor is then reattached, and removed
 regions are deleted **last**, so a surviving child is pulled out before its old container goes.
 `diff_emission_order` is that argument as a property of the emitted list — the script IS
@@ -4833,7 +4833,7 @@ invokable term, an inert sentinel", which carries the statement, the premise and
 WIRE_FORMAT §15.4 classifies a vocabulary change by an IDL diff — no removed tags means additive,
 any removal or rename means breaking — and §15.3 promises that a `Behind` consumer **preserves**
 what it does not understand. Since Phase 127 the classification is computed rather than
-hand-applied: `Versioning.classify` and `Versioning.bump` in `src/Fuaran.Core.Wire/Wire.fs`, driven
+hand-applied: `Versioning.classify` and `Versioning.bump` in `src/Fuaran.Core.Wire/Versioning.fs`, driven
 by the kind-tag delta an `idl.json` pair yields. It is exercised by tests that perturb the real
 vocabulary, and those tests answer a different question from the one the table raises. A test says
 the classifier returned `Additive` for this pair. The table says an `Additive` step is one every
@@ -5174,7 +5174,8 @@ by name. A tree of the wrong kind is `ArgOutOfSpace addr (SlotTree (Some k)) v`
 (`slot_wrong_kind_refused`). An argument that is no tree is `UninvocableArg`
 (`slot_scalar_uninvocable`), and `refusal_is_truthful` now allows that class for a tree-spaced entry
 as well as a spaceless one. Phase 177's statement is kept as `spaceless_required_uninvocable`,
-because it is still true, but after 229 it describes only a hand-built entry. The fourth
+because it is still true, but after 229 it describes only a hand-built entry (and since Phase 409,
+when an entry is its hole kind, only a hand-built action entry marked required). The fourth
 differential case now dispatches the whole template with a conforming slot and refuses the
 non-conforming arguments by name. The new lemmas all discharge at the leg's rlimit with no
 annotation beyond one recursive helper (`check_args_in_space_ok`). A falsification run that
@@ -5264,8 +5265,8 @@ counted rather than named so the hygiene law survives it (`validate_decl_rename`
 `compose_rename`). `register` runs it after totality (`register_refuses_ill_formed`,
 `register_admits_well_formed`); `compose` runs it over the tree it builds (`IllFormedResult`); a
 strict application refuses an open slot argument first (`SlotArgOpen`); `validate_args` refuses a
-repeated address first (`DuplicateArg`); and a pre-229 spaceless slot entry is checked against the
-tree space of its constraint (`arg_space`).
+repeated address first (`DuplicateArg`); and a slot entry is checked against the tree space of its
+constraint (`arg_space`, which is `SigEntry.Space` since Phase 409).
 
 Section 13 states what that buys. `validate_args_distinct`: an accepted argument list has distinct
 addresses — the hypothesis `invocation_key_deterministic` (ported from `Query.fst`, through
@@ -5326,15 +5327,17 @@ capability codec and the pipeline's node codec: writers, lenient readers through
 layer, each refusal as its `DecodeCode` and path. The route Phase 307 named as cheapest — declare
 the three types as an IDL vocabulary and let the F\* target generate `rt_<T>` — does not fit any of
 them, and `../DECISIONS.md` records why: each reader does something a structural vocabulary cannot
-say (a slot entry's space is omitted on write and restored from its constraint on read; the
+say (a slot entry's space is never written, because it is its constraint's tree; an entry is read
+as its hole kind, refusing a tag without the member its kind needs, since Phase 409; the
 signature reader runs `Signature.validate`; the capability reader cross-checks the determinism
 label against the signature it has just read, and since Phase 385 runs the registries' totality
 check over it; the node reader runs `Space.wellFormed`). So the
 lemmas are stated by hand, and stated EXACTLY: `signature_roundtrip`, `capability_roundtrip` and
 `node_roundtrip` each give decode-after-encode for EVERY value — the identity on the well-formed
-ones, a named refusal (code and path) or a normal form on the others. The normal form is a finding
-the round trip surfaces rather than hides: a hand-built slot entry with no space reads back with
-the `SlotTree` of its constraint, so it is the one value that does not read back as itself.
+ones and a named refusal (code and path) on the others. Until Phase 409 the signature had a normal
+form too: a hand-built slot entry with no space read back with the `SlotTree` of its constraint.
+Since `SigEntry.Kind` is the `HoleKind` itself, that entry cannot be built, and every signature
+reads back as itself or is refused.
 
 The phase also asked that "decode refuses what encode never produces". For a lenient reader that
 is false, and it is not what is proved: the readers accept an extra member and any member order,

@@ -65,9 +65,9 @@ module Measure =
         let mergeEvery = max 1 ((nodes - lanes) / (merges + 1))
         let mutable mergesDone = 0
 
-        let take (r: Result<string * Dag.T<CounterOp> * Dag.Reach<CounterOp>, DagAppendFault>) =
+        let take (r: Result<Dag.IndexedAppend<CounterOp>, DagAppendFault>) =
             match r with
-            | Ok(id, _, r') -> id, r'
+            | Ok x -> x.Id, x.Reach
             | Error f -> failwith ("measurement DAG refused a node: " + DagAppendFault.toString f)
 
         while count < nodes do
@@ -170,9 +170,9 @@ module Measure =
 
                 for i in 1..k do
                     match Dag.appendIndexed h sw (Human "ext") (Inc i) parent r with
-                    | Ok(id, _, r') ->
-                        r <- r'
-                        parent <- id
+                    | Ok x ->
+                        r <- x.Reach
+                        parent <- x.Id
                     | Error _ -> ()
 
                 s.Elapsed.TotalMilliseconds * 1000.0 / float k
@@ -301,15 +301,13 @@ let tests =
               let reach = ref (Dag.Reach.ofDag Dag.empty)
               let ids = ref []
 
-              let step
-                  (f: Dag.Reach<CounterOp> -> Result<string * Dag.T<CounterOp> * Dag.Reach<CounterOp>, DagAppendFault>)
-                  =
+              let step (f: Dag.Reach<CounterOp> -> Result<Dag.IndexedAppend<CounterOp>, DagAppendFault>) =
                   match f reach.Value with
-                  | Ok(id, d, r') ->
-                      Expect.isTrue (Dag.Reach.dag r' = d) "the extended index carries the new DAG"
-                      reach.Value <- r'
-                      ids.Value <- ids.Value @ [ id ]
-                      id
+                  | Ok x ->
+                      Expect.isTrue (Dag.Reach.dag x.Reach = x.Dag) "the extended index carries the new DAG"
+                      reach.Value <- x.Reach
+                      ids.Value <- ids.Value @ [ x.Id ]
+                      x.Id
                   | Error f -> failwith (DagAppendFault.toString f)
 
               // ids drawn from FNV over these ops land in no particular order, so a new leaf enters
@@ -341,10 +339,10 @@ let tests =
               let reach = Dag.Reach.ofDag dag
 
               match Dag.appendIndexed h sw (Human "x") (Inc 2) g reach with
-              | Ok(id, dag', reach') ->
-                  Expect.equal id a "the same node"
-                  Expect.isTrue (dag' = dag) "the DAG is unchanged"
-                  agrees dag reach' (Map.toList dag.Nodes |> List.map fst)
+              | Ok x ->
+                  Expect.equal x.Id a "the same node"
+                  Expect.isTrue (x.Dag = dag) "the DAG is unchanged"
+                  agrees dag x.Reach (Map.toList dag.Nodes |> List.map fst)
               | Error f -> failwith (DagAppendFault.toString f)
 
           testCase "appendIndexed refuses exactly what append refuses"
@@ -397,11 +395,11 @@ let tests =
               let minted: HashFn = fun _ _ -> "missing"
 
               match Dag.appendIndexed minted sw (Human "x") (Inc 3) m reach with
-              | Ok(_, dag', reach') -> agrees dag' reach' (ids @ [ "cd" ])
+              | Ok x -> agrees x.Dag x.Reach (ids @ [ "cd" ])
               | Error f -> failwith (DagAppendFault.toString f)
 
               match Dag.appendIndexed h sw (Human "x") (Inc 3) "cz" reach with
-              | Ok(id, dag', reach') -> agrees dag' reach' (ids @ [ id ])
+              | Ok x -> agrees x.Dag x.Reach (ids @ [ x.Id ])
               | Error f -> failwith (DagAppendFault.toString f)
 
           testCase "reconcileManyWith answers as reconcileMany over every base and head set of a lane DAG"

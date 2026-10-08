@@ -130,10 +130,7 @@ module internal PipelineSeamLaws =
         let consHole: SigEntry =
             { Addr = "x"
               Name = "x"
-              Kind = "value"
-              Space = Some(IntRange(0, 100))
-              Slot = None
-              Action = None
+              Kind = ValueHole(IntRange(0, 100))
               Required = true }
 
         let consSig: Signature =
@@ -186,15 +183,10 @@ module internal PipelineSeamLaws =
                         { Name = "arg"
                           Holes =
                             [ { consHole with
-                                  Space = Some argSpace
                                   Kind =
                                       (match argSpace with
-                                       | SlotTree _ -> "slot"
-                                       | _ -> "value")
-                                  Slot =
-                                      (match argSpace with
-                                       | SlotTree c -> c
-                                       | _ -> None) } ]
+                                       | SlotTree c -> SlotHole c
+                                       | _ -> ValueHole argSpace) } ]
                           Effect = Effect.pureDeterministic }
                         Server
 
@@ -463,10 +455,7 @@ module internal PipelineSeamLaws =
                       Holes =
                         [ { Addr = "x"
                             Name = "x"
-                            Kind = "value"
-                            Space = Some(IntRange(0, 1000))
-                            Slot = None
-                            Action = None
+                            Kind = ValueHole(IntRange(0, 1000))
                             Required = true } ]
                       Effect = Effect.pureDeterministic }
                     Server

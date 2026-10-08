@@ -487,7 +487,8 @@ let refusalTests =
               | other -> failtestf "expected the domain's rejection, got %A" other
 
               match Dag.appendChecked h sw x (Dec 2) 5 a d1 with
-              | Ok(3, id, d2) -> Expect.equal (Dag.tryReplayTo sw 0 d2 id) (Ok 3) "the state it returns is the replay"
+              | Ok r when r.State = 3 ->
+                  Expect.equal (Dag.tryReplayTo sw 0 r.Dag r.Id) (Ok 3) "the state it returns is the replay"
               | other -> failtestf "expected the applied node, got %A" other
 
               match Dag.mergeChecked h sw x (Inc 0) 5 a "nope" d1 with
@@ -546,10 +547,10 @@ let verifiedTests =
 
               // the merge's parents replay to 5 + 3 + 4, without the merge op
               match Dag.mergeVerified h sw 0 x (Inc 0) 12 a b d3 with
-              | Ok(12, id, d) as verified ->
+              | Ok r as verified when r.State = 12 ->
                   Expect.equal verified (Dag.mergeChecked h sw x (Inc 0) 12 a b d3 |> checkedAs) "the checked merge"
-                  Expect.equal id m "the same merge node"
-                  Expect.equal (Dag.tryReplayTo sw 0 d id) (Ok 12) "whose own replay is the state returned"
+                  Expect.equal r.Id m "the same merge node"
+                  Expect.equal (Dag.tryReplayTo sw 0 r.Dag r.Id) (Ok 12) "whose own replay is the state returned"
               | other -> failtestf "expected the verified merge, got %A" other
 
           testCase "the genesis parent replays to the initial state itself"

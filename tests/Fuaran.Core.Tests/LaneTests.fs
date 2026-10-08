@@ -629,7 +629,7 @@ let tests =
                     ignore m
                     Expect.equal (Dag.disjointRoots d5) [] "merged"
 
-                testCase "laneKey is (lane, seq, id), seq counting the lane's own history"
+                testCase "laneKey is a LaneKey (lane, seq, id), seq counting the lane's own history"
                 <| fun _ ->
                     let loaded = fixtureStore ()
                     let key = Dag.laneKey loaded
@@ -640,8 +640,23 @@ let tests =
                             |> Map.toList
                             |> List.filter (fun (id, _) -> loaded.LaneOf[id] = lane)
 
-                        let seqs = ns |> List.map (fun (_, n) -> let _, s, _ = key n in s) |> List.sort
+                        for id, n in ns do
+                            Expect.equal (key n).Lane lane "the node's lane"
+                            Expect.equal (key n).Id id "the node's id"
+
+                        let seqs = ns |> List.map (fun (_, n) -> (key n).Seq) |> List.sort
                         Expect.equal seqs [ 0 .. List.length ns - 1 ] ("one position per node in " + lane)
+
+                    // Phase 410: the record compares as the `(lane, seq, id)` triple it replaced did
+                    let nodes = loaded.Dag.Nodes |> Map.toList |> List.map snd
+                    let triple (k: Dag.LaneKey) = k.Lane, k.Seq, k.Id
+
+                    for p in nodes do
+                        for q in nodes do
+                            Expect.equal
+                                (sign (compare (key p) (key q)))
+                                (sign (compare (triple (key p)) (triple (key q))))
+                                "field order is the triple's order"
 
                     Expect.equal (Dag.totalOrder loaded) (Dag.totalOrderBy key loaded.Dag) "the default order"
 
@@ -746,7 +761,8 @@ let tests =
                     let _, hs, dag = threeHeads ()
                     let state = Dag.replayAllBy (fun _ -> 0) sw 0 dag |> ok
 
-                    let st', id, d = Dag.appendIf h sw (List.rev hs) x (Inc 5) state dag |> ok
+                    let written = Dag.appendIf h sw (List.rev hs) x (Inc 5) state dag |> ok
+                    let st', id, d = written.State, written.Id, written.Dag
                     Expect.equal st' (state + 5) "applied at the caller's state"
                     Expect.equal id (Dag.mergeAll h sw x (Inc 5) hs dag |> ok |> fst) "mergeAll's node"
                     Expect.equal (Dag.heads d) [ id ] "converged"
@@ -761,11 +777,10 @@ let tests =
                         (Error(Dag.DagAppendIfRejection.Domain "would go negative"))
                         "the domain's rejection"
 
-                    let g0, e =
-                        Dag.appendIf h sw [] x (Inc 1) 0 Dag.empty |> ok |> (fun (s, i, d) -> (s, i), d)
+                    let genesis = Dag.appendIf h sw [] x (Inc 1) 0 Dag.empty |> ok
 
-                    Expect.equal (fst g0) 1 "genesis on an empty DAG"
-                    Expect.equal (Dag.heads e) [ snd g0 ] "one node" ] ]
+                    Expect.equal genesis.State 1 "genesis on an empty DAG"
+                    Expect.equal (Dag.heads genesis.Dag) [ genesis.Id ] "one node" ] ]
 
 /// The `Conformance.laneLaws` cases — the suite `proofs.json`'s Phase 311 tested row cites.
 [<Tests>]
