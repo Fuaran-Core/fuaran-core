@@ -554,10 +554,24 @@ module Dag =
 
                 go [ m ] m d rest
 
+    /// What a write that APPLIES its op answers (Phase 410; a positional triple before): the state
+    /// after the op, the node that recorded it, and the DAG holding that node. The answer of
+    /// `appendChecked`, `mergeChecked`, `appendIf` and the four verified forms.
+    type CheckedAppend<'State, 'Op> =
+        {
+            /// The state after the op: the caller's state with the op applied.
+            State: 'State
+            /// The id of the node that recorded the op — an identical node already held, when the
+            /// write deduplicated.
+            Id: string
+            /// The DAG holding that node.
+            Dag: T<'Op>
+        }
+
     /// `append` that also APPLIES the op (Phase 296): `state` is the state `parentId`'s closure
     /// replays to — the caller's, exactly as `OpStream.append` takes the stream's current state — and
     /// an op the domain rejects there is refused before it enters the DAG, instead of surfacing at
-    /// replay. Returns the state after the op beside the node. The graph refusals are judged first.
+    /// replay. Answers the state after the op beside the node. The graph refusals are judged first.
     let appendChecked
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -566,12 +580,12 @@ module Dag =
         (state: 'State)
         (parentId: string)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, DagAppendRejection<'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, DagAppendRejection<'Rej>> =
         match append hashFn w actor op parentId dag with
         | Error f -> Error(DagAppendRejection.Fault f)
         | Ok(id, dag') ->
             match w.Apply op state with
-            | Ok state' -> Ok(state', id, dag')
+            | Ok state' -> Ok { State = state'; Id = id; Dag = dag' }
             | Error rej -> Error(DagAppendRejection.Domain rej)
 
     /// `merge` that also APPLIES the merge op (Phase 296): `state` is the state the merged closure
@@ -587,12 +601,12 @@ module Dag =
         (leftId: string)
         (rightId: string)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, DagAppendRejection<'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, DagAppendRejection<'Rej>> =
         match merge hashFn w actor op leftId rightId dag with
         | Error f -> Error(DagAppendRejection.Fault f)
         | Ok(id, dag') ->
             match w.Apply op state with
-            | Ok state' -> Ok(state', id, dag')
+            | Ok state' -> Ok { State = state'; Id = id; Dag = dag' }
             | Error rej -> Error(DagAppendRejection.Domain rej)
 
     /// Why `Dag.appendIf` refused (Phase 311) — `AppendRejection<'Rej>`'s shape on the DAG: the head
@@ -626,7 +640,7 @@ module Dag =
         (op: 'Op)
         (state: 'State)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, DagAppendIfRejection<'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, DagAppendIfRejection<'Rej>> =
         let expected = expectedHeads |> List.distinct |> ordinalSort
         let actual = heads dag |> ordinalSort
 
@@ -637,7 +651,7 @@ module Dag =
             | Error f -> Error(DagAppendIfRejection.Fault f)
             | Ok(id, dag') ->
                 match w.Apply op state with
-                | Ok state' -> Ok(state', id, dag')
+                | Ok state' -> Ok { State = state'; Id = id; Dag = dag' }
                 | Error rej -> Error(DagAppendIfRejection.Domain rej)
 
     /// The ancestor closure of `roots` — each root plus all its transitive parents the DAG holds; a
@@ -910,7 +924,7 @@ module Dag =
     // same drain at a different key, so Core exposes the drain with the key as a parameter: the order is
     // a linear extension of the parent relation whatever the key (`DagFold.total_order_by_is_a_linear_
     // extension`), a function of the node SET (the drain's determinism, section 13), and a consumer with
-    // its own key passes it. The lane store's default key is `laneKey` (lane, seq, id), below.
+    // its own key passes it. The lane store's default key is `laneKey` (a `LaneKey`: lane, seq, id), below.
 
     /// Why a whole-DAG order could not be drawn (Phase 311): nodes on or below a cycle, which no drain
     /// places — every one of them, in id order. Only a hand-built or unverified load can hold one.
@@ -1023,8 +1037,8 @@ module Dag =
         (stateEquals: 'State -> 'State -> bool)
         (handed: 'State)
         (replayed: Result<'State, ReplayFault<'Rej>>)
-        (checkedForm: unit -> Result<'State * string * T<'Op>, DagAppendRejection<'Rej>>)
-        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        (checkedForm: unit -> Result<CheckedAppend<'State, 'Op>, DagAppendRejection<'Rej>>)
+        : Result<CheckedAppend<'State, 'Op>, VerifiedAppendRejection<'State, 'Rej>> =
         match replayed with
         | Error fault -> Error(VerifiedAppendRejection.ParentReplay fault)
         | Ok r when not (stateEquals handed r) -> Error(VerifiedAppendRejection.StateMismatch(handed, r))
@@ -1049,7 +1063,7 @@ module Dag =
         (state: 'State)
         (parentId: string)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, VerifiedAppendRejection<'State, 'Rej>> =
         match append hashFn w actor op parentId dag with
         | Error f -> Error(VerifiedAppendRejection.Checked(DagAppendRejection.Fault f))
         | Ok _ ->
@@ -1072,7 +1086,7 @@ module Dag =
         (state: 'State)
         (parentId: string)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, VerifiedAppendRejection<'State, 'Rej>> =
         appendVerifiedWith (fun a b -> a = b) hashFn w state0 actor op state parentId dag
 
     /// `mergeChecked`, verifying the PAIRING of `state` with the two parents (Phase 329), under the
@@ -1091,7 +1105,7 @@ module Dag =
         (leftId: string)
         (rightId: string)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, VerifiedAppendRejection<'State, 'Rej>> =
         match merge hashFn w actor op leftId rightId dag with
         | Error f -> Error(VerifiedAppendRejection.Checked(DagAppendRejection.Fault f))
         | Ok _ ->
@@ -1110,7 +1124,7 @@ module Dag =
         (leftId: string)
         (rightId: string)
         (dag: T<'Op>)
-        : Result<'State * string * T<'Op>, VerifiedAppendRejection<'State, 'Rej>> =
+        : Result<CheckedAppend<'State, 'Op>, VerifiedAppendRejection<'State, 'Rej>> =
         mergeVerifiedWith (fun a b -> a = b) hashFn w state0 actor op state leftId rightId dag
 
     // ---- JSONL persistence (Phase 01) ----
@@ -1968,9 +1982,24 @@ module Dag =
                             else reach.Pos[j])
                       Dangling = reach.Dangling }
 
-    /// `append`, extending an index with the new node (Phase 289): `Ok(id, dag', reach')` where
-    /// `(id, dag')` is exactly `append`'s answer on `Reach.dag reach` and `reach'` answers every
-    /// question as `Reach.ofDag dag'` does, at O(N) instead of a rebuild. Refusals are `append`'s.
+    /// What a write that EXTENDS an index answers (Phase 410; a positional triple before): the node,
+    /// the DAG holding it, and the index extended to that DAG. The answer of `appendIndexed` and
+    /// `mergeIndexed`. No equality, as `Reach` has none.
+    [<NoEquality; NoComparison>]
+    type IndexedAppend<'Op> =
+        {
+            /// The id of the node the write recorded — an identical node already held, when the write
+            /// deduplicated.
+            Id: string
+            /// The DAG holding that node: `append`'s (or `merge`'s) DAG, and `Reach.dag Reach`.
+            Dag: T<'Op>
+            /// The index extended with the node: it answers every question as `Reach.ofDag Dag` does.
+            Reach: Reach<'Op>
+        }
+
+    /// `append`, extending an index with the new node (Phase 289): `Id` and `Dag` are exactly
+    /// `append`'s answer on `Reach.dag reach`, and `Reach` answers every question as
+    /// `Reach.ofDag Dag` does, at O(N) instead of a rebuild. Refusals are `append`'s.
     let appendIndexed
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -1978,10 +2007,14 @@ module Dag =
         (op: 'Op)
         (parentId: string)
         (reach: Reach<'Op>)
-        : Result<string * T<'Op> * Reach<'Op>, DagAppendFault> =
+        : Result<IndexedAppend<'Op>, DagAppendFault> =
         match append hashFn w actor op parentId reach.Graph with
         | Error f -> Error f
-        | Ok(id, dag') -> Ok(id, dag', Reach.extend reach dag' id)
+        | Ok(id, dag') ->
+            Ok
+                { Id = id
+                  Dag = dag'
+                  Reach = Reach.extend reach dag' id }
 
     /// `merge`, extending an index with the merge node (Phase 289) — `appendIndexed`'s contract for
     /// the other way a node enters the DAG, so a session that appends and merges in a loop never
@@ -1994,10 +2027,14 @@ module Dag =
         (leftId: string)
         (rightId: string)
         (reach: Reach<'Op>)
-        : Result<string * T<'Op> * Reach<'Op>, DagAppendFault> =
+        : Result<IndexedAppend<'Op>, DagAppendFault> =
         match merge hashFn w actor op leftId rightId reach.Graph with
         | Error f -> Error f
-        | Ok(id, dag') -> Ok(id, dag', Reach.extend reach dag' id)
+        | Ok(id, dag') ->
+            Ok
+                { Id = id
+                  Dag = dag'
+                  Reach = Reach.extend reach dag' id }
 
     /// `tryReplayTo` over an index (Phase 289): the same answer on `Reach.dag reach`, with the head's
     /// order read from the index instead of drained from the node map. Takes the index where
@@ -2878,24 +2915,39 @@ module Dag =
                 else
                     Map.add id lane loaded.LaneOf })
 
-    /// The lane store's DEFAULT order key (Phase 311): `(lane, seq, id)` — the node's lane, its position
-    /// in that lane's own history (the number of nodes of the same lane it descends from, so a one-head
-    /// lane's nodes are 0, 1, 2, … in the order its writer wrote them), and its id. Under it the drain
-    /// takes, among the nodes that are ready, the smallest lane's next node: each writer's history is
-    /// kept together as far as the parent relation allows, lanes in lane-id order, and the id breaks the
-    /// ties a lane with two heads leaves. Computed once per store (the returned function answers per
-    /// node); a node `LaneOf` does not name has lane `""` and `seq` 0. A consumer whose history carries
-    /// an order of its own passes its own key to `totalOrderBy` / `replayAllBy` instead.
-    let laneKey (loaded: Loaded<'Op>) : DagNode<'Op> -> string * int * string =
+    /// The lane store's default order key for one node (Phase 410; a positional `(lane, seq, id)`
+    /// triple before). It compares field by field in declaration order — `Lane`, then `Seq`, then
+    /// `Id`, each string ordinally — which is the order the triple compared in, so every total order
+    /// and replay it drives is unchanged.
+    type LaneKey =
+        {
+            /// The node's lane; `""` for a node `LaneOf` does not name.
+            Lane: string
+            /// The node's position in its lane's own history: the number of nodes of the same lane it
+            /// descends from, so a one-head lane's nodes are 0, 1, 2, … in the order its writer wrote
+            /// them. `0` for a node `LaneOf` does not name.
+            Seq: int
+            /// The node's id: breaks the ties a lane with two heads leaves.
+            Id: string
+        }
+
+    /// The lane store's DEFAULT order key (Phase 311): a `LaneKey` — the node's lane, its position
+    /// in that lane's own history, and its id. Under it the drain takes, among the nodes that are
+    /// ready, the smallest lane's next node: each writer's history is kept together as far as the
+    /// parent relation allows, lanes in lane-id order, and the id breaks the ties a lane with two
+    /// heads leaves. Computed once per store (the returned function answers per node). A consumer
+    /// whose history carries an order of its own passes its own key to `totalOrderBy` /
+    /// `replayAllBy` instead.
+    let laneKey (loaded: Loaded<'Op>) : DagNode<'Op> -> LaneKey =
         let seqs =
             laneShape loaded
             |> List.collect (fun (_, ns) -> ns |> List.map (fun (id, s, _) -> id, s))
             |> Map.ofList
 
         fun n ->
-            (Map.tryFind n.Id loaded.LaneOf |> Option.defaultValue ""),
-            (Map.tryFind n.Id seqs |> Option.defaultValue 0),
-            n.Id
+            { Lane = Map.tryFind n.Id loaded.LaneOf |> Option.defaultValue ""
+              Seq = Map.tryFind n.Id seqs |> Option.defaultValue 0
+              Id = n.Id }
 
     /// The lane store in its default total order (Phase 311): `totalOrderBy (laneKey loaded)`.
     let totalOrder (loaded: Loaded<'Op>) : Result<string list, TotalOrderFault> =

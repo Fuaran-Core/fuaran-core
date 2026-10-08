@@ -305,12 +305,104 @@ let private liveVerdicts () : string * (string * Verdict) list =
       FrozenAtTagLaw, frozenAtTagLaw major (renderFrozen Conformance.frozenWitnessFields) atTag
       NoBreakWithinMajorLaw, noBreakWithinMajorLaw major newest breaking ]
 
+// ---- the tuple rule: no public function answers three or more positions (Phase 410) --------
+//
+// D138.1: a positional tuple frozen at 1.0 stays positional until 2.0, so a public function
+// answers a record named for what it holds instead of a tuple of three or more parts. Phase 391
+// applied the rule to the packages it reshaped and Phase 410 to `OpStream.Dag`; this scan holds
+// it over EVERY shipped package, read from the built assemblies by reflection, so a package
+// added later is covered without being named. It is not a major-gated law: the rule binds the
+// surface as it stands, at every major.
+
+/// Every tuple of three or more positions inside `t`, outermost first: `t` itself, the type
+/// arguments of a generic answer (`Result`, `option`, `list`, `Map`, …), an array's element, and
+/// the RANGE of a function-typed answer — what a returned function answers in its turn. A
+/// function's domain is an input, not an answer, and is not read.
+let rec internal wideTuplesIn (t: Type) : Type list =
+    if FSharp.Reflection.FSharpType.IsTuple t then
+        let elements = FSharp.Reflection.FSharpType.GetTupleElements t |> Array.toList
+        let own = if elements.Length >= 3 then [ t ] else []
+        own @ (elements |> List.collect wideTuplesIn)
+    elif FSharp.Reflection.FSharpType.IsFunction t then
+        wideTuplesIn (snd (FSharp.Reflection.FSharpType.GetFunctionElements t))
+    elif t.IsArray || t.IsByRef || t.IsPointer then
+        wideTuplesIn (t.GetElementType())
+    elif t.IsGenericType then
+        t.GetGenericArguments() |> Array.toList |> List.collect wideTuplesIn
+    else
+        []
+
+/// What the tuple scan read and found in one assembly: the public functions it read — every
+/// public method that is not a property accessor or other special-named member, and every
+/// public property of a function type — and each one whose answer carries a tuple of three or
+/// more positions, as `Type.member : answer`.
+let internal wideTupleAnswers (asm: Assembly) : int * string list =
+    let flags =
+        BindingFlags.Public
+        ||| BindingFlags.Static
+        ||| BindingFlags.Instance
+        ||| BindingFlags.DeclaredOnly
+
+    let answers =
+        [ for t in asm.GetExportedTypes() do
+              for m in t.GetMethods flags do
+                  if not m.IsSpecialName then
+                      yield t.FullName + "." + m.Name, m.ReturnType
+
+              for p in t.GetProperties flags do
+                  if FSharp.Reflection.FSharpType.IsFunction p.PropertyType then
+                      yield t.FullName + "." + p.Name, p.PropertyType ]
+
+    let offenders =
+        answers
+        |> List.choose (fun (name, answer) ->
+            match wideTuplesIn answer with
+            | [] -> None
+            | _ -> Some(sprintf "%s : %s" name (answer.ToString())))
+        |> List.distinct
+        |> List.sort
+
+    answers.Length, offenders
+
+/// The tuple rule's verdict over `functions` public functions read from `assemblies` assemblies.
+let internal tupleRuleVerdict (assemblies: int) (functions: int) (offenders: string list) : Verdict =
+    if assemblies = 0 || functions = 0 then
+        Broken(
+            sprintf
+                "the tuple scan read %d assembl(ies) and %d public function(s) — a scan that read nothing must not read as one that found nothing"
+                assemblies
+                functions
+        )
+    elif List.isEmpty offenders then
+        Held(
+            sprintf
+                "no public function answers a tuple of three or more positions (%d function(s) over %d assembl(ies))"
+                functions
+                assemblies
+        )
+    else
+        Broken(
+            sprintf
+                "%d public function(s) answer a tuple of three or more positions — answer a record named for what the positions hold (DECISIONS D138.1, Phase 410):\n       %s"
+                offenders.Length
+                (String.concat "\n       " offenders)
+        )
+
 // ---- the go-red plants' decoys --------------------------------------------------------------
 
 /// A decoy carrying an obsolete member, for law 1's plant: the scan must find it in this assembly.
 type OneDotZeroObsoleteDecoy() =
     [<Obsolete("a planted forward — the OneDotZero go-red plant reads it")>]
     member _.Forward = 1
+
+/// Decoys for the tuple rule's plant: a triple answered directly, one inside a `Result`, one as a
+/// returned function's range, and the pair and the data property the rule does not reach.
+type OneDotZeroTupleDecoy() =
+    static member Triple() : int * string * int = 1, "a", 2
+    static member Wrapped() : Result<int * int * int, string> = Ok(1, 2, 3)
+    static member Keyed() : string -> string * int * string = fun s -> s, 0, s
+    static member Pair() : int * string = 1, "a"
+    static member Data: (int * int * int) list = []
 
 [<Tests>]
 let tests =
@@ -449,6 +541,45 @@ let tests =
               match noBreakWithinMajorLaw 1 (Some "v1.0.0") [] with
               | Held _ -> ()
               | v -> failtestf "no breaking move holds, got %A" v
+          }
+
+          test "no public function in any Core package answers a tuple of three or more positions" {
+              let ids = PackageRosterTests.packableProjects (repoRoot ()) |> List.map _.PackageId
+              let assemblies = ids |> List.map (fun id -> Assembly.Load(AssemblyName id))
+              let scans = assemblies |> List.map wideTupleAnswers
+              let functions = scans |> List.sumBy fst
+              let offenders = scans |> List.collect snd
+
+              match tupleRuleVerdict assemblies.Length functions offenders with
+              | Held e -> printfn "  HELD     %s" e
+              | Broken d -> failtest d
+              | Vacuous why -> failtestf "the tuple rule is never vacuous: %s" why
+
+              Expect.contains ids "Fuaran.Core.OpStream.Dag" "the scan reads the package Phase 410 reshaped"
+          }
+
+          test "go-red: the tuple scan finds the planted triples and is red on them" {
+              let read, found = wideTupleAnswers (Assembly.GetExecutingAssembly())
+              let decoy = typeof<OneDotZeroTupleDecoy>.FullName
+
+              let named (m: string) =
+                  found |> List.exists _.StartsWith(decoy + "." + m + " ")
+
+              Expect.isGreaterThan read 0 "the scan read the test assembly's functions"
+              Expect.isTrue (named "Triple") "a triple answered directly"
+              Expect.isTrue (named "Wrapped") "a triple inside a Result"
+              Expect.isTrue (named "Keyed") "a triple as a returned function's range"
+              Expect.isFalse (named "Pair") "a pair is not reached"
+              Expect.isFalse (named "Data") "a data property is not a function"
+              Expect.isFalse (named "get_Data") "nor is its accessor"
+
+              match tupleRuleVerdict 1 read found with
+              | Broken d -> Expect.stringContains d "OneDotZeroTupleDecoy.Triple" "the red names the function"
+              | v -> failtestf "a planted triple must be red, got %A" v
+
+              match tupleRuleVerdict 0 0 [] with
+              | Broken _ -> ()
+              | v -> failtestf "a scan that read nothing must be red, got %A" v
           }
 
           test "the major reader" {
