@@ -48,9 +48,18 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # in the suite below: the .NET half of every parity vector, and the Fable surface's membership
 # (`fable-exclusions.json`), including the check that no script here invokes the compiler.
 
+# Phase 400 — the suite names the legs a missing prerequisite skipped (tests/Fuaran.Core.Tests/Program.fs
+# writes one line to the file named here), and the final green line repeats it, so a green run says how
+# much of the suite it did not read.
+$skipReport = Join-Path ([IO.Path]::GetTempPath()) ("fuaran-core-skips-" + [Guid]::NewGuid().ToString('N') + '.txt')
+$env:FUARAN_CORE_SKIP_REPORT = $skipReport
 $global:LASTEXITCODE = 0
 dotnet run --project tests/Fuaran.Core.Tests --no-build -c $Configuration
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$testExit = $LASTEXITCODE
+Remove-Item Env:FUARAN_CORE_SKIP_REPORT -ErrorAction SilentlyContinue
+if ($testExit -ne 0) { exit $testExit }
+$skipped = if (Test-Path $skipReport) { (Get-Content -Raw $skipReport).Trim() } else { 'unknown (the suite wrote no skip report)' }
+Remove-Item $skipReport -ErrorAction SilentlyContinue
 
 # The reference adoption sample (docs/ADOPTION.md) must certify GREEN — it exercises the
 # whole adoption path (witness laws + op-algebra + reducer + op-stream) end to end.
@@ -70,5 +79,5 @@ if ($Proofs) {
     }
 }
 
-Write-Host '==== verify: fuaran-core green' -ForegroundColor Green
+Write-Host "==== verify: fuaran-core green; $skipped" -ForegroundColor Green
 exit 0
