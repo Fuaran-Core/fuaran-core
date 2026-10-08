@@ -193,6 +193,35 @@ type ProbeRefusedSurface() =
     static member Spread([<ParamArray>] xs: int[]) = xs.Length
     static member Maybe(?x: int) = defaultArg x 0
 
+/// Phase 408's go-red pair, and its control: one method, an instance member in `Before` and `Same`,
+/// static in `After`. IL leaves `this` out of a signature, so before the marker the two rendered the
+/// same token. Rendered from this assembly's own IL, so the pair is a real compiled pair.
+module ProbeStaticBefore =
+    type Gauge() =
+        member _.Read(x: int) = x + 1
+        member _.Level = 1
+
+module ProbeStaticAfter =
+    type Gauge() =
+        static member Read(x: int) = x + 1
+        member _.Level = 1
+
+module ProbeStaticSame =
+    type Gauge() =
+        member _.Read(x: int) = x + 1
+        member _.Level = 1
+
+/// The static marker's format (Phase 408): a static method and property of a type carry it, an
+/// instance member does not, and a module's members — static by construction — do not.
+type ProbeStaticMembers() =
+    static member Make() = ProbeStaticMembers()
+    static member Count = 2
+    member _.Size = 3
+
+module ProbeStaticModule =
+    let probeHelper (x: int) = x + 1
+    let probeValue = 4
+
 // ---- the signature type provider ------------------------------------------
 //
 // `MetadataReader` hands signatures back as blobs; `DecodeSignature` walks one given a
@@ -482,6 +511,42 @@ let private visibleMethodAccess =
           MethodAttributes.Family
           MethodAttributes.FamORAssem ]
 
+// ---- static members (Phase 408) ----------------------------------------------
+//
+// IL does not put `this` in a method's signature, so `member x.M(a)` and `static member M(a)`
+// rendered the same token, and turning one into the other — which changes every call site from
+// `x.M a` to `T.M a` — read as `unchanged`. A static member of a type that is not a module now
+// ends its token with ` (static)`, the way a literal field ends with ` (literal)`. A suffix rather
+// than a prefix, so the member's `identity` does not move: a flip pairs into one `retype`, which
+// `describe` names as a flip.
+//
+// A module's members carry no marker. Every one of them is static by construction — F# cannot
+// declare an instance member in a module — and its `type … (module)` token already says so, so a
+// marker there would be the same fact written on every line, and no move of it could happen
+// without the module itself becoming a type, which that token reports (DECISIONS.md D136).
+
+/// The suffix a static member's token carries.
+[<Literal>]
+let internal StaticMarker = " (static)"
+
+/// The marker for a member of a type of the given rendered `kind` — empty for an instance member
+/// and for any member of a module.
+let private staticMarkerOf (kind: string) (isStatic: bool) : string =
+    if isStatic && kind <> "module" then StaticMarker else ""
+
+/// `true` when a token carries the static marker (Phase 408).
+let internal isStaticToken (token: string) : bool =
+    token.EndsWith(StaticMarker, StringComparison.Ordinal)
+
+/// A token without its static marker — the pre-Phase-408 rendering of the same member. Used ONLY
+/// to compare against a baseline that predates the marker (the since-tag report); the live gate
+/// never strips it, because a marker-free comparison is exactly the blindness Phase 408 removes.
+let internal stripStaticMarker (token: string) : string =
+    if isStaticToken token then
+        token.Substring(0, token.Length - StaticMarker.Length)
+    else
+        token
+
 /// The rendered public contract surface of one managed assembly, ordinal-sorted.
 ///
 /// "Public surface" is what a consumer in ANOTHER assembly can reach: public and protected
@@ -704,6 +769,7 @@ let internal renderAssembly (dllPath: string) : string list =
                                 else
                                     tokens.Add(
                                         sprintf "method %s.%s%s(%s) : %s" full name generic ps signature.ReturnType
+                                        + staticMarkerOf kind (md.Attributes.HasFlag MethodAttributes.Static)
                                     )
                     with e ->
                         // A member this reader cannot decode is skipped rather than fatal:
@@ -719,13 +785,21 @@ let internal renderAssembly (dllPath: string) : string list =
                         let name = r.GetString pd.Name
                         let accessors = pd.GetAccessors()
 
-                        let visibleParts =
+                        let visibleAccessors =
                             [ "get", accessors.Getter; "set", accessors.Setter ]
                             |> List.filter (fun (_, h) -> not h.IsNil)
                             |> List.filter (fun (_, h) ->
                                 let am = r.GetMethodDefinition h
                                 visibleMethodAccess.Contains(am.Attributes &&& MethodAttributes.MemberAccessMask))
-                            |> List.map fst
+
+                        let visibleParts = visibleAccessors |> List.map fst
+
+                        // Phase 408 — a property is static when its accessors are; IL carries the
+                        // flag on the accessor methods, not on the property row.
+                        let isStaticProperty =
+                            visibleAccessors
+                            |> List.exists (fun (_, h) ->
+                                (r.GetMethodDefinition h).Attributes.HasFlag MethodAttributes.Static)
 
                         if not visibleParts.IsEmpty then
                             let attrs = pd.GetCustomAttributes()
@@ -764,6 +838,7 @@ let internal renderAssembly (dllPath: string) : string list =
                                             name
                                             ty
                                             (String.concat "; " visibleParts)
+                                        + staticMarkerOf kind isStaticProperty
                                     )
                     with e ->
                         eprintfn "surface: property skipped in %s — %s" full e.Message
@@ -788,11 +863,13 @@ let internal renderAssembly (dllPath: string) : string list =
                         then
                             let ty = fd.DecodeSignature(sigProvider, null)
 
+                            // A literal is static by construction and says so already; any other
+                            // static field carries the Phase 408 marker like a method or property.
                             let literal =
                                 if fd.Attributes.HasFlag FieldAttributes.Literal then
                                     " (literal)"
                                 else
-                                    ""
+                                    staticMarkerOf kind (fd.Attributes.HasFlag FieldAttributes.Static)
 
                             tokens.Add(sprintf "field %s.%s : %s%s" full name ty literal)
                     with e ->
@@ -812,7 +889,8 @@ let internal renderAssembly (dllPath: string) : string list =
 // `[<Optional>]` / `?arg` change which calls compile, `[<Extension>]` admits `x.M()`,
 // `CompilerMessage` can turn a use into an error, `RequiresExplicitTypeArguments` demands `f<T>`,
 // and `CompilationRepresentation(Static | Instance | UseNullAsTrueValue)` moves a member between
-// instance and static in IL, which the `method` token does not distinguish. None of them is used on
+// instance and static in IL WITHOUT moving its F# call syntax — so the static marker (Phase 408),
+// which reads IL, would describe a flip no F# caller sees. None of them is used on
 // the shipped surface. Drawing them would need a per-overload identity the token grammar does not
 // have, for a shape nothing ships; leaving them unseen would be the blindness this phase removes.
 // So the surface REFUSES them: the family below goes red the day one appears, naming it, and the
@@ -1290,6 +1368,13 @@ let internal predatesFieldNames (tokens: string list) : bool =
     not carrying.IsEmpty
     && carrying |> List.forall (List.forall (fst >> Option.isNone))
 
+/// `true` for a `retype` whose two tokens differ by the static marker alone (Phase 408): the same
+/// member, the same signature, moved between instance and static.
+let internal isStaticFlip (m: Move) : bool =
+    match m.Class, m.Before, m.After with
+    | Retype, Some b, Some a -> isStaticToken b <> isStaticToken a && stripStaticMarker b = stripStaticMarker a
+    | _ -> false
+
 /// A move rendered for a human, one line.
 let internal describe (m: Move) : string =
     match m.Before, m.After with
@@ -1316,6 +1401,16 @@ let internal describe (m: Move) : string =
             (className m.Class)
             a
             (attributeReason name |> Option.defaultValue name)
+    | Some b, Some a when isStaticFlip m ->
+        sprintf
+            "%-18s %s  ->  %s  (%s)"
+            (className m.Class)
+            b
+            a
+            (if isStaticToken a then
+                 "instance -> static: every call through a value must now name the type"
+             else
+                 "static -> instance: every call through the type must now go through a value")
     | Some b, Some a -> sprintf "%-18s %s  ->  %s" (className m.Class) b a
     | Some b, None -> sprintf "%-18s - %s" (className m.Class) b
     | None, Some a -> sprintf "%-18s + %s" (className m.Class) a
@@ -1428,6 +1523,9 @@ type internal SinceTag =
         /// The tag's baselines predate `attribute` lines (Phase 406), so this package was compared
         /// without them and a qualification since that tag is not visible here.
         AttributesStripped: bool
+        /// The tag's baselines predate the static marker (Phase 408), so this package was compared
+        /// without it and an instance/static flip since that tag is not visible here.
+        StaticStripped: bool
     }
 
 /// `true` when a tag's baselines predate `attribute` lines (Phase 406): not one of them carries
@@ -1437,6 +1535,14 @@ type internal SinceTag =
 let internal predatesAttributes (taggedBaselines: string list list) : bool =
     not taggedBaselines.IsEmpty
     && taggedBaselines |> List.forall (List.exists isAttributeToken >> not)
+
+/// `true` when a tag's baselines predate the static marker (Phase 408): not one of them carries
+/// it. Read across the WHOLE tag, as `predatesAttributes` is and for the same reason — a package
+/// whose types declare no static member carries no marker and is still current, while every tag
+/// cut since 408 carries the marker somewhere.
+let internal predatesStaticMarkers (taggedBaselines: string list list) : bool =
+    not taggedBaselines.IsEmpty
+    && taggedBaselines |> List.forall (List.exists isStaticToken >> not)
 
 /// Every packable package whose committed baseline exists, read against `tag`'s baseline.
 let internal sinceTag (root: string) (tag: string) : SinceTag list =
@@ -1456,6 +1562,11 @@ let internal sinceTag (root: string) (tag: string) : SinceTag list =
     let attributesStripped =
         predatesAttributes (read |> List.choose (fun (_, _, t) -> t))
 
+    // A tag cut before Phase 408 marks no static member, so every static member of a type would
+    // read as a `retype` no consumer ever saw. Stripped the same way, and expiring the same way.
+    let staticStripped =
+        predatesStaticMarkers (read |> List.choose (fun (_, _, t) -> t))
+
     [ for id, current, tagged in read do
           match tagged with
           | None ->
@@ -1463,7 +1574,8 @@ let internal sinceTag (root: string) (tag: string) : SinceTag list =
                   { PackageId = id
                     Moves = None
                     NamesStripped = false
-                    AttributesStripped = false }
+                    AttributesStripped = false
+                    StaticStripped = false }
           | Some tagged ->
               // A tag cut before Phase 237 carries nameless union cases. Read against it,
               // today's named baseline would report every carrying case as a `retype` that no
@@ -1477,13 +1589,15 @@ let internal sinceTag (root: string) (tag: string) : SinceTag list =
               let current =
                   current
                   |> List.filter (fun t -> not (attributesStripped && isAttributeToken t))
+                  |> List.map (fun t -> if staticStripped then stripStaticMarker t else t)
                   |> List.map (fun t -> if stripped then stripFieldNames t else t)
 
               yield
                   { PackageId = id
                     Moves = Some(classify tagged current)
                     NamesStripped = stripped
-                    AttributesStripped = attributesStripped } ]
+                    AttributesStripped = attributesStripped
+                    StaticStripped = staticStripped } ]
 
 // ---- D101 made general: no case name is reachable unqualified from two public unions (Phase 386) ----
 //
@@ -1765,6 +1879,12 @@ let tests =
                       if read |> List.exists _.AttributesStripped then
                           printfn
                               "  (%s's baselines predate `attribute` lines — compared without them; an attribute added or removed since %s is not visible here, and the release ledger names it)"
+                              tag
+                              tag
+
+                      if read |> List.exists _.StaticStripped then
+                          printfn
+                              "  (%s's baselines predate the static marker — compared without it; an instance/static flip since %s is not visible here, and the release ledger names it)"
                               tag
                               tag
 
@@ -2312,6 +2432,137 @@ let tests =
                   [ "Fuaran.Core.Tests.PublicSurfaceTests+ProbeRefusedSurface.Maybe(x): Microsoft.FSharp.Core.OptionalArgumentAttribute"
                     "Fuaran.Core.Tests.PublicSurfaceTests+ProbeRefusedSurface.Spread(xs): System.ParamArrayAttribute" ]
                   "both planted carriers are named, by member and parameter"
+          }
+
+          test
+              "a static member of a type carries the marker; an instance member and a module's members do not (Phase 408)" {
+              let own = renderAssembly (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+              let prefix = "Fuaran.Core.Tests.PublicSurfaceTests+"
+
+              let members (owner: string) =
+                  own
+                  |> List.filter (fun t ->
+                      (t.StartsWith("method ", StringComparison.Ordinal)
+                       || t.StartsWith("property ", StringComparison.Ordinal))
+                      && t.Contains(" " + prefix + owner + "."))
+
+              Expect.equal
+                  (members "ProbeStaticMembers")
+                  [ "method "
+                    + prefix
+                    + "ProbeStaticMembers.Make() : "
+                    + prefix
+                    + "ProbeStaticMembers (static)"
+                    "property "
+                    + prefix
+                    + "ProbeStaticMembers.Count : System.Int32 { get } (static)"
+                    "property " + prefix + "ProbeStaticMembers.Size : System.Int32 { get }" ]
+                  "a static method and a static property end in the marker; the instance property does not"
+
+              Expect.equal
+                  (members "ProbeStaticModule")
+                  [ "method "
+                    + prefix
+                    + "ProbeStaticModule.probeHelper(System.Int32) : System.Int32"
+                    "property " + prefix + "ProbeStaticModule.probeValue : System.Int32 { get }" ]
+                  "a module's members are static by construction and carry no marker (DECISIONS.md D136)"
+
+              let make = List.head (members "ProbeStaticMembers")
+
+              Expect.isTrue (isStaticToken make) "the marker reads back"
+
+              Expect.equal
+                  (stripStaticMarker make)
+                  ("method "
+                   + prefix
+                   + "ProbeStaticMembers.Make() : "
+                   + prefix
+                   + "ProbeStaticMembers")
+                  "and strips back to the pre-408 token"
+
+              Expect.equal
+                  (identity make)
+                  ("method " + prefix + "ProbeStaticMembers.Make")
+                  "the marker is outside the identity, so a flip pairs rather than splitting"
+          }
+
+          test
+              "go-red: a member that flips between instance and static is ONE breaking `retype` with its reason, both ways; an identical pair is unchanged (Phase 408)" {
+              let own = renderAssembly (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+
+              let surfaceOf (moduleName: string) =
+                  own
+                  |> List.filter (fun t -> t.Contains("+" + moduleName + "+"))
+                  |> List.map (fun t -> t.Replace("+" + moduleName + "+", "+ProbeStatic+"))
+
+              let before = surfaceOf "ProbeStaticBefore"
+              let after = surfaceOf "ProbeStaticAfter"
+              let same = surfaceOf "ProbeStaticSame"
+
+              Expect.isNonEmpty before "the fixture's surface rendered"
+              Expect.isEmpty (classify before same) "a pair differing by nothing is classed unchanged"
+
+              let instance =
+                  "method Fuaran.Core.Tests.PublicSurfaceTests+ProbeStatic+Gauge.Read(System.Int32) : System.Int32"
+
+              let flipped = classify before after
+
+              Expect.equal
+                  (flipped |> List.map (fun m -> m.Class, m.Before, m.After))
+                  [ Retype, Some instance, Some(instance + StaticMarker) ]
+                  "making the member static is ONE move, a `retype` — the move the pre-408 renderer read as `unchanged`"
+
+              Expect.equal (headline flipped) (Some Retype) "the package's headline says so"
+              Expect.isTrue (isBreaking Retype) "and it is breaking: every `g.Read 1` stops compiling"
+              Expect.isTrue (isStaticFlip flipped.Head) "the move is recognised as a flip"
+
+              Expect.stringContains
+                  (describe flipped.Head)
+                  "instance -> static: every call through a value must now name the type"
+                  "the report prints the reason beside the move"
+
+              let back = classify after before
+
+              Expect.equal
+                  (back |> List.map (fun m -> m.Class, m.Before, m.After))
+                  [ Retype, Some(instance + StaticMarker), Some instance ]
+                  "the reverse flip is one `retype` too"
+
+              Expect.stringContains
+                  (describe back.Head)
+                  "static -> instance: every call through the type must now go through a value"
+                  "with its reason printed"
+
+              // The blindness this phase removes, stated as its own control: without the marker the
+              // two surfaces are the same surface.
+              Expect.isEmpty
+                  (classify (before |> List.map stripStaticMarker) (after |> List.map stripStaticMarker))
+                  "without the marker the flip is invisible — which is what the gate printed before Phase 408"
+          }
+
+          test "the since-tag report reads a pre-408 tag without the static marker, and only such a tag (Phase 408)" {
+              let marked = "method A.T.M(System.Int32) : System.Int32" + StaticMarker
+              let bare = "method A.T.M(System.Int32) : System.Int32"
+
+              Expect.isTrue
+                  (predatesStaticMarkers [ [ "type A.T (type)"; bare ]; [ "type B.M (module)" ] ])
+                  "a tag none of whose baselines carries the marker predates it"
+
+              Expect.isFalse
+                  (predatesStaticMarkers [ [ "type B.M (module)" ]; [ "type A.T (type)"; marked ] ])
+                  "one baseline carrying it is enough: a package with no static member of a type is not legacy on its own"
+
+              Expect.isFalse (predatesStaticMarkers []) "a tag that carries no baseline at all is not read as legacy"
+
+              Expect.isEmpty
+                  (classify [ "type A.T (type)"; bare ] ([ "type A.T (type)"; marked ] |> List.map stripStaticMarker))
+                  "stripped, a marked baseline reads as the legacy one it renders the same member as"
+
+              Expect.equal
+                  (classify [ "type A.T (type)"; bare ] [ "type A.T (type)"; marked ]
+                   |> List.map (fun m -> m.Class))
+                  [ Retype ]
+                  "the live gate never strips: the same pair unstripped is a `retype`"
           }
 
           test "the since-tag report reads a pre-237 baseline without names, and only it (Phase 237)" {
