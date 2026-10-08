@@ -3,7 +3,9 @@
 /// `Fuaran.Core.Idl.Diff` library, for repositories with no F# build of their own.
 module Fuaran.Core.Idl.Cli.Program
 
+open System
 open System.IO
+open System.Text
 open Fuaran.Core.Idl
 
 // ---------------------------------------------------------------------------
@@ -404,6 +406,18 @@ let private spikeProposal (proposalPath: string) (rest: string list) : int =
 /// code is the verb's own — see the usage text.
 [<EntryPoint>]
 let main argv =
+    // The usage text and reports carry non-ASCII characters (the em dash). Left ambient, a redirected
+    // stream is encoded with the console's code page, so the bytes would depend on the machine that
+    // ran the command. Pin both streams to UTF-8 without a byte-order mark, before any write.
+    // Setting `Console.OutputEncoding` replaces the writers behind both `Console.Out` and
+    // `Console.Error`; the error writer is then set explicitly so the pairing does not rest on that.
+    let utf8 = UTF8Encoding false
+    Console.OutputEncoding <- utf8
+
+    let err = new StreamWriter(Console.OpenStandardError(), utf8)
+    err.AutoFlush <- true
+    Console.SetError err
+
     match List.ofArray argv with
     | "classify" :: before :: after :: rest -> classify before after rest
     | [ "classify" ]
