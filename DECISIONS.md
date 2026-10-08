@@ -1,5 +1,50 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D140: `OpStream.Dag`'s append and merge family answers records, and the tuple rule is held over every package by reflection (applies D138.1; closes D138.8)
+
+**Recorded by Phase 410. `Fuaran.Core.OpStream.Dag`'s `api/` baseline, `OneDotZeroTests`, the
+`1.0.0` slot (`docs/releases/1.0.0.md`) and its migration.**
+
+*The move (D140.1).* D138.8 measured ten functions in `OpStream.Dag` still answering a triple. Each
+now answers a record named for what it holds. The seven forms that APPLY their op —
+`appendChecked`, `mergeChecked`, `appendIf` and the four verified forms — answer a
+`Dag.CheckedAppend<'State, 'Op>` (`{ State; Id; Dag }`). The two that extend an index —
+`appendIndexed`, `mergeIndexed` — answer a `Dag.IndexedAppend<'Op>` (`{ Id; Dag; Reach }`).
+`laneKey loaded` answers a function to a `Dag.LaneKey` (`{ Lane; Seq; Id }`).
+
+*Decided: no 391 record is reused (D140.2).* The shard asked for reuse where the meaning is the
+same. None is: `ScriptRejection` is a refusal's position, envelope and prefix tree;
+`CapturedEffect` an answer, an occurrence and a journal; `LaneDag` a fixture's DAG, base and heads.
+Reusing one for a write's result would name the positions wrongly, which is the defect the rule
+removes. One record serves all seven applying forms because they answer the same three things —
+the verified forms answer EXACTLY the checked form's result, a law holds them equal — and a
+record per verb would be seven names for one meaning.
+
+*Decided: `IndexedAppend` keeps `Dag` beside `Reach` (D140.3).* `Reach.dag r.Reach` is the same
+DAG, so the field is derivable. It stays: every caller in the repository reads the DAG, the triple
+carried it, and dropping it would make the record answer less than the function did. It is
+documented as equal to `Reach.dag Reach`, and the record is `NoEquality; NoComparison` because
+`Reach` is.
+
+*Decided: `LaneKey` is a record that orders as the triple did (D140.4).* It is an order key, so its
+comparison is part of its meaning. An F# record compares its fields in declaration order with the
+same generic comparison a tuple uses (strings ordinally), so `{ Lane; Seq; Id }` in that order
+drives exactly the drains `(lane, seq, id)` drove: `totalOrder`, `replayAll` and every stored
+total order are unchanged, and a test compares the two on every pair of a lane store's nodes.
+
+*Decided: the rule's reach, as a test reads it (D140.5).* "A public function answers no tuple of
+three or more positions" is held over every packable package's built assembly, read from the
+roster, so a later package is covered without being named. A public function is a public method
+that is not a special-named accessor, or a public property of a function type (a witness's
+function field). Its answer is searched through generic type arguments (`Result`, `option`, lists,
+maps), array elements and a returned function's range; a function's domain is an input and is not
+read, and neither is a parameter. A data property or record field holding a triple is outside this
+rule: D138.1 rules on what a function answers.
+
+**Consequences.** `Fuaran.Core.OpStream.Dag` moves by `retype` (10 moves) with three `additive`
+records, paid by `1.0.0`. The callers in `Conformance` (`dagLaws`, `reachLaws`) and the suite move
+with it. No wire baseline, digest, chain pre-image, total order or `ParityVectors` row moves.
+
 ## 2026-10-08 — D139: `SigEntry.Kind` is the `HoleKind`, and the entry keeps no second copy of what the kind carries; the reader refuses a tag without the member its kind needs (answers D138.7; amends D104's rejected retype)
 
 **Recorded by Phase 409. `Fuaran.Core.Function` (`SigEntry`, `HoleKind`, `Function`,

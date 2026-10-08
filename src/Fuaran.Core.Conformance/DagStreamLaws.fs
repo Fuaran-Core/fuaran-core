@@ -164,8 +164,8 @@ module internal DagStreamLaws =
             let agrees
                 (what: string)
                 (replayed: Result<'State, Dag.ReplayFault<'Rej>>)
-                (verified: 'State -> Result<'State * string * Dag.T<'Op>, Dag.VerifiedAppendRejection<'State, 'Rej>>)
-                (checkedForm: 'State -> Result<'State * string * Dag.T<'Op>, DagAppendRejection<'Rej>>)
+                (verified: 'State -> Result<Dag.CheckedAppend<'State, 'Op>, Dag.VerifiedAppendRejection<'State, 'Rej>>)
+                (checkedForm: 'State -> Result<Dag.CheckedAppend<'State, 'Op>, DagAppendRejection<'Rej>>)
                 =
                 match replayed with
                 | Error fault ->
@@ -192,7 +192,7 @@ module internal DagStreamLaws =
                 (what: string)
                 (handed: Result<'State, Dag.ReplayFault<'Rej>>)
                 (replayed: Result<'State, Dag.ReplayFault<'Rej>>)
-                (verified: 'State -> Result<'State * string * Dag.T<'Op>, Dag.VerifiedAppendRejection<'State, 'Rej>>)
+                (verified: 'State -> Result<Dag.CheckedAppend<'State, 'Op>, Dag.VerifiedAppendRejection<'State, 'Rej>>)
                 =
                 match handed, replayed with
                 | Ok sh, Ok sr when sh <> sr ->
@@ -404,9 +404,9 @@ module internal DagStreamLaws =
             let mutable reach = Dag.Reach.ofDag Dag.empty
             let mutable nodes: string list = []
 
-            let note (built: Result<string * Dag.T<'Op> * Dag.Reach<'Op>, DagAppendFault>) =
+            let note (built: Result<Dag.IndexedAppend<'Op>, DagAppendFault>) =
                 match built with
-                | Ok(id, _, r) -> Some(id, r)
+                | Ok x -> Some(x.Id, x.Reach)
                 | Error _ -> None // a content-id collision under the caller's hash: the step is skipped
 
             match note (Dag.appendIndexed hashFn sw actor (rng.Draw gen.Op) "" reach) with
@@ -558,12 +558,12 @@ module internal DagStreamLaws =
 
                 for e in extensions do
                     match e with
-                    | Ok(_, dag', r') ->
+                    | Ok extended ->
                         let ids' =
                             forgedIds
-                            @ (Dag.heads dag' |> List.filter (fun h -> not (List.contains h forgedIds)))
+                            @ (Dag.heads extended.Dag |> List.filter (fun h -> not (List.contains h forgedIds)))
 
-                        match anyMismatch (indexed r') (indexed (Dag.Reach.ofDag dag')) ids' with
+                        match anyMismatch (indexed extended.Reach) (indexed (Dag.Reach.ofDag extended.Dag)) ids' with
                         | None -> extensionCell.Saw()
                         | Some m -> extensionCell.Check(false, fun () -> at ("extended cyclic load, " + m))
                     | Error _ -> ()) // a collision under the caller's hash, as in the growth above
