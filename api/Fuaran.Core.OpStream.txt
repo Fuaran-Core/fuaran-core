@@ -4,6 +4,22 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.ActorInvalid RequireQualifiedAccess
+attribute Fuaran.Core.ActorModule RequireQualifiedAccess
+attribute Fuaran.Core.AppendOutcome`2 RequireQualifiedAccess
+attribute Fuaran.Core.AppendRejection`1 RequireQualifiedAccess
+attribute Fuaran.Core.CapturePhase RequireQualifiedAccess
+attribute Fuaran.Core.CaptureReplayFault RequireQualifiedAccess
+attribute Fuaran.Core.ChainBreakReason RequireQualifiedAccess
+attribute Fuaran.Core.CompactedOutcome`2 RequireQualifiedAccess
+attribute Fuaran.Core.JsonlFaultReason RequireQualifiedAccess
+attribute Fuaran.Core.JsonlWriteFaultReason RequireQualifiedAccess
+attribute Fuaran.Core.KeyIndexModule RequireQualifiedAccess
+attribute Fuaran.Core.KeyedCaptureFault RequireQualifiedAccess
+attribute Fuaran.Core.OpStream+EncodingProfile RequireQualifiedAccess
+attribute Fuaran.Core.SnapshotBreak RequireQualifiedAccess
+attribute Fuaran.Core.SnapshotFault`1 RequireQualifiedAccess
+attribute Fuaran.Core.SnapshotMode RequireQualifiedAccess
 ctor Fuaran.Core.Attestation..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Attributed`1..ctor(System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.Int32>, System.String, !0)
 ctor Fuaran.Core.ChainBreak..ctor(System.Int32, Fuaran.Core.ChainBreakReason, System.String, System.String)

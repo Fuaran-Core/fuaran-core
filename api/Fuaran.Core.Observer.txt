@@ -4,6 +4,7 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.ObserverDefect RequireQualifiedAccess
 ctor Fuaran.Core.Observation`2..ctor(System.String, !0, Microsoft.FSharp.Collections.FSharpList`1<!1>)
 ctor Fuaran.Core.ObserverEntry`2..ctor(!0, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!1>)
 ctor Fuaran.Core.ObserverOptions`1..ctor(System.Boolean, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, System.Boolean>>)

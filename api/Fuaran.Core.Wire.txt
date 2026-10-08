@@ -4,6 +4,22 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Canonical RequireQualifiedAccess
+attribute Fuaran.Core.Codec RequireQualifiedAccess
+attribute Fuaran.Core.CodecDeclarationFault RequireQualifiedAccess
+attribute Fuaran.Core.CodecDeclarationFaultModule RequireQualifiedAccess
+attribute Fuaran.Core.DecodeCode RequireQualifiedAccess
+attribute Fuaran.Core.DecodeErrorModule RequireQualifiedAccess
+attribute Fuaran.Core.DecodePath RequireQualifiedAccess
+attribute Fuaran.Core.Decoder RequireQualifiedAccess
+attribute Fuaran.Core.EncodingProfile RequireQualifiedAccess
+attribute Fuaran.Core.EncodingProfileModule RequireQualifiedAccess
+attribute Fuaran.Core.JValModule RequireQualifiedAccess
+attribute Fuaran.Core.Json+ReadError RequireQualifiedAccess
+attribute Fuaran.Core.Json+Reader Sealed
+attribute Fuaran.Core.Json+ReaderModule RequireQualifiedAccess
+attribute Fuaran.Core.PathSegment RequireQualifiedAccess
+attribute Fuaran.Core.Versioning+Evolution RequireQualifiedAccess
 ctor Fuaran.Core.Codec`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.CodecDeclarationFault>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>>, Fuaran.Core.JVal)
 ctor Fuaran.Core.Corpus+Case..ctor(System.String, Fuaran.Core.Corpus+CaseKind, System.String, System.String)
 ctor Fuaran.Core.Corpus+Codec`1..ctor(Microsoft.FSharp.Core.FSharpFunc`2<!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>)

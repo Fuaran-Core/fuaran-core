@@ -127,6 +127,17 @@ matches a case by field name (`TargetNotAContainer(target = …)`) stops compili
 changes. So a union field rename is a `retype`, which is breaking, and the report names the case
 and both names. Before Phase 237 a case rendered its field types only, and a rename moved nothing.
 
+**The attributes that decide what consumer source is legal are part of the surface (Phase 406).**
+A type renders one `attribute <type> <Name>` line per such attribute it carries:
+`RequireQualifiedAccess`, `AutoOpen`, `NoEquality`, `NoComparison`, `ReferenceEquality`,
+`AllowNullLiteral`, `Sealed`, `AbstractClass`, `Measure`, and `Struct` (a value type). Adding or
+removing one on a type both sides publish is a `retype`, which is breaking, and the report prints
+what the move costs a consumer. The member- and parameter-level attributes that change call syntax
+(`ParamArray`, optional arguments, `[<Extension>]`, `CompilerMessage`,
+`RequiresExplicitTypeArguments`, `CompilationRepresentation` other than `ModuleSuffix`) are not
+drawn: the surface refuses them, so the first one shipped is red until the renderer draws it.
+Before Phase 406 qualifying a union moved nothing.
+
 **The gate refuses an UNCLASSIFIED move, never a breaking one.** Additive or breaking, a move whose
 baseline moved with it passes; what fails is a surface that moved while its baseline stood still.
 The record-widening dispensation stands — widening is permitted, widening *in silence* is

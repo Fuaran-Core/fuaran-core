@@ -130,6 +130,69 @@ module ProbeFieldsSame =
 type IProbeSeam =
     abstract Probe: int -> string
 
+/// Phase 406's go-red pair, and its control: one union, bare in `Before` and `Same`, qualified in
+/// `After`. Rendered from this assembly's own IL, so the pair is a real compiled pair.
+module ProbeQualifyBefore =
+    type Shape =
+        | Ring
+        | Disc of radius: int
+
+module ProbeQualifyAfter =
+    [<RequireQualifiedAccess>]
+    type Shape =
+        | Ring
+        | Disc of radius: int
+
+module ProbeQualifySame =
+    type Shape =
+        | Ring
+        | Disc of radius: int
+
+/// One probe per drawn attribute (Phase 406) — each must render its `attribute` line.
+[<RequireQualifiedAccess>]
+type ProbeQualifiedRecord = { Gamma: int }
+
+[<RequireQualifiedAccess>]
+module ProbeQualifiedModule =
+    let probeQualified = 1
+
+[<AutoOpen>]
+module ProbeAutoOpenModule =
+    let probeAutoOpened = 1
+
+[<NoEquality; NoComparison>]
+type ProbeNoEquality = { Delta: int -> int }
+
+[<NoComparison>]
+type ProbeNoComparison = { Epsilon: int }
+
+[<ReferenceEquality>]
+type ProbeReferenceEquality = { Zeta: int }
+
+[<AllowNullLiteral>]
+type ProbeNullable() =
+    member _.Eta = 1
+
+[<Sealed>]
+type ProbeSealed() =
+    member _.Theta = 1
+
+[<AbstractClass>]
+type ProbeAbstract() =
+    abstract Iota: int
+
+[<Measure>]
+type probeUnit
+
+[<Struct>]
+type ProbeStructRecord = { Kappa: int }
+
+/// The surface the renderer refuses rather than draws (Phase 406): a `ParamArray` parameter and an
+/// F# optional argument, each of which changes which calls compile.
+type ProbeRefusedSurface() =
+    static member Spread([<ParamArray>] xs: int[]) = xs.Length
+    static member Maybe(?x: int) = defaultArg x 0
+
 // ---- the signature type provider ------------------------------------------
 //
 // `MetadataReader` hands signatures back as blobs; `DecodeSignature` walks one given a
@@ -276,6 +339,122 @@ let internal hasAttribute (r: MetadataReader) (attrs: CustomAttributeHandleColle
             attributeName (r.GetCustomAttribute ah) = name
         with _ ->
             false)
+
+// ---- consumer-visible attributes (Phase 406) --------------------------------
+//
+// Phase 386 put `[<RequireQualifiedAccess>]` on six public unions, and this gate printed nothing:
+// the renderer drew a type by its kind and its members, never by the attributes the F# compiler
+// reads off it to decide what consumer source is LEGAL. Qualifying a union breaks every consumer
+// that names a case bare, and the class report read `unchanged`. So a type now renders one
+// `attribute <type> <Name>` line per attribute below that it carries, and a move of one of those
+// lines on a type that stays published is a `retype` with its reason printed.
+//
+// The rule for what is drawn: an attribute is drawn when adding or removing it changes which
+// consumer source compiles. What is NOT drawn, and why (DECISIONS.md D134):
+//
+//   CustomEquality / CustomComparison      the type still satisfies `equality` / `comparison`;
+//                                          what changes is the RESULT of `=`, a behaviour move.
+//   StructuralEquality / StructuralComparison   assert the default; a type that cannot satisfy
+//                                          them fails at its own definition, not at a consumer.
+//   CompilationRepresentation(ModuleSuffix) the suffix is in the type's IL name, so the `type`
+//                                          token already moves; F# source does not change.
+//   member- and parameter-level attributes that change call syntax or compiled shape — see
+//                                          `undrawnSurfaceAttributes`, which REFUSES them rather
+//                                          than leaving them unseen.
+
+/// The namespace-qualified name of a custom attribute's type — `""` when it cannot be read.
+let private attributeQualifiedName (r: MetadataReader) (ca: CustomAttribute) : string =
+    try
+        let ctor = ca.Constructor
+
+        let ofReference (h: TypeReferenceHandle) =
+            let tr = r.GetTypeReference h
+            r.GetString tr.Namespace + "." + r.GetString tr.Name
+
+        let ofDefinition (h: TypeDefinitionHandle) =
+            let td = r.GetTypeDefinition h
+            r.GetString td.Namespace + "." + r.GetString td.Name
+
+        if ctor.Kind = HandleKind.MemberReference then
+            let parent = (r.GetMemberReference(MemberReferenceHandle.op_Explicit ctor)).Parent
+
+            if parent.Kind = HandleKind.TypeReference then
+                ofReference (TypeReferenceHandle.op_Explicit parent)
+            elif parent.Kind = HandleKind.TypeDefinition then
+                ofDefinition (TypeDefinitionHandle.op_Explicit parent)
+            else
+                ""
+        elif ctor.Kind = HandleKind.MethodDefinition then
+            ofDefinition ((r.GetMethodDefinition(MethodDefinitionHandle.op_Explicit ctor)).GetDeclaringType())
+        else
+            ""
+    with _ ->
+        ""
+
+/// One attribute the renderer draws: the name its `attribute` line carries, and what a consumer
+/// gains or loses when it moves — printed beside the move, so a reviewer reads the cost rather
+/// than reconstructing it.
+type internal DrawnAttribute = { Name: string; Reason: string }
+
+/// The FSharp.Core attributes drawn off a type, keyed by their attribute type's qualified name.
+let internal drawnTypeAttributes: (string * DrawnAttribute) list =
+    let fsharpCore (name: string) (reason: string) =
+        "Microsoft.FSharp.Core." + name + "Attribute", { Name = name; Reason = reason }
+
+    [ fsharpCore
+          "RequireQualifiedAccess"
+          "a case, field or member must be named through its type or module, and a qualified module cannot be opened — adding it breaks every bare use; removing it lets a bare name shadow another in the consumer's scope"
+      fsharpCore
+          "AutoOpen"
+          "the module is opened wherever its enclosing namespace or module is — adding it can shadow a consumer's own names; removing it breaks every use that relied on it"
+      fsharpCore "NoEquality" "`=`, `<>`, `hash` and every `equality`-constrained use refuse the type"
+      fsharpCore
+          "NoComparison"
+          "`compare`, `<`, `max`, a `Set` element or `Map` key and every `comparison`-constrained use refuse the type"
+      fsharpCore "ReferenceEquality" "equality is identity and comparison is refused"
+      fsharpCore "AllowNullLiteral" "`null` is a value of the type a consumer may write"
+      fsharpCore "Sealed" "a consumer may not inherit the type"
+      fsharpCore "AbstractClass" "a consumer may not construct the type, only inherit it"
+      fsharpCore "Measure" "the type is a unit of measure, written only in measure position" ]
+
+/// `Struct` is drawn off the IL rather than an attribute: a type whose base is `System.ValueType`.
+let internal structAttribute: DrawnAttribute =
+    { Name = "Struct"
+      Reason =
+        "the type is a value type — no `null`, copy semantics, a default value, and a different binary layout a consumer links against" }
+
+/// The reason printed beside a moved `attribute` line, by the name the line carries.
+let internal attributeReason (name: string) : string option =
+    (structAttribute :: List.map snd drawnTypeAttributes)
+    |> List.tryFind (fun a -> a.Name = name)
+    |> Option.map _.Reason
+
+/// The drawn attributes a type carries, by the name its `attribute` line carries, ordinal-sorted.
+let private typeAttributeNames (r: MetadataReader) (td: TypeDefinition) : string list =
+    let carried =
+        td.GetCustomAttributes()
+        |> Seq.choose (fun ah ->
+            let q = attributeQualifiedName r (r.GetCustomAttribute ah)
+
+            drawnTypeAttributes
+            |> List.tryFind (fun (k, _) -> k = q)
+            |> Option.map (snd >> _.Name))
+        |> List.ofSeq
+
+    let isValueType =
+        let bt = td.BaseType
+
+        not bt.IsNil
+        && bt.Kind = HandleKind.TypeReference
+        && (let tr = r.GetTypeReference(TypeReferenceHandle.op_Explicit bt)
+            r.GetString tr.Namespace = "System" && r.GetString tr.Name = "ValueType")
+
+    (if isValueType then
+         structAttribute.Name :: carried
+     else
+         carried)
+    |> List.distinct
+    |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
 
 // ---- the renderer ---------------------------------------------------------
 
@@ -454,6 +633,10 @@ let internal renderAssembly (dllPath: string) : string list =
 
                 tokens.Add(sprintf "type %s (%s)" full kind)
 
+                // Phase 406 — the attributes that decide what consumer source is legal.
+                for a in typeAttributeNames r td do
+                    tokens.Add(sprintf "attribute %s %s" full a)
+
                 // -- methods, constructors and DU case factories --
                 for mh in td.GetMethods() do
                     try
@@ -623,6 +806,114 @@ let internal renderAssembly (dllPath: string) : string list =
 
         tokens |> List.ofSeq |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
 
+// ---- the attributes the renderer refuses rather than draws (Phase 406) ---------
+//
+// Some attributes change what a consumer may write at a MEMBER or a PARAMETER: `ParamArray` and
+// `[<Optional>]` / `?arg` change which calls compile, `[<Extension>]` admits `x.M()`,
+// `CompilerMessage` can turn a use into an error, `RequiresExplicitTypeArguments` demands `f<T>`,
+// and `CompilationRepresentation(Static | Instance | UseNullAsTrueValue)` moves a member between
+// instance and static in IL, which the `method` token does not distinguish. None of them is used on
+// the shipped surface. Drawing them would need a per-overload identity the token grammar does not
+// have, for a shape nothing ships; leaving them unseen would be the blindness this phase removes.
+// So the surface REFUSES them: the family below goes red the day one appears, naming it, and the
+// renderer is taught to draw it then (DECISIONS.md D134).
+
+/// The value of `CompilationRepresentationFlags.ModuleSuffix`, the one flag the surface admits —
+/// it renames the module in IL, which the `type` token already shows.
+[<Literal>]
+let private ModuleSuffixFlag = 4
+
+/// The attributes the surface refuses, by their attribute type's qualified name.
+let internal refusedSurfaceAttributes: string list =
+    [ "System.ParamArrayAttribute"
+      "System.Runtime.CompilerServices.ExtensionAttribute"
+      "System.Runtime.InteropServices.OptionalAttribute"
+      "Microsoft.FSharp.Core.OptionalArgumentAttribute"
+      "Microsoft.FSharp.Core.CompilerMessageAttribute"
+      "Microsoft.FSharp.Core.RequiresExplicitTypeArgumentsAttribute" ]
+
+/// Every refused attribute on the externally-visible surface of an assembly, one line per
+/// carrier: `<type>[.<member>[(<parameter>)]]: <attribute>`. Empty is the only admitted answer.
+let internal undrawnSurfaceAttributes (dllPath: string) : string list =
+    use stream = File.OpenRead dllPath
+    use pe = new PEReader(stream)
+
+    if not pe.HasMetadata then
+        []
+    else
+        let r = pe.GetMetadataReader()
+
+        let rec visibleType (th: TypeDefinitionHandle) : bool =
+            let td = r.GetTypeDefinition th
+            let vis = td.Attributes &&& TypeAttributes.VisibilityMask
+
+            if td.IsNested then
+                (vis = TypeAttributes.NestedPublic
+                 || vis = TypeAttributes.NestedFamily
+                 || vis = TypeAttributes.NestedFamORAssem)
+                && visibleType (td.GetDeclaringType())
+            else
+                vis = TypeAttributes.Public
+
+        let rec fullName (th: TypeDefinitionHandle) : string =
+            let td = r.GetTypeDefinition th
+            let name = r.GetString td.Name
+
+            if td.IsNested then
+                fullName (td.GetDeclaringType()) + "+" + name
+            else
+                let ns = r.GetString td.Namespace
+                if String.IsNullOrEmpty ns then name else ns + "." + name
+
+        let refused (attrs: CustomAttributeHandleCollection) : string list =
+            [ for ah in attrs do
+                  let ca = r.GetCustomAttribute ah
+                  let q = attributeQualifiedName r ca
+
+                  if List.contains q refusedSurfaceAttributes then
+                      yield q
+                  elif q = "Microsoft.FSharp.Core.CompilationRepresentationAttribute" then
+                      let bytes = r.GetBlobBytes ca.Value
+
+                      let flags =
+                          if bytes.Length >= 6 then
+                              BitConverter.ToInt32(bytes, 2)
+                          else
+                              -1
+
+                      if flags <> ModuleSuffixFlag then
+                          yield sprintf "%s(%d)" q flags ]
+
+        [ for th in r.TypeDefinitions do
+              if visibleType th then
+                  let td = r.GetTypeDefinition th
+                  let full = fullName th
+
+                  for a in refused (td.GetCustomAttributes()) do
+                      yield sprintf "%s: %s" full a
+
+                  for mh in td.GetMethods() do
+                      let md = r.GetMethodDefinition mh
+
+                      if visibleMethodAccess.Contains(md.Attributes &&& MethodAttributes.MemberAccessMask) then
+                          let name = r.GetString md.Name
+
+                          for a in refused (md.GetCustomAttributes()) do
+                              yield sprintf "%s.%s: %s" full name a
+
+                          for ph in md.GetParameters() do
+                              let p = r.GetParameter ph
+
+                              for a in refused (p.GetCustomAttributes()) do
+                                  yield sprintf "%s.%s(%s): %s" full name (r.GetString p.Name) a
+
+                  for ph in td.GetProperties() do
+                      let pd = r.GetPropertyDefinition ph
+
+                      for a in refused (pd.GetCustomAttributes()) do
+                          yield sprintf "%s.%s: %s" full (r.GetString pd.Name) a ]
+        |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
+
 // ---- the baseline file ----------------------------------------------------
 
 /// The header every baseline carries. Static apart from the package id — a timestamp or a
@@ -732,6 +1023,21 @@ let internal owner (token: string) : string option =
         else
             Some(body.Substring(0, dot).TrimEnd '.')
 
+/// `true` for an `attribute <type> <Name>` line (Phase 406).
+let internal isAttributeToken (token: string) : bool =
+    token.StartsWith("attribute ", StringComparison.Ordinal)
+
+/// An `attribute` line's type and attribute name. A rendered type name carries no space, so the
+/// last space is the separator.
+let internal attributeParts (token: string) : string * string =
+    let body = token.Substring "attribute ".Length
+    let space = body.LastIndexOf ' '
+
+    if space < 0 then
+        body, ""
+    else
+        body.Substring(0, space), body.Substring(space + 1)
+
 /// Classify the drift from `before` to `after`, as a list of moves.
 ///
 /// Three steps, and the middle one is what a set difference alone cannot do: removed and added
@@ -743,15 +1049,56 @@ let internal classify (before: string list) (after: string list) : Move list =
     let beforeSet = Set.ofList before
     let afterSet = Set.ofList after
 
-    let removed =
+    let removedAll =
         before
         |> List.filter (fun t -> not (afterSet.Contains t))
         |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
 
-    let added =
+    let addedAll =
         after
         |> List.filter (fun t -> not (beforeSet.Contains t))
         |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
+
+    // Phase 406 — an `attribute` line is never paired: it is classed by whether its TYPE stays
+    // published. On a type both sides publish, adding or removing it is a `retype`, because the
+    // same type now admits different consumer source. With the type itself new it is additive,
+    // and with the type gone it goes with it as a removal.
+    let removedAttributes, removed = removedAll |> List.partition isAttributeToken
+    let addedAttributes, added = addedAll |> List.partition isAttributeToken
+
+    let publishedTypes (tokens: string list) =
+        tokens
+        |> List.choose (fun t ->
+            if t.StartsWith("type ", StringComparison.Ordinal) then
+                let body = t.Substring "type ".Length
+                let paren = body.LastIndexOf " ("
+                Some(if paren > 0 then body.Substring(0, paren) else body)
+            else
+                None)
+        |> Set.ofList
+
+    let typesBefore = publishedTypes before
+    let typesAfter = publishedTypes after
+
+    let attributeMoves =
+        (removedAttributes
+         |> List.map (fun t ->
+             { Class =
+                 if typesAfter.Contains(fst (attributeParts t)) then
+                     Retype
+                 else
+                     Removal
+               Before = Some t
+               After = None }))
+        @ (addedAttributes
+           |> List.map (fun t ->
+               { Class =
+                   if typesBefore.Contains(fst (attributeParts t)) then
+                       Retype
+                   else
+                       Additive
+                 Before = None
+                 After = Some t }))
 
     let countBy f xs =
         xs
@@ -823,7 +1170,7 @@ let internal classify (before: string list) (after: string list) : Move list =
               Before = None
               After = Some t })
 
-    removals @ retypes @ additions
+    removals @ retypes @ attributeMoves @ additions
 
 /// The one-word class of a whole surface move, or `None` when the surface did not move. This
 /// is the "ride or advance" line's verdict.
@@ -953,6 +1300,22 @@ let internal describe (m: Move) : string =
             |> String.concat "; "
 
         sprintf "%-18s %s  (%s  ->  %s)" (className m.Class) renames b a
+    | Some b, None when m.Class = Retype && isAttributeToken b ->
+        let name = snd (attributeParts b)
+
+        sprintf
+            "%-18s - %s  (attribute removed: %s)"
+            (className m.Class)
+            b
+            (attributeReason name |> Option.defaultValue name)
+    | None, Some a when m.Class = Retype && isAttributeToken a ->
+        let name = snd (attributeParts a)
+
+        sprintf
+            "%-18s + %s  (attribute added: %s)"
+            (className m.Class)
+            a
+            (attributeReason name |> Option.defaultValue name)
     | Some b, Some a -> sprintf "%-18s %s  ->  %s" (className m.Class) b a
     | Some b, None -> sprintf "%-18s - %s" (className m.Class) b
     | None, Some a -> sprintf "%-18s + %s" (className m.Class) a
@@ -1062,42 +1425,65 @@ type internal SinceTag =
         /// The tag's baseline predates union field names (Phase 237), so both sides were compared
         /// without them and a field rename since that tag is not visible.
         NamesStripped: bool
+        /// The tag's baselines predate `attribute` lines (Phase 406), so this package was compared
+        /// without them and a qualification since that tag is not visible here.
+        AttributesStripped: bool
     }
+
+/// `true` when a tag's baselines predate `attribute` lines (Phase 406): not one of them carries
+/// one. Read across the WHOLE tag rather than per package, because a single package can carry no
+/// drawn attribute at all and still be current — while every tag cut since 406 carries the
+/// qualified unions' lines somewhere, so an attribute-free tag is a tag cut before it.
+let internal predatesAttributes (taggedBaselines: string list list) : bool =
+    not taggedBaselines.IsEmpty
+    && taggedBaselines |> List.forall (List.exists isAttributeToken >> not)
 
 /// Every packable package whose committed baseline exists, read against `tag`'s baseline.
 let internal sinceTag (root: string) (tag: string) : SinceTag list =
-    [ for id in roster () |> List.map _.PackageId do
-          let path = baselinePath id
+    let read =
+        [ for id in roster () |> List.map _.PackageId do
+              let path = baselinePath id
 
-          if File.Exists path then
-              let current = baselineTokens (File.ReadAllText path)
+              if File.Exists path then
+                  let current = baselineTokens (File.ReadAllText path)
 
-              match git root (sprintf "show %s:api/%s.txt" tag id) with
-              | Error _ ->
-                  yield
-                      { PackageId = id
-                        Moves = None
-                        NamesStripped = false }
-              | Ok text ->
-                  // A tag cut before Phase 237 carries nameless union cases. Read against it,
-                  // today's named baseline would report every carrying case as a `retype` that no
-                  // consumer ever saw. So the comparison drops the names — and says so, because a
-                  // field rename since that tag is invisible to it, exactly as it was to the gate
-                  // then. This expires by itself: the first tag cut after 237 carries named
-                  // baselines, and nothing is stripped against it.
-                  let tagged = baselineTokens text
-                  let stripped = predatesFieldNames tagged
+                  match git root (sprintf "show %s:api/%s.txt" tag id) with
+                  | Error _ -> yield id, current, None
+                  | Ok text -> yield id, current, Some(baselineTokens text) ]
 
-                  let current =
-                      if stripped then
-                          current |> List.map stripFieldNames
-                      else
-                          current
+    // A tag cut before Phase 406 draws no attribute, so every qualified type would read as a
+    // `retype` no consumer ever saw — the same shape, and the same answer, as 237's names below.
+    let attributesStripped =
+        predatesAttributes (read |> List.choose (fun (_, _, t) -> t))
 
-                  yield
-                      { PackageId = id
-                        Moves = Some(classify tagged current)
-                        NamesStripped = stripped } ]
+    [ for id, current, tagged in read do
+          match tagged with
+          | None ->
+              yield
+                  { PackageId = id
+                    Moves = None
+                    NamesStripped = false
+                    AttributesStripped = false }
+          | Some tagged ->
+              // A tag cut before Phase 237 carries nameless union cases. Read against it,
+              // today's named baseline would report every carrying case as a `retype` that no
+              // consumer ever saw. So the comparison drops the names — and says so, because a
+              // field rename since that tag is invisible to it, exactly as it was to the gate
+              // then. This expires by itself: the first tag cut after 237 carries named
+              // baselines, and nothing is stripped against it. Attributes expire the same way at
+              // the first tag cut after 406.
+              let stripped = predatesFieldNames tagged
+
+              let current =
+                  current
+                  |> List.filter (fun t -> not (attributesStripped && isAttributeToken t))
+                  |> List.map (fun t -> if stripped then stripFieldNames t else t)
+
+              yield
+                  { PackageId = id
+                    Moves = Some(classify tagged current)
+                    NamesStripped = stripped
+                    AttributesStripped = attributesStripped } ]
 
 // ---- D101 made general: no case name is reachable unqualified from two public unions (Phase 386) ----
 //
@@ -1106,9 +1492,8 @@ let internal sinceTag (root: string) (tag: string) : SinceTag list =
 // was opened last — `Diff.fs`'s `Required` silently meant `Strength.Required` over
 // `Optionality.Required` until this phase — so the rule is held here, over the shipped assemblies and
 // FSharp.Core's own option and result cases. A union may carry a shared name when it is
-// `[<RequireQualifiedAccess>]`; at most one union may carry it bare. (The surface renderer does not
-// draw the attribute, so qualifying a union is a source-breaking move the class report reads as
-// `unchanged`; the release ledger names each one.)
+// `[<RequireQualifiedAccess>]`; at most one union may carry it bare. (Since Phase 406 the surface
+// renderer draws the attribute, so qualifying a union is a `retype` the class report names.)
 
 /// One public union case: `(union full name, case name, the union is RequireQualifiedAccess)`.
 type internal UnionCase = string * string * bool
@@ -1376,6 +1761,12 @@ let tests =
 
                       let read = sinceTag root tag
                       let mutable moved = 0
+
+                      if read |> List.exists _.AttributesStripped then
+                          printfn
+                              "  (%s's baselines predate `attribute` lines — compared without them; an attribute added or removed since %s is not visible here, and the release ledger names it)"
+                              tag
+                              tag
 
                       for r in read do
                           if r.NamesStripped then
@@ -1732,6 +2123,195 @@ let tests =
                                     yield sprintf "%s: %s" p.PackageId t ]
 
               Expect.isEmpty unnamed "every union case with fields renders `name: Type` for each"
+          }
+
+          // ---- Phase 406: the attributes that decide what consumer source is legal ----------
+
+          test
+              "every drawn attribute renders its `attribute` line on a probe that carries it, and only there (Phase 406)" {
+              let own = renderAssembly (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+
+              let attributesOf (typeSuffix: string) =
+                  own
+                  |> List.filter isAttributeToken
+                  |> List.filter (fun t -> (fst (attributeParts t)).EndsWith(typeSuffix, StringComparison.Ordinal))
+                  |> List.map (attributeParts >> snd)
+
+              let expected =
+                  [ "+ProbeQualifyAfter+Shape", [ "RequireQualifiedAccess" ]
+                    "+ProbeQualifiedRecord", [ "RequireQualifiedAccess" ]
+                    "+ProbeQualifiedModule", [ "RequireQualifiedAccess" ]
+                    "+ProbeAutoOpenModule", [ "AutoOpen" ]
+                    "+ProbeNoEquality", [ "NoComparison"; "NoEquality" ]
+                    "+ProbeNoComparison", [ "NoComparison" ]
+                    "+ProbeReferenceEquality", [ "ReferenceEquality" ]
+                    "+ProbeNullable", [ "AllowNullLiteral" ]
+                    "+ProbeSealed", [ "Sealed" ]
+                    "+ProbeAbstract", [ "AbstractClass" ]
+                    "+probeUnit", [ "Measure" ]
+                    "+ProbeStructRecord", [ "Struct" ]
+                    "+ProbeStructUnion", [ "Struct" ] ]
+
+              for suffix, names in expected do
+                  Expect.equal (attributesOf suffix) names (sprintf "%s renders exactly its drawn attributes" suffix)
+
+              Expect.equal
+                  (expected |> List.collect snd |> List.distinct |> List.sort)
+                  ((structAttribute :: List.map snd drawnTypeAttributes)
+                   |> List.map _.Name
+                   |> List.sort)
+                  "every drawn attribute has a probe — an attribute added to the drawn set without one is red here"
+
+              Expect.isEmpty
+                  (attributesOf "+ProbeQualifyBefore+Shape"
+                   @ attributesOf "+ProbeRecord"
+                   @ attributesOf "+ProbeUnion")
+                  "a type carrying none renders none — the line is the attribute, not a property of every type"
+
+              for name in expected |> List.collect snd |> List.distinct do
+                  Expect.isSome (attributeReason name) (sprintf "%s carries the reason a moved line prints" name)
+          }
+
+          test
+              "go-red: a union that GAINS `RequireQualifiedAccess` is a breaking `retype` with its reason; losing it is one too; an identical pair is unchanged (Phase 406)" {
+              let own = renderAssembly (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+
+              // One module's surface, re-homed under a common name — one package at two points in time.
+              let surfaceOf (moduleName: string) =
+                  own
+                  |> List.filter (fun t -> t.Contains("+" + moduleName + "+"))
+                  |> List.map (fun t -> t.Replace("+" + moduleName + "+", "+ProbeQualify+"))
+
+              let before = surfaceOf "ProbeQualifyBefore"
+              let after = surfaceOf "ProbeQualifyAfter"
+              let same = surfaceOf "ProbeQualifySame"
+
+              Expect.isNonEmpty before "the fixture's surface rendered"
+              Expect.isEmpty (classify before same) "a pair differing by nothing is classed unchanged"
+
+              let line =
+                  "attribute Fuaran.Core.Tests.PublicSurfaceTests+ProbeQualify+Shape RequireQualifiedAccess"
+
+              let gained = classify before after
+
+              Expect.equal
+                  (gained |> List.map (fun m -> m.Class, m.Before, m.After))
+                  [ Retype, None, Some line ]
+                  "qualifying the union is ONE move, a `retype` naming the attribute line — the move the pre-406 renderer read as `unchanged`"
+
+              Expect.equal (headline gained) (Some Retype) "the package's headline says so"
+              Expect.isTrue (isBreaking Retype) "and it is breaking: every bare `Ring` / `Disc` stops compiling"
+
+              Expect.stringContains
+                  (describe gained.Head)
+                  "attribute added: a case, field or member must be named through its type or module"
+                  "the report prints the reason beside the move"
+
+              let lost = classify after before
+
+              Expect.equal
+                  (lost |> List.map (fun m -> m.Class, m.Before, m.After))
+                  [ Retype, Some line, None ]
+                  "un-qualifying it is a `retype` too: a bare name may now shadow another in the consumer's scope"
+
+              Expect.stringContains (describe lost.Head) "attribute removed: " "with its reason printed"
+
+              // The blindness this phase removes, stated as its own control: without the attribute
+              // lines the two surfaces are the same surface.
+              Expect.isEmpty
+                  (classify
+                      (before |> List.filter (isAttributeToken >> not))
+                      (after |> List.filter (isAttributeToken >> not)))
+                  "without attribute lines the qualification is invisible — which is what the gate printed for Phase 386"
+          }
+
+          test
+              "every drawn attribute, added to or removed from a published type, is a breaking `retype` with its reason (Phase 406)" {
+              let own = renderAssembly (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+              let lines = own |> List.filter isAttributeToken
+
+              Expect.isGreaterThanOrEqual lines.Length 13 "the probes' attribute lines rendered"
+
+              for line in lines do
+                  let without = own |> List.filter (fun t -> t <> line)
+                  let name = snd (attributeParts line)
+
+                  for moves, verb in [ classify own without, "removed"; classify without own, "added" ] do
+                      Expect.equal
+                          (moves |> List.map _.Class)
+                          [ Retype ]
+                          (sprintf "%s %s on a published type is one `retype`" name verb)
+
+                      Expect.stringContains
+                          (describe moves.Head)
+                          (sprintf "attribute %s: %s" verb (attributeReason name |> Option.defaultValue "?"))
+                          (sprintf "%s %s prints its reason" name verb)
+          }
+
+          test "an attribute on a NEW type is `additive`, and on a type that left it goes as a `removal` (Phase 406)" {
+              let published = [ "type A.U (union)"; "union-case A.U.C #0()" ]
+              let line = "attribute A.V RequireQualifiedAccess"
+              let grown = published @ [ "type A.V (union)"; line; "union-case A.V.D #0()" ]
+
+              Expect.equal
+                  (classify published grown |> List.map _.Class |> List.distinct)
+                  [ Additive ]
+                  "a new qualified union is ordinary growth: nobody named its cases before"
+
+              Expect.equal
+                  (classify grown published
+                   |> List.filter (fun m -> m.Before = Some line)
+                   |> List.map _.Class)
+                  [ Removal ]
+                  "a qualified union that left takes its line with it as a removal"
+          }
+
+          test "the since-tag report reads a pre-406 tag without attribute lines, and only such a tag (Phase 406)" {
+              let current = [ "attribute A.U RequireQualifiedAccess"; "type A.U (union)" ]
+
+              Expect.isTrue
+                  (predatesAttributes [ [ "type A.U (union)" ]; [ "type B.V (record)" ] ])
+                  "a tag none of whose baselines carries an attribute line predates them"
+
+              Expect.isFalse
+                  (predatesAttributes [ [ "type A.U (union)" ]; current ])
+                  "one baseline carrying one is enough: a package with no drawn attribute is not legacy on its own"
+
+              Expect.isFalse (predatesAttributes []) "a tag that carries no baseline at all is not read as legacy"
+
+              Expect.equal
+                  (classify [ "type A.U (union)" ] current |> List.map _.Class)
+                  [ Retype ]
+                  "while the LIVE gate, which never strips, sees an attribute-free baseline as moved — so a stale baseline cannot hide a qualification"
+          }
+
+          test "no packable package carries an attribute the renderer refuses rather than draws (Phase 406)" {
+              let root = repoRoot ()
+
+              let carried =
+                  [ for p in roster () do
+                        match assemblyFor root p.ProjectFile p.PackageId with
+                        | Error _ -> () // reported by the baseline leg as an unbuilt solution
+                        | Ok dll ->
+                            for c in undrawnSurfaceAttributes dll do
+                                yield sprintf "%s: %s" p.PackageId c ]
+
+              Expect.isEmpty
+                  carried
+                  "these change what a consumer may write and the surface does not draw them — teach the renderer to draw the attribute in the same change (DECISIONS.md D134)"
+          }
+
+          test
+              "go-red: the refused-attribute scan names a `ParamArray` parameter and an F# optional argument (Phase 406)" {
+              let own =
+                  undrawnSurfaceAttributes (Uri(typeof<ProbeRecord>.Assembly.Location).LocalPath)
+                  |> List.filter (fun l -> l.Contains "+ProbeRefusedSurface.")
+
+              Expect.equal
+                  own
+                  [ "Fuaran.Core.Tests.PublicSurfaceTests+ProbeRefusedSurface.Maybe(x): Microsoft.FSharp.Core.OptionalArgumentAttribute"
+                    "Fuaran.Core.Tests.PublicSurfaceTests+ProbeRefusedSurface.Spread(xs): System.ParamArrayAttribute" ]
+                  "both planted carriers are named, by member and parameter"
           }
 
           test "the since-tag report reads a pre-237 baseline without names, and only it (Phase 237)" {

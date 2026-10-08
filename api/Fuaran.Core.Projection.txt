@@ -4,6 +4,7 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Scope`1 RequireQualifiedAccess
 ctor Fuaran.Core.Projection..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ProjectionLine>)
 ctor Fuaran.Core.ProjectionLine..ctor(System.String, System.String, System.Int32, System.String, System.String)
 ctor Fuaran.Core.ProjectionSnapshot..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>)
