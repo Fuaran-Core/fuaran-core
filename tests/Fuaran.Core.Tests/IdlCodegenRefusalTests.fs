@@ -322,7 +322,9 @@ let supportTests =
                     Encoder = "and private encNoteSpec (s: NoteSpec) : JVal = JObj [ \"label\", JStr s.Label ]"
                     Decoder =
                       "and private decNoteSpec (j: JVal) : Result<NoteSpec, string> = jprop \"label\" j |> Result.bind jstr |> Result.map (fun l -> { Label = l })"
-                    Mk = None }
+                    Mk = None
+                    MapMsg = None
+                    RecordFields = None }
 
               let bad =
                   { Gen.GenSupport.Empty with

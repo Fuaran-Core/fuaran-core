@@ -475,7 +475,9 @@ let valueCarryingDefaults =
                   { SpecDecl = "ProbeSpec = { Bag: Map<string, string> }"
                     Encoder = "and private encProbeSpec (s: ProbeSpec) : JVal = JObj []"
                     Decoder = "and private decProbeSpec (j: JVal) : Result<ProbeSpec, string> = Ok { Bag = Map.empty }"
-                    Mk = None }
+                    Mk = None
+                    MapMsg = None
+                    RecordFields = None }
 
               let support =
                   { Gen.GenSupport.Empty with

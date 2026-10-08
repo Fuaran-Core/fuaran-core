@@ -38,15 +38,106 @@ module internal FSharpDerive =
     /// What a derivation reads: the vocabulary, the msg-carrying set, and the declarations the
     /// module emits (the selected kinds and what they reach).
     type Ctx =
-        { Idl: Idl
-          Msg: Set<string>
-          Kinds: IdlKind list
-          Unions: IdlUnion list
-          Records: IdlRecord list
-          Projected: Set<string> }
+        {
+            Idl: Idl
+            Msg: Set<string>
+            Kinds: IdlKind list
+            Unions: IdlUnion list
+            Records: IdlRecord list
+            /// Kind tag → the declared host projection of that kind (Phase 945); every derivation
+            /// that reads a kind's fields reads a projected kind's through [[recordFields]].
+            Projections: Map<string, Projection>
+        }
 
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
         Error(CodegenError.UnsupportedConstruct(construct, principle, alternative))
+
+    // -----------------------------------------------------------------------
+    // Phase 403 — a PROJECTED kind's fields. Its record is verbatim host source, so the fields a
+    // derivation reads are the projection's declared `RecordFields` (the record's host shapes),
+    // never the kind's wire fields: the two differ exactly where a projection earns its keep (a
+    // wire key optional where the record's member is required, two wire keys merged into one).
+    // -----------------------------------------------------------------------
+
+    /// The principle every refusal over an undeclared projected record states.
+    let private undeclaredRecord =
+        "a projected kind's record is verbatim host source, so the generator cannot read its field shapes"
+
+    /// The alternative every refusal over an undeclared projected record names.
+    let private declareRecord (orElse: string) =
+        sprintf "declare the projected record's fields through the projection's RecordFields, or %s" orElse
+
+    /// The fields a derivation reads for a kind: a kind's own wire fields, a projected kind's
+    /// declared record fields, or — for a projected kind that declares none — `undeclared ()`,
+    /// which says whether that derivation can proceed without them.
+    let recordFields
+        (projections: Map<string, Projection>)
+        (k: IdlKind)
+        (undeclared: unit -> Result<IdlField list, CodegenError>)
+        : Result<IdlField list, CodegenError> =
+        match projections.TryFind k.Tag with
+        | None -> Ok k.Fields
+        | Some { RecordFields = Some fs } -> Ok fs
+        | Some { RecordFields = None } -> undeclared ()
+
+    /// The node positions of a projected kind with no declared record, read from its WIRE: a
+    /// projection's encoder writes the wire, and a node on no wire key is a node no host can read
+    /// back, so a wire that holds no node (`holds` false for every field) says the record holds
+    /// none and the kind has no position to walk. A wire that does hold one says nothing about
+    /// which member of the record holds it, and is refused by name.
+    let nodeFieldsOf
+        (projections: Map<string, Projection>)
+        (holds: IdlField -> bool)
+        (construct: string)
+        (orElse: string)
+        (k: IdlKind)
+        : Result<IdlField list, CodegenError> =
+        recordFields projections k (fun () ->
+            if k.Fields |> List.exists holds then
+                refuse
+                    (sprintf "%s of the projected kind '%s'" construct k.Tag)
+                    undeclaredRecord
+                    (declareRecord orElse)
+            else
+                Ok [])
+
+    /// Every declared record's field types name declarations this module emits — a type the
+    /// module does not declare is one no derived member could walk, and would emit source that
+    /// does not compile. Checked whatever is requested; it changes no byte of an admitted module.
+    let recordFieldsDeclared (ctx: Ctx) : Result<unit, CodegenError> =
+        let declared =
+            Set.unionMany
+                [ ctx.Unions |> List.map _.Name |> Set.ofList
+                  ctx.Records |> List.map _.Name |> Set.ofList
+                  ctx.Idl.Enums |> List.map _.Name |> Set.ofList ]
+
+        let rec names (t: IdlType) : string list =
+            match t with
+            | TEnum n
+            | TRecord n -> [ n ]
+            | TUnion(n, args) -> n :: List.collect names args
+            | TList i
+            | TMap i -> names i
+            | _ -> []
+
+        let undeclaredIn =
+            ctx.Projections
+            |> Map.toList
+            |> List.collect (fun (tag, p) ->
+                p.RecordFields
+                |> Option.defaultValue []
+                |> List.collect (fun f ->
+                    names f.Type
+                    |> List.filter (fun n -> not (declared.Contains n))
+                    |> List.map (fun n -> tag, f.Name, n)))
+
+        match undeclaredIn with
+        | [] -> Ok()
+        | (tag, field, n) :: _ ->
+            refuse
+                (sprintf "the projected record field '%s.%s' at the undeclared type '%s'" tag field n)
+                "a projected record's declared fields name declarations the module emits, so every derivation over them can walk what they hold"
+                "declare the field at a type the selected kinds reach, or correct the name"
 
     /// A STRUCTURAL child position: a node or node list a kind always carries. An optional node is
     /// a keyed position — it is not an ordered list a structural edit may rebuild — and so is a
@@ -302,23 +393,32 @@ module internal FSharpDerive =
                |> List.collect unionHelpers)
             |> sequenceR
 
-        let keyedFields (k: IdlKind) =
-            k.Fields |> List.filter (fun f -> holdsF f && (structuralField f).IsNone)
+        // Phase 403 — a projected kind's keyed positions are its declared record's.
+        let kindFields =
+            ctx.Kinds
+            |> List.map (fun k ->
+                nodeFieldsOf ctx.Projections holdsF "the keyed node positions" "do not request KeyedPositions" k
+                |> Result.map (fun fs -> k, fs |> List.filter (fun f -> holdsF f && (structuralField f).IsNone)))
+            |> sequenceR
 
         let keyedKinds =
-            ctx.Kinds |> List.filter (fun k -> not (List.isEmpty (keyedFields k)))
+            kindFields
+            |> Result.map (List.filter (fun (_, fs) -> not (List.isEmpty fs)))
+            |> Result.defaultValue []
 
         let kindWild = List.length keyedKinds < List.length ctx.Kinds
         let envFields = ctx.Idl.NodeFields |> List.filter holdsF
 
         let listerArms =
-            keyedKinds
-            |> List.map (fun k ->
-                keyedFields k
-                |> List.map (fun f -> collectField hs f ("s." + pascal f.Name))
-                |> sequenceR
-                |> Result.map (fun xs -> sprintf "        | NodeKind.%s s -> %s" k.Tag (appendAll xs)))
-            |> sequenceR
+            kindFields
+            |> Result.bind (fun _ ->
+                keyedKinds
+                |> List.map (fun (k, fs) ->
+                    fs
+                    |> List.map (fun f -> collectField hs f ("s." + pascal f.Name))
+                    |> sequenceR
+                    |> Result.map (fun xs -> sprintf "        | NodeKind.%s s -> %s" k.Tag (appendAll xs)))
+                |> sequenceR)
 
         let envListers =
             envFields
@@ -327,8 +427,8 @@ module internal FSharpDerive =
 
         let mapperArms =
             keyedKinds
-            |> List.map (fun k ->
-                keyedFields k
+            |> List.map (fun (k, fs) ->
+                fs
                 |> List.mapi (fun i f -> mapField hs f ("s." + pascal f.Name) |> Result.map (fun b -> i, f, b))
                 |> sequenceR
                 |> Result.map (fun xs ->
@@ -487,12 +587,25 @@ module internal FSharpDerive =
                 |> Option.map (sprintf "(match %s with Some __v -> %s | None -> [])" e)
             | _ -> direct e
 
-        let arms =
+        // Phase 403 — a projected kind's slots are its declared record's. Undeclared, it is refused
+        // whatever its wire says: a host record may hold a value of the type that its wire spells
+        // otherwise (two wire keys merged into one member), so an absent wire field proves nothing.
+        let armsR =
             ctx.Kinds
-            |> List.choose (fun k ->
-                match k.Fields |> List.choose (ofField "s") with
-                | [] -> None
-                | xs -> Some(sprintf "        | NodeKind.%s s -> %s" k.Tag (appendAll xs)))
+            |> List.map (fun k ->
+                recordFields ctx.Projections k (fun () ->
+                    refuse
+                        (sprintf "a slot enumerator over '%s' through the projected kind '%s'" typeName k.Tag)
+                        undeclaredRecord
+                        (declareRecord (sprintf "do not request SlotsOf \"%s\"" typeName)))
+                |> Result.map (fun fs ->
+                    match fs |> List.choose (ofField "s") with
+                    | [] -> None
+                    | xs -> Some(sprintf "        | NodeKind.%s s -> %s" k.Tag (appendAll xs))))
+            |> sequenceR
+            |> Result.map (List.choose id)
+
+        let arms = armsR |> Result.defaultValue []
 
         let env = ctx.Idl.NodeFields |> List.choose (ofField "n")
 
@@ -501,6 +614,8 @@ module internal FSharpDerive =
                 (sprintf "a slot enumerator over '%s'" typeName)
                 "a slot enumerator is derived over a declared enum, record or union this module emits"
                 "name a declared type the selected kinds reach"
+        elif Result.isError armsR then
+            armsR |> Result.map (fun _ -> "")
         elif List.isEmpty arms && List.isEmpty env then
             refuse
                 (sprintf "a slot enumerator over '%s'" typeName)
@@ -734,13 +849,16 @@ module internal FSharpDerive =
                 ctx.Kinds
                 |> List.filter (fun k -> ctx.Msg.Contains(k.Tag + "Spec"))
                 |> List.map (fun k ->
-                    if ctx.Projected.Contains k.Tag then
+                    match ctx.Projections.TryFind k.Tag with
+                    // Phase 403 — the projection's own map, composed verbatim: the projected record
+                    // is host source, so its map is written once beside it, as its `Mk` is.
+                    | Some { MapMsg = Some map } -> Ok map
+                    | Some { MapMsg = None } ->
                         refuse
                             (sprintf "the message map over the projected kind '%s'" k.Tag)
                             "a projected kind's record is verbatim host source, so the generator cannot construct it"
                             "supply the projected kind's map through the declared support, or do not request MapMsg"
-                    else
-                        recordMapper (k.Tag + "Spec") k.Tag k.Fields)
+                    | None -> recordMapper (k.Tag + "Spec") k.Tag k.Fields)
 
             let unions =
                 ctx.Unions
@@ -1110,7 +1228,7 @@ module internal FSharpDerive =
 
         let kinds =
             ctx.Kinds
-            |> List.filter (fun k -> not (ctx.Projected.Contains k.Tag))
+            |> List.filter (fun k -> not (ctx.Projections.ContainsKey k.Tag))
             |> List.choose (fun k -> value (k.Tag + "Spec") (fun f -> defaultFor k.Tag f.Name) k.Fields)
 
         let records =

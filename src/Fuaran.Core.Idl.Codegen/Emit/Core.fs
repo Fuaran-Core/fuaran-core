@@ -542,7 +542,9 @@ module internal Core =
         { SpecDecl: string
           Encoder: string
           Decoder: string
-          Mk: string option }
+          Mk: string option
+          MapMsg: string option
+          RecordFields: IdlField list option }
 
     /// The emitters' view of `Gen.GenSupport`.
     type Support =

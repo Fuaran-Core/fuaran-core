@@ -67,6 +67,66 @@ the compaction oracle's differentials still speak the matrix's shape, and the mo
 strings, so the suite keeps a test-local translation onto `OpStream.Snapshots`
 (`tests/Fuaran.Core.Tests/SnapshotMatrix.fs`). Nothing ships from it.
 
+## 2026-10-08 — D132: a kind projection carries its message map and declares its record's fields, in one widening; an emission that cannot read a projected record refuses by name
+
+**Recorded by Phase 403. `Gen.KindProjection`, `Emit/FSharpDerive.fs`, `Emit/FSharpCodec.fs`
+(`witnessDecl`), `SupportArtifact` (`mapMsg`, `recordFields`), `Diff`; held by `IdlDeriveTests`, "Phase
+403 - a projected kind under the derivations". `Fuaran.Core.Idl.Codegen` moves `record-widening`; the
+`supportArtifact` wire baseline moves `additive`.**
+
+*The defect.* A kind projection (Phase 945) replaces a kind's record, encoder and decoder with host
+source. Two things followed that the generator could not do. `Derivation.MapMsg` refused a vocabulary
+with a projected kind, and the projection had no member through which the host could supply the map,
+so a host kept a hand-written message map beside its generated layer. And `SlotsOf` read the kind's
+WIRE fields as if they were the record's: where a wire key is optional and the record's member is
+required, it emitted `match s.On with Some …` against a required `On`, which does not compile.
+
+*Why the defect was wider than its shard said.* The shard named `SlotsOf` and asked that every
+derivation over a projected kind read the record "or refuse by name". Read at HEAD, the node witness
+(emitted in every module, privately or as `StructuralAccess`) and `KeyedPositions` read the same wire
+fields through the same `k.Fields`. They had compiled for the one projection in use only because its
+node-bearing wire keys and record members happen to share names and shapes. All three are the one
+defect and are fixed under one rule.
+
+*The decision: BOTH members, in ONE widening.*
+
+- `MapMsg: string option` — the `and private mapMsg<Tag>Spec …` member, verbatim, joined to the derived
+  message map's recursion group. It is host source for the reason `Mk` is: the record is host source,
+  and a map the generator built from a guessed shape would be a guess.
+- `RecordFields: IdlField list option` — the record's fields at their host shapes, read by the witness,
+  the keyed walk and the slot enumerators in place of the wire fields.
+
+Refusal alone was considered and rejected. It would have taken `StructuralAccess` away from the one
+host that uses a projection, whose projected kind's wire holds a node, with no way back short of a
+second widening. Adding a field to `KindProjection` breaks every full literal (`FS0764`) whenever it
+happens, so taking both in the slot that freezes the 1.0 surface costs a host one edit instead of two
+across a frozen surface. `RecordFields` was not made required: a projection whose wire holds no node,
+in a module requesting no slot enumerator, needs no declaration, and forcing one would add ceremony
+with nothing to check.
+
+*The refusal rules when a member is `None`.*
+
+- `MapMsg = None`: `Derivation.MapMsg` over that kind refuses with the message it always had ("the
+  message map over the projected kind …"). The generator does not guess a map.
+- `RecordFields = None`:
+  - the node witness and `StructuralAccess` refuse when the kind's wire holds a node DIRECTLY;
+  - `KeyedPositions` refuses when it holds one ANYWHERE;
+  - `SlotsOf` refuses ALWAYS.
+
+  The node rules read the wire because a projection's encoder writes the wire: a node on no wire key is
+  a node no host reads back, so a node-free wire says the record holds none. No such argument exists
+  for a value of a declared type, because a record can hold one its wire spells otherwise (two wire keys
+  merged into one member). So the slot enumerator admits no undeclared projected kind.
+- A declared `RecordFields` naming a type the module does not declare is refused by name, whatever is
+  requested.
+
+*Rejected alternatives.* Deriving the map from `RecordFields` was rejected: it would put a second route
+to the same member beside the one the host writes, and the refusal would no longer mean "no map was
+supplied". Parsing `SpecDecl` for field shapes was rejected: it is verbatim host source, and reading
+types out of it would be a second F# parser in the generator. A `support.json` encoding-version bump was
+rejected: both keys are optional and absent when undeclared, so every existing document reads and
+renders byte for byte. That is the posture `annotations` took in `idl.json`.
+
 ## 2026-10-08 — D131: a strict proof run records cost and refuses a cached read; one cached-read threshold replaces the per-module floors
 
 **Recorded by Phase 399, on an operator ruling of 2026-10-08. `proofs/kit/check-proof-leg.ps1`,

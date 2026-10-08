@@ -1106,3 +1106,382 @@ let declarationTests =
                                   | None -> ()
                               | Error e -> failtestf "plain refused: %A" e
                       | m, d -> failtestf "module %A, declarations %A" (Result.isOk m) d) ]
+
+// ---------------------------------------------------------------------------
+// Phase 403 — a PROJECTED kind under the derivations. A kind projection (Phase 945) replaces a
+// kind's record, encoder and decoder with host source, so the generator can neither construct
+// the record (the message map) nor read its field shapes (the witness, the keyed walk, the slot
+// enumerators) from the kind's wire fields — the two differ exactly where a projection earns its
+// keep. The vocabulary below projects `Gate`, whose wire `rule` is OPTIONAL (absent meaning
+// `Always`) while the record's `Rule` is REQUIRED: the optionality the SlotsOf defect was
+// recorded with. The projection supplies its map (`MapMsg`) and declares its record's fields
+// (`RecordFields`); without them each emission that needs them refuses by name. The compiled
+// leg runs the emission under `dotnet fsi` — and runs the pre-403 reading (the wire fields read
+// as the record's) through the same probe, which must FAIL to compile, so the probe can tell
+// the fixed emission from the defect.
+// ---------------------------------------------------------------------------
+
+module private Projected =
+    let field name ty opt =
+        { Name = name
+          Type = ty
+          Opt = opt
+          Annotations = Annotations.Empty }
+
+    let req name ty = field name ty Required
+    let opt name ty = field name ty Optional
+
+    let case tag fields =
+        { Tag = tag
+          Fields = fields
+          Annotations = Annotations.Empty }
+
+    let rule = TUnion("Rule", [])
+    let trigger = TUnion("Trigger", [])
+
+    /// The gate's wire fields: a structural child, a case table of keyed nodes, an OPTIONAL rule
+    /// and a message-carrying trigger.
+    let gateWire =
+        [ req "body" TNode
+          req "steps" (TList(TRecord "Step"))
+          opt "rule" rule
+          req "trigger" trigger ]
+
+    let idlWith (gateFields: IdlField list) : Idl =
+        { Enums = []
+          Unions =
+            [ { Name = "Rule"
+                Params = []
+                Cases = [ case "Always" []; case "Equals" [ req "key" TStr; req "value" TStr ] ] }
+              { Name = "Trigger"
+                Params = []
+                Cases =
+                  [ case
+                        "Timer"
+                        [ req "every" TInt
+                          req
+                              "fire"
+                              (TFn
+                                  { FSharp = "int -> 'Msg"
+                                    TypeScript = "(x: int) => Msg"
+                                    Placeholder = "(fun (_: int) -> box \"<closure>\")" }) ]
+                    case "Manual" [ req "label" TStr ] ] } ]
+          Records =
+            [ { Name = "Step"
+                Fields = [ req "label" TStr; req "body" TNode ] } ]
+          Kinds =
+            [ { Tag = "Gate"
+                Category = "flow"
+                Fields = gateFields
+                Annotations = Annotations.Empty }
+              { Tag = "Leaf"
+                Category = "flow"
+                Fields = [ req "text" TStr ]
+                Annotations = Annotations.Empty } ]
+          Defaults = []
+          NodeFields = []
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared }
+
+    let idl = idlWith gateWire
+
+    /// The record's fields at their host shapes: `rule` REQUIRED where the wire's is optional.
+    let recordFields =
+        [ req "body" TNode
+          req "steps" (TList(TRecord "Step"))
+          req "rule" rule
+          req "trigger" trigger ]
+
+    /// The map, written once in host source beside the record — as `Mk` is.
+    let gateMap =
+        "and private mapMsgGateSpec<'Msg, 'Msg2> (f: 'Msg -> 'Msg2) (v: GateSpec<'Msg>) : GateSpec<'Msg2> =\n"
+        + "    ({ Body = mapMsg f v.Body; Steps = List.map (mapMsgStep f) v.Steps; Rule = v.Rule; Trigger = mapMsgTrigger f v.Trigger }: GateSpec<'Msg2>)"
+
+    let projection (map: string option) (fields: IdlField list option) : Gen.KindProjection =
+        { SpecDecl =
+            "GateSpec<'Msg> =\n    { Body: Node<'Msg>\n      Steps: Step<'Msg> list\n      Rule: Rule\n      Trigger: Trigger<'Msg> }"
+          Encoder =
+            "and private encGateSpec<'Msg> (s: GateSpec<'Msg>) : JVal =\n"
+            + "    Canon.typed \"Gate\" ([ Some(\"body\", encNode s.Body); Some(\"steps\", JArr(List.map encStep s.Steps)); (match s.Rule with Rule.Always -> None | r -> Some(\"rule\", encRule r)); Some(\"trigger\", encTrigger s.Trigger) ] |> List.choose id)"
+          Decoder =
+            "and private decGateSpec (j: JVal) : Result<GateSpec<obj>, DecodeError> =\n"
+            + "    dObj j |> Result.bind (fun __fs ->\n"
+            + "    dReq \"body\" __fs decNode |> Result.bind (fun body ->\n"
+            + "    dReq \"steps\" __fs (dList decStep) |> Result.bind (fun steps ->\n"
+            + "    dOpt \"rule\" __fs decRule |> Result.bind (fun rule ->\n"
+            + "    dReq \"trigger\" __fs decTrigger |> Result.bind (fun trigger ->\n"
+            + "    Ok { Body = body; Steps = steps; Rule = Option.defaultValue Rule.Always rule; Trigger = trigger })))))"
+          Mk = None
+          MapMsg = map
+          RecordFields = fields }
+
+    let supportWith (map: string option) (fields: IdlField list option) : Gen.GenSupport =
+        { Gen.GenSupport.Empty with
+            KindProjections = Map.ofList [ "Gate", projection map fields ] }
+
+    /// The projection as a host supplies it in full.
+    let support = supportWith (Some gateMap) (Some recordFields)
+
+    let tags = [ "Gate"; "Leaf" ]
+
+    let derive (sup: Gen.GenSupport) (ds: Gen.Derivation list) (idl: Idl) =
+        Gen.fsharpModuleDerived sup ds "Projected" idl tags
+
+    let refusal (r: Result<string, CodegenError>) : string * string =
+        match r with
+        | Error(CodegenError.UnsupportedConstruct(construct, principle, _)) -> construct, principle
+        | Error e -> failtestf "expected UnsupportedConstruct, got %A" e
+        | Ok _ -> failtest "expected a refusal, got a module"
+
+    let emitted (r: Result<string, CodegenError>) : string =
+        match r with
+        | Ok s -> s
+        | Error e -> failtestf "codegen refused: %s" (CodegenError.describe e)
+
+    /// Run a script under `dotnet fsi`: its exit code and both streams, or None without `dotnet`.
+    let runFsi (source: string) : (int * string * string) option =
+        let path =
+            Path.Combine(Path.GetTempPath(), sprintf "fuaran-403-%s.fsx" (System.Guid.NewGuid().ToString("N")))
+
+        File.WriteAllText(path, source)
+
+        try
+            match
+                (try
+                    Some(System.Diagnostics.Process.Start(ChildProcess.redirected "dotnet" ("fsi \"" + path + "\"")))
+                 with _ ->
+                     None)
+            with
+            | None -> None
+            | Some p ->
+                let err = p.StandardError.ReadToEndAsync()
+                let out = p.StandardOutput.ReadToEnd()
+                p.WaitForExit()
+                Some(p.ExitCode, out, err.Result)
+        finally
+            try
+                File.Delete path
+            with _ ->
+                ()
+
+    let dllRef (name: string) =
+        "#r @\"" + Path.Combine(System.AppContext.BaseDirectory, name) + "\"\n"
+
+    /// A script compiling the emitted module ahead of `body`.
+    let script (moduleText: string) (body: string) =
+        dllRef "Fuaran.Core.Wire.dll"
+        + dllRef "Fuaran.Core.Tree.dll"
+        + dllRef "Fuaran.Core.Validator.dll"
+        + moduleText.Replace("module Projected\n", "")
+        + "\n\n"
+        + body
+
+    let derivations =
+        [ Gen.Derivation.StructuralAccess
+          Gen.Derivation.KeyedPositions
+          Gen.Derivation.SlotsOf "Rule"
+          Gen.Derivation.MapMsg ]
+
+    /// What the compiled module is asked: the walks, the rule slot, and the mapped handler.
+    let probe =
+        String.concat
+            "\n"
+            [ "let gate: Node<string> ="
+              "    { Id = \"g\""
+              "      Kind ="
+              "        NodeKind.Gate"
+              "            { Body = { Id = \"body\"; Kind = NodeKind.Leaf { Text = \"b\" } }"
+              "              Steps = [ { Label = \"one\"; Body = { Id = \"step\"; Kind = NodeKind.Leaf { Text = \"s\" } } } ]"
+              "              Rule = Rule.Equals(\"k\", \"v\")"
+              "              Trigger = Trigger.Timer(5, fun i -> sprintf \"tick %d\" i) } }"
+              "printfn \"children\\t%s\" (children gate |> List.map (fun n -> n.Id) |> String.concat \",\")"
+              "printfn \"keyed\\t%s\" (keyedChildren gate |> List.map (fun n -> n.Id) |> String.concat \",\")"
+              "printfn \"slots\\t%s\" (slotsOfRule gate |> List.map (fun (k, r) -> sprintf \"%s=%A\" k r) |> String.concat \",\")"
+              "match (mapMsg (fun (s: string) -> s.Length) gate).Kind with"
+              "| NodeKind.Gate g ->"
+              "    match g.Trigger with"
+              "    | Trigger.Timer(_, fire) -> printfn \"mapped\\t%d\" (fire 7)"
+              "    | Trigger.Manual _ -> printfn \"mapped\\tmanual\""
+              "| NodeKind.Leaf _ -> printfn \"mapped\\tleaf\""
+              "printfn \"encoded\\t%s\" (encodeNode gate)" ]
+
+[<Tests>]
+let projectedKindTests =
+    testList
+        "Phase 403 - a projected kind under the derivations"
+        [ testCase "with its map supplied, MapMsg over a projected kind composes it" (fun _ ->
+              let src =
+                  Projected.emitted (Projected.derive Projected.support [ Gen.Derivation.MapMsg ] Projected.idl)
+
+              Expect.stringContains src Projected.gateMap "the projection's map, verbatim, in the message map's group"
+
+              Expect.stringContains
+                  src
+                  "    | NodeKind.Gate s -> NodeKind.Gate(mapMsgGateSpec f s)"
+                  "the kind arm calls it")
+
+          testCase "with no map, MapMsg over a projected kind is refused, with the same message" (fun _ ->
+              let construct, principle =
+                  Projected.refusal (
+                      Projected.derive
+                          (Projected.supportWith None (Some Projected.recordFields))
+                          [ Gen.Derivation.MapMsg ]
+                          Projected.idl
+                  )
+
+              Expect.equal construct "the message map over the projected kind 'Gate'" "the construct, by name"
+
+              Expect.equal
+                  principle
+                  "a projected kind's record is verbatim host source, so the generator cannot construct it"
+                  "the principle, unchanged")
+
+          testCase "the slot enumerator reads the RECORD's shape: a required member, not the wire's option" (fun _ ->
+              let src =
+                  Projected.emitted (
+                      Projected.derive Projected.support [ Gen.Derivation.SlotsOf "Rule" ] Projected.idl
+                  )
+
+              Expect.stringContains
+                  src
+                  "        | NodeKind.Gate s -> [ \"rule\", s.Rule ]"
+                  "the record's required Rule"
+
+              Expect.isFalse (src.Contains "match s.Rule with Some") "not the wire's optional rule")
+
+          testCase "with no declared record, each emission that reads one refuses by name" (fun _ ->
+              let undeclared = Projected.supportWith (Some Projected.gateMap) None
+
+              let without (names: string list) =
+                  Projected.idlWith (Projected.gateWire |> List.filter (fun f -> not (List.contains f.Name names)))
+
+              // A wire holding a node directly: even the plain module's witness cannot say which
+              // member of the record holds it.
+              Expect.equal
+                  (fst (Projected.refusal (Gen.fsharpModuleWith undeclared "Projected" Projected.idl Projected.tags)))
+                  "the node witness's children of the projected kind 'Gate'"
+                  "the witness, in the plain module"
+
+              Expect.equal
+                  (fst (
+                      Projected.refusal (Projected.derive undeclared [ Gen.Derivation.StructuralAccess ] Projected.idl)
+                  ))
+                  "the structural children of the projected kind 'Gate'"
+                  "the public structural access"
+
+              // Nodes only within a record: the witness has no child to read, the keyed walk does.
+              let keyedOnly = without [ "body" ]
+
+              Expect.isOk
+                  (Gen.fsharpModuleWith undeclared "Projected" keyedOnly Projected.tags)
+                  "no direct node on the wire: the witness reads nothing of the record"
+
+              Expect.equal
+                  (fst (Projected.refusal (Projected.derive undeclared [ Gen.Derivation.KeyedPositions ] keyedOnly)))
+                  "the keyed node positions of the projected kind 'Gate'"
+                  "the keyed walk"
+
+              // No node on the wire at all: the node walks admit it; the slot enumerator still
+              // refuses, because a record may hold a value its wire spells otherwise.
+              let nodeFree = without [ "body"; "steps" ]
+
+              Expect.isOk
+                  (Projected.derive
+                      undeclared
+                      [ Gen.Derivation.StructuralAccess; Gen.Derivation.KeyedPositions ]
+                      nodeFree)
+                  "a node-free wire: no node position to read"
+
+              Expect.equal
+                  (fst (Projected.refusal (Projected.derive undeclared [ Gen.Derivation.SlotsOf "Rule" ] nodeFree)))
+                  "a slot enumerator over 'Rule' through the projected kind 'Gate'"
+                  "the slot enumerator, always")
+
+          testCase "a declared record field at a type the module does not declare is refused" (fun _ ->
+              let sup =
+                  Projected.supportWith
+                      (Some Projected.gateMap)
+                      (Some(Projected.recordFields @ [ Projected.req "owner" (TRecord "Owner") ]))
+
+              Expect.equal
+                  (fst (Projected.refusal (Gen.fsharpModuleWith sup "Projected" Projected.idl Projected.tags)))
+                  "the projected record field 'Gate.owner' at the undeclared type 'Owner'"
+                  "the field and the type, by name")
+
+          testCase
+              "compiled: the walks, the slots and the map read the record; the wire's reading does not compile"
+              (fun _ ->
+                  let fixedSrc =
+                      Projected.emitted (Projected.derive Projected.support Projected.derivations Projected.idl)
+
+                  match Projected.runFsi (Projected.script fixedSrc Projected.probe) with
+                  | None -> skiptest "dotnet not on PATH - the compiled projection check is skipped"
+                  | Some(code, out, err) ->
+                      Expect.equal code 0 (sprintf "the emission compiles and runs: %s" err)
+
+                      let lines =
+                          out.Replace("\r\n", "\n").Split('\n')
+                          |> Array.filter (fun l -> l <> "")
+                          |> List.ofArray
+
+                      Expect.equal
+                          lines
+                          [ "children\tbody"
+                            "keyed\tstep"
+                            "slots\trule=Equals (\"k\", \"v\")"
+                            "mapped\t6"
+                            "encoded\t{\"id\":\"g\",\"kind\":{\"$type\":\"Gate\",\"body\":{\"id\":\"body\",\"kind\":{\"$type\":\"Leaf\",\"text\":\"b\"}},\"rule\":{\"$type\":\"Equals\",\"key\":\"k\",\"value\":\"v\"},\"steps\":[{\"body\":{\"id\":\"step\",\"kind\":{\"$type\":\"Leaf\",\"text\":\"s\"}},\"label\":\"one\"}],\"trigger\":{\"$type\":\"Timer\",\"every\":5,\"fire\":\"<closure>\"}}}" ]
+                          "the record's members, walked, enumerated and mapped"
+
+                      // The go-red: the pre-403 reading — the wire's fields taken as the record's —
+                      // through the same probe. It emits, and it does not compile.
+                      let wireReading =
+                          Projected.emitted (
+                              Projected.derive
+                                  (Projected.supportWith (Some Projected.gateMap) (Some Projected.gateWire))
+                                  Projected.derivations
+                                  Projected.idl
+                          )
+
+                      match Projected.runFsi (Projected.script wireReading Projected.probe) with
+                      | None -> skiptest "dotnet not on PATH"
+                      | Some(code, _, err) ->
+                          Expect.notEqual code 0 "the wire's optional rule against the record's required one"
+                          Expect.stringContains err "FS0001" "a type mismatch, as recorded")
+
+          testCase "the support document carries the map and the record fields, and reads them back" (fun _ ->
+              let doc: SupportDocument =
+                  { Support = Projected.support
+                    HostPrelude = None }
+
+              let text = SupportArtifact.render doc
+              Expect.stringContains text "\"mapMsg\"" "the map is rendered"
+              Expect.stringContains text "\"recordFields\"" "the record fields are rendered"
+
+              match SupportArtifact.parse text with
+              | Error e -> failtestf "support.json did not parse: %s" e
+              | Ok back ->
+                  Expect.equal back.Support Projected.support "every member round-trips"
+                  Expect.equal (SupportArtifact.render back) text "and the bytes are stable"
+
+              let bare =
+                  SupportArtifact.render
+                      { Support = Projected.supportWith None None
+                        HostPrelude = None }
+
+              Expect.isFalse (bare.Contains "mapMsg" || bare.Contains "recordFields") "neither key when undeclared")
+
+          testCase "the diff sees a change to either member as a support change" (fun _ ->
+              let snap (sup: Gen.GenSupport) =
+                  match
+                      Diff.snapshotWith
+                          (Artifact.json Projected.idl)
+                          (Some(SupportArtifact.json { Support = sup; HostPrelude = None }))
+                  with
+                  | Ok s -> s.Support
+                  | Error e -> failtestf "snapshot: %s" e
+
+              let full = snap Projected.support
+              Expect.notEqual (snap (Projected.supportWith None (Some Projected.recordFields))) full "the map"
+              Expect.notEqual (snap (Projected.supportWith (Some Projected.gateMap) None)) full "the record fields") ]

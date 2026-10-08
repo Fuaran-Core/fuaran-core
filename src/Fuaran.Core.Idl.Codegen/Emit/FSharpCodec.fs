@@ -1312,7 +1312,16 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
     /// an OPTIONAL node field is a keyed position rather than a child (it is not an ordered list
     /// a structural edit may rebuild). `false` is the emission every module had before, byte for
     /// byte.
-    let witnessDecl (publicAccess: bool) (msg: Set<string>) (kinds: IdlKind list) : Result<string, CodegenError> =
+    ///
+    /// Phase 403 — a projected kind's children are read from its declared record fields
+    /// (`Projection.RecordFields`); one that declares none and whose wire holds a node directly is
+    /// refused by name, because nothing says which member of the host record holds it.
+    let witnessDecl
+        (publicAccess: bool)
+        (projections: Map<string, Projection>)
+        (msg: Set<string>)
+        (kinds: IdlKind list)
+        : Result<string, CodegenError> =
         let nodeArgs = declParams msg "Node" []
 
         let nodeBearing =
@@ -1321,9 +1330,35 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             else
                 nodeBearing
 
+        let construct, request =
+            if publicAccess then
+                "the structural children", "do not request StructuralAccess"
+            else
+                "the node witness's children", "do not select the kind"
+
+        let kindFields =
+            kinds
+            |> List.map (fun k ->
+                FSharpDerive.nodeFieldsOf
+                    projections
+                    (fun f ->
+                        match f.Type with
+                        | TNode
+                        | TList TNode -> true
+                        | _ -> false)
+                    construct
+                    request
+                    k
+                |> Result.map (fun fs -> k.Tag, fs))
+            |> sequenceR
+            |> Result.map Map.ofList
+
+        let fieldsOf (k: IdlKind) =
+            kindFields |> Result.map (fun m -> m[k.Tag]) |> Result.defaultValue []
+
         let childBearing =
             kinds
-            |> List.filter (fun k -> k.Fields |> List.exists (nodeBearing >> Option.isSome))
+            |> List.filter (fun k -> fieldsOf k |> List.exists (nodeBearing >> Option.isSome))
 
         let allBearing = List.length childBearing = List.length kinds
 
@@ -1334,7 +1369,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
 
         let childArm (k: IdlKind) =
             let exprs =
-                k.Fields
+                fieldsOf k
                 |> List.choose nodeBearing
                 |> List.map (fun (name, isList) -> if isList then "s." + name else "[ s." + name + " ]")
                 |> String.concat " @ "
@@ -1342,7 +1377,7 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             sprintf "    | NodeKind.%s s -> %s" k.Tag exprs
 
         let replaceArm (k: IdlKind) : Result<string, CodegenError> =
-            match k.Fields |> List.choose nodeBearing with
+            match fieldsOf k |> List.choose nodeBearing with
             | [ (name, true) ] ->
                 Ok(sprintf "    | NodeKind.%s s -> { n with Kind = NodeKind.%s { s with %s = kids } }" k.Tag k.Tag name)
             | [ (name, false) ] ->
@@ -1375,9 +1410,8 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
             |> String.concat "\n"
 
         let replaceArms =
-            childBearing
-            |> List.map replaceArm
-            |> sequenceR
+            kindFields
+            |> Result.bind (fun _ -> childBearing |> List.map replaceArm |> sequenceR)
             |> Result.map (fun arms -> (arms @ (if allBearing then [] else [ "    | _ -> n" ])) |> String.concat "\n")
 
         let publicDecl (replaceArmsStr: string) =
@@ -1701,10 +1735,11 @@ let private dFormat (format: string) (j: JVal) : Result<unit, DecodeError> =
               Kinds = kinds
               Unions = unions
               Records = records
-              Projected = sup.KindProjections |> Map.toList |> List.map fst |> Set.ofList }
+              Projections = sup.KindProjections }
 
         let witnessAndDerived =
-            witnessDecl publicAccess msg kinds
+            FSharpDerive.recordFieldsDeclared derivedCtx
+            |> Result.bind (fun () -> witnessDecl publicAccess sup.KindProjections msg kinds)
             |> Result.bind (fun w -> FSharpDerive.derivedDecl derivedCtx requests |> Result.map (fun ds -> w, ds))
             // Phase 377 — the collecting decoders and the public per-spec entries, on request, after
             // every other member (they compose with the decoder group and nothing reads them).
