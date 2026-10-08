@@ -5328,8 +5328,9 @@ the round trip surfaces rather than hides: a hand-built slot entry with no space
 the `SlotTree` of its constraint, so it is the one value that does not read back as itself.
 
 The phase also asked that "decode refuses what encode never produces". For a lenient reader that
-is false, and it is not what is proved: the readers accept an extra member, any member order and
-the descriptor spelling of a space, none of which a writer produces. What is true, and proved
+is false, and it is not what is proved: the readers accept an extra member and any member order,
+neither of which a writer produces (and, until Phase 405 refused it, the descriptor spelling of a
+space). What is true, and proved
 (`signature_decoded_wf`, `capability_decoded_wf`, `node_decoded_wf`), is the statement about
 VALUES: every document a reader accepts reads as a well-formed value, which encodes and reads back
 as itself. A reader never yields a value its writer could not have written.
