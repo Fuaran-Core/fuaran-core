@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-08 — D134: a value space has ONE reader spelling at `1.0.0` — the descriptor read D133 kept leaves, model and oracle with it (amends D133)
+## 2026-10-08 — D135: a value space has ONE reader spelling at `1.0.0` — the descriptor read D133 kept leaves, model and oracle with it (amends D133)
 
 **Recorded by Phase 405. `Fuaran.Core.Function` (`SpaceCodec.decoder`), `proofs/Capability.fst` and
 its extracted oracle, the suite; the `1.0.0` slot (`docs/releases/1.0.0.md`,
