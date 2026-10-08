@@ -1,10 +1,10 @@
-/// No `.fs` file under `src/` is longer than 2,000 lines, except the files DECISIONS.md D125 and D139
+/// No `.fs` file under `src/` is longer than 2,000 lines, except the files DECISIONS.md D125 and D141
 /// name.
 ///
 /// Phase 388 split the internal law files along their banners, and Phase 401 divided the four long
 /// multi-module files (`Wire.fs`, `Ops.fs`, `Idl.fs`, `Column.fs`) at their top-level module
 /// boundaries, one module per file, and `Query.fs` at the two boundaries its dependency order allows
-/// (D139). The files on the exception list below stay whole by ruling: each is ONE public module
+/// (D141). The files on the exception list below stay whole by ruling: each is ONE public module
 /// with public types nested inside it, F# compiles one module from one file, so dividing any of them
 /// would rename public types in the `api/` baselines. A file's length is not a reason to move a
 /// public surface.
@@ -19,7 +19,7 @@ open Expecto
 /// The line every `.fs` under `src/` stays at or under.
 let limit = 2000
 
-/// The files that stay whole over `limit` (DECISIONS.md D125, D139), repository-relative, each with
+/// The files that stay whole over `limit` (DECISIONS.md D125, D141), repository-relative, each with
 /// the reason it is not divided.
 let exceptions: (string * string) list =
     [ "src/Fuaran.Core.Idl.Codegen/Diff.fs",
@@ -29,7 +29,7 @@ let exceptions: (string * string) list =
       "src/Fuaran.Core.OpStream.Dag/DagOpStream.fs",
       "the public module `Dag` holds its public types nested, and F# compiles one module from one file; dividing it renames them in api/ (D125)"
       "src/Fuaran.Core.Conformance/Families.fs",
-      "the public module `Families` holds its public types nested (`Families+LawFamily`, `Families+Roster`), and F# compiles one module from one file; dividing it renames them in api/ (D125's class, named by D139)" ]
+      "the public module `Families` holds its public types nested (`Families+LawFamily`, `Families+Roster`), and F# compiles one module from one file; dividing it renames them in api/ (D125's class, named by D141)" ]
 
 /// Every finding over `(path, lineCount)` pairs: a file over `limit` the exceptions do not name, an
 /// exception naming no file, and an exception naming a file at or under `limit`.
