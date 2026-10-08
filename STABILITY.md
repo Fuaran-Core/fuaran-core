@@ -15,7 +15,7 @@ post-push registry probe). The publish workflow uses `--skip-duplicate`;
 bump `<Version>` in `Directory.Build.props` before tagging.
 
 **Semantic versioning from `1.0.0`; obsolete forwards leave at a major, and `1.0.0` is one (Phase
-386, DECISIONS.md D132).** Through the `0.x` line a breaking class (below) advanced the MINOR and an
+386, DECISIONS.md D133).** Through the `0.x` line a breaking class (below) advanced the MINOR and an
 additive one rode the standing draft slot. From `1.0.0` the version is semver: a breaking class —
 `removal`, `retype` or any `*-widening` — advances the MAJOR, an additive one the minor, and a change
 that moves no public surface the patch. A member a minor retires stays as a `System.Obsolete` forward

@@ -1,6 +1,6 @@
 # Fuaran.Core — decisions (newest first)
 
-## 2026-10-08 — D132: `1.0.0` freezes with no obsolete forward, three shapes close, D101 becomes a gate, and the `OneDotZero` family makes "1.0" a test output
+## 2026-10-08 — D133: `1.0.0` freezes with no obsolete forward, three shapes close, D101 becomes a gate, and the `OneDotZero` family makes "1.0" a test output
 
 **Recorded by Phase 386. Every package with a forward, `Fuaran.Core.Function`, `Fuaran.Core.Query`,
 `Fuaran.Core.OpStream.Dag`, the conformance kit and the suite; opens the `1.0.0` slot

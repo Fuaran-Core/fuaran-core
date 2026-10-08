@@ -240,7 +240,7 @@ module Space =
 /// draft; Phase 386 KEPT it through the 1.x line, because the verified model of this reader
 /// (`proofs/Capability.fst`, the `the-descriptor-spelling-of-a-space-is-read-leniently` vector)
 /// pins it as an accepted input, and the extracted oracle is held to production. It leaves at
-/// `2.0.0`, with that vector (DECISIONS.md D132).
+/// `2.0.0`, with that vector (DECISIONS.md D133).
 module SpaceCodec =
 
     /// Write a value space as a wire document (`"$type"`, `min` / `max`).
