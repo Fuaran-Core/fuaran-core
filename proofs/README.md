@@ -13,6 +13,15 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 **The ladder, counted:** 299 claims — 218 proved across 28 models, 46 tested, 33 assumed (6 `domain-obligation`, 21 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
+**No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
+`unscheduled`; none names a phase that will close it, and the count above is therefore a statement about
+what is proved today, not about what is planned. The reason is a boundary, not a gap: this repository's
+roadmap lives outside it and cannot be read from here, so a list of open phases kept in this tree would be
+a copy that nothing could hold to its source. `tests/Fuaran.Core.Tests/open-phases.json` declares itself
+inert for that reason, and Clause 2 below FAILS any row that makes a scheduling claim while it is
+(see "The scheduled half is vacuous on today's data"). The first row to carry a phase needs a writer for
+that list on the roadmap side before it can pass, and that is the point at which one is asked for.
+
 This directory is the mechanised half of the correctness story whose differential half already
 existed: Phase 80 certified two-script confluence, Phase 83 the two-head `Dag.reconcile`, Phase 100
 the N-lane fold-confluence pack. Those are property tests over sampled orders; this is the same law
