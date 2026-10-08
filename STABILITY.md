@@ -1239,8 +1239,8 @@ slot, and every heading that moved keeps a working anchor there. This table is p
 link to `STABILITY.md#<anchor>` is resolved by finding the anchor in the right-hand column and
 following the row to its file, where the anchor is the same unless the row writes `old → new`
 (a heading GitHub numbered as a duplicate here is unique in its new file). The suite holds every
-row: each anchor named must be a heading of the file the row names (`PackageRoster`, "the moved-
-anchor table resolves").
+row: each anchor named must be a heading of the file the row names (the `Package roster` family,
+"the moved-anchor table resolves").
 
 | New home | Anchors that moved there |
 |---|---|
