@@ -1,5 +1,75 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D130: `STABILITY.md` is the contract and `docs/releases/<version>.md` the ledger, one file per slot; the contract is held under 1,500 lines, its moved anchors are mapped in a permanent table, and the prose claims are held to the tree
+
+**Recorded by Phase 397. `STABILITY.md`, the new `docs/releases/`, `Directory.Build.props`,
+`CONTRIBUTING.md`, `README.md`, `docs/ADOPTION.md`; the tests are `PackageRosterTests`,
+`ReleaseRecordTests`, `ReadmeClaimsTests` and `GateProbeTagTests`. No package or wire byte moves.**
+
+*The defect.* `STABILITY.md` had grown to 10,552 lines: a contract and every release's changelog in
+one file, sections in no reader's order, and about 540 lines of contracts for packages that left
+this repository with Phase 258 still reading as current. `Directory.Build.props` carried a third,
+partial copy of the version history — 330 lines of comment ahead of `<Version>`, missing ten
+released slots — edited by hand in a file every project imports. And the documents a reader judges
+this repository by had drifted from the tree because nothing read them: CONTRIBUTING and the README
+promised a "Fable-compile gate" `verify.ps1` has not run since Phase 217; CONTRIBUTING's format
+command omitted `samples`, which the check covers; the contract said nineteen assemblies and no
+`InternalsVisibleTo` anywhere, against eighteen packable projects and five declarations; it named
+`Fuaran.Core.CSharp` (removed by Phase 231) and `Idl.Spike` (gone) as off the Fable surface; several
+members it listed as public promises no longer existed here; the README's Fable compiler version was
+compared only where the receiving gate's checkout happened to be present, which no CI run has; and
+one event — the typed actor folded into the chain hash — was spelt "since Phase 320" in one document
+and "as of `0.0.1-alpha.13`" in the other.
+
+*Decided: the split.* The contract stays in `STABILITY.md`: the versioning policy (the release
+sequence's home since Phase 392), the surface classes, the load-bearing invariant, the
+stability-critical surfaces, the witness freeze, the hash-chain and determinism postures, the
+Fable-cleanliness promise, the behavioural postures every version is held to, and the vocabulary
+paragraphs. The ledger is `docs/releases/<version>.md`, one file per version slot — every tagged
+slot, every slot that was opened and never released, and the standing draft — with
+`docs/releases/README.md` as its index. A section whose heading is stamped with the version that
+shipped it, or that records a change event, is that version's entry and moved to its slot's file; a
+section stating a standing promise about a surface that ships today stayed. The compute-strand
+promises (`RowIdentity`, the `Transform` algebra and its closed sets, `ColExpr.Param`,
+`Column.aggregate`'s parity with `GroupBy`, and the compute members of the three member lists) moved
+to `docs/releases/0.32.0.md`, the last slot this repository produced those packages in — moved, not
+removed. The version-history comment left `Directory.Build.props` for the slot files, verbatim, each
+under the slot it described; the props file keeps `<Version>`, one sentence pointing at the ledger,
+and the stability-record declaration.
+
+*Decided: the ledger is held, not trusted.* The index carries each slot file's heading word for word,
+newest first, with a link; a slot without a file, a file without its index entry, a heading that
+disagrees with its file, a DRAFT heading on anything but the standing `<Version>`, and a stray file
+in the directory are each red by name (`Package roster`). `<FuaranStabilityRecord>` now names the
+index, so a downstream version check reading the declared record sees every slot's heading. The
+`Release record` family reads the slot files and names the file and line of a fault. Every release
+tag now has a file: a slot tagged before `0.25.0` is headed with what its tag proves (the version,
+the tagged commit's date, `released`) and says in its body that no entry was written when it was
+cut, so the per-tag floor (`entryHeaderFloor`) drops to cover every tag without inventing a record
+for any.
+
+*Decided: the contract has a ceiling, and its old anchors a permanent map.* `STABILITY.md` is held to
+at most 1,500 lines and to carrying no `## <version>` entry, so a release's entry cannot drift back
+into it. Every heading that moved keeps a working anchor in its new file, and the table at the end of
+`STABILITY.md`, "Where sections moved", maps each old anchor to its new home — permanently, not for a
+quarter, because an external link does not expire on a schedule. The suite resolves every row
+against the file it names.
+
+*Decided: the prose claims held to the tree.* `ReadmeClaimsTests` reads: the stages CONTRIBUTING's
+and the README's `./verify.ps1` line names against the commands `verify.ps1` runs (a command it does
+not recognise is red, so a new stage cannot pass undocumented); CONTRIBUTING's format command
+against the check's directories; the feed STABILITY names against the publish workflow's
+`--source`; the friend-grant paragraph's packable count, grant counts and parties against the
+project files; the Fable section's "off the surface" names against `fable-exclusions.json`, and that
+file's names against the projects under `src/`; the typed actor's arrival spelt with both its phase
+and its version wherever STABILITY or the adoption guide names it; and every member a contract
+bullet names against the public-surface baselines. The README's Fable compiler version is marked
+"unverified in this repository's CI" in the README itself, held there, and reported on every run
+that cannot compare it, instead of being skipped.
+
+*Not decided here.* Phase 389 writes the vocabulary paragraphs into the contract half; the ceiling
+leaves room for them. Opening the `1.0.0` slot is Phase 386's, and it opens a ledger file.
+
 ## 2026-10-07 — D129: a Core assembly reaches another's internal member only from a `NoInlining` function; the friend grants stay, and no internal is made public to escape the rule
 
 **Recorded by Phase 402. `Fuaran.Core.Conformance` (`ConfRng`), `Fuaran.Core.Idl.Codegen`

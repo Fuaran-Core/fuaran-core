@@ -159,7 +159,7 @@ let floorEnd = "<!-- surface-versions:end -->"
 /// The statement between the markers.
 let internal floorStatement (floor: string) : string =
     sprintf
-        "**Each surface named in code type below carries the version it arrived in** — `(since 0.31.0)`, or `(since 0.34.0, unreleased)` for one only the draft at the head of [`STABILITY.md`](STABILITY.md) has — and a surface shown without one shipped in `%s` or earlier, the first release whose public surface this repository records under `api/`. The versions are derived from those records at each release tag, not written by hand, and the suite holds them."
+        "**Each surface named in code type below carries the version it arrived in** — `(since 0.31.0)`, or `(since 0.34.0, unreleased)` for one only the standing draft slot of the [release ledger](docs/releases/README.md) has — and a surface shown without one shipped in `%s` or earlier, the first release whose public surface this repository records under `api/`. The versions are derived from those records at each release tag, not written by hand, and the suite holds them."
         floor
 
 /// The README as the derivation says it must read: every stamp removed, then one re-inserted after the
@@ -286,11 +286,11 @@ let internal arrivalOf
         | Some i -> Some(Released(fst releases[i]))
         | None -> Some(Unreleased standing)
 
-/// What is wrong with the README's stamps against STABILITY.md: an unreleased stamp must name the
-/// standing `<Version>` and that version must be headed `## <v> — DRAFT`; a released stamp must name
-/// a version some entry header names.
-let internal stampFaults (standing: string option) (stability: string) (readme: string) : string list =
-    let headings = stability.Replace("\r\n", "\n").Split('\n')
+/// What is wrong with the README's stamps against the release ledger (read as one text): an
+/// unreleased stamp must name the standing `<Version>` and that version must be headed
+/// `## <v> — DRAFT`; a released stamp must name a version some entry header names.
+let internal stampFaults (standing: string option) (ledger: string) (readme: string) : string list =
+    let headings = ledger.Replace("\r\n", "\n").Split('\n')
 
     let draftHeading (v: string) =
         headings |> Array.exists (fun l -> l.Trim() = sprintf "## %s — DRAFT" v)
@@ -306,15 +306,15 @@ let internal stampFaults (standing: string option) (stability: string) (readme: 
             elif not (draftHeading v) then
                 Some(
                     sprintf
-                        "`%s` is stamped unreleased in %s, and STABILITY.md has no '## %s — DRAFT' heading"
+                        "`%s` is stamped unreleased in %s, and the release ledger has no '## %s — DRAFT' heading"
                         claim
                         v
                         v
                 )
             else
                 None
-        elif (PackageRosterTests.entryHeaderNaming v stability).IsNone then
-            Some(sprintf "`%s` is stamped as arriving in %s, which no STABILITY.md entry header names" claim v)
+        elif (PackageRosterTests.entryHeaderNaming v ledger).IsNone then
+            Some(sprintf "`%s` is stamped as arriving in %s, which no release-ledger entry header names" claim v)
         else
             None)
 
@@ -379,6 +379,11 @@ let internal fableCorePin (packagesProps: string) : string option =
 
     if m.Success then Some m.Groups[1].Value else None
 
+/// The words the README's Fable line carries for the compiler version this repository's CI cannot
+/// compare (Phase 397).
+[<Literal>]
+let unverifiedMarker = "unverified in this repository's CI"
+
 /// The receiving gate's checkout names this variable when it is not beside this repository.
 [<Literal>]
 let receivingDirVariable = "FUARAN_DOTNET_DIR"
@@ -411,6 +416,245 @@ let private receivingManifest () : string option =
     fromVar @ besides
     |> List.map (fun d -> Path.Combine(d, ".config", "dotnet-tools.json"))
     |> List.tryFind File.Exists
+
+// ---- prose held to the tree (Phase 397) ---------------------------------------------
+//
+// The sentences a public repository is judged on, each read against the file it describes. A claim
+// nothing reads drifts the day the tree moves: the 2026-10-07 drift table found a "Fable-compile
+// gate" `verify.ps1` had not run since Phase 217, a feed the publish workflow no longer pushed to, a
+// format command missing a directory the check covers, and a count of friend grants that was never
+// true. Each reader below has a go-red case over synthetic input in the suite.
+
+let private numberWords =
+    [| "zero"
+       "one"
+       "two"
+       "three"
+       "four"
+       "five"
+       "six"
+       "seven"
+       "eight"
+       "nine"
+       "ten"
+       "eleven"
+       "twelve"
+       "thirteen"
+       "fourteen"
+       "fifteen"
+       "sixteen"
+       "seventeen"
+       "eighteen"
+       "nineteen"
+       "twenty" |]
+
+/// A count as the documents spell it: a word up to twenty, digits beyond.
+let internal numberWord (n: int) : string =
+    if n >= 0 && n < numberWords.Length then
+        numberWords[n]
+    else
+        string n
+
+/// A document's paragraphs (blank-line separated), each joined to one line.
+let internal paragraphs (text: string) : string list =
+    text.Replace("\r\n", "\n").Split("\n\n")
+    |> Array.map (fun p -> p.Split('\n') |> Array.map _.Trim() |> String.concat " ")
+    |> Array.filter (fun p -> p <> "")
+    |> Array.toList
+
+/// The stages `verify.ps1` runs, named as the documents name them, read from its native commands:
+/// `(default stages, opt-in stages)`. `Error` names a command this reader does not know, so a stage
+/// added to the gate cannot pass undocumented.
+let internal verifyStages (script: string) : Result<string list * string list, string> =
+    let commands =
+        script.Replace("\r\n", "\n").Split('\n')
+        |> Array.map _.Trim()
+        |> Array.filter (fun l ->
+            l.StartsWith("dotnet ", StringComparison.Ordinal)
+            || l.StartsWith("pwsh ", StringComparison.Ordinal))
+        |> Array.toList
+
+    let classify (l: string) =
+        if l = "dotnet tool restore" then
+            Ok None
+        elif l.StartsWith("dotnet fantomas --check", StringComparison.Ordinal) then
+            Ok(Some(false, "format-check"))
+        elif l.StartsWith("dotnet build", StringComparison.Ordinal) then
+            Ok(Some(false, "build"))
+        elif l.StartsWith("dotnet run --project tests/", StringComparison.Ordinal) then
+            Ok(Some(false, "test"))
+        elif l.StartsWith("dotnet run --project samples/", StringComparison.Ordinal) then
+            Ok(Some(false, "sample"))
+        elif l.Contains("proofs/check.ps1", StringComparison.Ordinal) then
+            Ok(Some(true, "the proof leg"))
+        else
+            Error(sprintf "verify.ps1 runs a command this reader does not name: `%s`" l)
+
+    let classified = commands |> List.map classify
+
+    let firstError =
+        classified
+        |> List.tryPick (fun r ->
+            match r with
+            | Error e -> Some e
+            | Ok _ -> None)
+
+    match firstError with
+    | Some e -> Error e
+    | None when commands.IsEmpty -> Error "verify.ps1 runs no `dotnet` or `pwsh` command this reader found"
+    | None ->
+        let stages =
+            classified
+            |> List.choose (fun r ->
+                match r with
+                | Ok s -> s
+                | Error _ -> None)
+
+        Ok(stages |> List.filter (fst >> not) |> List.map snd, stages |> List.filter fst |> List.map snd)
+
+let private verifyLineRe =
+    Regex(@"^\./verify\.ps1\s+#\s*(?<desc>[^(\n]+?)\s*(?:\(|$)", RegexOptions.Compiled ||| RegexOptions.Multiline)
+
+/// The stages a document's `./verify.ps1   # a + b + c (…)` line names, if it has one.
+let internal documentedStages (doc: string) : string list option =
+    let m = verifyLineRe.Match(doc.Replace("\r\n", "\n"))
+
+    if m.Success then
+        Some(m.Groups["desc"].Value.Split(" + ") |> Array.map _.Trim() |> Array.toList)
+    else
+        None
+
+/// The directories `verify.ps1`'s format check covers.
+let internal checkedFormatDirs (script: string) : string list =
+    let m = Regex.Match(script, @"dotnet fantomas --check (?<d>[^\r\n#]+)")
+
+    if m.Success then
+        m.Groups["d"].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        |> Array.toList
+    else
+        []
+
+/// The directories a document's `` `dotnet fantomas …` `` command names.
+let internal documentedFormatDirs (doc: string) : string list option =
+    let m = Regex.Match(doc, @"`dotnet fantomas (?<d>[^`]+)`")
+
+    if m.Success then
+        Some(
+            m.Groups["d"].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            |> Array.toList
+        )
+    else
+        None
+
+/// The package sources a workflow pushes to (`--source <url>`).
+let internal pushSources (workflow: string) : Set<string> =
+    Regex.Matches(workflow, @"--source\s+(\S+)")
+    |> Seq.map (fun m -> m.Groups[1].Value)
+    |> Set.ofSeq
+
+/// The package feeds a document names: a NuGet v3 service index URL, or the GitHub Packages host.
+let internal namedFeeds (doc: string) : Set<string> =
+    Regex.Matches(doc, @"https://[^\s`)<>]+/index\.json|https://nuget\.pkg\.github\.com[^\s`)<>]*")
+    |> Seq.map _.Value
+    |> Set.ofSeq
+
+/// The `InternalsVisibleTo` declarations under `src/`: `(granting project, friend)`.
+let internal friendGrants (root: string) : (string * string) list =
+    Directory.GetDirectories(Path.Combine(root, "src"))
+    |> Array.collect (fun d -> Directory.GetFiles(d, "*.fsproj"))
+    |> Array.toList
+    |> List.collect (fun f ->
+        Regex.Matches(File.ReadAllText f, @"<InternalsVisibleTo\s+Include=""([^""]+)""")
+        |> Seq.map (fun m -> Path.GetFileNameWithoutExtension f, m.Groups[1].Value)
+        |> Seq.toList)
+    |> List.sort
+
+/// What is wrong with the contract's friend-grant paragraph: it states the packable count, the
+/// count of grants between shipped assemblies and of the rest, and names every party to a shipped
+/// grant.
+let internal friendGrantFaults
+    (contract: string)
+    (packable: Set<string>)
+    (grants: (string * string) list)
+    : string list =
+    let paragraph =
+        paragraphs contract
+        |> List.tryFind (fun p -> p.Contains("grants `InternalsVisibleTo` in", StringComparison.Ordinal))
+
+    match paragraph with
+    | None -> [ "STABILITY.md has no paragraph stating where `InternalsVisibleTo` is granted" ]
+    | Some p ->
+        let shipped = grants |> List.filter (fun (_, friend) -> packable.Contains friend)
+        let rest = grants.Length - shipped.Length
+
+        let expect (claim: string) =
+            if p.Contains(claim, StringComparison.Ordinal) then
+                []
+            else
+                [ sprintf "the friend-grant paragraph does not say \"%s\"" claim ]
+
+        let restClaim =
+            if rest = 1 then
+                "the one further declaration"
+            else
+                sprintf "the %s further declarations" (numberWord rest)
+
+        let parties =
+            shipped
+            |> List.collect (fun (g, f) -> [ g; f ])
+            |> List.distinct
+            |> List.filter (fun n -> not (p.Contains(sprintf "`%s`" n, StringComparison.Ordinal)))
+            |> List.map (sprintf "the friend-grant paragraph does not name `%s`, a party to a grant")
+
+        expect (sprintf "is %s packable assemblies" (numberWord packable.Count))
+        @ expect (
+            sprintf "exactly %s declaration%s" (numberWord shipped.Length) (if shipped.Length = 1 then "" else "s")
+        )
+        @ (if rest = 0 then [] else expect restClaim)
+        @ parties
+
+/// The packages the contract's Fable section names as off the surface, if it names any.
+let internal namedFableExclusions (contract: string) : Set<string> option =
+    paragraphs contract
+    |> List.tryPick (fun p ->
+        match p.IndexOf("Off the surface today:", StringComparison.Ordinal) with
+        | -1 -> None
+        | i ->
+            let rest = p.Substring i
+
+            let sentence =
+                match rest.IndexOf(". ", StringComparison.Ordinal) with
+                | -1 -> rest
+                | j -> rest.Substring(0, j)
+
+            Regex.Matches(sentence, @"`(Fuaran\.Core\.[A-Za-z.]*[A-Za-z])`")
+            |> Seq.map (fun m -> m.Groups[1].Value)
+            |> Set.ofSeq
+            |> Some)
+
+/// Paragraphs naming the typed actor's arrival by its phase without its version — one event, one
+/// spelling (`Phase 320`, `0.0.1-alpha.13`).
+let internal typedActorSpellingFaults (doc: string) : string list =
+    paragraphs doc
+    |> List.filter (fun p ->
+        p.Contains("Phase 320", StringComparison.Ordinal)
+        && not (p.Contains("0.0.1-alpha.13", StringComparison.Ordinal)))
+
+/// The members the contract's bulleted lists name as `**`Fuaran.Core.…`**`.
+let internal contractBulletMembers (contract: string) : string list =
+    Regex.Matches(contract, @"(?m)^- \*\*`(Fuaran\.Core\.[\w.]+)`\*\*")
+    |> Seq.map (fun m -> m.Groups[1].Value)
+    |> Seq.distinct
+    |> Seq.toList
+
+/// Of `names`, those no public-surface baseline carries.
+let internal absentFromBaselines (baselines: string) (names: string list) : string list =
+    names
+    |> List.filter (fun n ->
+        not (
+            [ "("; " "; "`"; "\n" ]
+            |> List.exists (fun after -> baselines.Contains(n + after, StringComparison.Ordinal))
+        ))
 
 // ---- the suite -----------------------------------------------------------------
 
@@ -451,15 +695,17 @@ let tests =
           }
 
           test
-              "a stamp naming an unreleased version names the DRAFT heading in STABILITY.md, and a released one an entry" {
+              "a stamp naming an unreleased version names the DRAFT heading in the release ledger, and a released one an entry" {
               let root = repoRoot ()
               let readme = File.ReadAllText(readmePath ())
-              let stability = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+              let ledger = PackageRosterTests.ledgerText (PackageRosterTests.ledgerFiles root)
               let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
 
+              Expect.isNonEmpty ledger "the release ledger was read"
+
               Expect.isEmpty
-                  (stampFaults (PackageRosterTests.standingVersion props) stability readme)
-                  "a README stamp must name a version STABILITY.md heads as what it is"
+                  (stampFaults (PackageRosterTests.standingVersion props) ledger readme)
+                  "a README stamp must name a version the release ledger heads as what it is"
           }
 
           test
@@ -595,14 +841,20 @@ let tests =
 
                   Expect.equal (Some core) ownPin "the README's Fable.Core version is Directory.Packages.props' pin"
 
+                  // The compiler version is a claim about another repository's pin. Where that checkout
+                  // is absent (every CI run) the claim cannot be compared, so the README must SAY so —
+                  // held here — and the run reports it rather than skipping: a skipped check reads as
+                  // a passing one in a green report.
+                  Expect.isTrue
+                      (readme.Replace("\r\n", "\n").Replace("\n", " ").Contains(unverifiedMarker))
+                      (sprintf "the README's Fable line marks its compiler version \"%s\"" unverifiedMarker)
+
                   match receivingManifest () with
                   | None ->
-                      skiptest (
-                          sprintf
-                              "the receiving Fable gate's checkout was not found (set %s to it), so the README's compiler version %s was compared with nothing"
-                              receivingDirVariable
-                              compiler
-                      )
+                      printfn
+                          "README Fable compiler version %s: UNVERIFIED on this run — the receiving gate's checkout was not found (set %s to it), as the README states"
+                          compiler
+                          receivingDirVariable
                   | Some manifest ->
                       Expect.equal
                           (fableToolPin (File.ReadAllText manifest))
@@ -629,4 +881,205 @@ let tests =
                   (fableCorePin """<PackageVersion Include="Fable.Core" Version="5.0" />""")
                   (Some "5.0")
                   "the package pin is read"
+          }
+
+          // ---- prose held to the tree (Phase 397) ------------------------------------
+
+          test "CONTRIBUTING and the README name the stages verify.ps1 runs, and no other" {
+              let root = repoRoot ()
+
+              match verifyStages (File.ReadAllText(Path.Combine(root, "verify.ps1"))) with
+              | Error e -> failtest e
+              | Ok(stages, optIn) ->
+                  Expect.isNonEmpty stages "verify.ps1's default stages were read"
+
+                  for doc in [ "CONTRIBUTING.md"; "README.md" ] do
+                      let text = File.ReadAllText(Path.Combine(root, doc))
+
+                      match documentedStages text with
+                      | None -> failtestf "%s has no `./verify.ps1   # <stages>` line" doc
+                      | Some named ->
+                          Expect.equal
+                              named
+                              stages
+                              (sprintf "%s's `./verify.ps1` line names the stages verify.ps1 runs, in order" doc)
+
+                  let readme = File.ReadAllText(readmePath ())
+
+                  for stage in optIn do
+                      Expect.isTrue
+                          (readme.Contains("./verify.ps1 -Proofs", StringComparison.Ordinal))
+                          (sprintf "the README documents the opt-in stage (%s) with its switch" stage)
+          }
+
+          test "the format command CONTRIBUTING names covers the directories the format check covers" {
+              let root = repoRoot ()
+              let dirs = checkedFormatDirs (File.ReadAllText(Path.Combine(root, "verify.ps1")))
+
+              Expect.isNonEmpty dirs "verify.ps1's format-check directories were read"
+
+              Expect.equal
+                  (documentedFormatDirs (File.ReadAllText(Path.Combine(root, "CONTRIBUTING.md"))))
+                  (Some dirs)
+                  "CONTRIBUTING.md's `dotnet fantomas …` names the directories `verify.ps1` checks"
+          }
+
+          test "the package feed STABILITY.md names is the one the publish workflow pushes to" {
+              let root = repoRoot ()
+
+              let sources =
+                  pushSources (File.ReadAllText(Path.Combine(root, ".github", "workflows", "publish-packages.yml")))
+
+              Expect.isNonEmpty sources "the publish workflow's `--source` was read"
+
+              Expect.equal
+                  (namedFeeds (File.ReadAllText(Path.Combine(root, "STABILITY.md"))))
+                  sources
+                  "STABILITY.md names exactly the feeds the publish workflow pushes to"
+          }
+
+          test "the friend-grant paragraph states the tree's counts and names every party" {
+              let root = repoRoot ()
+
+              let packable =
+                  PackageRosterTests.packableProjects root |> List.map _.PackageId |> Set.ofList
+
+              let grants = friendGrants root
+              Expect.isNonEmpty grants "the `InternalsVisibleTo` declarations under src/ were read"
+
+              Expect.isEmpty
+                  (friendGrantFaults (File.ReadAllText(Path.Combine(root, "STABILITY.md"))) packable grants)
+                  "STABILITY.md's friend-grant paragraph is the tree's"
+          }
+
+          test "the Fable exclusions STABILITY.md names are fable-exclusions.json's, and each is a project here" {
+              let root = repoRoot ()
+
+              let excluded =
+                  PackageRosterTests.declaredExclusions (File.ReadAllText(Path.Combine(root, "fable-exclusions.json")))
+                  |> Option.defaultWith (fun () -> failtest "fable-exclusions.json was not read")
+
+              let projects =
+                  Directory.GetDirectories(Path.Combine(root, "src"))
+                  |> Array.collect (fun d ->
+                      Array.append (Directory.GetFiles(d, "*.fsproj")) (Directory.GetFiles(d, "*.csproj")))
+                  |> Array.map Path.GetFileNameWithoutExtension
+                  |> Set.ofArray
+
+              Expect.isNonEmpty excluded "fable-exclusions.json declares at least one package"
+
+              Expect.isEmpty
+                  (Set.difference excluded projects)
+                  "every package fable-exclusions.json names is a project under src/"
+
+              Expect.equal
+                  (namedFableExclusions (File.ReadAllText(Path.Combine(root, "STABILITY.md"))))
+                  (Some excluded)
+                  "STABILITY.md's \"Off the surface today\" sentence names exactly fable-exclusions.json's packages"
+          }
+
+          test "the typed actor's arrival is spelt one way in STABILITY.md and docs/ADOPTION.md" {
+              let root = repoRoot ()
+
+              for doc in [ "STABILITY.md"; Path.Combine("docs", "ADOPTION.md") ] do
+                  let text = File.ReadAllText(Path.Combine(root, doc))
+
+                  Expect.isTrue
+                      (text.Contains("Phase 320", StringComparison.Ordinal))
+                      (sprintf "%s names the event" doc)
+
+                  Expect.isEmpty
+                      (typedActorSpellingFaults text)
+                      (sprintf "%s names Phase 320 without `0.0.1-alpha.13`" doc)
+          }
+
+          test "every member a contract bullet names is on a public-surface baseline" {
+              let root = repoRoot ()
+
+              let names =
+                  contractBulletMembers (File.ReadAllText(Path.Combine(root, "STABILITY.md")))
+
+              Expect.isNonEmpty names "the contract's member bullets were read"
+
+              let baselines =
+                  Directory.GetFiles(Path.Combine(root, "api"), "*.txt")
+                  |> Array.map File.ReadAllText
+                  |> String.concat "\n"
+
+              Expect.isEmpty
+                  (absentFromBaselines baselines names)
+                  "STABILITY.md names a member no api/ baseline carries — a member that left the repository belongs in the release ledger, not the contract"
+          }
+
+          test "the prose readers red what drifted (go-red over synthetic input)" {
+              let script =
+                  "dotnet tool restore\n    dotnet fantomas --check src tests samples\ndotnet build X.slnx\ndotnet run --project tests/T --no-build\ndotnet run --project samples/adoption\n    pwsh ./proofs/check.ps1 -Runs 3"
+
+              Expect.equal
+                  (verifyStages script)
+                  (Ok([ "format-check"; "build"; "test"; "sample" ], [ "the proof leg" ]))
+                  "the stages are read in order, the opt-in leg apart"
+
+              Expect.isError
+                  (verifyStages (script + "\ndotnet fable src"))
+                  "a command the reader does not name is red, so a new stage cannot pass undocumented"
+
+              Expect.equal
+                  (documentedStages
+                      "```\n./verify.ps1     # format-check + build + Fable-compile gate + test (the green gate)\n```")
+                  (Some [ "format-check"; "build"; "Fable-compile gate"; "test" ])
+                  "the drifted line Phase 397 corrected reads as the stages it named"
+
+              Expect.equal (checkedFormatDirs script) [ "src"; "tests"; "samples" ] "the format-check directories"
+
+              Expect.equal
+                  (documentedFormatDirs "(or `dotnet fantomas src tests`)")
+                  (Some [ "src"; "tests" ])
+                  "the drifted command reads as two directories"
+
+              Expect.equal
+                  (namedFeeds "published to `https://nuget.pkg.github.com/fuaran-ui/index.json`")
+                  (set [ "https://nuget.pkg.github.com/fuaran-ui/index.json" ])
+                  "a GitHub Packages feed is a feed this reader sees"
+
+              let contract =
+                  "A\n\n`Fuaran.Core.*` is eighteen packable assemblies. It grants `InternalsVisibleTo` in exactly one declaration — `A` to `B`; the one further declaration is a test's.\n"
+
+              let packable = set [ "A"; "B" ]
+
+              Expect.isNonEmpty
+                  (friendGrantFaults contract packable [ "A", "B"; "C", "Tests" ])
+                  "a packable count the tree does not have is red"
+
+              Expect.exists
+                  (friendGrantFaults
+                      (contract.Replace("eighteen", "three"))
+                      (Set.add "C" packable)
+                      [ "A", "B"; "A", "C"; "C", "Tests" ])
+                  (fun f -> f.Contains "exactly two declarations")
+                  "a grant count the tree does not have is red"
+
+              Expect.isEmpty
+                  (friendGrantFaults (contract.Replace("eighteen", "two")) packable [ "A", "B"; "C", "Tests" ])
+                  "the paragraph that matches the tree is green"
+
+              Expect.equal
+                  (namedFableExclusions
+                      "Prose. Off the surface today: `Fuaran.Core.Idl.Codegen` and `Fuaran.Core.CSharp` (a C# assembly). `Fuaran.Core.Other` is later.")
+                  (Some(set [ "Fuaran.Core.Idl.Codegen"; "Fuaran.Core.CSharp" ]))
+                  "the sentence's names are read, and the next sentence's are not"
+
+              Expect.equal
+                  (typedActorSpellingFaults
+                      "folded in (Phase 320, `0.0.1-alpha.13`).\n\nfolded into the hash since Phase 320, so")
+                  [ "folded into the hash since Phase 320, so" ]
+                  "the spelling without the version is red"
+
+              Expect.equal
+                  (absentFromBaselines
+                      "method Fuaran.Core.Memo.isMemoisable(Fuaran.Core.EffectClass) : System.Boolean\n"
+                      (contractBulletMembers
+                          "- **`Fuaran.Core.Memo.isMemoisable`** — kept\n- **`Fuaran.Core.DataFrame.cellString`** — moved"))
+                  [ "Fuaran.Core.DataFrame.cellString" ]
+                  "a member no baseline carries is red"
           } ]

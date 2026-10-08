@@ -24,9 +24,15 @@ module Fuaran.Core.Tests.PackageRosterTests
 //   2. No packable project sits outside `src/` — the SCOPE property 1's derivation assumes,
 //      checked rather than trusted. Without it a package added elsewhere is invisible to
 //      property 1 by being out of frame, which is the same drift wearing a different hat.
-//   3. Some entry header in STABILITY.md names the standing `<Version>`.
+//   3. Some entry header of the release ledger names the standing `<Version>`.
 //   4. No "no `vX.Y.Z` tag exists" sentence survives the tag it denies.
 //   5. Every release TAG at or above a declared floor has an entry header naming it.
+//   8. The release ledger's shape (Phase 397): one `docs/releases/<version>.md` per slot, each
+//      opening with its own heading, the index carrying every heading word for word with a link,
+//      every tag and the standing version with a file, DRAFT only on the standing version; the
+//      contract under its line ceiling and free of version entries; `Directory.Build.props` free
+//      of version history and pointing its stability record at the index; and every row of the
+//      contract's "Where sections moved" table resolving to a heading of the file it names.
 //   6. The README states no bare count of tests (Phase 233) — a figure nothing asserts is a
 //      claim the document cannot keep true; the suite's own census is docs/conformance-families.md.
 //   7. The post-push registry probe (`.github/scripts/probe-registry.ps1`, Phase 393) derives the
@@ -37,9 +43,11 @@ module Fuaran.Core.Tests.PackageRosterTests
 // that was cut, tagged, released and then left behind as `<Version>` moved on is invisible
 // to it: `v0.25.0` was tagged 2026-09-15 and this document carried no entry for it at all,
 // while property 3 read green against `0.26.0` the whole time. Quantifying over the tags
-// is what closes that, and the FLOOR is what keeps it honest — every release below
-// `0.25.0` predates this document's per-slot classes, so demanding entries for them would
-// demand invention rather than record.
+// is what closes that. The FLOOR kept it honest while the record lived in STABILITY.md: every
+// release below `0.25.0` predated the per-slot classes, so demanding entries for them would have
+// demanded invention rather than record. Since Phase 397 each of those tags has a ledger file
+// whose heading states only what the tag proves and whose body says no entry was written then,
+// so the floor covers every tag.
 //
 // Properties 4 and 5 read `git tag` LOCALLY, which is the honest limit: they answer "has
 // the release gesture been made in this clone", never "is this version published". A clone
@@ -236,11 +244,13 @@ let internal staleDraftSentences (tags: Set<string>) (lines: string list) : (int
             None)
 
 /// The oldest released slot the per-tag entry rule covers (Phase 205), as
-/// `(major, minor, patch)`. ONE named constant, because the number is a judgement — it is
-/// the oldest slot whose record can still be written from evidence — and a judgement spelt
-/// in two places is a judgement that will disagree with itself. STABILITY.md's versioning
-/// preamble states the same floor in prose; this is what the gate holds.
-let internal entryHeaderFloor = (0, 25, 0)
+/// `(major, minor, patch)`. ONE named constant, because the number is a judgement, and a
+/// judgement spelt in two places is a judgement that will disagree with itself. It was `0.25.0`,
+/// the oldest slot whose ENTRY could still be written from evidence; since Phase 397 every release
+/// tag has a ledger file whose heading states only what the tag proves (the version, the date,
+/// `released`), and a slot cut before the per-slot entries says so in its file rather than having
+/// an entry invented for it — so the rule covers every tag (DECISIONS.md D130).
+let internal entryHeaderFloor = (0, 0, 0)
 
 let private releaseTagRe = Regex(@"^v(\d+)\.(\d+)\.(\d+)$", RegexOptions.Compiled)
 
@@ -272,6 +282,275 @@ let internal tagsMissingEntryHeader (floor: int * int * int) (tags: Set<string>)
     |> List.sortBy fst
     |> List.filter (fun (_, t) -> (entryHeaderNaming (t.Substring 1) stability).IsNone)
     |> List.map snd
+
+// ---- the release ledger (Phase 397) ---------------------------------------
+//
+// STABILITY.md is the contract; `docs/releases/<version>.md` is the ledger, one file per version
+// slot, and `docs/releases/README.md` its index (DECISIONS.md D130). The per-tag properties above
+// read the ledger's slot files; what follows holds the ledger's own shape, so a slot without a
+// file, a file without an index entry, or an index heading that disagrees with its file is red.
+
+/// The ledger directory, repo-relative.
+let internal ledgerDir = "docs/releases"
+
+/// The contract's line ceiling: what an adopter reads in one sitting, and what keeps a release's
+/// entry from drifting back into it (D130).
+let internal contractLineCeiling = 1500
+
+/// One slot file of the ledger.
+type internal LedgerFile =
+    {
+        Version: string
+        /// Repo-relative, forward-slashed.
+        Path: string
+        Text: string
+    }
+
+let private levelTwoVersionRe =
+    Regex(@"^## (?<v>\d+\.\d+\.\d+)(?:\s|$)", RegexOptions.Compiled)
+
+let internal versionTriple (v: string) : int * int * int =
+    match v.Split('.') |> Array.map int with
+    | [| a; b; c |] -> (a, b, c)
+    | _ -> (0, 0, 0)
+
+/// Every `## <version> …` heading of a document, in order, trailing space trimmed.
+let internal versionHeadings (text: string) : (string * string) list =
+    text.Replace("\r\n", "\n").Split('\n')
+    |> Array.toList
+    |> List.choose (fun l ->
+        let m = levelTwoVersionRe.Match l
+
+        if m.Success then
+            Some(m.Groups["v"].Value, l.TrimEnd())
+        else
+            None)
+
+/// The ledger read as one text, newest slot first — the shape the per-tag properties read.
+let internal ledgerText (files: LedgerFile list) : string =
+    files |> List.map _.Text |> String.concat "\n"
+
+/// What is wrong with the ledger's shape: each slot file opens with its own version's level-2
+/// heading and carries no other; the index carries exactly the slot files' headings, newest first,
+/// each with a link to its file; every release tag and the standing `<Version>` has a file; a
+/// `DRAFT` heading names only the standing version; and nothing else sits in the directory.
+let internal ledgerFaults
+    (tags: Set<string>)
+    (standing: string option)
+    (index: string)
+    (files: LedgerFile list)
+    (strays: string list)
+    : string list =
+    let perFile =
+        files
+        |> List.collect (fun f ->
+            let firstLine =
+                f.Text.Replace("\r\n", "\n").Split('\n')
+                |> Array.tryFind (fun l -> l.Trim() <> "")
+                |> Option.defaultValue ""
+
+            let opens =
+                let m = levelTwoVersionRe.Match firstLine
+
+                if m.Success && m.Groups["v"].Value = f.Version then
+                    []
+                else
+                    [ sprintf
+                          "%s does not open with its slot's heading `## %s — …` (it opens '%s')"
+                          f.Path
+                          f.Version
+                          firstLine ]
+
+            let others =
+                versionHeadings f.Text
+                |> List.filter (fun (v, _) -> v <> f.Version)
+                |> List.map (fun (v, h) -> sprintf "%s carries a heading for another slot, %s: '%s'" f.Path v h)
+
+            let draft =
+                versionHeadings f.Text
+                |> List.filter (fun (v, h) ->
+                    v = f.Version
+                    && h.StartsWith(sprintf "## %s — DRAFT" v, StringComparison.Ordinal))
+                |> List.choose (fun (v, _) ->
+                    if Some v = standing then
+                        None
+                    else
+                        Some(
+                            sprintf
+                                "%s is headed DRAFT, and %s is not the standing <Version>: a draft heading turns when its slot is released or advanced"
+                                f.Path
+                                v
+                        ))
+
+            opens @ others @ draft)
+
+    let fileHeadings =
+        files
+        |> List.sortByDescending (fun f -> versionTriple f.Version)
+        |> List.choose (fun f ->
+            versionHeadings f.Text
+            |> List.tryFind (fun (v, _) -> v = f.Version)
+            |> Option.map snd)
+
+    let indexHeadings = versionHeadings index |> List.map snd
+
+    let indexFault =
+        if indexHeadings = fileHeadings then
+            []
+        else
+            let a = Set.ofList indexHeadings
+            let b = Set.ofList fileHeadings
+
+            let show label (xs: string seq) =
+                if Seq.isEmpty xs then
+                    []
+                else
+                    [ sprintf "%s:\n         %s" label (String.concat "\n         " xs) ]
+
+            let parts =
+                show "an index heading no slot file opens with" (Set.difference a b)
+                @ show "a slot file heading the index does not carry" (Set.difference b a)
+
+            [ sprintf
+                  "%s/README.md does not carry the slot files' headings word for word, newest first%s"
+                  ledgerDir
+                  (if parts.IsEmpty then
+                       " (the order differs)"
+                   else
+                       "\n       " + String.concat "\n       " parts) ]
+
+    let links =
+        files
+        |> List.filter (fun f -> not (index.Contains(sprintf "(%s.md)" f.Version, StringComparison.Ordinal)))
+        |> List.map (fun f -> sprintf "%s/README.md does not link `%s.md`" ledgerDir f.Version)
+
+    let have = files |> List.map _.Version |> Set.ofList
+
+    let missing =
+        let fromTags =
+            tags
+            |> Set.toList
+            |> List.choose (fun t -> releaseTagVersion t |> Option.map (fun _ -> t.Substring 1))
+
+        (fromTags @ Option.toList standing)
+        |> List.distinct
+        |> List.filter (have.Contains >> not)
+        |> List.sortBy versionTriple
+        |> List.map (fun v -> sprintf "%s has no ledger file: %s/%s.md is missing" v ledgerDir v)
+
+    let stray =
+        strays
+        |> List.map (fun s -> sprintf "%s/%s is neither the index nor a slot file named `<version>.md`" ledgerDir s)
+
+    perFile @ indexFault @ links @ missing @ stray
+
+/// GitHub's anchor for a heading: the text lower-cased, link targets and backslash escapes dropped,
+/// every character that is not a letter, digit, space, `-` or `_` removed, spaces made `-`.
+let internal slugBase (heading: string) : string =
+    let t = heading.TrimStart('#').Trim()
+
+    let t =
+        Regex.Replace(t, @"\[([^\]]*)\]\([^)]*\)", "$1").Replace("\\", "").ToLowerInvariant()
+
+    let kept =
+        t
+        |> Seq.filter (fun c -> Char.IsLetterOrDigit c || c = ' ' || c = '-' || c = '_')
+        |> Seq.toArray
+
+    String(kept).Replace(' ', '-')
+
+/// Every heading anchor of a document, numbered for duplicates as GitHub numbers them; fenced code
+/// is not read.
+let internal headingAnchors (text: string) : Set<string> =
+    let seen = Collections.Generic.Dictionary<string, int>()
+
+    let folder (fence: bool, acc: string list) (l: string) =
+        if l.TrimStart().StartsWith("```", StringComparison.Ordinal) then
+            not fence, acc
+        elif fence || not (Regex.IsMatch(l, @"^#{1,6} ")) then
+            fence, acc
+        else
+            let b = slugBase l
+
+            let n =
+                match seen.TryGetValue b with
+                | true, n -> n
+                | _ -> 0
+
+            seen[b] <- n + 1
+            fence, (if n = 0 then b else sprintf "%s-%d" b n) :: acc
+
+    text.Replace("\r\n", "\n").Split('\n')
+    |> Array.fold folder (false, [])
+    |> snd
+    |> Set.ofList
+
+let private tableAnchorRe =
+    Regex(@"`#(?<old>[^`]+)`(?:\s*→\s*`#(?<new>[^`]+)`)?", RegexOptions.Compiled)
+
+let private tableTargetRe =
+    Regex(@"^\| \[`(?<file>[^`]+)`\]\([^)]*\) \|", RegexOptions.Compiled)
+
+/// The rows of the contract's "Where sections moved" table: `(target file, old anchor, the anchor
+/// it has there)`. A row naming `this file` targets the contract itself.
+let internal movedAnchorRows (contract: string) : (string * string * string) list =
+    let lines = contract.Replace("\r\n", "\n").Split('\n')
+
+    match lines |> Array.tryFindIndex (fun l -> l = "## Where sections moved") with
+    | None -> []
+    | Some start ->
+        lines[start + 1 ..]
+        |> Array.takeWhile (fun l -> not (l.StartsWith("## ", StringComparison.Ordinal)))
+        |> Array.filter (fun l -> l.StartsWith("| ", StringComparison.Ordinal))
+        |> Array.toList
+        |> List.collect (fun l ->
+            let target =
+                if l.StartsWith("| this file |", StringComparison.Ordinal) then
+                    Some "STABILITY.md"
+                else
+                    let m = tableTargetRe.Match l
+                    if m.Success then Some m.Groups["file"].Value else None
+
+            match target with
+            | None -> []
+            | Some file ->
+                [ for m in tableAnchorRe.Matches l ->
+                      let old = m.Groups["old"].Value
+
+                      let there =
+                          if m.Groups["new"].Success then
+                              m.Groups["new"].Value
+                          else
+                              old
+
+                      file, old, there ])
+
+/// Every row of the moved-anchor table whose anchor is not a heading of the file it names, given
+/// each file's text (`None` for a file that does not exist); and every old anchor mapped twice.
+let internal movedAnchorFaults (read: string -> string option) (rows: (string * string * string) list) : string list =
+    let unresolved =
+        rows
+        |> List.choose (fun (file, old, there) ->
+            match read file with
+            | None -> Some(sprintf "`#%s` is mapped to %s, which does not exist" old file)
+            | Some text when not ((headingAnchors text).Contains there) ->
+                Some(sprintf "`#%s` is mapped to %s#%s, which is not a heading anchor there" old file there)
+            | Some _ -> None)
+
+    let twice =
+        rows
+        |> List.countBy (fun (_, old, _) -> old)
+        |> List.filter (fun (_, n) -> n > 1)
+        |> List.map (fun (old, n) -> sprintf "`#%s` is mapped %d times" old n)
+
+    unresolved @ twice
+
+/// Lines of `Directory.Build.props` that open a version-history note (`<!-- 0.12.0 (2026-08-21): …`)
+/// — the second ledger the props file kept by hand until Phase 397.
+let internal propsHistoryLines (props: string) : string list =
+    props.Replace("\r\n", "\n").Split('\n')
+    |> Array.toList
+    |> List.filter (fun l -> Regex.IsMatch(l, @"^\s*<!--\s*\d+\.\d+\.\d+\s*\(\d{4}-\d{2}-\d{2}\)"))
 
 // ---- the instruments ------------------------------------------------------
 
@@ -320,6 +599,35 @@ let private withRoot (f: string -> unit) =
 
 let private fileLines (path: string) =
     File.ReadAllText(path).Replace("\r\n", "\n").Split('\n') |> Array.toList
+
+/// The ledger's slot files under `root`, newest slot first, and the names of any other file in the
+/// directory beside the index.
+let internal readLedger (root: string) : LedgerFile list * string list =
+    let dir = Path.Combine(root, ledgerDir)
+
+    if not (Directory.Exists dir) then
+        [], []
+    else
+        let names = Directory.GetFiles dir |> Array.map Path.GetFileName |> Array.toList
+
+        let isSlot (n: string) =
+            Regex.IsMatch(n, @"^\d+\.\d+\.\d+\.md$")
+
+        let slots =
+            names
+            |> List.filter isSlot
+            |> List.map (fun n ->
+                let v = n.Substring(0, n.Length - 3)
+
+                { Version = v
+                  Path = ledgerDir + "/" + n
+                  Text = File.ReadAllText(Path.Combine(dir, n)).Replace("\r\n", "\n") })
+            |> List.sortByDescending (fun f -> versionTriple f.Version)
+
+        slots, names |> List.filter (fun n -> not (isSlot n) && n <> "README.md") |> List.sort
+
+/// The ledger's slot files under `root`, newest first.
+let internal ledgerFiles (root: string) : LedgerFile list = fst (readLedger root)
 
 // ---- the registry probe's roster (Phase 393) ------------------------------
 
@@ -522,20 +830,21 @@ let tests =
                           Directory.Delete(dir, true))
           }
 
-          test "STABILITY.md carries an entry header naming the standing <Version>" {
+          test "the release ledger carries an entry header naming the standing <Version>" {
               withRoot (fun root ->
                   let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
 
                   match standingVersion props with
                   | None -> failtest "Directory.Build.props declares no <Version>"
                   | Some version ->
-                      let stability = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+                      let ledger = ledgerText (ledgerFiles root)
 
-                      match entryHeaderNaming version stability with
+                      match entryHeaderNaming version ledger with
                       | Some _ -> ()
                       | None ->
                           failtestf
-                              "`<Version>` is `%s` and no STABILITY.md entry header names it.\n       Remedy: open the slot — a `## %s (draft)` header with the draft-slot preamble — and append this change's entry under it. The version is what tells a consumer what adopting it costs; a number with no entry says nothing."
+                              "`<Version>` is `%s` and no entry header of the release ledger (docs/releases/) names it.\n       Remedy: open the slot — docs/releases/%s.md headed `## %s — DRAFT` with the draft-slot preamble, and its index entry — and append this change's entry under it. The version is what tells a consumer what adopting it costs; a number with no entry says nothing."
+                              version
                               version
                               version)
           }
@@ -551,15 +860,19 @@ let tests =
                   | Ok tags ->
                       Expect.isNonEmpty (Set.toList tags) "`git tag --list` listed at least one tag"
 
-                      let lines = fileLines (Path.Combine(root, "STABILITY.md"))
+                      let stale =
+                          ledgerFiles root
+                          |> List.collect (fun f ->
+                              staleDraftSentences tags (f.Text.Split('\n') |> Array.toList)
+                              |> List.map (fun (n, v) -> f.Path, n, v))
 
-                      match staleDraftSentences tags lines with
+                      match stale with
                       | [] -> ()
                       | stale ->
                           let shown =
                               stale
-                              |> List.map (fun (n, v) ->
-                                  sprintf "STABILITY.md:%d says no `v%s` tag exists — it does" n v)
+                              |> List.map (fun (path, n, v) ->
+                                  sprintf "%s:%d says no `v%s` tag exists — it does" path n v)
                               |> String.concat "\n       "
 
                           failtestf
@@ -568,7 +881,7 @@ let tests =
                               shown)
           }
 
-          test "every release tag at or above the floor has a STABILITY entry header" {
+          test "every release tag at or above the floor has a release-ledger entry header" {
               // Phase 205. Property 3 asserts the STANDING version only, so a released slot
               // that `<Version>` has moved past is outside its frame entirely — which is
               // how `v0.25.0` came to be tagged with no entry while this file read green.
@@ -588,13 +901,13 @@ let tests =
                           covered
                           "at least one release tag sits at or above the floor — with none the comparison below would pass vacuously, which is the shape a mis-parsed tag would take"
 
-                      let stability = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+                      let ledger = ledgerText (ledgerFiles root)
 
-                      match tagsMissingEntryHeader entryHeaderFloor tags stability with
+                      match tagsMissingEntryHeader entryHeaderFloor tags ledger with
                       | [] -> ()
                       | missing ->
                           failtestf
-                              "%d released tag(s) at or above the floor have no STABILITY.md entry header: %s\n       Remedy: open a level-2 section whose header names the version — the shape the released slots use is '0.25.0 — released <date> as v0.25.0' — and record under it what shipped in that slot, each change classed. A released version with no entry tells a consumer nothing about what adopting it costs.\n       The floor is `entryHeaderFloor` in this file, and lowering it is a decision about which old slots can still be written from evidence, not a tidy-up."
+                              "%d released tag(s) at or above the floor have no release-ledger entry header: %s\n       Remedy: open docs/releases/<version>.md headed with the version — the shape the released slots use is '## 0.25.0 — released <date> as `v0.25.0`' — add its index entry, and record under it what shipped in that slot, each change classed. A released version with no entry tells a consumer nothing about what adopting it costs.\n       The floor is `entryHeaderFloor` in this file."
                               missing.Length
                               (String.concat ", " missing))
           }
@@ -631,6 +944,113 @@ let tests =
                               "%d package(s) on the declared Fable surface are absent from the README table: %s"
                               absent.Length
                               (String.concat ", " absent))
+          }
+
+          // ---- the release ledger (Phase 397) --------------------------------
+
+          test "the release ledger: every slot has its file, its index entry and its own heading" {
+              withRoot (fun root ->
+                  let files, strays = readLedger root
+                  let indexPath = Path.Combine(root, ledgerDir, "README.md")
+
+                  Expect.isTrue (File.Exists indexPath) "docs/releases/README.md, the ledger's index, exists"
+
+                  Expect.isNonEmpty
+                      files
+                      "the ledger holds at least one slot file — an empty read would make every clause vacuous"
+
+                  let tags =
+                      match gitTags root with
+                      | Ok tags -> tags
+                      | Error why ->
+                          // Without git the tag clause has nothing to read; the shape clauses still run.
+                          printfn "release-ledger tag clause SKIPPED: %s" why
+                          Set.empty
+
+                  let standing =
+                      standingVersion (File.ReadAllText(Path.Combine(root, "Directory.Build.props")))
+
+                  match ledgerFaults tags standing (File.ReadAllText indexPath) files strays with
+                  | [] -> ()
+                  | faults ->
+                      failtestf
+                          "%d release-ledger fault(s):\n       %s\n       Remedy: one file per version slot, docs/releases/<version>.md, opening with `## <version> — …`; its heading copied word for word into docs/releases/README.md, newest first, with a link to the file. A tagged slot is headed `released <date> as `v<version>``; only the standing <Version> is headed DRAFT."
+                          faults.Length
+                          (String.concat "\n       " faults))
+          }
+
+          test "STABILITY.md is the contract, held to the line ceiling" {
+              withRoot (fun root ->
+                  let lines = fileLines (Path.Combine(root, "STABILITY.md"))
+
+                  Expect.isTrue
+                      (lines |> List.exists (fun l -> l = "## Versioning policy"))
+                      "the contract was read — it carries its versioning policy"
+
+                  Expect.isLessThanOrEqual
+                      lines.Length
+                      contractLineCeiling
+                      (sprintf
+                          "STABILITY.md is %d lines, over the %d-line ceiling DECISIONS.md D130 sets. A release's entry belongs in its slot file, docs/releases/<version>.md; the contract keeps what every version is held to"
+                          lines.Length
+                          contractLineCeiling)
+
+                  Expect.isEmpty
+                      (versionHeadings (String.concat "\n" lines))
+                      "STABILITY.md carries no `## <version>` entry: every slot's entry is in the ledger")
+          }
+
+          test
+              "Directory.Build.props keeps <Version> and points the stability record at the ledger index, with no version history" {
+              withRoot (fun root ->
+                  let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
+
+                  Expect.isSome (standingVersion props) "the props file declares <Version>"
+
+                  Expect.isEmpty
+                      (propsHistoryLines props)
+                      "Directory.Build.props carries a version-history note — the history is the ledger's, docs/releases/<version>.md"
+
+                  let record =
+                      Regex.Match(props, @"<FuaranStabilityRecord>([^<]*)</FuaranStabilityRecord>")
+
+                  Expect.isTrue record.Success "the props file declares <FuaranStabilityRecord>"
+
+                  Expect.equal
+                      (record.Groups[1].Value.Trim())
+                      (ledgerDir + "/README.md")
+                      "the declared stability record is the ledger's index, which carries every slot's heading"
+
+                  Expect.isTrue
+                      (File.Exists(Path.Combine(root, record.Groups[1].Value.Trim())))
+                      "the declared stability record exists")
+          }
+
+          test "the moved-anchor table resolves: every old anchor is a heading of the file it names" {
+              withRoot (fun root ->
+                  let contract = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+                  let rows = movedAnchorRows contract
+
+                  Expect.isGreaterThan
+                      rows.Length
+                      0
+                      "the \"Where sections moved\" table was found and parsed — an empty read would pass vacuously"
+
+                  let read (file: string) =
+                      let path = Path.Combine(root, file)
+
+                      if File.Exists path then
+                          Some(File.ReadAllText path)
+                      else
+                          None
+
+                  match movedAnchorFaults read rows with
+                  | [] -> ()
+                  | faults ->
+                      failtestf
+                          "%d moved-anchor row(s) do not resolve:\n       %s\n       Remedy: the table is permanent — a heading that moves again is re-pointed in its row, never dropped from it."
+                          faults.Length
+                          (String.concat "\n       " faults))
           }
 
           // ---- the go-red controls ------------------------------------------
@@ -839,4 +1259,106 @@ let tests =
               Expect.isNone
                   (declaredExclusions """{"note":"nothing excluded yet"}""")
                   "a shape carrying no id array is a named skip too — a sibling's newer format must not redden this"
+          }
+
+          test "the ledger reader reds a missing file, a stray index row, a foreign heading and a stale DRAFT" {
+              let file v (text: string) =
+                  { Version = v
+                    Path = sprintf "%s/%s.md" ledgerDir v
+                    Text = text }
+
+              let files =
+                  [ file "0.3.0" "## 0.3.0 — DRAFT\n\nentries"
+                    file "0.2.0" "## 0.2.0 — released 2026-07-26 as `v0.2.0`\n\nrecord" ]
+
+              let index =
+                  "# Ledger\n\n## 0.3.0 — DRAFT\n\n[`0.3.0.md`](0.3.0.md)\n\n## 0.2.0 — released 2026-07-26 as `v0.2.0`\n\n[`0.2.0.md`](0.2.0.md)\n"
+
+              let tags = set [ "v0.2.0"; "v0.0.0-gate-probe" ]
+              let faults = ledgerFaults tags (Some "0.3.0")
+
+              Expect.isEmpty (faults index files []) "the synthetic ledger is the green shape"
+
+              Expect.exists
+                  (ledgerFaults (Set.add "v0.1.0" tags) (Some "0.3.0") index files [])
+                  (fun f -> f.Contains "0.1.0 has no ledger file")
+                  "a tag with no slot file is red"
+
+              Expect.exists
+                  (faults (index.Replace("## 0.2.0 — released", "## 0.2.0 — DRAFT released")) files [])
+                  (fun f -> f.Contains "does not carry the slot files' headings")
+                  "an index heading that disagrees with its file is red"
+
+              Expect.exists
+                  (faults (index.Replace("(0.2.0.md)", "(elsewhere.md)")) files [])
+                  (fun f -> f.Contains "does not link `0.2.0.md`")
+                  "an index entry without its link is red"
+
+              Expect.exists
+                  (faults index (files @ [ file "0.1.0" "## 0.1.0 — released 2026-07-01 as `v0.1.0`" ]) [])
+                  (fun f -> f.Contains "a slot file heading the index does not carry")
+                  "a slot file the index does not list is red"
+
+              Expect.exists
+                  (faults index [ file "0.3.0" "## 0.2.0 — DRAFT"; files[1] ] [])
+                  (fun f -> f.Contains "does not open with its slot's heading")
+                  "a file opening with another slot's heading is red"
+
+              Expect.exists
+                  (ledgerFaults tags (Some "0.4.0") index files [])
+                  (fun f -> f.Contains "is headed DRAFT, and 0.3.0 is not the standing <Version>")
+                  "a DRAFT heading on a slot that is no longer the standing version is red"
+
+              Expect.exists
+                  (faults index files [ "notes.txt" ])
+                  (fun f -> f.Contains "notes.txt is neither the index nor a slot file")
+                  "a stray file in the ledger directory is red"
+          }
+
+          test "the anchor reader numbers duplicates as GitHub does, and the table reader reds an unresolved row" {
+              Expect.equal
+                  (slugBase "## 0.36.0 — released 2026-10-08 as `v0.36.0`")
+                  "0360--released-2026-10-08-as-v0360"
+                  "an em dash leaves a double hyphen, and dots and backticks go"
+
+              Expect.equal
+                  (headingAnchors "## Class\n\n```\n## not a heading\n```\n### Class\n# Other")
+                  (set [ "class"; "class-1"; "other" ])
+                  "the second heading of one text is numbered; fenced code is not read"
+
+              let contract =
+                  "# C\n\n## Where sections moved\n\n| New home | Anchors |\n|---|---|\n| this file | `#old-name` → `#new-name` |\n| [`docs/releases/0.2.0.md`](docs/releases/0.2.0.md) | `#class`, `#gone` |\n\n## New name\n"
+
+              let rows = movedAnchorRows contract
+
+              Expect.equal
+                  rows
+                  [ "STABILITY.md", "old-name", "new-name"
+                    "docs/releases/0.2.0.md", "class", "class"
+                    "docs/releases/0.2.0.md", "gone", "gone" ]
+                  "both row shapes parse, the renamed anchor carrying its new name"
+
+              let read =
+                  function
+                  | "STABILITY.md" -> Some contract
+                  | "docs/releases/0.2.0.md" -> Some "## 0.2.0 — x\n### Class"
+                  | _ -> None
+
+              Expect.equal
+                  (movedAnchorFaults read rows)
+                  [ "`#gone` is mapped to docs/releases/0.2.0.md#gone, which is not a heading anchor there" ]
+                  "only the anchor its file does not carry is red"
+
+              Expect.exists
+                  (movedAnchorFaults read [ "docs/releases/9.9.9.md", "x", "x" ])
+                  (fun f -> f.Contains "which does not exist")
+                  "a row naming a missing file is red"
+
+              Expect.isNonEmpty
+                  (propsHistoryLines "<!-- 0.12.0 (2026-08-21): a note -->\n<Version>0.12.0</Version>")
+                  "a version-history note in the props file is found"
+
+              Expect.isEmpty
+                  (propsHistoryLines "<!-- Phase 294: an incomplete match -->")
+                  "an ordinary comment is not history"
           } ]

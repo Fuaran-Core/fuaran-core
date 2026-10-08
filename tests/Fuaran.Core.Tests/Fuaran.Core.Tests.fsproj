@@ -285,9 +285,11 @@
          root and the project files off disk; it references no other test module. -->
     <Compile Include="FableSmokeCompletenessTests.fs" />
     <!-- Phase 199 — the package roster held to the tree: the README table's rows equal the
-         packable projects under src/, nothing packable sits outside that scope, STABILITY.md
-         carries an entry header naming the standing <Version>, and no draft-slot preamble
-         denies a tag the repository holds. Spawns git through ChildProcess.fs above and
+         packable projects under src/, nothing packable sits outside that scope, the release
+         ledger (docs/releases/, Phase 397) carries an entry header naming the standing <Version>,
+         and no draft-slot preamble denies a tag the repository holds; since Phase 397 also the
+         ledger's shape, the contract's line ceiling, the props file free of version history and
+         the moved-anchor table resolving. Spawns git through ChildProcess.fs above and
          reads no other test module, so the position is free; appended at the end of the
          list (append-only registration). -->
     <Compile Include="PackageRosterTests.fs" />
@@ -354,11 +356,13 @@
     <!-- Phase 254 — every package carries its XML documentation file (read from the suite's own
          output, where each referenced project's file is copied), and every README claim of a surface
          carries the version it arrived in, derived from api/ at each release tag, with the README's
-         Fable line held to the pins. Read PackageRosterTests.fs, SiblingCorpus.fs, ChildProcess.fs and
+         Fable line held to the pins; since Phase 397 also the prose claims of CONTRIBUTING.md,
+         README.md, STABILITY.md and docs/ADOPTION.md held to the files they describe. Read PackageRosterTests.fs, SiblingCorpus.fs, ChildProcess.fs and
          Snapshots.fs; appended (append-only). -->
     <Compile Include="PackageDocsTests.fs" />
     <Compile Include="ReadmeClaimsTests.fs" />
-    <!-- Phase 392 — "released" is a gate output: every tag at or above the entry floor is headed
+    <!-- Phase 392 — "released" is a gate output, read from the release ledger's slot files since
+         Phase 397: every tag at or above the entry floor is headed
          `released … as v<v>` (DRAFT over a tag is red by name), every released heading has its tag,
          the untagged standing version is headed DRAFT, and every released slot from 0.31.0 names its
          receiving-gate run in a fixed grammar. Reads PackageRosterTests.fs, ChildProcess.fs and
