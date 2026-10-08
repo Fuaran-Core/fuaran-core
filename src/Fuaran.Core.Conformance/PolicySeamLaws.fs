@@ -40,7 +40,7 @@ module internal PolicySeamLaws =
 
         let pipelineAdmits =
             LawKit.LawCell
-                "a pipeline evaluated over either registry's lookup admits each Invoke through the registry's policy: a denied one is EvalPolicyRefused naming its gate, a parked one EvalPolicyRefused with ApprovalRequired, observers told, and its body never runs"
+                "a pipeline evaluated over either registry's lookup admits each Invoke through the registry's policy: a denied one is PipelineEvalError.EvalPolicyRefused naming its gate, a parked one PipelineEvalError.EvalPolicyRefused with ApprovalRequired, observers told, and its body never runs"
 
         let decisions =
             [ PolicyDecision.Allow
@@ -282,9 +282,15 @@ module internal PolicySeamLaws =
                 let wanted: Result<Map<string, int>, PipelineEvalError> =
                     match expected with
                     | PolicyDecision.Allow -> Ok(Map.ofList [ "s", n; "i", n ])
-                    | PolicyDecision.NeedsApproval -> Error(EvalPolicyRefused("i", ApprovalRequired gateName))
+                    | PolicyDecision.NeedsApproval ->
+                        Error(PipelineEvalError.EvalPolicyRefused("i", ApprovalRequired gateName))
                     | PolicyDecision.Deny g ->
-                        Error(EvalPolicyRefused("i", PolicyRefused(gateName, g.Message, g.Alternatives)))
+                        Error(
+                            PipelineEvalError.EvalPolicyRefused(
+                                "i",
+                                PolicyRefused(gateName, g.Message, g.Alternatives)
+                            )
+                        )
 
                 pipelineAdmits.Check(
                     viaCap = wanted

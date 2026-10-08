@@ -326,7 +326,7 @@ let private esc (s: string) : string = Json.render (JStr s)
 let private encInt (n: int) = Json.render (JInt n)
 
 let private decInt (s: string) : Result<int, string> =
-    Decode.parse s |> Result.bind Decode.asInt
+    Decode.parse s |> Result.bind (Decoder.describing Decoder.int)
 
 let private labels =
     [ "clock"; "random"; "clock+random"; "network"; OpStream.deterministicTag ]

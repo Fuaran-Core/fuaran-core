@@ -8,7 +8,6 @@ ctor Fuaran.Core.ArtifactWitness`2..ctor(Fuaran.Core.NodeWitness`2<!0, !1>, Fuar
 ctor Fuaran.Core.Capability..ctor(System.String, Fuaran.Core.Signature, Fuaran.Core.Placement)
 ctor Fuaran.Core.CapabilityLookup..ctor(Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>)
 ctor Fuaran.Core.CapabilityPipeline..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>)
-ctor Fuaran.Core.CapabilityRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>, Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>)
 ctor Fuaran.Core.EffectClass..ctor(Fuaran.Core.HostEffect, Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>)
 ctor Fuaran.Core.FunctionEntry..ctor(Fuaran.Core.Capability, System.String)
 ctor Fuaran.Core.HandlerBinding`1..ctor(!0, Fuaran.Core.EffectClass)
@@ -240,11 +239,6 @@ method Fuaran.Core.PolicyDecisionModule.guidance(Fuaran.Core.PolicyDecision) : M
 method Fuaran.Core.PolicyDecisionModule.join(Fuaran.Core.PolicyDecision, Fuaran.Core.PolicyDecision) : Fuaran.Core.PolicyDecision
 method Fuaran.Core.PolicyDecisionModule.meet(Fuaran.Core.PolicyDecision, Fuaran.Core.PolicyDecision) : Fuaran.Core.PolicyDecision
 method Fuaran.Core.PolicyDecisionModule.rank(Fuaran.Core.PolicyDecision) : System.Int32
-method Fuaran.Core.Registry.dispatchWithArgs`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ArgValue>>, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
-method Fuaran.Core.Registry.dispatch`1(Fuaran.Core.CapabilityRegistry, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Capability, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Deferred`1<!!0>>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Deferred`1<!!0>, Fuaran.Core.InvokeError>
-method Fuaran.Core.Registry.enumerate(Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Capability>
-method Fuaran.Core.Registry.register(Fuaran.Core.Capability, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.CapabilityRegistry, Fuaran.Core.InvokeError>
-method Fuaran.Core.Registry.tryFind(System.String, Fuaran.Core.CapabilityRegistry) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>
 method Fuaran.Core.RegistryPolicyModule.combine`2(Fuaran.Core.RegistryPolicy`2<!!0, !!1>, Fuaran.Core.RegistryPolicy`2<!!0, !!1>) : Fuaran.Core.RegistryPolicy`2<!!0, !!1>
 method Fuaran.Core.RegistryPolicyModule.decideNamed`2(Fuaran.Core.RegistryPolicy`2<!!0, !!1>, !!0, !!1) : System.Tuple`2<System.String, Fuaran.Core.PolicyDecision>
 method Fuaran.Core.RegistryPolicyModule.decide`2(Fuaran.Core.RegistryPolicy`2<!!0, !!1>, !!0, !!1) : Fuaran.Core.PolicyDecision
@@ -278,7 +272,6 @@ property Fuaran.Core.EffectCodec.hostDecoder : Microsoft.FSharp.Core.FSharpFunc`
 property Fuaran.Core.EffectCodec.members : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
 property Fuaran.Core.FunctionRegistryModule.empty : Fuaran.Core.FunctionRegistry { get }
 property Fuaran.Core.HoleKindModule.tags : Microsoft.FSharp.Collections.FSharpList`1<System.String> { get }
-property Fuaran.Core.Registry.empty : Fuaran.Core.CapabilityRegistry { get }
 property Fuaran.Core.SigEntry.HoleKind : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.HoleKind> { get }
 record-field Fuaran.Core.ArtifactWitness`2.Bind #4 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.Arg`1<!0>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, System.String>>>>
 record-field Fuaran.Core.ArtifactWitness`2.Effect #3 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.EffectClass>
@@ -292,8 +285,6 @@ record-field Fuaran.Core.CapabilityLookup.Known #1 : Microsoft.FSharp.Collection
 record-field Fuaran.Core.CapabilityLookup.Policy #2 : Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>
 record-field Fuaran.Core.CapabilityLookup.TryFind #0 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Capability>>
 record-field Fuaran.Core.CapabilityPipeline.Nodes #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PipelineNode>
-record-field Fuaran.Core.CapabilityRegistry.Capabilities #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Capability>
-record-field Fuaran.Core.CapabilityRegistry.Policy #1 : Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Capability, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>
 record-field Fuaran.Core.EffectClass.Determinism #1 : Microsoft.FSharp.Collections.FSharpSet`1<Fuaran.Core.DeterminismFactor>
 record-field Fuaran.Core.EffectClass.Host #0 : Fuaran.Core.HostEffect
 record-field Fuaran.Core.FunctionEntry.Capability #0 : Fuaran.Core.Capability
@@ -473,7 +464,6 @@ type Fuaran.Core.PolicyDenial`1 (record)
 type Fuaran.Core.PolicyGate`2 (record)
 type Fuaran.Core.ReadPolicy (union)
 type Fuaran.Core.ReadPolicy+Tags (type)
-type Fuaran.Core.Registry (module)
 type Fuaran.Core.RegistryPolicyModule (module)
 type Fuaran.Core.RegistryPolicy`2 (record)
 type Fuaran.Core.SigEntry (record)

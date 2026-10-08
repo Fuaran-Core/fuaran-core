@@ -808,8 +808,8 @@ let tests =
                     Major = Int32.MaxValue
                     Minor = Int32.MaxValue }
 
-              let additive = Versioning.Additive [ "x" ]
-              let breaking = Versioning.Breaking([ "x" ], [])
+              let additive = Versioning.Evolution.Additive [ "x" ]
+              let breaking = Versioning.Evolution.Breaking([ "x" ], [])
 
               Expect.equal (Versioning.bump top additive) top "the minor stays, it does not wrap negative"
               Expect.equal (Versioning.bump top breaking) top "the major stays"
@@ -817,7 +817,7 @@ let tests =
               Expect.isError (Versioning.tryBump top breaking) "for both counters"
 
               Expect.equal
-                  (Versioning.tryBump top (Versioning.Additive []))
+                  (Versioning.tryBump top (Versioning.Evolution.Additive []))
                   (Ok top)
                   "a no-op bumps nothing and refuses nothing"
 

@@ -242,8 +242,10 @@ module Artifact =
         else
             [ "annotations", annotationBlock a ]
 
-    /// Field lists keep their AUTHORED order (see the module's ordering contract).
-    let private fieldsJson (fs: IdlField list) : JVal =
+    /// Field lists keep their AUTHORED order (see the module's ordering contract). Internal since
+    /// Phase 403: the support document renders a projected record's declared fields with it, so a
+    /// field reads the same in both documents of one triple.
+    let internal fieldsJson (fs: IdlField list) : JVal =
         fs
         |> List.map (fun f ->
             JObj(
@@ -925,7 +927,9 @@ module Artifact =
     let private readAnnotations (owner: JVal) : Result<Annotations, DecodeError> =
         Decoder.fieldOr "annotations" Annotations.Empty readAnnotationBlock owner
 
-    let private readField (v: JVal) : Result<IdlField, DecodeError> =
+    /// One field object — internal since Phase 403, the support document's reader of a projected
+    /// record's declared fields.
+    let internal readField (v: JVal) : Result<IdlField, DecodeError> =
         strAt "name" v
         |> Result.bind (fun name ->
             match Decoder.tryMember "type" v, Decoder.tryMember "optionality" v with

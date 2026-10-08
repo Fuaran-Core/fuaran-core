@@ -18,15 +18,25 @@ let rec private encodeNode (n: RNode) : JVal =
           "value", JStr n.Value
           "children", JArr(n.Children |> List.map encodeNode) ]
 
+/// Every item of a JSON array through `d`, stopping at the first refusal — the string-error
+/// `Decode.mapList` this file used until it left at `1.0.0` (Phase 386), kept local to the test.
+let private itemsThrough (d: JVal -> Result<'T, string>) (el: JVal) : Result<'T list, string> =
+    let rec go acc xs =
+        match xs with
+        | [] -> Ok(List.rev acc)
+        | x :: rest -> d x |> Result.bind (fun v -> go (v :: acc) rest)
+
+    Decoder.describing Decoder.items el |> Result.bind (go [])
+
 let rec private decodeNode (el: JVal) : Result<RNode, string> =
-    Decode.kindOf el
+    Decoder.describing (Decoder.field "kind" Decoder.str) el
     |> Result.bind (fun kind ->
-        Decode.strField "id" el
+        Decoder.describing (Decoder.field "id" Decoder.str) el
         |> Result.bind (fun id ->
-            Decode.strField "value" el
+            Decoder.describing (Decoder.field "value" Decoder.str) el
             |> Result.bind (fun value ->
-                Decode.getProp "children" el
-                |> Result.bind (Decode.mapList decodeNode)
+                Decoder.describing (Decoder.field "children" Decoder.json) el
+                |> Result.bind (itemsThrough decodeNode)
                 |> Result.map (fun kids ->
                     { Id = id
                       Kind = kind
@@ -48,7 +58,9 @@ let private tolerantCodec: Corpus.Codec<Versioning.Decoded<RNode>> =
       Decode =
         fun s ->
             Decode.parse s
-            |> Result.bind (Versioning.decodeTolerant Decode.kindOf isKnown decodeNode) }
+            |> Result.bind (
+                Versioning.decodeTolerant (Decoder.describing (Decoder.field "kind" Decoder.str)) isKnown decodeNode
+            ) }
 
 [<Tests>]
 let tests =
@@ -173,7 +185,12 @@ let tests =
 
               match
                   Decode.parse childWire
-                  |> Result.bind (Versioning.decodeTolerant Decode.kindOf isKnown decodeNode)
+                  |> Result.bind (
+                      Versioning.decodeTolerant
+                          (Decoder.describing (Decoder.field "kind" Decoder.str))
+                          isKnown
+                          decodeNode
+                  )
               with
               | Ok(Versioning.Unknown u) ->
                   Expect.equal (Canon.render u.Payload) childWire "child payload preserved byte-for-byte"
@@ -199,18 +216,21 @@ let tests =
               let removal = Set.ofList [ "para" ]
               let rename = Set.ofList [ "para"; "panel" ] // section → panel
 
-              Expect.equal (Versioning.classify v1 additive) (Versioning.Additive [ "callout" ]) "added only ⇒ Additive"
+              Expect.equal
+                  (Versioning.classify v1 additive)
+                  (Versioning.Evolution.Additive [ "callout" ])
+                  "added only ⇒ Additive"
 
               Expect.equal
                   (Versioning.classify v1 removal)
-                  (Versioning.Breaking([ "section" ], []))
+                  (Versioning.Evolution.Breaking([ "section" ], []))
                   "removed ⇒ Breaking"
 
               match Versioning.classify v1 rename with
-              | Versioning.Breaking(removed, added) ->
+              | Versioning.Evolution.Breaking(removed, added) ->
                   Expect.equal removed [ "section" ] "rename removes the old tag"
                   Expect.equal added [ "panel" ] "rename adds the new tag"
-              | Versioning.Additive _ -> failtest "a rename is breaking"
+              | Versioning.Evolution.Additive _ -> failtest "a rename is breaking"
 
           testCase "bump: additive bumps minor, breaking bumps major and resets minor"
           <| fun _ ->
@@ -219,15 +239,15 @@ let tests =
                     Versioning.Major = 1
                     Versioning.Minor = 3 }
 
-              Expect.equal (Versioning.bump p (Versioning.Additive [])) p "no-op additive ⇒ unchanged"
+              Expect.equal (Versioning.bump p (Versioning.Evolution.Additive [])) p "no-op additive ⇒ unchanged"
 
               Expect.equal
-                  (Versioning.bump p (Versioning.Additive [ "callout" ]))
+                  (Versioning.bump p (Versioning.Evolution.Additive [ "callout" ]))
                   { p with Versioning.Minor = 4 }
                   "additive ⇒ minor+1"
 
               Expect.equal
-                  (Versioning.bump p (Versioning.Breaking([ "section" ], [])))
+                  (Versioning.bump p (Versioning.Evolution.Breaking([ "section" ], [])))
                   { p with
                       Versioning.Major = 2
                       Versioning.Minor = 0 }

@@ -1152,7 +1152,7 @@ const cEveryOf = (read) => {
                   Kinds = kinds
                   Unions = unions
                   Records = records
-                  Projected = Set.empty }
+                  Projections = Map.empty }
 
             let has r = List.contains r requests
 
@@ -1164,7 +1164,7 @@ const cEveryOf = (read) => {
             // mixing a node list with other children) and its derivations, texts discarded.
             let admitted =
                 (if publicAccess then
-                     FSharpCodec.witnessDecl true msg kinds |> Result.map ignore
+                     FSharpCodec.witnessDecl true Map.empty msg kinds |> Result.map ignore
                  else
                      Ok())
                 |> Result.bind (fun () -> FSharpDerive.derivedDecl ctx requests |> Result.map ignore)

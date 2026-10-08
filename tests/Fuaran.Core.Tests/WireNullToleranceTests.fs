@@ -96,10 +96,13 @@ let tests =
               match Decode.parseTolerantOfNull doc with
               | Error m -> failtestf "tolerant decode failed: %s" m
               | Ok el ->
-                  Expect.equal (Decode.strField "a" el) (Ok "x") "the present member decodes"
+                  Expect.equal
+                      (Decoder.describing (Decoder.field "a" Decoder.str) el)
+                      (Ok "x")
+                      "the present member decodes"
 
                   Expect.equal
-                      (Decode.getProp "b" el)
+                      (Decoder.describing (Decoder.field "b" Decoder.json) el)
                       (Error "missing property: b")
                       "the erased member reads exactly as an omitted one"
 

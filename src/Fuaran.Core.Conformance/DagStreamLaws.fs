@@ -3,6 +3,16 @@ namespace Fuaran.Core
 /// The DAG's families: the DAG laws, the reachability index (Phase 289), checkpoints, lanes and the
 /// DAG break-reason fixtures — `StreamLaws` until the Phase 388 split along its banners.
 module internal DagStreamLaws =
+
+    /// A DAG over `nodes` through `Dag.ofNodes` (Phase 386: the constructor is private). Every map a
+    /// law below forges is keyed by its nodes' own ids — a forgery here tampers a node's CONTENT,
+    /// which is what `firstBreak` must catch — so the key-mismatch refusal cannot arise; reaching it
+    /// is a defect in the law, raised as one.
+    let private dagOf (nodes: Map<string, DagNode<'Op>>) : Dag.T<'Op> =
+        match Dag.ofNodes nodes with
+        | Ok dag -> dag
+        | Error m -> invalidOp (sprintf "a forged DAG filed a node under %s that carries id %s" m.Key m.NodeId)
+
     /// Op-DAG laws (Phase 07): **verifyDag accepts an intact DAG**, **replayTo is
     /// deterministic** (the total topo order ⇒ the same head replays to the same state), and
     /// **verifyDag detects a tampered node**. A domain that adopts the branching op-DAG runs
@@ -81,7 +91,7 @@ module internal DagStreamLaws =
             match LawKit.drawDistinct rng gen.Op (fun o -> sw.Encode tnode.Op <> sw.Encode o) with
             | None -> ()
             | Some newOp ->
-                let forged = { Dag.T.Nodes = Map.add tid { tnode with Op = newOp } dag.Nodes }
+                let forged = dagOf (Map.add tid { tnode with Op = newOp } dag.Nodes)
 
                 tamper.Check(not (Dag.verifyDag hashFn sw forged), fun () -> at "a tampered DAG node was not detected")
 
@@ -522,13 +532,13 @@ module internal DagStreamLaws =
                         Parents = parents }
 
                 let forged: Dag.T<'Op> =
-                    { Nodes =
-                        [ forgedNode "cyc-x" [ "cyc-y"; first ]
-                          forgedNode "cyc-y" [ "cyc-x" ]
-                          forgedNode "cyc-z" [ "cyc-x" ]
-                          forgedNode "cyc-w" [ last ]
-                          forgedNode "cyc-d" [ "cyc-missing" ] ]
-                        |> List.fold (fun m (k, v) -> Map.add k v m) dag.Nodes }
+                    [ forgedNode "cyc-x" [ "cyc-y"; first ]
+                      forgedNode "cyc-y" [ "cyc-x" ]
+                      forgedNode "cyc-z" [ "cyc-x" ]
+                      forgedNode "cyc-w" [ last ]
+                      forgedNode "cyc-d" [ "cyc-missing" ] ]
+                    |> List.fold (fun m (k, v) -> Map.add k v m) dag.Nodes
+                    |> dagOf
 
                 let forgedIds = ids @ [ "cyc-x"; "cyc-y"; "cyc-z"; "cyc-w"; "cyc-d"; "cyc-missing" ]
                 let forgedReach = Dag.Reach.ofDag forged
@@ -931,9 +941,7 @@ module internal DagStreamLaws =
                             | Some fresh ->
                                 opForged <- opForged + 1
 
-                                let forged =
-                                    { small with
-                                        Nodes = Map.add victim { n with Op = fresh } small.Nodes }
+                                let forged = dagOf (Map.add victim { n with Op = fresh } small.Nodes)
 
                                 tamperCell.Check(
                                     fails cp2 forged,
@@ -1288,7 +1296,7 @@ module internal DagStreamLaws =
 
                 // a second lane file holding a node of this lane: identically, and with its op changed
                 let held = tipNode
-                let copy = "zz-copy", Dag.toJsonl sw.Encode { Nodes = Map.ofList [ held.Id, held ] }
+                let copy = "zz-copy", Dag.toJsonl sw.Encode (dagOf (Map.ofList [ held.Id, held ]))
 
                 collisionCell.Check(
                     renderLoad (Dag.loadLanes sw (texts @ [ copy ])) = Ok(render store),
@@ -1300,7 +1308,7 @@ module internal DagStreamLaws =
                     collided <- collided + 1
 
                     let forged =
-                        "zz-forged", Dag.toJsonl sw.Encode { Nodes = Map.ofList [ held.Id, { held with Op = op } ] }
+                        "zz-forged", Dag.toJsonl sw.Encode (dagOf (Map.ofList [ held.Id, { held with Op = op } ]))
 
                     let expected =
                         Error(
@@ -1422,7 +1430,7 @@ module internal DagStreamLaws =
             | Some op ->
                 let tampered =
                     { store with
-                        Dag = { Nodes = Map.add victim { vNode with Op = op } dag.Nodes } }
+                        Dag = dagOf (Map.add victim { vNode with Op = op } dag.Nodes) }
 
                 let lane = store.LaneOf.[victim]
 
@@ -1456,7 +1464,7 @@ module internal DagStreamLaws =
                     |> List.fold (fun acc r -> Set.union acc (Dag.ancestorsOf dag r)) Set.empty
 
                 let pruned: Dag.T<'Op> =
-                    { Nodes = dag.Nodes |> Map.filter (fun id _ -> not (List.contains id dropped)) }
+                    dagOf (dag.Nodes |> Map.filter (fun id _ -> not (List.contains id dropped)))
 
                 pruneCell.Check(
                     (dropped = (ids |> List.filter (fun id -> not (Set.contains id kept))))
@@ -1584,8 +1592,7 @@ module internal DagStreamLaws =
             // the content id exists to catch, and it is precisely not a rewrite.
             let tid, tnode = dag.Nodes |> Map.toList |> List.head
 
-            let tampered =
-                { Dag.T.Nodes = Map.add tid { tnode with Op = tnode.Op + 1000 } dag.Nodes }
+            let tampered = dagOf (Map.add tid { tnode with Op = tnode.Op + 1000 } dag.Nodes)
 
             match reasonOf "content-id" at (Dag.firstBreak hashFn sw tampered) with
             | Some r -> seen <- Set.add (DagBreakReason.toString r) seen
@@ -1594,7 +1601,7 @@ module internal DagStreamLaws =
             // missing parent: delete the genesis node that `a` and `b` both name. Every surviving
             // node's id still recomputes from its own fields, so the content-id check passes and the
             // parent check is the one that fires — the only way to reach that arm.
-            let orphaned = { Dag.T.Nodes = Map.remove g dag.Nodes }
+            let orphaned = dagOf (Map.remove g dag.Nodes)
 
             match reasonOf "missing-parent" at (Dag.firstBreak hashFn sw orphaned) with
             | Some r -> seen <- Set.add (DagBreakReason.toString r) seen

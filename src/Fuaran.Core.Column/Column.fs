@@ -1288,6 +1288,7 @@ type SchemaError =
 /// A compatibility verdict for a schema change relative to the columns a consumer actually depends on
 /// (Phase 33) — the data-strand analogue of `verifyChain` for the op-stream. Recoverable + enumerated
 /// (GP5): `Breaking` / `Unknown` name their reasons.
+[<RequireQualifiedAccess>]
 type SchemaCompat =
     /// No depended-on column was removed, and every depended-on retype is a safe widening.
     | Compatible
@@ -1435,8 +1436,8 @@ module Schema =
                 + " (not a safe widening)")
 
         match removedDep @ badRetype with
-        | [] -> Compatible
-        | reasons -> Breaking reasons
+        | [] -> SchemaCompat.Compatible
+        | reasons -> SchemaCompat.Breaking reasons
 
     // A DELIBERATE COPY of `Hash.fnv1a` (`Fuaran.Core.Tree`), kept because `Column` references only
     // `Wire` and taking a `Tree` dependency to reach one 8-line function would add a package edge

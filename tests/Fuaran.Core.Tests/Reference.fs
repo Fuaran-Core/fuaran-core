@@ -153,8 +153,10 @@ module Counter =
         let parsed =
             Decode.parse s
             |> Result.bind (fun el ->
-                Decode.kindOf el
-                |> Result.bind (fun k -> Decode.intField "n" el |> Result.map (fun n -> k, n)))
+                Decoder.describing (Decoder.field "kind" Decoder.str) el
+                |> Result.bind (fun k ->
+                    Decoder.describing (Decoder.field "n" Decoder.int) el
+                    |> Result.map (fun n -> k, n)))
 
         match parsed with
         | Ok("inc", n) -> Ok(Inc n)

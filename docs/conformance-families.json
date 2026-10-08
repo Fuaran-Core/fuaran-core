@@ -30,35 +30,9 @@
       "refusal": "drawn"
     },
     {
-      "id": "Conformance.aiSurfaceLaws",
-      "module": "Conformance",
-      "entry": "aiSurfaceLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["AiSurfaceWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
       "id": "Conformance.aiSurfaceLawsAt",
       "module": "Conformance",
       "entry": "aiSurfaceLawsAt",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["AiSurfaceWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
-      "id": "Conformance.aiSurfaceLawsUnderKitPolicy",
-      "module": "Conformance",
-      "entry": "aiSurfaceLawsUnderKitPolicy",
       "package": "Fuaran.Core.Conformance",
       "witness": ["AiSurfaceWitness"],
       "optIn": true,
@@ -80,19 +54,6 @@
       "cases": "1800",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
-    },
-    {
-      "id": "Conformance.attestationLaws",
-      "module": "Conformance",
-      "entry": "attestationLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["StreamWitness", "StreamGen", "IAttestationSink"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1000",
-      "adequacy": "guarded-reached",
-      "refusal": "built"
     },
     {
       "id": "Conformance.attestationLawsAt",
@@ -160,19 +121,6 @@
       "refusal": "drawn"
     },
     {
-      "id": "Conformance.capabilityLawsWith",
-      "module": "Conformance",
-      "entry": "capabilityLawsWith",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["CapabilitySeamWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "900",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
       "id": "Conformance.capabilityPipelineIncrementalLaws",
       "module": "Conformance",
       "entry": "capabilityPipelineIncrementalLaws",
@@ -202,19 +150,6 @@
       "id": "Conformance.capabilityPipelineLawsAt",
       "module": "Conformance",
       "entry": "capabilityPipelineLawsAt",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["CapabilityPipelineWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "guarded-reached",
-      "refusal": "built"
-    },
-    {
-      "id": "Conformance.capabilityPipelineLawsWith",
-      "module": "Conformance",
-      "entry": "capabilityPipelineLawsWith",
       "package": "Fuaran.Core.Conformance",
       "witness": ["CapabilityPipelineWitness"],
       "optIn": true,
@@ -316,19 +251,6 @@
       "refusal": "drawn"
     },
     {
-      "id": "Conformance.compositionLaws",
-      "module": "Conformance",
-      "entry": "compositionLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
       "id": "Conformance.compositionLawsAt",
       "module": "Conformance",
       "entry": "compositionLawsAt",
@@ -338,19 +260,6 @@
       "reason": "needs-witness-capability",
       "discharges": [],
       "cases": "800",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
-      "id": "Conformance.compositionPilot",
-      "module": "Conformance",
-      "entry": "compositionPilot",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1200",
       "adequacy": "unconditional",
       "refusal": "none"
     },
@@ -523,19 +432,6 @@
       "refusal": "none"
     },
     {
-      "id": "Conformance.encoderInjectivityLaws",
-      "module": "Conformance",
-      "entry": "encoderInjectivityLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "200",
-      "adequacy": "guarded-reached",
-      "refusal": "none"
-    },
-    {
       "id": "Conformance.encoderInjectivityLawsAt",
       "module": "Conformance",
       "entry": "encoderInjectivityLawsAt",
@@ -586,19 +482,6 @@
       "cases": "1400",
       "adequacy": "guarded-reached",
       "refusal": "none"
-    },
-    {
-      "id": "Conformance.functionVerifyLaws",
-      "module": "Conformance",
-      "entry": "functionVerifyLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "600",
-      "adequacy": "unconditional",
-      "refusal": "drawn-miss-is-red"
     },
     {
       "id": "Conformance.functionVerifyLawsAt",
@@ -666,19 +549,6 @@
       "refusal": "none"
     },
     {
-      "id": "Conformance.keyedApplyLaws",
-      "module": "Conformance",
-      "entry": "keyedApplyLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "2100",
-      "adequacy": "guarded-reached",
-      "refusal": "built"
-    },
-    {
       "id": "Conformance.keyedApplyLawsAt",
       "module": "Conformance",
       "entry": "keyedApplyLawsAt",
@@ -690,19 +560,6 @@
       "cases": "2100",
       "adequacy": "guarded-reached",
       "refusal": "built"
-    },
-    {
-      "id": "Conformance.keyedArbitrationLaws",
-      "module": "Conformance",
-      "entry": "keyedArbitrationLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1400",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
     },
     {
       "id": "Conformance.keyedArbitrationLawsAt",
@@ -741,19 +598,6 @@
       "discharges": [],
       "cases": "1000",
       "adequacy": "unconditional",
-      "refusal": "built"
-    },
-    {
-      "id": "Conformance.keyedChildrenLaws",
-      "module": "Conformance",
-      "entry": "keyedChildrenLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["KeyedWitness", "NodeWitness", "IdWitness", "OpGen"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "600",
-      "adequacy": "guarded-reached",
       "refusal": "built"
     },
     {
@@ -796,19 +640,6 @@
       "refusal": "built"
     },
     {
-      "id": "Conformance.memoLaws",
-      "module": "Conformance",
-      "entry": "memoLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1000",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
       "id": "Conformance.memoLawsAt",
       "module": "Conformance",
       "entry": "memoLawsAt",
@@ -818,19 +649,6 @@
       "reason": "needs-witness-capability",
       "discharges": [],
       "cases": "1000",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
-      "id": "Conformance.memoSoundnessLaws",
-      "module": "Conformance",
-      "entry": "memoSoundnessLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "100",
       "adequacy": "unconditional",
       "refusal": "none"
     },
@@ -887,19 +705,6 @@
       "refusal": "none"
     },
     {
-      "id": "Conformance.observerLaws",
-      "module": "Conformance",
-      "entry": "observerLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ObserverWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "600",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
       "id": "Conformance.observerLawsAt",
       "module": "Conformance",
       "entry": "observerLawsAt",
@@ -908,7 +713,7 @@
       "optIn": true,
       "reason": "needs-witness-capability",
       "discharges": [],
-      "cases": "600",
+      "cases": "400",
       "adequacy": "unconditional",
       "refusal": "none"
     },
@@ -977,19 +782,6 @@
       "refusal": "drawn"
     },
     {
-      "id": "Conformance.projectionLaws",
-      "module": "Conformance",
-      "entry": "projectionLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ProjectionWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "800",
-      "adequacy": "unconditional",
-      "refusal": "none"
-    },
-    {
       "id": "Conformance.projectionLawsAt",
       "module": "Conformance",
       "entry": "projectionLawsAt",
@@ -1014,19 +806,6 @@
       "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "built"
-    },
-    {
-      "id": "Conformance.propagationEvaluatorLaws",
-      "module": "Conformance",
-      "entry": "propagationEvaluatorLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["EvaluatorWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "600",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
     },
     {
       "id": "Conformance.propagationEvaluatorLawsAt",
@@ -1071,19 +850,6 @@
       "id": "Conformance.queryLawsAt",
       "module": "Conformance",
       "entry": "queryLawsAt",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["QuerySeamWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1200",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
-      "id": "Conformance.queryLawsWith",
-      "module": "Conformance",
-      "entry": "queryLawsWith",
       "package": "Fuaran.Core.Conformance",
       "witness": ["QuerySeamWitness"],
       "optIn": true,
@@ -1145,19 +911,6 @@
       "refusal": "drawn"
     },
     {
-      "id": "Conformance.referenceLaws",
-      "module": "Conformance",
-      "entry": "referenceLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["RefWitness", "NodeWitness", "IdWitness", "OpGen"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1400",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
-    },
-    {
       "id": "Conformance.referenceLawsAt",
       "module": "Conformance",
       "entry": "referenceLawsAt",
@@ -1180,19 +933,6 @@
       "reason": "seam-not-every-domain-has",
       "discharges": [],
       "cases": "2200",
-      "adequacy": "unconditional",
-      "refusal": "built"
-    },
-    {
-      "id": "Conformance.sanitizeLaws",
-      "module": "Conformance",
-      "entry": "sanitizeLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["SanitizeWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "1200",
       "adequacy": "unconditional",
       "refusal": "built"
     },
@@ -1259,19 +999,6 @@
       "cases": "800",
       "adequacy": "guarded-reached",
       "refusal": "drawn"
-    },
-    {
-      "id": "Conformance.verifyHonestyLaws",
-      "module": "Conformance",
-      "entry": "verifyHonestyLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["ArtifactWitness"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "400",
-      "adequacy": "unconditional",
-      "refusal": "drawn-miss-is-red"
     },
     {
       "id": "Conformance.verifyHonestyLawsAt",
@@ -1362,19 +1089,6 @@
       "cases": "10",
       "adequacy": "unconditional",
       "refusal": "none"
-    },
-    {
-      "id": "FoldConfluence.laneFoldLaws",
-      "module": "FoldConfluence",
-      "entry": "laneFoldLaws",
-      "package": "Fuaran.Core.Conformance",
-      "witness": ["StreamWitness", "LaneGen"],
-      "optIn": true,
-      "reason": "needs-witness-capability",
-      "discharges": [],
-      "cases": "360",
-      "adequacy": "guarded-reached",
-      "refusal": "drawn"
     },
     {
       "id": "FoldConfluence.laneFoldLawsAt",

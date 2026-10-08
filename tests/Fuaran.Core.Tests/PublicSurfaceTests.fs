@@ -247,7 +247,7 @@ let private mappingInts (r: MetadataReader) (attrs: CustomAttributeHandleCollect
         with _ ->
             None)
 
-let private hasAttribute (r: MetadataReader) (attrs: CustomAttributeHandleCollection) (name: string) : bool =
+let internal hasAttribute (r: MetadataReader) (attrs: CustomAttributeHandleCollection) (name: string) : bool =
     let attributeName (ca: CustomAttribute) : string =
         try
             let ctor = ca.Constructor
@@ -1051,11 +1051,148 @@ let internal newestVersionTag (tagLines: string list) : string option =
 let private roster () =
     PackageRosterTests.packableProjects (repoRoot ())
 
+/// One packable package's baseline read against a tag's (Phase 386 — the comparison the since-tag
+/// report prints and the `OneDotZero` family's within-a-major law asserts, written once).
+type internal SinceTag =
+    {
+        PackageId: string
+        /// The moves from the tag's baseline to the committed one; `None` when the tag carries no
+        /// baseline for this package (its first snapshot).
+        Moves: Move list option
+        /// The tag's baseline predates union field names (Phase 237), so both sides were compared
+        /// without them and a field rename since that tag is not visible.
+        NamesStripped: bool
+    }
+
+/// Every packable package whose committed baseline exists, read against `tag`'s baseline.
+let internal sinceTag (root: string) (tag: string) : SinceTag list =
+    [ for id in roster () |> List.map _.PackageId do
+          let path = baselinePath id
+
+          if File.Exists path then
+              let current = baselineTokens (File.ReadAllText path)
+
+              match git root (sprintf "show %s:api/%s.txt" tag id) with
+              | Error _ ->
+                  yield
+                      { PackageId = id
+                        Moves = None
+                        NamesStripped = false }
+              | Ok text ->
+                  // A tag cut before Phase 237 carries nameless union cases. Read against it,
+                  // today's named baseline would report every carrying case as a `retype` that no
+                  // consumer ever saw. So the comparison drops the names — and says so, because a
+                  // field rename since that tag is invisible to it, exactly as it was to the gate
+                  // then. This expires by itself: the first tag cut after 237 carries named
+                  // baselines, and nothing is stripped against it.
+                  let tagged = baselineTokens text
+                  let stripped = predatesFieldNames tagged
+
+                  let current =
+                      if stripped then
+                          current |> List.map stripFieldNames
+                      else
+                          current
+
+                  yield
+                      { PackageId = id
+                        Moves = Some(classify tagged current)
+                        NamesStripped = stripped } ]
+
+// ---- D101 made general: no case name is reachable unqualified from two public unions (Phase 386) ----
+//
+// D1 qualified `Severity` because its `Error` shadowed `Result.Error`; D101 stated the rule for every
+// union and left it to review. A case name two unions both carry UNQUALIFIED is resolved by whichever
+// was opened last — `Diff.fs`'s `Required` silently meant `Strength.Required` over
+// `Optionality.Required` until this phase — so the rule is held here, over the shipped assemblies and
+// FSharp.Core's own option and result cases. A union may carry a shared name when it is
+// `[<RequireQualifiedAccess>]`; at most one union may carry it bare. (The surface renderer does not
+// draw the attribute, so qualifying a union is a source-breaking move the class report reads as
+// `unchanged`; the release ledger names each one.)
+
+/// One public union case: `(union full name, case name, the union is RequireQualifiedAccess)`.
+type internal UnionCase = string * string * bool
+
+/// Every case name carried unqualified by more than one union, with the unions that carry it.
+let internal unqualifiedCollisions (cases: UnionCase list) : (string * string list) list =
+    cases
+    |> List.filter (fun (_, _, rqa) -> not rqa)
+    |> List.groupBy (fun (_, case, _) -> case)
+    |> List.choose (fun (case, owners) ->
+        match owners |> List.map (fun (u, _, _) -> u) |> List.distinct |> List.sort with
+        | _ :: _ :: _ as us -> Some(case, us)
+        | _ -> None)
+    |> List.sortBy fst
+
+/// The public unions of `asm` (a case's nested class is not a union of its own).
+let internal publicUnionCases (asm: Assembly) : UnionCase list =
+    let isUnion (t: Type) =
+        FSharp.Reflection.FSharpType.IsUnion(t, BindingFlags.Public ||| BindingFlags.NonPublic)
+
+    [ for t in asm.GetExportedTypes() do
+          let caseClass = t.IsNested && isUnion t.DeclaringType
+
+          if not caseClass && isUnion t then
+              let rqa = t.IsDefined(typeof<RequireQualifiedAccessAttribute>, false)
+
+              for c in FSharp.Reflection.FSharpType.GetUnionCases(t, BindingFlags.Public ||| BindingFlags.NonPublic) do
+                  yield t.FullName, c.Name, rqa ]
+
+/// FSharp.Core's cases every consumer has open: a Core union carrying one of these bare shadows it.
+let internal fsharpCoreCases: UnionCase list =
+    [ "Microsoft.FSharp.Core.FSharpOption`1", "Some", false
+      "Microsoft.FSharp.Core.FSharpOption`1", "None", false
+      "Microsoft.FSharp.Core.FSharpValueOption`1", "ValueSome", false
+      "Microsoft.FSharp.Core.FSharpValueOption`1", "ValueNone", false
+      "Microsoft.FSharp.Core.FSharpResult`2", "Ok", false
+      "Microsoft.FSharp.Core.FSharpResult`2", "Error", false ]
+
 [<Tests>]
 let tests =
     testList
         "Public surface"
-        [
+        [ test "no case name is carried unqualified by two public unions (D101 made general, Phase 386)" {
+              let ids = roster () |> List.map _.PackageId
+              Expect.isNonEmpty ids "the packable roster was read"
+
+              let cases =
+                  ids
+                  |> List.collect (fun id -> publicUnionCases (Assembly.Load(AssemblyName id)))
+
+              Expect.isGreaterThan
+                  (cases |> List.map (fun (u, _, _) -> u) |> List.distinct |> List.length)
+                  50
+                  "the shipped unions were read — a check that read none must not read as one that found none"
+
+              let collisions = unqualifiedCollisions (fsharpCoreCases @ cases)
+
+              Expect.isEmpty
+                  collisions
+                  (sprintf
+                      "these case names are carried unqualified by more than one union, so the last one opened shadows the rest — mark all but one [<RequireQualifiedAccess>] (DECISIONS.md D101):\n       %s"
+                      (collisions
+                       |> List.map (fun (c, us) -> c + ": " + String.concat ", " us)
+                       |> String.concat "\n       "))
+          }
+
+          test "go-red: a planted bare collision is named; one bare carrier beside qualified ones is not" {
+              let planted: UnionCase list =
+                  [ "A.Verdict", "Unknown", false
+                    "B.Decoded", "Unknown", false
+                    "C.Kind", "Known", true
+                    "D.Other", "Known", false ]
+
+              Expect.equal
+                  (unqualifiedCollisions planted)
+                  [ "Unknown", [ "A.Verdict"; "B.Decoded" ] ]
+                  "two bare carriers collide; a qualified one beside a bare one does not"
+
+              Expect.equal
+                  (unqualifiedCollisions (fsharpCoreCases @ [ "E.Outcome", "Error", false ]))
+                  [ "Error", [ "E.Outcome"; "Microsoft.FSharp.Core.FSharpResult`2" ] ]
+                  "a bare `Error` shadows Result.Error — D1's own case"
+          }
+
 
           // Phase 395 — the surface is rendered from the configuration under test, never from a stale
           // build of another. Over a synthetic tree holding ONLY the other configuration's assembly the
@@ -1237,64 +1374,43 @@ let tests =
                       printfn ""
                       printfn "==== public surface: class of every baseline moved since %s" tag
 
-                      let mutable read = 0
+                      let read = sinceTag root tag
                       let mutable moved = 0
 
-                      for id in packable do
-                          let path = baselinePath id
+                      for r in read do
+                          if r.NamesStripped then
+                              printfn
+                                  "  %-28s (%s's baseline predates union field names — compared without them; a field rename since %s is not visible here)"
+                                  r.PackageId
+                                  tag
+                                  tag
 
-                          if File.Exists path then
-                              read <- read + 1
-                              let current = baselineTokens (File.ReadAllText path)
+                          match r.Moves with
+                          | None ->
+                              printfn "  %-28s first snapshot — %s carries no baseline for this package" r.PackageId tag
+                          | Some [] -> ()
+                          | Some moves ->
+                              moved <- moved + 1
 
-                              match git root (sprintf "show %s:api/%s.txt" tag id) with
-                              | Error _ ->
-                                  printfn "  %-28s first snapshot — %s carries no baseline for this package" id tag
-                              | Ok text ->
-                                  // A tag cut before Phase 237 carries nameless union cases. Read
-                                  // against it, today's named baseline would report every carrying
-                                  // case as a `retype` that no consumer ever saw. So the comparison
-                                  // drops the names — and says so, because a field rename since
-                                  // that tag is invisible to it, exactly as it was to the gate then.
-                                  // This expires by itself: the first tag cut after 237 carries
-                                  // named baselines, and nothing is stripped against it.
-                                  let tagged = baselineTokens text
+                              let cls = headline moves |> Option.map className |> Option.defaultValue "unchanged"
 
-                                  let current =
-                                      if predatesFieldNames tagged then
-                                          printfn
-                                              "  %-28s (%s's baseline predates union field names — compared without them; a field rename since %s is not visible here)"
-                                              id
-                                              tag
-                                              tag
+                              printfn
+                                  "  %-28s %-18s %d move(s)%s"
+                                  r.PackageId
+                                  cls
+                                  moves.Length
+                                  (if isBreaking (headline moves |> Option.defaultValue Additive) then
+                                       "   ADVANCE <Version> — this move is breaking"
+                                   else
+                                       "   may RIDE a draft slot")
 
-                                          current |> List.map stripFieldNames
-                                      else
-                                          current
+                              for m in moves |> List.truncate 8 do
+                                  printfn "      %s" (describe m)
 
-                                  match classify tagged current with
-                                  | [] -> ()
-                                  | moves ->
-                                      moved <- moved + 1
+                              if moves.Length > 8 then
+                                  printfn "      ... and %d more" (moves.Length - 8)
 
-                                      let cls =
-                                          headline moves |> Option.map className |> Option.defaultValue "unchanged"
-
-                                      printfn
-                                          "  %-28s %-18s %d move(s)%s"
-                                          id
-                                          cls
-                                          moves.Length
-                                          (if isBreaking (headline moves |> Option.defaultValue Additive) then
-                                               "   ADVANCE <Version> — this move is breaking"
-                                           else
-                                               "   may RIDE a draft slot")
-
-                                      for m in moves |> List.truncate 8 do
-                                          printfn "      %s" (describe m)
-
-                                      if moves.Length > 8 then
-                                          printfn "      ... and %d more" (moves.Length - 8)
+                      let read = read.Length
 
                       if moved = 0 then
                           printfn "  (no baseline has moved since %s)" tag

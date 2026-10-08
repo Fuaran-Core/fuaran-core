@@ -377,12 +377,20 @@ module Diff =
         let projection (p: Gen.KindProjection) =
             String.concat
                 "\n--\n"
-                [ p.SpecDecl
-                  p.Encoder
-                  p.Decoder
-                  (match p.Mk with
-                   | Some mk -> mk
-                   | None -> "") ]
+                ([ p.SpecDecl
+                   p.Encoder
+                   p.Decoder
+                   (match p.Mk with
+                    | Some mk -> mk
+                    | None -> "") ]
+                 // Phase 403 — appended only when declared, so a projection declaring neither
+                 // compares exactly as it did before they existed.
+                 @ (match p.MapMsg with
+                    | Some map -> [ "mapMsg:\n" + map ]
+                    | None -> [])
+                 @ (match p.RecordFields with
+                    | Some fs -> [ "recordFields:\n" + Canon.render (CodegenLookup.fieldsJson fs) ]
+                    | None -> []))
 
         [ for KeyValue(path, lines) in sup.Docs -> "doc:" + path, String.concat "\n" lines
           match sup.TypeSplice with
@@ -2444,6 +2452,7 @@ module Diff =
     /// How firmly an obligation binds. `Check` exists because the honest answer
     /// to several of these is conditional, and a report that stated them as
     /// `Required` would train its reader to skim.
+    [<RequireQualifiedAccess>]
     type Strength =
         /// The surface must change in the same change-set (`MUST` in the report).
         | Required
@@ -2573,63 +2582,71 @@ module Diff =
 
         if not (touchesWire c) then
             [ { Surface = "reference host (F#) regeneration"
-                Strength = Required
+                Strength = Strength.Required
                 Note =
                   "host-surface only — regenerate the generated layer and recompile. No codec host, corpus fixture or spec row is obliged." } ]
         elif not uiTier then
             [ if roster.IsEmpty then
                   { Surface = "hosts: none declared"
-                    Strength = Check
+                    Strength = Strength.Check
                     Note =
                       "the vocabulary's manifest declares no `hosts`, so no codec host is obliged by name. Every host generated from this vocabulary (`Gen.fsharpModule`, `Gen.typescriptModule`, `Gen.jsonSchema`) regenerates in the same change-set; declare `hosts` in the manifest to have each named here." }
 
               for h in codecHosts do
                   { Surface = sprintf "codec: %s (%s)" h.Id h.Language
-                    Strength = Required
+                    Strength = Strength.Required
                     Note = "encoder + decoder + schema shape, same change-set, pinned to the vocabulary's documents." }
 
               for h in projections do
                   { Surface = sprintf "render arm: %s (%s)" h.Id h.Language
-                    Strength = (if isKindSetChange ch then Required else Check)
+                    Strength =
+                      (if isKindSetChange ch then
+                           Strength.Required
+                       else
+                           Strength.Check)
                     Note =
                       "a projection that models the changed family as a closed type gains or loses an arm; one that does not is unaffected." }
 
               { Surface = "generated layer: regenerate"
-                Strength = Required
+                Strength = Strength.Required
                 Note = "regenerate every generated module and schema from the new vocabulary, and recompile." }
 
               { Surface = "artifact: idl.json"
-                Strength = Required
+                Strength = Strength.Required
                 Note =
                   "re-render the vocabulary artifact beside the vocabulary it projects; a regenerate-and-byte-compare guard fails when the committed artifact and a fresh emission disagree." }
 
               if c.Severity = BreakingWire then
                   { Surface = "profile: §15 negotiation"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note =
                       "a major wire event moves the `/vN/` segment; an older consumer must classify the new profile `Foreign` and hard-refuse it (STABILITY.md §15 negotiate outcomes)." }
 
               if c.Severity = BreakingForEmitters then
                   { Surface = "downstream emitters"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note =
                       "coordinate the bump with every emitter, and advance the producing package's `<Version>` in the SAME commit — an unmoved version re-packs the slot under consumers already pinned to it." } ]
         else
             [ for h in codecHosts do
                   if h.Id = "fuaran" then
                       { Surface = "codec: fuaran (F#, reference)"
-                        Strength = Required
+                        Strength = Strength.Required
                         Note =
                           "IDL + `--regen-snapshots` + `sync-generated-layer.ps1`, then the policy decoder (`JsonDecode.fs`) and `SchemaGen.fs` — §11 steps 1-3." }
                   else
                       { Surface = sprintf "codec: %s (%s)" h.Id h.Language
-                        Strength = Required
+                        Strength = Strength.Required
                         Note =
                           "encoder + decoder + schema shape, same change-set — §11 step 5; pinned to the corpus by its §11.1 leg." }
 
               for h in projections do
                   { Surface = sprintf "render arm: %s (%s)" h.Id h.Language
-                    Strength = (if isKindSetChange ch then Required else Check)
+                    Strength =
+                      (if isKindSetChange ch then
+                           Strength.Required
+                       else
+                           Strength.Check)
                     Note =
                       if isKindSetChange ch then
                           "a NodeKind lacking an arm is a BUILD error in the native tier (§11.0 render projections). No codec change — the Rust core owns the codec."
@@ -2637,67 +2654,67 @@ module Diff =
                           "bound only if this tier models the changed family as a sealed type — Swift's `switch` without `default:` and Kotlin's `when` are exhaustiveness errors, so a modelled family forces an arm (the 745 precedent). Do not soften either host's default-deny to make a suite pass." }
 
               { Surface = "corpus: wire-format-fixtures fixture"
-                Strength = Required
+                Strength = Strength.Required
                 Note =
                   "§11 step 4 — `--emit-corpus`, and run `Fuaran.UI.Tests` in the same session (the corpus-as-a-set assertions live only there). The corpus is its own repo: commit and PUSH it with the codec commits." }
 
               { Surface = "schema: schema.json"
-                Strength = Required
+                Strength = Strength.Required
                 Note = "regenerated by the same `--emit-corpus` command; the stale-schema guard fails if it is skipped." }
 
               { Surface = "artifact: idl.json"
-                Strength = Required
+                Strength = Strength.Required
                 Note =
                   "re-render the vocabulary artifact beside the vocabulary it projects; the domain's regenerate-and-byte-compare guard fails when the committed artifact and a fresh emission disagree." }
 
               if isKindSetChange ch then
                   { Surface = "veneer: C# fluent factory (Fuaran.UI.CSharp)"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note =
                       "§11 step 6 — a factory + options record for the kind. The coverage-vs-corpus test fires the moment step 4's fixture lands." }
 
                   { Surface = "veneer: VB XML-literal mapping (Fuaran.UI.VisualBasic)"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note = "§11 step 6 — an element registration driving that factory." }
 
                   { Surface = "analyzer: VB Vocabulary.cs"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note =
                       "§11 step 6 — the kind name + attribute rows. Mind the pin's blind spot: a kind missing from BOTH the translator and the analyzer keeps the vocabulary-pin test green." }
 
                   { Surface = "manifest: manifest.kinds"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note = "the machine-readable kind enumeration (§11.2) — regenerated with the corpus." }
 
                   { Surface = "spec: WIRE_FORMAT.md §3.2 kind table"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note = "the kind's row + its spec-record shape." }
               else
                   { Surface = "veneers + analyzer (C#/VB)"
-                    Strength = Check
+                    Strength = Strength.Check
                     Note =
                       "Phase 801 recorded that a payload-FIELD addition binds neither the C# `Coverage` reflection nor the VB analyzer's `Vocabulary.cs` (both pin `NodeKind`); §11 step 6 nonetheless names \"attribute rows\". Settle it for this change rather than inheriting either reading." }
 
               if isFamilyChange ch then
                   { Surface = "spec: WIRE_FORMAT.md §11 discriminator-family list"
-                    Strength = Check
+                    Strength = Strength.Check
                     Note =
                       "§11 enumerates the families the rule is stated over. A change that introduces a family adds a row; a change within an existing one does not." }
 
               if isEnumSetChange ch then
                   { Surface = "spec: WIRE_FORMAT.md closed-set enumeration"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note = "the closed set's admitted strings are normative doc text as well as schema `enum` array." }
 
               if c.Severity = BreakingWire then
                   { Surface = "profile: §15 negotiation"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note =
                       "a major wire event moves the `/vN/` segment; an older consumer must classify the new profile `Foreign` and hard-refuse it (STABILITY.md §15 negotiate outcomes)." }
 
               if c.Severity = BreakingForEmitters then
                   { Surface = "downstream emitters"
-                    Strength = Required
+                    Strength = Strength.Required
                     Note =
                       "coordinate the bump with every emitter, and advance the producing package's `<Version>` in the SAME commit — an unmoved version re-packs the slot under consumers already pinned to it." } ]
 
@@ -2715,9 +2732,9 @@ module Diff =
 
     let private strengthLabel =
         function
-        | Required -> "MUST"
-        | Check -> "CHECK"
-        | NotBound -> "n/a"
+        | Strength.Required -> "MUST"
+        | Strength.Check -> "CHECK"
+        | Strength.NotBound -> "n/a"
 
     let private summarise (c: Change) : string = (ruleOf c).Summary c
 
@@ -2789,9 +2806,9 @@ module Diff =
 
             let rank =
                 function
-                | Required -> 2
-                | Check -> 1
-                | NotBound -> 0
+                | Strength.Required -> 2
+                | Strength.Check -> 1
+                | Strength.NotBound -> 0
 
             let consolidated =
                 cs
@@ -3171,9 +3188,9 @@ module Diff =
             sprintf
                 "wire evolution:   %s"
                 (match v.Evolution with
-                 | Versioning.Additive [] -> "no movement"
-                 | Versioning.Additive added -> sprintf "additive — %d introduced" (List.length added)
-                 | Versioning.Breaking(removed, added) ->
+                 | Versioning.Evolution.Additive [] -> "no movement"
+                 | Versioning.Evolution.Additive added -> sprintf "additive — %d introduced" (List.length added)
+                 | Versioning.Evolution.Breaking(removed, added) ->
                      sprintf "BREAKING — %d retired, %d introduced" (List.length removed) (List.length added))
         )
 

@@ -109,14 +109,21 @@ module StringEscapeVectors =
             + quoted v.Escaped
             + "}"
 
+        // Filed under its own id, so `Dag.ofNodes` (the constructor is private since Phase 386)
+        // cannot refuse it; reaching the refusal is a defect in this vector, raised as one.
         let dag: Dag.T<unit> =
-            { Nodes =
-                Map.ofList
-                    [ v.Input,
-                      { Id = v.Input
-                        Parents = [ v.Input ]
-                        Actor = Human "a"
-                        Op = () } ] }
+            match
+                Dag.ofNodes (
+                    Map.ofList
+                        [ v.Input,
+                          { Id = v.Input
+                            Parents = [ v.Input ]
+                            Actor = Human "a"
+                            Op = () } ]
+                )
+            with
+            | Ok d -> d
+            | Error m -> invalidOp (sprintf "a node filed under %s carries id %s" m.Key m.NodeId)
 
         [ // the rule at its home
           expect (v.Name + " / Wire.Json.escape") "Json.escape" v.Escaped (Json.escape v.Input)

@@ -91,14 +91,14 @@ let private registry =
         (fun r id ->
             r
             |> Result.bind (
-                Registry.register (
+                CapabilityRegistry.register (
                     if id = "fmt-temp" then
                         fmtTemp
                     else
                         { fmtTemp with Id = id }
                 )
             ))
-        (Ok Registry.empty)
+        (Ok CapabilityRegistry.empty)
     |> Result.toOption
     |> Option.get
 
@@ -272,7 +272,7 @@ let private injectInto (path: string list) (doc: string) : string =
     | Error e -> failwithf "unparseable: %s" e
 
 let private propOf (name: string) (el: JVal) : JVal =
-    match Decode.getProp name el with
+    match Decoder.describing (Decoder.field name Decoder.json) el with
     | Ok v -> v
     | Error e -> failwithf "no member %s: %s" name e
 
@@ -305,7 +305,7 @@ let tests =
                         "ArgOutOfSpace"
 
                     let denied =
-                        refusalOf (Registry.dispatch registry "purge-station" [] (fun _ () -> Ready "never"))
+                        refusalOf (CapabilityRegistry.dispatch registry "purge-station" [] (fun _ () -> Ready "never"))
 
                     Expect.equal
                         (InvokeError.describe denied)
@@ -530,12 +530,14 @@ let tests =
 
                 testCase "dispatchWithArgs denies by default and hands on the resolved capability"
                 <| fun _ ->
-                    match Registry.dispatchWithArgs registry "purge-station" [] (fun _ _ -> Ready "never") with
+                    match
+                        CapabilityRegistry.dispatchWithArgs registry "purge-station" [] (fun _ _ -> Ready "never")
+                    with
                     | Error(NoSuchCapability("purge-station", known)) -> Expect.equal known toolIds "names the tools"
                     | other -> failtestf "expected NoSuchCapability, got %A" other
 
                     let r =
-                        Registry.dispatchWithArgs
+                        CapabilityRegistry.dispatchWithArgs
                             registry
                             "fmt-temp"
                             [ "fmt-temp/celsius", "-4"; "fmt-temp/station", "ridge" ]
@@ -765,14 +767,14 @@ let tests =
                         let doc = CapabilityCodec.encodeDeferred JStr d
 
                         Expect.equal
-                            (CapabilityCodec.decodeDeferredWith ReadPolicy.Strict Decode.asString doc)
+                            (CapabilityCodec.decodeDeferredWith ReadPolicy.Strict (Decoder.describing Decoder.str) doc)
                             (Ok d)
                             doc
 
                         Expect.isError
                             (CapabilityCodec.decodeDeferredWith
                                 ReadPolicy.Strict
-                                Decode.asString
+                                (Decoder.describing Decoder.str)
                                 (withMember "actor" (JStr "x") doc))
                             (sprintf "%s with an extra member" doc)
 

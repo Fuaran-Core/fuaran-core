@@ -1,4 +1,4 @@
-// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 0.36.0. Do not edit by hand.
+// AUTO-GENERATED from the IDL by Fuaran.Core.Idl.Gen 1.0.0. Do not edit by hand.
 module Fuaran.Core.Tests.DocAnnotatedGenerated
 #nowarn "44" // this layer implements every declared member, including deprecated ones
 
@@ -296,7 +296,7 @@ let nodeWitness: NodeWitness<Node, string> =
       ReplaceChildren = witnessReplaceChildren }
 
 // Validator scaffold — register domain RuleFamilies into `reg`; rule content stays domain-side.
-let runValidator (reg: Validator.Registry<Node, string>) (root: Node) : Defect<string> list =
+let runValidator (reg: Validator.RuleRegistry<Node, string>) (root: Node) : Defect<string> list =
     Validator.runAll nodeWitness reg root
 
 // Smart constructors — required-without-default fields are parameters; IDL-declared

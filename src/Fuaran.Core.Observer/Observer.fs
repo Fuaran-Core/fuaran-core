@@ -22,12 +22,13 @@ namespace Fuaran.Core
 // and module functions over a pure state value (`ObserverState`), in
 // `namespace Fuaran.Core` like every other seam — the package was the one
 // non-IDL package outside it, an OO interface plus a class keyed by raw
-// strings. The OO surface (`Fuaran.Core.Observer.IObserver`,
-// `InMemoryObserver`) remains below, for one draft, as an ADAPTER over these
-// functions; the subscriber list is the one piece of state it adds.
+// strings. That OO surface (`Fuaran.Core.Observer.IObserver`,
+// `InMemoryObserver`) stayed one draft as an adapter over these functions and
+// left at `1.0.0` (Phase 386): subscription is host state, so a host keeps its
+// subscriber list beside the `ObserverState` it threads.
 //
 // **FSharp.Core only + Fable-clean.** The state is immutable maps and
-// lists; the adapter's `ResizeArray` / `IDisposable` compile under Fable.
+// lists.
 
 /// One runtime snapshot for a single registered node: the raw input
 /// the derivation saw, plus the derived domain flags. The `Input` is
@@ -313,137 +314,3 @@ module ObserverWitness =
         match scan Set.empty st.Order with
         | Some defect -> Error defect
         | None -> Ok(observeTree st root)
-
-namespace Fuaran.Core.Observer
-
-// The OO surface, kept for ONE draft as an adapter over `Fuaran.Core`'s
-// `ObserverWitness` functions (Phase 298). New code uses the witness; the
-// type names below forward to the moved records.
-
-open System
-open Fuaran.Core
-
-/// `Fuaran.Core.Observation` — moved to the spine's namespace in Phase 298.
-type Observation<'Input, 'Flag> = Fuaran.Core.Observation<'Input, 'Flag>
-
-/// `Fuaran.Core.Derivation` — moved to the spine's namespace in Phase 298.
-type Derivation<'Input, 'Flag> = Fuaran.Core.Derivation<'Input, 'Flag>
-
-/// `Fuaran.Core.ObserverOptions` — moved to the spine's namespace in Phase 298.
-type ObserverOptions<'Flag> = Fuaran.Core.ObserverOptions<'Flag>
-
-/// Forwards to `Fuaran.Core.ObserverOptions`; kept for one draft (Phase 298).
-module ObserverOptions =
-    /// `Fuaran.Core.ObserverOptions.defaults`.
-    let defaults<'Flag when 'Flag: equality> : ObserverOptions<'Flag> =
-        Fuaran.Core.ObserverOptions.defaults
-
-/// The generic runtime-observer contract — three reads (single-node,
-/// tree, live subscription) + two registry calls. Domains satisfy it
-/// with the in-memory engine below, or with a live host-bound observer
-/// (e.g. a browser `ResizeObserver`-backed instance) that feeds the
-/// same `'Input` through the same `Derivation`. Kept for one draft
-/// (Phase 298): `Register` declares no parent, so through this interface
-/// every node is a root — the witness functions take the parent.
-type IObserver<'Input, 'Flag> =
-    /// Snapshot the observation for a single registered node. `None`
-    /// when the node is not currently registered.
-    abstract Observe: nodeId: string -> Observation<'Input, 'Flag> option
-
-    /// Snapshot every observation reachable from `rootNodeId`
-    /// (inclusive), walking the parent-pointer graph declared at
-    /// registration. Empty list when the root is not registered.
-    abstract ObserveTree: rootNodeId: string -> Observation<'Input, 'Flag> list
-
-    /// Subscribe to live observation deltas. The handler is invoked per
-    /// the configured emit policy with the (nodeId, observation) tuple.
-    /// Dispose the returned `IDisposable` to remove the handler.
-    abstract Subscribe: handler: (string * Observation<'Input, 'Flag> -> unit) -> IDisposable
-
-    /// Register a node for observation with its current input.
-    /// Idempotent-on-key — re-registering replaces the entry.
-    abstract Register: nodeId: string * input: 'Input -> unit
-
-    /// Unregister a node. Idempotent — unregistering an unknown NodeId
-    /// is a no-op.
-    abstract Unregister: nodeId: string -> unit
-
-/// In-memory runtime observer — the adapter (Phase 298) that drives an
-/// `ObserverState` through the `ObserverWitness` functions and delivers each
-/// emission to its subscribers. Construct with the domain's pure
-/// `Derivation` + emit options. Drive `RegisterNode` / `Update`; read via
-/// `Observe` / `ObserveTree` / subscriber callbacks.
-type InMemoryObserver<'Input, 'Flag>(derive: Derivation<'Input, 'Flag>, options: ObserverOptions<'Flag>) =
-    let w = ObserverWitness.createWith derive options
-    let mutable state = ObserverWitness.empty<'Input, 'Flag>
-    let subscribers = ResizeArray<string * Observation<'Input, 'Flag> -> unit>()
-
-    // Delivery iterates a SNAPSHOT of the subscriber list (Phase 298): a
-    // subscriber that disposes itself, or subscribes another, during its
-    // callback changes the list for the NEXT emission and never the one in
-    // flight — enumerating the live list threw on .NET and skipped an element
-    // under Fable.
-    let emit (nodeId: string) (observation: Observation<'Input, 'Flag>) =
-        for subscriber in subscribers.ToArray() do
-            try
-                subscriber (nodeId, observation)
-            with ex ->
-                // A subscriber throwing must not poison sibling
-                // subscribers — mirror the UI observer's isolation.
-                ignore ex
-
-    /// The current state as a value — what the witness functions read.
-    member _.State: ObserverState<'Input, 'Flag> = state
-
-    /// Register (or replace) a node with its input and an optional
-    /// parent NodeId. Always fires an initial emission, regardless of
-    /// `EmitOnFlagChangeOnly` (the initial-emission rule).
-    member this.RegisterNode(nodeId: string, input: 'Input, ?parent: string) : unit =
-        let next, observation = ObserverWitness.register w nodeId input parent state
-        state <- next
-        emit nodeId observation
-
-    /// Replace a registered node's input. Honours
-    /// `EmitOnFlagChangeOnly` — fires only when the derived flag set
-    /// differs from the previous emission (or always, when the option
-    /// is false). No-op if `nodeId` isn't registered.
-    member this.Update(nodeId: string, input: 'Input) : unit =
-        let next, emission = ObserverWitness.update w nodeId input state
-        state <- next
-
-        match emission with
-        | Some observation -> emit nodeId observation
-        | None -> ()
-
-    interface IObserver<'Input, 'Flag> with
-        member _.Observe(nodeId: string) : Observation<'Input, 'Flag> option = ObserverWitness.snapshot state nodeId
-
-        member _.ObserveTree(rootNodeId: string) : Observation<'Input, 'Flag> list =
-            ObserverWitness.observeTree state rootNodeId
-
-        member _.Subscribe(handler: string * Observation<'Input, 'Flag> -> unit) : IDisposable =
-            subscribers.Add(handler)
-
-            { new IDisposable with
-                member _.Dispose() = subscribers.Remove(handler) |> ignore }
-
-        member this.Register(nodeId: string, input: 'Input) : unit = this.RegisterNode(nodeId, input)
-
-        member _.Unregister(nodeId: string) : unit =
-            state <- ObserverWitness.unregister nodeId state
-
-/// Constructors for the `InMemoryObserver` adapter; kept for one draft
-/// (Phase 298) — new code builds an `ObserverWitness` instead.
-module InMemoryObserver =
-    /// Construct with the change-only structural-equality defaults.
-    let create<'Input, 'Flag when 'Flag: equality>
-        (derive: Derivation<'Input, 'Flag>)
-        : InMemoryObserver<'Input, 'Flag> =
-        InMemoryObserver(derive, ObserverOptions.defaults)
-
-    /// Construct with host-tunable options.
-    let createWith
-        (derive: Derivation<'Input, 'Flag>)
-        (options: ObserverOptions<'Flag>)
-        : InMemoryObserver<'Input, 'Flag> =
-        InMemoryObserver(derive, options)

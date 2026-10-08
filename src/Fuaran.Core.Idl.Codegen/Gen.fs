@@ -36,6 +36,23 @@ module Gen =
             /// generated ctor would construct the IDL-derived record, which under a
             /// projection is not the record that exists.
             Mk: string option
+            /// Phase 403 — the full `and private mapMsg<Tag>Spec …` member, verbatim, or None.
+            /// `Derivation.MapMsg` joins it to the derived message map's recursion group in
+            /// place of the record mapper it cannot construct (the projected record is host
+            /// source), so it may call `mapMsg f` and every derived `mapMsg<Decl> f`. Its
+            /// signature is `('Msg -> 'Msg2) -> <Tag>Spec<'Msg> -> <Tag>Spec<'Msg2>`. With None, a
+            /// message map over this kind is refused — the generator does not guess a map.
+            MapMsg: string option
+            /// Phase 403 — the projected record's fields at their HOST shapes (name, type,
+            /// optionality), or None. Each `Name` is spelled as a wire field is, the record's
+            /// member being its PascalCase (`on` → `On`), and each type names a declaration the
+            /// module emits. The emissions that read a kind's fields — the node witness, the
+            /// keyed walk, the slot enumerators — read these in place of the kind's wire fields.
+            /// With None they refuse by name wherever they would read the projected record: the
+            /// node positions when the kind's wire holds a node directly or within, the slot
+            /// enumerators always, because a host record may hold a value its wire spells
+            /// otherwise.
+            RecordFields: IdlField list option
         }
 
     /// Phase 945 — the declared-support channel for `fsharpModuleWith`: doc comments,
@@ -87,7 +104,9 @@ module Gen =
         { SpecDecl = p.SpecDecl
           Encoder = p.Encoder
           Decoder = p.Decoder
-          Mk = p.Mk }
+          Mk = p.Mk
+          MapMsg = p.MapMsg
+          RecordFields = p.RecordFields }
 
     let private toSupport (sup: GenSupport) : Core.Support =
         { Docs = sup.Docs

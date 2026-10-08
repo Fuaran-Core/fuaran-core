@@ -372,15 +372,15 @@ let tests =
               let template = dag.Nodes.[g]
 
               let forged: Dag.T<CounterOp> =
-                  { Nodes =
-                      [ "cx", [ "cy"; a ]
-                        "cy", [ "cx" ]
-                        "cz", [ "cx" ]
-                        "cw", [ m ]
-                        "cd", [ "missing" ] ]
-                      |> List.fold
-                          (fun nodes (id, ps) -> Map.add id { template with Id = id; Parents = ps } nodes)
-                          dag.Nodes }
+                  [ "cx", [ "cy"; a ]
+                    "cy", [ "cx" ]
+                    "cz", [ "cx" ]
+                    "cw", [ m ]
+                    "cd", [ "missing" ] ]
+                  |> List.fold
+                      (fun nodes (id, ps) -> Map.add id { template with Id = id; Parents = ps } nodes)
+                      dag.Nodes
+                  |> DagOf.nodes
 
               let reach = Dag.Reach.ofDag forged
               let ids = (Map.toList forged.Nodes |> List.map fst) @ [ "missing"; "absent" ]

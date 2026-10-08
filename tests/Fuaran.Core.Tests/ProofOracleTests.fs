@@ -656,7 +656,7 @@ let private treeDiamondSample
 //
 //  The model is parametric in the two numeric carriers (no combinator in `Decode` looks inside a
 //  number, it only moves one), so the bridge instantiates it at `<int, float>` and hands
-//  `as_float` the widening `Decode.asFloat` performs as `float i`.
+//  `as_float` the widening `(Decoder.describing Decoder.float)` performs as `float i`.
 // ---------------------------------------------------------------------------
 
 type private MJVal = WireDecode.jval<int, float>
@@ -743,23 +743,44 @@ let private decodeProbes (bridge: JVal -> MJVal) (el: JVal) : Probe list =
           Production = prod
           Oracle = orac }
 
-    [ p "asString" (resR asStr (Decode.asString el)) (resO asStr (WireDecode.as_string m))
-      p "asInt" (resR string (Decode.asInt el)) (resO string (WireDecode.as_int m))
-      p "asBool" (resR string (Decode.asBool el)) (resO string (WireDecode.as_bool m))
-      p "asFloat" (resR asFlt (Decode.asFloat el)) (resO asFlt (WireDecode.as_float (fun (i: int) -> float i) m))
-      p "kindOf" (resR asStr (Decode.kindOf el)) (resO asStr (WireDecode.kind_of m))
-      p "getProp kind" (resR asJson (Decode.getProp "kind" el)) (resO asModelJson (WireDecode.get_prop "kind" m))
-      p "getProp $type" (resR asJson (Decode.getProp "$type" el)) (resO asModelJson (WireDecode.get_prop "$type" m))
-      p "getProp id" (resR asJson (Decode.getProp "id" el)) (resO asModelJson (WireDecode.get_prop "id" m))
+    [ p "asString" (resR asStr (Decoder.describing Decoder.str el)) (resO asStr (WireDecode.as_string m))
+      p "asInt" (resR string (Decoder.describing Decoder.int el)) (resO string (WireDecode.as_int m))
+      p "asBool" (resR string (Decoder.describing Decoder.bool el)) (resO string (WireDecode.as_bool m))
+      p
+          "asFloat"
+          (resR asFlt (Decoder.describing Decoder.float el))
+          (resO asFlt (WireDecode.as_float (fun (i: int) -> float i) m))
+      p
+          "kindOf"
+          (resR asStr (Decoder.describing (Decoder.field "kind" Decoder.str) el))
+          (resO asStr (WireDecode.kind_of m))
+      p
+          "getProp kind"
+          (resR asJson (Decoder.describing (Decoder.field "kind" Decoder.json) el))
+          (resO asModelJson (WireDecode.get_prop "kind" m))
+      p
+          "getProp $type"
+          (resR asJson (Decoder.describing (Decoder.field "$type" Decoder.json) el))
+          (resO asModelJson (WireDecode.get_prop "$type" m))
+      p
+          "getProp id"
+          (resR asJson (Decoder.describing (Decoder.field "id" Decoder.json) el))
+          (resO asModelJson (WireDecode.get_prop "id" m))
       p
           "getProp absent"
-          (resR asJson (Decode.getProp "no-such-member" el))
+          (resR asJson (Decoder.describing (Decoder.field "no-such-member" Decoder.json) el))
           (resO asModelJson (WireDecode.get_prop "no-such-member" m))
-      p "strField id" (resR asStr (Decode.strField "id" el)) (resO asStr (WireDecode.str_field "id" m))
-      p "intField n" (resR string (Decode.intField "n" el)) (resO string (WireDecode.int_field "n" m))
+      p
+          "strField id"
+          (resR asStr (Decoder.describing (Decoder.field "id" Decoder.str) el))
+          (resO asStr (WireDecode.str_field "id" m))
+      p
+          "intField n"
+          (resR string (Decoder.describing (Decoder.field "n" Decoder.int) el))
+          (resO string (WireDecode.int_field "n" m))
       p
           "mapList asString"
-          (resR asStrs (Decode.mapList Decode.asString el))
+          (resR asStrs (Decoder.describing (Decoder.list Decoder.str) el))
           (resO asStrs (WireDecode.map_list (fun (x: MJVal) -> WireDecode.as_string x) m)) ]
 
 /// Every value in a document, root first — the combinators are asked about the scalars and the
@@ -847,22 +868,24 @@ let rec private encodeRef (n: RefNode) : JVal =
 /// The kind-dispatch node decoder a domain writes from the shipped combinators — the production
 /// side of the model's `decode_node`, written against `Wire.Decode` and nothing else.
 let rec private decodeRef (el: JVal) : Result<RefNode, string> =
-    match Decode.kindOf el with
+    match Decoder.describing (Decoder.field "kind" Decoder.str) el with
     | Error m -> Error m
     | Ok tag ->
         if tag = "text" then
-            Decode.strField "value" el |> Result.map RefText
+            Decoder.describing (Decoder.field "value" Decoder.str) el |> Result.map RefText
         elif tag = "flag" then
-            Decode.getProp "on" el |> Result.bind Decode.asBool |> Result.map RefFlag
+            Decoder.describing (Decoder.field "on" Decoder.json) el
+            |> Result.bind (Decoder.describing Decoder.bool)
+            |> Result.map RefFlag
         elif tag = "tags" then
-            Decode.getProp "tags" el
-            |> Result.bind (Decode.mapList Decode.asString)
+            Decoder.describing (Decoder.field "tags" Decoder.json) el
+            |> Result.bind (Decoder.describing (Decoder.list Decoder.str))
             |> Result.map RefTags
         elif tag = "group" then
-            match Decode.strField "id" el with
+            match Decoder.describing (Decoder.field "id" Decoder.str) el with
             | Error m -> Error m
             | Ok id ->
-                match Decode.getProp "items" el with
+                match Decoder.describing (Decoder.field "items" Decoder.json) el with
                 | Error m -> Error m
                 | Ok(JArr ys) ->
                     let rec go acc rest =
@@ -2265,7 +2288,7 @@ let private firstBreakWalk (dag: Dag.T<'Op>) : string list =
     | Ok order -> order
     | Error(Dag.TotalOrderFault.Cyclic unplaced) ->
         let rest: Dag.T<'Op> =
-            { Nodes = dag.Nodes |> Map.filter (fun k _ -> not (List.contains k unplaced)) }
+            DagOf.nodes (dag.Nodes |> Map.filter (fun k _ -> not (List.contains k unplaced)))
 
         (match Dag.totalOrderBy (fun _ -> 0) rest with
          | Ok order -> order
@@ -2388,35 +2411,22 @@ let private dagTampers (otherOp: 'Op -> 'Op) (dag: Dag.T<'Op>) : (string * Dag.T
           let o' = otherOp n.Op
 
           if o' <> n.Op then
-              yield
-                  sprintf "op@%s" k,
-                  { dag with
-                      Nodes = Map.add k { n with Op = o' } dag.Nodes }
+              yield sprintf "op@%s" k, DagOf.nodes (Map.add k { n with Op = o' } dag.Nodes)
 
           let a' = Human "tamperer"
 
           if a' <> n.Actor then
-              yield
-                  sprintf "actor@%s" k,
-                  { dag with
-                      Nodes = Map.add k { n with Actor = a' } dag.Nodes }
+              yield sprintf "actor@%s" k, DagOf.nodes (Map.add k { n with Actor = a' } dag.Nodes)
 
           match
               nodes
               |> List.tryPick (fun (p, _) -> if p <> k && n.Parents <> [ p ] then Some p else None)
           with
-          | Some p ->
-              yield
-                  sprintf "reparent@%s" k,
-                  { dag with
-                      Nodes = Map.add k { n with Parents = [ p ] } dag.Nodes }
+          | Some p -> yield sprintf "reparent@%s" k, DagOf.nodes (Map.add k { n with Parents = [ p ] } dag.Nodes)
           | None -> ()
 
           for p in n.Parents do
-              yield
-                  sprintf "drop-parent@%s" p,
-                  { dag with
-                      Nodes = Map.remove p dag.Nodes } ]
+              yield sprintf "drop-parent@%s" p, DagOf.nodes (Map.remove p dag.Nodes) ]
 
 type private WalkerTally =
     {
@@ -2515,7 +2525,7 @@ let private dagDifferential
         for (i, (k1, w1, n1)) in List.indexed perNode do
             for (j, (k2, w2, n2)) in List.indexed perNode do
                 if i < j then
-                    let both: Dag.T<'Op> = { Nodes = dag.Nodes |> Map.add k1 n1 |> Map.add k2 n2 }
+                    let both: Dag.T<'Op> = DagOf.nodes (dag.Nodes |> Map.add k1 n1 |> Map.add k2 n2)
 
                     let p = compare (w1 + " and " + w2) both
                     t <- { t with Tampers = t.Tampers + 1 }
@@ -2726,7 +2736,7 @@ let private swappedHash: HashFn = fun a b -> OpStream.defaultHash b a
 // ---------------------------------------------------------------------------
 //  Phase 191 — snapshot and bounded replay (`proofs/Chain.fst`, section 7)
 //
-//  The model's `compact` / `replay_from` / `verify_across` beside `OpStream.compact`,
+//  The model's `compact` / `replay_from` / `verify_across` beside `SnapshotMatrix.compact`,
 //  `compactChainOnly`, `replayFrom`, `verifyAcross` and `verifyAcrossChainOnly`, over generated
 //  streams, EVERY boundary of each (the out-of-range one included), and every single-record tamper
 //  of each — so the streams compared include ones that do not verify and ones that do not replay,
@@ -2782,8 +2792,8 @@ let private prodCompact
     (n: int)
     : Result<Snapshot<'State> * OpRecord<'Op> list, string> =
     match mode with
-    | StateHashed -> OpStream.compact hashFn stateEnc w state0 rs n
-    | ChainOnly -> OpStream.compactChainOnly hashFn w state0 rs n
+    | StateHashed -> SnapshotMatrix.compact hashFn stateEnc w state0 rs n
+    | ChainOnly -> SnapshotMatrix.compactChainOnly hashFn w state0 rs n
 
 let private prodVerifyAcross
     (mode: SnapshotMode)
@@ -2794,8 +2804,8 @@ let private prodVerifyAcross
     (tail: OpRecord<'Op> list)
     : bool =
     match mode with
-    | StateHashed -> OpStream.verifyAcross hashFn stateEnc w snap tail
-    | ChainOnly -> OpStream.verifyAcrossChainOnly hashFn w snap tail
+    | StateHashed -> SnapshotMatrix.verifyAcross hashFn stateEnc w snap tail
+    | ChainOnly -> SnapshotMatrix.verifyAcrossChainOnly hashFn w snap tail
 
 let private modelPay (mode: SnapshotMode) (stateEnc: 'State -> string) : Chain.pos -> 'State -> string =
     match mode with
@@ -2957,7 +2967,7 @@ let private snapshotDifferential
                             sprintf "%s\n  compact refused an in-range boundary, but the origin replay is %A" here other
                         )
             | Ok(snap, tail) ->
-                let pFrom = prodReplayVerdict (OpStream.replayFrom w snap tail)
+                let pFrom = prodReplayVerdict (SnapshotMatrix.replayFrom w snap tail)
 
                 let mFrom =
                     modelReplayVerdict (Chain.replay_from apply (toModelSnapshot snap) (toChainRecords tail))
@@ -5780,20 +5790,27 @@ let private relatedByModel (a: JVal) (b: JVal) : bool =
 /// reading members by position instead of by name. Everything else is `Wire.Decode`.
 type private GetProp = string -> JVal -> Result<JVal, string>
 
+/// The production reading of a member, in the string-error shape the probes take: the typed
+/// `Decoder.field` described (the `Decode.getProp` this stood for left at `1.0.0`, Phase 386).
+let private getProp: GetProp =
+    fun name el -> Decoder.describing (Decoder.field name Decoder.json) el
+
 let rec private decodeRefWith (getProp: GetProp) (el: JVal) : Result<RefNode, string> =
     let strField name e =
-        getProp name e |> Result.bind Decode.asString
+        getProp name e |> Result.bind (Decoder.describing Decoder.str)
 
-    match getProp "kind" el |> Result.bind Decode.asString with
+    match getProp "kind" el |> Result.bind (Decoder.describing Decoder.str) with
     | Error m -> Error m
     | Ok tag ->
         if tag = "text" then
             strField "value" el |> Result.map RefText
         elif tag = "flag" then
-            getProp "on" el |> Result.bind Decode.asBool |> Result.map RefFlag
+            getProp "on" el
+            |> Result.bind (Decoder.describing Decoder.bool)
+            |> Result.map RefFlag
         elif tag = "tags" then
             getProp "tags" el
-            |> Result.bind (Decode.mapList Decode.asString)
+            |> Result.bind (Decoder.describing (Decoder.list Decoder.str))
             |> Result.map RefTags
         elif tag = "group" then
             match strField "id" el with
@@ -5827,15 +5844,15 @@ let private getPropByPosition (name: string) (el: JVal) : Result<JVal, string> =
 /// Production's answers to the questions the theorem says are order-insensitive. Each result
 /// carries no members of its own, so these are compared for EQUALITY — message included.
 let private orderFreeAnswers (getProp: GetProp) (el: JVal) : (string * string) list =
-    [ "kindOf", resR asStr (getProp "kind" el |> Result.bind Decode.asString)
-      "strField id", resR asStr (getProp "id" el |> Result.bind Decode.asString)
-      "strField value", resR asStr (getProp "value" el |> Result.bind Decode.asString)
-      "intField n", resR string (getProp "n" el |> Result.bind Decode.asInt)
-      "asString", resR asStr (Decode.asString el)
-      "asInt", resR string (Decode.asInt el)
-      "asBool", resR string (Decode.asBool el)
-      "asFloat", resR asFlt (Decode.asFloat el)
-      "mapList asString", resR asStrs (Decode.mapList Decode.asString el)
+    [ "kindOf", resR asStr (getProp "kind" el |> Result.bind (Decoder.describing Decoder.str))
+      "strField id", resR asStr (getProp "id" el |> Result.bind (Decoder.describing Decoder.str))
+      "strField value", resR asStr (getProp "value" el |> Result.bind (Decoder.describing Decoder.str))
+      "intField n", resR string (getProp "n" el |> Result.bind (Decoder.describing Decoder.int))
+      "asString", resR asStr (Decoder.describing Decoder.str el)
+      "asInt", resR string (Decoder.describing Decoder.int el)
+      "asBool", resR string (Decoder.describing Decoder.bool el)
+      "asFloat", resR asFlt (Decoder.describing Decoder.float el)
+      "mapList asString", resR asStrs (Decoder.describing (Decoder.list Decoder.str) el)
       "decodeRef", resR renderRef (decodeRefWith getProp el) ]
 
 /// `getProp`'s own result is a SUBTREE, so the two answers are related rather than equal — and
@@ -6886,9 +6903,9 @@ let private toModelVocab (v: Set<string>) : WireCanon.ch list list = v |> Set.to
 /// one equality over the shipped type rather than a pair of shape tests.
 let private ofModelEvolution (e: WireVersioning.evolution) : Versioning.Evolution =
     match e with
-    | WireVersioning.Additive added -> Versioning.Additive(added |> List.map canonFromChs)
+    | WireVersioning.Additive added -> Versioning.Evolution.Additive(added |> List.map canonFromChs)
     | WireVersioning.Breaking(removed, added) ->
-        Versioning.Breaking(removed |> List.map canonFromChs, added |> List.map canonFromChs)
+        Versioning.Evolution.Breaking(removed |> List.map canonFromChs, added |> List.map canonFromChs)
 
 /// One classification, asked of production and of the model. The comparison is the WHOLE verdict
 /// — both lists, not merely the `Additive`/`Breaking` discriminator — because a classifier that
@@ -7103,9 +7120,9 @@ let private profileTriple (p: WireVersioning.profile) : string * int * int =
 /// nothing.
 let private subjectOf (c: IdlDiff.Classification) : string =
     match IdlDiff.evolution [ c ] with
-    | Versioning.Additive(s :: _) -> s
-    | Versioning.Breaking(s :: _, _) -> s
-    | Versioning.Breaking([], s :: _) -> s
+    | Versioning.Evolution.Additive(s :: _) -> s
+    | Versioning.Evolution.Breaking(s :: _, _) -> s
+    | Versioning.Evolution.Breaking([], s :: _) -> s
     | _ -> "<this row moves neither subject set>"
 
 /// What one field-add perturbation measures on both sides.
@@ -7209,12 +7226,12 @@ let private fieldAddMeasurements () : FieldAddMeasurement list =
 let private envelopeVocab: Set<string> = Set.ofList [ "Markdown" ]
 
 let private envelopeTagOf (el: JVal) : Result<string, string> =
-    Decode.getProp "kind" el
-    |> Result.bind (Decode.getProp "$type")
-    |> Result.bind Decode.asString
+    Decoder.describing (Decoder.field "kind" Decoder.json) el
+    |> Result.bind (Decoder.describing (Decoder.field "$type" Decoder.json))
+    |> Result.bind (Decoder.describing Decoder.str)
 
 let private envelopeRequiredProfile (el: JVal) : Versioning.Profile option =
-    match Decode.getProp "requiredProfile" el with
+    match Decoder.describing (Decoder.field "requiredProfile" Decoder.json) el with
     | Result.Ok(JStr s) ->
         match Versioning.Profile.tryParse s with
         | Result.Ok p -> Some p
@@ -8061,7 +8078,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
     // build a registry on both sides, in the same order, with duplicates possible
     let n, r1 = ConfRng.intBelow 4 rng
     rng <- r1
-    let mutable preg = Registry.empty
+    let mutable preg = CapabilityRegistry.empty
     let mutable mreg = ModelCap.empty
     let mutable registered = 0
     let mutable dupRefused = 0
@@ -8092,14 +8109,14 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
         | _ -> diffs.Add(sprintf "seed %d: register verdict differs on %s" seedTag id)
 
     // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
-    let penum = Registry.enumerate preg |> List.map capToModel
+    let penum = CapabilityRegistry.enumerate preg |> List.map capToModel
     let menum = ModelCap.enumerate mreg |> List.sortBy (fun c -> c.c_id)
 
     if penum <> menum then
         diffs.Add(sprintf "seed %d: enumerate differs" seedTag)
 
     for id in "cap-x" :: capIdPool do
-        let p = Registry.tryFind id preg |> Option.map capToModel
+        let p = CapabilityRegistry.tryFind id preg |> Option.map capToModel
         let m = ofMOpt (ModelCap.try_find_cap id mreg)
 
         if p <> m then
@@ -8123,7 +8140,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
         rng <- r6
 
         let args, r7 =
-            match Registry.tryFind id preg with
+            match CapabilityRegistry.tryFind id preg with
             | Some c -> genInvocation c.Signature rng
             | None -> [ "h1", "1" ], rng
 
@@ -8150,7 +8167,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
             | 1 -> ModelCap.Pending
             | _ -> ModelCap.Ready 42
 
-        let p = Registry.dispatch preg id args pBody
+        let p = CapabilityRegistry.dispatch preg id args pBody
         let m = ModelCap.dispatch rd mreg id args mBody
 
         (match p, m with
@@ -8232,7 +8249,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (acc: CapTally) (r: C
                  diffs.Add(sprintf "seed %d: dispatch %s was REFUSED and the body still ran" seedTag id))
 
         // validateArgs on its own, on the resolved capability
-        match Registry.tryFind id preg with
+        match CapabilityRegistry.tryFind id preg with
         | Some c ->
             match Capability.validateArgs c args, ModelCap.validate_args rd (capToModel c) args with
             | Ok(), ModelCap.Ok() -> validated <- validated + 1
@@ -8565,12 +8582,12 @@ let private pipeErrClass (e: PipelineError) : string =
 
 let private prodEvalErrRender (e: PipelineEvalError) : string =
     match e with
-    | EvalIllTyped r -> sprintf "EvalIllTyped(%s)" (prodPipeErrRender r)
-    | EvalNodeFailed(n, m) -> sprintf "EvalNodeFailed(%s;%s)" n m
-    | EvalArgRefused(n, r) -> sprintf "EvalArgRefused(%s;%s)" n (prodInvokeErrRender r)
+    | PipelineEvalError.EvalIllTyped r -> sprintf "EvalIllTyped(%s)" (prodPipeErrRender r)
+    | PipelineEvalError.EvalNodeFailed(n, m) -> sprintf "EvalNodeFailed(%s;%s)" n m
+    | PipelineEvalError.EvalArgRefused(n, r) -> sprintf "EvalArgRefused(%s;%s)" n (prodInvokeErrRender r)
     // Phase 383 — the policy admission the model does not carry; the oracle's lookups run no gate,
     // so it is never answered here, and a render that reached it would differ from every model render.
-    | EvalPolicyRefused(n, r) -> sprintf "EvalPolicyRefused(%s;%s)" n (prodInvokeErrRender r)
+    | PipelineEvalError.EvalPolicyRefused(n, r) -> sprintf "EvalPolicyRefused(%s;%s)" n (prodInvokeErrRender r)
 
 let private modelEvalErrRender (e: ModelCap.pipeline_eval_error) : string =
     match e with
@@ -8875,7 +8892,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
                         )
                 else
                     match pt' with
-                    | Error(PipelineForwardEdge _) -> ()
+                    | Error(PipelineError.PipelineForwardEdge _) -> ()
                     | other ->
                         diffs.Add(
                             sprintf
@@ -8951,14 +8968,16 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
             diffs.Add(sprintf "seed %d: eval ran the body on different nodes or arguments" i)
 
         (match pt, pe0 with
-         | Error e, Error(EvalIllTyped e') when e = e' ->
+         | Error e, Error(PipelineEvalError.EvalIllTyped e') when e = e' ->
              // `pipeline_refused_never_evaluated`: the refusal is the type check's, and no body ran.
              if pLog.Count > 0 then
                  diffs.Add(sprintf "seed %d: eval ran a body on a pipeline typeCheck refused" i)
          | Error _, _ -> diffs.Add(sprintf "seed %d: eval did not answer the type check's refusal" i)
-         | Ok(), Error(EvalIllTyped _) ->
+         | Ok(), Error(PipelineEvalError.EvalIllTyped _) ->
              // `pipeline_illtyped_iff_refused`: never, over an accepted pipeline.
-             diffs.Add(sprintf "seed %d: eval answered EvalIllTyped over a pipeline typeCheck ACCEPTED" i)
+             diffs.Add(
+                 sprintf "seed %d: eval answered PipelineEvalError.EvalIllTyped over a pipeline typeCheck ACCEPTED" i
+             )
          | Ok(), Ok _ -> evaluated <- evaluated + 1
          | Ok(), Error _ -> evalRefused <- evalRefused + 1)
 
@@ -12316,13 +12335,13 @@ let proofOracleTests =
                     Op = planLaneGen.BaseOp }
 
               let cyclic: Dag.T<PlanOp> =
-                  { Nodes =
-                      [ node "a" []
-                        node "b" [ "a"; "d" ] // b waits on d …
-                        node "c" [ "b" ]
-                        node "d" [ "c" ] ] // … and d waits on c waits on b
-                      |> List.map (fun n -> n.Id, n)
-                      |> Map.ofList }
+                  [ node "a" []
+                    node "b" [ "a"; "d" ] // b waits on d …
+                    node "c" [ "b" ]
+                    node "d" [ "c" ] ] // … and d waits on c waits on b
+                  |> List.map (fun n -> n.Id, n)
+                  |> Map.ofList
+                  |> DagOf.nodes
 
               // Production: the closure is four nodes and only "a" is ever ready.
               Expect.isFalse (Dag.isAcyclic cyclic "d") "production sees the cycle"
@@ -12347,10 +12366,10 @@ let proofOracleTests =
               // … and the same set with the back edge removed drains completely and IS one, so the
               // comparison above is a discrimination rather than a refusal of everything.
               let acyclic: Dag.T<PlanOp> =
-                  { Nodes =
-                      [ node "a" []; node "b" [ "a" ]; node "c" [ "b" ]; node "d" [ "c" ] ]
-                      |> List.map (fun n -> n.Id, n)
-                      |> Map.ofList }
+                  [ node "a" []; node "b" [ "a" ]; node "c" [ "b" ]; node "d" [ "c" ] ]
+                  |> List.map (fun n -> n.Id, n)
+                  |> Map.ofList
+                  |> DagOf.nodes
 
               let ns' = modelClosure acyclic "d"
 
@@ -12778,7 +12797,7 @@ let proofOracleTests =
                     Op = planLaneGen.BaseOp }
 
               let build ns : Dag.T<PlanOp> =
-                  { Nodes = ns |> List.map (fun (n: DagNode<PlanOp>) -> n.Id, n) |> Map.ofList }
+                  DagOf.nodes (ns |> List.map (fun (n: DagNode<PlanOp>) -> n.Id, n) |> Map.ofList)
 
               let cyclic =
                   build [ node "a" []; node "b" [ "a"; "d" ]; node "c" [ "b" ]; node "d" [ "c" ] ]
@@ -13826,13 +13845,13 @@ let proofOracleTests =
                   let k, n =
                       dag.Nodes |> Map.toList |> List.find (fun (_, n) -> n.Op = AddItem("z1", "one"))
 
-                  { dag with
-                      Nodes =
-                          Map.add
-                              k
-                              { n with
-                                  Op = AddItem("z1", "TAMPERED") }
-                              dag.Nodes }
+                  DagOf.nodes (
+                      Map.add
+                          k
+                          { n with
+                              Op = AddItem("z1", "TAMPERED") }
+                          dag.Nodes
+                  )
 
               let real = dagUnder OpStream.defaultHash planW planLaneGen.BaseOp [ lane ]
               let weak = dagUnder opBlindHash planW planLaneGen.BaseOp [ lane ]
@@ -14401,14 +14420,14 @@ let proofOracleTests =
                   |> Reference.built
 
               let spoiled =
-                  { Dag.Nodes =
-                      dag.Nodes
-                      |> Map.add
-                          mergeId
-                          { Id = mergeId
-                            Parents = [ ambiguous ]
-                            Actor = Human "w"
-                            Op = planLaneGen.BaseOp } }
+                  dag.Nodes
+                  |> Map.add
+                      mergeId
+                      { Id = mergeId
+                        Parents = [ ambiguous ]
+                        Actor = Human "w"
+                        Op = planLaneGen.BaseOp }
+                  |> DagOf.nodes
 
               match Dag.firstBreak OpStream.defaultHash planW spoiled with
               | Some b ->
@@ -14458,13 +14477,13 @@ let proofOracleTests =
                       |> Map.toList
                       |> List.find (fun (_, n) -> n.Op = AddItem("z1", "one"))
 
-                  { weak with
-                      Nodes =
-                          Map.add
-                              k
-                              { n with
-                                  Op = AddItem("z1", "TAMPERED") }
-                              weak.Nodes }
+                  DagOf.nodes (
+                      Map.add
+                          k
+                          { n with
+                              Op = AddItem("z1", "TAMPERED") }
+                          weak.Nodes
+                  )
 
               Expect.isTrue
                   (Dag.verifyDag OpStream.defaultHash lossy tampered)
@@ -14710,11 +14729,11 @@ let proofOracleTests =
                       (Human "writer")
                       [ AddItem("s1", "one"); AddItem("s2", "two"); Retitle("s1", "uno") ]
 
-              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
+              match SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
               | Error e -> failtestf "compact refused an intact stream: %s" e
               | Ok(snap, tail) ->
                   Expect.isTrue
-                      (OpStream.verifyAcross OpStream.defaultHash planHash planW snap tail)
+                      (SnapshotMatrix.verifyAcross OpStream.defaultHash planHash planW snap tail)
                       "production verifies across its own boundary"
 
                   Expect.isFalse
@@ -14750,11 +14769,11 @@ let proofOracleTests =
                       else
                           r)
 
-              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
+              match SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1 with
               | Error e -> failtestf "the prefix replays, so compact must not refuse: %s" e
               | Ok(snap, tail) ->
                   let origin = prodReplayVerdict (OpStream.replay planW planLaneGen.State0 rs)
-                  let bounded = prodReplayVerdict (OpStream.replayFrom planW snap tail)
+                  let bounded = prodReplayVerdict (SnapshotMatrix.replayFrom planW snap tail)
                   Expect.equal origin (HaltedAt(2, "no item missing")) "the origin halts at the third record"
 
                   Expect.equal
@@ -14798,11 +14817,11 @@ let proofOracleTests =
 
               Expect.isFalse (OpStream.verifyChain OpStream.defaultHash planW rs) "the original does not verify"
 
-              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 2 with
+              match SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 2 with
               | Error e -> failtestf "the tampered prefix still replays, so compact does not refuse: %s" e
               | Ok(snap, tail) ->
                   Expect.isTrue
-                      (OpStream.verifyAcross OpStream.defaultHash planHash planW snap tail)
+                      (SnapshotMatrix.verifyAcross OpStream.defaultHash planHash planW snap tail)
                       "production verifies across the boundary of a stream that does not verify"
 
                   Expect.isTrue
@@ -14850,8 +14869,10 @@ let proofOracleTests =
 
               let prodWith (mode: SnapshotMode) (n: int) =
                   match mode with
-                  | StateHashed -> OpStream.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n
-                  | ChainOnly -> OpStream.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n
+                  | StateHashed ->
+                      SnapshotMatrix.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n
+                  | ChainOnly ->
+                      SnapshotMatrix.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n
 
               for mode in [ StateHashed; ChainOnly ] do
                   for n in 0 .. List.length rs do
@@ -14912,17 +14933,17 @@ let proofOracleTests =
               // The canonical entry point is the `""` instantiation and says so: handed this stream it
               // still snapshots `""` at zero, which is why a host on another genesis compacts through
               // `compactWith`. Past zero the two agree — the boundary hash is a stored one.
-              match OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 0 with
+              match SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 0 with
               | Error e -> failtestf "compact refused an intact stream: %s" e
               | Ok(snap, tail) ->
                   Expect.equal snap.PrevHash "" "the canonical compact seeds the canonical genesis"
 
                   Expect.isFalse
-                      (OpStream.verifyAcrossWith cfg OpStream.defaultHash planHash planW snap tail)
+                      (SnapshotMatrix.verifyAcrossWith cfg OpStream.defaultHash planHash planW snap tail)
                       "so it is not the compaction of a g0 stream at zero"
 
               Expect.equal
-                  (OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1)
+                  (SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs 1)
                   (prodWith StateHashed 1)
                   "past zero the canonical compact and compactWith cfg are the same value"
 
@@ -14949,17 +14970,17 @@ let proofOracleTests =
 
                   for n in 0 .. List.length rs + 1 do
                       Expect.equal
-                          (OpStream.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n)
-                          (OpStream.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs n)
+                          (SnapshotMatrix.compactWith cfg OpStream.defaultHash planHash planW planLaneGen.State0 rs n)
+                          (SnapshotMatrix.compact OpStream.defaultHash planHash planW planLaneGen.State0 rs n)
                           (sprintf "compact at %d" n)
 
                       Expect.equal
-                          (OpStream.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n)
-                          (OpStream.compactChainOnly OpStream.defaultHash planW planLaneGen.State0 rs n)
+                          (SnapshotMatrix.compactChainOnlyWith cfg OpStream.defaultHash planW planLaneGen.State0 rs n)
+                          (SnapshotMatrix.compactChainOnly OpStream.defaultHash planW planLaneGen.State0 rs n)
                           (sprintf "compactChainOnly at %d" n)
 
                       Expect.equal
-                          (OpStream.snapshotAtOptWith
+                          (SnapshotMatrix.snapshotAtOptWith
                               cfg
                               OpStream.defaultHash
                               (Some planHash)
@@ -14967,12 +14988,18 @@ let proofOracleTests =
                               planLaneGen.State0
                               rs
                               n)
-                          (OpStream.snapshotAtOpt OpStream.defaultHash (Some planHash) planW planLaneGen.State0 rs n)
+                          (SnapshotMatrix.snapshotAtOpt
+                              OpStream.defaultHash
+                              (Some planHash)
+                              planW
+                              planLaneGen.State0
+                              rs
+                              n)
                           (sprintf "snapshotAtOpt at %d" n)
 
               match
-                  OpStream.snapshotAt OpStream.defaultHash planHash planW planLaneGen.State0 rs 0,
-                  OpStream.snapshotAtChainOnly OpStream.defaultHash planW planLaneGen.State0 rs 0
+                  SnapshotMatrix.snapshotAt OpStream.defaultHash planHash planW planLaneGen.State0 rs 0,
+                  SnapshotMatrix.snapshotAtChainOnly OpStream.defaultHash planW planLaneGen.State0 rs 0
               with
               | Ok strict, Ok chainOnly ->
                   Expect.equal strict.PrevHash "" "the canonical boundary hash at zero"
@@ -15821,7 +15848,7 @@ let proofOracleTests =
                               | Error e -> failtestf "%s: not JSON (%s)" name e
                               | Ok v ->
                                   everyValue v
-                                  |> List.fold (fun a el -> shuffleProbe Decode.getProp name 4 15201 el a) acc)
+                                  |> List.fold (fun a el -> shuffleProbe getProp name 4 15201 el a) acc)
                           emptyShuffleTally
 
                   expectShuffleAgreement "nodes/ fixtures, shuffled" tally
@@ -15867,7 +15894,7 @@ let proofOracleTests =
                           | Error e -> failtestf "%s: not JSON (%s)" name e
                           | Ok v ->
                               everyValue v
-                              |> List.fold (fun a el -> shuffleProbe Decode.getProp name 4 15203 el a) acc)
+                              |> List.fold (fun a el -> shuffleProbe getProp name 4 15203 el a) acc)
                       emptyShuffleTally
                   |> expectShuffleAgreement "ops/ fixtures, shuffled"
 
@@ -15885,7 +15912,7 @@ let proofOracleTests =
                   let n, r' = genRef 0 rng
                   rng <- r'
                   let el = encodeRef n
-                  tally <- shuffleProbe Decode.getProp (sprintf "ref %d" i) 4 (15300 + i) el tally
+                  tally <- shuffleProbe getProp (sprintf "ref %d" i) 4 (15300 + i) el tally
 
                   // … and the tree it returns is the node that was encoded, not merely a stable
                   // answer: a decoder that answered `Error` consistently would pass the above.
@@ -15908,7 +15935,7 @@ let proofOracleTests =
                   rng2 <- r'
 
                   for el in everyValue v do
-                      refusals <- shuffleProbe Decode.getProp (sprintf "generated %d" i) 3 (15400 + i) el refusals
+                      refusals <- shuffleProbe getProp (sprintf "generated %d" i) 3 (15400 + i) el refusals
 
               expectShuffleAgreement "generated documents, shuffled" refusals
               Expect.isGreaterThan refusals.Refused 0 "the node decoder REFUSED — the message comparison ran"
@@ -16723,24 +16750,25 @@ let proofOracleTests =
                   verdicts |> List.find (fun (l, _) -> l = name) |> snd
 
               match verdictOf "add a kind" with
-              | Versioning.Additive [ one ] -> Expect.equal one "Phase151ProbeKind" "the added tag is the one added"
+              | Versioning.Evolution.Additive [ one ] ->
+                  Expect.equal one "Phase151ProbeKind" "the added tag is the one added"
               | other -> failtestf "adding a kind classified as %A" other
 
               match verdictOf "add an optional field" with
-              | Versioning.Additive [] -> ()
+              | Versioning.Evolution.Additive [] -> ()
               | other ->
                   failtestf
                       "adding an OPTIONAL FIELD moved the kind-tag set (%A) — a field addition is invisible AT THIS DELTA by construction, and a verdict here means the perturbation changed a tag. §15.4's optional-field row itself is measured by the field-add case below, which walks the composition that does see it"
                       other
 
               match verdictOf "remove a tag" with
-              | Versioning.Breaking(removed, added) ->
+              | Versioning.Evolution.Breaking(removed, added) ->
                   Expect.equal (List.length removed) 1 "exactly the removed tag"
                   Expect.isEmpty added "removing a tag adds none"
               | other -> failtestf "removing a tag classified as %A" other
 
               match verdictOf "rename" with
-              | Versioning.Breaking(removed, added) ->
+              | Versioning.Evolution.Breaking(removed, added) ->
                   Expect.equal (List.length removed) 1 "a rename removes exactly the old tag"
                   Expect.equal (List.length added) 1 "and adds exactly the new one"
               | other ->
@@ -16897,9 +16925,9 @@ let proofOracleTests =
               let counters = [ 0; 1; System.Int32.MaxValue - 1; System.Int32.MaxValue ]
 
               let evolutions =
-                  [ Versioning.Additive [], WireVersioning.Additive []
-                    Versioning.Additive [ "x" ], WireVersioning.Additive [ canonToChs "x" ]
-                    Versioning.Breaking([ "x" ], [ "y" ]),
+                  [ Versioning.Evolution.Additive [], WireVersioning.Additive []
+                    Versioning.Evolution.Additive [ "x" ], WireVersioning.Additive [ canonToChs "x" ]
+                    Versioning.Evolution.Breaking([ "x" ], [ "y" ]),
                     WireVersioning.Breaking([ canonToChs "x" ], [ canonToChs "y" ]) ]
 
               let mutable refused = 0
@@ -17219,7 +17247,7 @@ let proofOracleTests =
               let cap = Capability.create "cap-t" sg Server
 
               let reg =
-                  match Registry.register cap Registry.empty with
+                  match CapabilityRegistry.register cap CapabilityRegistry.empty with
                   | Ok r -> r
                   | Error e -> failtestf "register refused: %A" e
 
@@ -17239,12 +17267,12 @@ let proofOracleTests =
 
               // unregistered_refused
               Expect.equal
-                  (Registry.dispatch reg "cap-u" [ "tpl/t", "x" ] body)
+                  (CapabilityRegistry.dispatch reg "cap-u" [ "tpl/t", "x" ] body)
                   (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
                   "an unregistered id is the typed refusal, naming what IS registered"
 
               Expect.equal
-                  (Registry.dispatch reg "cap-u" [ "tpl/t", "x" ] failing)
+                  (CapabilityRegistry.dispatch reg "cap-u" [ "tpl/t", "x" ] failing)
                   (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
                   "and the same refusal under a failing body"
 
@@ -17254,8 +17282,8 @@ let proofOracleTests =
                     [ "tpl/t", "x"; "tpl/c", "1"; "tpl/zz", "1" ]
                     [ "tpl/t", "x"; "tpl/c", "1"; "tpl/s", "para" ]
                     [ "tpl/t", "x" ] ] do
-                  let a = Registry.dispatch reg "cap-t" args body
-                  let b = Registry.dispatch reg "cap-t" args failing
+                  let a = CapabilityRegistry.dispatch reg "cap-t" args body
+                  let b = CapabilityRegistry.dispatch reg "cap-t" args failing
                   Expect.isTrue (Result.isError a) (sprintf "the set %A is refused" args)
                   Expect.equal a b "and the refusal is the same under a failing body"
 
@@ -17275,12 +17303,12 @@ let proofOracleTests =
               let slotCap = Capability.create "cap-slot" full Server
 
               let reg2 =
-                  match Registry.register slotCap reg with
+                  match CapabilityRegistry.register slotCap reg with
                   | Ok r -> r
                   | Error e -> failtestf "register refused: %A" e
 
               Expect.equal
-                  (Registry.enumerate reg2 |> List.map (fun c -> c.Id))
+                  (CapabilityRegistry.enumerate reg2 |> List.map (fun c -> c.Id))
                   [ "cap-slot"; "cap-t" ]
                   "the slot-bearing capability enumerates like any other"
 
@@ -17292,7 +17320,7 @@ let proofOracleTests =
                     ArgOutOfSpace("tpl/s", SlotTree(Some "para"), """{"kind":"field"}""")
                     [ "tpl/s", "" ], UninvocableArg "tpl/s" ] do
                   Expect.equal
-                      (Registry.dispatch reg2 "cap-slot" args body)
+                      (CapabilityRegistry.dispatch reg2 "cap-slot" args body)
                       (Error expected)
                       (sprintf "the slot-bearing capability refuses %A by name" args)
 
@@ -17302,7 +17330,7 @@ let proofOracleTests =
               let accepted = [ "tpl/t", "x"; "tpl/c", "3" ]
 
               Expect.equal
-                  (Registry.dispatch reg "cap-t" accepted body)
+                  (CapabilityRegistry.dispatch reg "cap-t" accepted body)
                   (Ok(Ready "ran"))
                   "an accepted set runs the body"
 
@@ -17312,12 +17340,12 @@ let proofOracleTests =
               // past an accepted validation the envelope's three cases go to exactly the three
               // outcomes, and `Ok(Failed _)` is not among them.
               Expect.equal
-                  (Registry.dispatch reg "cap-t" accepted pending)
+                  (CapabilityRegistry.dispatch reg "cap-t" accepted pending)
                   (Ok Pending: Result<Deferred<string>, InvokeError>)
                   "a pending body stays pending inside the Ok"
 
               Expect.equal
-                  (Registry.dispatch reg "cap-t" accepted failing)
+                  (CapabilityRegistry.dispatch reg "cap-t" accepted failing)
                   (Error(BodyFailed "boom"): Result<Deferred<string>, InvokeError>)
                   "a failing body is the typed BodyFailed, never Ok(Failed _)"
 
@@ -17325,7 +17353,7 @@ let proofOracleTests =
 
               // ... and the slot-bearing capability DISPATCHES a conforming slot argument.
               Expect.equal
-                  (Registry.dispatch reg2 "cap-slot" (accepted @ [ "tpl/s", """{"kind":"para"}""" ]) body)
+                  (CapabilityRegistry.dispatch reg2 "cap-slot" (accepted @ [ "tpl/s", """{"kind":"para"}""" ]) body)
                   (Ok(Ready "ran"))
                   "a capability over a slotted artifact is invocable"
 

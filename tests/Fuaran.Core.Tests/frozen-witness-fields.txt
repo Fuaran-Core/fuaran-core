@@ -1,0 +1,16 @@
+IdWitness: ToString, OfString, Equals
+NodeWitness: Id, KindTag, Children, ReplaceChildren
+StreamWitness: Apply, Encode, Decode
+ArtifactWitness: Tree, IdW, Holes, Effect, Bind
+AiSurfaceWitness: ReadTools, OpKinds, KindOfOp, Patterns, Decide, Apply, Explain
+ProjectionWitness: Tree, IdW, Encode, Snippet, ParseBack
+ObserverWitness: Derive, Options
+CapabilitySeamWitness: Registry, Body, Dispatch, GenCall
+QuerySeamWitness: Queries, Resolver, Dispatch, GenQuery
+CapabilityPipelineWitness: PipelineRegistry, GenPipeline
+ConstructWitness: Surface, Construct
+KeyedWitness: Surface, KeyedChildren, ReplaceKeyedChildren, PlaceKeyedChild, IdsUnique
+EvaluatorWitness: Surface, Model, Deps, EvalNode, Change
+RefWitness: RefsOf, DeclsOf
+SanitizeWitness: SanitizeUrl, SanitizeUrlOrBlank, IsAllowedAttributeKey, IsSafeAttributeValue, SanitizeAttributes, ScrubMarkdown
+GuardedSurfaceWitness: Surface, DryRun, EffectsOf

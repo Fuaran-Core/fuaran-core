@@ -2,8 +2,9 @@
 
 ## Supported versions
 
-Fuaran.Core is pre-1.0. Security fixes are applied to the latest released `0.x` version on the
-`main` branch. Older pre-releases are not maintained.
+Fuaran.Core follows semantic versioning from `1.0.0`. Security fixes are applied to the latest
+minor of the current major, on the `main` branch. Earlier minors, and the `0.x` line, are not
+maintained.
 
 ## Reporting a vulnerability
 
@@ -31,7 +32,7 @@ is correspondingly narrow. Two documented, by-design properties are **not** vuln
   [`STABILITY.md`](STABILITY.md).
 - **Encoder injectivity is a caller precondition.** `Function.applyMemo`'s cache-key soundness
   depends on the caller supplying an injective node encoder; a colliding encoder that serves a wrong
-  cached value is a **caller** defect. Certify yours with `Conformance.encoderInjectivityLaws`.
+  cached value is a **caller** defect. Certify yours with `Conformance.encoderInjectivityLawsAt`.
 
 Genuine issues we want to hear about include: a totality violation (a public function throwing
 instead of returning a typed error), a decode path that admits malformed wire as valid, parser

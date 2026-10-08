@@ -3369,7 +3369,6 @@
         "model": "proofs/DagFold.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Dag.replayTo",
           "Dag.tryReplayTo"
         ]
       }

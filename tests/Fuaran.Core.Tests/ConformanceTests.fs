@@ -302,8 +302,8 @@ let conformanceFacadeTests =
 
 /// The domain validity oracle the verifier drives: any node whose Value parses as an int > 5 is a
 /// `Severity.Error` defect. The "rule" a correct-by-construction function must respect for every
-/// binding — registered into a real `Validator.Registry` so `verifyFunction` drives the framework.
-let countReg: Validator.Registry<RNode, string> =
+/// binding — registered into a real `Validator.RuleRegistry` so `verifyFunction` drives the framework.
+let countReg: Validator.RuleRegistry<RNode, string> =
     Validator.ofFamilies
         [ Validator.perNode "count≤5" (fun _ n ->
               match System.Int32.TryParse n.Value with

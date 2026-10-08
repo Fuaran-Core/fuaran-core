@@ -89,7 +89,8 @@ module internal PipelineSeamLaws =
     /// value, journalled under `nodeInvocationKey`, replays byte-identically via the Phase-27 seam).
     let capabilityPipelineLaws (seed: int) (iterations: int) : LawResult list =
         let typecheck =
-            LawKit.LawCell "pipeline type-check accepts a well-typed DAG + names an ill-typed edge (EdgeTypeMismatch)"
+            LawKit.LawCell
+                "pipeline type-check accepts a well-typed DAG + names an ill-typed edge (PipelineError.EdgeTypeMismatch)"
 
         let roundtrip = LawKit.LawCell "a capability pipeline round-trips the wire"
 
@@ -105,10 +106,10 @@ module internal PipelineSeamLaws =
 
         let ordered =
             LawKit.LawCell
-                "a self-edge and a cycle are refused PipelineCycle and a forward edge PipelineForwardEdge, by name"
+                "a self-edge and a cycle are refused PipelineError.PipelineCycle and a forward edge PipelineError.PipelineForwardEdge, by name"
 
         let checkedFirst =
-            LawKit.LawCell "an ill-typed pipeline is refused EvalIllTyped before any body runs"
+            LawKit.LawCell "an ill-typed pipeline is refused PipelineEvalError.EvalIllTyped before any body runs"
 
         let encV (n: int) : string = string n
 
@@ -168,7 +169,7 @@ module internal PipelineSeamLaws =
                 let v = rng.IntBelow 100
 
                 (match CapabilityPipeline.typeCheck reg good, CapabilityPipeline.typeCheck reg bad with
-                 | Ok(), Error(EdgeTypeMismatch _) -> typecheck.Saw()
+                 | Ok(), Error(PipelineError.EdgeTypeMismatch _) -> typecheck.Saw()
                  | g, b -> typecheck.Check(false, fun () -> at (sprintf "type-check disagreed (good=%A bad=%A)" g b)))
 
                 (match CapabilityPipeline.decode (CapabilityPipeline.encode good) with
@@ -208,7 +209,7 @@ module internal PipelineSeamLaws =
 
                 (match CapabilityPipeline.typeCheck lookup edge with
                  | Ok() when Space.subsumes argSpace output -> relation.Saw()
-                 | Error(EdgeTypeMismatch _) when not (Space.subsumes argSpace output) -> relation.Saw()
+                 | Error(PipelineError.EdgeTypeMismatch _) when not (Space.subsumes argSpace output) -> relation.Saw()
                  | other ->
                      relation.Check(
                          false,
@@ -251,9 +252,9 @@ module internal PipelineSeamLaws =
                     CapabilityPipeline.typeCheck reg cycle,
                     CapabilityPipeline.typeCheck reg forward
                  with
-                 | Error(PipelineCycle("n1", [ "n1" ])),
-                   Error(PipelineCycle("n1", [ "n1"; "n2" ])),
-                   Error(PipelineForwardEdge("n2", "x", "n1")) -> ordered.Saw()
+                 | Error(PipelineError.PipelineCycle("n1", [ "n1" ])),
+                   Error(PipelineError.PipelineCycle("n1", [ "n1"; "n2" ])),
+                   Error(PipelineError.PipelineForwardEdge("n2", "x", "n1")) -> ordered.Saw()
                  | a, b, c ->
                      ordered.Check(false, fun () -> at (sprintf "order refusals: self=%A cycle=%A forward=%A" a b c)))
 
@@ -268,7 +269,8 @@ module internal PipelineSeamLaws =
                             Ok v)
                         bad
                  with
-                 | Error(EvalIllTyped(EdgeTypeMismatch _)) when not ran.Value -> checkedFirst.Saw()
+                 | Error(PipelineEvalError.EvalIllTyped(PipelineError.EdgeTypeMismatch _)) when not ran.Value ->
+                     checkedFirst.Saw()
                  | other ->
                      checkedFirst.Check(
                          false,
@@ -384,7 +386,7 @@ module internal PipelineSeamLaws =
                                 lookup
                                 (replaceAt k (Invoke(nid, absentCapability, outT, args)))
                         with
-                        | Error(PipelineNoSuchCapability(c, _)) when c = absentCapability -> deny.Saw()
+                        | Error(PipelineError.PipelineNoSuchCapability(c, _)) when c = absentCapability -> deny.Saw()
                         | other ->
                             deny.Check(
                                 false,
@@ -402,7 +404,8 @@ module internal PipelineSeamLaws =
                                 lookup
                                 (replaceAt k (Invoke(nid, capId, outT, args @ [ strayArg, Literal "0" ])))
                         with
-                        | Error(PipelineArgRefused(m, UnknownArg(a, _))) when m = nid && a = strayArg -> deny.Saw()
+                        | Error(PipelineError.PipelineArgRefused(m, UnknownArg(a, _))) when m = nid && a = strayArg ->
+                            deny.Saw()
                         | other ->
                             deny.Check(
                                 false,

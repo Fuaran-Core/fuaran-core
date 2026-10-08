@@ -316,9 +316,9 @@ let tests =
                   "m"
                   "the core invents no alternatives — the domain enumerates them"
 
-          testCase "aiSurfaceLaws certify the reference witness green at its own policy (seed-replayable)"
+          testCase "aiSurfaceLawsAt certifies the reference witness green at its own policy (seed-replayable)"
           <| fun _ ->
-              let results = Conformance.aiSurfaceLaws policedWitness genNoteOp state0 1234 200
+              let results = Conformance.aiSurfaceLawsAt policedWitness genNoteOp state0 1234 200
 
               Expect.equal
                   (List.length results)
@@ -328,18 +328,18 @@ let tests =
               for r in results do
                   Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
 
-          testCase "Phase 246 — an allow-all policy turns aiSurfaceLaws RED; the kit-policy variant stays green"
+          testCase "Phase 246 — an allow-all policy turns aiSurfaceLawsAt RED; the kit-policy variant stays green"
           <| fun _ ->
               // The planted defect downstream consumers measured: a policy that allows every write.
               // `witness` IS that policy. Run at the domain's own Decide, the park and deny arms are
               // never reached and the family says so; run with the kit's policy swapped in, every arm
               // is exercised by the kit's own roll and the family is green — about the plumbing, and
               // saying nothing about the policy, which is why that form is named for what it does.
-              let domain = Conformance.aiSurfaceLaws witness genNoteOp state0 1234 200
+              let domain = Conformance.aiSurfaceLawsAt witness genNoteOp state0 1234 200
 
               Expect.equal
                   (domain |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
-                  [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLaws"
+                  [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLawsAt"
                     + "the sample reached every policy decision the laws distinguish" ]
                   "exactly the policy-decision guard is red"
 
@@ -355,7 +355,7 @@ let tests =
                   Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
 
           testCase
-              "Phase 223 — an op generator that draws no rejection turns aiSurfaceLaws RED, on the rejected-op guard alone"
+              "Phase 223 — an op generator that draws no rejection turns aiSurfaceLawsAt RED, on the rejected-op guard alone"
           <| fun _ ->
               // The must-fail case: both catalogued kinds, neither ever rejected (fresh ids only, and
               // a removal of the note `state0` holds). Every subject law passes — the guidance law
@@ -370,10 +370,10 @@ let tests =
                       RemoveNote "n1", r1
 
               let results =
-                  Conformance.aiSurfaceLaws policedWitness applicableOnly state0 1234 200
+                  Conformance.aiSurfaceLawsAt policedWitness applicableOnly state0 1234 200
 
               Expect.equal
                   (results |> List.filter (fun r -> not r.Passed) |> List.map (fun r -> r.Law))
-                  [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLaws"
+                  [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLawsAt"
                     + "the sample reached every rejected op the laws distinguish" ]
                   "exactly the rejected-op guard is red" ]

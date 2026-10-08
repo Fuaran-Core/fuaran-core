@@ -478,19 +478,26 @@ module Capability =
 /// A typed capability registry — the discovery surface an agent enumerates (the compute analogue of
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
 /// dispatch — only a registered id resolves.
+///
+/// OPAQUE since `1.0.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
+/// policy are reachable only through this module's verbs, so `register` — and its admission gate —
+/// is the only way a capability gets in. While the record was public, `{ r with Capabilities =
+/// Map.add id c r.Capabilities }` admitted a capability no gate had seen, which is the default-deny
+/// promise broken by construction.
 type CapabilityRegistry =
-    {
-        /// Keyed by `Capability.Id`; every member was admitted by `register`, so each is total.
-        Capabilities: Map<string, Capability>
-        /// The gates every dispatch runs after validation and before the body, and the observers a
-        /// refusal reaches (Phase 318). `RegistryPolicy.none` — no gate — in `empty`; only
-        /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
-        Policy: RegistryPolicy<Capability, (string * string) list>
-    }
+    private
+        {
+            /// Keyed by `Capability.Id`; every member was admitted by `register`, so each is total.
+            Capabilities: Map<string, Capability>
+            /// The gates every dispatch runs after validation and before the body, and the observers a
+            /// refusal reaches (Phase 318). `RegistryPolicy.none` — no gate — in `empty`; only
+            /// `withGate` and `onDenied` add to it, and every lifecycle verb carries it through.
+            Policy: RegistryPolicy<Capability, (string * string) list>
+        }
 
-/// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295,
-/// which kept that name as an obsolete alias for the 0.34.0 draft). `ModuleSuffix`, so the module
-/// and the type share a name, as `FunctionRegistry` does.
+/// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295; the
+/// obsolete alias left at `1.0.0`). `ModuleSuffix`, so the module and the type share a name, as
+/// `FunctionRegistry` does.
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module CapabilityRegistry =
 
@@ -721,42 +728,6 @@ module CapabilityRegistry =
         |> Result.map (fun m ->
             { Capabilities = m
               Policy = RegistryPolicy.combine a.Policy b.Policy })
-
-/// The capability registry's former module name, kept for the 0.34.0 draft only (Phase 295): each
-/// member forwards to `CapabilityRegistry`.
-[<System.Obsolete("Registry is CapabilityRegistry since Phase 295; this alias is removed at the next draft.")>]
-module Registry =
-
-    /// Forwards to `CapabilityRegistry.empty`; removed at the next draft.
-    let empty: CapabilityRegistry = CapabilityRegistry.empty
-
-    /// Forwards to `CapabilityRegistry.register`; removed at the next draft.
-    let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
-        CapabilityRegistry.register c r
-
-    /// Forwards to `CapabilityRegistry.tryFind`; removed at the next draft.
-    let tryFind (id: string) (r: CapabilityRegistry) : Capability option = CapabilityRegistry.tryFind id r
-
-    /// Forwards to `CapabilityRegistry.enumerate`; removed at the next draft.
-    let enumerate (r: CapabilityRegistry) : Capability list = CapabilityRegistry.enumerate r
-
-    /// Forwards to `CapabilityRegistry.dispatch`; removed at the next draft.
-    let dispatch
-        (r: CapabilityRegistry)
-        (id: string)
-        (args: (string * string) list)
-        (body: Capability -> unit -> Deferred<'v>)
-        : Result<Deferred<'v>, InvokeError> =
-        CapabilityRegistry.dispatch r id args body
-
-    /// Forwards to `CapabilityRegistry.dispatchWithArgs`; removed at the next draft.
-    let dispatchWithArgs
-        (r: CapabilityRegistry)
-        (id: string)
-        (args: (string * string) list)
-        (body: Capability -> (string * ArgValue) list -> Deferred<'v>)
-        : Result<Deferred<'v>, InvokeError> =
-        CapabilityRegistry.dispatchWithArgs r id args body
 
 /// How a seam codec treats a member it does not know (Phase 251). `Lenient` — the default, and
 /// what every decoder without a policy argument does — ignores it, so a reader tolerates a writer

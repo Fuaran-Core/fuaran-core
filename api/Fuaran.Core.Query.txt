@@ -6,7 +6,6 @@
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 ctor Fuaran.Core.Query..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.QueryParam>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Fuaran.Core.EffectClass, Fuaran.Core.DataSource, Microsoft.FSharp.Core.FSharpOption`1<System.Int32>, Microsoft.FSharp.Core.FSharpOption`1<System.Int32>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ColumnPredicate>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SortKey>)
 ctor Fuaran.Core.QueryParam..ctor(System.String, Fuaran.Core.ColumnType, System.Boolean)
-ctor Fuaran.Core.QueryRegistry..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Query>, Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>>)
 ctor Fuaran.Core.QueryResult..ctor(Fuaran.Core.Table, System.Int32, Microsoft.FSharp.Core.FSharpOption`1<System.Int32>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.SortKey..ctor(System.String, Fuaran.Core.SortDirection)
 field Fuaran.Core.ColumnPredicate+Tags.AtLeast : System.Int32 (literal)
@@ -107,8 +106,6 @@ record-field Fuaran.Core.Query.Where #7 : Microsoft.FSharp.Collections.FSharpLis
 record-field Fuaran.Core.QueryParam.Name #0 : System.String
 record-field Fuaran.Core.QueryParam.Required #2 : System.Boolean
 record-field Fuaran.Core.QueryParam.Type #1 : Fuaran.Core.ColumnType
-record-field Fuaran.Core.QueryRegistry.Policy #1 : Fuaran.Core.RegistryPolicy`2<Fuaran.Core.Query, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Cell>>>
-record-field Fuaran.Core.QueryRegistry.Queries #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Query>
 record-field Fuaran.Core.QueryResult.NextPageToken #3 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.QueryResult.PageNum #1 : System.Int32
 record-field Fuaran.Core.QueryResult.Rows #0 : Fuaran.Core.Table

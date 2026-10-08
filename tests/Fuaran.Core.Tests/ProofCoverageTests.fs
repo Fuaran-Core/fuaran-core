@@ -1646,15 +1646,29 @@ let proofCoverageTests =
                   (List.length inputs.Census)
                   "no two published operations share a spelling, so a name maps one operation"
 
-              Expect.isNonEmpty inputs.Obsolete "the obsolete entries' attribute is read by reflection"
+              // Phase 386: the obsolete class has no subject at a major boundary — the `OneDotZero`
+              // family holds that no shipped member carries `System.Obsolete` from 1.0.0 — so the
+              // attribute reader is probed by the fixture tests below (`Thing.old`), not by the tree.
+              Expect.isEmpty
+                  (Set.difference inputs.Obsolete (inputs.Census |> List.map _.Name |> Set.ofList))
+                  "every operation the obsolete reading names is a published one"
 
           testCase "every operation class in the closed vocabulary is carried by at least one entry"
           <| fun _ ->
               let inputs = liveOperationInputs ()
               let used = inputs.Exclusions |> List.map _.Class |> Set.ofList
 
+              // `obsolete` is carried exactly when a published operation carries `System.Obsolete`:
+              // none does at a major boundary (Phase 386, the `OneDotZero` family), and the class
+              // stays in the vocabulary for the forward a later minor deprecates.
+              let exempt =
+                  if inputs.Census |> List.exists carriesObsolete then
+                      Set.empty
+                  else
+                      Set.singleton "obsolete"
+
               Expect.equal
-                  (Set.difference inputs.Classes used)
+                  (Set.difference (Set.difference inputs.Classes used) exempt)
                   Set.empty
                   "a class no entry carries is a vocabulary term nothing tests — carry it or drop it"
 

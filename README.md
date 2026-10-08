@@ -31,7 +31,7 @@ field freeze in [`STABILITY.md`](STABILITY.md) names the domains whose adoption 
 | **`Fuaran.Core.Tree`** | addressing, preorder walk, parent/path lookup, structural update, content-hash, the `fold`/`ancestors`/`descendants`/`siblings`/`depth`/`subtree` combinators | `'Node` + `'Id` witnesses |
 | **`Fuaran.Core.Ops`** | the skeleton ops — five structural, plus the in-place `UpdateNode` (since `0.32.0`) (content kept apart from structure) — + the recoverable error-envelope (the AI-feedback protocol), dry-run `canApply`, op `invert` (undo/redo), structural `Diff.toOps`, and `Arbitration.arbitrate` — which subset of N op-script proposals can land together against one base tree (batch `canApply` + greedy `footprint` independence, a deterministic total partition with typed rejections) | node/id witness |
 | **`Fuaran.Core.OpStream`** | append-only hash-chained stream, `verifyChain`, `replay`, **portable** JSONL encode + decode, snapshot/`compact`/`replayFrom` (bounded replay), determinism capture/replay (`captureEffect`/`replayEffect`/`verifyCaptures` — exact replay of clock/random/network effects) | `(apply, encode, decode)` witness |
-| **`Fuaran.Core.OpStream.Dag`** | content-addressed branching/merging op-DAG, `verifyDag`, deterministic `replayTo` a head | the same stream witness |
+| **`Fuaran.Core.OpStream.Dag`** | content-addressed branching/merging op-DAG, `verifyDag`, deterministic `tryReplayTo` a head | the same stream witness |
 | **`Fuaran.Core.Wire`** | the `"kind"`-tag/camelCase envelope, Fable-clean encode + **portable** decode combinators, corpus tooling | a domain codec |
 | **`Fuaran.Core.ContentAddress` (since `0.35.2`)** | the content address of a wire value: the typed `Digest` (its type in `Tree`) of a value's canonical text under a NAMED `EncodingProfile` (since `0.35.1`), and of stored text only when it is canonical under that profile — the one package holding both the renderer and the hash, so neither references the other (D122) | a `JVal` under a named profile |
 | **`Fuaran.Core.Function`** | the artifact-function protocol: `signature`/`apply`/`curry`/`compose` under the three laws, `auditEffect`, `toSchema`; + the invocable `Capability` seam (typed registry + enumerate + default-deny dispatch, arg-validated invocation, Phase-27 replay keying); + the `Deferred<'T>` async-result envelope the host body answers in — so an invocation has exactly three outcomes: settled, pending, or refused with a typed `InvokeError`; + the signature-typed `FunctionRegistry` (`findBySignature`), and the serializable `CapabilityPipeline` (typed capability-DAG). **Arguments are keyed by hole ADDRESS** — `SigEntry.Addr`, the absolute id-path your `ArtifactWitness.Holes` mints, never `SigEntry.Name` — in `Capability.validateArgs`, in `invoke` and in `Function.toJsonSchema`'s properties alike: binding by address is the hygiene law, and there is no name-keyed projection. **A capability declares no result type**: the body's `'v` is yours, and the wire carries it through the encoder you hand `CapabilityCodec.encodeDeferred`; `FunctionEntry.ResultType` is a label `findBySignature` matches, and a `PipelineNode`'s output type types a pipeline edge. **Default deny** is the registry's shape, not a flag: a call reaches your body only when its id is registered and its arguments validate, and anything else is refused (`NoSuchCapability` names the registered ids). **`Capability.invocationKey`** is the id, `#`, and eight lower-case hex digits — the 32-bit FNV-1a (`Hash.fnv1a`, over UTF-16 code units) of the address-sorted pre-image. The pre-image is injective; the digest is 32 bits, so it keys a capture journal, and a host correlating many calls in flight carries its own call id beside it. **Tag spellings, by artefact**: a wire document a codec decodes back (`CapabilityCodec`, `QueryCodec`, `CapabilityPipeline.encode` — declarations, invocations, the `Deferred` envelope, refusals) is discriminated by `"$type"`; a descriptor that is read and never decoded (`Function.toSchema`) is tagged `"kind"`, like a tree node; a JSON Schema for a model (`toJsonSchema`) carries no tag | artifact witness |
@@ -129,11 +129,11 @@ held in a keyed position on either side of an insert, and addresses nodes below 
 `Ops.apply` / `applyContained` are unchanged: they see only `Children`, so a domain that uses them
 still owes its own check over its own walk.
 
-**And certify the declaration rather than assuming it.** `Conformance.keyedApplyLaws` (since `0.33.0`) BUILDS the
+**And certify the declaration rather than assuming it.** `Conformance.keyedApplyLawsAt` (since `0.36.0`) BUILDS the
 collisions the unkeyed engine is blind to — an id held keyed in the tree against a structural graft,
 the reverse, and keyed against keyed — and requires `applyContainedKeyed` (since `0.33.0`) to refuse exactly the
 inserts your own check refuses afterwards; a keyed position your `KeyedChildren` forgets is the
-disagreement it reports. `Conformance.keyedChildrenLaws` (since `0.30.0`) certifies your check itself. Building the
+disagreement it reports. `Conformance.keyedChildrenLawsAt` (since `0.36.0`) certifies your check itself. Building the
 collisions is the point: your generator mints fresh ids, so a law quantified over what it draws
 would certify a check that checks nothing. A domain with no keyed position declares the empty list,
 and the report says it was vacuous **by declaration** rather than passing quietly.
@@ -163,7 +163,7 @@ does not collide, an extractor and a compiler that are correct). The table is ch
 obligations** (Phase 211). The agreement theorem holds of an evaluator that is a function of what it
 reads, handed a change set that names every node an edit moved, and a `prior` that is `eval`'s own
 output over the same dependency map. The driver enforces none of that, and the first two are
-properties of YOUR evaluator. `Conformance.propagationEvaluatorLaws` (since `0.31.0`) certifies them at your
+properties of YOUR evaluator. `Conformance.propagationEvaluatorLawsAt` (since `0.36.0`) certifies them at your
 evaluator, from an `EvaluatorWitness` (since `0.31.0`): your model generator, your dependency map, your per-node
 evaluator, and your edits, each with the change set you would name for it. The third is yours in
 words, because no law can see where a stored `Map` came from. A `prior` kept across an edit that
@@ -171,8 +171,8 @@ moves the dependency map must be re-primed with `eval`, not replayed.
 
 ### Compacting an op-stream — verify, then compact
 
-**`OpStream.compact` and `compactChainOnly` do not walk the chain.** They read the boundary record's
-hash and TRUST it. So the compacted stream verifies exactly when the original does only over a
+**`OpStream.Snapshots.compact` (since `0.33.0`) does not walk the chain, in either mode.** It reads the boundary record's
+hash and TRUSTS it. So the compacted stream verifies exactly when the original does only over a
 prefix that was verified BEFORE it was discarded — `compact_preserves_verify` and its corollary
 `compact_verifies_iff_original` in [`proofs/Chain.fst`](proofs/Chain.fst) — and a tamper in the
 prefix of an unverified stream survives compaction, verifies across the new boundary, and once the
@@ -181,10 +181,10 @@ whatever it was handed.** The order is an obligation on every caller: `verifyCha
 `verifyChainWith cfg`) first, then `compact`.
 
 **A stream kept under its own `StreamConfig` compacts under the same config** (Phase 227):
-`compactWith cfg` (since `0.31.0`) / `compactChainOnlyWith cfg` (since `0.31.0`) (over `snapshotAtOptWith cfg` (since `0.31.0`)) seed the boundary at
+`OpStream.Snapshots.compact mode cfg` (over `OpStream.Snapshots.take mode cfg` (since `0.33.0`)) seeds the boundary at
 sequence zero with `cfg.Genesis`, the value every chain walker starts from, so a compaction at zero
-verifies across under any genesis (`compact_at_zero_verifies_under_any_genesis`). The canonical
-entry points are the empty-genesis instantiation and emit the same bytes they always have.
+verifies across under any genesis (`compact_at_zero_verifies_under_any_genesis`). Under
+`canonicalConfig` it is the empty-genesis instantiation and emits the same bytes it always has.
 
 ### The container capability — what `applyContained` enforces, and the one thing it asks of you
 
@@ -274,7 +274,7 @@ family, measured at this repository's own reference witness. A cell reads `vacuo
 number — when the run certified nothing, naming the starved dimension; `unmeasured` is the
 separate state of a rendering handed no run at all. Every family reaches a non-zero, non-starved
 count here, which is what lets a host read a zero in its own census as a fact about its own
-witness rather than about the kit. The instance that proves it: `attestationLaws` at
+witness rather than about the kit. The instance that proves it: `attestationLawsAt` (since `0.36.0`) at
 `OpStream.noAttestation` reports its laws green over zero signed heads, and now says so.
 
 ## Adopting a domain

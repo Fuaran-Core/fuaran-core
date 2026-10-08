@@ -237,15 +237,44 @@ type ReconcileFault<'Op, 'Rej> =
 module Dag =
 
     /// The DAG: nodes keyed by content hash.
+    ///
+    /// OPAQUE since `1.0.0` (Phase 386): the constructor is private, so a DAG is built through this
+    /// module — `empty`, `append` and its kin, the readers, or `ofNodes`, which refuses a map whose
+    /// key and node id disagree. While the record was public, `{ Nodes = … }` could file a node under
+    /// a key that was not its id, and every walk that looks a parent up by id then read a different
+    /// node from the one the map enumerated. `Nodes` is still read freely.
     type T<'Op> =
+        private
+            { NodeMap: Map<string, DagNode<'Op>> }
+
+        /// Every node, keyed by its own `Id`. The id is the CLAIM `firstBreak` checks against the
+        /// node's content; that every key equals its node's id is what `ofNodes` and every builder
+        /// here guarantee.
+        member this.Nodes: Map<string, DagNode<'Op>> = this.NodeMap
+
+    /// A map key whose node carries a different `Id` — what `ofNodes` refuses.
+    type KeyMismatch =
         {
-            /// Every node by its content id. Built through this module, each key equals its node's `Id`;
-            /// a hand-built or loaded map may not, which `firstBreak` reports.
-            Nodes: Map<string, DagNode<'Op>>
+            /// The key the node was filed under.
+            Key: string
+            /// The id the node itself carries.
+            NodeId: string
         }
 
     /// The DAG with no nodes: no heads, and `append` with parent `""` adds its first (genesis) node.
-    let empty: T<'Op> = { Nodes = Map.empty }
+    let empty: T<'Op> = { NodeMap = Map.empty }
+
+    /// A DAG over `nodes`. Refused with the first key (in ordinal key order) whose node carries a
+    /// different `Id`; a node whose id does not match its CONTENT is admitted, because that is the
+    /// integrity question `firstBreak` and `verifyDag` answer, and a loaded or hand-built DAG is
+    /// exactly what they are asked about.
+    let ofNodes (nodes: Map<string, DagNode<'Op>>) : Result<T<'Op>, KeyMismatch> =
+        nodes
+        |> Map.toSeq
+        |> Seq.tryFind (fun (key, node) -> key <> node.Id)
+        |> function
+            | Some(key, node) -> Error { Key = key; NodeId = node.Id }
+            | None -> Ok { NodeMap = nodes }
 
     /// `nodeHash = hashFn (sorted parents joined) (actor | encoded-op)` — content addressing,
     /// reusing the pluggable `HashFn` (FNV-1a default; host SHA swap) for cross-host parity. Since
@@ -348,7 +377,7 @@ module Dag =
                   Actor = actor
                   Op = op }
 
-            Ok(id, { Nodes = Map.add id node dag.Nodes })
+            Ok(id, { NodeMap = Map.add id node dag.Nodes })
 
     /// `addNodeAs` at the id `nodeHash` mints.
     let private addNode
@@ -873,23 +902,6 @@ module Dag =
         : Result<'State, ReplayFault<'Rej>> =
         replayClosure w state0 dag [ headId ]
 
-    /// Replay to `headId` — a bridge for one draft over `tryReplayTo` (Phase 296). A domain rejection
-    /// is `Error(nodeId, reject)` as before; an unknown head or a cyclic history, which this signature
-    /// cannot carry, RAISES (`ArgumentException`) where it used to return a silent partial fold or the
-    /// initial state as `Ok`. Use `tryReplayTo`.
-    [<System.Obsolete("Dag.replayTo cannot report an unknown head or a cyclic history and raises on both; use Dag.tryReplayTo. Removed after the 0.33.0 draft.")>]
-    let replayTo
-        (w: StreamWitness<'Op, 'State, 'Rej>)
-        (state0: 'State)
-        (dag: T<'Op>)
-        (headId: string)
-        : Result<'State, string * 'Rej> =
-        match tryReplayTo w state0 dag headId with
-        | Ok st -> Ok st
-        | Error(ReplayFault.Rejected(id, e)) -> Error(id, e)
-        | Error(ReplayFault.UnknownHead h) -> invalidArg "headId" ("Dag.replayTo: the DAG holds no node " + h)
-        | Error(ReplayFault.CyclicHistory h) -> invalidArg "headId" ("Dag.replayTo: cyclic history at " + h)
-
     // ---- the whole-DAG total order (Phase 311) ----
     // Every function above orders ONE head's closure (`tryTopoOrder`, `tryReplayTo`), or a union of
     // heads' closures above a base (`reconcileMany`). A store of several writers' lanes needs the order
@@ -1195,7 +1207,7 @@ module Dag =
         |> bind (fun lines ->
             let rec go (acc: Map<string, DagNode<'Op>>) =
                 function
-                | [] -> Ok { Nodes = acc }
+                | [] -> Ok { NodeMap = acc }
                 | (line, node: DagNode<'Op>) :: rest ->
                     match Map.tryFind node.Id acc with
                     | None -> go (Map.add node.Id node acc) rest
@@ -2426,9 +2438,7 @@ module Dag =
             let band = forwardFrom dag (fun id -> Set.contains id behind) side
             let keep = Set.unionMany [ band; later; Set.singleton node ]
 
-            Ok
-                { dag with
-                    Nodes = dag.Nodes |> Map.filter (fun id _ -> Set.contains id keep) }
+            Ok { NodeMap = dag.Nodes |> Map.filter (fun id _ -> Set.contains id keep) }
 
     /// Compact the DAG at `nodeId` (Phase 288): `(checkpoint, compacted)`, the checkpoint `checkpointAt`
     /// takes and the DAG truncated behind its node — which it KEEPS, so the compacted DAG lives on: append
@@ -2672,7 +2682,7 @@ module Dag =
         loaded.Dag.Nodes
         |> Map.toList
         |> List.groupBy (fun (id, _) -> Map.tryFind id loaded.LaneOf |> Option.defaultValue "")
-        |> List.map (fun (lane, ns) -> lane, { Nodes = Map.ofList ns })
+        |> List.map (fun (lane, ns) -> lane, { NodeMap = Map.ofList ns })
         |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
 
     /// Load a lane store (Phase 311): one `(lane id, JSONL text)` per lane file, in any order. Each text
@@ -2700,7 +2710,7 @@ module Dag =
                     match Map.tryFind id l.Dag.Nodes with
                     | None ->
                         Ok
-                            { Dag = { Nodes = Map.add id n l.Dag.Nodes }
+                            { Dag = { NodeMap = Map.add id n l.Dag.Nodes }
                               LaneOf = Map.add id lane l.LaneOf }
                     | Some held when sameNode w.Encode held n.Parents n.Actor n.Op -> Ok l
                     | Some _ -> Error(LaneLoadFault.Collision(id, ordinalSort [ l.LaneOf.[id]; lane ])))

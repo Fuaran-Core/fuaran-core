@@ -625,18 +625,42 @@ let tests =
               [ testCase "each forward answers the sentence it always answered"
                 <| fun _ ->
                     let doc = parse """{"s":"x","i":1}"""
-                    Expect.equal (Fuaran.Core.Decode.getProp "zz" doc) (Error "missing property: zz") "getProp missing"
 
                     Expect.equal
-                        (Fuaran.Core.Decode.getProp "zz" (JInt 1))
+                        (Fuaran.Core.Decoder.describing (Decoder.field "zz" Decoder.json) doc)
+                        (Error "missing property: zz")
+                        "getProp missing"
+
+                    Expect.equal
+                        (Fuaran.Core.Decoder.describing (Decoder.field "zz" Decoder.json) (JInt 1))
                         (Error "expected object, got int")
                         "getProp non-object"
 
-                    Expect.equal (Fuaran.Core.Decode.strField "i" doc) (Error "expected string, got int") "strField"
-                    Expect.equal (Fuaran.Core.Decode.intField "s" doc) (Error "expected int, got string") "intField"
-                    Expect.equal (Fuaran.Core.Decode.asBool (JStr "x")) (Error "expected bool, got string") "asBool"
-                    Expect.equal (Fuaran.Core.Decode.asFloat (JStr "x")) (Error "expected number, got string") "asFloat"
-                    Expect.equal (Fuaran.Core.Decode.kindOf doc) (Error "missing property: kind") "kindOf"
+                    Expect.equal
+                        (Fuaran.Core.Decoder.describing (Decoder.field "i" Decoder.str) doc)
+                        (Error "expected string, got int")
+                        "strField"
+
+                    Expect.equal
+                        (Fuaran.Core.Decoder.describing (Decoder.field "s" Decoder.int) doc)
+                        (Error "expected int, got string")
+                        "intField"
+
+                    Expect.equal
+                        (Fuaran.Core.Decoder.describing Decoder.bool (JStr "x"))
+                        (Error "expected bool, got string")
+                        "asBool"
+
+                    Expect.equal
+                        (Fuaran.Core.Decoder.describing Decoder.float (JStr "x"))
+                        (Error "expected number, got string")
+                        "asFloat"
+
+                    Expect.equal
+                        (Fuaran.Core.Decoder.describing (Decoder.field "kind" Decoder.str) doc)
+                        (Error "missing property: kind")
+                        "kindOf"
+
                     Expect.equal (Fuaran.Core.Decode.tryProp "s" doc) (Some(JStr "x")) "tryProp"
 
                 testCase "the IDL interpreter's string forms carry the typed refusal's sentence"
