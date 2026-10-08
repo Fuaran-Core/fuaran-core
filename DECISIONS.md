@@ -1,5 +1,100 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D131: a strict proof run records cost and refuses a cached read; one cached-read threshold replaces the per-module floors
+
+**Recorded by Phase 399, on an operator ruling of 2026-10-08. `proofs/kit/check-proof-leg.ps1`,
+`proofs/modules.json` (`cachedRead`), `proofs/check.ps1`, `.github/workflows/proofs-strict.yml`; held
+by the `C` arms of `proofs/kit/check-proof-leg.tests.ps1`. No package or wire byte moves.**
+
+*The ruling (the operator's).* `-Strict` had been answering two questions with one switch. **A cost
+overrun is not a strict failure.** A module at 110% of its budget is a slow cold check, which is the
+opposite of a warm one. Under `-Strict` an overrun is a recorded `COST` finding: it is printed, it is
+written to the strict baseline with its percentage, and the scheduled strict run trends it. It never
+turns the leg red. Budgets are neither raised to make a run pass nor deleted; they stay the trend's
+reference. **The hard gate is "this was not a real cold verification"**, and it is detected by a
+cached-read threshold measured on the machine, not by a percentage of a time. The Phase 402 cache
+provenance check stays the primary signal. The threshold is its backstop for a writer active during
+one invocation. The scheduled strict workflow follows the same rules: it reports cost overruns as
+findings and fails only on a cached read or a model that does not verify.
+
+*The measurement.* On the pinned prover, on the local Windows dev machine that recorded the first
+strict baseline (other sessions active), ten modules were cold-checked in roster order into one
+fresh cache, and each was then re-run three times against the populated cache with the leg's own
+flags. The cached reads took 0.18s to 0.51s. Cold checks of the same modules took 0.38s (`Limits`),
+1.61s (`Skeleton`), and 29.8s to 184.0s for the rest. The kit tests' one-line models check cold in
+about 0.2s. Every cold check printed at least three `Quake:` query lines, and every cached read
+printed none. The figures are in `proofs/modules.json` `cachedRead.measured` and in the
+`proofs/README.md` section "Cached read or cold check".
+
+*The decision.* The threshold is `cachedRead.thresholdSeconds` = **1.0s**, about twice the slowest
+cached read. It is checked before a module's green line is printed.
+
+*Tiny modules, checked first.* Some models genuinely check faster than a second cold, so a flat
+threshold would refuse real cold checks as cached reads. The evidence: on the strict baseline run
+(`fe50742`) `Limits` checked cold in 1s, 0s and 0s and `Skeleton` in 1s, 1s and 1s; in the
+measurement above `Limits` took 0.38s cold, which is inside the cached-read band; the kit tests'
+one-line models check cold in about 0.2s. Two fixes were considered. **A threshold relative to each
+module's own recorded cold time** was rejected: it is the floor again, one number per module per
+machine, and it broke on the first faster runner. **An exemption for the modules whose genuine cold
+check can fall into the cached-read band** was adopted, because that is the same cut the floors'
+`zeroBelowSeconds` made, now stated against the measured band. The threshold applies to a module
+whose recorded `fastestSeconds` is at least `cachedRead.appliesFromFastestSeconds` = **3s**, three
+times the threshold. Below that, a module rests on the provenance check alone, and the leg names
+those modules at start-up: today `Skeleton`, `Limits` and `WireVersioning`. The threefold margin
+covers a machine about twice as fast as this one, which is what the Linux runner measured
+(`WireColumn`, 16s against a 17s floor seeded on Windows). The smallest module the threshold judges
+is `VocabularyVectors`, which checked cold in 3s on all three strict-baseline runs.
+
+*Held by* the kit tests' `C` arms. At the real numbers (1.0s from 3s), a sub-second module's genuine
+cold check stays green, and the same slow module that checks green cold is red when re-run warm. The
+warm re-run puts its genuine checked file in front of the check through a new `-BeforeInvocation`
+test seam, which runs after the provenance check has passed. That is the writer-during-an-invocation
+case that only the threshold can see.
+
+*The strict baseline under these rules.* Re-derived from the recorded timings of the `fe50742` run,
+the run `proofs/last-strict.json` names. Every model verified with every query 3/3 under `--quake` on
+all three runs. No cost overrun is red. The four modules over budget on some run were all on passes
+the contention factor labels contended (x1.03, x0.82, x0.89): `WireDecode` 78s/70s, `VocabularyProofs`
+33s/30s, `ScoreVocabulary` 41s/40s and `ScoreVocabularyProofs` 103s/90s. Every module the threshold
+judges checked cold in 3s or more, well above 1.0s. So the run is green under these rules, as it was
+under the old ones.
+
+*The floors are retired, on that evidence.* The per-module `floorSeconds` (Phase 164) and
+`floorSeeding.os` (Phase 402) answered the same question with one number per module per machine.
+The measurement shows nothing between a cached read and a cold check for such a number to see: a
+module is either read back in half a second or checked. A faster machine reads a cache faster still
+and stays under the threshold, so no OS gate is needed. A much slower machine could take longer than
+the threshold to read a cache, so the gate would miss; that is the safe direction, and the
+provenance check still runs. Keeping both mechanisms would mean two gates for one question, one of
+which is already known to break on a faster runner. A budget file that still carries `floorSeeding`
+or a `floorSeconds` is refused by name. `-NoFloor` is gone. `fastestSeconds` stays, as the
+threshold's applicability input, and `floorSeeding.zeroBelowSeconds` moved to
+`contentionSeeding.minimumSeconds`, the one place it is still read.
+
+*What `-Strict` still turns red.* A coverage or shape finding: a module with no budget, a module
+with no `fastestSeconds` when a threshold is declared, a budget for a module the leg does not check,
+or a budget file with no `cachedRead` block. These are gaps in a declaration, not measurements of a
+machine. The contention factor and its labels are unchanged; they now tell a reader of the strict
+record which overruns measure the machine.
+
+*Observed, and left for the operator.* The absence of any `Quake:` line separates a cached read from
+a cold check without a clock, and it also covers the sub-second modules the threshold cannot judge.
+It was not adopted, because the ruling asked for a threshold and a second gate is a decision to make
+on its own. A module with no SMT query at all would print no `Quake:` line when checked cold, so
+adopting it would need a declared exemption for such modules.
+
+*The first strict baseline.* `proofs/last-strict.json` records the green `check.ps1 -Runs 3
+-Strict` of `fe50742` and stays as it is, by the operator's ruling. A pass of the new code was
+started and stopped on the operator's instruction: the new rules change how timings are judged, not
+whether the proofs hold, and the re-derivation above settles the judgement. The record predates the
+per-module `costs` the new code writes, so the over-budget modules are named here rather than in the
+file. The run before it, on the same machine, was red under the old rules on one unlabelled finding:
+`DocVocabularyProofs` at 27s against a 20s budget, on a pass at x0.72. That module had grown with
+Phase 293 without a re-seed, and Phase 399 re-seeded it from its slowest ordinary observation
+(70s/32s) before this ruling. Under this decision that overrun would not have been red either. The
+code this decision changes is a leg script, so `-Since` reads the baseline as predating every module.
+The next strict run of the new code, scheduled or local, records one that does not.
+
 ## 2026-10-08 — D130: `STABILITY.md` is the contract and `docs/releases/<version>.md` the ledger, one file per slot; the contract is held under 1,500 lines, its moved anchors are mapped in a permanent table, and the prose claims are held to the tree
 
 **Recorded by Phase 397. `STABILITY.md`, the new `docs/releases/`, `Directory.Build.props`,

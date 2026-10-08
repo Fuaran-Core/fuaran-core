@@ -1,0 +1,108 @@
+name: proofs-strict
+
+# Phase 399 — the proof leg's STRICT run, on a schedule.
+#
+# The `proofs` job in ci.yml runs `./proofs/check.ps1 -Runs 3` on every push. This workflow runs the
+# same leg with -Strict once a week and on demand. That run is the RECORDED one: a green strict
+# full run writes proofs/last-strict.json (the tree it verified, the machine, each run's contention
+# factor and every module's time against its budget), and this workflow uploads it as the
+# `strict-baseline` artefact. It commits nothing; a maintainer who wants `check.ps1 -Since` to lean
+# on this run downloads the artefact and commits the file.
+#
+# WHAT MAKES IT RED (DECISIONS.md D131, an operator ruling): a model that does not verify, a second
+# writer caught by the cache provenance check, a check that finishes under the cached-read threshold
+# (`modules.json` `cachedRead`), or an incomplete budget declaration. A COST overrun never makes it
+# red: a module over its budget is a slow cold check. The job summary lists every cost finding with
+# its percentage on every run, red or green, so a module that is over budget week after week is
+# visible; re-seeding it is the recorded act proofs/README.md describes, after a quiet
+# re-measurement.
+#
+# It never runs on a push or a tag: the strict leg is too slow to gate a push, and the publish
+# workflow already runs the leg on the tagged commit.
+on:
+  schedule:
+    # Mondays, 04:17 UTC — off the hour, when runners are least contended.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  strict:
+    name: proofs strict (windows-latest)
+    # Windows because the budgets in modules.json were measured on Windows, so the cost trend is read
+    # against numbers from the same OS.
+    runs-on: windows-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      # At the pin, as in ci.yml (Phase 394).
+      - name: Read the corpus pin (copies.json `corpus`)
+        id: corpus-pin
+        shell: pwsh
+        run: ./.github/scripts/corpus-pin.ps1
+      - name: Check out the wire-format conformance corpus at the pin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.corpus-pin.outputs.repository }}
+          ref: ${{ steps.corpus-pin.outputs.sha }}
+          path: wire-format-fixtures
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Cache the pinned F* release
+        uses: actions/cache@v4
+        with:
+          path: proofs/.fstar
+          key: fstar-${{ runner.os }}-${{ hashFiles('proofs/fstar-pin.json') }}
+      - name: Strict proof leg (./proofs/check.ps1 -Runs 3 -Strict)
+        shell: pwsh
+        env:
+          FUARAN_CORE_CORPUS_FRESHNESS: '1'
+          FUARAN_CORE_CORPUS_DIR: ${{ github.workspace }}/wire-format-fixtures
+        # A child pwsh, so every line the leg prints reaches the log file, and the exit code read
+        # below is the leg's own: seeded first, so a step that ran nothing cannot read green.
+        run: |
+          $global:LASTEXITCODE = 0
+          pwsh -NoProfile -File ./proofs/check.ps1 -Runs 3 -Strict 2>&1 | Tee-Object -FilePath proofs-strict.log
+          exit $LASTEXITCODE
+      - name: Summarise the run (cost findings, and why it is red if it is)
+        if: always()
+        shell: pwsh
+        run: |
+          $lines = if (Test-Path proofs-strict.log) { Get-Content proofs-strict.log } else { @() }
+          $cost = @($lines | Where-Object { $_ -match '==== proofs: COST' })
+          $contention = @($lines | Where-Object { $_ -match '==== proofs: contention' })
+          $verdict = @($lines | Where-Object { $_ -match '^==== proofs: ' }) | Select-Object -Last 1
+          $summary = @("## Strict proof leg: $(if ('${{ job.status }}' -eq 'success') { 'green' } else { 'RED' })", '')
+          if ('${{ job.status }}' -ne 'success') {
+            $summary += 'Red means a model did not verify, a second writer or a probable cached read was caught, or the budget declaration is incomplete. A cost overrun never makes this run red. The last verdict line:'
+            $summary += ''
+            $summary += '```'
+            $summary += $(if ($verdict) { $verdict } else { '(no verdict line; read the log artefact)' })
+            $summary += '```'
+            $summary += ''
+          }
+          $summary += "### $($cost.Count) cost finding(s) against ``proofs/modules.json``"
+          $summary += 'Recorded, not failed. A module over budget week after week is the case for a re-seed after a quiet re-measurement (`proofs/README.md`, "What the leg costs").'
+          $summary += ''
+          $summary += '```'
+          $summary += $(if ($cost.Count -gt 0) { $cost } else { '(none)' })
+          $summary += $contention
+          $summary += '```'
+          $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload the refreshed strict baseline
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-baseline
+          path: proofs/last-strict.json
+          if-no-files-found: error
+      - name: Upload the leg's log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofs-strict-log
+          path: proofs-strict.log
+          if-no-files-found: warn
