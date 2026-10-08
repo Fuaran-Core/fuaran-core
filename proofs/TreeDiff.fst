@@ -3,7 +3,7 @@
    turns one tree into another, and this module is that derivation modelled clause for clause
    (fuaran-core Phase 141).
 
-   WHAT IS MODELLED. `Ops.fs`'s `Diff.toOps` — the two refusals, the four passes and the order they
+   WHAT IS MODELLED. `Diff.fs`'s `Diff.toOps` — the two refusals, the four passes and the order they
    are emitted in — and `Diff.toOpsContained`, its `canHold`-aware mirror. The tree, the operations,
    the rejection envelope and the whole membership algebra are `TreeOps`'s, opened here rather than
    restated, exactly as `Preservation.fst` opens them; this module extracts beside both into the
@@ -104,7 +104,7 @@ open Preservation
 #set-options "--ext context_pruning"
 
 (* ======================================================================================
-   1. Why a diff could not be produced (F#: `Diff.DiffError<'Id>` in Ops.fs).
+   1. Why a diff could not be produced (F#: `Diff.DiffError<'Id>` in Diff.fs).
 
       Three cases, and the third is `toOpsContained`'s alone — the plain `toOps` cannot raise it,
       which section 5 proves rather than asserts, in the shape `Preservation.apply_total` uses for
@@ -209,7 +209,7 @@ let rec kid_map (ns:list tree) : Tot (list (string & list string)) (decreases ns
 let dup_id (t:tree) : Tot (option string) = scan_dup [] (ids t)
 
 (* ======================================================================================
-   3. The four passes (F#: `Ops.fs`'s `toOps`, one function per numbered comment block).
+   3. The four passes (F#: `Diff.fs`'s `toOps`, one function per numbered comment block).
    ====================================================================================== *)
 
 (* F#: `w.ReplaceChildren n []` — the LEAF SHELL an added node goes in as. The witness law says a
@@ -336,7 +336,7 @@ let rec pass_reorders (b_ids:list string) (b_kids:list (string & list string)) (
      | None -> pass_reorders b_ids b_kids after r)
 
 (* ======================================================================================
-   4. `Diff.toOps` itself (F#: `Ops.fs`, clause for clause), and `Diff.toOpsContained`.
+   4. `Diff.toOps` itself (F#: `Diff.fs`, clause for clause), and `Diff.toOpsContained`.
 
       The four blocks are named rather than inlined, so that the emission-order theorem in section
       6 can be stated about THEM rather than about an existential. It is the same function either
@@ -444,7 +444,7 @@ let diff_never_target_not_a_container (b a:tree)
 (* ======================================================================================
    6. The emission ORDER, which is the theorem.
 
-      `Ops.fs`'s doc comment says: "The emitted order is always applyable: added nodes go in as leaf
+      `Diff.fs`'s doc comment says: "The emitted order is always applyable: added nodes go in as leaf
       shells (top-down), every survivor is then reattached/reordered to its `after` position, and
       removed regions are deleted **last** (so a surviving child is pulled out before its old
       container is removed)." That is an argument in prose about a four-pass procedure, and every

@@ -79,7 +79,7 @@ existed to make.
 
 **Why the classifier got it wrong, which is the part worth keeping.** A `THosted` slot's content is,
 by explicit design, not described by the artifact: "everywhere else the JSON is carried verbatim,
-because its content is the host codec's business, not the schema's" (`Idl.fs`). So the artifact
+because its content is the host codec's business, not the schema's" (`Fuaran.Core.Idl`'s `Encode.fs`). So the artifact
 records that the slot *was* erased and *is now* a three-string enum, and contains nothing whatever
 about what the erased side admitted. The set may have narrowed, widened, or stayed identical, and
 `idl.json` cannot say which. The original verdict was not conservative — it was an assertion the

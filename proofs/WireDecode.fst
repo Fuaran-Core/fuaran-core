@@ -2,7 +2,7 @@
    WireDecode — an F* model of Fuaran.Core's wire DECODE combinators, with decoder totality as a
    machine-checked theorem (fuaran-core Phase 135 — the attested-stack programme's theorem 1).
 
-   WHAT IS MODELLED. `Fuaran.Core.Decode` (src/Fuaran.Core.Wire/Wire.fs), clause for clause:
+   WHAT IS MODELLED. `Fuaran.Core.Decode` (src/Fuaran.Core.Wire/Decode.fs), clause for clause:
    `getProp`, `asString` / `asInt` / `asBool` / `asFloat`, `kindOf`, `strField` / `intField`, and
    `mapList` — the array walker, in its accumulator-and-`rev` form, which is what production is.
    On top of them a REFERENCE VOCABULARY (`rnode`) with its encoder and the kind-dispatch node
@@ -38,7 +38,7 @@
        combinator: erase object-member nulls, refuse a null that has no absence to erase it to.
        Section 7 models it there — `read : null_policy -> jvaln -> outcome jval`, from a document
        model that HAS a null into the wire model that does not, which is the type-level form of
-       "tolerance is a read normalisation, never a new emission" (Wire.fs, `NullPolicy`'s doc).
+       "tolerance is a read normalisation, never a new emission" (Json.fs, `NullPolicy`'s doc).
        What section 7 ASSUMED until Phase 190, and stated rather than hid, is that the parser's
        member-null absorption is equivalent to erasing member nulls from the document tree the
        strict grammar would otherwise produce. It is a THEOREM now — `null_absorption_is_erasure`,
@@ -83,7 +83,7 @@ module WireDecode
 
 (* ======================================================================================
    0. The outcome (F#: `Result<'T, string>`, which every combinator in `Decode` returns —
-      "so a failure NAMES what was expected", Wire.fs).
+      "so a failure NAMES what was expected", Decode.fs).
    ====================================================================================== *)
 
 type outcome (a: Type) =
@@ -107,7 +107,7 @@ let rec rev_app (#a: Type) (l acc: list a) : Tot (list a) (decreases l) =
 let rev (#a: Type) (l: list a) : Tot (list a) = rev_app l []
 
 (* ======================================================================================
-   1. The value model (F#: `JVal` in Wire.fs).
+   1. The value model (F#: `JVal` in JVal.fs).
 
       Parametric in the two numeric carriers: see the header's note on opacity.
    ====================================================================================== *)
@@ -160,7 +160,7 @@ let fsize_cons (#num #flt: eqtype) (k: string) (v: jval num flt) (t: list (strin
   : Lemma (ensures fsize ((k, v) :: t) == jsize v + fsize t) [SMTPat (fsize ((k, v) :: t))] = ()
 
 (* ======================================================================================
-   3. The combinators (F#: `module Decode`, Wire.fs), clause for clause.
+   3. The combinators (F#: `module Decode`, Decode.fs), clause for clause.
    ====================================================================================== *)
 
 (* F#: `Decode.kindName` — the word a failure names the actual shape with. *)
@@ -551,7 +551,7 @@ and decode_encode_items (#num #flt: eqtype) (acc: list rnode) (ns: list rnode)
       null — read into `jval`, which by its type cannot carry one.
    ====================================================================================== *)
 
-(* F#: `NullPolicy` (Wire.fs). *)
+(* F#: `NullPolicy` (Json.fs). *)
 type null_policy =
   | RejectNull
   | EraseMemberNull
@@ -601,7 +601,7 @@ let fnsize_cons (#num #flt: eqtype) (k: string) (v: jvaln num flt) (t: list (str
 
 (* F#: the two messages `parseValue`'s `'n'` arm raises, verbatim — the tolerant policy names
    a DIFFERENT rejection at a position it declines to erase, deliberately, "since the remedy
-   is different" (Wire.fs). Reproducing both is what lets the theorem below be honest about
+   is different" (Json.fs). Reproducing both is what lets the theorem below be honest about
    which half of the verdict is preserved. *)
 let reject_msg: string = "null is not representable in the Fuaran wire JVal model"
 
@@ -790,7 +790,7 @@ and null_free_fields (#num #flt: eqtype) (fs: list (string & jvaln num flt))
       `{"a":{"x":1,"y":2}}` and `{"a":{"y":2,"x":1}}` are related, at any depth.
 
       THE PREMISE, AND WHY IT IS NECESSARY RATHER THAN CONVENIENT. `getProp` is a `List.tryFind`
-      over the member list (Wire.fs), so it answers with the FIRST member of the given name.
+      over the member list (Decoder.fs), so it answers with the FIRST member of the given name.
       On a list with no repeated key that is order-independent; on one WITH a repeated key it is
       not — and nothing upstream excludes the case, since `Json.parseObject` appends every member
       with no key check and Phase 146's `parse_members` models exactly that accumulation. The

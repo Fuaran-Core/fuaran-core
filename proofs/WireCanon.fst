@@ -2,7 +2,7 @@
    WireCanon — an F* model of Fuaran.Core's CANONICAL ENCODER, with the canonical form's determinism
    and its converse as machine-checked theorems (fuaran-core Phase 149).
 
-   WHAT IS MODELLED. `Fuaran.Core.Canon` (src/Fuaran.Core.Wire/Wire.fs), clause for clause:
+   WHAT IS MODELLED. `Fuaran.Core.Canon` (src/Fuaran.Core.Wire/Canon.fs), clause for clause:
    `Canon.escape` (WIRE_FORMAT §2 rule 6), `Canon.canonicalFloat` (rule 5, including the `-0`
    collapse and the three non-finite tokens), and `Canon.render` (rules 2, 3, 5, 6, 7 and the
    omitted-key corollary of rule 4). Beside it, a READER for exactly the grammar `render` emits —
@@ -23,7 +23,7 @@
    rather than described:
 
      1. `render_aliases_nan` / `_pos_inf` / `_neg_inf` — a non-finite float renders as the QUOTED
-        STRING `"NaN"` / `"Infinity"` / `"-Infinity"` (rule 5, Wire.fs `canonicalFloat`), which is
+        STRING `"NaN"` / `"Infinity"` / `"-Infinity"` (rule 5, Canon.fs `canonicalFloat`), which is
         byte-for-byte what the STRING of those characters renders as. At Phase 149 `Canon.render`
         had no guarded counterpart, where `Json.render` has `Json.tryRender` beside it — see the
         finding at the foot of this header, and section 13 for the guard Phase 165 added.
@@ -279,7 +279,7 @@ let rec bridged_all (s: list ch) : Tot bool =
   | c :: t -> bridged c && bridged_all t
 
 (* ======================================================================================
-   2. The value model (F#: `JVal` in Wire.fs).
+   2. The value model (F#: `JVal` in JVal.fs).
 
       Parametric in the two numeric carriers, as theorem 1's is and for the same reason; strings
       and keys are character lists, because rule 6 and rule 2 are both statements about characters.

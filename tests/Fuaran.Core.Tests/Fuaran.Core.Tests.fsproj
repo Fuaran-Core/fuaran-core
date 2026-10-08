@@ -348,6 +348,8 @@
     <Compile Include="HashRosterTests.fs" />
     <!-- No unpaired surrogate spelled in a literal under src/ (the 0.34.0 release candidate's Fable gate). -->
     <Compile Include="SourceLiteralTests.fs" />
+    <!-- Phase 401 — the 2,000-line rule over src/, with D125's three exceptions and their reasons. -->
+    <Compile Include="SourceLengthTests.fs" />
 
     <!-- Phase 299 — the codec refusal corpus (`conformance/refusals/`): the authored vectors, their
          emit-refusals renderer, and the test holding the committed files to a fresh render.

@@ -3,7 +3,7 @@
    the error classification as machine-checked theorems (fuaran-core Phase 146 — the boundary
    Phase 135's theorem 1 named and left open).
 
-   WHAT IS MODELLED. `Fuaran.Core.Json.parseDetailedWithPolicy` (src/Fuaran.Core.Wire/Wire.fs),
+   WHAT IS MODELLED. `Fuaran.Core.Json.parseDetailedWithPolicy` (src/Fuaran.Core.Wire/Json.fs),
    clause for clause: `skipWs`, `expect`, `parseString` with its eight short escapes, the
    `\uXXXX` path and — since Phase 306 — its refusal of a lone or ill-ordered surrogate,
    `parseNumber` with the JSON number grammar (`Json.isJsonNumber`, also since Phase 306) and the
@@ -81,7 +81,7 @@
    reasoning is what a reader needs to see why the grammar closes it.
 
    The finding, recorded here because the phase's own task list assumed otherwise: THE INT53 GUARD
-   WAS NOT EXACT, AND COULD NOT BE, BECAUSE THE PARSER DID NOT REJECT LEADING ZEROS. Wire.fs justifies
+   WAS NOT EXACT, AND COULD NOT BE, BECAUSE THE PARSER DID NOT REJECT LEADING ZEROS. Json.fs justifies
    comparing the digit string lexically with "JSON forbids leading zeros, so for equal length that
    IS the numeric order" — but `parseNumber`'s digit loop accepts `007`, and for a token `Int32`
    refuses, padding lengthens the string without changing the value. So `0009007199254740992` — 19
@@ -267,7 +267,7 @@ type jresult =
   | ROk  : v:jval -> jresult
   | RErr : k:ekind -> msg:string -> at:list ch -> jresult
 
-(* ---- the messages, verbatim from Wire.fs ---- *)
+(* ---- the messages, verbatim from Json.fs ---- *)
 
 let msg_expect_char (c: ch) : Tot string = "expected '" ^ ch_str c ^ "'"
 let msg_expect_lit (l: string) : Tot string = "expected '" ^ l ^ "'"
@@ -1040,7 +1040,7 @@ let canonical_layout_past_int53_is_read (float_read: list ch -> freadv) (tok: li
    JSON number grammar before either guard sees it, the grammar has no leading zero, and on an
    unpadded digit string the lexical test and the test on the value are one test. So over the
    tokens the parser reads, the guard is EXACT — which is what the phase that wrote it asked for,
-   and what the comment in Wire.fs justifying the lexical comparison always assumed. *)
+   and what the comment in Json.fs justifying the lexical comparison always assumed. *)
 
 [@@ noextract_to "FSharp"]
 let rec all_digits (d: list ch) : Tot bool (decreases d) =
@@ -1245,7 +1245,7 @@ let member_null_erased (float_read: list ch -> freadv) (cap: string)
   = ()
 
 (* … and a null the tolerant policy declines to erase is still refused, in DIFFERENT words, which
-   is the distinction Wire.fs makes deliberately ("since the remedy is different"). *)
+   is the distinction Json.fs makes deliberately ("since the remedy is different"). *)
 let off_policy_null_still_refused (float_read: list ch -> freadv) (cap: string)
   : Lemma (ensures
       (let doc = [CLBrack; CLn; CLu; CLl; CLl; CRBrack] in

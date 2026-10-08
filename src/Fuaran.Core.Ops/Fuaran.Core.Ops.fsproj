@@ -7,7 +7,12 @@
     <Description>Fuaran.Core.Ops — the skeleton-five structural ops (InsertChild/RemoveNode/MoveNode/ReorderChildren/Batch) and the recoverable error-envelope contract (name the failure, enumerate the valid alternatives) — the AI-feedback protocol — plus proposal arbitration (which subset of N op-script proposals can land together against one base tree: batch canApply + greedy footprint independence, a deterministic total partition with typed rejections), the concurrency half of footprint/independent. Per-kind property ops stay domain-side. FSharp.Core only.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="RejectionNouns.fs" />
+    <Compile Include="Rejection.fs" />
+    <Compile Include="Footprint.fs" />
     <Compile Include="Ops.fs" />
+    <Compile Include="TreePlacement.fs" />
+    <Compile Include="Diff.fs" />
     <Compile Include="Arbitration.fs" />
     <Compile Include="WriteGate.fs" />
   </ItemGroup>

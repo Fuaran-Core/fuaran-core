@@ -772,7 +772,7 @@ module Diff =
         /// **The artifact cannot decide this one.** Reserved for changes that
         /// cross an ERASED slot (`hosted` / `json` / `opaque`), whose admitted
         /// values the artifact deliberately does not state — a `THosted` slot's
-        /// content "is the host codec's business, not the schema's" (Idl.fs), so
+        /// content "is the host codec's business, not the schema's" (Fuaran.Core.Idl's Encode.fs), so
         /// nothing in `idl.json` says whether the two sides admit the same set.
         ///
         /// This case exists because the Phase 700 retroactive validation found

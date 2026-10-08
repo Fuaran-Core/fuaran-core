@@ -3647,7 +3647,7 @@ theorem 15). What follows is the finding as it stood, and it is still true of th
 `int53_guard_conservative` is still a lemma — but no longer of the parser: the witness below is now
 refused as a malformed number (`padded_token_is_refused_by_the_grammar`)._
 
-`Wire.fs` justifies comparing the digit string lexically with "JSON forbids leading zeros, so for
+`Json.fs` justifies comparing the digit string lexically with "JSON forbids leading zeros, so for
 equal length that IS the numeric order". **This parser does not enforce that.** `parseNumber`'s
 digit loop accepts `007`, and for a token `Int32.TryParse` refuses, leading zeros lengthen the
 string without changing the value — so `0009007199254740992`, which is exactly 2^53 and therefore
@@ -4205,7 +4205,7 @@ contrapositive is the sentence the phase exists for and is stated as its own lem
 `diff_never_target_not_a_container` closes the envelope the way `apply_total` closes `apply`'s: the
 third error class is `toOpsContained`'s alone and the plain diff cannot reach it.
 
-**The emission order.** `Ops.fs`'s doc comment argues, in prose, that the emitted order is always
+**The emission order.** `Diff.fs`'s doc comment argues, in prose, that the emitted order is always
 applyable: added nodes go in as leaf shells top-down, every survivor is then reattached, and removed
 regions are deleted **last**, so a surviving child is pulled out before its old container goes.
 `diff_emission_order` is that argument as a property of the emitted list — the script IS
@@ -4833,7 +4833,7 @@ invokable term, an inert sentinel", which carries the statement, the premise and
 WIRE_FORMAT §15.4 classifies a vocabulary change by an IDL diff — no removed tags means additive,
 any removal or rename means breaking — and §15.3 promises that a `Behind` consumer **preserves**
 what it does not understand. Since Phase 127 the classification is computed rather than
-hand-applied: `Versioning.classify` and `Versioning.bump` in `src/Fuaran.Core.Wire/Wire.fs`, driven
+hand-applied: `Versioning.classify` and `Versioning.bump` in `src/Fuaran.Core.Wire/Versioning.fs`, driven
 by the kind-tag delta an `idl.json` pair yields. It is exercised by tests that perturb the real
 vocabulary, and those tests answer a different question from the one the table raises. A test says
 the classifier returned `Additive` for this pair. The table says an `Additive` step is one every
