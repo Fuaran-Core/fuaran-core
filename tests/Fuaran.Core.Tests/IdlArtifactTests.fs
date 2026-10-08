@@ -305,7 +305,7 @@ let tests =
 // every earlier artifact wrote.
 // ---------------------------------------------------------------------------
 
-let private hostedIdl (wire: IdlType option) (format: string option) : Idl =
+let private hostedIdl (wire: IdlType option) (format: HostedFormat option) : Idl =
     { refIdl with
         Kinds =
             [ { Tag = "Trip"
@@ -363,7 +363,7 @@ let identityAndWireFormTests =
           testCase
               "a hosted slot's declared wire form and format round-trip, and an undeclared one is unchanged"
               (fun _ ->
-                  for wire, format in [ None, None; Some TStr, Some "date"; Some(TList TStr), None ] do
+                  for wire, format in [ None, None; Some TStr, Some HostedFormat.Date; Some(TList TStr), None ] do
                       let idl = hostedIdl wire format
                       let text = Artifact.render idl
 
@@ -383,6 +383,6 @@ let identityAndWireFormTests =
                       "undeclared: as before"
 
                   Expect.stringContains
-                      (Artifact.render (hostedIdl (Some TStr) (Some "date")))
+                      (Artifact.render (hostedIdl (Some TStr) (Some HostedFormat.Date)))
                       "\"format\": \"date\""
                       "the format") ]

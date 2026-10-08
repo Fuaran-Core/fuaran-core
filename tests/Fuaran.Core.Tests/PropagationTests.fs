@@ -56,15 +56,6 @@ let tests =
                   (Set.singleton "r")
                   "isolated node"
 
-          testCase "staleSet is dirtyFromChangedIds (staleness as returned data)"
-          <| fun _ ->
-              let deps = Propagation.dependencyMap nodew idw readsOf (tree ())
-
-              Expect.equal
-                  (Propagation.staleSet deps (Set.singleton "c"))
-                  (Propagation.dirtyFromChangedIds deps (Set.singleton "c"))
-                  "staleSet == the dirty closure"
-
           testCase "touchedBy maps each SkeletonOp to its container ids"
           <| fun _ ->
               let root = tree ()

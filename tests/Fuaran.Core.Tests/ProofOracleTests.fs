@@ -5119,7 +5119,10 @@ let private scriptProbe
             0,
             0,
             0
-        | Error(pi, pe, ppartial), DagFold.Error(mi, me, mpartial) ->
+        | Error { Applied = pi
+                  Rejection = pe
+                  Tree = ppartial },
+          DagFold.Error(mi, me, mpartial) ->
             let pc = prodRejClass pe
             let mc = modelRejClass me
 
@@ -5159,7 +5162,7 @@ let private scriptProbe
             0,
             0,
             0
-        | Error(pi, pe, _), DagFold.Ok _ ->
+        | Error { Applied = pi; Rejection = pe }, DagFold.Ok _ ->
             [ sprintf
                   "production REJECTED the script at %d (%s) but the oracle accepted — %s"
                   pi
@@ -5203,7 +5206,7 @@ let private scriptProbe
             let fromApply =
                 match prod with
                 | Ok _ -> Choice1Of2()
-                | Error(i, e, _) -> Choice2Of2(string i, prodRejClass e)
+                | Error { Applied = i; Rejection = e } -> Choice2Of2(string i, prodRejClass e)
 
             if render pv <> render fromApply then
                 [ sprintf
@@ -5226,7 +5229,7 @@ let private scriptProbe
         let render r =
             match r with
             | Ok t -> "ok:" + prodTreeHash t
-            | Error(i, e, t) -> sprintf "%d:%s:%s" i (prodRejClass e) (prodTreeHash t)
+            | Error { Applied = i; Rejection = e; Tree = t } -> sprintf "%d:%s:%s" i (prodRejClass e) (prodTreeHash t)
 
         let applySide =
             if render plainApply <> render totalApply then
@@ -5565,7 +5568,7 @@ let private diffProbe
                 match rebuilt with
                 | Ok t when prodTreeHash t = prodTreeHash after -> []
                 | Ok t -> [ sprintf "applyAll(toOps) did NOT reconstruct — %s\n  got: %s" where (prodTreeHash t) ]
-                | Error(i, e, _) ->
+                | Error { Applied = i; Rejection = e } ->
                     [ sprintf "applyAll(toOps) was REFUSED at step %d (%s) — %s" i (prodRejClass e) where ]
 
             let applyability =
@@ -5652,7 +5655,7 @@ let private diffProbe
                 | Ok t when prodTreeHash t = prodTreeHash after -> []
                 | Ok t ->
                     [ sprintf "applyAllWith(toOpsContained) did NOT reconstruct — %s\n  got: %s" where (prodTreeHash t) ]
-                | Error(i, e, _) ->
+                | Error { Applied = i; Rejection = e } ->
                     [ sprintf "applyAllWith REFUSED a contained script at step %d (%s) — %s" i (prodRejClass e) where ]
 
             let dry =
@@ -9477,7 +9480,7 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
 
 // ------------------------------------------------------------------------------------------
 // Phase 186 — the INCREMENTAL PROMISE. `proofs/Propagation.fst` models
-// `Fuaran.Core.Propagation`'s dirty set (`dependents`, `dirtyFromChangedIds`, `staleSet`) and its
+// `Fuaran.Core.Propagation`'s dirty set (`dependents`, `dirtyFromChangedIds`) and its
 // driver (`eval`, `evalFrom`) clause for clause, over an abstract node evaluator and with
 // `sort`'s result handed in; `proofs/oracle/Propagation.fs` is that model extracted. This runs
 // it BESIDE production over generated dependency maps — acyclic ones, the generator
@@ -9700,12 +9703,6 @@ let private propProbe
         diffs <-
             sprintf "%s: dirty production=%A model=%A" where (Set.toList prodDirty) (Set.toList modelDirty)
             :: diffs
-
-    if
-        Propagation.staleSet deps changed
-        <> Set.ofList (ModelProp.stale_set mdeps (Set.toList changed))
-    then
-        diffs <- sprintf "%s: staleSet disagrees" where :: diffs
 
     // (3) the reference evaluator, before the change
     let spec0 = propSpec base0 deps
@@ -11100,7 +11097,7 @@ module private ColumnDiff =
         | MissingField f -> "MissingField " + f
         | MalformedShape _ -> "MalformedShape"
         | UnknownType(got, _) -> "UnknownType " + got
-        | TypeMismatch(col, expected, _) -> "TypeMismatch " + col + " " + expected
+        | TypeMismatch(col, expected, _) -> "TypeMismatch " + col + " " + ColumnType.tag expected
         | LengthMismatch(col, _, _) -> "LengthMismatch " + col
         | NonFiniteFloat(col, _) -> "NonFiniteFloat " + col
         | RaggedColumns(col, _, _) -> "RaggedColumns " + col
@@ -12474,7 +12471,8 @@ let proofOracleTests =
                               (prodShape t)
                               (prodShape after)
                               (sprintf "#%d: production's script lands on after" i)
-                      | Error(j, e, _) -> failtestf "#%d: production's content-aware script was REFUSED at %d: %A" i j e
+                      | Error { Applied = j; Rejection = e } ->
+                          failtestf "#%d: production's content-aware script was REFUSED at %d: %A" i j e
                   | _ -> ()
 
               match disagreements with
@@ -15567,7 +15565,9 @@ let proofOracleTests =
                   failtestf "canApplyAllWith must refuse at step 0 with the envelope applyAllWith raises, got %A" other
 
               match Ops.applyAllWith canHold nodew idw script tree with
-              | Error(0, NotAContainer("leaf", "para"), partial) ->
+              | Error { Applied = 0
+                        Rejection = NotAContainer("leaf", "para")
+                        Tree = partial } ->
                   // the refusal is at the first step, so the accepted prefix is empty and the
                   // partial tree is the caller's own — first-refusal-wins, not all-or-nothing
                   Expect.equal
@@ -18209,7 +18209,7 @@ let proofOracleTests =
           // ---- Phase 186: the incremental promise (proofs/Propagation.fst) ----
 
           testCase
-              "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, staleSet, eval, evalFrom, neededFor, evalFor and evalForWith, over generated dependency maps, change sets and target sets"
+              "the propagation oracle agrees with Propagation.dependents, dirtyFromChangedIds, eval, evalFrom, neededFor, evalFor and evalForWith, over generated dependency maps, change sets and target sets"
           <| fun _ ->
               let t = propDifferential depsToModel 1861 400
 

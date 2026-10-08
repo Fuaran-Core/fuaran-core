@@ -437,7 +437,7 @@ module internal QuerySeamLaws =
                     tokens
                     |> List.fold
                         (fun (acc, j) t ->
-                            let answer, _, j' =
+                            let captured =
                                 QueryRegistry.dispatchPageCapturedWith
                                     hashFn
                                     encodeV
@@ -448,7 +448,7 @@ module internal QuerySeamLaws =
                                     typedResolver
                                     j
 
-                            acc @ [ answer ], j')
+                            acc @ [ captured.Outcome ], captured.Journal)
                         ([], [])
 
                 let replayFrom (journal: KeyedCapture list) (t: string option) (cursor: Map<string, int>) =
@@ -466,13 +466,15 @@ module internal QuerySeamLaws =
                     tokens
                     |> List.fold
                         (fun (acc, cursor) t ->
-                            match replayFrom typedJournal t cursor with
-                            | Ok(answer, cursor') -> acc @ [ Some answer ], cursor'
-                            | Error _ -> acc @ [ None ], cursor)
+                            let replayed = replayFrom typedJournal t cursor
+
+                            match replayed.Outcome with
+                            | Error(ReplayFailure.Unanswered _) -> acc @ [ None ], cursor
+                            | answer -> acc @ [ Some answer ], replayed.Cursor)
                         ([], Map.empty)
                     |> fst
 
-                let unpaged, _, unpagedJournal =
+                let unpagedCapture =
                     QueryRegistry.dispatchCapturedWith
                         hashFn
                         encodeV
@@ -482,7 +484,9 @@ module internal QuerySeamLaws =
                         (fun q' a -> typedResolver q' None a)
                         []
 
-                let unpagedReplay = replayFrom unpagedJournal None Map.empty |> Result.map fst
+                let unpaged = unpagedCapture.Outcome
+
+                let unpagedReplay = (replayFrom unpagedCapture.Journal None Map.empty).Outcome
 
                 // Counted per refusal page, where the refusal is built.
                 List.zip3 live capturedTyped replayedTyped
@@ -490,7 +494,10 @@ module internal QuerySeamLaws =
                     match l with
                     | Error _ ->
                         typedReach.Check(
-                            c = l && rp = Some l && (n > 0 || (unpaged = l && unpagedReplay = Ok l)),
+                            c = l
+                            && rp = Some(Result.mapError ReplayFailure.Refused l)
+                            && (n > 0
+                                || (unpaged = l && unpagedReplay = Result.mapError ReplayFailure.Refused l)),
                             fun () ->
                                 at (
                                     sprintf
@@ -593,8 +600,10 @@ module internal QuerySeamLaws =
                         QueryRegistry.dispatchWithArgs regS qS.Id goodArgs (fun _ _ ->
                             Error(ResolveFault.OrderUnsupported orderColumn))
 
-                    let capturedP, _, journalP =
+                    let captureP =
                         QueryRegistry.dispatchCapturedWith hashFn encodeV regS qS.Id goodArgs unhonoured []
+
+                    let capturedP = captureP.Outcome
 
                     let replayedP =
                         QueryRegistry.dispatchReplayedWith
@@ -605,8 +614,9 @@ module internal QuerySeamLaws =
                             None
                             (fun _ _ _ -> Ok(Ready realized))
                             Map.empty
-                            journalP
-                        |> Result.map fst
+                            captureP.Journal
+
+                    let replayedP = replayedP.Outcome
 
                     shape.Check(
                         served = Ok(Ready realized)
@@ -614,7 +624,7 @@ module internal QuerySeamLaws =
                         && refusedP = Error(PredicateNotHonoured predicate)
                         && refusedO = Error(OrderNotHonoured orderColumn)
                         && capturedP = refusedP
-                        && replayedP = Ok refusedP
+                        && replayedP = Result.mapError ReplayFailure.Refused refusedP
                         && QueryCodec.decode (QueryCodec.encode qS) = Ok qS
                         && keysApart
                         && admitted
@@ -654,7 +664,7 @@ module internal QuerySeamLaws =
 
     /// The query-seam laws at a DOMAIN'S seam (Phase 246) — `capabilityLawsAt`'s three laws, over
     /// the domain's own `QuerySeamWitness`: every drawn call goes through the witness's `Dispatch`
-    /// with its `Resolver`, counted, and the family certifies that a dispatch has exactly three
+    /// with the domain's `resolver` (a per-call argument since Phase 391), counted, and the family certifies that a dispatch has exactly three
     /// outcomes (`Ok(Failed _)` never escapes, and an `ExecutionFailed` carries the resolver's own
     /// failure), that **a refused dispatch runs no resolver** (and a dispatched one runs it exactly
     /// once), and that the host agrees with the registry: a call reaches the resolver iff its id is
@@ -667,7 +677,13 @@ module internal QuerySeamLaws =
     ///
     /// The query instance of `LawKit.seamLaws` (Phase 297); `capabilityLawsAt` is the capability one.
     /// `family` labels the guard, as there.
-    let queryLawsAt (family: string) (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
+    let queryLawsAt
+        (family: string)
+        (w: QuerySeamWitness)
+        (resolver: (string * Cell) list -> Query -> Deferred<QueryResult>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
         let known = QueryRegistry.enumerate w.Queries |> List.map _.Id
 
         // Phase 302 — the result law. Nothing bound a resolver's answer to the query's declared
@@ -686,7 +702,7 @@ module internal QuerySeamLaws =
             match QueryRegistry.tryFind id w.Queries with
             | None -> ()
             | Some q ->
-                match w.Dispatch id args (fun q' -> w.Resolver args q') with
+                match w.Dispatch id args (fun q' -> resolver args q') with
                 | Ok(Ready r) ->
                     let schemaOk = r.Rows.Schema = q.ResultSchema
 
@@ -723,7 +739,7 @@ module internal QuerySeamLaws =
                         | None -> Error(NoSuchQuery(id, known))
                         | Some q -> Ok q
                   Validate = Query.validateParams
-                  Body = fun args q -> w.Resolver args q
+                  Body = resolver
                   Dispatch = w.Dispatch
                   Gen = w.GenQuery
                   Rendering =

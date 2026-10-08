@@ -162,16 +162,7 @@ let private propagationTests =
 
               match Propagation.evalFromPlan ev prior (Set.ofList [ "zz" ]) plan with
               | Error(Propagation.PropagationError.EvalUnknownChange [ "zz" ]) -> ()
-              | other -> failtestf "expected EvalUnknownChange, got %A" other
-
-          testCase "staleSet is dirtyFromChangedIds"
-          <| fun _ ->
-              let deps = chain 6
-
-              Expect.equal
-                  (Propagation.staleSet deps (Set.singleton "c2"))
-                  (Propagation.dirtyFromChangedIds deps (Set.singleton "c2"))
-                  "an alias, and only that" ]
+              | other -> failtestf "expected EvalUnknownChange, got %A" other ]
 
 // ---- Validator ----
 
@@ -533,11 +524,11 @@ let private aiSurfaceTests =
               let _, c = Proposals.propose "x" "t" None [ Put "3" ] pruned
               Expect.equal c 3 "one past the largest held"
 
-              match Proposals.proposeWithId b "x" "t" None [ Put "4" ] q2 with
+              match Proposals.proposeWithId "x" "t" b None [ Put "4" ] q2 with
               | Error(Proposals.ProposeFailure.DuplicateProposal(i, [ 1; 2 ])) when i = b -> ()
               | other -> failtestf "expected DuplicateProposal, got %A" other
 
-              match Proposals.proposeWithId 40 "x" "t" None [ Put "4" ] q2 with
+              match Proposals.proposeWithId "x" "t" 40 None [ Put "4" ] q2 with
               | Ok q -> Expect.equal (q.Proposals |> List.map _.Id) [ 1; 2; 40 ] "appended under the chosen id"
               | Error e -> failtestf "refused: %A" e ]
 

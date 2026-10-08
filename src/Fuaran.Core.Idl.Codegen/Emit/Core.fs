@@ -240,9 +240,8 @@ module internal Core =
 
         match h.Wire, h.Format with
         | Some w, _ when unreadable w -> refuse (sprintf "declaring the wire form %A" w)
-        | _, Some f when not (List.contains f HostedFormat.known) ->
-            refuse (sprintf "declaring the unknown format '%s'" f)
-        | w, Some f when w <> Some TStr -> refuse (sprintf "declaring the format '%s' on a non-string wire" f)
+        | w, Some f when w <> Some TStr ->
+            refuse (sprintf "declaring the format '%s' on a non-string wire" (HostedFormat.name f))
         | _ -> None
 
     /// `one of 'a', 'b'` — what an `UnknownTag` refusal says the position expected, spelled as

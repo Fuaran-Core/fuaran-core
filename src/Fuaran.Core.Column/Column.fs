@@ -137,12 +137,15 @@ type ColumnError =
     /// kind appeared), or a cell's TEXT is not its type's canonical form — decimal text, or an
     /// ISO-8601 date or timestamp (`DecimalText`, `TemporalText`).
     | MalformedShape of detail: string
-    /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid tags.
-    | UnknownType of got: string * expected: string list
+    /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid types, in
+    /// `ColumnType.all`'s order (`ColumnType` since Phase 391; their tags before `1.0.0`).
+    | UnknownType of got: string * expected: ColumnType list
     /// A present cell's type does not widen into its column's declared type — its JSON kind on
     /// decode, its `Cell` case in `Table.validate` (Phase 299) — or a column's `Type` disagrees with
-    /// its schema entry.
-    | TypeMismatch of column: string * expected: string * got: string
+    /// its schema entry. `expected` is the declared type (`ColumnType` since Phase 391; its tag before
+    /// `1.0.0`); `got` is what was found — a JSON value's kind on decode, a `Cell`'s or a column's
+    /// type tag otherwise.
+    | TypeMismatch of column: string * expected: ColumnType * got: string
     /// A column's `values` and `validity` arrays had different lengths (they must co-index).
     | LengthMismatch of column: string * values: int * validity: int
     /// A present `Float` cell was non-finite (`NaN` / `Infinity` / `-Infinity`); the Fuaran wire has no
@@ -416,7 +419,8 @@ module ColumnType =
           TimestampType
           DecimalType ]
 
-    /// The wire tags in `all`'s order — the `expected` list an `UnknownType` refusal carries.
+    /// The wire tags in `all`'s order — the tags of the `expected` list an `UnknownType` refusal
+    /// carries.
     let allTags = all |> List.map tag
 
     /// Resolve a wire tag to its type, or `None` for an unknown tag.
@@ -595,19 +599,21 @@ type AggFn =
 /// types; an integer `Sum` outside the int32 band is a named overflow (the pinned no-silent-wrap posture
 /// shared with the compute layer's evaluator, Phase 39).
 type AggregateError =
-    /// A numeric aggregate over a non-numeric column: `fn` is the aggregate's tag (`"sum"`, …),
-    /// `colType` the column's type tag, and `expected` the numeric tags (`int`, `float`, `decimal`).
-    | IncompatibleAggType of fn: string * colType: string * expected: string list
+    /// A numeric aggregate over a non-numeric column: `fn` is the aggregate, `colType` the column's
+    /// type, and `expected` the numeric types (`IntType`, `FloatType`, `DecimalType`). Typed since
+    /// Phase 391; their tags before `1.0.0`.
+    | IncompatibleAggType of fn: AggFn * colType: ColumnType * expected: ColumnType list
     /// An answer outside its type's range: an int `Sum` past int32, a float `Sum` or a float
     /// statistic that left the float range over finite input, or a decimal too large to read as a
     /// float for a float-valued aggregate. `detail` says which, with the offending value or column.
     | AggregateOverflow of detail: string
-    /// A present cell outside its column's type (Phase 299): the column, its declared type, and the
-    /// cell — its type's tag, or, for a `Decimal` cell, the text that is not decimal text. The
+    /// A present cell outside its column's type (Phase 299): the column, its declared type
+    /// (`ColumnType` since Phase 391; its tag before `1.0.0`), and the cell — its type's tag, or, for
+    /// a `Decimal` cell, the text that is not decimal text. The
     /// aggregate used to read cells by shape and trust the column's type: a `Float` in an int
     /// column was truncated into an int `Sum`, and one in a decimal column was dropped from `Sum`
     /// and counted in `Mean`. Now it is refused, by name, before any aggregate reads it.
-    | CellOutsideType of column: string * colType: string * cell: string
+    | CellOutsideType of column: string * colType: ColumnType * cell: string
 
 /// Column reads and the pinned aggregate semantics — the single `aggregate` the compute layer's
 /// grouping and pivoting call rather than copy.
@@ -680,12 +686,11 @@ module Column =
             ->
             match DecimalText.tryCanonical s with
             | Some canonical -> Ok(Decimal canonical)
-            | None ->
-                Error(CellOutsideType(col.Name, ColumnType.tag col.Type, "decimal text '" + s + "' (not decimal)"))
+            | None -> Error(CellOutsideType(col.Name, col.Type, "decimal text '" + s + "' (not decimal)"))
         | _ ->
             match Cell.typeOf c with
             | Some t when ColumnType.widens t col.Type -> Ok c
-            | Some t -> Error(CellOutsideType(col.Name, ColumnType.tag col.Type, ColumnType.tag t))
+            | Some t -> Error(CellOutsideType(col.Name, col.Type, ColumnType.tag t))
             | None -> Ok c
 
     let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
@@ -1078,8 +1083,7 @@ module Column =
             | Mean
             | StdDev
             | Median when not isNumeric ->
-                passFold (fun _ ->
-                    Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float"; "decimal" ])))
+                passFold (fun _ -> Error(IncompatibleAggType(fn, col.Type, [ IntType; FloatType; DecimalType ])))
             | Sum ->
                 match col.Type with
                 | DecimalType -> decimalSumFold ()
@@ -1131,8 +1135,7 @@ module Table =
             | Null -> None
             | _ ->
                 match Cell.typeOf cell with
-                | Some t when not (ColumnType.widens t c.Type) ->
-                    Some(TypeMismatch(c.Name, ColumnType.tag c.Type, ColumnType.tag t))
+                | Some t when not (ColumnType.widens t c.Type) -> Some(TypeMismatch(c.Name, c.Type, ColumnType.tag t))
                 | _ ->
                     match cell with
                     | Float f -> JVal.nonFiniteToken f |> Option.map (fun tok -> NonFiniteFloat(c.Name, tok))
@@ -1201,8 +1204,7 @@ module Table =
                     t.Schema
                     |> List.tryPick (fun (name, ty) ->
                         match t.Columns |> List.tryFind (fun c -> c.Name = name) with
-                        | Some c when c.Type <> ty ->
-                            Some(TypeMismatch(name, ColumnType.tag ty, ColumnType.tag c.Type))
+                        | Some c when c.Type <> ty -> Some(TypeMismatch(name, ty, ColumnType.tag c.Type))
                         | _ -> None)
 
                 match typeFault with
@@ -1648,7 +1650,7 @@ module ColumnCodec =
     /// canonical form spells (`0000`–`9999`); anything else is a `MalformedShape`.
     let private decodeCell (colName: string) (ty: ColumnType) (v: JVal) : Result<Cell, ColumnError> =
         let mismatch () =
-            Error(TypeMismatch(colName, ColumnType.tag ty, JVal.kindName v))
+            Error(TypeMismatch(colName, ty, JVal.kindName v))
 
         let notCanonical (what: string) =
             Error(MalformedShape(colName + ": " + what))
@@ -1709,7 +1711,7 @@ module ColumnCodec =
             |> Result.bind (fun tag ->
                 match ColumnType.ofTag tag with
                 | Some ty -> Ok(name, ty)
-                | None -> Error(UnknownType(tag, ColumnType.allTags))))
+                | None -> Error(UnknownType(tag, ColumnType.all))))
 
     let private decodeSchema (el: JVal) : Result<Schema, ColumnError> =
         asArr "schema" el
@@ -1936,8 +1938,14 @@ module ColumnCodec =
             "unknown column type '"
             + got
             + "'; expected one of: "
-            + String.concat ", " expected
-        | TypeMismatch(col, expected, got) -> "column '" + col + "': expected " + expected + " value, got " + got
+            + String.concat ", " (expected |> List.map ColumnType.tag)
+        | TypeMismatch(col, expected, got) ->
+            "column '"
+            + col
+            + "': expected "
+            + ColumnType.tag expected
+            + " value, got "
+            + got
         | LengthMismatch(col, v, va) ->
             "column '"
             + col
@@ -2013,7 +2021,7 @@ module SchemaDeltaCodec =
         |> Result.bind (fun tag ->
             match ColumnType.ofTag tag with
             | Some ty -> Ok ty
-            | None -> Error(UnknownType(tag, ColumnType.allTags)))
+            | None -> Error(UnknownType(tag, ColumnType.all)))
 
     let private items (name: string) (read: JVal -> Result<'a, ColumnError>) (el: JVal) : Result<'a list, ColumnError> =
         field name el

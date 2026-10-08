@@ -22,6 +22,12 @@
   <Folder Name="/tests/">
     <Project Path="tests/Fuaran.Core.Tests/Fuaran.Core.Tests.fsproj" />
   </Folder>
+  <!-- Phase 400: the wire benchmarks are BUILT by the gate and never RUN by it. A harness nobody compiles
+       rots silently against the API it times; compiling it here costs seconds, while running it costs
+       minutes of wall-clock time that a gate cannot compare. The by-hand run is docs/wire-performance.md. -->
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Fuaran.Core.Wire.Benchmarks/Fuaran.Core.Wire.Benchmarks.fsproj" />
+  </Folder>
   <Folder Name="/proofs/">
     <Project Path="proofs/oracle/Fuaran.Core.Proofs.Oracle.fsproj" />
   </Folder>

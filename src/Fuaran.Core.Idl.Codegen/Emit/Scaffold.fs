@@ -177,7 +177,7 @@ module internal Scaffold =
                 | Error m, _, _ -> Error m
                 | Ok _, None, _ -> Ok()
                 | Ok _, Some fmt, JStr s when HostedFormat.admits fmt s -> Ok()
-                | Ok _, Some fmt, _ -> Error(sprintf "not a '%s' string" fmt)
+                | Ok _, Some fmt, _ -> Error(sprintf "not a '%s' string" (HostedFormat.name fmt))
 
             match inForm, fsJValLit j with
             | Error m, _ -> Error(valueMismatch (sprintf "a hosted value outside its declared wire form (%s)" m))

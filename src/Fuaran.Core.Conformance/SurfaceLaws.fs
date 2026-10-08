@@ -1,5 +1,26 @@
 namespace Fuaran.Core
 
+/// A witness record's field list, by name and in declaration order (Phase 391; a pair before
+/// `1.0.0`): an entry of `Conformance.frozenWitnessFields` (the freeze's pin) or of
+/// `Conformance.declaredWitnessFields` (what the record declares).
+type WitnessFields =
+    {
+        /// The record's name without its generic arity — `NodeWitness`, `CapabilitySeamWitness`.
+        Record: string
+        /// Its fields, by name and in declaration order.
+        Fields: string list
+    }
+
+/// A public witness record declared OUTSIDE the field freeze, with why (Phase 391; a pair before
+/// `1.0.0`): an entry of `Conformance.unfrozenWitnesses`.
+type FreezeExemption =
+    {
+        /// The record's name without its generic arity.
+        Witness: string
+        /// Why the freeze does not cover it.
+        Reason: string
+    }
+
 /// The surface families (Phase 297 split): projections, the AI surface, and the witness-record field freeze.
 module internal SurfaceLaws =
 
@@ -445,7 +466,7 @@ module internal SurfaceLaws =
                         // rejection never invokes the reducer.
                         let before = applyCalls.Value
 
-                        (match Proposals.reject "approver" "t1" "not now" id q with
+                        (match Proposals.reject "approver" "t1" id "not now" q with
                          | Ok _ ->
                              proposals.Check(
                                  (applyCalls.Value = before),
@@ -565,8 +586,10 @@ module internal SurfaceLaws =
           "ProjectionWitness", [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
           // Phase 298 — the observer seam's witness, frozen as it ships
           "ObserverWitness", [ "Derive"; "Options" ]
-          "CapabilitySeamWitness", [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
-          "QuerySeamWitness", [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
+          // Phase 391 — `Body` left at `1.0.0`: a frozen record carries data, not behaviour, and
+          // the host body is a per-call argument of the capability family (DECISIONS.md D138).
+          "CapabilitySeamWitness", [ "Registry"; "Dispatch"; "GenCall" ]
+          "QuerySeamWitness", [ "Queries"; "Dispatch"; "GenQuery" ]
           "CapabilityPipelineWitness", [ "PipelineRegistry"; "GenPipeline" ]
           "ConstructWitness", [ "Surface"; "Construct" ]
           "KeyedWitness",
@@ -601,7 +624,9 @@ module internal SurfaceLaws =
     /// carries a `STABILITY.md` entry naming the record, the field and why composition — a new
     /// witness record that EMBEDS the frozen one — could not express it. From 1.0 there is no such
     /// route: a frozen witness does not grow.
-    let frozenWitnessFields: (string * string list) list = frozenPins
+    let frozenWitnessFields: WitnessFields list =
+        frozenPins
+        |> List.map (fun (record, fields) -> { Record = record; Fields = fields })
 
     /// The fields each frozen witness record DECLARES, by name and in declaration order — the FACT
     /// beside `frozenWitnessFields`' policy (Phase 387, DECISIONS.md D124).
@@ -615,7 +640,7 @@ module internal SurfaceLaws =
     /// reads"), so a record that grows a field reddens that test until the list is re-derived, and
     /// the re-derived list then reddens the freeze on both pipelines until the widening is made
     /// deliberately.
-    let declaredWitnessFields: (string * string list) list =
+    let declaredWitnessFields: WitnessFields list =
         [ "IdWitness", [ "ToString"; "OfString"; "Equals" ]
           "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ]
           "StreamWitness", [ "Apply"; "Encode"; "Decode" ]
@@ -623,8 +648,8 @@ module internal SurfaceLaws =
           "AiSurfaceWitness", [ "ReadTools"; "OpKinds"; "KindOfOp"; "Patterns"; "Decide"; "Apply"; "Explain" ]
           "ProjectionWitness", [ "Tree"; "IdW"; "Encode"; "Snippet"; "ParseBack" ]
           "ObserverWitness", [ "Derive"; "Options" ]
-          "CapabilitySeamWitness", [ "Registry"; "Body"; "Dispatch"; "GenCall" ]
-          "QuerySeamWitness", [ "Queries"; "Resolver"; "Dispatch"; "GenQuery" ]
+          "CapabilitySeamWitness", [ "Registry"; "Dispatch"; "GenCall" ]
+          "QuerySeamWitness", [ "Queries"; "Dispatch"; "GenQuery" ]
           "CapabilityPipelineWitness", [ "PipelineRegistry"; "GenPipeline" ]
           "ConstructWitness", [ "Surface"; "Construct" ]
           "KeyedWitness",
@@ -643,6 +668,7 @@ module internal SurfaceLaws =
             "SanitizeAttributes"
             "ScrubMarkdown" ]
           "GuardedSurfaceWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
+        |> List.map (fun (record, fields) -> { Record = record; Fields = fields })
 
     /// The public records named `…Witness` that the freeze deliberately does NOT cover, each with
     /// why (Phase 232). Listing them is what lets `witnessSurfaceLaws` hold every public witness to a
@@ -656,7 +682,7 @@ module internal SurfaceLaws =
     /// field add breaks it the same way. The list stays, and the coverage law still reads it, so a
     /// witness added before 1.0 can still be declared outside the freeze, with why, by the commit
     /// that adds it.
-    let unfrozenWitnesses: (string * string) list = []
+    let unfrozenWitnesses: FreezeExemption list = []
 
     /// The per-record law's name — one spelling on both pipelines, so a family run reads the same
     /// row on .NET and under Fable.
@@ -758,8 +784,8 @@ module internal SurfaceLaws =
             |> List.distinct
             |> List.sort
 
-        let frozen = frozenWitnessFields |> List.map fst
-        let unfrozen = unfrozenWitnesses |> List.map fst
+        let frozen = frozenWitnessFields |> List.map _.Record
+        let unfrozen = unfrozenWitnesses |> List.map _.Witness
         let classified = frozen @ unfrozen
 
         let unclassified = found |> List.filter (fun n -> not (List.contains n classified))
@@ -848,24 +874,27 @@ module internal SurfaceLaws =
     let witnessSurfaceLaws () : LawResult list =
 #if FABLE_COMPILER
         frozenWitnessFields
-        |> List.map (fun (name, pinned) ->
+        |> List.map (fun pin ->
             let declared =
                 declaredWitnessFields
-                |> List.tryFind (fun (n, _) -> n = name)
-                |> Option.map snd
+                |> List.tryFind (fun d -> d.Record = pin.Record)
+                |> Option.map _.Fields
                 |> Option.defaultValue []
 
-            witnessDeclaredFieldsLaw name pinned declared)
+            witnessDeclaredFieldsLaw pin.Record pin.Fields declared)
 #else
         let fields =
             frozenWitnessFields
-            |> List.map (fun (name, pinned) ->
-                match frozenWitnessTypes |> List.tryFind (fun (n, _) -> n = name) with
-                | Some(_, t) -> witnessFieldsLaw name pinned t
+            |> List.map (fun pin ->
+                match frozenWitnessTypes |> List.tryFind (fun (n, _) -> n = pin.Record) with
+                | Some(_, t) -> witnessFieldsLaw pin.Record pin.Fields t
                 | None ->
-                    let law = witnessFieldsCell name
+                    let law = witnessFieldsCell pin.Record
 
-                    law.Check(false, fun () -> name + " is frozen but names no record type for the .NET law to read")
+                    law.Check(
+                        false,
+                        fun () -> pin.Record + " is frozen but names no record type for the .NET law to read"
+                    )
 
                     law.Result)
 

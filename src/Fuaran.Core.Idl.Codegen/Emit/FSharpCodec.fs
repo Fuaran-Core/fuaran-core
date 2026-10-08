@@ -397,7 +397,10 @@ let private encFloat (f: float) : JVal =
                     |> Result.map (fun wd ->
                         let format =
                             match h.Format with
-                            | Some f -> sprintf " |> Result.bind (fun _ -> dFormat %s __j)" (SourceLit.fsString f)
+                            | Some f ->
+                                sprintf
+                                    " |> Result.bind (fun _ -> dFormat %s __j)"
+                                    (SourceLit.fsString (HostedFormat.name f))
                             | None -> ""
 
                         sprintf

@@ -310,8 +310,10 @@ module FunctionRegistry =
                 RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired r.Policy id e.Capability args)
             |> Result.bind (fun () -> InvokeError.settle (body e ()))
 
-    /// Partially apply a registered function (Phase 50) — the content-pack formalism. Produce a NEW
-    /// entry under `newId` whose signature is `Function.signatureExcluding boundAddrs` of the source's
+    /// Narrow a registered function's signature under a new id (Phase 50; `partiallyApply` before
+    /// `1.0.0`, renamed by Phase 391 because it binds no value: it narrows the signature and binds
+    /// nothing) — the content-pack formalism. Produce a
+    /// NEW entry under `newId` whose signature is `Function.signatureExcluding boundAddrs` of the source's
     /// (the bound holes drop out — a narrowed signature, fewer required holes), with the source's result
     /// type + placement. Registering it makes the content pack a first-class registry entry findable by
     /// its narrowed hole shape (a smaller available context now subsumes it, while the un-narrowed
@@ -323,11 +325,7 @@ module FunctionRegistry =
     /// The first that is not is refused `UnknownArg(addr, bindable)`, naming the bindable holes, so a
     /// typo cannot register an un-narrowed signature under the pack's name; `ContentPack.load`
     /// reports it as `UnknownBoundAddr`.
-    let partiallyApply
-        (newId: string)
-        (boundAddrs: Set<string>)
-        (source: FunctionEntry)
-        : Result<FunctionEntry, InvokeError> =
+    let narrow (newId: string) (boundAddrs: Set<string>) (source: FunctionEntry) : Result<FunctionEntry, InvokeError> =
         let bindable =
             source.Capability.Signature.Holes
             |> List.filter (fun h ->

@@ -60,9 +60,9 @@ let guarded: GuardedSurfaceWitness<NoteState, NoteOp, NoteRej> =
       DryRun = witness.Apply
       EffectsOf = effectsOf }
 
-let actors = [ "admin"; "agent"; "intern" ]
+let actors = [ Human "admin"; Agent("model", "1", "agent"); Human "intern" ]
 
-let privileged (actor: string) = actor = "admin"
+let privileged (actor: Actor) = Actor.id actor = "admin"
 
 [<Tests>]
 let tests =
@@ -361,43 +361,59 @@ let tests =
               let hashFn = OpStream.defaultHash
               let enc = QueryCodec.encodeResult
 
-              let r1, _, j1 =
+              let c1 =
                   QueryRegistry.dispatchPageCaptured hashFn enc reg "feed" [] None (fun _ _ -> Ready(page 1)) []
 
-              let r2, _, j2 =
-                  QueryRegistry.dispatchPageCaptured hashFn enc reg "feed" [] (Some "2") (fun _ _ -> Ready(page 2)) j1
+              let c2 =
+                  QueryRegistry.dispatchPageCaptured
+                      hashFn
+                      enc
+                      reg
+                      "feed"
+                      []
+                      (Some "2")
+                      (fun _ _ -> Ready(page 2))
+                      c1.Journal
 
-              Expect.equal (r1, r2) (Ok(Ready(page 1)), Ok(Ready(page 2))) "live pages"
+              let j2 = c2.Journal
+
+              Expect.equal (c1.Outcome, c2.Outcome) (Ok(Ready(page 1)), Ok(Ready(page 2))) "live pages"
               Expect.isTrue (OpStream.verifyKeyedCaptures hashFn j2) "the journal verifies"
 
               // replay page two FIRST: keyed, not positional
               let live _ _ = Ready(page 99)
 
-              match
+              let second =
                   QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] (Some "2") live Map.empty j2
-              with
-              | Ok(outcome, cursor) ->
-                  Expect.equal outcome (Ok(Ready(page 2))) "page two replays from its own capture"
 
-                  match QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] None live cursor j2 with
-                  | Ok(first, _) -> Expect.equal first (Ok(Ready(page 1))) "and page one from its own"
-                  | Error f -> failtestf "page one did not replay: %A" f
-              | Error f -> failtestf "page two did not replay: %A" f
+              Expect.equal second.Outcome (Ok(Ready(page 2))) "page two replays from its own capture"
+
+              let first =
+                  QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] None live second.Cursor j2
+
+              Expect.equal first.Outcome (Ok(Ready(page 1))) "and page one from its own"
+
+              let never =
+                  QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] (Some "3") live Map.empty j2
 
               Expect.equal
-                  (QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] (Some "3") live Map.empty j2)
-                  (Error(KeyedCaptureFault.NoCapture(Query.invocationKeyPage q [] (Some "3"))))
+                  never.Outcome
+                  (Error(ReplayFailure.Unanswered(KeyedCaptureFault.NoCapture(Query.invocationKeyPage q [] (Some "3")))))
                   "a page never captured refuses rather than fetching"
+
+              Expect.equal never.Cursor Map.empty "and consumes nothing"
 
           testCase "a pending invocation leaves its attempt open, and settles later"
           <| fun _ ->
               let hashFn = OpStream.defaultHash
               let enc (v: int) = string v
 
-              let answer, occ, j =
+              let captured =
                   OpStream.captureEffectKeyed hashFn enc "network" "k" (fun () -> None) []
 
-              Expect.equal (answer, occ, List.length j) (None, 0, 1) "only the attempt is journalled"
+              let occ, j = captured.Occurrence, captured.Journal
+
+              Expect.equal (captured.Answer, occ, List.length j) (None, 0, 1) "only the attempt is journalled"
               Expect.isTrue (OpStream.verifyKeyedCaptures hashFn j) "an open attempt verifies"
 
               match OpStream.settleEffectKeyed hashFn enc "k" occ (Error "timed out") j with

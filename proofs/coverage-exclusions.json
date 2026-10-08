@@ -604,13 +604,6 @@
     },
     {
       "members": [
-        "CapabilityPipeline.enumerate"
-      ],
-      "class": "trivial",
-      "reason": "Returns the pipeline's node list; no computation."
-    },
-    {
-      "members": [
         "CapabilityRegistry.dispatchWithArgs"
       ],
       "class": "measured-elsewhere",
@@ -876,6 +869,16 @@
       "reason": "Encodes one node; `encode` dispatches a node value to it.",
       "through": "Encode.encode",
       "standIn": "tests/Fuaran.Core.Tests/DecodeLayerTests.fs"
+    },
+    {
+      "members": [
+        "Idl.HostedFormat.name",
+        "Idl.HostedFormat.tryParse"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A hosted format's wire name and its reading back (Phase 391): the artifact writer spells a declared format through `name` and the reader admits one through `tryParse`, refusing an unknown name; the artifact round-trip tests and the unknown-format refusal exercise both.",
+      "through": "Artifact.parse",
+      "standIn": "tests/Fuaran.Core.Tests/IdlArtifactTests.fs"
     },
     {
       "members": [
@@ -1679,8 +1682,7 @@
       "members": [
         "Propagation.evalForWith",
         "Propagation.evalFor",
-        "Propagation.neededFor",
-        "Propagation.staleSet"
+        "Propagation.neededFor"
       ],
       "class": "measured-elsewhere",
       "reason": "Propagation operations beside the rostered eval / dirty / sort core and the modelled `changedForOp` / `validTopo`: dependency maps, part-level dirtiness, planned and targeted evaluation, staleness. The propagation tests stand in.",

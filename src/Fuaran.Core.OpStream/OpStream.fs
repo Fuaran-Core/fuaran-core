@@ -9,7 +9,7 @@ namespace Fuaran.Core
 //                                         verification, rehash, replay, the head,
 //                                         compare-and-append and idempotent append
 //    - Jsonl.fs      `OpStreamJsonl`      the one JSONL scanner and the record readers/writer
-//    - Snapshot.fs   `OpStreamSnapshot`   the snapshot family and its pre-Phase-296 forwards
+//    - Snapshot.fs   `OpStreamSnapshot`   the snapshot family, its mode carried on the snapshot
 //    - Capture.fs    `OpStreamCapture`    determinism capture / replay and attestation
 //    - Attributed.fs `OpStreamAttributed` the attributed-stream lift
 //  So this file IS the contract a reader can read top to bottom, a change to one
@@ -344,7 +344,7 @@ module OpStream =
         OpStreamJsonl.tryToJsonl w records
 
     /// THE JSONL line scanner (Phase 296) — the one scanner in the repository. Every reader in this
-    /// package (`fromJsonl`, `captureFromJsonl`, `snapshotFromJsonlResult`,
+    /// package (`fromJsonl`, `captureFromJsonl`, `Snapshots.ofJsonl`,
     /// `Attributed.decodeEnvelope`) and the DAG package's `Dag.fromJsonl` read through it; until
     /// Phase 296 the DAG carried a verbatim copy, and every scanner fix was applied twice.
     ///
@@ -450,7 +450,7 @@ module OpStream =
     /// Parse JSONL into `(records, rawSnapshotLines)` (Phase 16) — the snapshot-aware reader. The
     /// records are decoded by the witness; the snapshot line, when there is one, is returned verbatim
     /// (its `state` member still embedded raw) so a caller can recover the base state with
-    /// `snapshotFromJsonl` / `snapshotFromJsonlResult` and resume via `replayFrom`. A non-empty
+    /// `Snapshots.ofJsonl` and resume via `Snapshots.replayFrom`. A non-empty
     /// snapshot list means the file was compacted — replaying the records from origin would be wrong.
     /// Fully portable (Phase 241).
     ///
@@ -487,7 +487,7 @@ module OpStream =
     /// them — a broken prev-link / reordered / tampered record is a named `Error`, not a silent
     /// `Ok` of a corrupt stream. For a linear, uncompacted stream; a compacted file (snapshot +
     /// tail) does not start its chain at genesis, so read it with `fromJsonlWithSnapshots` and
-    /// verify the boundary with `verifyAcross` instead.
+    /// verify the boundary with `Snapshots.verify` instead.
     let fromJsonlVerified
         (hashFn: HashFn)
         (w: StreamWitness<'Op, 'State, 'Rej>)
@@ -500,7 +500,10 @@ module OpStream =
     /// THE snapshot family (Phase 296) — one set of entry points taking the `SnapshotMode` and the
     /// `StreamConfig`, where seventeen members formed a strict/chain-only × canonical/config matrix.
     /// The mode is carried ON the `Snapshot`, so everything after `take` reads it from the snapshot
-    /// rather than from an argument or a re-parse of the line.
+    /// rather than from an argument or a re-parse of the line. Since `1.0.0` it stands alone: the
+    /// pre-Phase-296 entry points, whose names chose a verification that could contradict the
+    /// snapshot's own `Mode`, left with Phase 386, and no member takes a mode that overrides the one
+    /// the snapshot carries (confirmed by Phase 391).
     ///
     /// **The state encoder.** It is the `'State`'s JSON, which a snapshot line always stores; under
     /// `SnapshotMode.Strict` it is ALSO the hash pre-image of the state, so it must be canonical and
@@ -1015,9 +1018,10 @@ module OpStream =
     /// Capture one invocation under its invocation key (Phase 318): attempt, run `effect`, and settle
     /// with what it answered. The effect answers `None` while it has not settled — the shape of
     /// `Deferred.settled`, so a seam's `Deferred` body plugs straight in — and then the attempt stays
-    /// open and the returned occurrence is what `settleEffectKeyed` settles it with later. A
+    /// open and the returned `Occurrence` is what `settleEffectKeyed` settles it with later. A
     /// `deterministic` label journals nothing (occurrence `0`, the journal unchanged), as
-    /// `captureEffect`'s does.
+    /// `captureEffect`'s does. A `CapturedEffect` since Phase 391 (a positional triple before
+    /// `1.0.0`).
     let captureEffectKeyed
         (hashFn: HashFn)
         (encode: 'v -> string)
@@ -1025,7 +1029,7 @@ module OpStream =
         (key: string)
         (effect: unit -> Result<'v, string> option)
         (captures: KeyedCapture list)
-        : Result<'v, string> option * int * KeyedCapture list =
+        : CapturedEffect<'v> =
         OpStreamCapture.captureEffectKeyedWith canonicalConfig hashFn encode det key effect captures
 
     /// `captureEffectKeyed` from `cfg.Genesis`.
@@ -1037,7 +1041,7 @@ module OpStream =
         (key: string)
         (effect: unit -> Result<'v, string> option)
         (captures: KeyedCapture list)
-        : Result<'v, string> option * int * KeyedCapture list =
+        : CapturedEffect<'v> =
         OpStreamCapture.captureEffectKeyedWith cfg hashFn encode det key effect captures
 
     /// Replay one invocation from the keyed journal (Phase 318) — by its KEY, never its position.
@@ -1094,7 +1098,7 @@ module OpStream =
     /// The current head of a chain under an explicit `StreamConfig` (Phase 296) — the last record's
     /// `Hash`, or `cfg.Genesis` for an empty chain: the seed every chain walker starts from, so an
     /// empty stream appended under a non-empty genesis has the head its first record's `PrevHash`
-    /// names (the class of defect Phase 227 fixed for `snapshotAtOpt`).
+    /// names (the class of defect Phase 227 fixed in the snapshot entry points).
     let headWith (cfg: StreamConfig) (records: OpRecord<'Op> list) : string = OpStreamChain.headWith cfg records
 
     /// The current head of a chain — the last record's `Hash`, or the canonical genesis `""` for an

@@ -492,7 +492,7 @@ let typedDispatchTests =
                   tokens385
                   |> List.fold
                       (fun (acc, j) t ->
-                          let a, _, j' =
+                          let c =
                               QueryRegistry.dispatchPageCapturedWith
                                   OpStream.defaultHash
                                   QueryCodec.encodeResult
@@ -503,7 +503,7 @@ let typedDispatchTests =
                                   typedPages
                                   j
 
-                          acc @ [ a ], j')
+                          acc @ [ c.Outcome ], c.Journal)
                       ([], [])
 
               Expect.equal captured live "capture answers what the live dispatch answers"
@@ -512,7 +512,7 @@ let typedDispatchTests =
                   tokens385
                   |> List.fold
                       (fun (acc, cursor) t ->
-                          match
+                          let r =
                               QueryRegistry.dispatchReplayedWith
                                   QueryCodec.decodeResult
                                   registered
@@ -522,15 +522,19 @@ let typedDispatchTests =
                                   (fun _ _ _ -> failtest "replay must not resolve a network query")
                                   cursor
                                   journal
-                          with
-                          | Ok(a, cursor') -> acc @ [ a ], cursor'
-                          | Error f -> failtestf "replay faulted: %A" f)
+
+                          match r.Outcome with
+                          | Error(ReplayFailure.Unanswered f) -> failtestf "replay faulted: %A" f
+                          | a -> acc @ [ a ], r.Cursor)
                       ([], Map.empty)
                   |> fst
 
-              Expect.equal replayed live "replay answers each page as it was answered live"
+              Expect.equal
+                  replayed
+                  (live |> List.map (Result.mapError ReplayFailure.Refused))
+                  "replay answers each page as it was answered live"
 
-              let unpaged, _, j1 =
+              let unpagedCapture =
                   QueryRegistry.dispatchCapturedWith
                       OpStream.defaultHash
                       QueryCodec.encodeResult
@@ -540,10 +544,10 @@ let typedDispatchTests =
                       (fun q a -> typedPages q (Some "p1") a)
                       []
 
-              Expect.equal unpaged (Error Timeout) "the unpaged capture"
+              Expect.equal unpagedCapture.Outcome (Error Timeout) "the unpaged capture"
 
-              Expect.equal
-                  (QueryRegistry.dispatchReplayedWith
+              let unpagedReplay =
+                  QueryRegistry.dispatchReplayedWith
                       QueryCodec.decodeResult
                       registered
                       "sales-by-region"
@@ -551,16 +555,15 @@ let typedDispatchTests =
                       None
                       typedPages
                       Map.empty
-                      j1
-                   |> Result.map fst)
-                  (Ok(Error Timeout))
-                  "replays as the timeout"
+                      unpagedCapture.Journal
+
+              Expect.equal unpagedReplay.Outcome (Error(ReplayFailure.Refused Timeout)) "replays as the timeout"
 
           testCase "an untyped failure replays as the ExecutionFailed answered live; a pre-0.36 reason as before"
           <| fun _ ->
               let args = [ "year", Int 2026 ]
 
-              let answer, _, journal =
+              let capture =
                   QueryRegistry.dispatchCaptured
                       OpStream.defaultHash
                       QueryCodec.encodeResult
@@ -570,6 +573,7 @@ let typedDispatchTests =
                       (fun _ -> Failed "down")
                       []
 
+              let answer = capture.Outcome
               Expect.equal answer (Error(ExecutionFailed("down", []))) "live"
 
               let replay j =
@@ -582,14 +586,16 @@ let typedDispatchTests =
                       (fun _ _ -> Ready sampleResult)
                       Map.empty
                       j
-                  |> Result.map fst
 
-              Expect.equal (replay journal) (Ok answer) "replayed exactly"
+              Expect.equal
+                  (replay capture.Journal).Outcome
+                  (Result.mapError ReplayFailure.Refused answer)
+                  "replayed exactly"
 
               // A journal written before 0.36.0 recorded the refusal's sentence.
               let sentence = QueryError.describe (ExecutionFailed("down", []))
 
-              let _, _, legacy =
+              let legacy =
                   OpStream.captureEffectKeyed
                       OpStream.defaultHash
                       QueryCodec.encodeResult
@@ -599,8 +605,8 @@ let typedDispatchTests =
                       []
 
               Expect.equal
-                  (replay legacy)
-                  (Ok(Error(ExecutionFailed(sentence, []))))
+                  (replay legacy.Journal).Outcome
+                  (Error(ReplayFailure.Refused(ExecutionFailed(sentence, []))))
                   "the recorded text, as it always was" ]
 
 // ---- Phase 398: the declared filter and order ----
@@ -901,7 +907,7 @@ let whereOrderByTests =
                   "an unhonoured order is refused naming the column"
 
               // Captured and replayed as the refusal it was answered live.
-              let live, _, journal =
+              let capture =
                   QueryRegistry.dispatchCapturedWith
                       OpStream.defaultHash
                       QueryCodec.encodeResult
@@ -911,6 +917,7 @@ let whereOrderByTests =
                       noContains
                       []
 
+              let live = capture.Outcome
               Expect.equal live (Error(PredicateNotHonoured contains)) "captured live"
 
               let replayed =
@@ -922,10 +929,9 @@ let whereOrderByTests =
                       None
                       (fun _ _ _ -> Ok(Ready sampleResult))
                       Map.empty
-                      journal
-                  |> Result.map fst
+                      capture.Journal
 
-              Expect.equal replayed (Ok live) "replayed exactly"
+              Expect.equal replayed.Outcome (Result.mapError ReplayFailure.Refused live) "replayed exactly"
 
           testCase "the new refusals cross the wire and read as one sentence naming what they refuse"
           <| fun _ ->

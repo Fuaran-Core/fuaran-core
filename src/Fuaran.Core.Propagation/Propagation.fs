@@ -228,14 +228,6 @@ module Propagation =
     let dirtyFromChangedIds (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
         closureOver (dependents deps) changed
 
-    /// Staleness as queryable data (A3): the dirty closure the caller has not yet recomputed, returned as a
-    /// derived `Set<string>` — no mutable state, no stored flag on any node (GP2). **An ALIAS of
-    /// `dirtyFromChangedIds`, and only that** (Phase 298 states it): the same function under the name a
-    /// call site that marks outputs stale reads better with. It has no semantics of its own and never
-    /// will; a reader who meets both names is reading one function.
-    let staleSet (deps: Map<string, Set<string>>) (changed: Set<string>) : Set<string> =
-        dirtyFromChangedIds deps changed
-
     /// The **needed set** for a target set (Phase 317) — the pull dual of `dirtyFromChangedIds`:
     /// `targets` ∪ every id transitively UPSTREAM of one (the reachability closure over the dependency
     /// map itself, where the dirty set closes over its inverse). It is the ⊆-least set that holds the

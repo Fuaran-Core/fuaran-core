@@ -394,7 +394,7 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                             Encode = "encDate"
                             Decode = "decDate"
                             Wire = Some Fuaran.Core.Idl.TStr
-                            Format = Some "date" })
+                            Format = Some Fuaran.Core.Idl.HostedFormat.Date })
                       opt ] ]
           [ Fuaran.Core.Idl.Declare.enumOf "Tone" [ "Low"; "Mid"; "High" ] ] with
         Records =

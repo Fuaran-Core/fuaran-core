@@ -10,7 +10,7 @@ open Fuaran.Core.Tests.Reference
 let private applyAllOk ops tree =
     match Ops.applyAll nodew idw ops tree with
     | Ok r -> r
-    | Error(i, e, _) -> failtestf "applyAll failed at %d: %A" i e
+    | Error { Applied = i; Rejection = e } -> failtestf "applyAll failed at %d: %A" i e
 
 let private diffOk before after =
     match Diff.toOps nodew idw before after with

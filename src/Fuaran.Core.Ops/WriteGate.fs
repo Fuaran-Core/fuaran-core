@@ -22,15 +22,29 @@ namespace Fuaran.Core
 //  FSharp.Core + Fuaran.Core.Tree only, as `Ops` is; Fable-clean.
 // ============================================================================
 
+/// The mode of a write gate (Phase 391; an `option` before `1.0.0`, `None` for the deny-list and
+/// `Some ids` for the allow-list): what is writable besides what the gate locks. The locks are the
+/// gate's `Locked` in both modes, so the deny-list case carries no set of its own — a second one
+/// would be a second place to say what is locked, and a lock wins inside an allow-list.
+[<RequireQualifiedAccess>]
+type WriteScope =
+    /// Deny-list mode: everything not locked is writable. The deny list is the gate's `Locked`.
+    | DenyList
+    /// Allow-list mode (default-deny): only these ids and their subtrees are writable, and a lock
+    /// still wins inside one. An allowance on a node covers removing it and moving it out: the
+    /// removed node's source parent, whose child list the removal rewrites, need not be on the list
+    /// (DECISIONS.md D138, which answers D119.7).
+    | AllowList of Set<string>
+
 /// An id-scoped write policy (Phase 318): ids keyed by `IdWitness.ToString`, as `Footprint`'s are,
 /// so no `comparison` is demanded of the id.
 type WriteGate =
     {
         /// Never writable, and neither is anything under them.
         Locked: Set<string>
-        /// `None`: everything not locked is writable (deny-list mode). `Some ids`: an allow-list —
-        /// only these ids and their subtrees are writable, and a lock still wins inside one.
-        Writable: Set<string> option
+        /// What is writable besides the locks: everything (`DenyList`), or only the listed ids and
+        /// their subtrees (`AllowList`).
+        Writable: WriteScope
     }
 
 /// Why the write gate refused an op (Phase 318). Each case names the target it refused and the
@@ -58,17 +72,19 @@ type GatedApplyFailure<'Id> =
 module WriteGate =
 
     /// The permissive gate: nothing locked, no allow-list.
-    let allowAll: WriteGate = { Locked = Set.empty; Writable = None }
+    let allowAll: WriteGate =
+        { Locked = Set.empty
+          Writable = WriteScope.DenyList }
 
     /// Deny-list mode: everything writable except these ids and their subtrees.
     let lockOnly (ids: string list) : WriteGate =
         { Locked = Set.ofList ids
-          Writable = None }
+          Writable = WriteScope.DenyList }
 
     /// Allow-list mode (default-deny): only these ids and their subtrees are writable.
     let allowOnly (ids: string list) : WriteGate =
         { Locked = Set.empty
-          Writable = Some(Set.ofList ids) }
+          Writable = WriteScope.AllowList(Set.ofList ids) }
 
     /// The ids ONE non-batch op writes when it lands on `root`: `Ops.footprint`'s structure writes
     /// (the parents whose child lists change), content writes (the nodes it authors, destroys,
@@ -143,8 +159,8 @@ module WriteGate =
 
         match locked, gate.Writable with
         | Some denial, _ -> Error denial
-        | None, None -> Ok()
-        | None, Some writable ->
+        | None, WriteScope.DenyList -> Ok()
+        | None, WriteScope.AllowList writable ->
             match
                 chains
                 |> List.tryFind (fun (_, chain) -> not (List.exists writable.Contains chain))

@@ -61,8 +61,8 @@ let private shippedPublicTypes: Lazy<System.Type list> =
 
 let private pinnedOf (record: string) : string list =
     Conformance.frozenWitnessFields
-    |> List.tryFind (fun (n, _) -> n = record)
-    |> Option.map snd
+    |> List.tryFind (fun w -> w.Record = record)
+    |> Option.map _.Fields
     |> Option.defaultWith (fun () -> failtestf "%s is not a frozen witness" record)
 
 
@@ -87,7 +87,9 @@ let witnessSurfaceLawTests =
                   (List.length Conformance.frozenWitnessFields + 1)
                   "one field law per frozen record and one coverage law"
 
-              for record, _ in Conformance.frozenWitnessFields do
+              for pin in Conformance.frozenWitnessFields do
+                  let record = pin.Record
+
                   Expect.exists results (fun r -> r.Law.Contains("(" + record + ")")) (sprintf "no law names %s" record)
 
           testCase "the pinned records are exactly the ones STABILITY.md freezes, and STABILITY.md names the family"
@@ -131,7 +133,7 @@ let witnessSurfaceLawTests =
 
               Expect.equal
                   named
-                  (Conformance.frozenWitnessFields |> List.map fst |> List.sort)
+                  (Conformance.frozenWitnessFields |> List.map _.Record |> List.sort)
                   "the records STABILITY.md freezes and the records Conformance.frozenWitnessFields pins disagree"
 
               Expect.stringContains
@@ -181,7 +183,7 @@ let witnessSurfaceLawTests =
               "Phase 330, 313, 298, 349 and 318: sixteen records are frozen and none is declared outside the freeze"
           <| fun _ ->
               Expect.equal
-                  (Conformance.frozenWitnessFields |> List.map fst)
+                  (Conformance.frozenWitnessFields |> List.map _.Record)
                   [ "IdWitness"
                     "NodeWitness"
                     "StreamWitness"
@@ -234,12 +236,14 @@ let witnessSurfaceLawTests =
 
           testCase "the frozen and unfrozen declarations are disjoint and each gives its reason"
           <| fun _ ->
-              let frozen = Conformance.frozenWitnessFields |> List.map fst |> Set.ofList
-              let unfrozen = Conformance.unfrozenWitnesses |> List.map fst |> Set.ofList
+              let frozen = Conformance.frozenWitnessFields |> List.map _.Record |> Set.ofList
+              let unfrozen = Conformance.unfrozenWitnesses |> List.map _.Witness |> Set.ofList
               Expect.isEmpty (Set.intersect frozen unfrozen) "a witness is frozen or it is not"
 
-              for name, why in Conformance.unfrozenWitnesses do
-                  Expect.isNotEmpty (why.Trim()) (sprintf "%s is declared outside the freeze with no reason" name)
+              for u in Conformance.unfrozenWitnesses do
+                  Expect.isNotEmpty
+                      (u.Reason.Trim())
+                      (sprintf "%s is declared outside the freeze with no reason" u.Witness)
 
           // Phase 387 (D124) — the Fable pipeline reads `declaredWitnessFields` instead of reflecting,
           // so the list is only as good as its agreement with the records. THIS is the test that holds
@@ -250,8 +254,8 @@ let witnessSurfaceLawTests =
           testCase "the committed declared-field list is what reflection reads, for every frozen record"
           <| fun _ ->
               Expect.equal
-                  (Conformance.declaredWitnessFields |> List.map fst)
-                  (Conformance.frozenWitnessFields |> List.map fst)
+                  (Conformance.declaredWitnessFields |> List.map _.Record)
+                  (Conformance.frozenWitnessFields |> List.map _.Record)
                   "the declared-field list covers exactly the frozen records, in pin order"
 
               let bare (t: System.Type) =
@@ -259,7 +263,9 @@ let witnessSurfaceLawTests =
                   let tick = n.IndexOf '`'
                   if tick < 0 then n else n.Substring(0, tick)
 
-              for name, declared in Conformance.declaredWitnessFields do
+              for entry in Conformance.declaredWitnessFields do
+                  let name, declared = entry.Record, entry.Fields
+
                   let t =
                       shippedPublicTypes.Value
                       |> List.filter (fun t -> bare t = name && Microsoft.FSharp.Reflection.FSharpType.IsRecord t)
@@ -279,9 +285,11 @@ let witnessSurfaceLawTests =
 
           testCase "the reflection-free law agrees with the reflecting one, and fails on a widened list"
           <| fun _ ->
-              for name, pinned in Conformance.frozenWitnessFields do
+              for pin in Conformance.frozenWitnessFields do
+                  let name, pinned = pin.Record, pin.Fields
+
                   let declared =
-                      Conformance.declaredWitnessFields |> List.find (fun (n, _) -> n = name) |> snd
+                      (Conformance.declaredWitnessFields |> List.find (fun d -> d.Record = name)).Fields
 
                   let r = Conformance.witnessDeclaredFieldsLaw name pinned declared
                   Expect.isTrue r.Passed (sprintf "%s: %s" name (defaultArg r.Counterexample r.Law))

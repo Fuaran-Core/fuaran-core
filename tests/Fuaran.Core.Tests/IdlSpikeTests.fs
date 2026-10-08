@@ -909,7 +909,7 @@ module private SecondVocabulary =
           Decode =
             "(fun (j: JVal) -> match j with JStr s -> (match System.DateOnly.TryParseExact(s, \"yyyy-MM-dd\", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None) with | true, d -> Ok d | _ -> Error \"not a date\") | _ -> Error \"expected a string\")"
           Wire = Some TStr
-          Format = Some "date" }
+          Format = Some HostedFormat.Date }
 
     let idl: Idl =
         { Kinds =
@@ -1076,12 +1076,18 @@ let secondVocabularyTests =
                           [ SecondVocabulary.kind "Trip" [ SecondVocabulary.field "departs" (THosted h) Required ] ] }
                   |> Declare.hostedWireErrors
 
-              Expect.hasLength
-                  (bad
-                      { SecondVocabulary.date with
-                          Format = Some "postcode" })
-                  1
-                  "an unknown format"
+              // Phase 391: an unknown format is unrepresentable — `HostedCodec.Format` is the closed
+              // `HostedFormat` — so the artifact reader refuses its NAME, where the declaration check
+              // reported it before. The document is the vocabulary's own, with one format re-spelled.
+              let rendered = Artifact.render SecondVocabulary.idl
+
+              Expect.stringContains rendered "\"format\": \"date\"" "the vocabulary renders its format by name"
+
+              match Artifact.parseDetailed (rendered.Replace("\"format\": \"date\"", "\"format\": \"postcode\"")) with
+              | Error e ->
+                  Expect.equal e.Code DecodeCode.UnknownTag "an unknown format name is an unknown tag"
+                  Expect.stringContains e.Message "postcode" "naming the format"
+              | Ok _ -> failtest "the reader admitted an unknown format"
 
               Expect.hasLength
                   (bad

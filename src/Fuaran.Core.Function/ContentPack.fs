@@ -2,7 +2,7 @@ namespace Fuaran.Core
 
 // ============================================================================
 //  Content-pack packaging contract (Phase 57) — a content pack distributes as a
-//  set of CURRIED artifact-functions (`FunctionRegistry.partiallyApply`, Phase
+//  set of CURRIED artifact-functions (`FunctionRegistry.narrow`, Phase
 //  24/50 — the content-pack formalism) plus a manifest, loading into the
 //  signature-typed registry through ONE mechanism across domains (music Artist
 //  Packs, legal house-style, CAD manufacturability, a future Model domain's
@@ -22,7 +22,7 @@ namespace Fuaran.Core
 //  assumed ("never a silent stale binding" — the Fork-2 hygiene contract at the
 //  distribution boundary).
 //
-//  Additive over the FROZEN registry (GP1/GP7): loading is `partiallyApply` +
+//  Additive over the FROZEN registry (GP1/GP7): loading is `FunctionRegistry.narrow` +
 //  `register`, the registry's existing default-deny posture, no new dispatch path.
 //  FSharp.Core only, Fable-clean. Totality (GP4): a typed `PackLoadError`, never an
 //  exception.
@@ -114,7 +114,7 @@ module ContentPack =
           BoundAddrs = boundAddrs }
 
     /// Load a content pack into a signature-typed registry (Phase 57). Each `PackedFunction` curries its
-    /// base function (`FunctionRegistry.partiallyApply` — the content-pack formalism) and registers the
+    /// base function (`FunctionRegistry.narrow` — the content-pack formalism) and registers the
     /// narrowed entry under its `NewId`, through the registry's existing default-deny posture (no new
     /// dispatch path). Four guards, default-deny by shape:
     ///   1. the base function must be registered (an unknown base is `UnknownBaseFunction`, enumerating
@@ -142,7 +142,7 @@ module ContentPack =
                     if actual <> pf.BaseSignatureVersion then
                         Error(SignatureVersionMismatch(manifest.PackId, pf.BaseId, pf.BaseSignatureVersion, actual))
                     else
-                        match FunctionRegistry.partiallyApply pf.NewId pf.BoundAddrs baseEntry with
+                        match FunctionRegistry.narrow pf.NewId pf.BoundAddrs baseEntry with
                         | Error(UnknownArg(addr, declared)) ->
                             Error(UnknownBoundAddr(manifest.PackId, pf.NewId, addr, declared))
                         | Error e -> Error(PackRegisterFailed(manifest.PackId, pf.NewId, e))

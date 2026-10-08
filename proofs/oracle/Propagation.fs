@@ -279,9 +279,6 @@ in (grow d fresh (union acc fresh))))
 let dirty_from_changed_ids : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( changed  :  Prims.list<Prims.string> ) -> (grow (dependents deps) changed changed))
 
 
-let stale_set : dmap  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string> = (fun ( deps  :  dmap ) ( changed  :  Prims.list<Prims.string> ) -> (dirty_from_changed_ids deps changed))
-
-
 let rec downstream : dmap  ->  Prims.string  ->  Prims.list<Prims.string>  ->  Prims.bool = (fun ( deps  :  dmap ) ( c  :  Prims.string ) ( path  :  Prims.list<Prims.string> ) -> (match (path) with
 | [] -> begin
      true

@@ -73,7 +73,7 @@ let private isUpdate =
 let private applyAllWithOk canHold ops before =
     match Ops.applyAllWith canHold nodew idw ops before with
     | Ok t -> Ok t
-    | Error(i, e, _) -> Error(i, e)
+    | Error { Applied = i; Rejection = e } -> Error(i, e)
 
 // ---- the shard's pair ----------------------------------------------------------------------------
 
@@ -151,7 +151,7 @@ let drawScript (rng: Random) (tree: RNode) (length: int) : SkeletonOp<RNode, str
 let private treeOf (ops: SkeletonOp<RNode, string> list) (tree: RNode) =
     match Ops.applyAll nodew idw ops tree with
     | Ok t -> t
-    | Error(i, e, _) -> failtestf "a drawn script did not apply at %d: %A" i e
+    | Error { Applied = i; Rejection = e } -> failtestf "a drawn script did not apply at %d: %A" i e
 
 /// A long flat script of distinct inserts under the root — nothing in it collapses.
 let private flatInserts (count: int) : SkeletonOp<RNode, string> list =
@@ -465,7 +465,7 @@ let tests =
                         let broken = script @ [ RemoveNode "not-here" ]
 
                         match Ops.invertAll nodew idw broken tree, Ops.applyAll nodew idw broken tree with
-                        | Error(i, e), Error(j, e', _) ->
+                        | Error(i, e), Error { Applied = j; Rejection = e' } ->
                             Expect.equal i j "same index"
                             Expect.equal (Rejection.code e) (Rejection.code e') "same envelope class"
                         | a, b -> failtestf "expected both to refuse: %A / %A" a b ]
@@ -523,7 +523,8 @@ let tests =
                         let merged =
                             match Ops.applyAll nodew idw result.MergedScript tree with
                             | Ok t -> t
-                            | Error(i, e, _) -> failtestf "the merged script was refused at %d: %A" i e
+                            | Error { Applied = i; Rejection = e } ->
+                                failtestf "the merged script was refused at %d: %A" i e
 
                         if List.length result.Accepted > 1 then
                             multi <- multi + 1

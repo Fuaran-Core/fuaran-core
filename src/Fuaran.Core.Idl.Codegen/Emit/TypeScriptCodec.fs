@@ -557,7 +557,12 @@ module internal TypeScriptCodec =
                 tsDecFn h.Wire.Value
                 |> Result.map (fun d ->
                     match h.Format with
-                    | Some f -> "((x) => dFormat(" + SourceLit.tsString f + ", " + d + "(x)))"
+                    | Some f ->
+                        "((x) => dFormat("
+                        + SourceLit.tsString (HostedFormat.name f)
+                        + ", "
+                        + d
+                        + "(x)))"
                     | None -> d)
         // Phase 676 — keep the parsed JSON as-is. Hosted slots identically.
         | TJson

@@ -5,8 +5,8 @@ ArtifactWitness: Tree, IdW, Holes, Effect, Bind
 AiSurfaceWitness: ReadTools, OpKinds, KindOfOp, Patterns, Decide, Apply, Explain
 ProjectionWitness: Tree, IdW, Encode, Snippet, ParseBack
 ObserverWitness: Derive, Options
-CapabilitySeamWitness: Registry, Body, Dispatch, GenCall
-QuerySeamWitness: Queries, Resolver, Dispatch, GenQuery
+CapabilitySeamWitness: Registry, Dispatch, GenCall
+QuerySeamWitness: Queries, Dispatch, GenQuery
 CapabilityPipelineWitness: PipelineRegistry, GenPipeline
 ConstructWitness: Surface, Construct
 KeyedWitness: Surface, KeyedChildren, ReplaceKeyedChildren, PlaceKeyedChild, IdsUnique

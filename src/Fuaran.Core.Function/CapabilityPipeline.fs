@@ -296,9 +296,6 @@ module CapabilityPipeline =
 
             go p.Nodes
 
-    /// Enumerate the pipeline's nodes in declaration (topological) order — the stable discovery surface.
-    let enumerate (p: CapabilityPipeline) : PipelineNode list = p.Nodes
-
     /// The Phase-27 capture key a node's realized result is journalled under: a readable prefix
     /// (`source#<id>#` / `<capId>#<id>#`) + a hash of the node's canonical pre-image. A consumer
     /// threads this as `OpStream.captureEffect`'s `eff` argument, so the whole dataflow replays

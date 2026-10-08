@@ -6,8 +6,9 @@
     Wire and Tree sources only - no timing library, no JavaScript binding - so the program compiled by
     Fable and run under node is the same measurement as on .NET. ../run.ps1 runs it on both.
 
-    Not in Fuaran.Core.slnx: the gate never runs it. Its corpus and its timing module ARE compiled by
-    the gate, because the suite's clock leg (tests/Fuaran.Core.Tests/WireClockLeg.fs) compiles both.
+    In Fuaran.Core.slnx since Phase 400, so the gate BUILDS the whole program and never runs it (a timing
+    run is minutes of wall clock and compares nothing in a gate). Its corpus and its timing module are
+    also compiled into the suite's clock leg (tests/Fuaran.Core.Tests/WireClockLeg.fs).
     Not packable, and it carries no Fable.Core reference of its own (DECISIONS.md D55).
   -->
   <PropertyGroup>

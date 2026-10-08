@@ -46,7 +46,7 @@ let capabilityRegistry: CapabilityRegistry =
 let private argOf (args: (string * string) list) (addr: string) =
     args |> List.tryPick (fun (a, v) -> if a = addr then Some v else None)
 
-let capabilityBody (args: (string * string) list) (c: Capability) () : Deferred<string> =
+let capabilityBody (args: (string * string) list) (c: Capability) : Deferred<string> =
     match c.Id with
     | "echo" -> Ready(argOf args "echo/n" |> Option.defaultValue "?")
     | "later" -> Pending
@@ -89,7 +89,6 @@ let genCapabilityCall (rng: ConfRng.T) : (string * (string * string) list) * Con
 
 let capabilityWitness: CapabilitySeamWitness<string> =
     { Registry = capabilityRegistry
-      Body = capabilityBody
       Dispatch = CapabilityRegistry.dispatch capabilityRegistry
       GenCall = genCapabilityCall }
 
@@ -167,7 +166,6 @@ let genQueryCall (rng: ConfRng.T) : (string * (string * Cell) list) * ConfRng.T 
 
 let queryWitness: QuerySeamWitness =
     { Queries = queryRegistry
-      Resolver = queryResolver
       Dispatch = QueryRegistry.dispatch queryRegistry
       GenQuery = genQueryCall }
 
@@ -222,7 +220,8 @@ let tests =
     testList
         "Phase 246 — witness-taking law families"
         [ testCase "capabilityLawsAt certifies the reference seam green, every outcome reached"
-          <| fun _ -> allGreen "capabilityLawsAt" (Conformance.capabilityLawsAt capabilityWitness 2460 300)
+          <| fun _ ->
+              allGreen "capabilityLawsAt" (Conformance.capabilityLawsAt capabilityWitness capabilityBody 2460 300)
 
           testCase "a host that runs the body before refusal turns capabilityLawsAt RED; capabilityLaws stays green"
           <| fun _ ->
@@ -230,6 +229,7 @@ let tests =
                   Conformance.capabilityLawsAt
                       { capabilityWitness with
                           Dispatch = bodyBeforeRefusal }
+                      capabilityBody
                       2460
                       300
 
@@ -254,6 +254,7 @@ let tests =
                   Conformance.capabilityLawsAt
                       { capabilityWitness with
                           Dispatch = refuseAll }
+                      capabilityBody
                       2460
                       300
 
@@ -277,6 +278,7 @@ let tests =
                   Conformance.capabilityLawsAt
                       { capabilityWitness with
                           GenCall = noPending }
+                      capabilityBody
                       2460
                       300
 
@@ -286,7 +288,7 @@ let tests =
                   "exactly the outcome guard is red"
 
           testCase "queryLawsAt certifies the reference seam green, every outcome reached"
-          <| fun _ -> allGreen "queryLawsAt" (Conformance.queryLawsAt queryWitness 2461 300)
+          <| fun _ -> allGreen "queryLawsAt" (Conformance.queryLawsAt queryWitness queryResolver 2461 300)
 
           testCase "a host that runs the resolver before refusal turns queryLawsAt RED; queryLaws stays green"
           <| fun _ ->
@@ -294,6 +296,7 @@ let tests =
                   Conformance.queryLawsAt
                       { queryWitness with
                           Dispatch = resolverBeforeRefusal }
+                      queryResolver
                       2461
                       300
 

@@ -98,10 +98,18 @@ module internal PlacementTreeLaws =
                 (added: Set<string>)
                 =
                 match Ops.applyAllWith canHold nodew idw script tree with
-                | Error(j, e, _) ->
+                | Error r ->
                     lands.Check(
                         false,
-                        fun () -> at (sprintf "%s: the script %A was refused at step %d: %A" what script j e)
+                        fun () ->
+                            at (
+                                sprintf
+                                    "%s: the script %A was refused at step %d: %A"
+                                    what
+                                    script
+                                    r.Applied
+                                    r.Rejection
+                            )
                     )
 
                     None
@@ -446,7 +454,7 @@ module internal PlacementTreeLaws =
 
                     duplicate.Check(
                         (match got with
-                         | Error(_, DuplicateId d', _) -> idw.Equals d d'
+                         | Error { Rejection = DuplicateId d' } -> idw.Equals d d'
                          | _ -> false),
                         fun () ->
                             at (sprintf "the lowered script of a tree repeating %s answered %A" (idw.ToString d) got)

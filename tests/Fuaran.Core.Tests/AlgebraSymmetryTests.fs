@@ -238,7 +238,7 @@ let schemaPatchTests =
               Expect.equal
                   (SchemaDeltaCodec.decode
                       """{"added":[{"name":"a","type":"uuid"}],"removed":[],"retyped":[],"reordered":false,"order":[]}""")
-                  (Error(UnknownType("uuid", ColumnType.allTags)))
+                  (Error(UnknownType("uuid", ColumnType.all)))
                   "an unknown type tag"
 
               Expect.isTrue

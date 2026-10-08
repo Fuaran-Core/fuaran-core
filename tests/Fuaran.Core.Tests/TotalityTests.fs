@@ -88,12 +88,11 @@ module private Before =
         | Decimal s when col.Type = DecimalType ->
             match DecimalText.tryCanonical s with
             | Some canonical -> Ok(Decimal canonical)
-            | None ->
-                Error(CellOutsideType(col.Name, ColumnType.tag col.Type, "decimal text '" + s + "' (not decimal)"))
+            | None -> Error(CellOutsideType(col.Name, col.Type, "decimal text '" + s + "' (not decimal)"))
         | _ ->
             match Cell.typeOf c with
             | Some t when ColumnType.widens t col.Type -> Ok c
-            | Some t -> Error(CellOutsideType(col.Name, ColumnType.tag col.Type, ColumnType.tag t))
+            | Some t -> Error(CellOutsideType(col.Name, col.Type, ColumnType.tag t))
             | None -> Ok c
 
     let private admitAll (col: Column) : Result<Cell list, AggregateError> =
@@ -152,7 +151,7 @@ module private Before =
                 if isNumeric then
                     k ()
                 else
-                    Error(IncompatibleAggType(aggFnTag fn, ColumnType.tag col.Type, [ "int"; "float"; "decimal" ]))
+                    Error(IncompatibleAggType(fn, col.Type, [ IntType; FloatType; DecimalType ]))
 
             match fn with
             | Count -> Ok(Int(List.length (present ())))
@@ -652,7 +651,7 @@ let tests =
               let huge = String.replicate 400 "9"
 
               match Column.aggregate Mean (Column.create "m" DecimalType [ Decimal huge; Float 1.0 ]) with
-              | Error(CellOutsideType("m", "decimal", "float")) -> ()
+              | Error(CellOutsideType("m", DecimalType, "float")) -> ()
               | other -> failtestf "a later cell outside the type outranks an earlier decimal past the range: %A" other
 
               match
@@ -668,11 +667,11 @@ let tests =
               | other -> failtestf "%A" other
 
               match Column.aggregate Sum (Column.create "s" StringType [ Str "a"; Bool true ]) with
-              | Error(CellOutsideType("s", "string", "bool")) -> ()
+              | Error(CellOutsideType("s", StringType, "bool")) -> ()
               | other -> failtestf "a cell outside the type outranks a non-numeric column: %A" other
 
               match Column.aggregate Sum (Column.create "s" StringType [ Str "a" ]) with
-              | Error(IncompatibleAggType("sum", "string", _)) -> ()
+              | Error(IncompatibleAggType(Sum, StringType, _)) -> ()
               | other -> failtestf "%A" other
 
           // ---- the profile grammar ----

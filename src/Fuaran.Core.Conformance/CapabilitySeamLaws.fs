@@ -402,8 +402,8 @@ module internal CapabilitySeamLaws =
     /// its own capabilities from the seed and certifies Core's `CapabilityRegistry.dispatch`; it cannot see a
     /// domain's registry, body or host path, so a host that runs the body before the registry
     /// refuses leaves it green. This form runs the domain's own `CapabilitySeamWitness` — every call
-    /// the witness's generator draws goes through the witness's `Dispatch` with its `Body`, counted —
-    /// and certifies:
+    /// the witness's generator draws goes through the witness's `Dispatch` with the domain's `body`
+    /// (a per-call argument since Phase 391), counted — and certifies:
     ///
     ///  - **three outcomes** — every dispatch settles (`Ok(Ready _)`), stays pending (`Ok Pending`)
     ///    or is refused typed (`Error _`); `Ok(Failed _)` never escapes, and a `BodyFailed` carries the
@@ -417,14 +417,14 @@ module internal CapabilitySeamLaws =
     ///
     /// **Vacuity.** The guard counts settled, pending and refused-before-the-body dispatches over the
     /// drawn calls; a generator that never reaches one of the three is starved, and the family says
-    /// so rather than reporting green. A thrown `Body` or `Dispatch` is a failure of the first law.
+    /// so rather than reporting green. A thrown `body` or `Dispatch` is a failure of the first law.
     ///
     /// The capability instance of `LawKit.seamLaws` (Phase 297); `queryLawsAt` is the query one.
-    /// `family` is the roster id the guard is labelled with — `Conformance.capabilityLawsAt`, or the
-    /// `…With` spelling for the obsolete forward that keeps its own id for one draft.
+    /// `family` is the roster id the guard is labelled with — `Conformance.capabilityLawsAt`.
     let capabilityLawsAt
         (family: string)
         (w: CapabilitySeamWitness<'v>)
+        (body: (string * string) list -> Capability -> Deferred<'v>)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -437,7 +437,7 @@ module internal CapabilitySeamLaws =
                     | None -> Error(NoSuchCapability(id, known))
                     | Some c -> Ok c
               Validate = Capability.validateArgs
-              Body = fun args c -> w.Body args c ()
+              Body = body
               Dispatch = fun id args body -> w.Dispatch id args (fun c () -> body c)
               Gen = w.GenCall
               Rendering =

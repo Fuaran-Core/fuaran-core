@@ -1947,7 +1947,7 @@ module Families =
                 "FunctionRegistry.dispatch"
                 "FunctionRegistry.entry"
                 "FunctionRegistry.findBySignature"
-                "FunctionRegistry.partiallyApply"
+                "FunctionRegistry.narrow"
                 "FunctionRegistry.ids"
                 "FunctionRegistry.unregister"
                 "FunctionRegistry.replace"

@@ -49,7 +49,9 @@ module Sample =
     // which now holds the threading rather than a duplicated arithmetic.
     // -----------------------------------------------------------------------
 
-    /// Why a vocabulary could not be sampled (Phase 292) — the typed refusal
+    /// Why a vocabulary could not be sampled (Phase 292; `SampleRefusal` before `1.0.0`, renamed
+    /// by Phase 391 under STABILITY.md's "Vocabulary": the sampler ran over the vocabulary it was
+    /// given and could not complete, which is a fault) — the typed fault
     /// [[trySampleNodes]] returns where the sampler used to throw (a division by zero
     /// choosing from an empty list) or to draw a placeholder the encoder then refused
     /// (`VStr "?"` at an enum, `VUnion("?", [])` at a union).
@@ -57,7 +59,7 @@ module Sample =
     /// `At` names the slot — the type, or the kind tag — and `Reason` says why nothing in
     /// it can be drawn: an empty enum, union, kind or op set, a name the vocabulary does not
     /// declare, an unbound type variable, or a type with no finite value.
-    type SampleRefusal =
+    type SampleFault =
         {
             /// A noun phrase locating the slot, written to follow "cannot sample" in
             /// [[Describe]] — `enum 'Tone'`, `type variable 'T'`, or a type's `%A` rendering.
@@ -66,7 +68,7 @@ module Sample =
             Reason: string
         }
 
-        /// The refusal as one sentence.
+        /// The fault as one sentence.
         member this.Describe = sprintf "cannot sample %s: %s" this.At this.Reason
 
     /// Raised inside the sampler and caught at [[trySampleNodes]], so the refusal unwinds
@@ -137,19 +139,18 @@ module Sample =
     /// epoch, an offset other than UTC — each admitted by its format, so a document
     /// drawn here is valid in every leg. An unknown format draws nothing it could admit;
     /// the empty string stands in, and [[Declare.hostedWireErrors]] is what reports it.
-    let private formatPool (format: string) : string list =
+    let private formatPool (format: HostedFormat) : string list =
         match format with
-        | "date" -> [ "2026-10-03"; "2000-02-29"; "1970-01-01"; "0001-01-01"; "9999-12-31" ]
-        | "date-time" ->
+        | HostedFormat.Date -> [ "2026-10-03"; "2000-02-29"; "1970-01-01"; "0001-01-01"; "9999-12-31" ]
+        | HostedFormat.DateTime ->
             [ "2026-10-03T12:34:56Z"
               "2000-02-29T23:59:59+01:00"
               "1970-01-01T00:00:00Z"
               "1999-12-31T23:59:59-05:30" ]
-        | "uuid" ->
+        | HostedFormat.Uuid ->
             [ "00000000-0000-0000-0000-000000000000"
               "123e4567-e89b-12d3-a456-426614174000"
               "f81d4fae-7dec-11d0-a765-00a0c91e6bf6" ]
-        | _ -> [ "" ]
 
     /// Whether sampling a value of `t` **at the depth floor** can still reach a
     /// `TNode` — the sampler's termination predicate (Phase 698).
@@ -442,14 +443,14 @@ module Sample =
     /// **Total (Phase 292).** A vocabulary the sampler cannot draw from — no tag given (the
     /// cycle used to divide by zero), a tag naming no kind, an empty enum, union or op set
     /// reached by a slot, a name the vocabulary does not declare, an unbound type variable,
-    /// a type with no finite value — is a typed [[SampleRefusal]], and every value it does
+    /// a type with no finite value — is a typed [[SampleFault]], and every value it does
     /// draw is one the encoder accepts: there is no placeholder left that it refuses.
     let trySampleNodes
         (idl: Idl)
         (kindTags: string list)
         (seed: int)
         (count: int)
-        : Result<IdlValue list, SampleRefusal> =
+        : Result<IdlValue list, SampleFault> =
         let r = ofSeed seed
 
         match kindTags with

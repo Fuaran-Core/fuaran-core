@@ -37,7 +37,7 @@ let private kidsOf (id: string) (t: RNode) =
 let private applied (script: SkeletonOp<RNode, string> list) (t: RNode) =
     match Ops.applyAll nodew idw script t with
     | Ok t' -> t'
-    | Error(i, e, _) -> failtestf "the script %A was refused at step %d: %A" script i e
+    | Error { Applied = i; Rejection = e } -> failtestf "the script %A was refused at step %d: %A" script i e
 
 let private okScript (r: Result<SkeletonOp<RNode, string> list, PlaceError<string>>) =
     match r with
@@ -416,7 +416,8 @@ let tests =
               let script = Ops.lower nodew t
 
               match Ops.applyAllWith canHold nodew idw script (Ops.skeletonRoot nodew t) with
-              | Error(1, NotAContainer("p", "para"), _) -> ()
+              | Error { Applied = 1
+                        Rejection = NotAContainer("p", "para") } -> ()
               | other -> failtestf "expected NotAContainer at step 1, got %A" other
 
           testCase "lower and repairDuplicates are stack-safe on a deep tree"

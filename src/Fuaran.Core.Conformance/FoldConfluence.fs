@@ -81,6 +81,19 @@ type LaneGen<'Op, 'State> =
         Lanes: int -> ConfRng.T -> 'Op list list * ConfRng.T
     }
 
+/// The lane trial `FoldConfluence.laneDag` builds (Phase 391; a positional triple before `1.0.0`):
+/// the DAG, its base node, and the lane heads — exactly the three things `Dag.reconcileMany`
+/// takes beside the domain's witness and state.
+type LaneDag<'Op> =
+    {
+        /// The base node and every lane chained onto it.
+        Dag: Dag.T<'Op>
+        /// The base node's id.
+        BaseId: string
+        /// Each lane's head, in lane order; an empty lane's head is `BaseId`.
+        Heads: string list
+    }
+
 /// The fold-confluence law family (Phase 100). A domain runs `laneFoldLaws` against its own
 /// witness; `foldOnce` and `shrinkLanes` are exposed because a domain investigating a
 /// counterexample wants to drive them directly, and `laneDag` (Phase 249) because a domain that
@@ -249,10 +262,13 @@ module FoldConfluence =
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (baseOp: 'Op)
         (lanes: 'Op list list)
-        : Dag.T<'Op> * string * string list =
+        : LaneDag<'Op> =
         let baseId, d0 = baseNode hashFn w baseOp
         let heads, dag = chainLanes w hashFn (fun _ _ -> baseId) d0 lanes
-        dag, baseId, heads
+
+        { Dag = dag
+          BaseId = baseId
+          Heads = heads }
 
     /// Fold ONE lane set in the order given, through the real DAG surface rather than a
     /// re-implementation of it: the trial is `laneDag` (each lane chained onto a shared base node
@@ -271,8 +287,8 @@ module FoldConfluence =
         (baseOp: 'Op)
         (lanes: 'Op list list)
         : LaneFoldOutcome =
-        let dag, baseId, heads = laneDag hashFn w baseOp lanes
-        foldHeads w footprintOf hashState state0 dag baseId heads
+        let trial = laneDag hashFn w baseOp lanes
+        foldHeads w footprintOf hashState state0 trial.Dag trial.BaseId trial.Heads
 
     /// Greedy delta-debugging over a failing lane set: repeatedly take the first single-element
     /// removal — a whole lane, or one op from one lane — that still `diverges`, to a fixpoint or
