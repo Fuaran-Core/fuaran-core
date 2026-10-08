@@ -614,15 +614,25 @@ module Conformance =
         CapabilitySeamLaws.capabilityLaws seed iterations
 
     /// Forward — see `CapabilitySeamLaws.capabilityLawsAt`: the capability seam laws at a DOMAIN'S seam.
-    let capabilityLawsAt (w: CapabilitySeamWitness<'v>) (seed: int) (iterations: int) : LawResult list =
-        CapabilitySeamLaws.capabilityLawsAt "Conformance.capabilityLawsAt" w seed iterations
+    let capabilityLawsAt
+        (w: CapabilitySeamWitness<'v>)
+        (body: (string * string) list -> Capability -> Deferred<'v>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        CapabilitySeamLaws.capabilityLawsAt "Conformance.capabilityLawsAt" w body seed iterations
 
     /// Forward — see `QuerySeamLaws.queryLaws`.
     let queryLaws (seed: int) (iterations: int) : LawResult list = QuerySeamLaws.queryLaws seed iterations
 
     /// Forward — see `QuerySeamLaws.queryLawsAt`: the query seam laws at a DOMAIN'S seam.
-    let queryLawsAt (w: QuerySeamWitness) (seed: int) (iterations: int) : LawResult list =
-        QuerySeamLaws.queryLawsAt "Conformance.queryLawsAt" w seed iterations
+    let queryLawsAt
+        (w: QuerySeamWitness)
+        (resolver: (string * Cell) list -> Query -> Deferred<QueryResult>)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        QuerySeamLaws.queryLawsAt "Conformance.queryLawsAt" w resolver seed iterations
 
     /// Forward — see `RegistrySeamLaws.registryLaws`.
     let registryLaws (seed: int) (iterations: int) : LawResult list =
@@ -636,14 +646,16 @@ module Conformance =
     /// Forward — see `PolicySeamLaws.policyLawsAt` (Phase 318): the no-unapproved-write law and the dry
     /// run's agreement with `Apply`, under the DOMAIN'S own policy, its effects accessor and the
     /// registry its actors act through. `privileged` names the actors a host-writing op may be
-    /// allowed for; every other actor drawn from `actors` is held to the law.
+    /// allowed for; every other actor drawn from `actors` is held to the law. The actors are the
+    /// stream's typed `Actor` (Phase 391; bare strings before `1.0.0`), and the surface's policy is
+    /// asked about each by its attribution id, `Actor.id`.
     let policyLawsAt
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
         (registry: CapabilityRegistry)
         (state0: 'State)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
-        (actors: string list)
-        (privileged: string -> bool)
+        (actors: Actor list)
+        (privileged: Actor -> bool)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -875,15 +887,13 @@ module Conformance =
         SurfaceLaws.aiSurfaceKitPolicyLawsAt "Conformance.aiSurfaceKitPolicyLawsAt" w genOp state0 seed iterations
 
     /// Forward — see `SurfaceLaws.frozenWitnessFields`.
-    let frozenWitnessFields: (string * string list) list =
-        SurfaceLaws.frozenWitnessFields
+    let frozenWitnessFields: WitnessFields list = SurfaceLaws.frozenWitnessFields
 
     /// Forward — see `SurfaceLaws.unfrozenWitnesses`.
-    let unfrozenWitnesses: (string * string) list = SurfaceLaws.unfrozenWitnesses
+    let unfrozenWitnesses: FreezeExemption list = SurfaceLaws.unfrozenWitnesses
 
     /// Forward — see `SurfaceLaws.declaredWitnessFields` (Phase 387).
-    let declaredWitnessFields: (string * string list) list =
-        SurfaceLaws.declaredWitnessFields
+    let declaredWitnessFields: WitnessFields list = SurfaceLaws.declaredWitnessFields
 
     /// Forward — see `SurfaceLaws.witnessDeclaredFieldsLaw` (Phase 387).
     let witnessDeclaredFieldsLaw (record: string) (pinned: string list) (declared: string list) : LawResult =

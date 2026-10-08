@@ -398,11 +398,13 @@ module Proposals =
     /// Park an op sequence for approval under the id `id` (Phase 298) — the form
     /// for a host that mints ids from its own source (a sequence it persists, a
     /// content hash of the proposal). REFUSED when the queue already holds `id`:
-    /// two proposals under one id would make every later decision ambiguous.
+    /// two proposals under one id would make every later decision ambiguous. The id follows the
+    /// author and the instant, as the proposal id does in `approve` and `reject` (Phase 391: every
+    /// `Proposals` verb takes the witness, the actor and the instant first, then its own arguments).
     let proposeWithId
-        (id: int)
         (author: string)
         (proposedAt: string)
+        (id: int)
         (intent: string option)
         (ops: 'Op list)
         (q: ProposalQueue<'Op>)
@@ -521,12 +523,13 @@ module Proposals =
                     | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
 
     /// Reject a pending proposal with a reason. Recorded, never dropped — and
-    /// the artifact is never touched (a denied proposal never mutates).
+    /// the artifact is never touched (a denied proposal never mutates). The proposal id precedes the
+    /// reason, as it follows the instant in `approve` (Phase 391; `reason` came first before `1.0.0`).
     let reject
         (approver: string)
         (at: string)
-        (reason: string)
         (id: int)
+        (reason: string)
         (q: ProposalQueue<'Op>)
         : Result<ProposalQueue<'Op>, ApprovalFailure<'Rej>> =
         find id q

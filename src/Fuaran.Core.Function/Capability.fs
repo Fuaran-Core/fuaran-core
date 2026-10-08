@@ -472,6 +472,49 @@ module Capability =
         : Result<Deferred<'v>, InvokeError> =
         typeArgs c args |> Result.bind (fun typed -> InvokeError.settle (body typed))
 
+/// A dispatch journalled in the keyed capture journal (Phase 391; a positional triple before
+/// `1.0.0`): what `CapabilityRegistry.dispatchCaptured` and the `QueryRegistry.dispatch…Captured`
+/// verbs answer. `'e` is the seam's refusal — `InvokeError` for a capability, `QueryError` for a
+/// query.
+type CapturedDispatch<'v, 'e> =
+    {
+        /// Exactly what the un-journalled dispatch answers.
+        Outcome: Result<Deferred<'v>, 'e>
+        /// The invocation key and occurrence the attempt was journalled under — the ticket
+        /// `OpStream.settleEffectKeyed` settles a `Pending` answer with later. `None` when nothing
+        /// was journalled: a refusal before the body, or a deterministic declaration.
+        Ticket: (string * int) option
+        /// The journal, with the attempt and its settlement appended when one was journalled.
+        Journal: KeyedCapture list
+    }
+
+/// Why a replayed dispatch did not answer a value (Phase 391; a nested `Result` before `1.0.0`): the
+/// seam's own refusal, which a live dispatch would have answered too, or the journal's inability
+/// to answer the invocation.
+[<RequireQualifiedAccess>]
+type ReplayFailure<'e> =
+    /// The seam refused, exactly as the live dispatch refuses — an id it does not hold, arguments
+    /// that do not validate, a policy refusal — or the journal recorded the invocation's refusal,
+    /// which replays as the refusal it was answered live.
+    | Refused of 'e
+    /// The journal cannot answer the invocation — `NoCapture`, `Exhausted`, a label mismatch, an
+    /// undecodable value. Never answered by a live call.
+    | Unanswered of KeyedCaptureFault
+
+/// A dispatch replayed from the keyed capture journal (Phase 391; a nested `Result` and a pair
+/// before `1.0.0`): what `CapabilityRegistry.dispatchReplayed` and the
+/// `QueryRegistry.dispatchReplayed…` verbs answer.
+type ReplayedDispatch<'v, 'e> =
+    {
+        /// The replayed answer: a value as `Ready`, an attempt that never settled as `Pending`, or
+        /// the failure.
+        Outcome: Result<Deferred<'v>, ReplayFailure<'e>>
+        /// The replay cursor after this invocation — advanced past every journal record the replay
+        /// consumed (a recorded refusal included), unchanged when the seam refused before the
+        /// journal or the journal could not answer. Thread it into the next replay.
+        Cursor: Map<string, int>
+    }
+
 /// A typed capability registry — the discovery surface an agent enumerates (the compute analogue of
 /// node-introspection): "what compute may I invoke, with what typed args". Default-deny by shape on
 /// dispatch — only a registered id resolves.
@@ -604,9 +647,10 @@ module CapabilityRegistry =
     /// after the id resolved, the arguments validated and the policy admitted the invocation, and
     /// before the body runs; the body's answer settles it — `Ready v` as `Completed` (`encode v`),
     /// `Failed m` as `Refused m` — and a `Pending` answer leaves the attempt open, with the returned
-    /// ticket (`key`, occurrence) the one `OpStream.settleEffectKeyed` settles it with later. A refusal
-    /// before the body journals nothing, so a policy refusal leaves no capture; a deterministic
-    /// capability journals nothing either (ticket `None`). The result is exactly `dispatch`'s.
+    /// `Ticket` (`key`, occurrence) the one `OpStream.settleEffectKeyed` settles it with later. A
+    /// refusal before the body journals nothing, so a policy refusal leaves no capture; a
+    /// deterministic capability journals nothing either (`Ticket = None`). The `Outcome` is exactly
+    /// `dispatch`'s; a `CapturedDispatch` since Phase 391.
     let dispatchCaptured
         (hashFn: HashFn)
         (encode: 'v -> string)
@@ -615,22 +659,27 @@ module CapabilityRegistry =
         (args: (string * string) list)
         (body: Capability -> unit -> Deferred<'v>)
         (journal: KeyedCapture list)
-        : Result<Deferred<'v>, InvokeError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<'v, InvokeError> =
+        let unjournalled outcome =
+            { Outcome = outcome
+              Ticket = None
+              Journal = journal }
+
         match Map.tryFind id r.Capabilities with
-        | None -> Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst)), None, journal
+        | None -> unjournalled (Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst)))
         | Some c ->
             match Capability.validateArgs c args |> Result.bind (fun () -> admit r c args) with
-            | Error e -> Error e, None, journal
+            | Error e -> unjournalled (Error e)
             | Ok() ->
                 let det = Capability.determinismTag c
 
                 if det = OpStream.deterministicTag then
-                    InvokeError.settle (body c ()), None, journal
+                    unjournalled (InvokeError.settle (body c ()))
                 else
                     let key = Capability.invocationKey c args
                     let mutable answered = Pending
 
-                    let _, occ, journal' =
+                    let captured =
                         OpStream.captureEffectKeyed
                             hashFn
                             encode
@@ -641,7 +690,9 @@ module CapabilityRegistry =
                                 Deferred.settled answered)
                             journal
 
-                    InvokeError.settle answered, Some(key, occ), journal'
+                    { Outcome = InvokeError.settle answered
+                      Ticket = Some(key, captured.Occurrence)
+                      Journal = captured.Journal }
 
     /// REPLAY an invocation from the keyed capture journal instead of running its body (Phase 318) —
     /// so a `Network` capability's replay is exact. The id resolves, the arguments validate and the
@@ -649,8 +700,11 @@ module CapabilityRegistry =
     /// consults no journal); then a non-deterministic capability is answered from the journal by its
     /// invocation key: a completion as `Ready`, a recorded refusal as the same `BodyFailed`, an attempt
     /// that never settled as `Pending`. A deterministic capability runs `body` live, as a reproducible
-    /// effect may. A journal that cannot answer is the `KeyedCaptureFault` — `NoCapture` for an
-    /// invocation never captured, `Exhausted` past the recorded ones — never a live call.
+    /// effect may. A journal that cannot answer is `ReplayFailure.Unanswered` with the
+    /// `KeyedCaptureFault` — `NoCapture` for an invocation never captured, `Exhausted` past the
+    /// recorded ones — never a live call; every refusal of the seam, live or recorded, is
+    /// `ReplayFailure.Refused`. A `ReplayedDispatch` since Phase 391: one `Result`, and the cursor
+    /// beside it whatever the outcome.
     let dispatchReplayed
         (decode: string -> Result<'v, string>)
         (r: CapabilityRegistry)
@@ -659,33 +713,42 @@ module CapabilityRegistry =
         (body: Capability -> unit -> Deferred<'v>)
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
-        : Result<Result<Deferred<'v>, InvokeError> * Map<string, int>, KeyedCaptureFault> =
+        : ReplayedDispatch<'v, InvokeError> =
+        let refused e =
+            { Outcome = Error(ReplayFailure.Refused e)
+              Cursor = cursor }
+
         match Map.tryFind id r.Capabilities with
-        | None -> Ok(Error(NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst)), cursor)
+        | None -> refused (NoSuchCapability(id, r.Capabilities |> Map.toList |> List.map fst))
         | Some c ->
             match Capability.validateArgs c args |> Result.bind (fun () -> admit r c args) with
-            | Error e -> Ok(Error e, cursor)
+            | Error e -> refused e
             | Ok() ->
                 let det = Capability.determinismTag c
 
                 if det = OpStream.deterministicTag then
-                    Ok(InvokeError.settle (body c ()), cursor)
+                    { Outcome = InvokeError.settle (body c ()) |> Result.mapError ReplayFailure.Refused
+                      Cursor = cursor }
                 else
-                    OpStream.replayEffectKeyed
-                        decode
-                        det
-                        (Capability.invocationKey c args)
-                        (fun () -> None)
-                        cursor
-                        journal
-                    |> Result.map (fun (answer, cursor') ->
-                        let outcome =
+                    match
+                        OpStream.replayEffectKeyed
+                            decode
+                            det
+                            (Capability.invocationKey c args)
+                            (fun () -> None)
+                            cursor
+                            journal
+                    with
+                    | Error fault ->
+                        { Outcome = Error(ReplayFailure.Unanswered fault)
+                          Cursor = cursor }
+                    | Ok(answer, cursor') ->
+                        { Outcome =
                             match answer with
                             | Some(Ok v) -> Ok(Ready v)
-                            | Some(Error m) -> Error(BodyFailed m)
+                            | Some(Error m) -> Error(ReplayFailure.Refused(BodyFailed m))
                             | None -> Ok Pending
-
-                        outcome, cursor')
+                          Cursor = cursor' }
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 

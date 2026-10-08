@@ -1401,15 +1401,17 @@ module QueryRegistry =
         (key: string)
         (run: unit -> Result<Deferred<QueryResult>, QueryError>)
         (journal: KeyedCapture list)
-        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<QueryResult, QueryError> =
         let det = Query.determinismTag q
 
         if det = OpStream.deterministicTag then
-            run (), None, journal
+            { Outcome = run ()
+              Ticket = None
+              Journal = journal }
         else
             let mutable answered: Result<Deferred<QueryResult>, QueryError> = Ok Pending
 
-            let _, occ, journal' =
+            let capture =
                 OpStream.captureEffectKeyed
                     hashFn
                     encode
@@ -1423,7 +1425,9 @@ module QueryRegistry =
                         | Error e -> Some(Error(QueryErrorWire.render e)))
                     journal
 
-            answered, Some(key, occ), journal'
+            { Outcome = answered
+              Ticket = Some(key, capture.Occurrence)
+              Journal = capture.Journal }
 
     /// Resolve the id, validate, admit through the policy, then capture `run` under `keyOf q` — the
     /// order every captured dispatch keeps. A refusal before the resolver journals nothing.
@@ -1436,12 +1440,17 @@ module QueryRegistry =
         (keyOf: Query -> string)
         (run: Query -> Result<Deferred<QueryResult>, QueryError>)
         (journal: KeyedCapture list)
-        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<QueryResult, QueryError> =
+        let unjournalled outcome =
+            { Outcome = outcome
+              Ticket = None
+              Journal = journal }
+
         match Map.tryFind id r.Queries with
-        | None -> Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), None, journal
+        | None -> unjournalled (Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)))
         | Some q ->
             match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
-            | Error e -> Error e, None, journal
+            | Error e -> unjournalled (Error e)
             | Ok() -> captured hashFn encode q (keyOf q) (fun () -> run q) journal
 
     /// `dispatch`, journalling the invocation in the KEYED capture journal under
@@ -1450,8 +1459,9 @@ module QueryRegistry =
     /// (through `encode`, `QueryCodec.encodeResult` for the canonical form), a refusal from the
     /// resolver settles it `Refused` with the refusal's wire document (`QueryCodec.encodeQueryError`;
     /// `QueryError.describe`'s sentence before Phase 385), and `Pending` leaves it open with the
-    /// returned ticket. A refusal before the resolver journals nothing; a deterministic query
-    /// journals nothing. The result is exactly `dispatch`'s.
+    /// returned `Ticket`. A refusal before the resolver journals nothing; a deterministic query
+    /// journals nothing. The `Outcome` is exactly `dispatch`'s; a `CapturedDispatch` since Phase 391
+    /// (a positional triple before `1.0.0`).
     let dispatchCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -1460,7 +1470,7 @@ module QueryRegistry =
         (args: (string * Cell) list)
         (resolve: Query -> Deferred<QueryResult>)
         (journal: KeyedCapture list)
-        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<QueryResult, QueryError> =
         dispatchCapturedAt
             hashFn
             encode
@@ -1482,7 +1492,7 @@ module QueryRegistry =
         (pageToken: string option)
         (resolve: Query -> string option -> Deferred<QueryResult>)
         (journal: KeyedCapture list)
-        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<QueryResult, QueryError> =
         dispatchCapturedAt
             hashFn
             encode
@@ -1505,7 +1515,7 @@ module QueryRegistry =
         (args: (string * Cell) list)
         (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         (journal: KeyedCapture list)
-        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<QueryResult, QueryError> =
         dispatchCapturedAt
             hashFn
             encode
@@ -1528,7 +1538,7 @@ module QueryRegistry =
         (pageToken: string option)
         (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         (journal: KeyedCapture list)
-        : Result<Deferred<QueryResult>, QueryError> * (string * int) option * KeyedCapture list =
+        : CapturedDispatch<QueryResult, QueryError> =
         dispatchCapturedAt
             hashFn
             encode
@@ -1550,36 +1560,45 @@ module QueryRegistry =
         (live: Query -> Result<Deferred<QueryResult>, QueryError>)
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
-        : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
+        : ReplayedDispatch<QueryResult, QueryError> =
+        let refused e =
+            { Outcome = Error(ReplayFailure.Refused e)
+              Cursor = cursor }
+
         match Map.tryFind id r.Queries with
-        | None -> Ok(Error(NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst)), cursor)
+        | None -> refused (NoSuchQuery(id, r.Queries |> Map.toList |> List.map fst))
         | Some q ->
             match Query.validateParams q args |> Result.bind (fun () -> admit r q args) with
-            | Error e -> Ok(Error e, cursor)
+            | Error e -> refused e
             | Ok() ->
                 let det = Query.determinismTag q
 
                 if det = OpStream.deterministicTag then
-                    Ok(live q, cursor)
+                    { Outcome = live q |> Result.mapError ReplayFailure.Refused
+                      Cursor = cursor }
                 else
-                    OpStream.replayEffectKeyed
-                        decode
-                        det
-                        (Query.invocationKeyPage q args pageToken)
-                        (fun () -> None)
-                        cursor
-                        journal
-                    |> Result.map (fun (answer, cursor') ->
-                        let outcome =
+                    match
+                        OpStream.replayEffectKeyed
+                            decode
+                            det
+                            (Query.invocationKeyPage q args pageToken)
+                            (fun () -> None)
+                            cursor
+                            journal
+                    with
+                    | Error fault ->
+                        { Outcome = Error(ReplayFailure.Unanswered fault)
+                          Cursor = cursor }
+                    | Ok(answer, cursor') ->
+                        { Outcome =
                             match answer with
                             | Some(Ok v) -> Ok(Ready v)
                             | Some(Error reason) ->
                                 match QueryErrorWire.ofReason reason with
-                                | Some e -> Error e
-                                | None -> Error(ExecutionFailed(reason, []))
+                                | Some e -> Error(ReplayFailure.Refused e)
+                                | None -> Error(ReplayFailure.Refused(ExecutionFailed(reason, [])))
                             | None -> Ok Pending
-
-                        outcome, cursor')
+                          Cursor = cursor' }
 
     /// REPLAY a query invocation from the keyed journal instead of resolving it (Phase 318). The id,
     /// the parameters and the policy run exactly as `dispatchPage` (a refusal there is answered as
@@ -1589,7 +1608,9 @@ module QueryRegistry =
     /// refusal as the `QueryError` it records (Phase 385; a reason that is no query-error document,
     /// from a journal written before 0.36.0, as `ExecutionFailed` with the recorded text), an
     /// unsettled attempt as `Pending`. A deterministic query resolves live. A journal that cannot
-    /// answer is the `KeyedCaptureFault`, never a live fetch.
+    /// answer is `ReplayFailure.Unanswered` with the `KeyedCaptureFault`, never a live fetch; every
+    /// refusal of the seam, live or recorded, is `ReplayFailure.Refused`. A `ReplayedDispatch` since
+    /// Phase 391 (a nested `Result` before `1.0.0`).
     let dispatchReplayed
         (decode: string -> Result<QueryResult, string>)
         (r: QueryRegistry)
@@ -1599,7 +1620,7 @@ module QueryRegistry =
         (resolve: Query -> string option -> Deferred<QueryResult>)
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
-        : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
+        : ReplayedDispatch<QueryResult, QueryError> =
         dispatchReplayedAt
             decode
             r
@@ -1623,7 +1644,7 @@ module QueryRegistry =
         (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
-        : Result<Result<Deferred<QueryResult>, QueryError> * Map<string, int>, KeyedCaptureFault> =
+        : ReplayedDispatch<QueryResult, QueryError> =
         dispatchReplayedAt
             decode
             r

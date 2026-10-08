@@ -266,7 +266,7 @@ let tests =
                             OpStream.appendMany OpStream.defaultHash skeletonStream (Human "h") ops (sample ()) [],
                             Ops.applyAll nodew idw ops (sample ())
                         with
-                        | Error(i, e), Error(j, e', _) ->
+                        | Error(i, e), Error { Applied = j; Rejection = e' } ->
                             refused <- refused + 1
                             Expect.equal i j "the same refusal index"
                             Expect.equal e e' "the same envelope"

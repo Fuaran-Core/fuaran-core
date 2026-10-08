@@ -42,8 +42,6 @@ type StreamGen<'Op, 'State> =
 /// - `Registry` — the registry the domain dispatches against. The laws read it as the ORACLE: a
 ///   call whose id is registered and whose arguments `Capability.validateArgs` accepts must reach
 ///   the body, and every other call must be refused with the registry's own error.
-/// - `Body` — the domain's body, handed the call's arguments first, in the shape
-///   `CapabilityRegistry.dispatch` wants after them. The kit wraps it to count how often it runs.
 /// - `Dispatch` — the domain's HOST path: the function its surface actually calls to invoke a
 ///   capability, handed the id, the arguments and the body to run. A host that delegates to Core
 ///   passes `CapabilityRegistry.dispatch registry`; a host with its own wiring passes that wiring, which is the
@@ -51,14 +49,17 @@ type StreamGen<'Op, 'State> =
 /// - `GenCall` — the calls a model could make: registered and invented ids, arguments in space, out
 ///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a
 ///   refused dispatch.
+///
+/// The domain's BODY is not a field (Phase 391; `Body`, a thunk-returning function, before `1.0.0`):
+/// it is what the family hands `Dispatch` on each call, so it is the family's per-call argument
+/// (`Conformance.capabilityLawsAt w body`), which the kit wraps to count how often it runs. The record
+/// names the seam — its oracle, its host path and the calls a model could make — and freezes that
+/// (DECISIONS.md D138).
 type CapabilitySeamWitness<'v> =
     {
         /// The oracle: whether a call should reach the body, and which error it must be refused
         /// with otherwise, is read from this registry alone.
         Registry: CapabilityRegistry
-        /// The domain's body, arguments first. The kit counts its runs: a refused call must run it
-        /// zero times, any other call exactly once.
-        Body: (string * string) list -> Capability -> unit -> Deferred<'v>
         /// The host's invocation path — id, arguments, body. It must refuse with exactly the
         /// registry's error and must never return `Ok(Failed _)`; a throw fails the family.
         Dispatch:
@@ -72,17 +73,16 @@ type CapabilitySeamWitness<'v> =
     }
 
 /// A domain's query seam, as `Conformance.queryLawsAt` certifies it (Phase 246) — the query
-/// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Resolver` the domain's resolver
-/// (handed the call's arguments first), `Dispatch` the host path (`QueryRegistry.dispatch queries`
-/// for a host that delegates to Core), and `GenQuery` the calls a model could make.
+/// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Dispatch` the host path
+/// (`QueryRegistry.dispatch queries` for a host that delegates to Core), and `GenQuery` the calls a
+/// model could make. The domain's resolver is the family's per-call argument
+/// (`Conformance.queryLawsAt w resolver`), as the capability body is (Phase 391; the field
+/// `Resolver` before `1.0.0`, DECISIONS.md D138).
 type QuerySeamWitness =
     {
         /// The oracle: whether a call should reach the resolver, and which error refuses it
         /// otherwise, is read from this registry alone.
         Queries: QueryRegistry
-        /// The domain's resolver, arguments first. The kit counts its runs: a refused call must
-        /// run it zero times, any other call exactly once.
-        Resolver: (string * Cell) list -> Query -> Deferred<QueryResult>
         /// The host's query path — id, arguments, resolver. It must refuse with exactly the
         /// registry's error; a throw fails the family.
         Dispatch:

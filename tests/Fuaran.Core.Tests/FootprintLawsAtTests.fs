@@ -310,7 +310,8 @@ let tests =
                           [ FoldConfluenceTests.SetShipped "p4"; FoldConfluenceTests.Retitle("p5", "b") ]
                           [] ]
 
-                    let dag, baseId, heads = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
+                    let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
+                    let dag, baseId, heads = trial.Dag, trial.BaseId, trial.Heads
 
                     let built (r: Result<string * Dag.T<_>, DagAppendFault>) =
                         match r with
@@ -349,14 +350,14 @@ let tests =
                 <| fun _ ->
                     let lane = [ FoldConfluenceTests.Retitle("p2", "same") ]
 
-                    let _, _, heads =
+                    let trial =
                         FoldConfluence.laneDag
                             OpStream.defaultHash
                             FoldConfluenceTests.planW
                             (FoldConfluenceTests.SetShipped "p1")
                             [ lane; lane; lane ]
 
-                    Expect.equal (List.length (List.distinct heads)) 3 "three distinct heads"
+                    Expect.equal (List.length (List.distinct trial.Heads)) 3 "three distinct heads"
 
                 testCase "the typed conflicts read off laneDag are the halt foldOnce reports"
                 <| fun _ ->
@@ -368,7 +369,8 @@ let tests =
                           [ FoldConfluenceTests.Retitle("p3", "middle") ]
                           [ FoldConfluenceTests.AddItem("n0", "right") ] ]
 
-                    let dag, baseId, heads = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
+                    let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
+                    let dag, baseId, heads = trial.Dag, trial.BaseId, trial.Heads
 
                     let cs =
                         match
@@ -412,7 +414,8 @@ let tests =
                           [ FoldConfluenceTests.SetShipped "p4" ]
                           [ FoldConfluenceTests.AddItem("n1", "c") ] ]
 
-                    let dag, baseId, heads = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
+                    let trial = FoldConfluence.laneDag OpStream.defaultHash w baseOp lanes
+                    let dag, baseId, heads = trial.Dag, trial.BaseId, trial.Heads
 
                     let final =
                         match

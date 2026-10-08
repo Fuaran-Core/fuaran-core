@@ -1,5 +1,92 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-08 — D138: the surfaces 1.0 freezes carry records, declared unions and per-call inputs; an allowance on a node covers removing it (answers D119.7); `SigEntry.Kind` waits for its model
+
+**Recorded by Phase 391. Nine packages' `api/` baselines, the `Fuaran.Core.Idl` and
+`Fuaran.Core.Idl.Codegen` wire baselines, `STABILITY.md` ("Vocabulary"), the `1.0.0` slot
+(`docs/releases/1.0.0.md`) and its migration.**
+
+*The rule (D138.1).* Once `1.0` freezes a surface, a positional tuple, a string over a closed set or
+an `option` standing for a two-case mode stays until `2.0`. So on this slot a public function in
+the reshaped packages answers no tuple of three or more parts, a field or case carries no `string`
+over a closed set its package declares, and no `option` names a mode. Each became a record named
+for what it holds (`ScriptRejection`, `CapturedDispatch`, `ReplayedDispatch`, `CapturedEffect`,
+`MemoStep`, `WitnessFields`, `FreezeExemption`, `LaneDag`) or the declared union (`WriteScope`,
+`HostedFormat`, `ColumnType`, `AggFn`, `Actor`). Three namings are deliberate. `Applied` and not
+`Index`: the number of ops applied before the refusal is the refused op's 0-based position, and the
+name says why. `Ticket` and not `Cursor` on a capture: it is the key and occurrence
+`settleEffectKeyed` settles with, and `Cursor` is the replay map; the shard named the two alike.
+`Journal` and not `Captures`: the argument it extends is already `journal`.
+
+*Decided: a replay is ONE `Result`, and the cursor rides beside it (D138.2).* The replay dispatchers
+answered `Result<Result<Deferred, 'e> * cursor, KeyedCaptureFault>`. Flattened to
+`Result<Deferred, ReplayFailure<'e>>` alone, a recorded refusal — which advances the cursor — would
+lose the cursor its caller needs for the next invocation. So the answer is `{ Outcome; Cursor }`, the
+outcome one `Result` whose failure is `ReplayFailure.Refused` (the seam's refusal, live or recorded)
+or `ReplayFailure.Unanswered` (the `KeyedCaptureFault`), the cursor unchanged wherever nothing was
+consumed. `ReplayFailure` is a `…Failure` by D136: a composite flow's outcome wrapping two families.
+
+*Decided: the seam body is a per-call argument (D138.3), as ruled for this slot.* The shard's question
+was whether `CapabilitySeamWitness.Body`'s `unit -> Deferred<'v>` is the contract or a kit
+convenience. A kit convenience: the witness's own `Dispatch` takes the body on every call, so the
+field was a copy of an argument the family supplies per call, and its `unit` thunk was there only to
+match `Dispatch`'s shape. The premise given with the ruling — "frozen records carry data, not
+behaviour" — is not the distinguishing fact, and is recorded as refuted: every witness is a record of
+functions (`Dispatch`, `GenCall`, `NodeWitness.Children`). The fact is that a witness names its
+seam — its oracle, its host path, the calls a model could make — and a per-call input is not part of
+it. `QuerySeamWitness.Resolver` is the same input in the same position, so it left the same way: two
+seam witnesses frozen with different shapes for one role would be the inconsistency the freeze
+exists to prevent. `capabilityLawsAt w body` and `queryLawsAt w resolver`; the body type drops the
+thunk. The two frozen field lists moved deliberately, on the one slot where they may.
+
+*Decided: `WriteScope.DenyList` carries no set (D138.4).* This slot's ruling named `AllowList of Set |
+DenyList of Set`. A set on `DenyList` would be a second place to say what is locked beside `Locked`,
+or would drop `Locked` and with it the lock that wins inside an allow-list, which callers rely on.
+So `Writable: WriteScope` is `DenyList` (the deny list is `Locked`) or `AllowList ids`.
+
+*Decided, answering D119.7: an allowance on a node covers removing it and moving it out; the
+source parent need not be on the list (D138.5).* D119 proved the lock theorem and left the
+allow-list question open: removing an allowed `a` rewrites the child list of a parent the list may
+not cover. Two contracts were possible. (A) Every written id must be covered, so removing `a` needs
+its parent writable. (B) The allowance covers the node's presence, so `a` may be removed or moved out
+(into a covered destination, which is a target) without its parent. (B) is the contract, for three
+reasons. Under (A) "may remove what it may write" cannot be expressed without allowing the parent's
+whole subtree, which collapses an allow-list to its parent, the widening it exists to prevent. The
+removal changes the parent's list only by deleting the removed node's own entry: no sibling is
+added, reordered or rewritten, and an insert into the parent stays refused, because the parent is
+its target. And it is what the gate does and what D119's model proves (`targets_cover_written`, with
+`allow_list_does_not_cover_the_source_parent` as the stated boundary), so the answer moves no
+behaviour, no model and no law. What it leaves inexpressible is "may edit inside `a` but not delete
+`a`"; a domain that needs it locks nothing and adds a domain policy check, or allows `a`'s children.
+
+*Decided: a hosted format is closed in the type, and the reader refuses an unknown name (D138.6).*
+`HostedCodec.Format` was `string option` over `HostedFormat.known`. As a union it cannot hold
+another name, so the `idl.json` reader refuses one at `format` (`UnknownTag`), where the
+declaration check and every generator refused it before. No emitted byte moves. The wire baselines
+of `artifact` and `supportArtifact` do move, because the surface renderer now draws the three cases
+as documents: the shard's "the wire-surface baselines are byte-identical" was true of every move but
+this one, and is recorded as refuted for it. The class is `breaking` on both, approved with the
+reason in the ledger.
+
+*Not decided here: `SigEntry.Kind` as `HoleKind` (D138.7).* A `SigEntry` whose `Kind` is a
+`HoleKind` cannot hold a `value` entry without a space, which the capability reader admits today
+(and the admission gate refuses later, as non-total). The reader is modelled clause for clause by
+`entry_of_j` and `entry_total` in `proofs/Capability.fst` and held to production over mutated
+documents by the codec oracle, so the retype is a reader change, a model change, a re-verification
+and an oracle re-extraction — a phase of its own, and it belongs on this slot. It is proposed as a
+successor rather than done half here.
+
+*Measured, beyond the shard's list (D138.8).* The rule was applied wherever the reshaped packages
+answered a triple: `OpStream.captureEffectKeyed` (the primitive under the capture dispatchers) and
+`FoldConfluence.laneDag` joined the list. The `OpStream.Dag` package, which the phase does not name,
+still answers ten triples (`appendChecked`, `appendIf`, `appendIndexed`, `appendVerified…`,
+`merge…` and `laneKey`); they are proposed as a successor on this slot.
+
+**Consequences.** `api/` baselines of `Fuaran.Core.AiSurface`, `Column`, `Conformance`, `Function`,
+`Idl`, `OpStream`, `Ops`, `Propagation` and `Query` move, classed `retype` or `removal`; the
+`OneDotZero` family reads them as paid by the major. `ParityVectors`, the law corpora, every other
+wire baseline, every digest and every chain pre-image are unchanged.
+
 ## 2026-10-08 — D137: the surface marks a static member of a type with a ` (static)` suffix outside its identity, so an instance/static flip is one `retype`; a module's members carry no marker
 
 **Recorded by Phase 408. `tests/Fuaran.Core.Tests/PublicSurfaceTests.fs`, `api/Fuaran.Core.Idl.txt`

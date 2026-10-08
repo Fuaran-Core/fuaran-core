@@ -503,6 +503,21 @@ type RefWitness<'Node, 'Id> =
         DeclsOf: 'Node -> 'Id list
     }
 
+/// A script's refusal (Phase 391): the first op of an op-script the engine refused, with the tree
+/// the accepted prefix reached. A script is not a `Batch` — it stops at the first refusal and KEEPS
+/// the prefix — so the refusal names how far it got. `Ops.applyAllWith` and every sequence form
+/// beside it (`applyAll`, `applyAllGrammar`, `applyAllReferenced`) answer it on `Error`.
+type ScriptRejection<'Node, 'Id> =
+    {
+        /// How many ops were applied before the refusal — so also the 0-based position of the
+        /// refused op in the script.
+        Applied: int
+        /// Why that op was refused.
+        Rejection: Rejection<'Id>
+        /// The tree the accepted prefix reached: the state the refused op was offered against.
+        Tree: 'Node
+    }
+
 /// The generic apply engine over the skeleton ops. Total: every failure is a typed
 /// `Rejection` envelope. Generic over the `NodeWitness` / `IdWitness` — no domain
 /// `NodeKind` is ever in scope.
@@ -1031,26 +1046,29 @@ module Ops =
     ///
     /// FIRST REFUSAL WINS, and a script is **not** a `Batch`. `Batch` is all-or-nothing inside
     /// one op: it aborts and the original tree survives. A script stops at the first refusal and
-    /// returns the tree built so far, so the accepted prefix is kept. On failure the payload is
-    /// `(index, envelope, partial tree)`: the **index** is the 0-based position of the refused op
-    /// in `ops` (it counts steps offered, so it is the position of the step that failed, not the
-    /// count that succeeded), and the tree is the one the accepted prefix reached — the state the
-    /// refused step was offered against. That triple is the shape every domain `applyAll`
-    /// returns and the contract consumers already rely on.
+    /// returns the tree built so far, so the accepted prefix is kept. On failure the payload is a
+    /// `ScriptRejection` (Phase 391; a positional triple before `1.0.0`): `Applied`, the number of
+    /// ops applied before the refusal and so the 0-based position of the refused op in `ops`;
+    /// `Rejection`, the envelope; and `Tree`, the tree the accepted prefix reached — the state the
+    /// refused step was offered against.
     let applyAllWith
         (canHold: 'Node -> bool)
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
-        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
         let rec go i node =
             function
             | [] -> Ok node
             | o :: rest ->
                 match applyWith canHold w w None idw o node with
                 | Ok node' -> go (i + 1) node' rest
-                | Error e -> Error(i, e, node)
+                | Error e ->
+                    Error
+                        { Applied = i
+                          Rejection = e
+                          Tree = node }
 
         go 0 root ops
 
@@ -1081,14 +1099,14 @@ module Ops =
     /// Apply a sequence non-atomically, threading the tree. Every node is treated as able to hold
     /// children, so this is `applyAllWith (fun _ -> true)` and its behaviour is exactly what it
     /// was before Phase 160 — the instance relation `apply`/`applyContained` have carried since
-    /// Phase 251, now at the sequence level. First refusal wins: on failure the failing index, the
-    /// envelope, and the partial tree built so far.
+    /// Phase 251, now at the sequence level. First refusal wins: on failure the `ScriptRejection` —
+    /// how many ops applied, the envelope, and the partial tree built so far.
     let applyAll
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
-        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
         applyAllWith (fun _ -> true) w idw ops root
 
     /// Dry-run a sequence (Phase 246): report the first failing index + envelope without
@@ -2032,7 +2050,7 @@ module Ops =
                 | Some r -> Error r
                 | None -> Ok after
 
-    /// The sequence form of `applyChecked`: first refusal wins, `applyAllWith`'s triple.
+    /// The sequence form of `applyChecked`: first refusal wins, `applyAllWith`'s `ScriptRejection`.
     let private applyAllChecked
         (check: SkeletonOp<'Node, 'Id> -> 'Node -> 'Node -> Rejection<'Id> option)
         (canHold: 'Node -> bool)
@@ -2040,14 +2058,18 @@ module Ops =
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
-        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
         let rec go i node =
             function
             | [] -> Ok node
             | o :: rest ->
                 match applyChecked check canHold w idw o node with
                 | Ok node' -> go (i + 1) node' rest
-                | Error e -> Error(i, e, node)
+                | Error e ->
+                    Error
+                        { Applied = i
+                          Rejection = e
+                          Tree = node }
 
         go 0 root ops
 
@@ -2095,7 +2117,8 @@ module Ops =
         applyGrammar allowedChildren canHold w idw op root |> Result.map ignore
 
     /// The sequence form of `applyGrammar` — `applyAllWith`'s contract (first refusal wins; the
-    /// failing index, the envelope and the tree the accepted prefix reached) under the grammar.
+    /// `ScriptRejection` naming how many ops applied, the envelope and the tree the accepted prefix
+    /// reached) under the grammar.
     let applyAllGrammar
         (allowedChildren: string -> string list option)
         (canHold: 'Node -> bool)
@@ -2103,7 +2126,7 @@ module Ops =
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
-        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
         applyAllChecked (grammarCheck allowedChildren w idw) canHold w idw ops root
 
     /// The dry run of `applyAllGrammar`, in `canApplyAllWith`'s shape — the `canApply` a domain with
@@ -2119,7 +2142,7 @@ module Ops =
         : Result<unit, int * Rejection<'Id>> =
         match applyAllGrammar allowedChildren canHold w idw ops root with
         | Ok _ -> Ok()
-        | Error(i, e, _) -> Error(i, e)
+        | Error r -> Error(r.Applied, r.Rejection)
 
     /// Reference-aware apply (Phase 313) — `applyGrammar` under a `RefWitness` as well: a
     /// `RemoveNode` or `UpdateNode` it accepts is then refused with `StillReferenced` when the tree
@@ -2161,7 +2184,7 @@ module Ops =
         (idw: IdWitness<'Id>)
         (ops: SkeletonOp<'Node, 'Id> list)
         (root: 'Node)
-        : Result<'Node, int * Rejection<'Id> * 'Node> =
+        : Result<'Node, ScriptRejection<'Node, 'Id>> =
         applyAllChecked (referenceCheck refw allowedChildren w idw) canHold w idw ops root
 
     /// The dry run of `applyAllReferenced`, in `canApplyAllWith`'s shape.
@@ -2176,7 +2199,7 @@ module Ops =
         : Result<unit, int * Rejection<'Id>> =
         match applyAllReferenced refw allowedChildren canHold w idw ops root with
         | Ok _ -> Ok()
-        | Error(i, e, _) -> Error(i, e)
+        | Error r -> Error(r.Applied, r.Rejection)
 
     /// `footprint` under a `RefWitness` (Phase 313): every id the script writes a reference to is
     /// READ — the references every node of an inserted subtree carries, and those of an `UpdateNode`

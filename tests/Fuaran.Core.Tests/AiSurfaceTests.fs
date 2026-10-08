@@ -278,7 +278,7 @@ let tests =
               let q, id =
                   Proposals.propose "agent" "t0" None [ AddNote("n2", "b") ] Proposals.Queue.empty
 
-              match Proposals.reject "reviewer" "t1" "not now" id q with
+              match Proposals.reject "reviewer" "t1" id "not now" q with
               | Ok q2 ->
                   match (q2.Proposals |> List.exactlyOne).Status with
                   | Proposals.ProposalStatus.Rejected("reviewer", "t1", "not now") -> ()

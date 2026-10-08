@@ -959,8 +959,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Column` | 38 | 6 | 2 | 4 | 0 | 0 | 0 | 26 |
 | `Fuaran.Core.Conformance` | 148 | 1 | 101 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
-| `Fuaran.Core.Function` | 144 | 33 | 64 | 6 | 0 | 0 | 0 | 41 |
-| `Fuaran.Core.Idl` | 60 | 0 | 6 | 1 | 1 | 0 | 0 | 52 |
+| `Fuaran.Core.Function` | 143 | 33 | 64 | 5 | 0 | 0 | 0 | 41 |
+| `Fuaran.Core.Idl` | 62 | 0 | 6 | 1 | 1 | 0 | 0 | 54 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 56 | 8 | 0 | 0 | 1 | 0 | 0 | 47 |
 | `Fuaran.Core.Observer` | 11 | 0 | 7 | 1 | 0 | 0 | 0 | 3 |
@@ -968,12 +968,12 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.OpStream.Dag` | 85 | 23 | 37 | 0 | 0 | 0 | 0 | 25 |
 | `Fuaran.Core.Ops` | 73 | 25 | 25 | 6 | 0 | 0 | 0 | 17 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
-| `Fuaran.Core.Propagation` | 26 | 3 | 7 | 0 | 0 | 0 | 0 | 16 |
+| `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1110 | 141 | 385 | 31 | 13 | 0 | 3 | 537 |
+| **Total** | 1110 | 141 | 385 | 30 | 13 | 0 | 3 | 538 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -5420,9 +5420,9 @@ names:
 > recomputed. A `changed` id not in the dependency map is a named `EvalUnknownChange`."**
 
 `Propagation.fst` models the two halves of that clause for clause — `dependents` through the same
-pair list and grouping the F# writes, `dirtyFromChangedIds` with its private frontier loop `grow`,
-`staleSet`, and the driver: `PropagationError`, `EvalOutcome`, the private `walk` and its loop `go`,
-`eval`, and `evalFrom` with its unknown-change guard — over two **parameters**. The node evaluator
+pair list and grouping the F# writes, `dirtyFromChangedIds` with its private frontier loop `grow`
+(its alias `staleSet` left at `1.0.0`), and the driver: `PropagationError`, `EvalOutcome`, the
+private `walk` and its loop `go`, `eval`, and `evalFrom` with its unknown-change guard — over two **parameters**. The node evaluator
 is a function over an abstract value type, exactly as theorem 9 takes the pipeline evaluator: Core
 owns no evaluator, and nothing here says what a domain computes. And the order the driver walks is
 a `topo_result` handed in where production computes `sort deps`: `sort` is Tarjan's algorithm over

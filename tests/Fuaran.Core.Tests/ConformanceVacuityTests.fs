@@ -508,8 +508,19 @@ let private runs =
            run
                "Conformance.capabilityLawsAt"
                300
-               (Conformance.capabilityLawsAt WitnessTakingFamiliesTests.capabilityWitness 2460 300)
-           run "Conformance.queryLawsAt" 300 (Conformance.queryLawsAt WitnessTakingFamiliesTests.queryWitness 2461 300)
+               (Conformance.capabilityLawsAt
+                   WitnessTakingFamiliesTests.capabilityWitness
+                   WitnessTakingFamiliesTests.capabilityBody
+                   2460
+                   300)
+           run
+               "Conformance.queryLawsAt"
+               300
+               (Conformance.queryLawsAt
+                   WitnessTakingFamiliesTests.queryWitness
+                   WitnessTakingFamiliesTests.queryResolver
+                   2461
+                   300)
            run
                "Conformance.capabilityPipelineLawsAt"
                200
@@ -1483,7 +1494,7 @@ let floorTests =
               let w = WitnessTakingFamiliesTests.queryWitness
 
               let lying (args: (string * Cell) list) (q: Query) =
-                  match w.Resolver args q with
+                  match WitnessTakingFamiliesTests.queryResolver args q with
                   | Ready r ->
                       Ready
                           { r with
@@ -1492,10 +1503,12 @@ let floorTests =
                                     Columns = [ Column.create "other" IntType [ Int 11 ] ] } }
                   | d -> d
 
-              let results = Conformance.queryLawsAt { w with Resolver = lying } 4242 200
+              let results = Conformance.queryLawsAt w lying 4242 200
               Expect.isTrue (hasRed "bound to its declaration" results) (sprintf "%A" (redLaws results))
 
-              let honest = Conformance.queryLawsAt w 4242 200
+              let honest =
+                  Conformance.queryLawsAt w WitnessTakingFamiliesTests.queryResolver 4242 200
+
               Expect.isEmpty (redLaws honest) "and the reference resolver is green"
 
           testCase "propagationEvaluatorLawsAt is red on an evaluator that asks for a read it does not declare"

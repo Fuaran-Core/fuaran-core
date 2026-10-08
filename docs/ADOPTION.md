@@ -195,11 +195,13 @@ model could make:
 ```fsharp
 let capabilitySeam : CapabilitySeamWitness<string> =
     { Registry = capabilities
-      Body = fun args _ () -> fillBody args
       Dispatch = CapabilityRegistry.dispatch capabilities   // the path your surface really calls
       GenCall = genCall }                         // settled, pending and refused calls
 
-Conformance.capabilityLawsAt capabilitySeam seed iters   // and queryLawsAt for a QuerySeamWitness
+let capabilityBody args (_: Capability) = fillBody args   // your body, handed each call
+
+Conformance.capabilityLawsAt capabilitySeam capabilityBody seed iters
+// and queryLawsAt querySeam resolver seed iters for a QuerySeamWitness
 ```
 
 The family certifies the three outcomes, that a refusal runs no body, and that your host refuses

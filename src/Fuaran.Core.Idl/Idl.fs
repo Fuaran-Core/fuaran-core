@@ -50,6 +50,20 @@ type ClosureSig =
         Placeholder: string
     }
 
+/// A closed string FORMAT a hosted slot's declared wire form may name (Phase 252; a `string`
+/// over [[HostedFormat.known]] before `1.0.0`, a union since Phase 391). The names are JSON
+/// Schema's spellings — [[HostedFormat.name]] — and [[HostedFormat.admits]] is the one
+/// definition of what each admits.
+[<RequireQualifiedAccess>]
+type HostedFormat =
+    /// RFC 3339 `full-date`, spelled `date`: a real calendar day, years 0001–9999.
+    | Date
+    /// RFC 3339 `date-time`, spelled `date-time`: an offset is required; `T`/`Z` in either case;
+    /// no leap second.
+    | DateTime
+    /// The 8-4-4-4-12 hex form in either case, spelled `uuid`.
+    | Uuid
+
 /// The structural type of a field's value on the wire.
 type IdlType =
     /// A JSON string, carried as-is.
@@ -171,7 +185,7 @@ and HostedCodec =
         /// [[Declare.hostedWireErrors]]).
         Wire: IdlType option
         /// A closed string format on top of a `Some TStr` wire ([[HostedFormat]]).
-        Format: string option
+        Format: HostedFormat option
     }
 
 /// Where a node's KIND BODY sits relative to its `id` on the wire (Phase 109).
@@ -762,21 +776,37 @@ type Idl =
     }
 
 /// The closed set of string FORMATS a hosted slot's declared wire form may name
-/// (Phase 252, [[HostedCodec.Format]]) — and the one definition of what each admits,
-/// so the interpreter, the sampler and the generated hosts cannot disagree on it.
+/// (Phase 252, [[HostedCodec.Format]]) — their names, and the one definition of what each
+/// admits, so the interpreter, the sampler and the generated hosts cannot disagree on it.
 ///
 /// **Closed, deliberately.** A format the engine does not know is one no leg can
-/// check or draw from, which is the disagreement the declaration exists to remove;
-/// [[Declare.hostedWireErrors]] reports one, and the generators refuse it. The three
+/// check or draw from, which is the disagreement the declaration exists to remove; since
+/// Phase 391 the type cannot hold one, and the `idl.json` reader refuses an unknown name. The three
 /// are JSON Schema's spellings, read strictly: `date` is RFC 3339 `full-date` (a real
 /// calendar day, years 0001–9999), `date-time` is RFC 3339 `date-time` (an offset is
 /// required; `T`/`Z` in either case; no leap second), and `uuid` is the 8-4-4-4-12 hex
 /// form in either case.
 [<RequireQualifiedAccess>]
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module HostedFormat =
 
-    /// Every format a hosted slot may declare.
-    let known: string list = [ "date"; "date-time"; "uuid" ]
+    /// Every format, in declaration order.
+    let all: HostedFormat list =
+        [ HostedFormat.Date; HostedFormat.DateTime; HostedFormat.Uuid ]
+
+    /// The format's name on the wire and in a generated module: `date`, `date-time`, `uuid`.
+    let name (format: HostedFormat) : string =
+        match format with
+        | HostedFormat.Date -> "date"
+        | HostedFormat.DateTime -> "date-time"
+        | HostedFormat.Uuid -> "uuid"
+
+    /// Every format's name, in `all`'s order.
+    let known: string list = all |> List.map name
+
+    /// The format a name spells, or `None` for a name the engine does not know.
+    let tryParse (s: string) : HostedFormat option =
+        all |> List.tryFind (fun f -> name f = s)
 
     let private dateRx =
         System.Text.RegularExpressions.Regex("^([0-9]{4})-([0-9]{2})-([0-9]{2})$")
@@ -794,15 +824,15 @@ module HostedFormat =
     let private validDay (y: int) (m: int) (d: int) =
         y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= System.DateTime.DaysInMonth(y, m)
 
-    /// Whether the string `s` is in `format`. An unknown format admits nothing.
-    let admits (format: string) (s: string) : bool =
+    /// Whether the string `s` is in `format`.
+    let admits (format: HostedFormat) (s: string) : bool =
         let num (g: System.Text.RegularExpressions.Group) = int g.Value
 
         match format with
-        | "date" ->
+        | HostedFormat.Date ->
             let m = dateRx.Match s
             m.Success && validDay (num m.Groups[1]) (num m.Groups[2]) (num m.Groups[3])
-        | "date-time" ->
+        | HostedFormat.DateTime ->
             let m = dateTimeRx.Match s
 
             m.Success
@@ -811,8 +841,7 @@ module HostedFormat =
             && num m.Groups[5] <= 59
             && num m.Groups[6] <= 59
             && (not m.Groups[9].Success || (num m.Groups[9] <= 23 && num m.Groups[10] <= 59))
-        | "uuid" -> uuidRx.IsMatch s
-        | _ -> false
+        | HostedFormat.Uuid -> uuidRx.IsMatch s
 
 /// Type-parameter substitution (Phase 292) — the ONE definition the encoder, the decoder,
 /// the sampler and the generator share.
@@ -1599,8 +1628,8 @@ module Decode =
                     | Some fmt, _ ->
                         err
                             DecodeCode.OutOfRange
-                            ("a '" + fmt + "' string")
-                            (sprintf "hosted value is not a '%s' string" fmt))
+                            ("a '" + HostedFormat.name fmt + "' string")
+                            (sprintf "hosted value is not a '%s' string" (HostedFormat.name fmt)))
         | TRecord name, JObj fs ->
             match IdlLookup.tryRecord idl name with
             | None ->
@@ -1895,8 +1924,9 @@ module Declare =
     /// list ⇒ well-formed. A wire form is a type the other legs can read without the
     /// host codec — a scalar, a declared enum, record or union, or a list or map of
     /// those — so another erased slot (`json`, `hosted`, a closure, a sentinel), a
-    /// node, a tree-op or a type variable is refused; a format needs a string wire and
-    /// must be one [[HostedFormat]] knows.
+    /// node, a tree-op or a type variable is refused; a format needs a string wire (a
+    /// format the engine does not know is unrepresentable since Phase 391, and the
+    /// `idl.json` reader refuses its name).
     let hostedWireErrors (idl: Idl) : string list =
         let rec readable (t: IdlType) : string option =
             match t with
@@ -1940,14 +1970,11 @@ module Declare =
                       | None -> ()
 
                       match h.Format, h.Wire with
-                      | Some fmt, _ when not (List.contains fmt HostedFormat.known) ->
-                          sprintf
-                              "%s: format '%s' is not one the engine knows (%s)"
-                              at
-                              fmt
-                              (String.concat ", " HostedFormat.known)
                       | Some fmt, w when w <> Some TStr ->
-                          sprintf "%s: format '%s' needs a string wire form (Wire = Some TStr)" at fmt
+                          sprintf
+                              "%s: format '%s' needs a string wire form (Wire = Some TStr)"
+                              at
+                              (HostedFormat.name fmt)
                       | _ -> () ]
 
     /// Well-formedness of the declared wire shape (Phases 108/109). Empty list ⇒

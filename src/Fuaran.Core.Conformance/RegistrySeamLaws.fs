@@ -58,7 +58,7 @@ module internal RegistrySeamLaws =
     ///    AND exact matching (the registry indexes it by what it produces + requires);
     ///  - **a non-matching query returns it not** — a query with the wrong result type, or with a
     ///    context missing a required hole, does NOT return the entry (default-deny by shape on search);
-    ///  - **a partial application narrows its signature in the index** — `partiallyApply` (the content-
+    ///  - **a partial application narrows its signature in the index** — `FunctionRegistry.narrow` (the content-
     ///    pack formalism) yields an entry with fewer required holes that IS findable from the smaller
     ///    context that subsumes it, while the un-narrowed original is NOT (its dropped hole stays unmet);
     ///  - **dispatch stays default-deny + arg-validated** — an unregistered id is `NoSuchCapability`, a
@@ -220,7 +220,7 @@ module internal RegistrySeamLaws =
 
                 // ---- 3. a partial application narrows its signature in the index ----
                 (match
-                    FunctionRegistry.partiallyApply ("pack-" + string i) (Set.ofList [ "h0" ]) ent
+                    FunctionRegistry.narrow ("pack-" + string i) (Set.ofList [ "h0" ]) ent
                     |> Result.bind (fun pack -> FunctionRegistry.register pack r |> Result.map (fun r2 -> pack, r2))
                  with
                  | Error e ->

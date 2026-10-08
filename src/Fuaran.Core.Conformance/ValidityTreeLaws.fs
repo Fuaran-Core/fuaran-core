@@ -249,7 +249,7 @@ module internal ValidityTreeLaws =
                         acc
                         |> Result.bind (fun t ->
                             Ops.applyAllGrammar allowedChildren canHold nodew idw ops t
-                            |> Result.mapError (fun (i, e, _) -> i, e)))
+                            |> Result.mapError (fun r -> r.Applied, r.Rejection)))
                     (Ok cur)
 
             let scripts = verdict.Accepted |> List.map _.Ops

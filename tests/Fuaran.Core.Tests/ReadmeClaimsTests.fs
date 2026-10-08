@@ -1272,7 +1272,7 @@ let tests =
 
           test "the witness-freeze counts are the frozen list's length, and the freeze names every frozen record" {
               let root = repoRoot ()
-              let frozen = Fuaran.Core.SurfaceLaws.frozenWitnessFields |> List.map fst
+              let frozen = Fuaran.Core.SurfaceLaws.frozenWitnessFields |> List.map _.Record
               Expect.isNonEmpty frozen "the frozen witness list was read"
 
               Expect.isEmpty

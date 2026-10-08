@@ -94,7 +94,7 @@ module internal JsonSchema =
             // Phase 252 — a hosted slot that declares its wire form is stated as that type,
             // with its format beside it; only an undeclared one keeps the abstention below.
             match schemaOf w, fmt with
-            | JObj fs, Some f -> JObj(fs @ [ "format", JStr f ])
+            | JObj fs, Some f -> JObj(fs @ [ "format", JStr(HostedFormat.name f) ])
             | s, _ -> s
         | TJson
         | THosted _ -> JBool true

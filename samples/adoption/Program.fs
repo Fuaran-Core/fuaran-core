@@ -248,9 +248,11 @@ let genCall (rng: ConfRng.T) : (string * (string * string) list) * ConfRng.T =
 
     call, r2
 
+/// The body the capability seam laws run, per call: the arguments first, then the capability.
+let capabilityBody (args: (string * string) list) (_: Capability) : Deferred<string> = fillBody args
+
 let capabilitySeam: CapabilitySeamWitness<string> =
     { Registry = capabilities
-      Body = fun args _ () -> fillBody args
       Dispatch = CapabilityRegistry.dispatch capabilities // the host path: delegate to Core's dispatch
       GenCall = genCall }
 
@@ -318,7 +320,6 @@ let genQuery (rng: ConfRng.T) : (string * (string * Cell) list) * ConfRng.T =
 
 let querySeam: QuerySeamWitness =
     { Queries = queries
-      Resolver = notesResolver
       Dispatch = QueryRegistry.dispatch queries
       GenQuery = genQuery }
 
@@ -376,8 +377,8 @@ let main _ =
 
     // the seams: certify at YOUR registry, body and host path, then dispatch through that same path
     let seamLaws =
-        Conformance.capabilityLawsAt capabilitySeam 4 200
-        @ Conformance.queryLawsAt querySeam 5 200
+        Conformance.capabilityLawsAt capabilitySeam capabilityBody 4 200
+        @ Conformance.queryLawsAt querySeam notesResolver 5 200
 
     for r in seamLaws do
         printfn "  [%s] %s" (if r.Passed then "PASS" else "FAIL") r.Law

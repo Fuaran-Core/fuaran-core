@@ -127,6 +127,19 @@ type KeyedCapture =
         Hash: string
     }
 
+/// What capturing one invocation answered (Phase 391; a positional triple before `1.0.0`):
+/// `OpStream.captureEffectKeyed`'s result.
+type CapturedEffect<'v> =
+    {
+        /// What the effect answered: `None` while it has not settled — the attempt then stays open.
+        Answer: Result<'v, string> option
+        /// The invocation's occurrence under its key — what `settleEffectKeyed` settles an open
+        /// attempt with later. `0`, and nothing journalled, for a `deterministic` label.
+        Occurrence: int
+        /// The journal with the attempt, and its settlement when the effect answered.
+        Journal: KeyedCapture list
+    }
+
 /// Why the keyed capture journal refused a request (Phase 318). Each verb names the cases it can
 /// raise: `settleEffectKeyed` the last two, `replayEffectKeyed` the first five.
 [<RequireQualifiedAccess>]
@@ -460,14 +473,19 @@ module internal OpStreamCapture =
         (key: string)
         (effect: unit -> Result<'v, string> option)
         (captures: KeyedCapture list)
-        : Result<'v, string> option * int * KeyedCapture list =
+        : CapturedEffect<'v> =
         if det = deterministicTag then
-            effect (), 0, captures
+            { Answer = effect ()
+              Occurrence = 0
+              Journal = captures }
         else
             let occ, attempted = beginEffectKeyedWith cfg hashFn det key captures
 
             match effect () with
-            | None -> None, occ, attempted
+            | None ->
+                { Answer = None
+                  Occurrence = occ
+                  Journal = attempted }
             | Some outcome ->
                 let settled =
                     match settleEffectKeyedWith cfg hashFn encode key occ outcome attempted with
@@ -476,7 +494,9 @@ module internal OpStreamCapture =
                     // refuse; a refusal here is a defect in this journal, never a plausible value.
                     | Error _ -> failwithf "unreachable: the attempt just journalled for %s/%d did not settle" key occ
 
-                Some outcome, occ, settled
+                { Answer = Some outcome
+                  Occurrence = occ
+                  Journal = settled }
 
     /// A JSON string literal's text (the inverse of `jstr` over what `jstr` writes), or `None`.
     let private unquote (raw: string) : string option =

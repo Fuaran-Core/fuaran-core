@@ -284,6 +284,18 @@ type MemoCache<'Node> =
         Bypasses: int
     }
 
+/// One inner function of a memoised composition (Phase 391; a positional triple before `1.0.0`):
+/// what `Function.applyMemoComposed` applies through the memo and composes into the outer.
+type MemoStep<'Node> =
+    {
+        /// The slot address in the outer the inner's result is composed into.
+        Slot: string
+        /// The inner function.
+        Inner: 'Node
+        /// The inner's own hole bindings.
+        Args: Map<string, Arg<'Node>>
+    }
+
 /// Companion helpers for `MemoCache` — the empty memo, its size, and the memoisability predicate.
 module Memo =
 
@@ -1036,7 +1048,7 @@ module Function =
                         Misses = cache.Misses + 1 })
 
     /// Apply a COMPOSED function with subtree-level memo (Phase 49) — the "single-hole edit re-derives
-    /// only the affected path" property. Each `(slotAddr, innerFn, innerArgs)` is applied through
+    /// only the affected path" property. Each `MemoStep` (its `Slot`, `Inner` and `Args`) is applied through
     /// `applyMemo` (so an unchanged inner sub-function is served from the cache, not re-derived) and
     /// `compose`d into the outer; then the outer's own holes are bound, also through `applyMemo`. An edit
     /// to an outer hole leaves every inner's key unchanged — the inner subtrees come straight from the
@@ -1047,7 +1059,7 @@ module Function =
     let applyMemoComposed
         (w: ArtifactWitness<'Node, 'Id>)
         (encode: 'Node -> string)
-        (inners: (string * 'Node * Map<string, Arg<'Node>>) list)
+        (inners: MemoStep<'Node> list)
         (outerArgs: Map<string, Arg<'Node>>)
         (outer: 'Node)
         (cache: MemoCache<'Node>)
@@ -1055,10 +1067,10 @@ module Function =
         let rec go (acc: 'Node) (c: MemoCache<'Node>) =
             function
             | [] -> Ok(acc, c)
-            | (slotAddr, innerFn, innerArgs) :: rest ->
-                applyMemo w encode innerArgs innerFn c
+            | step :: rest ->
+                applyMemo w encode step.Args step.Inner c
                 |> Result.bind (fun (innerResult, c') ->
-                    compose w slotAddr innerResult acc
+                    compose w step.Slot innerResult acc
                     |> Result.bind (fun composed -> go composed c' rest))
 
         go outer cache inners

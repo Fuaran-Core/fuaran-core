@@ -134,7 +134,9 @@ let tests =
               let ops = [ InsertChild("a", RNode.leaf "a3" "para" "w"); RemoveNode "ghost" ]
 
               match Ops.applyAll nodew idw ops (sample ()) with
-              | Error(1, UnknownNode("ghost", _), partial) ->
+              | Error { Applied = 1
+                        Rejection = UnknownNode("ghost", _)
+                        Tree = partial } ->
                   Expect.isSome (Tree.tryFind nodew idw "a3" partial) "first op applied in the partial"
               | other -> failtestf "expected Error at index 1, got %A" other
 
@@ -405,7 +407,9 @@ let insertIdUniquenessTests =
                     InsertChild("a", RNode.leaf "a4" "para" "never") ]
 
               match Ops.applyAllWith canHold nodew idw script (sample ()) with
-              | Error(i, NotAContainer("a1", "para"), partial) ->
+              | Error { Applied = i
+                        Rejection = NotAContainer("a1", "para")
+                        Tree = partial } ->
                   Expect.equal i 2 "the index is the position of the REFUSED step, not the count that succeeded"
 
                   // the partial tree carries both accepted steps and neither of the two that were
@@ -431,7 +435,7 @@ let insertIdUniquenessTests =
               let dry = Ops.canApplyAllWith canHold nodew idw script (sample ())
 
               match dry, Ops.applyAllWith canHold nodew idw script (sample ()) with
-              | Error(di, de), Error(ai, ae, _) ->
+              | Error(di, de), Error { Applied = ai; Rejection = ae } ->
                   Expect.equal di ai "the dry run and the mutating call name the same step"
                   Expect.equal (sprintf "%A" de) (sprintf "%A" ae) "…and the same envelope"
                   Expect.equal di 1 "which is step 1 here"
@@ -449,10 +453,11 @@ let insertIdUniquenessTests =
               // The comparison is of the WHOLE payload — verdict, tree, index, partial tree —
               // because two functions agreeing on accept-vs-refuse while disagreeing about which
               // step failed would be a moved contract reported as an unmoved one.
-              let render (r: Result<RNode, int * Rejection<string> * RNode>) =
+              let render (r: Result<RNode, ScriptRejection<RNode, string>>) =
                   match r with
                   | Ok t -> "ok:" + Tree.encodeHash nodew encNode t
-                  | Error(i, e, t) -> sprintf "%d:%A:%s" i e (Tree.encodeHash nodew encNode t)
+                  | Error { Applied = i; Rejection = e; Tree = t } ->
+                      sprintf "%d:%A:%s" i e (Tree.encodeHash nodew encNode t)
 
               let renderCan (r: Result<unit, int * Rejection<string>>) =
                   match r with

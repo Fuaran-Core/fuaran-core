@@ -971,7 +971,11 @@ let memoTests =
                   RNode.node "in" "para" [ RNode.hole "iv" "field" "x" (ValueHole AnyString) ]
 
               let innerArgs = Map.ofList [ "in/iv", ValueArg "deep" ]
-              let inners () = [ "tpl/s", innerFn (), innerArgs ]
+
+              let inners () =
+                  [ { Slot = "tpl/s"
+                      Inner = innerFn ()
+                      Args = innerArgs } ]
 
               let outerArgs c =
                   Map.ofList [ "tpl/t", ValueArg "Hi"; "tpl/c", ValueArg c ]
@@ -1005,7 +1009,9 @@ let memoTests =
               let outerArgs = Map.ofList [ "tpl/t", ValueArg "Hi"; "tpl/c", ValueArg "3" ]
 
               let innersWith v =
-                  [ "tpl/s", innerFn (), Map.ofList [ "in/iv", ValueArg v ] ]
+                  [ { Slot = "tpl/s"
+                      Inner = innerFn ()
+                      Args = Map.ofList [ "in/iv", ValueArg v ] } ]
 
               match Function.applyMemoComposed artw encNode (innersWith "deep") outerArgs (template ()) Memo.empty with
               | Ok(_, c1) ->
@@ -1526,7 +1532,7 @@ let convergenceTests =
               | Error(UnknownBoundAddr("p", "doc-fn.typo", "h9", [ "h0"; "h1" ])) -> ()
               | other -> failtestf "expected UnknownBoundAddr, got %A" other
 
-              match FunctionRegistry.partiallyApply "x" (Set.ofList [ "h0" ]) (packBaseEntry ()) with
+              match FunctionRegistry.narrow "x" (Set.ofList [ "h0" ]) (packBaseEntry ()) with
               | Ok e -> Expect.equal (e.Capability.Signature.Holes |> List.map _.Addr) [ "h1" ] "narrowed"
               | Error e -> failtestf "a bindable hole was refused: %A" e
 
@@ -1868,7 +1874,9 @@ let validatedDeclarationTests =
                   Function.applyMemoComposed
                       artw
                       encNode
-                      [ "tpl/s", clockLeaf, Map.empty ]
+                      [ { Slot = "tpl/s"
+                          Inner = clockLeaf
+                          Args = Map.empty } ]
                       outerArgs
                       (template ())
                       Memo.empty

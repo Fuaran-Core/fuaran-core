@@ -123,7 +123,7 @@ let internal noObsoleteLaw (major: int) (assemblies: int) (offenders: string lis
 // ---- law 2: every witness frozen ----------------------------------------------------------
 
 /// Law 2 over `Conformance.unfrozenWitnesses`.
-let internal allFrozenLaw (major: int) (unfrozen: (string * string) list) : Verdict =
+let internal allFrozenLaw (major: int) (unfrozen: FreezeExemption list) : Verdict =
     if major = 0 then
         atMajorZero
             AllFrozenLaw
@@ -138,7 +138,7 @@ let internal allFrozenLaw (major: int) (unfrozen: (string * string) list) : Verd
                 unfrozen.Length
                 major
                 (unfrozen
-                 |> List.map (fun (n, why) -> n + " — " + why)
+                 |> List.map (fun u -> u.Witness + " — " + u.Reason)
                  |> String.concat "\n       ")
         )
 
@@ -146,9 +146,9 @@ let internal allFrozenLaw (major: int) (unfrozen: (string * string) list) : Verd
 
 /// The committed render of `frozenWitnessFields`: one line per record, `Name: f1, f2`, in the
 /// list's order, LF-terminated.
-let internal renderFrozen (pins: (string * string list) list) : string =
+let internal renderFrozen (pins: WitnessFields list) : string =
     pins
-    |> List.map (fun (name, fields) -> name + ": " + String.concat ", " fields + "\n")
+    |> List.map (fun pin -> pin.Record + ": " + String.concat ", " pin.Fields + "\n")
     |> String.concat ""
 
 /// What the major's `vN.0.0` tag answered for the committed render.
@@ -389,7 +389,12 @@ let tests =
           }
 
           test "go-red: law 2 is red on a planted unfrozen witness at major 1" {
-              match allFrozenLaw 1 [ "DecoyWitness", "planted" ] with
+              match
+                  allFrozenLaw
+                      1
+                      [ { Witness = "DecoyWitness"
+                          Reason = "planted" } ]
+              with
               | Broken d -> Expect.stringContains d "DecoyWitness" "the red names the record"
               | v -> failtestf "a planted unfrozen witness at major 1 must be red, got %A" v
 
@@ -400,10 +405,14 @@ let tests =
 
           test "go-red: law 3 is red on a planted widening against the tag, vacuous with no tag" {
               let tagged =
-                  renderFrozen [ "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ] ]
+                  renderFrozen
+                      [ { Record = "NodeWitness"
+                          Fields = [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ] } ]
 
               let widened =
-                  renderFrozen [ "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren"; "Meta" ] ]
+                  renderFrozen
+                      [ { Record = "NodeWitness"
+                          Fields = [ "Id"; "KindTag"; "Children"; "ReplaceChildren"; "Meta" ] } ]
 
               match frozenAtTagLaw 1 widened (Tagged("v1.0.0", tagged)) with
               | Broken d -> Expect.stringContains d "Meta" "the red shows the widened list"

@@ -271,7 +271,7 @@ let tests =
           <| fun _ ->
               match ColumnCodec.decode """{"schema":[{"name":"x","type":"money"}],"columns":{}}""" with
               | Error(UnknownType("money", expected)) ->
-                  Expect.equal expected ColumnType.allTags "enumerates the valid tags"
+                  Expect.equal expected ColumnType.all "enumerates the valid types"
               | other -> failtestf "expected UnknownType, got %A" other
 
           testCase "TypeMismatch — a string where an int column is declared"
@@ -280,7 +280,7 @@ let tests =
                   """{"schema":[{"name":"x","type":"int"}],"columns":{"x":{"values":["nope"],"validity":[true]}}}"""
 
               match ColumnCodec.decode json with
-              | Error(TypeMismatch("x", "int", "string")) -> ()
+              | Error(TypeMismatch("x", IntType, "string")) -> ()
               | other -> failtestf "expected TypeMismatch, got %A" other
 
           testCase "LengthMismatch — values and validity disagree"
@@ -424,7 +424,7 @@ let tests =
                     Columns = [ Column.create "a" StringType [ Str "x" ] ] }
 
               match Table.validate t with
-              | Error(TypeMismatch("a", "int", "string")) -> ()
+              | Error(TypeMismatch("a", IntType, "string")) -> ()
               | other -> failtestf "expected TypeMismatch, got %A" other
 
           testCase "Table.validate passes a well-formed table; tryEncode rejects a malformed one"
@@ -524,8 +524,8 @@ let tests =
               let strs = Column.create "s" StringType [ Str "a"; Str "b" ]
 
               match Column.aggregate Sum strs with
-              | Error(IncompatibleAggType("sum", "string", expected)) ->
-                  Expect.equal expected [ "int"; "float"; "decimal" ] "enumerates numeric types"
+              | Error(IncompatibleAggType(Sum, StringType, expected)) ->
+                  Expect.equal expected [ IntType; FloatType; DecimalType ] "enumerates numeric types"
               | other -> failtestf "expected IncompatibleAggType, got %A" other
 
           testCase "Column.aggregate Sum overflow is a named AggregateOverflow"
@@ -672,7 +672,7 @@ let tests =
               | other -> failtestf "unexpected: %A" other
 
               match ColumnCodec.decode (withValues "3.5") with
-              | Error(TypeMismatch("m", "decimal", "float")) -> ()
+              | Error(TypeMismatch("m", DecimalType, "float")) -> ()
               | other -> failtestf "expected TypeMismatch, got %A" other
 
               match ColumnCodec.decode (withValues "\"1e3\"") with
@@ -819,22 +819,22 @@ let trustsNothingTests =
           <| fun _ ->
               Expect.equal
                   (Table.validate (oneColumn IntType [ Bool true ]))
-                  (Error(TypeMismatch("c", "int", "bool")))
+                  (Error(TypeMismatch("c", IntType, "bool")))
                   "a Bool in an int column"
 
               Expect.equal
                   (Table.validate (oneColumn DecimalType [ Float 1.5 ]))
-                  (Error(TypeMismatch("c", "decimal", "float")))
+                  (Error(TypeMismatch("c", DecimalType, "float")))
                   "a Float in a decimal column"
 
               Expect.equal
                   (Table.validate (oneColumn FloatType [ Decimal "1.5" ]))
-                  (Error(TypeMismatch("c", "float", "decimal")))
+                  (Error(TypeMismatch("c", FloatType, "decimal")))
                   "a Decimal in a float column"
 
               Expect.equal
                   (Table.validate (oneColumn IntType [ Float 1.0 ]))
-                  (Error(TypeMismatch("c", "int", "float")))
+                  (Error(TypeMismatch("c", IntType, "float")))
                   "a Float in an int column"
 
               Expect.equal (Table.validate (oneColumn FloatType [ Int 3; Null ])) (Ok()) "Int widens into float"
@@ -955,23 +955,23 @@ let trustsNothingTests =
 
               Expect.equal
                   (Column.aggregate Sum intCol)
-                  (Error(CellOutsideType("a", "int", "float")))
+                  (Error(CellOutsideType("a", IntType, "float")))
                   "a Float in an int column is not truncated into the Sum"
 
               let decCol = Column.create "m" DecimalType [ Decimal "1"; Float 2.5 ]
 
               Expect.equal
                   (Column.aggregate Mean decCol)
-                  (Error(CellOutsideType("m", "decimal", "float")))
+                  (Error(CellOutsideType("m", DecimalType, "float")))
                   "a Float in a decimal column is not dropped from Sum and counted in Mean"
 
               Expect.equal
                   (Column.aggregate Count (Column.create "b" IntType [ Bool true ]))
-                  (Error(CellOutsideType("b", "int", "bool")))
+                  (Error(CellOutsideType("b", IntType, "bool")))
                   "every aggregate admits its cells first"
 
               match Column.aggregate Sum (Column.create "m" DecimalType [ Decimal "abc" ]) with
-              | Error(CellOutsideType("m", "decimal", cell)) -> Expect.stringContains cell "abc" "names the text"
+              | Error(CellOutsideType("m", DecimalType, cell)) -> Expect.stringContains cell "abc" "names the text"
               | other -> failtestf "expected CellOutsideType, got %A" other
 
               Expect.equal
@@ -1071,7 +1071,7 @@ let trustsNothingTests =
                   "2^53 itself, the guard's edge"
 
               match decode "1e300" with
-              | Error(TypeMismatch("m", "decimal", "float")) -> ()
+              | Error(TypeMismatch("m", DecimalType, "float")) -> ()
               | other -> failtestf "past the guard is refused, got %A" other
 
           testCase "DecimalText.tryToFloat refuses past the float range rather than returning infinity"

@@ -304,10 +304,12 @@ suffix says which question it answers:
 `ResolveFault` was reviewed against this rule on the `1.0.0` slot (Phase 389, DECISIONS.md D136) and
 keeps its name: it is the host's report that its fetch could not complete, which is a fault, and the
 caller-facing refusal it becomes is `QueryError`. A `ResolveError` would have put two `…Error` unions
-on one dispatch with no rule to tell them apart. `Idl.Sample.SampleRefusal` is the one type outside
+on one dispatch with no rule to tell them apart. `Idl.Sample.SampleRefusal` was the one type outside
 the seven suffixes: by this rule it is a fault (the sampler could not complete on the vocabulary it
-was given, and names the slot), and its rename to `SampleFault`, a `retype`, is ruled for the `1.0.0`
-slot by the same decision.
+was given, and names the slot), and the same decision ruled its rename; it is `SampleFault` since the
+`1.0.0` slot (Phase 391). A replayed dispatch that does not answer a value is a `ReplayFailure` —
+the seam's own refusal (`Refused`) or the journal's inability to answer (`Unanswered`, carrying the
+`KeyedCaptureFault`) — the `…Failure` of a composite flow, as the rule above says.
 
 **The exception postures.** A typed failure is the rule; an exception crosses a Core boundary in
 exactly three shapes, each in a fixed place:
@@ -334,7 +336,19 @@ admits) before `canHold` (whether a node holds children at all); (3) the `NodeWi
 `IdWitness`; (4) the request (the op, the proposals); (5) the subject last (the root, the base tree),
 so the call pipes. `applyReferenced refw allowedChildren canHold w idw op root`,
 `arbitrateGrammar allowedChildren canHold nodew idw baseTree proposals` and
-`applyContainedKeyed keyw canHold nodew idw op root` are the same rule with steps left out.
+`applyContainedKeyed keyw canHold nodew idw op root` are the same rule with steps left out. The
+attributed verbs follow it too: the AI surface's `Proposals` verbs take the witness, then the actor,
+then the instant, then their own arguments — `approve w approver at id q state`,
+`reject approver at id reason q`, `proposeWithId author at id intent ops q` (Phase 391).
+
+**The shapes a frozen surface does not carry (Phase 391, DECISIONS.md D138).** A public function
+does not answer a positional tuple of three or more parts, a field or case does not carry a
+`string` over a closed set its package declares, and an `option` does not stand for a two-case
+mode: each is a record, the declared union, or a two-case union, named once (`ScriptRejection`,
+`CapturedDispatch`, `ReplayedDispatch`, `CapturedEffect`, `MemoStep`, `WitnessFields`,
+`WriteScope`, `HostedFormat`, `ColumnType`, `AggFn`, `Actor`). A frozen witness record names its
+seam and carries no per-call input: the body a family hands the seam's host path is the family's
+argument (`capabilityLawsAt w body`), not a field.
 
 ## Stability-critical surfaces
 
@@ -454,7 +468,8 @@ Phase-53 effect-honesty gate on the dirty path).
 stale* — the dependency structure, the cycle enumeration, and the dirty `Set` — and returns it as data;
 the actual re-evaluation stays domain-side. The dependency relation is a per-call `readsOf` function, not
 a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its public surface (`dependencyMap`
-/ `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp` / `staleSet`) is
+/ `sort` / `cycleThrough` / `dirtyFromChangedIds` / `touchedBy` / `dirtyFromOp`; the `staleSet` alias of
+`dirtyFromChangedIds` left at `1.0.0`) is
 FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the
 rest of the substrate.
 
@@ -471,7 +486,7 @@ express it. Three members are exactly that and nothing else: no caller outside t
 `0.19.0` no document saying why they were public. A reading that classifies surface by caller count
 therefore takes each for dead and reaches for a narrowing that would not compile. They are contracts:
 
-- **`Fuaran.Core.FunctionRegistryModule.partiallyApply`** — the content-pack currying
+- **`Fuaran.Core.FunctionRegistryModule.narrow`** — the content-pack currying
   `Fuaran.Core.Conformance` builds its samples with.
 - **`Fuaran.Core.Memo.isMemoisable`** — the memo-soundness law asks it the same question the memo
   gate asks, which is the whole point of that law.

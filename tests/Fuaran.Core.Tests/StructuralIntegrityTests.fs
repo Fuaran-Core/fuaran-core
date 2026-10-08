@@ -263,7 +263,9 @@ let tests =
                           InsertChild("root", RNode.leaf "y" "para" "") ]
 
                     match Ops.applyAllGrammar grammar canHold nodew idw ops (doc ()) with
-                    | Error(1, IllegalChild("y", _, "root", _, _), partial) ->
+                    | Error { Applied = 1
+                              Rejection = IllegalChild("y", _, "root", _, _)
+                              Tree = partial } ->
                         Expect.isSome (Tree.tryFind nodew idw "x" partial) "the accepted prefix is kept"
                     | other -> failtestf "expected the second op refused, got %A" other
 

@@ -384,8 +384,8 @@ module internal PolicySeamLaws =
         (registry: CapabilityRegistry)
         (state0: 'State)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
-        (actors: string list)
-        (privileged: string -> bool)
+        (actors: Actor list)
+        (privileged: Actor -> bool)
         (seed: int)
         (iterations: int)
         : LawResult list =
@@ -413,6 +413,8 @@ module internal PolicySeamLaws =
             let op = rng.Draw genOp
             let op2 = rng.Draw genOp
             let actor = rng.Choose actors
+            // The surface's policy and its proposals speak the actor's attribution id.
+            let actorId = Actor.id actor
 
             if not (privileged actor) then
                 unprivileged <- unprivileged + 1
@@ -421,9 +423,9 @@ module internal PolicySeamLaws =
                     writes <- writes + 1
 
                     noWrite.Check(
-                        Proposals.decideGuarded gw registry actor op <> PolicyDecision.Allow,
+                        Proposals.decideGuarded gw registry actorId op <> PolicyDecision.Allow,
                         fun () ->
-                            at (sprintf "%A was allowed for unprivileged %s although it writes to the host" op actor)
+                            at (sprintf "%A was allowed for unprivileged %s although it writes to the host" op actorId)
                     )
 
             let agree =
@@ -444,7 +446,7 @@ module internal PolicySeamLaws =
             | Error _ ->
                 refusedRuns <- refusedRuns + 1
 
-                match Proposals.submitGuarded gw registry actor "t" None seqOps Proposals.Queue.empty state0 with
+                match Proposals.submitGuarded gw registry actorId "t" None seqOps Proposals.Queue.empty state0 with
                 | Proposals.SubmitDenied _
                 | Proposals.SubmitOpRejected _ -> inapplicable.Saw()
                 | other -> inapplicable.Check(false, fun () -> at (sprintf "an inapplicable sequence was %A" other)))
@@ -664,10 +666,10 @@ module internal PolicySeamLaws =
                 calls
                 |> List.fold
                     (fun (j, ts) (key, outcome) ->
-                        let _, occ, j' =
+                        let captured =
                             OpStream.captureEffectKeyed hashFn enc "network" key (fun () -> outcome) j
 
-                        j', ts @ [ key, occ, outcome ])
+                        captured.Journal, ts @ [ key, captured.Occurrence, outcome ])
                     ([], [])
 
             verifies.Check(
@@ -753,7 +755,7 @@ module internal PolicySeamLaws =
                 CapabilityRegistry.register netCap CapabilityRegistry.empty
                 |> Result.defaultValue CapabilityRegistry.empty
 
-            let live, _, j =
+            let live =
                 CapabilityRegistry.dispatchCaptured
                     hashFn
                     enc
@@ -771,7 +773,7 @@ module internal PolicySeamLaws =
                     [ "n", string arg ]
                     (fun _ () -> Ready(recordedN + 1))
                     Map.empty
-                    j
+                    live.Journal
 
             let denying =
                 CapabilityRegistry.withGate
@@ -779,7 +781,7 @@ module internal PolicySeamLaws =
                       Decide = fun _ _ -> PolicyDecision.deny "never" }
                     reg
 
-            let _, _, refusedJournal =
+            let refused =
                 CapabilityRegistry.dispatchCaptured
                     hashFn
                     enc
@@ -790,11 +792,9 @@ module internal PolicySeamLaws =
                     []
 
             seam.Check(
-                live = Ok(Ready recordedN)
-                && (match replay with
-                    | Ok(outcome, _) -> outcome = Ok(Ready recordedN)
-                    | Error _ -> false)
-                && List.isEmpty refusedJournal,
+                live.Outcome = Ok(Ready recordedN)
+                && replay.Outcome = Ok(Ready recordedN)
+                && List.isEmpty refused.Journal,
                 fun () -> at (sprintf "the seam did not replay exactly: %A" replay)
             ))
 

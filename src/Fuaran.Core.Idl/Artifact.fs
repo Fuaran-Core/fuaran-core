@@ -132,7 +132,7 @@ module Artifact =
                     | None -> JStr "json")
                    "hostSurface", JObj [ "fsharp", JStr h.FSharp; "encode", JStr h.Encode; "decode", JStr h.Decode ] ]
                  @ (match h.Format with
-                    | Some f -> [ "format", JStr f ]
+                    | Some f -> [ "format", JStr(HostedFormat.name f) ]
                     | None -> []))
 
     /// An authored value — a field default, or a nested part of one.
@@ -773,7 +773,17 @@ module Artifact =
                         let format =
                             match Decoder.tryMember "format" v with
                             | None -> Ok None
-                            | Some(JStr f) -> Ok(Some f)
+                            | Some(JStr f) ->
+                                // Phase 391: a format is the closed `HostedFormat`; an unknown name
+                                // is refused here, where `Declare.hostedWireErrors` reported it before.
+                                match HostedFormat.tryParse f with
+                                | Some fmt -> Ok(Some fmt)
+                                | None ->
+                                    refuse
+                                        DecodeCode.UnknownTag
+                                        ("one of " + String.concat ", " HostedFormat.known)
+                                        ("hosted type's format '" + f + "' is not one the engine knows")
+                                    |> under (PathSegment.Key "format")
                             | Some _ ->
                                 refuse DecodeCode.WrongKind "string" "hosted type's 'format' is not a string"
                                 |> under (PathSegment.Key "format")

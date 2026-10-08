@@ -8,7 +8,7 @@
    incremental promise is made of:
 
      - the DIRTY SET: `dependents` (the inverted dependency map), `dirtyFromChangedIds` with its
-       private frontier loop `grow`, and the alias `staleSet`;
+       private frontier loop `grow` (its alias `staleSet` left at `1.0.0`, Phase 391);
      - the DRIVER: `PropagationError`, `EvalOutcome`, the private `walk` with its loop `go`, the
        reference evaluator `eval`, and the incremental `evalFrom` with its unknown-change guard —
        including the RESTRICTED resolver and its `EvalUndeclaredRead` refusal (Phase 209).
@@ -432,10 +432,6 @@ let rec grow (d:dmap) (frontier acc:list string)
 (* F#: `dirtyFromChangedIds`. *)
 let dirty_from_changed_ids (deps:dmap) (changed:list string) : Tot (list string) =
   grow (dependents deps) changed changed
-
-(* F#: `staleSet` — the same set under the name the call site reads. *)
-let stale_set (deps:dmap) (changed:list string) : Tot (list string) =
-  dirty_from_changed_ids deps changed
 
 (* A set closed under "reads": whoever reads a member is a member. *)
 let closed (deps:dmap) (s:list string) : Tot prop =
