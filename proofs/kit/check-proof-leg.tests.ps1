@@ -630,6 +630,38 @@ Assert-That 'C. COST — and the overrun is printed as a COST finding' ([bool](@
 Assert-That 'C. COST — and recorded in the run facts with its percentage and the finding' (
     $null -ne $slowCost -and $slowCost.budget -eq 1 -and $slowCost.percent -gt 100 -and [bool](@($slow.findings | Where-Object { $_.text -match 'LegSlow\.fst took' }).Count)) "$(if ($slow) { $slow | ConvertTo-Json -Compress -Depth 6 } else { 'no facts file' })"
 
+# THE THRESHOLD AT ITS REAL NUMBERS (Phase 399): this repository's own `cachedRead` block, 1.0s from
+# 3s. LegGood is a SUB-SECOND module: its genuine cold check takes about 0.2s, under the threshold,
+# and its recorded fastestSeconds of 0 exempts it. LegSlow is a module whose cold check takes
+# seconds. Both checked cold: green, the sub-second one included.
+@{
+    kind       = 'proofModules'
+    cachedRead = @{ thresholdSeconds = 1.0; appliesFromFastestSeconds = 3 }
+    modules    = @(
+        @{ module = 'LegGood'; budgetSeconds = 20; fastestSeconds = 0 }
+        @{ module = 'LegSlow'; budgetSeconds = 60; fastestSeconds = 3 }
+    )
+} | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.real.json')
+$real = $base + @{ BudgetFile = (Join-Path $scratch 'modules.real.json') }
+$t1 = Invoke-Leg ($real + @{ Modules = @('LegGood', 'LegSlow'); ProofOnly = @('LegGood', 'LegSlow') })
+Assert-That 'C. SUB-SECOND — a sub-second module''s genuine cold check stays green under the 1s threshold' ($t1.Exit -eq 0 -and $t1.Green -and [bool](@($t1.Lines -match 'LegGood\.fst verified — run 1 of 1, [01]s').Count)) "exit $($t1.Exit): $(Show-Tail $t1)"
+
+# A WARM re-run of the slow module is red. A green run into a -CacheDir leaves LegSlow's genuine
+# checked file; the -BeforeInvocation seam puts it in front of LegSlow's check AFTER the provenance
+# check has passed — a writer during the invocation, which only the threshold can see — and the
+# prover reads it back instead of checking it.
+$slowCache = Join-Path $WorkDir 'slow-cache'
+$t2 = Invoke-Leg ($real + @{ Modules = @('LegSlow'); ProofOnly = @('LegSlow'); CacheDir = $slowCache })
+$slowChecked = Join-Path $WorkDir 'LegSlow.fst.checked'
+Copy-Item (Join-Path $slowCache 'LegSlow.fst.checked') $slowChecked -ErrorAction SilentlyContinue
+Assert-That 'C. WARM — a green run of the slow module leaves its genuine checked file' ($t2.Exit -eq 0 -and $t2.Green -and (Test-Path $slowChecked)) "exit $($t2.Exit): $(Show-Tail $t2)"
+$t3 = Invoke-Leg ($real + @{
+        Modules = @('LegSlow'); ProofOnly = @('LegSlow')
+        BeforeInvocation = { param($module, $run, $cacheDir) if ($module -eq 'LegSlow') { Copy-Item $slowChecked (Join-Path $cacheDir 'LegSlow.fst.checked') } }
+    })
+Assert-That 'C. WARM — a warm re-run of the slow module is red as a probable cached read, under the real 1s threshold' (
+    $t3.Exit -ne 0 -and -not $t3.Green -and [bool](@($t3.Lines -match 'LegSlow\.fst verified in 0\.\d+s .* under the 1s cached-read threshold .* PROBABLE CACHED READ').Count)) "exit $($t3.Exit): $(Show-Tail $t3)"
+
 # What -Strict still promotes: a declaration defect. LegGood with no budget entry at all is a
 # coverage finding, which is red under -Strict and a warning without it.
 @{ kind = 'proofModules'; cachedRead = @{ thresholdSeconds = 1; appliesFromFastestSeconds = 3 }; modules = @() } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $scratch 'modules.empty.json')

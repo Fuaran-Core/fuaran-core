@@ -214,6 +214,11 @@ param(
     # directory. `check-proof-leg.tests.ps1` plants its second writer here, synchronously, so the
     # refusal it asserts cannot depend on scheduling. A caller that names nothing is unaffected.
     [scriptblock] $AfterInvocation,
+    # Phase 399 — the seam's other half, for the same tests and nothing else: a script block run
+    # after the cache provenance check has passed for a module and before the prover is started on
+    # it — the one point a writer DURING an invocation can act unseen by that check. The kit tests
+    # put a genuine checked file there to show the cached-read threshold refuses the read-back.
+    [scriptblock] $BeforeInvocation,
     # Phase 393 — the OS whose pin entry is resolved; defaults to the host's. Naming another OS is
     # only meaningful with -ResolveOnly: a prover built for one OS does not run on another.
     [ValidateSet('windows', 'linux', 'macos')][string] $Platform,
@@ -1276,6 +1281,7 @@ for ($run = 1; $run -le $Runs; $run++) {
             $isRetry = $attempt -gt 1
             $suffix = if ($isRetry) { ".run$run.retry" } else { ".run$run" }
             Assert-CacheProvenance $cacheState $module $run (-not $isRetry)
+            if ($BeforeInvocation -and -not $isRetry) { & $BeforeInvocation $module $run $cache }
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $checked = Invoke-Prover @(
                 '--z3rlimit', $ZRlimit, '--quake', $Quake, '--report_assumes', 'error',

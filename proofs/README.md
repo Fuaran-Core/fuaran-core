@@ -1443,7 +1443,10 @@ phase did not adopt it, because the ruling asked for a threshold. `DECISIONS.md`
 an open option.
 
 **Held by** the `C` arms of `kit/check-proof-leg.tests.ps1`: a genuine checked file put in front of
-its module is refused, a check under the threshold is refused before its green line, a module
+its module is refused, a check under the threshold is refused before its green line, and at the real
+numbers (1.0s from 3s) a sub-second module's genuine cold check stays green while a warm re-run of a
+slow module is red (its genuine checked file put in front of the check through the kit's
+`-BeforeInvocation` test seam, after the provenance check has passed), a module
 recorded as genuinely fast is not judged by the threshold, a retired `floorSeconds` is refused, a
 cold check several times over budget under `-Strict` is green with the finding recorded, and a
 missing budget is still red under `-Strict`.

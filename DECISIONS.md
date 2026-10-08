@@ -27,13 +27,37 @@ printed none. The figures are in `proofs/modules.json` `cachedRead.measured` and
 `proofs/README.md` section "Cached read or cold check".
 
 *The decision.* The threshold is `cachedRead.thresholdSeconds` = **1.0s**, about twice the slowest
-cached read. Some models genuinely check faster than that cold, so the threshold cannot judge every
-module. It applies to a module whose recorded `fastestSeconds` is at least
-`cachedRead.appliesFromFastestSeconds` = **3s**. `Skeleton`, `Limits` and `WireVersioning` fall
-below that and rest on the provenance check alone, which the leg says at start-up. The threefold
-margin covers a machine about twice as fast as this one, which is what the Linux runner measured
-against the Windows-seeded floors (`WireColumn`, 16s against 17s). A check under the threshold fails
-before its green line is printed.
+cached read. It is checked before a module's green line is printed.
+
+*Tiny modules, checked first.* Some models genuinely check faster than a second cold, so a flat
+threshold would refuse real cold checks as cached reads. The evidence: on the strict baseline run
+(`fe50742`) `Limits` checked cold in 1s, 0s and 0s and `Skeleton` in 1s, 1s and 1s; in the
+measurement above `Limits` took 0.38s cold, which is inside the cached-read band; the kit tests'
+one-line models check cold in about 0.2s. Two fixes were considered. **A threshold relative to each
+module's own recorded cold time** was rejected: it is the floor again, one number per module per
+machine, and it broke on the first faster runner. **An exemption for the modules whose genuine cold
+check can fall into the cached-read band** was adopted, because that is the same cut the floors'
+`zeroBelowSeconds` made, now stated against the measured band. The threshold applies to a module
+whose recorded `fastestSeconds` is at least `cachedRead.appliesFromFastestSeconds` = **3s**, three
+times the threshold. Below that, a module rests on the provenance check alone, and the leg names
+those modules at start-up: today `Skeleton`, `Limits` and `WireVersioning`. The threefold margin
+covers a machine about twice as fast as this one, which is what the Linux runner measured
+(`WireColumn`, 16s against a 17s floor seeded on Windows). The smallest module the threshold judges
+is `VocabularyVectors`, which checked cold in 3s on all three strict-baseline runs.
+
+*Held by* the kit tests' `C` arms. At the real numbers (1.0s from 3s), a sub-second module's genuine
+cold check stays green, and the same slow module that checks green cold is red when re-run warm. The
+warm re-run puts its genuine checked file in front of the check through a new `-BeforeInvocation`
+test seam, which runs after the provenance check has passed. That is the writer-during-an-invocation
+case that only the threshold can see.
+
+*The strict baseline under these rules.* Re-derived from the recorded timings of the `fe50742` run,
+the run `proofs/last-strict.json` names. Every model verified with every query 3/3 under `--quake` on
+all three runs. No cost overrun is red. The four modules over budget on some run were all on passes
+the contention factor labels contended (x1.03, x0.82, x0.89): `WireDecode` 78s/70s, `VocabularyProofs`
+33s/30s, `ScoreVocabulary` 41s/40s and `ScoreVocabularyProofs` 103s/90s. Every module the threshold
+judges checked cold in 3s or more, well above 1.0s. So the run is green under these rules, as it was
+under the old ones.
 
 *The floors are retired, on that evidence.* The per-module `floorSeconds` (Phase 164) and
 `floorSeeding.os` (Phase 402) answered the same question with one number per module per machine.
@@ -59,14 +83,17 @@ It was not adopted, because the ruling asked for a threshold and a second gate i
 on its own. A module with no SMT query at all would print no `Quake:` line when checked cold, so
 adopting it would need a declared exemption for such modules.
 
-*The first strict baseline.* `proofs/last-strict.json` records a green `check.ps1 -Runs 3 -Strict`
-of `fe50742`. That run used the semantics before this decision; it was green with every overrun
-labelled contended. The run before it, on the same machine, was red on one unlabelled finding,
-`DocVocabularyProofs` at 27s against a 20s budget at x0.72. That module had grown with Phase 293
-without a re-seed, and Phase 399 re-seeded it from its slowest ordinary observation (70s/32s, before
-this ruling). Under this decision neither overrun would have been red. The code this decision changes
-is a leg script, so `-Since` reads that baseline as predating every module until a strict run of the
-new code is recorded.
+*The first strict baseline.* `proofs/last-strict.json` records the green `check.ps1 -Runs 3
+-Strict` of `fe50742` and stays as it is, by the operator's ruling. A pass of the new code was
+started and stopped on the operator's instruction: the new rules change how timings are judged, not
+whether the proofs hold, and the re-derivation above settles the judgement. The record predates the
+per-module `costs` the new code writes, so the over-budget modules are named here rather than in the
+file. The run before it, on the same machine, was red under the old rules on one unlabelled finding:
+`DocVocabularyProofs` at 27s against a 20s budget, on a pass at x0.72. That module had grown with
+Phase 293 without a re-seed, and Phase 399 re-seeded it from its slowest ordinary observation
+(70s/32s) before this ruling. Under this decision that overrun would not have been red either. The
+code this decision changes is a leg script, so `-Since` reads the baseline as predating every module.
+The next strict run of the new code, scheduled or local, records one that does not.
 
 ## 2026-10-07 — D129: a Core assembly reaches another's internal member only from a `NoInlining` function; the friend grants stay, and no internal is made public to escape the rule
 
