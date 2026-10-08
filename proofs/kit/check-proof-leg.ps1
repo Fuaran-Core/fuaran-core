@@ -18,22 +18,27 @@
 #               -BudgetFile says what each module is expected to cost, every green line prints
 #               the measured seconds beside that budget, and an overshoot is a named COST warning
 #               rather than a failure — prover time varies by machine and by load, so the budget
-#               is a smoke detector and not a gate. -Strict promotes every UNLABELLED cost finding
-#               to a red leg, for a session that wants one — see the contention factor below for
-#               what a labelled one is. A fixed CI job timeout is deliberately NOT what
-#               this is: a timeout says a run died and nothing about which module.
-#               The clock is also measured against a declared FLOOR (Phase 164), and that one
-#               IS a gate: a module that verifies in less than its floorSeconds FAILS the leg on
-#               the spot, naming the module and the time. The two directions are not symmetric.
-#               An overshoot is a real measurement of a real cost; an undershoot means the
-#               measuring apparatus is broken — almost always a second writer in the cache — so
-#               everything after it would be measured with the same broken apparatus. -NoFloor
-#               is the deliberate opt-out for a machine genuinely that fast.
-#               A floor is a number measured on ONE kind of machine, so since Phase 402 the budget
-#               file's `floorSeeding.os` names the OS its floors were seeded on, and on any other
-#               OS they are not enforced (one line says so): a Windows-seeded floor broke the first
-#               Linux run, whose runner is simply faster. The second writer the floor stands in for
-#               is caught DIRECTLY, on every OS and whatever the clock says, by the CACHE
+#               is a smoke detector and not a gate. Since Phase 399 that holds under -Strict too:
+#               an overshoot is a slow COLD check, the opposite of the failure a gate exists for,
+#               so it is a recorded finding (printed, written to -SummaryFile with its percentage)
+#               and never a red leg. -Strict promotes only the COVERAGE and SHAPE findings — a
+#               module with no budget, a budget for no module — which are defects in a declaration
+#               rather than measurements. A fixed CI job timeout is deliberately NOT what this is:
+#               a timeout says a run died and nothing about which module.
+#               The clock IS a gate in the other direction, and only there (Phase 399): a module
+#               that verifies in less than the budget file's CACHED-READ THRESHOLD
+#               (`cachedRead.thresholdSeconds`) FAILS the leg on the spot as a probable cached
+#               read. Measured on the pinned prover, reading a checked module back from a populated
+#               cache costs F* start-up and deserialisation and nothing else — 0.18-0.51s across
+#               ten modules whose cold checks took 0.4s to 184s — so one absolute number separates a
+#               read from a check for every module whose genuine cold check is well above it. Which
+#               modules that is, is read off each entry's recorded `fastestSeconds` (the threshold
+#               applies at `cachedRead.appliesFromFastestSeconds` and above); a module that can
+#               genuinely check in under a second is guarded by the provenance check alone. This
+#               replaces the per-module FLOORS of Phases 164 and 402, which answered the same
+#               question with one number per module per OS and broke on the first faster machine.
+#               The second writer the threshold backstops is caught DIRECTLY, on every OS and
+#               whatever the clock says, by the CACHE
 #               PROVENANCE check (Phase 402): between two of this run's prover invocations nothing
 #               in the cache may appear, change or vanish, and a module's own `.checked` file may
 #               not be in the cache before its cold check starts. Either is a refusal naming the
@@ -72,6 +77,11 @@
 #               model the leg extracts must declare `let twins` and assert it by normalisation, so a
 #               model added to the roster without fixtures fails here rather than going quietly
 #               unsampled. A -ProofOnly model is exempt — it has no extraction to check.
+#   2d. GUARD — the ORACLE-INDEPENDENCE guard (Phase 399, section 4b), after extraction and before
+#               the host: the oracle project, as MSBuild evaluates it, may reference FSharp.Core and
+#               compile its own directory and nothing else, and its sources may name only `Prims`,
+#               `FStar` modules and their own modules. A differential over an oracle that reaches
+#               production compares production with itself; the leg refuses one, naming each line.
 #   3. HOST   — the -HostFilters the caller declared, each its own invocation of the host test
 #               project (-HostProject / -HostProjectFile) with its own failure message. Separate
 #               invocations rather than one prefix filter, so two failures read as what they are
@@ -143,7 +153,8 @@
 #
 # The prover is resolved from $env:FSTAR_HOME (a release directory holding bin/fstar.exe), else
 # from <ProofsDir>/.fstar/ (a previous install by this script), else DOWNLOADED from the pinned
-# GitHub release, hash-verified, and unpacked there. Both directories, and <WorkDir>, are expected
+# GitHub release — or, when that source cannot serve it, from the entry's `mirror` (Phase 399,
+# section 1a) — hash-verified, and unpacked there. Both directories, and <WorkDir>, are expected
 # to be gitignored by the adopting repository.
 # The pin file carries ONE ENTRY PER OPERATING SYSTEM (Phase 393: `windows` and `linux`), every
 # entry the same release. The download path resolves the entry by `$IsWindows` / `$IsLinux` /
@@ -171,7 +182,7 @@ param(
     [string] $RepoRoot,
     # The pinned prover declaration. Defaults to <ProofsDir>/fstar-pin.json.
     [string] $PinFile,
-    # The per-module cost budgets and time floors. Defaults to <ProofsDir>/modules.json.
+    # The per-module cost budgets and the cached-read threshold. Defaults to <ProofsDir>/modules.json.
     [string] $BudgetFile,
     # The committed extractions the fresh ones are diffed against. Defaults to <ProofsDir>/oracle.
     [string] $OracleDir,
@@ -195,7 +206,6 @@ param(
     [switch] $Extract,
     [switch] $SkipOracleHost,
     [switch] $Strict,
-    [switch] $NoFloor,
     [string] $CacheDir,
     [int]    $Runs = 1,
     # Phase 402 — THE KIT'S OWN TEST SEAM, and nothing else: a script block run after each prover
@@ -204,12 +214,30 @@ param(
     # directory. `check-proof-leg.tests.ps1` plants its second writer here, synchronously, so the
     # refusal it asserts cannot depend on scheduling. A caller that names nothing is unaffected.
     [scriptblock] $AfterInvocation,
+    # Phase 399 — the seam's other half, for the same tests and nothing else: a script block run
+    # after the cache provenance check has passed for a module and before the prover is started on
+    # it — the one point a writer DURING an invocation can act unseen by that check. The kit tests
+    # put a genuine checked file there to show the cached-read threshold refuses the read-back.
+    [scriptblock] $BeforeInvocation,
     # Phase 393 — the OS whose pin entry is resolved; defaults to the host's. Naming another OS is
     # only meaningful with -ResolveOnly: a prover built for one OS does not run on another.
     [ValidateSet('windows', 'linux', 'macos')][string] $Platform,
     # Print the pin entry the download path would fetch for -Platform, then exit 0 — or refuse it,
     # exactly as the download path would. Downloads nothing, runs nothing.
-    [switch] $ResolveOnly
+    [switch] $ResolveOnly,
+    # Phase 399 — fetch the pinned archive for this host's OS into <ProofsDir>/.fstar/ exactly as the
+    # download path does (its sources in order, the hash checked), then exit 0 — or refuse, exactly
+    # as the download path would. Unpacks nothing and runs no prover, so the mirror is testable
+    # without one.
+    [switch] $FetchOnly,
+    # Phase 399 — run the ORACLE-INDEPENDENCE GUARD (section 4b) over -OracleDir and exit: 0 when it
+    # holds, 1 naming every offending line when it does not. Checks no model, so the guard is
+    # testable without a prover.
+    [switch] $GuardOnly,
+    # Phase 399 — where a GREEN leg writes its run facts as JSON: the machine it ran on and each
+    # run's contention factor. Nothing is written on a red leg. The caller's strict baseline reads
+    # it, so the record says what kind of machine stands behind it.
+    [string] $SummaryFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -314,12 +342,291 @@ function Resolve-PinEntry {
     if ($entry.sha256 -notmatch '^[0-9a-f]{64}$') {
         Fail "$pinName's '$osName' sha256 is not 64 lowercase hex digits: '$($entry.sha256)'" 2
     }
+    # Phase 399 — the MIRROR is optional for an adopter and held to the same rules as `url` when it
+    # is there: it names the pin's release, and it serves the SAME asset — the one sha256 above is
+    # the only thing either source is trusted for.
+    if ($null -ne $entry.PSObject.Properties['mirror']) {
+        $mirror = [string]$entry.mirror
+        if (-not $mirror) { Fail "$pinName's '$osName' mirror is empty; remove the key or name a source" 2 }
+        if (-not $mirror.Contains($pin.fstar)) {
+            Fail "$pinName's '$osName' entry names a different release than the pin ($($pin.fstar)): its mirror is '$mirror'" 2
+        }
+        if (-not $mirror.EndsWith("/$($entry.asset)")) {
+            Fail "$pinName's '$osName' mirror does not serve the pinned asset $($entry.asset): '$mirror'" 2
+        }
+    }
     $entry
+}
+
+# The sources an entry is fetched from, in the order they are tried: `url` (upstream), then `mirror`.
+function Get-PinSources($entry) {
+    $sources = @([string]$entry.url)
+    if ($null -ne $entry.PSObject.Properties['mirror'] -and $entry.mirror) { $sources += [string]$entry.mirror }
+    , $sources
 }
 
 if ($ResolveOnly) {
     $entry = Resolve-PinEntry
-    Write-Host "==== proofs: the pinned prover for $pinPlatform is $($entry.asset) (sha256 $($entry.sha256))" -ForegroundColor Green
+    $sources = Get-PinSources $entry
+    Write-Host "==== proofs: the pinned prover for $pinPlatform is $($entry.asset) (sha256 $($entry.sha256)), from $($sources.Count) source(s) in order: $($sources -join ' then ')" -ForegroundColor Green
+    exit 0
+}
+
+# ---- 1a. fetching the pinned archive (Phase 399) ----------------------------------------------------
+#
+# THE PROVER IS MIRRORED. Until Phase 399 the archive had one source, an upstream release asset, and
+# CI cached it by the pin's hash — so a deleted upstream asset broke the leg only when the cache
+# evicted, on a quiet week, with a message about a download rather than about the pin. An entry may
+# now carry a `mirror` beside its `url`, and the sources are tried IN ORDER: a source that cannot
+# SERVE the archive (unreachable, 404, refused) is reported and the next is tried; the leg fails
+# only when every source has failed, naming each one and why.
+#
+# A source that serves the WRONG BYTES is not an availability failure and is NOT fallen past: the
+# leg refuses on the spot, naming the source, the digest it served and the pin's sha256, and deletes
+# what it fetched. A mismatch means the asset was replaced — at upstream or at the mirror — and
+# quietly trying the other source would turn a tamper signal into a green leg over whichever copy
+# happened to agree. The pin's sha256 is the only thing either source is trusted for.
+#
+# A `file://` source is copied rather than downloaded (Invoke-WebRequest has no file scheme), so a
+# mirror can be an organisation's file share as well as a release asset, and the kit's own tests
+# can serve one from a scratch directory.
+function Get-PinnedArchive($entry, [string] $archive) {
+    $failures = [System.Collections.Generic.List[string]]::new()
+    foreach ($source in (Get-PinSources $entry)) {
+        if (Test-Path $archive) { Remove-Item $archive -Force }
+        Write-Host "==== proofs: fetching the pinned prover $($pin.fstar) ($($entry.asset)) from $source" -ForegroundColor Cyan
+        try {
+            $uri = [Uri]::new($source)
+            if ($uri.IsFile) { Copy-Item -LiteralPath $uri.LocalPath -Destination $archive -ErrorAction Stop }
+            else { Invoke-WebRequest -Uri $source -OutFile $archive -ErrorAction Stop }
+        }
+        catch {
+            if (Test-Path $archive) { Remove-Item $archive -Force }
+            $failures.Add("$source — $($_.Exception.Message)")
+            Write-Host "==== proofs: $source could not serve $($entry.asset): $($_.Exception.Message)" -ForegroundColor Yellow
+            continue
+        }
+        $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+        if ($hash -ne $entry.sha256) {
+            Remove-Item $archive -Force
+            Fail ("$source served a $($entry.asset) that does not match the pin: sha256 $hash, pinned $($entry.sha256). It was deleted, and the next source " +
+                'was NOT tried — wrong bytes mean the asset was replaced, which is a finding about that source, not an outage to route around.')
+        }
+        Write-Host "==== proofs: $($entry.asset) from $source matches the pinned sha256 $($entry.sha256)" -ForegroundColor Cyan
+        return
+    }
+    Fail ("no source could serve the pinned $($entry.asset) (sha256 $($entry.sha256)); tried, in order: " + ($failures -join '; ') +
+        '. Set FSTAR_HOME to an F* ' + $pin.fstar + ' release to run without fetching.')
+}
+
+if ($FetchOnly) {
+    $entry = Resolve-PinEntry
+    $dir = Join-Path $ProofsDir '.fstar'
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Get-PinnedArchive $entry (Join-Path $dir $entry.asset)
+    Write-Host "==== proofs: fetched $($entry.asset) into $dir" -ForegroundColor Green
+    exit 0
+}
+
+# ---- 4b. the oracle-independence guard (Phase 399) -------------------------------------------------
+#
+# Defined here, ahead of the prover, so -GuardOnly can run it without one; the leg runs it at 4b,
+# after extraction and before the host step.
+#
+# WHY. A differential test is worth something only if the two sides are independent. The extracted
+# oracle is compiled beside production, and nothing stopped `oracle/*.fs` or the oracle's project
+# from reaching a production assembly or namespace. An oracle that shortcut to the production
+# function would pass every differential case by comparing production with itself, and the ladder
+# would still say "differentially tested" — the false-positive class Chakraborty et al. (ICSE 2025)
+# name for proof harnesses, where a definition closes only because the original it was meant to
+# reproduce is still in scope. Production is opened by the TEST HOST alone.
+#
+# WHAT IT REFUSES, naming the file, the line and the text each time:
+#   1. THE PROJECT, as MSBuild EVALUATES it (`dotnet msbuild -getItem`), so a reference inherited
+#      from a Directory.Build.props counts as much as one written in the project: any
+#      ProjectReference; any PackageReference other than FSharp.Core; any Reference (an assembly by
+#      path); and any Compile item outside the oracle directory (production source compiled in).
+#   2. THE SOURCES, read lexically with comments and string and character literals blanked: an
+#      `open`, a module abbreviation or a dotted name whose FIRST segment is not `Prims`, an `FStar`
+#      module, or a module declared by a file in the oracle directory; and `global.` outright. The
+#      hand-written runtime floor — every oracle file that is not an extraction of a module this
+#      leg extracts, `Prims.fs` and the option shim here — may also name `System` and
+#      `Microsoft.FSharp`, because that is what it defines the primitives AS. A lower-case first
+#      segment is a value's member access and is not judged: the project half is what makes
+#      production unreachable, and the source half names the line that tried.
+# An oracle directory with no project is checked on its sources alone, and the leg says so.
+function Get-FSharpCode([string] $text) {
+    # Comments and non-interpolated string / character literals become spaces; newlines are kept, so
+    # a line number in the result is a line number in the file. Block comments nest, as F#'s do, and
+    # `(*)` is the multiplication operator, not a comment. An INTERPOLATED string is kept as code: its
+    # holes are code, and reading its text as code too can only refuse more, never less.
+    $sb = [System.Text.StringBuilder]::new($text.Length)
+    $n = $text.Length
+    $i = 0
+    $depth = 0
+    while ($i -lt $n) {
+        $c = $text[$i]
+        $next = if ($i + 1 -lt $n) { $text[$i + 1] } else { [char]0 }
+        if ($depth -gt 0) {
+            if ($c -eq '(' -and $next -eq '*') { $depth++; $i += 2; $null = $sb.Append('  '); continue }
+            if ($c -eq '*' -and $next -eq ')') { $depth--; $i += 2; $null = $sb.Append('  '); continue }
+            $null = $sb.Append($(if ($c -eq "`n") { "`n" } else { ' ' })); $i++; continue
+        }
+        if ($c -eq '(' -and $next -eq '*' -and -not ($i + 2 -lt $n -and $text[$i + 2] -eq ')')) { $depth = 1; $i += 2; $null = $sb.Append('  '); continue }
+        if ($c -eq '/' -and $next -eq '/') {
+            while ($i -lt $n -and $text[$i] -ne "`n") { $null = $sb.Append(' '); $i++ }
+            continue
+        }
+        $interpolated = ($c -eq '$') -or ($c -eq '@' -and $next -eq '$')
+        if ($c -eq '"' -or (($c -eq '@' -or $c -eq '$') -and ($next -eq '"' -or $next -eq '@' -or $next -eq '$'))) {
+            # The prefix ($, @, $@, @$), then the delimiter.
+            $start = $i
+            $verbatim = $false
+            while ($i -lt $n -and ($text[$i] -eq '$' -or $text[$i] -eq '@')) { if ($text[$i] -eq '@') { $verbatim = $true }; $i++ }
+            if ($i -ge $n -or $text[$i] -ne '"') { $null = $sb.Append($text.Substring($start, $i - $start)); continue }
+            $triple = ($i + 2 -lt $n -and $text[$i + 1] -eq '"' -and $text[$i + 2] -eq '"')
+            $open = if ($triple) { 3 } else { 1 }
+            $j = $i + $open
+            while ($j -lt $n) {
+                if ($triple) { if ($j + 2 -lt $n -and $text[$j] -eq '"' -and $text[$j + 1] -eq '"' -and $text[$j + 2] -eq '"') { $j += 3; break } }
+                elseif ($verbatim) {
+                    if ($text[$j] -eq '"') { if ($j + 1 -lt $n -and $text[$j + 1] -eq '"') { $j += 2; continue } else { $j++; break } }
+                }
+                else {
+                    if ($text[$j] -eq '\') { $j += 2; continue }
+                    if ($text[$j] -eq '"') { $j++; break }
+                }
+                $j++
+            }
+            if ($j -gt $n) { $j = $n }
+            $literal = $text.Substring($start, $j - $start)
+            if ($interpolated) { $null = $sb.Append($literal) }
+            else { $null = $sb.Append(($literal -replace '[^\n]', ' ')) }
+            $i = $j
+            continue
+        }
+        if ($c -eq "'") {
+            $prev = if ($i -gt 0) { $text[$i - 1] } else { ' ' }
+            if (-not ([char]::IsLetterOrDigit($prev) -or $prev -eq '_' -or $prev -eq "'")) {
+                $m = [regex]::Match($text.Substring($i, [Math]::Min(12, $n - $i)), "^'(\\[^']{1,8}|[^\\'\n])'")
+                if ($m.Success) { $null = $sb.Append(' ' * $m.Length); $i += $m.Length; continue }
+            }
+        }
+        $null = $sb.Append($c)
+        $i++
+    }
+    $sb.ToString()
+}
+
+function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModules) {
+    $findings = [System.Collections.Generic.List[string]]::new()
+    if (-not (Test-Path $oracleDir)) {
+        Write-Host "==== proofs: oracle independence — there is no oracle directory ($oracleDir), so there is nothing to guard" -ForegroundColor Cyan
+        return $findings
+    }
+    $oracleFull = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($oracleDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+
+    # 1. the project, evaluated.
+    $projects = @(Get-ChildItem $oracleDir -Filter '*.fsproj' -File)
+    if ($projects.Count -eq 0) {
+        Write-Host '==== proofs: oracle independence — the oracle directory has no project, so the guard reads its sources alone' -ForegroundColor Cyan
+    }
+    foreach ($project in $projects) {
+        $global:LASTEXITCODE = 0
+        $json = & dotnet msbuild $project.FullName -nologo '-getItem:ProjectReference' '-getItem:PackageReference' '-getItem:Reference' '-getItem:Compile' 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $findings.Add("$($project.Name): MSBuild could not evaluate the project (exit $LASTEXITCODE), so its references cannot be shown to be independent: $(($json | Select-Object -Last 3) -join ' ')")
+            continue
+        }
+        $items = ($json -join "`n" | ConvertFrom-Json).Items
+        $offending = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in @($items.ProjectReference)) { if ($item) { $offending.Add(@($item, 'a ProjectReference — the oracle may reference no project')) } }
+        foreach ($item in @($items.Reference)) { if ($item) { $offending.Add(@($item, 'a Reference — the oracle may reference no assembly by path')) } }
+        foreach ($item in @($items.PackageReference)) {
+            if ($item -and $item.Identity -ne 'FSharp.Core') { $offending.Add(@($item, 'a PackageReference other than FSharp.Core')) }
+        }
+        foreach ($item in @($items.Compile)) {
+            if (-not $item) { continue }
+            $itemDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($item.FullPath))
+            if ($itemDir -ne $oracleFull) { $offending.Add(@($item, 'a Compile item outside the oracle directory — source the oracle did not extract')) }
+        }
+        foreach ($pair in $offending) {
+            $item, $why = $pair
+            $definedIn = if ($item.DefiningProjectFullPath) { $item.DefiningProjectFullPath } else { $project.FullName }
+            $where = Split-Path $definedIn -Leaf
+            $lineText = ''
+            if (Test-Path -LiteralPath $definedIn) {
+                $lines = Get-Content -LiteralPath $definedIn
+                for ($k = 0; $k -lt $lines.Count; $k++) {
+                    if ($lines[$k].Contains($item.Identity)) { $where = "$where`:$($k + 1)"; $lineText = $lines[$k].Trim(); break }
+                }
+            }
+            $findings.Add("$where`: $why ('$($item.Identity)')$(if ($lineText) { ": $lineText" })")
+        }
+    }
+
+    # 2. the sources.
+    $sources = @(Get-ChildItem $oracleDir -Filter '*.fs' -File)
+    $own = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($source in $sources) {
+        $null = $own.Add($source.BaseName)
+        $declared = [regex]::Match((Get-Content -LiteralPath $source.FullName -Raw), '(?m)^\s*module\s+(?:rec\s+)?([A-Za-z_][\w.]*)\s*$')
+        if ($declared.Success) { $null = $own.Add(($declared.Groups[1].Value -split '\.')[0]) }
+    }
+    $headPattern = [regex]::new('(?<![\w''.`])(``[^`]+``|[A-Za-z_][\w'']*)(?=\s*\.\s*[A-Za-z_`])')
+    $openPattern = [regex]::new('^\s*open\s+(?:type\s+)?(``[^`]+``|[A-Za-z_][\w'']*)((?:\s*\.\s*[\w`'']+)*)')
+    $aliasPattern = [regex]::new('^\s*module\s+[\w'']+\s*=\s*(``[^`]+``|[A-Za-z_][\w'']*)((?:\s*\.\s*[\w`'']+)*)')
+    foreach ($source in $sources) {
+        $floor = $extractedModules -notcontains $source.BaseName
+        $raw = (Get-Content -LiteralPath $source.FullName -Raw).Replace("`r`n", "`n")
+        $code = (Get-FSharpCode $raw) -split "`n"
+        $rawLines = $raw -split "`n"
+        for ($k = 0; $k -lt $code.Count; $k++) {
+            $line = $code[$k]
+            if ($line.Trim() -eq '') { continue }
+            $heads = [System.Collections.Generic.List[object]]::new()
+            foreach ($p in @($openPattern, $aliasPattern)) {
+                $m = $p.Match($line)
+                if ($m.Success) { $heads.Add(@($m.Groups[1].Value, ($m.Groups[1].Value + $m.Groups[2].Value) -replace '\s', '')) }
+            }
+            foreach ($m in $headPattern.Matches($line)) {
+                $rest = $line.Substring($m.Index) -replace '^(``[^`]+``|[\w'']+)((\s*\.\s*(``[^`]+``|[\w'']+))*).*$', '$1$2'
+                $heads.Add(@($m.Groups[1].Value, ($rest -replace '\s', '')))
+            }
+            $judged = [System.Collections.Generic.HashSet[string]]::new()
+            foreach ($pair in $heads) {
+                $head, $path = $pair
+                $bare = $head.Trim('`')
+                if (-not $judged.Add($bare)) { continue }   # an `open X.Y` is matched by both patterns
+                $why = $null
+                if ($bare -eq 'global') { $why = '`global.` reaches past every module the oracle declares' }
+                elseif ($bare -cmatch '^[a-z_]') { continue }
+                elseif ($bare -eq 'Prims' -or $bare -cmatch '^FStar($|_)' -or $own.Contains($bare)) { continue }
+                elseif ($floor -and ($bare -eq 'System' -or $path -eq 'Microsoft.FSharp' -or $path.StartsWith('Microsoft.FSharp.'))) { continue }
+                else { $why = "names '$bare', which is not Prims, an FStar module or a module of the oracle's own$(if ($floor) { ', nor the runtime floor''s System / Microsoft.FSharp' })" }
+                $findings.Add("$($source.Name):$($k + 1): $why`: $($rawLines[$k].Trim())")
+            }
+        }
+    }
+    return $findings
+}
+
+function Assert-OracleIndependence {
+    $extracted = @($Modules | Where-Object { $ProofOnly -notcontains $_ })
+    $findings = Test-OracleIndependence $OracleDir $extracted
+    if ($findings.Count -gt 0) {
+        Write-Host "==== proofs: the ORACLE is NOT INDEPENDENT of production — $($findings.Count) offending line(s):" -ForegroundColor Red
+        foreach ($f in $findings) { Write-Host "     $f" -ForegroundColor Red }
+        Write-Host '     A differential between an oracle that reaches production and production compares production with itself.' -ForegroundColor Red
+        Write-Host '     The oracle may reference FSharp.Core alone and name only Prims, FStar modules and its own modules (see kit/README.md).' -ForegroundColor Red
+        Fail 'oracle independence'
+    }
+    $count = @(Get-ChildItem $OracleDir -Filter '*.fs' -File -ErrorAction SilentlyContinue).Count
+    Write-Host "==== proofs: oracle independence — the oracle project and its $count source file(s) reach nothing but FSharp.Core, Prims, FStar and their own modules" -ForegroundColor Green
+}
+
+if ($GuardOnly) {
+    Assert-OracleIndependence
     exit 0
 }
 
@@ -341,16 +648,15 @@ function Resolve-FStar {
     New-Item -ItemType Directory -Force $dir | Out-Null
     $archive = Join-Path $dir $asset
 
-    if (-not (Test-Path $archive)) {
-        Write-Host "==== proofs: downloading the pinned prover $($pin.fstar) ($asset)" -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $entry.url -OutFile $archive
+    if (Test-Path $archive) {
+        # An archive a previous run left behind is held to the pin like a fresh one.
+        $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+        if ($hash -ne $entry.sha256) {
+            Remove-Item $archive -Force
+            Fail "the cached $asset does not match the pinned sha256 (got $hash, pinned $($entry.sha256)); it was deleted — re-run to fetch again"
+        }
     }
-
-    $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-    if ($hash -ne $entry.sha256) {
-        Remove-Item $archive -Force
-        Fail "the downloaded $asset does not match the pinned sha256 (got $hash, pinned $($entry.sha256)); it was deleted — re-run to fetch again"
-    }
+    else { Get-PinnedArchive $entry $archive }
 
     Write-Host "==== proofs: unpacking $asset" -ForegroundColor Cyan
     if ($asset.EndsWith('.zip')) {
@@ -570,12 +876,11 @@ if (-not (Test-Path $BudgetFile)) {
 # still be read as a budget at all. An entry with no `budgetSeconds` would otherwise arrive as 0 and
 # every run would be infinitely over it — a flood of findings, and a division by zero rendering the
 # percentage. A declared artefact is held to its shape by the code that consumes it.
-# The FLOOR beside it (Phase 164) is held to its shape the same way WHEN IT IS THERE, and is a
-# cost finding when it is ABSENT — a sibling adding a model should no more go red for a floor
-# nobody has measured than for a budget nobody has measured. An absent floor degrades to exactly
-# the pre-164 behaviour for that module, which is the safe direction; a floor of 0 is legal and
-# means "this module genuinely checks in about a second", which is NOT the same statement as an
-# absent one and reads differently in the file.
+# The `fastestSeconds` beside it (Phase 399: the fastest genuine cold check recorded, which decides
+# whether the cached-read threshold applies to the module) is held to its shape the same way WHEN
+# IT IS THERE, and is a coverage finding when it is ABSENT — a sibling adding a model should no more
+# go red for a measurement nobody has taken than for a budget nobody has measured. An absent one
+# leaves that module to the cache provenance check alone, which is the safe direction.
 #
 # Two more per-entry numbers are READ here since Phase 171, and neither is required. The
 # `measuredSeconds` this file has always recorded beside a budget — the observation the budget was
@@ -586,9 +891,17 @@ if (-not (Test-Path $BudgetFile)) {
 # a quiet machine from one seeded on a busy one. Nothing multiplies it into anything — see the
 # note on section 3c for why the measurement stays the wall clock.
 $budgets = @{}
-$floors = @{}
+$fastest = @{}
 $measurements = @{}
 $budgetDocument = Get-Content $BudgetFile -Raw | ConvertFrom-Json
+
+# Phase 399 RETIRED the per-module time floors. A budget file still carrying one is refused rather
+# than read past: a key the leg no longer acts on, left in a declaration, reads to its next editor as
+# a gate that is still there.
+if ($null -ne $budgetDocument.PSObject.Properties['floorSeeding']) {
+    Fail ("$budgetName still carries a floorSeeding block. The per-module floors were retired by Phase 399 for one absolute CACHED-READ threshold: " +
+        'replace the block with cachedRead (thresholdSeconds, appliesFromFastestSeconds), keep each entry''s fastestSeconds, delete floorSeconds — see the kit README')
+}
 foreach ($entry in $budgetDocument.modules) {
     $name = $entry.module
     if ([string]::IsNullOrWhiteSpace($name)) { Fail "$budgetName carries an entry with no module name" }
@@ -602,16 +915,16 @@ foreach ($entry in $budgetDocument.modules) {
 
     $budgets[$name] = [int]$declaredBudget
 
-    $declaredFloor = $entry.floorSeconds
-    if ($null -ne $declaredFloor) {
-        if ($declaredFloor -isnot [int] -and $declaredFloor -isnot [long] -and $declaredFloor -isnot [double]) {
-            Fail "$budgetName entry '$name' has a non-numeric floorSeconds"
+    if ($null -ne $entry.PSObject.Properties['floorSeconds']) {
+        Fail "$budgetName entry '$name' still carries a floorSeconds — the per-module floors were retired by Phase 399 for the cachedRead threshold; delete it (keep fastestSeconds)"
+    }
+    $declaredFastest = $entry.fastestSeconds
+    if ($null -ne $declaredFastest) {
+        if ($declaredFastest -isnot [int] -and $declaredFastest -isnot [long] -and $declaredFastest -isnot [double]) {
+            Fail "$budgetName entry '$name' has a non-numeric fastestSeconds"
         }
-        if ([int]$declaredFloor -lt 0) { Fail "$budgetName entry '$name' has a floorSeconds of $declaredFloor — a floor is a non-negative number of seconds" }
-        if ([int]$declaredFloor -ge [int]$declaredBudget) {
-            Fail "$budgetName entry '$name' has a floorSeconds of $declaredFloor at or above its budgetSeconds of $([int]$declaredBudget) — no run could satisfy both"
-        }
-        $floors[$name] = [int]$declaredFloor
+        if ([double]$declaredFastest -lt 0) { Fail "$budgetName entry '$name' has a fastestSeconds of $declaredFastest — a measurement is a non-negative number of seconds" }
+        $fastest[$name] = [double]$declaredFastest
     }
 
     $declaredMeasured = $entry.measuredSeconds
@@ -632,12 +945,33 @@ foreach ($entry in $budgetDocument.modules) {
     }
 }
 
+# THE CACHED-READ THRESHOLD (Phase 399). Declared in the budget file, like every other number here,
+# because what a cached read costs is a fact about the prover and the machine; see the header.
+$cachedReadThreshold = $null
+$cachedReadFrom = $null
+if ($null -ne $budgetDocument.cachedRead) {
+    $block = $budgetDocument.cachedRead
+    foreach ($key in 'thresholdSeconds', 'appliesFromFastestSeconds') {
+        $v = $block.$key
+        if ($v -isnot [int] -and $v -isnot [long] -and $v -isnot [double]) { Fail "$budgetName cachedRead.$key is missing or not numeric" }
+        if ([double]$v -le 0) { Fail "$budgetName cachedRead.$key is $v — it must be a positive number of seconds" }
+    }
+    $cachedReadThreshold = [double]$block.thresholdSeconds
+    $cachedReadFrom = [double]$block.appliesFromFastestSeconds
+    if ($cachedReadFrom -lt $cachedReadThreshold) {
+        Fail "$budgetName cachedRead.appliesFromFastestSeconds ($cachedReadFrom) is under its thresholdSeconds ($cachedReadThreshold) — a module whose genuine cold check can be under the threshold would be refused as a cached read"
+    }
+}
+else {
+    Add-CostFinding "$budgetName declares no cachedRead threshold — nothing but the cache provenance check can tell a cached read from a cold check; seed one per the kit README and cite your phase"
+}
+
 foreach ($module in $Modules) {
     if (-not $budgets.ContainsKey($module)) {
         Add-CostFinding "$module is checked by the leg and $budgetName declares no budget for it — time a cold run, budget it per the file's seeding rule, and cite your phase"
     }
-    elseif (-not $floors.ContainsKey($module)) {
-        Add-CostFinding "$module is checked by the leg and $budgetName declares no floorSeconds for it — nothing can tell an implausibly fast run of it from a real one; seed one per the file's floorSeeding rule and cite your phase"
+    elseif ($null -ne $cachedReadThreshold -and -not $fastest.ContainsKey($module)) {
+        Add-CostFinding "$module is checked by the leg and $budgetName records no fastestSeconds for it — the cached-read threshold cannot be applied to it without one; record its fastest genuine cold run and cite your phase"
     }
 }
 foreach ($declared in $budgets.Keys) {
@@ -669,28 +1003,16 @@ foreach ($declared in $budgets.Keys) {
 # normalised measurement would be a number nobody observed, and the whole value of this leg's cost
 # half is that every figure in it is one somebody's machine really produced.
 #
-# THE FLOORS' OS (Phase 402). A floor is the fastest cold run ever observed on the machine that
-# seeded it, halved — a fact about that machine as much as about the module. The first Linux run
-# verified WireColumn in 16s against a 17s floor seeded on Windows: a faster runner, not a second
-# writer. So `floorSeeding.os` names the OS the floors were seeded on, and they are enforced there
-# only. ABSENT means every OS, which is how an adopter's file without the key has always read. Not
-# enforcing them elsewhere does NOT leave the cold claim unchecked: the cache provenance check in
-# section 3 is what catches a second writer, on every OS, and the floor is its backstop where a
-# floor has been measured. Seeding floors for a second OS is a change to this file's format, made
-# when a reader wants that backstop there, with that OS's own cold runs as its evidence.
-$hostPlatform = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'macos' } else { '' }
-$floorsSeededOn = $null
-if ($null -ne $budgetDocument.floorSeeding -and $null -ne $budgetDocument.floorSeeding.os) {
-    $floorsSeededOn = [string]$budgetDocument.floorSeeding.os
-    if (@('windows', 'linux', 'macos') -notcontains $floorsSeededOn) {
-        Fail "$budgetName floorSeeding.os is '$floorsSeededOn' — it names the OS the floors were seeded on: windows, linux or macos"
-    }
-}
-$floorsApplyHere = ($null -eq $floorsSeededOn) -or ($floorsSeededOn -eq $hostPlatform)
+# THE FLOORS' OS (Phase 402) is RETIRED with the floors (Phase 399). A floor was the fastest cold
+# run ever observed on the machine that seeded it, halved, so it was a fact about that machine: the
+# first Linux run verified WireColumn in 16s against a 17s floor seeded on Windows, and the floors
+# had to be switched off on every OS but one. The cached-read threshold has no such dependence in
+# the direction that matters: a faster machine reads a cache faster still, so it stays under the
+# threshold, and `appliesFromFastestSeconds` keeps a fast genuine check above it (see section 2).
 
 # THE THRESHOLD is declared, in this file's own `contentionSeeding` block, for the same reason the
-# budget and floor rules are: a number the engine baked in would be a number no repository could
-# re-seed from its own machine. An ABSENT block is NOT a finding — unlike an absent budget or floor,
+# budget and cached-read rules are: a number the engine baked in would be a number no repository could
+# re-seed from its own machine. An ABSENT block is NOT a finding — unlike an absent budget,
 # which fire per module when a model is added, this one is per FILE and one-off, and a finding that
 # is present on every run of an unseeded repository is one people learn to scroll past. The factor
 # is still computed and still printed; nothing is labelled, and the line says so and names the
@@ -700,12 +1022,12 @@ $contentionThreshold = $null
 $contentionMinimumSamples = 3
 # A module whose recorded measurement is a second or two contributes noise rather than signal: the
 # clock is whole seconds, so 0s against a recorded 2s is a ratio of 0 and 1s is a ratio of 0.5, and
-# neither says anything about the machine. `floorSeeding.zeroBelowSeconds` already carries this
-# repository's answer to "below what is a reading process-start noise" — reused here rather than
-# minted again, so there is one number and one argument for it.
+# neither says anything about the machine. `contentionSeeding.minimumSeconds` carries this
+# repository's answer to "below what is a reading process-start noise" (until Phase 399 it was the
+# retired floors' `zeroBelowSeconds`, and the number moved with its argument).
 $contentionMinimumSeconds = 5
-if ($null -ne $budgetDocument.floorSeeding -and $null -ne $budgetDocument.floorSeeding.zeroBelowSeconds) {
-    $contentionMinimumSeconds = [double]$budgetDocument.floorSeeding.zeroBelowSeconds
+if ($null -ne $budgetDocument.contentionSeeding -and $null -ne $budgetDocument.contentionSeeding.minimumSeconds) {
+    $contentionMinimumSeconds = [double]$budgetDocument.contentionSeeding.minimumSeconds
 }
 if ($null -ne $budgetDocument.contentionSeeding) {
     $block = $budgetDocument.contentionSeeding
@@ -871,11 +1193,11 @@ else {
 $script:invocationCache = $cache
 Write-Host "==== proofs: cache $cache$(if (-not $script:invocationCacheIsOurs) { ' (-CacheDir; left in place at exit)' })" -ForegroundColor Cyan
 
-if ($NoFloor) {
-    Write-Host "==== proofs: -NoFloor — the per-module time floors in $budgetName are NOT enforced on this run" -ForegroundColor Yellow
-}
-elseif (-not $floorsApplyHere) {
-    Write-Host "==== proofs: the time floors in $budgetName were seeded on $floorsSeededOn and are NOT enforced on $(if ($hostPlatform) { $hostPlatform } else { 'this OS' }) — a floor measures one kind of machine; the cache provenance check is what refuses a second writer here" -ForegroundColor Cyan
+if ($null -ne $cachedReadThreshold) {
+    $guarded = @($Modules | Where-Object { $fastest.ContainsKey($_) -and $fastest[$_] -ge $cachedReadFrom })
+    $unguarded = @($Modules | Where-Object { $guarded -notcontains $_ })
+    Write-Host ("==== proofs: cached-read threshold ${cachedReadThreshold}s, applied to the $($guarded.Count) module(s) whose recorded fastest cold check is ${cachedReadFrom}s or more" +
+        $(if ($unguarded.Count -gt 0) { "; $($unguarded -join ', ') can genuinely check faster and rest on the cache provenance check alone" } else { '' })) -ForegroundColor Cyan
 }
 
 # THE CACHE PROVENANCE CHECK (Phase 402) — the second writer, caught directly rather than inferred
@@ -889,7 +1211,7 @@ elseif (-not $floorsApplyHere) {
 # or one that restored the old time, would read as unchanged. The bytes cannot. The cost is one read
 # of the cache per invocation, which is small beside the prover's. What it cannot see is a writer active only DURING one
 # invocation and silent after it, whose files the next record takes as this run's own; that is the
-# window the floor still backstops where one is enforced, and a writer whose files include a model
+# window the cached-read threshold backstops (Phase 399), and a writer whose files include a model
 # not yet checked is caught anyway, by that model's own `.checked` file.
 function Get-CacheState([string] $dir) {
     $state = @{}
@@ -929,6 +1251,12 @@ function Assert-CacheProvenance([hashtable] $recorded, [string] $module, [int] $
     }
 }
 
+# Phase 399 — each run's contention facts, for -SummaryFile: the pre-flight snapshot and the factor
+# section 3c computes (or why it computed none). Collected whatever -SummaryFile says; written only
+# on a green leg.
+$runFacts = [System.Collections.Generic.List[object]]::new()
+$moduleCosts = [System.Collections.Generic.List[object]]::new()
+
 for ($run = 1; $run -le $Runs; $run++) {
     if (Test-Path $cache) { Remove-Item $cache -Recurse -Force }
     New-Item -ItemType Directory -Force $cache | Out-Null
@@ -937,7 +1265,8 @@ for ($run = 1; $run -le $Runs; $run++) {
     # The PRE-FLIGHT line (Phase 166), at the head of every run rather than once per invocation:
     # contention is what changes between run 1 and run 3, so a number taken once says nothing about
     # the run that actually went wrong.
-    Write-Host "==== proofs: pre-flight — run $run of $Runs, $(Get-ResourceSnapshot)" -ForegroundColor Cyan
+    $preflight = Get-ResourceSnapshot
+    Write-Host "==== proofs: pre-flight — run $run of $Runs, $preflight" -ForegroundColor Cyan
 
     # This run's contention sample (Phase 171): one ratio per untouched module with a recorded
     # measurement worth dividing by. Per RUN and not per invocation, for the pre-flight line's own
@@ -952,6 +1281,7 @@ for ($run = 1; $run -le $Runs; $run++) {
             $isRetry = $attempt -gt 1
             $suffix = if ($isRetry) { ".run$run.retry" } else { ".run$run" }
             Assert-CacheProvenance $cacheState $module $run (-not $isRetry)
+            if ($BeforeInvocation -and -not $isRetry) { & $BeforeInvocation $module $run $cache }
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $checked = Invoke-Prover @(
                 '--z3rlimit', $ZRlimit, '--quake', $Quake, '--report_assumes', 'error',
@@ -981,7 +1311,7 @@ for ($run = 1; $run -le $Runs; $run++) {
                         "Read $($checked.LogPath) and the attempt before it, and the pre-flight lines above for what else was on the machine.") $ExitAbort
                 }
 
-                Write-Host "==== proofs: retrying $module.fst once — the retry is BOUNDED (one per module per run) and its timing is a WARM measurement, so it feeds neither the budget nor the floor" -ForegroundColor Yellow
+                Write-Host "==== proofs: retrying $module.fst once — the retry is BOUNDED (one per module per run) and its timing is a WARM measurement, so it is compared to neither the budget nor the cached-read threshold" -ForegroundColor Yellow
                 continue
             }
 
@@ -1001,10 +1331,24 @@ for ($run = 1; $run -le $Runs; $run++) {
             # is not a cold run and must not be read as one — by a person or by either gate. It is
             # printed, marked, and recorded as a finding; it is compared to nothing.
             if ($isRetry) {
-                $finding = "$module.fst ABORTED once on run $run of $Runs and verified on the bounded retry in ${seconds}s — a WARM measurement, compared to neither its budget nor its floor"
+                $finding = "$module.fst ABORTED once on run $run of $Runs and verified on the bounded retry in ${seconds}s — a WARM measurement, compared to neither its budget nor the cached-read threshold"
                 $abortFindings.Add($finding)
                 Write-Host "==== proofs: $module.fst verified ON RETRY — run $run of $Runs, ${seconds}s (warm cache: NOT a cold measurement), every query $Quake/$Quake under --quake" -ForegroundColor Yellow
                 break
+            }
+
+            # THE CACHED-READ GATE (Phase 399) fails HERE, before the green line, rather than joining
+            # the cost findings at the end, and the asymmetry with the ceiling below it is deliberate. An overshoot
+            # is a true measurement of a true cost. A check faster than a cached read costs is not a
+            # measurement of anything: the prover read the module back instead of checking it, so
+            # every module after it is measured by the same broken apparatus and carrying on would
+            # print green lines a reader is entitled to take as evidence. The wall clock is compared
+            # unrounded, since the threshold is a fraction of a second.
+            if ($null -ne $cachedReadThreshold -and $fastest.ContainsKey($module) -and $fastest[$module] -ge $cachedReadFrom -and
+                $sw.Elapsed.TotalSeconds -lt $cachedReadThreshold) {
+                Fail ("$module.fst verified in $([Math]::Round($sw.Elapsed.TotalSeconds, 2))s on run $run of $Runs, under the ${cachedReadThreshold}s cached-read threshold — a PROBABLE CACHED READ, not a cold verification " +
+                    "(its fastest genuine cold check is $($fastest[$module])s). The cache provenance check saw no second writer between invocations, so suspect one that wrote DURING this one: " +
+                    "check for another check.ps1 or fstar process against this cache. If the module genuinely got that fast, record its new fastestSeconds in $budgetName and cite your phase.")
             }
 
             $cost = if ($null -eq $budget) { "${seconds}s (no budget)" } else { "${seconds}s/${budget}s" }
@@ -1023,21 +1367,18 @@ for ($run = 1; $run -le $Runs; $run++) {
             # never populated from a measured time, and `-Strict` had nothing to promote — while the
             # budget file's comments and the README both went on describing a ceiling that fired. A
             # measured 32s against a 30s budget said nothing at all. It is a WARNING and the run
-            # continues, which is the half the floor below is deliberately not.
+            # continues, which is the half the cached-read gate above is deliberately not. Since
+            # Phase 399 it is never red, under -Strict or otherwise: the run's every module time is
+            # recorded beside its budget for -SummaryFile, and the overshoot is a finding there.
+            $moduleCosts.Add([ordered]@{
+                    module  = $module
+                    run     = $run
+                    seconds = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
+                    budget  = $budget
+                    percent = if ($null -ne $budget) { [int](100 * $seconds / $budget) } else { $null }
+                })
             if ($null -ne $budget -and $seconds -gt $budget) {
                 Add-CostFinding "$module.fst took ${seconds}s against its ${budget}s budget on run $run of $Runs — $($seconds - $budget)s over, $([int](100 * $seconds / $budget))% of budget" $run
-            }
-
-            # The floor fails HERE rather than joining the cost findings at the end, and the asymmetry
-            # with the ceiling just above it is deliberate. An overshoot is a true measurement of a
-            # true cost, so the run should continue and produce the rest of the evidence. An
-            # undershoot says the measurement itself is not to be believed — the cache was not cold —
-            # and every module after it is measured by the same apparatus, so carrying on would print
-            # more green lines that a reader is entitled to read as evidence and that are not.
-            if (-not $NoFloor -and $floorsApplyHere -and $floors.ContainsKey($module) -and $seconds -lt $floors[$module]) {
-                Fail ("$module.fst verified in ${seconds}s on run $run of $Runs, under its $($floors[$module])s floor — that is not a cold verification. " +
-                    'The cache provenance check saw no second writer between invocations, so suspect one that wrote DURING this one: check for another check.ps1 or fstar process against this cache; ' +
-                    "if this machine really is that fast, re-seed the floor per $budgetName floorSeeding and cite your phase, or pass -NoFloor for this run.")
             }
 
             break
@@ -1076,6 +1417,16 @@ for ($run = 1; $run -le $Runs; $run++) {
                 'an ordinary pass. A cost finding on this run is about its module.') -ForegroundColor Cyan
         }
     }
+
+    $computed = $null -ne $factor -and $runRatios.Count -ge $contentionMinimumSamples
+    $runFacts.Add([ordered]@{
+            run       = $run
+            preflight = $preflight
+            factor    = if ($computed) { [Math]::Round($factor, 2) } else { $null }
+            samples   = $runRatios.Count
+            threshold = $contentionThreshold
+            contended = $computed -and $null -ne $contentionThreshold -and $factor -gt $contentionThreshold
+        })
 }
 
 # ---- 3b. the extraction post-pass -----------------------------------------------------------------
@@ -1188,6 +1539,14 @@ foreach ($module in $Modules) {
     }
 }
 
+# ---- 4b. the oracle is independent of production (Phase 399) --------------------------------------
+#
+# After extraction, so it reads the oracle the diff above has just held to the model (or that
+# -Extract has just written), and before the host step, so no differential runs over an oracle that
+# could be comparing production with itself. The guard and its argument are defined above, beside
+# -GuardOnly.
+Assert-OracleIndependence
+
 # ---- 5. the oracle host --------------------------------------------------------------------------
 
 if (-not $SkipOracleHost -and $HostFilters.Count -gt 0) {
@@ -1256,20 +1615,54 @@ if ($costFindings.Count -gt 0) {
         Write-Host '     raises a ceiling to fit a slow afternoon. Re-measure on a quiet run before touching a number.' -ForegroundColor Yellow
     }
 
-    # -Strict promotes the UNLABELLED findings only. A session that asked for a red leg on cost
-    # asked to be stopped by a regression, and a contended pass is not one; reddening on it would
-    # make -Strict a coin toss on a shared machine, which is how a flag gets passed once and never
-    # again. Coverage and shape findings belong to no run, are never labelled, and so always
-    # promote — which is the half of -Strict's power this must not quietly remove.
+    # -Strict and a COST finding (Phase 399, an operator ruling). A measured overshoot is a slow
+    # COLD check — the opposite of the failure a gate exists for — so it is recorded and never red,
+    # under -Strict or not: the strict run's record carries every module's time against its budget,
+    # and the scheduled strict run is what trends them. What -Strict still promotes are the findings
+    # that belong to no run: a module with no budget or no recorded fastest cold check, a budget for
+    # a module the leg does not check, a budget file with no cached-read threshold. Those are
+    # defects in a declaration, not measurements of a machine.
+    $declarationFindings = @($costFindings | Where-Object { $_.Run -eq 0 })
+    if ($Strict -and $declarationFindings.Count -gt 0) {
+        Fail "the budget declaration is incomplete and -Strict is on ($($declarationFindings.Count) coverage finding(s) above)"
+    }
     if ($Strict) {
-        if ($unlabelledFindings.Count -gt 0) {
-            Fail "the cost budget is exceeded and -Strict is on ($($unlabelledFindings.Count) unlabelled finding(s) above)"
-        }
-        Write-Host "     -Strict is on and the leg stays GREEN: every finding above is labelled CONTENDED PASS, which is a" -ForegroundColor Yellow
-        Write-Host '     measurement of the machine rather than of a module. Re-run on a quiet machine to promote a real one.' -ForegroundColor Yellow
+        Write-Host '     -Strict is on and the leg stays GREEN: a cost overrun is a slow cold check, recorded as a finding, never a red leg (Phase 399).' -ForegroundColor Yellow
     }
 }
 
 Remove-InvocationCache
+
+# Phase 399 — the run facts, for a caller that records the run. The machine is described by what a
+# reader comparing two records needs: whether it was a CI runner or a local machine, the OS, the
+# processor count and the total memory, and a CI runner's name. Never a local HOST name: the record
+# is committed, often to a public repository, and a host name says nothing a reader can compare.
+if ($SummaryFile) {
+    $memory = $null
+    try {
+        if ($IsWindows) { $memory = '{0:N0} GB' -f ((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB) }
+        elseif (Test-Path '/proc/meminfo') {
+            $kb = [regex]::Match((Get-Content '/proc/meminfo' -Raw), 'MemTotal:\s+(\d+)')
+            if ($kb.Success) { $memory = '{0:N0} GB' -f ([double]$kb.Groups[1].Value / 1MB) }
+        }
+    }
+    catch { $memory = $null }
+    $summary = [ordered]@{
+        machine    = [ordered]@{
+            kind       = if ($env:GITHUB_ACTIONS -eq 'true') { 'ci' } else { 'local' }
+            runner     = if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_NAME) { $env:RUNNER_NAME } else { $null }
+            os         = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+            processors = [Environment]::ProcessorCount
+            memory     = $memory
+        }
+        contention = @($runFacts)
+        costs      = @($moduleCosts)
+        findings   = @($costFindings | ForEach-Object { [ordered]@{ run = $_.Run; text = $_.Text; label = $_.Label } })
+    }
+    # Resolved through PowerShell, not [IO.Path]::GetFullPath: the .NET call reads the PROCESS's
+    # directory, which `Set-Location` above does not move.
+    [System.IO.File]::WriteAllText($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SummaryFile),($summary | ConvertTo-Json -Depth 6) + "`n", [System.Text.UTF8Encoding]::new($false))
+}
+
 Write-Host '==== proofs: green' -ForegroundColor Green
 exit 0

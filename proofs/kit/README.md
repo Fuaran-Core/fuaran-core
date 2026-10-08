@@ -3,7 +3,7 @@
 A repository that wants an F\* proof leg needs the same nine things every time: a pinned prover, a
 script that locates or downloads it, checks each model from a cold cache, extracts each model to F\#
 and diffs the result against a committed oracle, runs the host families, and measures each module
-against a declared budget and a declared floor; two hand-written runtime shims the extractor's
+against a declared budget and a declared cached-read threshold; two hand-written runtime shims the extractor's
 output compiles against; a never-packed oracle project with the two settings that generated F\#
 needs; a CI job; a claims ladder; and a cost declaration. Written out by hand each time, that is
 four copies of one design and — the part that actually bites — **four prover pins, three of which
@@ -36,14 +36,14 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `check-proof-leg.ps1` | **The engine.** Knows how to run a proof leg; knows nothing about which models a repository has. Takes the module list, the oracle host and the paths as parameters. Classifies every lost pass into one of the three verdicts below. | copy verbatim |
 | `templates/check.ps1` | The thin caller. Three declarations to edit at the top; nothing below them is per-repository. | copy and edit |
 | `templates/oracle.fsproj.template` | The never-packed oracle project: `--strict-indentation-`, the FS0058/FS0064/FS1182 `NoWarn`, and the compile order the shims and models need. Named `.template` so no build or glob in a host repository can pick it up. | copy, rename and edit |
-| `templates/modules.json` | The cost declaration: the budget rule, the floor rule, the contention threshold, and one worked entry. | copy and edit |
+| `templates/modules.json` | The cost declaration: the budget rule, the cached-read threshold, the contention threshold, and one worked entry. | copy and edit |
 | `LADDER.md` | **The ladder's schema**: every field of `proofs.json`, which are required, what each level's evidence is, and how names are matched. The page the template is written against, and the one any tool reading a ladder reads it by. | read |
 | `templates/proofs.json` | The claims ladder: the closed level set, what each level means, and the host family that holds the rows to the tree. Goes at the **repository root**, not in `proofs/`. Written against `LADDER.md`. | copy and edit |
 | `templates/ci-proofs-job.yml` | The CI job, with the cache key that hashes the pin file — which is the whole mechanism by which a pin bump reaches CI with no second edit. | copy and edit |
 | `templates/Instance.fst.template` | The instantiation template (Phase 175): `../Skeleton.fst` with fourteen named holes. Drop the preamble, fill the holes, and the result is a domain's fold-confluence composite; the one obligation is `{{DIAMOND}}`, a proof of `independence_diamond` at the domain's own footprint and apply. Held to `../Skeleton.fst` byte for byte by the `Proofs.Kit` family, so the template and its first instance cannot drift apart. | copy and instantiate |
 | `extraction-post-pass.ps1` | **The extraction post-pass** (Phase 169): two functions, dot-sourced by the engine's EXTRACT stage, that re-indent a mutual type group's `and` to the column F\# expects and touch nothing else. See "The extraction post-pass" below. | copy verbatim |
 | `extraction-post-pass.tests.ps1` | Its go-red proof: four arms, two of which need the pinned prover and `dotnet` and are reported NOT RUN where either is absent. Also the machinery that answers the retirement condition. | copy verbatim |
-| `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Reports NOT RUN (exit 2) where there is no prover. | copy verbatim |
+| `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Its pin-resolution, mirror and oracle-guard arms (`R`, `M`, `I`) need no prover and run first; the rest report NOT RUN (exit 2) where there is no prover. | copy verbatim |
 | `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | copy verbatim |
 
 The rest of what an adopter needs is **not duplicated here**, deliberately, and lives where it is
@@ -97,7 +97,7 @@ the pinned prover rather than assumed:
 
 **A retry's clock is a WARM measurement and feeds neither gate.** The aborted attempt has already
 half-filled the cache, so the retry is not a cold run; its line says so, it is compared to neither
-the budget nor the floor, and the leg's closing verdict names every abort that was retried and
+the budget nor the cached-read threshold, and the leg's closing verdict names every abort that was retried and
 passed — a green run that lost a prover and got it back is not the same evidence as one that did
 not, and it should not take scrolling to find that out.
 
@@ -221,9 +221,10 @@ an ordinary pass crosses it — the labelling path is the same one a genuinely c
 Above the threshold, every cost finding from that run is **labelled** where the closing verdict prints
 it, and the label carries the whole consequence: **a labelled finding is not a re-seed obligation.**
 Re-seeding a budget from one raises a ceiling to fit a slow afternoon, which is precisely how a budget
-stops meaning anything. `-Strict` promotes only the **unlabelled** findings — a session that asked for
-a red leg on cost asked to be stopped by a regression, and a contended pass is not one — while the
-coverage and shape findings belong to no run, are never labelled, and so always promote.
+stops meaning anything. Since Phase 399 `-Strict` promotes **no** cost finding (see "Cost is
+recorded, a cached read is refused" below); the label is what tells a reader of the strict record
+which overruns measure the machine. The coverage and shape findings belong to no run, are never
+labelled, and are still red under `-Strict`.
 
 Five details are load-bearing rather than decorative:
 
@@ -247,11 +248,11 @@ Five details are load-bearing rather than decorative:
   untouched and the leg **says so** — "I could not tell" must never print as "nothing is touched".
 - **A module too cheap to time does not vote.** The clock is whole seconds, so 0s against a recorded
   2s is a ratio of 0 and 1s is a ratio of 0.5, and neither says anything about the machine. The cut is
-  `floorSeeding.zeroBelowSeconds` — this file's existing answer to "below what is a reading
-  process-start noise", reused rather than minted again — and a run with fewer than
+  `contentionSeeding.minimumSeconds` (until Phase 399 the retired floors' `zeroBelowSeconds`) — this
+  file's answer to "below what is a reading process-start noise" — and a run with fewer than
   `contentionSeeding.minimumSamples` contributors reports the factor as **not computed** rather than
   taking a median of one.
-- **An absent `contentionSeeding` block is not a finding.** Unlike a missing budget or floor, which
+- **An absent `contentionSeeding` block is not a finding.** Unlike a missing budget or `fastestSeconds`, which
   fire per module when a model is added, this one is per file and one-off, and a finding present on
   every run of an unseeded repository is one people learn to scroll past. The factor is still computed
   and still printed; nothing is labelled, and the line names the block to seed. That is the pre-171
@@ -262,6 +263,77 @@ whichever phase seeds that number: it says what the machine was doing when the m
 so a later reader can tell a budget seeded on a quiet machine from one seeded on a busy one. It is
 **provenance only** — the engine holds it to its shape and computes nothing from it, for the same
 reason the factor is never multiplied into a measurement. Absent reads as "not recorded", never as 1.
+
+## Cost is recorded, a cached read is refused (Phase 399)
+
+An operator ruling of 2026-10-08 separated the two questions `-Strict` used to conflate.
+
+- **A budget overrun is never a red leg**, with `-Strict` or without it. It is a slow cold check,
+  the opposite of the failure a gate is for. It is printed as a `COST` finding, and `-SummaryFile`
+  records every module's time against its budget, with the percentage, so the caller's strict record
+  names the over-budget modules and a scheduled strict run can trend them. Do not raise a budget to
+  quiet a finding, and do not delete budgets: they are the trend's reference. Re-seeding is still the
+  recorded act it always was.
+- **The hard gate is "this was not a real cold verification".** The cache provenance check (Phase
+  402) is the primary signal. Its backstop, for a writer active only DURING one invocation, is one
+  absolute number in the budget file: `cachedRead.thresholdSeconds`. A check that finishes under it
+  fails the leg as a probable cached read, before its green line is printed. It applies to the
+  modules whose recorded `fastestSeconds` is at least `cachedRead.appliesFromFastestSeconds`. A
+  module that genuinely checks in under a second cannot be told from a cached read by the clock,
+  so it rests on the provenance check alone, and the leg's start-up line names those modules.
+- **Seed the threshold from a measurement.** Cold-check a few modules of different sizes into one
+  cache, re-run each against it with the leg's flags, and set the threshold to about twice the
+  slowest read. Set `appliesFromFastestSeconds` to about three times that. The reference repository
+  measured 0.18-0.51s for every cached read, against cold checks of 0.4s to 184s; its
+  `proofs/README.md` section "Cached read or cold check" has the table.
+- **The per-module floors are retired** (`floorSeconds`, `floorSeeding`, `floorSeeding.os`, and
+  `-NoFloor`). A budget file still carrying them is refused by name; delete `floorSeconds` and
+  `floorSeeding`, keep each entry's `fastestSeconds`, add the `cachedRead` block, and move
+  `zeroBelowSeconds` to `contentionSeeding.minimumSeconds`. A floor was a per-machine number. A
+  cached read costs prover start-up whatever the module costs cold, so there is nothing for a floor
+  to see that one threshold does not.
+- **What `-Strict` still turns red:** a coverage or shape finding, which is a gap in the declaration
+  rather than a measurement. Examples are a module with no budget, a budget for a module the leg does
+  not check, and a budget file with no `cachedRead` block.
+
+## The oracle is independent of production (Phase 399)
+
+This is the paragraph an adopting repository copies into its own proofs README, unchanged but for
+the project name:
+
+> **The oracle cannot see production.** A differential test compares the extracted model with the
+> production code over the same inputs, and it is worth something only if the two sides are
+> independent. An oracle that referenced a production assembly, compiled a production source, or
+> opened a production namespace would pass every differential case by comparing production with
+> itself, and the claims ladder would still say "differentially tested". So after extraction and
+> before the host step, the leg refuses an oracle project that, as MSBuild evaluates it, carries any
+> `ProjectReference`, any `Reference`, a `PackageReference` other than `FSharp.Core`, or a `Compile`
+> item outside the oracle directory, and an oracle source that `open`s, abbreviates or qualifies a
+> name whose first segment is not `Prims`, an `FStar` module or one of the oracle's own modules (the
+> hand-written runtime floor may also name `System` and `Microsoft.FSharp`, which is what it defines
+> the primitives as). Each refusal names the file, the line and the text. Production is opened by
+> the test host alone.
+
+Why it is here. Chakraborty et al., *Towards Neural Synthesis for SMT-Assisted Proof-Oriented
+Programming* (ICSE 2025), name two ways a proof harness reports success falsely: an escape hatch
+(`admit`, `assume`), which this leg has always refused with `--report_assumes error`, and a definition
+that closes only because the original it was meant to reproduce is still in scope. Under F\* the
+second cannot happen, because no production F\# is in scope there. The differential half is where
+it can: the oracle project is compiled beside production, and before this guard nothing stopped an
+agent-written oracle from calling the function it was meant to model. No oracle here did. The guard
+makes that a checked claim rather than an observed one.
+
+How it reads. The project half evaluates the project (`dotnet msbuild -getItem`), so a reference
+inherited from a `Directory.Build.props` counts as much as one in the project file; it is what
+makes production unreachable. The source half is lexical: comments and string and character
+literals are blanked first, so a production name in prose or in a message is not a finding, and a
+lower-case first segment is a value's member access and is not judged. A name the source half
+refuses would not compile anyway once the project half holds; the source half exists to name the
+line that tried.
+
+`-GuardOnly` runs the guard alone and needs no prover. The `I` arms of `check-proof-leg.tests.ps1`
+plant each kind of breach in a scratch oracle and hold the refusal and the named line; the `Q` arms
+plant one inside a full leg and show it fails after extraction and before the host step.
 
 ## Adopting it
 
@@ -383,6 +455,33 @@ byte. An unrecognised value is refused rather than defaulted. A model's record i
 
 The sweep is warn-first and offline: it names a drifted copy and the command that regenerates it,
 and it never edits anything.
+
+**The pin's mirror (Phase 399).** An entry may carry a `mirror` beside its `url`: the same asset at a
+second address. The kit tries `url`, then `mirror`. A source that cannot serve the archive is
+reported and the next is tried. A source that serves bytes that do not match the entry's `sha256` is
+refused on the spot, naming the source and the pin's hash, and the other source is not tried: a
+mismatch is a replaced asset, not an outage. A mirror must name the pin's release and end in the
+entry's asset name, and the kit refuses one that does not. `file://` sources work too, so a mirror can
+be a file share. `-ResolveOnly` prints both sources in order; `-FetchOnly` fetches and verifies the
+archive and stops. In this repository the mirror is a `prover-fstar-<release>` release of the
+repository itself, never a `v*` tag, so attaching assets to it cannot fire a publish. A pin bump
+therefore has one more step: before the bump lands, download each new asset from upstream, check it
+against the sha256 you are about to commit, and attach it to a new mirror release:
+
+```powershell
+$release = 'v2026.09.06'                      # the pin's `fstar`
+gh release create "prover-fstar-$release" --repo <owner>/<repo> --target main --latest=false `
+    --title "Pinned F* $release (proof-leg mirror)" --notes "The proof leg's pinned prover, mirrored. See proofs/fstar-pin.json"
+gh release upload "prover-fstar-$release" --repo <owner>/<repo> <each downloaded, hash-checked asset>
+```
+
+**The run facts (Phase 399).** `-SummaryFile <path>` makes a GREEN leg write a JSON summary: the
+machine (`kind` = `ci` or `local`, a CI runner's name, the OS, the processor count and the memory;
+never a local host name, because callers commit what they record) and one `contention` entry per run
+(the pre-flight line, the factor or why none was computed, the threshold, and whether the run was
+contended). A red leg writes nothing. This repository's `check.ps1` copies it into the strict
+baseline it records, so the record says what kind of machine and what kind of afternoon stand behind
+an empty cone.
 
 ## What this kit does not solve
 

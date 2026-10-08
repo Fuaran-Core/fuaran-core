@@ -19,8 +19,10 @@ let private probe = "v0.0.0-gate-probe-20261007"
 
 let private released = set [ "v0.25.0"; "v0.31.0"; "v0.35.1"; "v0.35.2" ]
 
-let private stability () =
-    File.ReadAllText(Snapshots.repoFile "STABILITY.md").Replace("\r\n", "\n")
+/// The release ledger's slot files (Phase 397), `(path, text)`, newest first.
+let private ledger () =
+    PackageRosterTests.ledgerFiles (Snapshots.repoFile "")
+    |> List.map (fun f -> f.Path, f.Text)
 
 [<Tests>]
 let tests =
@@ -37,7 +39,7 @@ let tests =
           }
 
           test "ReleaseRecord reads the same faults with the probe tag present" {
-              let text = stability ()
+              let docs = ledger ()
 
               let faults tags =
                   ReleaseRecordTests.releaseFaults
@@ -46,13 +48,15 @@ let tests =
                       ReleaseRecordTests.releasedWithoutCitedRun
                       tags
                       (Some "0.36.0")
-                      text
+                      docs
 
               Expect.equal (faults (Set.add probe released)) (faults released) "the probe tag adds and removes nothing"
           }
 
           test "PackageRoster's tag properties read the same with the probe tag present" {
-              let text = stability ()
+              let text =
+                  PackageRosterTests.ledgerText (PackageRosterTests.ledgerFiles (Snapshots.repoFile ""))
+
               let lines = text.Split('\n') |> Array.toList
 
               Expect.equal

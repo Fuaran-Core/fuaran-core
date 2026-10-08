@@ -11,15 +11,14 @@
 #   -Runs N          N cold-cache verifications of every model (CI asks for 3)
 #   -Extract         rewrite the committed oracle/*.fs from a fresh extraction, then commit them
 #   -SkipOracleHost  leave the host families to the repository's own gate, which runs the suite
-#   -Strict          promote every cost finding to a red leg
-#   -NoFloor         do not enforce the per-module time floors declared in modules.json
+#   -Strict          the recorded run: a cost overrun stays a finding (never red, Phase 399); an
+#                    incomplete budget declaration is red
 #   -CacheDir <dir>  put the checked-module cache somewhere you name
 [CmdletBinding()]
 param(
     [switch] $Extract,
     [switch] $SkipOracleHost,
     [switch] $Strict,
-    [switch] $NoFloor,
     [string] $CacheDir,
     [int]    $Runs = 1
 )
@@ -65,7 +64,6 @@ $legArgs = @{
 if ($Extract) { $legArgs.Extract = $true }
 if ($SkipOracleHost) { $legArgs.SkipOracleHost = $true }
 if ($Strict) { $legArgs.Strict = $true }
-if ($NoFloor) { $legArgs.NoFloor = $true }
 if ($CacheDir) { $legArgs.CacheDir = $CacheDir }
 
 # `&` and not `.`: a dot-sourced script's `exit` does NOT propagate to its caller, so a dot-source

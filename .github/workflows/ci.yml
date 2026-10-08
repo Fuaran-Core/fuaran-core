@@ -98,6 +98,12 @@ jobs:
   # or a leg change that only works on one OS, is red here on the push that made it, not on the day
   # someone first needs the other runner. publish-packages.yml runs the same leg on the tagged
   # commit before it packs.
+  #
+  # Phase 399 — WITHOUT -Strict: a budget overshoot is a recorded finding on every leg and never a red
+  # one (DECISIONS.md D131), and the strict run's job is the record. proofs-strict.yml runs the same
+  # leg with -Strict weekly and on demand, trends the cost findings and refreshes
+  # proofs/last-strict.json. Both legs refuse a probable cached read (modules.json `cachedRead`).
+  # The prover the cache below misses on is fetched from the pin's `url`, then from its `mirror`.
   proofs:
     name: proofs (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

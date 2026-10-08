@@ -138,7 +138,7 @@ let streamW : StreamWitness<MyOp, MyState, MyRej> =
       Decode = MyWire.decodeOp }  // string -> Result<MyOp, string>   (Phase 252)
 
 // `actor` is a typed `Actor` (`Human "alice"` / `Agent("model","ver","id")`) — folded into the
-// hash since Phase 320, so attribution is tamper-evident. A pre-320 stream migrates via
+// hash since Phase 320 (`0.0.1-alpha.13`), so attribution is tamper-evident. A pre-320 stream migrates via
 // `fromJsonlLegacyActor` + `rehash` (see docs/migrations/0.0.1-alpha.13-typed-attested-provenance.md).
 OpStream.append OpStream.defaultHash streamW actor op state recs   // hash-chained
 OpStream.replay streamW state0 records                              // deterministic
@@ -223,7 +223,7 @@ reaches one of settled, pending or refused. Then dispatch through the very path 
   it — a linear stream through `OpStream.Snapshots`, a lane DAG through `Dag.sealAt` (Phase 288), which
   seals an imported state without replaying the history that produced it.
 - **F5 — typed actors.** Core's op-stream actor is the typed `Actor` (`Human` / `Agent`) since Phase
-  320, folded into the hash as step 3 shows; map your own actor type onto it at the seam.
+  320 (`0.0.1-alpha.13`), folded into the hash as step 3 shows; map your own actor type onto it at the seam.
 - **F6 — the win.** Core's `fromJsonl` is portable (FSharp.Core only), so your Fable host can
   rehydrate and `verifyChain` a stream in-browser — which a `System.Text.Json` decoder can't.
 

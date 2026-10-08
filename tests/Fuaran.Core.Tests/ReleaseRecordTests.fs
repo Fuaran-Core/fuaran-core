@@ -10,6 +10,9 @@ module Fuaran.Core.Tests.ReleaseRecordTests
 // that SOME `##`/`###` line CONTAINS the version, so `v0.35.1` was tagged and published while its
 // entry was headed `## 0.35.1 — DRAFT` and cited no run, and every test was green.
 //
+// Since Phase 397 the entries live in the release ledger, one `docs/releases/<version>.md` per slot
+// (DECISIONS.md D130), and every clause below reads the slot files; a fault names the file and line.
+//
 // The heading and the record are therefore read here as what they claim, against the tags this
 // tree's history carries (`git tag --merged HEAD` — a tag on a commit outside HEAD's history is
 // not this tree's release):
@@ -70,7 +73,9 @@ type internal Entry =
     {
         Version: string
         Heading: string
-        /// 1-based line of the heading.
+        /// The ledger file the entry is in, repo-relative.
+        File: string
+        /// 1-based line of the heading in that file.
         Line: int
         State: HeadingState
         /// The entry's paragraphs, up to the next level-2 heading, each joined to one line.
@@ -111,9 +116,9 @@ let private paragraphsOf (lines: string list) : string list =
 
     flush acc cur |> List.rev
 
-/// Every level-2 entry whose heading starts with a version, first heading per version, in document order.
-let internal entries (stability: string) : Entry list =
-    let lines = stability.Replace("\r\n", "\n").Split('\n')
+/// Every level-2 entry of one file whose heading starts with a version, in document order.
+let private entriesOf (file: string, text: string) : Entry list =
+    let lines = text.Replace("\r\n", "\n").Split('\n')
 
     let starts =
         lines
@@ -137,10 +142,15 @@ let internal entries (stability: string) : Entry list =
             Some
                 { Version = v
                   Heading = lines[i].TrimEnd()
+                  File = file
                   Line = i + 1
                   State = headingState v lines[i]
                   Paragraphs = paragraphsOf (lines[i + 1 .. next - 1] |> Array.toList) })
-    |> List.distinctBy _.Version
+
+/// Every level-2 entry of the ledger's files, `(path, text)`, whose heading starts with a version —
+/// the first heading per version, in file then document order.
+let internal entries (docs: (string * string) list) : Entry list =
+    docs |> List.collect entriesOf |> List.distinctBy _.Version
 
 let private gateRunRe =
     Regex(
@@ -161,7 +171,7 @@ let internal recordFaults (exceptions: Map<string, string>) (e: Entry) : string 
         e.Paragraphs
         |> List.filter (fun p -> p.StartsWith("**Receiving gate run:**", StringComparison.Ordinal))
 
-    let at = sprintf "STABILITY.md:%d (%s)" e.Line e.Version
+    let at = sprintf "%s:%d (%s)" e.File e.Line e.Version
 
     let recordFault =
         if hasRecord then
@@ -217,7 +227,7 @@ let internal recordFaults (exceptions: Map<string, string>) (e: Entry) : string 
 
     recordFault @ runFault
 
-/// Every fault of the release gesture against STABILITY.md: the per-tag heading and record (1, 4), the
+/// Every fault of the release gesture against the ledger: the per-tag heading and record (1, 4), the
 /// released heading without its tag (2), and the untagged standing version's DRAFT heading (3).
 let internal releaseFaults
     (headerFloor: int * int * int)
@@ -225,9 +235,9 @@ let internal releaseFaults
     (exceptions: Map<string, string>)
     (tags: Set<string>)
     (standing: string option)
-    (stability: string)
+    (docs: (string * string) list)
     : string list =
-    let es = entries stability
+    let es = entries docs
     let byVersion = es |> List.map (fun e -> e.Version, e) |> Map.ofList
 
     let tagged =
@@ -253,13 +263,15 @@ let internal releaseFaults
                 match e.State with
                 | Draft ->
                     [ sprintf
-                          "STABILITY.md:%d heads %s DRAFT, and %s is tagged — the tag was placed before the heading turned (flip the heading in the commit the tag names)"
+                          "%s:%d heads %s DRAFT, and %s is tagged — the tag was placed before the heading turned (flip the heading in the commit the tag names)"
+                          e.File
                           e.Line
                           version
                           t ]
                 | Other ->
                     [ sprintf
-                          "STABILITY.md:%d heads tagged %s as '%s', not `## %s — released <yyyy-mm-dd> as `%s``"
+                          "%s:%d heads tagged %s as '%s', not `## %s — released <yyyy-mm-dd> as `%s``"
+                          e.File
                           e.Line
                           version
                           e.Heading
@@ -275,7 +287,8 @@ let internal releaseFaults
             | Released _ when not (tags.Contains("v" + e.Version)) ->
                 Some(
                     sprintf
-                        "STABILITY.md:%d heads %s released, and no `v%s` tag is in this tree's history — the heading turned before the tag (tag the commit that turns it)"
+                        "%s:%d heads %s released, and no `v%s` tag is in this tree's history — the heading turned before the tag (tag the commit that turns it)"
+                        e.File
                         e.Line
                         e.Version
                         e.Version
@@ -288,7 +301,8 @@ let internal releaseFaults
             match Map.tryFind v byVersion with
             | Some e when e.State <> Draft ->
                 [ sprintf
-                      "STABILITY.md:%d heads the untagged standing <Version> %s as '%s', not `## %s — DRAFT`"
+                      "%s:%d heads the untagged standing <Version> %s as '%s', not `## %s — DRAFT`"
+                      e.File
                       e.Line
                       v
                       e.Heading
@@ -323,7 +337,7 @@ let private mergedTags (root: string) : Result<Set<string>, string> =
         |> Set.ofArray)
 
 let private remedy =
-    "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip and the README stamps in ONE commit, which is the commit the tag names."
+    "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file and its index entry) and the README stamps in ONE commit, which is the commit the tag names."
 
 let private failOn (faults: string list) =
     match faults with
@@ -362,7 +376,11 @@ let private sample =
 let private sampleTags = Set.ofList [ "v0.30.0"; "v0.35.1"; "v0.35.2" ]
 
 let private faultsOf tags standing text =
-    releaseFaults (0, 25, 0) (0, 31, 0) (Map.ofList [ "0.35.1", "D123" ]) tags standing text
+    releaseFaults (0, 25, 0) (0, 31, 0) (Map.ofList [ "0.35.1", "D123" ]) tags standing [ "sample.md", text ]
+
+/// The ledger's slot files, `(path, text)`, newest first.
+let private ledgerDocs (root: string) =
+    PackageRosterTests.ledgerFiles root |> List.map (fun f -> f.Path, f.Text)
 
 [<Tests>]
 let tests =
@@ -386,8 +404,10 @@ let tests =
                       covered
                       "at least one tag in HEAD's history sits at or above the record floor — with none every clause below passes vacuously"
 
-                  let stability = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+                  let ledger = ledgerDocs root
                   let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
+
+                  Expect.isNonEmpty ledger "the release ledger's slot files were read"
 
                   releaseFaults
                       PackageRosterTests.entryHeaderFloor
@@ -395,7 +415,7 @@ let tests =
                       releasedWithoutCitedRun
                       tags
                       (PackageRosterTests.standingVersion props)
-                      stability
+                      ledger
                   |> failOn
           }
 
@@ -409,7 +429,7 @@ let tests =
               match mergedTags root with
               | Error why -> skiptestf "release-record plants skipped — %s" why
               | Ok tags ->
-                  let stability = File.ReadAllText(Path.Combine(root, "STABILITY.md"))
+                  let ledger = ledgerDocs root
                   let props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"))
                   let standing = PackageRosterTests.standingVersion props
 
@@ -429,11 +449,18 @@ let tests =
                       |> List.maxBy fst
                       |> snd
 
-                  let e = entries stability |> List.find (fun e -> e.Version = newest.Substring 1)
+                  let e = entries ledger |> List.find (fun e -> e.Version = newest.Substring 1)
 
-                  Expect.isEmpty (run tags stability) "the live document is green before the plants"
+                  Expect.isEmpty (run tags ledger) "the live ledger is green before the plants"
 
-                  let drafted = stability.Replace(e.Heading, sprintf "## %s — DRAFT" e.Version)
+                  let drafted =
+                      ledger
+                      |> List.map (fun (path, text) ->
+                          path,
+                          (if path = e.File then
+                               text.Replace(e.Heading, sprintf "## %s — DRAFT" e.Version)
+                           else
+                               text))
 
                   Expect.exists
                       (run tags drafted)
@@ -441,7 +468,7 @@ let tests =
                       "a tagged slot headed DRAFT is red by name"
 
                   Expect.exists
-                      (run (Set.remove newest tags) stability)
+                      (run (Set.remove newest tags) ledger)
                       (fun f -> f.Contains "heads" && f.Contains "released, and no")
                       "a slot headed released with its tag withheld is red"
           }
@@ -450,7 +477,7 @@ let tests =
               Expect.isEmpty (faultsOf sampleTags (Some "0.36.0") sample) "the sample is the green shape"
 
               Expect.equal
-                  (entries sample |> List.map (fun e -> e.Version, e.State))
+                  (entries [ "sample.md", sample ] |> List.map (fun e -> e.Version, e.State))
                   [ "0.36.0", Draft
                     "0.35.2", Released "2026-10-07"
                     "0.35.1", Released "2026-10-06"
@@ -548,7 +575,7 @@ let tests =
 
           test "the closed no-run list admits only what it names, and only while the record says so" {
               let withList list tags text =
-                  releaseFaults (0, 25, 0) (0, 31, 0) (Map.ofList list) tags (Some "0.36.0") text
+                  releaseFaults (0, 25, 0) (0, 31, 0) (Map.ofList list) tags (Some "0.36.0") [ "sample.md", text ]
 
               Expect.exists
                   (withList [ "0.35.1", "D123"; "0.35.2", "D123" ] sampleTags sample)

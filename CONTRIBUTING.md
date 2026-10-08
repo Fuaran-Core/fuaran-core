@@ -10,8 +10,8 @@ is the whole design, not an accident.
 Requirements: the .NET SDK pinned in [`global.json`](global.json).
 
 ```powershell
-./run.ps1        # restore tools, format, build, test
-./verify.ps1     # format-check + build + Fable-compile gate + test + sample (the green gate)
+./run.ps1        # restore tools, format, build, test, sample
+./verify.ps1     # format-check + build + test + sample (the green gate)
 ```
 
 A change is ready to propose when `./verify.ps1` is green.
@@ -58,7 +58,7 @@ Remove-Item Env:CORE_APPROVE_WIRE
 
 ## Coding standards
 
-- **F# formatting is Fantomas.** Run `./run.ps1` (or `dotnet fantomas src tests`) before every
+- **F# formatting is Fantomas.** Run `./run.ps1` (or `dotnet fantomas src tests samples`) before every
   commit; `./verify.ps1` fails on unformatted code.
 - **Totality — no exceptions in the public surface.** Failures are typed values (`Result`, a
   `Rejection`, or a named `*Error` envelope), never a thrown exception. A recoverable envelope must
@@ -81,7 +81,9 @@ Remove-Item Env:CORE_APPROVE_WIRE
 - **No domain evaluator in Core.** Render / recompute / regenerate / reflow stay on the domain side.
 
 A change that adds a public surface should add or extend a `Conformance` law that certifies it, and
-update `STABILITY.md` when it touches a stability-critical surface.
+update `STABILITY.md` when it touches a stability-critical surface. What each version changed is
+recorded in the release ledger, `docs/releases/<version>.md`: a change that ships appends its entry
+to the standing draft slot's file there (`STABILITY.md`, "Versioning policy").
 
 ## Developer Certificate of Origin (DCO)
 
