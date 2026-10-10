@@ -1,5 +1,117 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-10 — D145: under Fable a `Vector<bool>` holds a byte a row in a `Uint8ClampedArray`, and `Vector.Unsafe.borrow` lends that array as it is; every read answers a boolean; `adopt` packs a boolean array, the one place it copies; on .NET nothing moves; and `Column.ofTimestamps` refuses an instant its text could not name
+
+**Context.** Under Fable a `bool[]` is a plain JavaScript array, eight bytes a row, and every
+`Vector<bool>` is held that way: every `Mask` (Phase 420 removed the mask only from null-free columns)
+and every bool column's values. Phase 422 measured a `Uint8Array` at one byte a row and a counting read
+over it about twice as slow, and did not build it (D143.8): Phase 418's `Vector.Unsafe.borrow` lends
+the backing array as a `'T[]`, so a typed backing for one element type is a decision about the
+ownership contract. Phase 431 takes that decision on the untagged `1.0.0` draft slot. The rulings
+below were settled before the code was written; the figures in D145.5 were measured against them.
+
+**D145.1 — what `borrow` lends for a bool vector under Fable: the packed array itself.** Four options
+were weighed.
+
+1. **Lend the packed array, with `0` and `1` documented (CHOSEN).** `Borrowed<'T>` keeps its shape on
+   both hosts. Under Fable the `Array` of a non-empty `Vector<bool>`'s borrow is its backing, a
+   `Uint8ClampedArray` holding `1` for `true` and `0` for `false`, typed `bool[]` by F#. Nothing is
+   copied, and a write through it is a write every holder sees, which is exactly 418's promise. A
+   borrower reads an element by truthiness: F# compiles `if a[i]`, `not a[i]` and `&&` to
+   JavaScript truthiness, so a condition reads correctly, but `a[i] = true`, `string a[i]`, a hash or
+   a boxed comparison sees the number. A write of `true` or `false` stores `1` or `0`, because the
+   clamped array converts on store, so a borrower that writes (breaking the contract) still writes a
+   value every holder reads as the boolean it wrote, and the ownership law sees it.
+2. **`Unsafe.borrowBytes` beside a `borrow` that refuses a bool vector under Fable.** Rejected. It adds
+   a member to both hosts, or to one, which would split the public surface by host. It also makes
+   generic code that borrows any vector throw for one element type on one host: an interop layer that
+   borrows every column, or the law kit itself, would fail at run time in exactly the case its type
+   cannot show.
+3. **`bool[]` for values and a typed array for masks only.** Rejected. A mask and a bool column's
+   values are one type, `Vector<bool>` (`Mask of present: Vector<bool>` is public and stays so on
+   .NET). Nothing distinguishes a mask's vector from a values vector at construction, so masks cannot
+   be typed alone without a new public mask type, and the split would also leave half the saving.
+4. **A copying `borrow` for bool.** Rejected. It breaks the reason `Unsafe` exists: no copy, and
+   writes visible to every holder.
+
+**Why `Uint8ClampedArray` rather than `Uint8Array`.** No F# element type compiles to a
+`Uint8ClampedArray` under Fable (`byte[]` is a `Uint8Array`, `sbyte[]` an `Int8Array`), so the class of
+the backing marks it as packed booleans with no flag to keep beside it. A `Vector<byte>` keeps its
+`Uint8Array` and keeps reading numbers.
+
+**D145.2 — where the backing applies: every `Vector<bool>`, masks and values alike.** The packing is
+decided per vector at construction, from its elements: a NON-EMPTY array every element of which is a
+JavaScript boolean is packed. That is exactly a non-empty `bool[]`. Under Fable it is also an `obj[]`
+of boxed booleans, or a `bool option[]` with no `None`, because the host erases the box and the
+`Some`. Such a vector reads back the same values (D145.3); only its borrow lends bytes, which the
+`Unsafe` doc comment states. An empty vector holds a plain empty array, since there is nothing to
+pack.
+
+**D145.3 — every read answers a boolean.** The indexer, every `Vector` module read (`toList`, `iter`,
+`iteri`, `fold`, `map`, `mapi`, `exists`, `tryFindIndex`, `tryItem`), equality and the hash read a
+packed element as `!!byte`, so `v[i] = true` holds on both hosts, `Vector.toArray` answers a plain array
+of booleans (a copy, as it always was), and a packed vector equals and hashes like the same booleans
+held plainly. A vector of any other element type reads exactly as before, at the cost of one field
+test per read. Core's own raw read of a mask's backing (`ColumnStorage.isSet`, the Phase 421 walk)
+reads it as `!!byte` too.
+
+**D145.4 — `adopt` packs a boolean array; it is the one place `adopt` copies.** Under Fable,
+`Vector.adopt` of a non-empty boolean array copies it into a packed backing, so every builder that
+reaches `adopt` (`ofList`, `ofSeq`, `init`, `map`, `mapi`, `Validity.ofList`, `Column.ofCells`, decode,
+and a consumer's own `adopt`) produces the byte backing. Without that, every mask a consumer built
+would stay at eight bytes a row, and the change would reach only `Vector.ofArray`. The promise of
+`adopt` is unchanged: the caller hands the array over and touches it no more. A caller who keeps that
+promise cannot tell the copy from a zero-copy take. A caller who breaks it now writes into an array
+nothing reads, so that one broken promise becomes harmless rather than visible. `ofArray` copies, as it
+always did, into the packed form. An array that is already packed (a `Uint8ClampedArray`, for example
+one a borrower took and adopts back) is adopted without a copy. On .NET, `adopt` is unchanged.
+
+**D145.5 — the read cost, and the bar.** The bar the shard set: held bytes at least four times
+smaller, AND a counting read and a `Validity` presence check no more than 1.25 times the `bool[]`
+figure. **Why 422 measured twice as slow:** its loop indexed both arrays through fable-library's
+bounds-checked `item` helper, one function shared by the plain array and the typed one, so V8 saw a
+polymorphic element load. The cost belonged to that shared call site, not to the bytes. A raw
+measurement on node 25 of the same loop over each array, written directly, puts the byte arrays at the
+plain array's figure or below. The figures for this design are in the Phase 431 release entry, measured
+through Core's own reads (the indexer, `Validity.presentCount`, `Validity.isPresent`,
+`Column.isPresent`, `Column.aggregate`, `Column.cell`) at 1,000 and 100,000 rows. See D145.7 for the
+verdict.
+
+**D145.6 — `Column.ofTimestamps` refuses an instant its text could not name.** Phase 430 found that a
+fraction at or past its unit's scale renders ANOTHER instant's canonical text: `1000` in a millisecond
+column reads as `.1Z`, because the fraction is written as digits without a carry. A second that is not
+whole does the same, since the clock is read from its floor. `Table.validate` refused such a column, but
+the typed builder admitted it, so `Column.cell` could render a wrong instant from a column a consumer
+built and never validated. `Column.ofTimestamps` now raises `System.ArgumentException`, naming the
+column, the row, the second, the fraction and the unit, when a present row is not
+`TemporalText.isInstantInRange` (a whole second within years `0000`..`9999`, a fraction in
+`[0, scale)`), or when a fraction vector's length is not the seconds'. That is what `Table.validate`'s
+clause (e) refuses for a timestamp column, so the builder and the validator now agree, and Phase 430's
+`frac_ok` and `temporal_ok` premises hold for every timestamp column a builder makes.
+
+- **Why it raises rather than answering a `Result`.** Every typed builder answers a `Column`, and
+  `Vector.slice` already raises `ArgumentOutOfRangeException` for arguments it cannot honour.
+  Retyping one builder to `Result` would break every caller for a refusal that only a programming
+  error reaches, because decode, `ofCells` and `ofDateTimeOffsets` each build only instants they have
+  already checked.
+- **What it cannot make true by construction.** `ColumnData.Timestamps` is a public union case, and a
+  union case runs no check. A column built from the case directly can still hold such a row. For that
+  route `Table.validate` names it, and `Column.cell` renders what it always rendered. Hiding the case
+  would take pattern matching away from every consumer. The Totality suite builds its ill-formed
+  timestamp storage through the case for this reason.
+- **Why `ofDates` stays unchecked.** A day outside the canonical range renders a text that is not
+  canonical (a year outside `0000`..`9999`), never another day's canonical text, so the builder cannot
+  render a wrong date. `Table.validate` names it as before.
+
+**D145.7 — the verdict.** [filled from the measurement]
+
+**Consequences.** `Fuaran.Core.Column`'s public surface does not move: no member is added, removed or
+retyped, and the api baseline is unchanged. The change is behavioural. Under Fable, `Vector<bool>`'s
+backing and what its borrow lends change (`retype`-class in effect for a Fable borrower, recorded in
+`STABILITY.md`'s ownership entry). On both hosts, `Column.ofTimestamps` raises where it built.
+Changing the Fable representation of `Vector<bool>` again, or what `borrow` lends for it, is major. No
+wire byte, digest, law vector or `ParityVectors` row moves.
+
 ## 2026-10-10 — D144: a schema entry is an opaque `Field` built through functions — name, type and the metadata that says what a column means (an optional `UnitOfMeasure`, a label, a description, an extension map); `Schema` is `Field list`; metadata is identity, not storage; the wire, the delta, the fingerprint and the query seam carry it, with every metadata-free byte unchanged
 
 **Context.** A schema was `(string * ColumnType) list` (`Table.fs`): a name and a type, and nowhere to say
