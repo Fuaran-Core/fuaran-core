@@ -120,9 +120,14 @@ module internal ColumnStorage =
               Bits = m.Items
               Offset = m.Offset }
 
-    /// Is row `i` (below `rows.Count`) present?
+    /// Is row `i` (below `rows.Count`) present? Under Fable a mask's backing is packed bytes
+    /// (Phase 431, DECISIONS.md D145), read back as a boolean.
     let inline isSet (rows: PresentRows) (i: int) : bool =
+#if FABLE_COMPILER
+        isNull rows.Bits || PackedBools.get (box rows.Bits) (rows.Offset + i)
+#else
         isNull rows.Bits || rows.Bits[rows.Offset + i]
+#endif
 
     /// The masks of two validities of `n`-row columns are one mask — `Validity.toMask n` of each
     /// equal, without materialising either.
@@ -489,7 +494,8 @@ module Column =
 
     // ---- the typed builders and readers (Phase 417) ----
     // Each builder takes the storage as built — a `Vector` the caller copied into (`Vector.ofArray`)
-    // or adopted (`Vector.adopt`), and `AllValid` or a `Mask` — and checks nothing: a `Mask` is
+    // or adopted (`Vector.adopt`), and `AllValid` or a `Mask` — and checks nothing (save
+    // `ofTimestamps`, which refuses an instant its text could not spell, Phase 431): a `Mask` is
     // expected to be the values' length, and `Table.validate` names one that is not. A builder
     // does not normalise the `Validity` it is handed (an all-true `Mask` is held as given, and is
     // equal to `AllValid`); `Validity.ofArray` / `ofList` / `ofVector` are the normalising
@@ -523,8 +529,14 @@ module Column =
 
     /// A timestamp column at `unit` over floor epoch seconds and, for a sub-second unit, their
     /// fractions scaled to the unit (`None` for every fraction zero), present where `validity` says.
-    /// Like every typed builder it checks nothing; `Table.validate` names a second that is not whole
-    /// or in range, a fraction out of range, and a fraction vector of another length.
+    /// Unlike the other typed builders it CHECKS what `Table.validate` checks of a timestamp column
+    /// (Phase 431, DECISIONS.md D145.6), because a row its canonical text cannot spell would render
+    /// as ANOTHER instant — `1000` in a millisecond column reads as `.1Z`, and a second that is not
+    /// whole as its floor — so `Column.cell` never renders a wrong instant from a column this builds.
+    /// It raises `System.ArgumentException`, naming the column, the row and what it holds, for a
+    /// fraction vector of another length than the seconds, and for a present row whose second is not
+    /// whole or not within `0000`..`9999`, or whose fraction is outside `[0, scale)`. A row under an
+    /// absent mask bit is not read.
     let ofTimestamps
         (name: string)
         (unit: TimeUnit)
@@ -532,6 +544,44 @@ module Column =
         (fraction: Vector<int> option)
         (validity: Validity)
         : Column =
+        let refuse (detail: string) =
+            raise (
+                System.ArgumentException(
+                    name
+                    + ": a "
+                    + ColumnType.tag (TimestampType unit)
+                    + " column holds whole epoch seconds from 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z and a fraction in [0, "
+                    + string (TimeUnit.scale unit)
+                    + "); "
+                    + detail
+                )
+            )
+
+        match fraction with
+        | Some f when f.Length <> seconds.Length ->
+            refuse (
+                "its fraction vector has "
+                + string f.Length
+                + " rows where its seconds have "
+                + string seconds.Length
+            )
+        | _ -> ()
+
+        for i in 0 .. seconds.Length - 1 do
+            if Validity.isPresent i validity then
+                let f = ColumnStorage.fractionAt fraction i
+
+                if not (TemporalText.isInstantInRange unit seconds[i] f) then
+                    refuse (
+                        "row "
+                        + string i
+                        + " holds second "
+                        + string seconds[i]
+                        + " and fraction "
+                        + string f
+                        + ", an instant the canonical form cannot spell"
+                    )
+
         { Name = name
           Data = Timestamps(unit, seconds, fraction, validity) }
 

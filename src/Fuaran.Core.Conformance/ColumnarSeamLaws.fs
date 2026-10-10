@@ -311,7 +311,9 @@ module internal ColumnarSeamLaws =
     ///    materialised mask (`Column.mask`) is the drawn one.
     /// 3. **Every vector read agrees with the indexer.** `toList`, `toArray`, `fold`, `iter`, `iteri`,
     ///    `map`, `mapi`, `exists`, `tryFindIndex`, `tryItem`, a `slice` and a borrowed array all answer
-    ///    what indexing answers, over the drawn vector.
+    ///    what indexing answers, over the drawn vector — and over a drawn bool vector (Phase 431),
+    ///    which under Fable is packed a byte a row: every read answers a boolean, `=` against `true`
+    ///    included, and its borrow reads as the same booleans by truthiness.
     let columnVectorLaws (seed: int) (iterations: int) : LawResult list =
         let equality =
             LawKit.LawCell "column equality is cell equality under Cell.compare, and equal columns hash equal"
@@ -570,7 +572,54 @@ module internal ColumnarSeamLaws =
                 && Vector.ofSeq (Seq.ofList byIndex) = v
                 && Vector.init m (fun i -> v[i]) = v
 
-            reads.Check(agree, fun () -> at "a Vector read disagreed with the indexer"))
+            reads.Check(agree, fun () -> at "a Vector read disagreed with the indexer")
+
+            // Law 3 over a bool vector (Phase 431): under Fable it is PACKED, a byte a row, and every
+            // read must still answer a boolean — `=` against `true` included, where a packed byte
+            // would answer `false` — and a borrow lends the bytes, which read as booleans by
+            // truthiness alone (DECISIONS.md D145.1). On .NET the same checks hold of a `bool[]`.
+            let bits = Array.init (rng.IntBelow 7) (fun _ -> rng.IntBelow 2 = 0)
+            let bv = Vector.ofArray bits
+            let k = Vector.length bv
+            let byBit = List.ofArray bits
+            let start = rng.IntBelow(k + 1)
+            let count = rng.IntBelow(k - start + 1)
+            let sliced = Vector.slice start count bv
+            let lent = Vector.Unsafe.borrow sliced
+
+            // A lent element is read as a CONDITION, the one reading a packed byte answers right on
+            // both hosts: `if b then true else false` would not do, the compiler reduces it to `b`.
+            let bit (b: bool) = if b then 1 else 0
+
+            let boolsAgree =
+                [ for i in 0 .. k - 1 -> bv[i] = true ] = List.map (fun b -> b = true) byBit
+                && Vector.toList bv = byBit
+                && List.ofArray (Vector.toArray bv) = byBit
+                && Vector.fold (fun acc b -> b :: acc) [] bv = List.rev byBit
+                && Vector.toList (Vector.map not bv) = List.map not byBit
+                && Vector.toList (Vector.mapi (fun i b -> b <> (i % 2 = 0)) bv) = List.mapi
+                    (fun i b -> b <> (i % 2 = 0))
+                    byBit
+                && Vector.exists id bv = List.exists id byBit
+                && Vector.tryFindIndex not bv = List.tryFindIndex not byBit
+                && Vector.tryItem k bv = None
+                && (k = 0 || Vector.tryItem 0 bv = Some(List.head byBit))
+                && (let seen = ResizeArray<bool>()
+                    Vector.iter seen.Add bv
+                    List.ofSeq seen = byBit)
+                && (let seen = ResizeArray<int * bool>()
+                    Vector.iteri (fun i b -> seen.Add(i, b)) bv
+                    List.ofSeq seen = List.indexed byBit)
+                && Vector.toList sliced = (byBit |> List.skip start |> List.truncate count)
+                && lent.Length = count
+                && [ for i in 0 .. count - 1 -> bit lent.Array[lent.Offset + i] ] = List.map bit (Vector.toList sliced)
+                && Vector.ofList byBit = bv
+                && Vector.adopt (Array.copy bits) = bv
+                && Vector.init k (fun i -> bits[i]) = bv
+                && hash (Vector.ofList byBit) = hash bv
+                && (k = 0 || Vector.ofList (List.map not byBit) <> bv)
+
+            reads.Check(boolsAgree, fun () -> at "a bool Vector read did not answer the boolean the indexer holds"))
 
         LawKit.results [ equality; bridge; reads ]
 

@@ -17,11 +17,14 @@ were weighed.
    both hosts. Under Fable the `Array` of a non-empty `Vector<bool>`'s borrow is its backing, a
    `Uint8ClampedArray` holding `1` for `true` and `0` for `false`, typed `bool[]` by F#. Nothing is
    copied, and a write through it is a write every holder sees, which is exactly 418's promise. A
-   borrower reads an element by truthiness: F# compiles `if a[i]`, `not a[i]` and `&&` to
-   JavaScript truthiness, so a condition reads correctly, but `a[i] = true`, `string a[i]`, a hash or
-   a boxed comparison sees the number. A write of `true` or `false` stores `1` or `0`, because the
-   clamped array converts on store, so a borrower that writes (breaking the contract) still writes a
-   value every holder reads as the boolean it wrote, and the ownership law sees it.
+   borrower reads an element as a CONDITION: F# compiles `if a[i] then …`, `not a[i]` and `&&` to
+   JavaScript truthiness, so a condition reads correctly. Used as a VALUE (`a[i] = true`,
+   `string a[i]`, a hash, a boxed comparison) the element is the number. That includes
+   `if a[i] then true else false`, which the compiler reduces to `a[i]`. The Fable leg found this: the
+   first draft of the new law read a lent element that way and went red under Fable alone.
+   A write of `true` or `false` stores `1` or `0`, because the clamped array converts on store, so a
+   borrower that writes (breaking the contract) still writes a value every holder reads as the boolean
+   it wrote, and the ownership law sees it.
 2. **`Unsafe.borrowBytes` beside a `borrow` that refuses a bool vector under Fable.** Rejected. It adds
    a member to both hosts, or to one, which would split the public surface by host. It also makes
    generic code that borrows any vector throw for one element type on one host: an interop layer that
@@ -51,9 +54,19 @@ pack.
 `iteri`, `fold`, `map`, `mapi`, `exists`, `tryFindIndex`, `tryItem`), equality and the hash read a
 packed element as `!!byte`, so `v[i] = true` holds on both hosts, `Vector.toArray` answers a plain array
 of booleans (a copy, as it always was), and a packed vector equals and hashes like the same booleans
-held plainly. A vector of any other element type reads exactly as before, at the cost of one field
-test per read. Core's own raw read of a mask's backing (`ColumnStorage.isSet`, the Phase 421 walk)
-reads it as `!!byte` too.
+held plainly. Core's own raw read of a mask's backing (`ColumnStorage.isSet`, the Phase 421 walk)
+reads it as `!!byte` too. Two choices about HOW the reads are written are part of this ruling,
+because the measurement (D145.5) decided them:
+
+- **Every `Vector` read under Fable indexes its backing directly**, packed or not, never through
+  fable-library's bounds-checked `item`. The range check stays the vector's own: the indexer checks
+  against the view's length, and a view's range lies within its backing by construction.
+- **Each module read tests `Packed` once, outside its loop.** A plain vector runs the loop it always
+  ran, and a packed one a loop of its own. A test inside the loop measured a bool count at four times
+  the cost and an unrelated float fold at about thirteen times.
+
+On .NET every read is the code it was. Its `#else` arm is the pre-phase source, and a decoded
+comparison of the two Release builds' IL finds every `Vector` member and module function identical.
 
 **D145.4 — `adopt` packs a boolean array; it is the one place `adopt` copies.** Under Fable,
 `Vector.adopt` of a non-empty boolean array copies it into a packed backing, so every builder that
@@ -72,10 +85,27 @@ figure. **Why 422 measured twice as slow:** its loop indexed both arrays through
 bounds-checked `item` helper, one function shared by the plain array and the typed one, so V8 saw a
 polymorphic element load. The cost belonged to that shared call site, not to the bytes. A raw
 measurement on node 25 of the same loop over each array, written directly, puts the byte arrays at the
-plain array's figure or below. The figures for this design are in the Phase 431 release entry, measured
-through Core's own reads (the indexer, `Validity.presentCount`, `Validity.isPresent`,
-`Column.isPresent`, `Column.aggregate`, `Column.cell`) at 1,000 and 100,000 rows. See D145.7 for the
-verdict.
+plain array's figure or below (100,000 rows: 0.079 to 0.082 ms against 0.082 to 0.085 ms).
+
+**Three more costs of the same kind, found by measuring this design.**
+
+1. **A first build read packed bytes through `item` as well.** That made the shared helper see one
+   more array kind, and a float fold at 1,000 rows ran three times slower. The fold had not changed;
+   the helper's history had.
+2. **Even with packed reads written directly, a float fold's figure depended only on what that helper
+   had seen first.** Alone it ran in 1.2 microseconds; after any other kernel, 6.7 to 15. Before the
+   phase it was 5.8 alone and 2.8 to 5.7 after another, so both builds swung, in opposite directions. Reading
+   every backing directly (D145.3) removed the swing: the same fold measures 0.5 microseconds whatever
+   ran first.
+3. **Storing a boolean into a clamped array converts it on a slow path**, at five times the cost of
+   storing the number. The packer stores `1` where an element is `true` and leaves the zero the new
+   array holds.
+
+**How it was measured.** The release entry carries the table. Core's own reads were timed (the
+indexer, `Validity.presentCount`, `Validity.isPresent`, `Column.isPresent`, `Column.aggregate`,
+`Column.cell`), with float and string reads as controls, at 1,000 and 100,000 rows. Each build ran in 16
+node processes, alternating between the two builds, and each process ran the kernels in an order drawn
+from its round number, so neither build was measured under one fixed JIT history.
 
 **D145.6 — `Column.ofTimestamps` refuses an instant its text could not name.** Phase 430 found that a
 fraction at or past its unit's scale renders ANOTHER instant's canonical text: `1000` in a millisecond
@@ -103,10 +133,30 @@ clause (e) refuses for a timestamp column, so the builder and the validator now 
   canonical (a year outside `0000`..`9999`), never another day's canonical text, so the builder cannot
   render a wrong date. `Table.validate` names it as before.
 
-**D145.7 — the verdict.** [filled from the measurement]
+**D145.7 — the verdict: the bar is MET, and the typed backing is built.** Medians over 16 processes
+each:
+
+- **Held bytes.** A bool vector, a bool column's values and a mask each hold 0.125 of what they held
+  at 100,000 rows (800,109 bytes to 100,310 for a vector). At 1,000 rows the figure is 0.155 to 0.183,
+  where the vector object's fixed size is a larger share. The bar asked for at most 0.25.
+- **Counting read.** The indexer loop measures 0.42 of the `bool[]` figure at 1,000 rows and 0.61 at
+  100,000. `Validity.presentCount` measures 0.12 and 0.11.
+- **Presence check.** `Validity.isPresent` measures 0.46 and 0.64, `Column.isPresent` 0.58 and 0.65,
+  and the Phase 421 `Count` walk 0.35 and 0.42. The bar asked for at most 1.25.
+- **The controls.** Float and string reads are as fast or faster. The float indexer measures 0.22 and
+  0.73, and the float fold 0.17 and 0.07, because the direct reads of D145.3 bypass the shared helper.
+- **What got slower, said plainly.** Building a bool vector through a generic constructor
+  (`Vector.init`) costs 1.15 times at 1,000 rows and 1.45 times at 100,000, because the plain array
+  `Array.init` makes is then packed. `Validity.ofArray` is faster (0.73 and 0.79), since its copy is
+  the pack. A consumer that borrows a bool vector and reads the lent array through F# indexing measures
+  1.9 to 2.2 times: that read goes through fable-library's `item`, which now sees a clamped array.
+  Interop that hands the array to JavaScript reads it directly, at the plain array's figure or below.
 
 **Consequences.** `Fuaran.Core.Column`'s public surface does not move: no member is added, removed or
-retyped, and the api baseline is unchanged. The change is behavioural. Under Fable, `Vector<bool>`'s
+retyped, and the api baseline is unchanged. The change is behavioural. On .NET, the decoded IL of the
+Release build differs from the pre-phase build in `Column.ofTimestamps` and its refusal helper, in its
+two callers (`ofDateTimeOffsets` and decode's timestamp arm, which inlined the old one-line body and now
+call it), and in nothing else but the source path and line of a match-failure literal in `aggregate`. Under Fable, `Vector<bool>`'s
 backing and what its borrow lends change (`retype`-class in effect for a Fable borrower, recorded in
 `STABILITY.md`'s ownership entry). On both hosts, `Column.ofTimestamps` raises where it built.
 Changing the Fable representation of `Vector<bool>` again, or what `borrow` lends for it, is major. No

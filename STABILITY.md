@@ -519,6 +519,19 @@ are **conformance-certified**, not asserted. Stable surfaces:
   by design: one NaN over another, because a NaN's payload is not portable across hosts. The contract
   is NOT an F* theorem — the models carry no mutation — and changing it (a public member that writes,
   a `slice` that copies, a second route to the backing array) is a **major** bump.
+- **A `Vector<bool>` under Fable, and what it lends (Phase 431, `1.0.0`, DECISIONS.md D145)** — .NET
+  is unchanged. **Guaranteed under Fable:** a non-empty vector of booleans (every bool column's values,
+  every `Mask`) is PACKED in a `Uint8ClampedArray`, `1`/`0`, a byte a row; every constructor packs,
+  `adopt` included (its one copy, unobservable to a caller keeping its promise); every read answers a
+  boolean, so `v[i] = true` holds on both hosts; and `Unsafe.borrow` lends the packed array itself, no
+  copy, seen by every holder when written. Its elements are `1`/`0` under a `bool[]` type: read one as a
+  CONDITION (`if a[i] then`), never as a value. Held by `columnVectorLaws` law 3 over a bool vector and
+  the ownership go-reds; changing the representation or what `borrow` lends is **major**.
+- **`Column.ofTimestamps` refuses what its text cannot spell (Phase 431, `1.0.0`, D145.6)** — it raises
+  `System.ArgumentException`, naming column, row, second and fraction, wherever `Table.validate`'s
+  timestamp clause would refuse (a fraction outside `[0, scale)`, a second not whole or not in
+  `0000`..`9999`, a fraction vector of another length), because such a row renders ANOTHER instant's
+  text; the public `Timestamps` case still checks nothing. Widening the refusal is **major**.
 - **`Query`** — the data-acquisition seam + its invocation key (also `canonicalFloat`-routed) are
   certified by `Conformance.queryLaws`.
 

@@ -974,7 +974,10 @@ let private genTypedColumn (seed: int) : Column =
                             (if pick 2 = 0 then 0 else pick scale))
                 )
 
-        Column.ofTimestamps "c" unit seconds fraction validity
+        // From the union case: `Column.ofTimestamps` refuses this storage since Phase 431, and the
+        // case is the route that can still hold it.
+        { Name = "c"
+          Data = Timestamps(unit, seconds, fraction, validity) }
     | DecimalType ->
         Column.ofDecimals "c" (view (fun () -> if pick 40 = 0 then "x" else decimals[pick decimals.Length])) validity
 

@@ -2013,6 +2013,42 @@ let ownershipTests =
 
                   Expect.stringContains cx "column 0 \"x\" (float): the bytes of its values moved" what
 
+          testCase "go-red: a write through a borrowed bool VALUES vector is named as its values moving (Phase 431)"
+          <| fun _ ->
+              // Under Fable a bool vector is packed bytes and its borrow lends them (DECISIONS.md D145.1);
+              // a write of a boolean through the lent array is a write every holder reads.
+              let flipValue (columns: Column list) =
+                  match Column.tryBools (sampleColumn "b" columns) with
+                  | Some xs ->
+                      let lent = Vector.Unsafe.borrow xs
+                      lent.Array[lent.Offset] <- not lent.Array[lent.Offset]
+                  | None -> failtest "the kit's sample has no bool column b"
+
+              let cx = ownershipFailure (Conformance.columnOwnershipLaws flipValue 4242 20)
+              Expect.stringContains cx "column 3 \"b\" (bool): the bytes of its values moved" "the values"
+              Expect.isFalse (cx.Contains "validity mask") "not its mask"
+
+          testCase "go-red: a borrowed write past one view's MASK is named as its NEIGHBOUR's mask moving (Phase 431)"
+          <| fun _ ->
+              // `f` and `g` hold adjacent views of one mask array, a `Vector<bool>`: the bit one past
+              // `f`'s range is `g`'s first, on .NET a `bool[]` and under Fable one packed array.
+              let overrun (columns: Column list) =
+                  match Column.validity (sampleColumn "f" columns) with
+                  | Mask m ->
+                      let lent = Vector.Unsafe.borrow m
+                      let next = lent.Offset + lent.Length
+                      lent.Array[next] <- not lent.Array[next]
+                  | AllValid -> failtest "the kit's sample holds f's mask as a Mask whatever the draw"
+
+              let cx = ownershipFailure (Conformance.columnOwnershipLaws overrun 4242 20)
+
+              Expect.stringContains
+                  cx
+                  "column 2 \"g\" (float): the bytes of its validity mask moved"
+                  "the neighbour's mask"
+
+              Expect.isFalse (cx.Contains "column 1 \"f\"") "not the column whose mask was borrowed"
+
           testCase "a draw that builds no column reds the family as never reached, not green over nothing"
           <| fun _ ->
               let results = Conformance.columnOwnershipLawsWith ignore (fun r -> [], r) 4242 20
@@ -2682,8 +2718,11 @@ let temporalTests =
                   (Column.ofDates "d" (Vector.ofList [ TemporalText.MaxDay + 1 ]) (Validity.ofList [ false ]))
                   "an absent row is not read"
 
+              // Built from the union case: since Phase 431 `Column.ofTimestamps` refuses every one of
+              // these itself, and the case is the route that still reaches `Table.validate`.
               let ts u seconds fraction =
-                  Column.ofTimestamps "t" u (Vector.ofList seconds) fraction AllValid
+                  { Name = "t"
+                    Data = Timestamps(u, Vector.ofList seconds, fraction, AllValid) }
 
               refuses (ts TimeUnit.Seconds [ 0.5 ] None) "a second that is not whole"
               refuses (ts TimeUnit.Seconds [ nan ] None) "a NaN second"
@@ -3120,3 +3159,121 @@ let fieldTests =
                   (fp (b (Field.withUnit (unitOf "m/s"))))
                   (fp (b (Field.withUnit (unitOf "m.s-1"))))
                   "a unit by its algebra, not its spelling" ]
+
+/// Phase 431 (DECISIONS.md D145.6): `Column.ofTimestamps` refuses a present row its canonical text
+/// could not spell, because the text of such a row is ANOTHER instant's — so `Column.cell` never
+/// renders a wrong instant from a column a builder made. The bool-vector half of the phase is a
+/// Fable representation; on .NET it is held by `columnVectorLaws`' bool reads and the ownership
+/// go-reds above.
+[<Tests>]
+let timestampBuilderTests =
+    let build (u: TimeUnit) (seconds: float list) (fraction: int list option) (validity: Validity) =
+        Column.ofTimestamps "t" u (Vector.ofList seconds) (Option.map Vector.ofList fraction) validity
+
+    let refused (what: string) (expected: string list) (f: unit -> Column) =
+        match
+            (try
+                Ok(f ())
+             with :? System.ArgumentException as e ->
+                 Error e.Message)
+        with
+        | Ok c -> failtestf "%s: built %A" what c
+        | Error message ->
+            for part in expected do
+                Expect.stringContains message part what
+
+    testList
+        "Column.ofTimestamps refuses an instant its text cannot spell (Phase 431)"
+        [ testCase "why: the unchecked text of such a row is another instant's canonical text"
+          <| fun _ ->
+              // Phase 430's finding, pinned: the reason the builder refuses rather than renders.
+              Expect.equal
+                  (TemporalText.instantText TimeUnit.Milliseconds 0.0 1000)
+                  (TemporalText.instantText TimeUnit.Milliseconds 0.0 100)
+                  "1000 in a millisecond column reads as .1"
+
+              Expect.equal
+                  (TemporalText.instantText TimeUnit.Seconds 1.5 0)
+                  (TemporalText.instantText TimeUnit.Seconds 1.0 0)
+                  "a second that is not whole reads as its floor"
+
+          testCase "each uncarriable row is refused, naming the column, its unit and the row"
+          <| fun _ ->
+              let ms = TimeUnit.Milliseconds
+
+              refused
+                  "a fraction at the scale"
+                  [ "t: a timestamp_ms column"; "[0, 1000)"; "row 1"; "fraction 1000" ]
+                  (fun () -> build ms [ 0.0; 60.0 ] (Some [ 0; 1000 ]) AllValid)
+
+              refused "a negative fraction" [ "row 0"; "fraction -1" ] (fun () ->
+                  build ms [ 0.0 ] (Some [ -1 ]) AllValid)
+
+              refused "a fraction in a seconds column" [ "t: a timestamp column"; "[0, 1)"; "row 0" ] (fun () ->
+                  build TimeUnit.Seconds [ 0.0 ] (Some [ 1 ]) AllValid)
+
+              refused "a second that is not whole" [ "row 0"; "second 0.5" ] (fun () ->
+                  build TimeUnit.Seconds [ 0.5 ] None AllValid)
+
+              refused "a NaN second" [ "row 0" ] (fun () -> build TimeUnit.Seconds [ nan ] None AllValid)
+
+              refused "a second past 9999" [ "row 0" ] (fun () ->
+                  build TimeUnit.Seconds [ TemporalText.maxSecond + 1.0 ] None AllValid)
+
+              refused "a second before 0000" [ "row 0" ] (fun () ->
+                  build TimeUnit.Seconds [ TemporalText.minSecond - 1.0 ] None AllValid)
+
+              refused "a short fraction vector" [ "its fraction vector has 1 rows where its seconds have 2" ] (fun () ->
+                  build ms [ 0.0; 1.0 ] (Some [ 1 ]) AllValid)
+
+              refused "a long fraction vector" [ "its fraction vector has 2 rows where its seconds have 1" ] (fun () ->
+                  build ms [ 0.0 ] (Some [ 1; 2 ]) AllValid)
+
+          testCase "what the builder still admits: absent rows are not read, and the canonical range's ends are held"
+          <| fun _ ->
+              let c =
+                  build TimeUnit.Milliseconds [ 0.0; 0.5 ] (Some [ 1; 1000 ]) (Validity.ofList [ true; false ])
+
+              Expect.equal (Column.cell 0 c) (Timestamp "1970-01-01T00:00:00.001Z") "the present row"
+              Expect.equal (Column.cell 1 c) Null "the absent row holds what it was handed, unread"
+
+              let ends =
+                  build
+                      TimeUnit.Nanoseconds
+                      [ TemporalText.minSecond; TemporalText.maxSecond ]
+                      (Some [ 0; 999999999 ])
+                      AllValid
+
+              Expect.equal (Column.cell 0 ends) (Timestamp "0000-01-01T00:00:00Z") "the first instant"
+              Expect.equal (Column.cell 1 ends) (Timestamp "9999-12-31T23:59:59.999999999Z") "the last instant"
+
+          testCase "a column the builder makes renders, in every present row, the instant its text reads back"
+          <| fun _ ->
+              let mutable st = 431.0
+
+              let next (k: int) =
+                  st <- (st * 48271.0) % 2147483647.0
+                  int (st % float k)
+
+              for u in
+                  [ TimeUnit.Seconds
+                    TimeUnit.Milliseconds
+                    TimeUnit.Microseconds
+                    TimeUnit.Nanoseconds ] do
+                  for _ in 1..200 do
+                      let n = 1 + next 6
+
+                      let seconds =
+                          List.init n (fun _ -> TemporalText.minSecond + float (next 2000000000) * 157.0)
+
+                      let fraction = List.init n (fun _ -> next (TimeUnit.scale u))
+                      let c = build u seconds (Some fraction) AllValid
+
+                      for i in 0 .. n - 1 do
+                          match Column.cell i c with
+                          | Timestamp text ->
+                              Expect.equal
+                                  (TemporalText.tryInstant u text)
+                                  (Some(seconds[i], fraction[i]))
+                                  (sprintf "%s row %d reads back as its own instant" text i)
+                          | other -> failtestf "expected a timestamp, got %A" other ]
