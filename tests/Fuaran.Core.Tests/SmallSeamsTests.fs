@@ -181,7 +181,7 @@ let private throwing: RuleFamily<RNode, string> =
       Run = fun _ _ -> failwith "rule exploded" }
 
 let private table (cols: (string * ColumnType * Cell list) list) : Table =
-    { Schema = cols |> List.map (fun (n, ty, _) -> n, ty)
+    { Schema = cols |> List.map (fun (n, ty, _) -> Field.create n ty)
       Columns = cols |> List.map (fun (n, ty, cells) -> cellColumn n ty cells) }
 
 let private orFail (r: Result<'a, RegistrationError>) : 'a =
@@ -290,7 +290,7 @@ let private validatorTests =
           testCase "unique refuses a ragged key column instead of reporting phantom duplicates; Null is a key value"
           <| fun _ ->
               let ragged =
-                  { Schema = [ "a", IntType; "b", IntType ]
+                  { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
                     Columns =
                       [ cellColumn "a" IntType [ Int 1; Int 2; Int 3 ]
                         cellColumn "b" IntType [ Int 1 ] ] }

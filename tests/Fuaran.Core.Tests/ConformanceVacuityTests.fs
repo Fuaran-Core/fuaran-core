@@ -1516,7 +1516,7 @@ let floorTests =
                       Ready
                           { r with
                               Rows =
-                                  { Schema = [ "other", IntType ]
+                                  { Schema = [ Field.create "other" IntType ]
                                     Columns = [ cellColumn "other" IntType [ Int 11 ] ] } }
                   | d -> d
 

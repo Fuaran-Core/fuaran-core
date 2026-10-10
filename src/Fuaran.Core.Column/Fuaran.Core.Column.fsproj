@@ -4,13 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <PackageId>Fuaran.Core.Column</PackageId>
-    <Description>Fuaran.Core.Column — the relational/columnar data strand: a typed, null-aware, Arrow-compatible columnar model (int/float/bool/string/date/timestamp/decimal with a first-class validity mask) and its canonical wire codec (column-oriented, reusing the Fuaran.Core.Wire canonical-float rules so numeric columns are byte-identical across hosts; decode is Result-typed with the codec error envelope, and refuses a cell outside its column type). No tree-witness coupling, no base node type. FSharp.Core only, Fable-clean on encode and decode.</Description>
+    <Description>Fuaran.Core.Column — the relational/columnar data strand: a typed, null-aware, Arrow-compatible columnar model (int/float/bool/string/date/timestamp/decimal with a first-class validity mask), schema entries that carry a unit, a label, a description and extension members behind builders, and its canonical wire codec (column-oriented, reusing the Fuaran.Core.Wire canonical-float rules so numeric columns are byte-identical across hosts; decode is Result-typed with the codec error envelope, and refuses a cell outside its column type). No tree-witness coupling, no base node type. FSharp.Core only, Fable-clean on encode and decode.</Description>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="DecimalText.fs" />
     <Compile Include="TemporalText.fs" />
     <Compile Include="ColumnType.fs" />
     <Compile Include="Cell.fs" />
+    <Compile Include="Field.fs" />
     <Compile Include="Vector.fs" />
     <Compile Include="Column.fs" />
     <Compile Include="Table.fs" />
@@ -20,6 +21,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

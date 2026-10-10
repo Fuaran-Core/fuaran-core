@@ -471,6 +471,25 @@ are **conformance-certified**, not asserted. Stable surfaces:
   the two cases' shapes, the unit's four cases and their tags, and the text and order rules; a fifth
   unit, or a change to the text or the order, is **major**. No .NET date type is storage: `DateOnly`
   and `DateTimeOffset` are edge accessors, absent under Fable.
+- **The schema field (Phase 427, `1.0.0`, DECISIONS.md D144)** — a schema entry is an opaque `Field`:
+  a name, a type and the metadata that says what the column means — an optional `UnitOfMeasure`, a
+  label, a description and an extension map of namespaced keys to strings — built through
+  `Field.create` and the `Field.with…` builders and read through its properties; `Schema` is
+  `Field list`. **Guaranteed:** the representation is internal, so a new metadata member is a new
+  builder and property, never a break; metadata is part of a field's identity (equality is structural
+  over every member; `Schema.fingerprint` moves with it and is unchanged over a schema without it);
+  metadata is not storage (`Table.validate` reads none of it, a `Column` carries its name and storage
+  only, and `Table.tryField` reads a column's field by name); the wire writes the members a field states
+  and no other — `unit` as the unit's canonical text, `label`, `description`, `ext` — so a table, a
+  delta or a declaration without metadata encodes to the bytes it did before; decode reads a parseable
+  unit spelling to the unit and refuses one the algebra does not parse, naming the column; the delta
+  reports a metadata change as `Amended` beside a retype and replays it; and `Schema.classify` reads a
+  stated unit replaced or withdrawn on a depended-on column as `Breaking`, a label or description change
+  as compatible, and an extension change as `Unknown`. Core never interprets an extension member.
+  Stable from `1.0.0`: the member names on the wire, the absent-when-unstated rule, the fingerprint's
+  pre-image, and the `FieldChange` cases and their `amended` spellings; a new metadata member is
+  **additive** (a new builder, property, wire member and `FieldChange` case), and a change to any of the
+  above is **major**.
 - **The ownership contract of `Vector` (Phase 418, `1.0.0`)** — the type is the contract, not a
   convention over arrays. **Guaranteed:** no public member of `Vector<'T>`, of the `Vector` module or
   of the column layer writes into a vector's storage, so a vector's contents never change after
@@ -538,6 +557,27 @@ a witness field (GP2); staleness is a returned `Set`, not a stored flag. Its pub
 `dirtyFromChangedIds` left at `1.0.0`) is
 FSharp.Core-only + Fable-clean and carries the same within-a-major additive-growth commitment as the
 rest of the substrate.
+
+### The unit algebra (`Fuaran.Core.Unit`, Phase 426, `1.0.0`)
+
+`Fuaran.Core.Unit` is a unit as a runtime VALUE — the dimension algebra over a stated UCUM subset and
+ISO 4217 currencies, [docs/units.md](docs/units.md) — and from `1.0.0` it is a stability-critical
+member of the substrate: the schema field carries one (Phase 427), so the algebra's answers are part of
+the column wire's meaning. **Guaranteed:** `UnitOfMeasure` is held in one canonical form and
+`Unit.render` writes ONE text per unit, which `Unit.parse` reads back (`parse (render u) = u`); identity
+is the canonical atom product, not the denotation (`km/h` and `m/s` are different, compatible units with
+the exact factor `5/18`; `N` and `kg.m/s2` differ with the factor `1`); `mul`, `div` and `pow` are total
+over the type and raise only past the `int32` exponent range; `compatible` and `conversionFactor` read the
+denotation, and the factor is an exact rational (`Ratio`, lowest terms); a refusal is one of the eight
+`UnitRefusal` cases, naming the token and its zero-based position; affine and logarithmic units
+(`Cel`, `[degF]`, `B`, `Np`, …) are refused as `NonRatioUnit`, so every unit the type holds is a ratio
+scale and the algebra is total over it. The ADMITTED VOCABULARY — the atoms and their factors in
+`docs/units.md`'s table, the twenty prefixes, the currency shape — is the contract: adding an atom,
+a prefix or an alias is **additive** (a text that was refused now parses; no text that parsed changes
+its unit or its text); changing an atom's factor, its dimension, which atoms take a prefix, the
+canonical text of any unit, or the refusal class of any text is **major**. The package takes no
+project reference and is FSharp.Core-only, which is also guaranteed: a consumer that needs units without
+columns takes only it, and `Fuaran.Core.Column` depends on it, never the reverse.
 
 ### Public because a sibling Core package calls it (`0.19.0`)
 

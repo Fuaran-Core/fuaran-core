@@ -788,6 +788,9 @@ let private realCases () =
     // Phase 422: the temporal encodings' tested row, evidenced by the column suite's own laws (the
     // calendar arithmetic is not yet an F* theorem).
     |> Set.union (caseNames ColumnTests.temporalTests |> Set.ofList)
+    // Phase 427: the schema field's tested row, evidenced by the column suite's field cases (the
+    // field codec is Phase 428's theorem).
+    |> Set.union (caseNames ColumnTests.fieldTests |> Set.ofList)
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.

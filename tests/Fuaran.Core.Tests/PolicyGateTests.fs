@@ -335,7 +335,7 @@ let tests =
               let q: Query =
                   { Id = "feed"
                     Params = []
-                    ResultSchema = [ "n", IntType ]
+                    ResultSchema = [ Field.create "n" IntType ]
                     Effect =
                       { Effect.pureDeterministic with
                           Determinism = Effect.network }

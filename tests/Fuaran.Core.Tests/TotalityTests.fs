@@ -967,7 +967,7 @@ let tests =
 
               let expected =
                   Embedded
-                      { Schema = [ "a", IntType ]
+                      { Schema = [ Field.create "a" IntType ]
                         Columns = [ column "a" IntType [ Int 1 ] ] }
 
               Expect.equal (ColumnCodec.decode wire) (Ok expected) "the table is the schema's"

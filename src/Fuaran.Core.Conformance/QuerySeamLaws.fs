@@ -90,8 +90,27 @@ module internal QuerySeamLaws =
 
         let hashFn = OpStream.defaultHash
 
+        // Phase 427 — the result field states metadata one iteration in three, keyed on the iteration
+        // rather than drawn, so every earlier draw keeps its sample: the declaration and the realized
+        // result carry the same field, so the codec round trips below carry a unit, a label, a
+        // description and an extension member as well as a name and a type.
+        let kg =
+            match Unit.parse "kg" with
+            | Ok u -> u
+            | Error e -> failwithf "the kit's unit kg did not parse: %A" e
+
         LawKit.run iterations seed (fun rng i at ->
             let nRows = rng.IntBelow 5
+
+            let nField =
+                if i % 3 = 0 then
+                    Field.create "n" IntType
+                    |> Field.withUnit kg
+                    |> Field.withLabel "Count"
+                    |> Field.withDescription ("the count in iteration " + string i)
+                    |> Field.withExt "kit.iteration" (string i)
+                else
+                    Field.create "n" IntType
 
             let q: Query =
                 { Id = "q-" + string i
@@ -99,7 +118,7 @@ module internal QuerySeamLaws =
                     [ { Name = "p0"
                         Type = IntType
                         Required = true } ]
-                  ResultSchema = [ "n", IntType ]
+                  ResultSchema = [ nField ]
                   Effect =
                     { Host = ReadsHost
                       Determinism = Effect.network }
@@ -153,7 +172,7 @@ module internal QuerySeamLaws =
             // byte-identical replay of the realized result through the Phase 27 seam.
             let realized: QueryResult =
                 { Rows =
-                    { Schema = [ "n", IntType ]
+                    { Schema = [ nField ]
                       Columns = [ Column.ofInts "n" (Vector.init nRows id) AllValid ] }
                   PageNum = 0
                   TotalRowCount = Some nRows
@@ -527,7 +546,7 @@ module internal QuerySeamLaws =
                 // ---- Phase 398: the declared filter and order ----
                 // Drawn after every earlier draw, so the laws above keep the samples they had. One
                 // predicate of each kind in turn over a two-column result, one drawn order key.
-                let shapeSchema = [ "n", IntType; "s", StringType ]
+                let shapeSchema = [ Field.create "n" IntType; Field.create "s" StringType ]
                 let lit = rng.IntBelow 100
 
                 let predicate =

@@ -129,7 +129,8 @@ type Query =
         /// The parameters an invocation may bind, in declaration order; an argument naming none
         /// of them is refused as `UnknownParam`.
         Params: QueryParam list
-        /// The columns of one result row, as (name, type) pairs in column order.
+        /// The columns of one result row — each a `Field` (name, type and, since Phase 427, the
+        /// metadata that says what the column means) in column order.
         ResultSchema: Schema
         /// Tells the caller whether to journal: a non-empty determinism set means the realized
         /// result is captured under `invocationKey`, an empty one that the query re-evaluates.
@@ -350,7 +351,7 @@ module internal QueryShape =
                 | Ok col -> col
                 | Error _ -> Column.ofStrs column Vector.empty AllValid
 
-        { Schema = [ column, col.Type ]
+        { Schema = [ Field.create column col.Type ]
           Columns = [ col ] }
 
     /// A literal's JSON value: the value the column codec writes for that one cell. A literal is
@@ -492,7 +493,7 @@ module internal QueryShape =
         | Ok col ->
             match
                 Table.validate
-                    { Schema = [ c, col.Type ]
+                    { Schema = [ Field.create c col.Type ]
                       Columns = [ col ] }
             with
             | Ok() -> None
@@ -504,14 +505,16 @@ module internal QueryShape =
     /// (`IllFormedLiteral`), and a literal of another type (`PredicateTypeMismatch`), checked in that
     /// order per predicate, predicates in order.
     let whereFault (schema: Schema) (where: ColumnPredicate list) : (int * QueryError) option =
-        let declared = schema |> List.map fst
+        let declared = schema |> List.map _.Name
 
         let fault (p: ColumnPredicate) : QueryError option =
             let c = column p
 
-            match schema |> List.tryFind (fun (n, _) -> n = c) with
+            match schema |> List.tryFind (fun f -> f.Name = c) with
             | None -> Some(UnknownColumn(c, declared))
-            | Some(_, ty) ->
+            | Some f ->
+                let ty = f.Type
+
                 match p, literal p with
                 | ColumnPredicate.Contains _, _ when ty <> StringType -> Some(PredicateNotApplicable(tag p, c, ty))
                 | _, Some Null ->
@@ -539,7 +542,7 @@ module internal QueryShape =
     /// an undeclared column (`UnknownColumn`), then a column named a second time
     /// (`DuplicateSortColumn`, at its second occurrence).
     let orderFault (schema: Schema) (order: SortKey list) : (int * QueryError) option =
-        let declared = schema |> List.map fst
+        let declared = schema |> List.map _.Name
 
         order
         |> List.indexed
@@ -1218,4 +1221,4 @@ module Query =
               "x-result",
               JObj
                   [ "type", JStr "object"
-                    "properties", JObj(q.ResultSchema |> List.map (fun (n, t) -> n, columnSchema t)) ] ]
+                    "properties", JObj(q.ResultSchema |> List.map (fun f -> f.Name, columnSchema f.Type)) ] ]

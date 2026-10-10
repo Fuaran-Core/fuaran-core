@@ -109,7 +109,7 @@ let private readings: Query =
           { Name = "limit"
             Type = IntType
             Required = false } ]
-      ResultSchema = [ "station", StringType; "celsius", FloatType ]
+      ResultSchema = [ Field.create "station" StringType; Field.create "celsius" FloatType ]
       Effect =
         { Host = ReadsHost
           Determinism = Effect.network }
@@ -123,7 +123,7 @@ let private stations: Query =
     { readings with
         Id = "stations"
         Params = []
-        ResultSchema = [ "station", StringType ] }
+        ResultSchema = [ Field.create "station" StringType ] }
 
 let private queries =
     QueryRegistry.register readings QueryRegistry.empty
@@ -144,7 +144,9 @@ let private invoices: Query =
           { Name = "day"
             Type = DateType
             Required = false } ]
-      ResultSchema = [ "total", DecimalType; "at", TimestampType TimeUnit.Seconds ]
+      ResultSchema =
+        [ Field.create "total" DecimalType
+          Field.create "at" (TimestampType TimeUnit.Seconds) ]
       Effect = Effect.pureDeterministic
       Source = Ref "ledger"
       TimeoutMs = None
@@ -793,7 +795,7 @@ let tests =
 
                     let result =
                         { Rows =
-                            { Schema = [ "total", DecimalType ]
+                            { Schema = [ Field.create "total" DecimalType ]
                               Columns = [ cellColumn "total" DecimalType [ Decimal "12.5" ] ] }
                           PageNum = 1
                           TotalRowCount = Some 1

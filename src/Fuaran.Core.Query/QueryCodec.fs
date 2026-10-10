@@ -49,16 +49,29 @@ module QueryCodec =
 
     // ---- schema ----
 
+    // Phase 427 — a result column is a `Field`, written and read by the column codec's schema-entry
+    // codec (`ColumnCodec.fieldJson` / `decodeField`): `{name, type}` and the metadata members the
+    // field states. This codec spelled the entry itself before, as `{name, type}`.
     let private schemaJson (s: Schema) : JVal =
-        JArr(
-            s
-            |> List.map (fun (n, t) -> JObj [ "name", JStr n; "type", JStr(colTypeStr t) ])
-        )
+        JArr(s |> List.map ColumnCodec.fieldJson)
 
-    let private schemaOf: Decoder<Schema> =
-        Decoder.list (fun e ->
-            Decoder.field "name" Decoder.str e
-            |> Result.bind (fun n -> Decoder.field "type" colTypeOf e |> Result.map (fun t -> n, t)))
+    /// The members a result column may carry — the strict reader's roster (Phase 310).
+    let internal fieldMembers =
+        [ "name"; "type"; "unit"; "label"; "description"; "ext" ]
+
+    let private fieldOf: Decoder<Field> =
+        fun e ->
+            match ColumnCodec.decodeField e with
+            | Ok f -> Ok f
+            | Error err ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.OutOfRange
+                        "a result column"
+                        ("not a result column the column codec reads: " + ColumnCodec.errorString err)
+                )
+
+    let private schemaOf: Decoder<Schema> = Decoder.list fieldOf
 
     // ---- optional int ----
 
@@ -373,7 +386,7 @@ module QueryCodec =
               "orderBy" ]
             el
         |> Result.bind (fun () -> within "params" (each (members "query parameter" [ "name"; "type"; "required" ])) el)
-        |> Result.bind (fun () -> within "resultSchema" (each (members "result column" [ "name"; "type" ])) el)
+        |> Result.bind (fun () -> within "resultSchema" (each (members "result column" fieldMembers)) el)
         |> Result.bind (fun () -> within "effect" (members "effect" EffectCodec.members) el)
         |> Result.bind (fun () ->
             within "where" (each (fun p -> members "filter predicate" (QueryShape.predicateMembers p) p)) el)

@@ -39,11 +39,50 @@ let private allTypes =
 
 let private namePool = [ "a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"; "x|y"; "\u0001" ]
 
-/// A schema naming no column twice: up to six names from the pool, each with a drawn type.
+/// The units a drawn field may state (Phase 427), parsed once from their canonical texts.
+let private unitPool: UnitOfMeasure list =
+    [ "kg"; "m"; "m/s"; "[GBP]"; "1" ]
+    |> List.map (fun text ->
+        match Unit.parse text with
+        | Ok u -> u
+        | Error e -> failwithf "unit pool text %s did not parse: %A" text e)
+
+/// `f` with drawn metadata (Phase 427) — none two times in three, else some of a unit, a label, a
+/// description and an extension member, each on an independent draw, so the delta law meets every
+/// member moving, appearing and disappearing.
+let private withDrawnMetadata (rng: Rng) (f: Field) : Field =
+    if rng.Below 3 <> 0 then
+        f
+    else
+        let f =
+            if rng.Below 2 = 0 then
+                Field.withUnit (rng.Pick unitPool) f
+            else
+                f
+
+        let f =
+            if rng.Below 2 = 0 then
+                Field.withLabel (rng.Pick [ "Mass"; "Speed"; "" ]) f
+            else
+                f
+
+        let f =
+            if rng.Below 2 = 0 then
+                Field.withDescription (rng.Pick [ "a sentence"; "another" ]) f
+            else
+                f
+
+        if rng.Below 2 = 0 then
+            Field.withExt (rng.Pick [ "vendor.k"; "vendor.j" ]) (rng.Pick [ "v"; "w" ]) f
+        else
+            f
+
+/// A schema naming no column twice: up to six names from the pool, each with a drawn type and
+/// drawn metadata.
 let private genSchema (rng: Rng) : Schema =
     rng.Shuffle namePool
     |> List.truncate (rng.Below 7)
-    |> List.map (fun n -> n, rng.Pick allTypes)
+    |> List.map (fun n -> Field.create n (rng.Pick allTypes) |> withDrawnMetadata rng)
 
 /// A target related to `old` the way edits relate them — some columns dropped, some retyped, some
 /// added, and the result reordered or not — or, one time in four, an unrelated schema.
@@ -53,18 +92,30 @@ let private genTarget (rng: Rng) (old: Schema) : Schema =
     else
         let kept = old |> List.filter (fun _ -> rng.Below 4 <> 0)
 
+        // Phase 427: a kept column's metadata is redrawn one time in three, so amendments appear
+        // beside retypes, on the same column as one and apart from one.
         let retyped =
             kept
-            |> List.map (fun (n, t) -> if rng.Below 4 = 0 then n, rng.Pick allTypes else n, t)
+            |> List.map (fun f ->
+                let f =
+                    if rng.Below 4 = 0 then
+                        Field.withType (rng.Pick allTypes) f
+                    else
+                        f
 
-        let used = old |> List.map fst |> Set.ofList
+                if rng.Below 3 = 0 then
+                    Field.create f.Name f.Type |> withDrawnMetadata rng
+                else
+                    f)
+
+        let used = old |> List.map _.Name |> Set.ofList
 
         let fresh =
             namePool
             |> List.filter (fun n -> not (used.Contains n))
             |> rng.Shuffle
             |> List.truncate (rng.Below 3)
-            |> List.map (fun n -> n, rng.Pick allTypes)
+            |> List.map (fun n -> Field.create n (rng.Pick allTypes) |> withDrawnMetadata rng)
 
         let combined = retyped @ fresh
 
@@ -134,23 +185,43 @@ let schemaPatchTests =
 
           testCase "an order that only moves an added column is recorded, and one that matches the derived order is not"
           <| fun () ->
-              let old = [ "a", IntType; "b", IntType ]
-              let appended = Schema.diff old [ "a", IntType; "b", IntType; "c", StringType ]
+              let old = [ Field.create "a" IntType; Field.create "b" IntType ]
+
+              let appended =
+                  Schema.diff
+                      old
+                      [ Field.create "a" IntType
+                        Field.create "b" IntType
+                        Field.create "c" StringType ]
+
               Expect.isEmpty appended.Order "the derived order needs no record"
               Expect.isFalse appended.Reordered "nothing common moved"
-              let placed = Schema.diff old [ "c", StringType; "a", IntType; "b", IntType ]
+
+              let placed =
+                  Schema.diff
+                      old
+                      [ Field.create "c" StringType
+                        Field.create "a" IntType
+                        Field.create "b" IntType ]
+
               Expect.equal placed.Order [ "c"; "a"; "b" ] "an addition placed first is recorded"
               Expect.isFalse placed.Reordered "the common columns kept their order"
 
-              Expect.equal (Schema.patch old placed) (Ok [ "c", StringType; "a", IntType; "b", IntType ]) "and replays"
+              Expect.equal
+                  (Schema.patch old placed)
+                  (Ok
+                      [ Field.create "c" StringType
+                        Field.create "a" IntType
+                        Field.create "b" IntType ])
+                  "and replays"
 
           testCase "patch refuses a delta computed against another schema, by name"
           <| fun () ->
-              let s = [ "a", IntType; "b", StringType ]
+              let s = [ Field.create "a" IntType; Field.create "b" StringType ]
 
               let delta =
                   { Schema.identityDelta with
-                      Removed = [ "z", IntType ] }
+                      Removed = [ Field.create "z" IntType ] }
 
               Expect.equal (Schema.patch s delta) (Error(AbsentColumn "z")) "removing an absent column"
 
@@ -158,7 +229,7 @@ let schemaPatchTests =
                   (Schema.patch
                       s
                       { Schema.identityDelta with
-                          Removed = [ "a", FloatType ] })
+                          Removed = [ Field.create "a" FloatType ] })
                   (Error(TypeDisagrees("a", FloatType, IntType)))
                   "removing a column recorded with another type"
 
@@ -182,7 +253,7 @@ let schemaPatchTests =
                   (Schema.patch
                       s
                       { Schema.identityDelta with
-                          Added = [ "a", IntType ] })
+                          Added = [ Field.create "a" IntType ] })
                   (Error(AlreadyPresent "a"))
                   "adding a column already present"
 
@@ -195,7 +266,7 @@ let schemaPatchTests =
                   "an order that is not a permutation"
 
               Expect.equal
-                  (Schema.patch [ "a", IntType; "a", IntType ] Schema.identityDelta)
+                  (Schema.patch [ Field.create "a" IntType; Field.create "a" IntType ] Schema.identityDelta)
                   (Error(DuplicateColumn "a"))
                   "a schema naming a column twice"
 
@@ -211,16 +282,45 @@ let schemaPatchTests =
                   Expect.equal (SchemaDeltaCodec.codec.Decode wire) (Ok delta) (sprintf "iter %d: codec" i)
 
               let d =
-                  { Added = [ "c", StringType ]
-                    Removed = [ "z", BoolType ]
+                  { Added = [ Field.create "c" StringType ]
+                    Removed = [ Field.create "z" BoolType ]
                     Retyped = [ "a", IntType, FloatType ]
+                    Amended = []
                     Reordered = true
                     Order = [ "b"; "a"; "c" ] }
 
               Expect.equal
                   (SchemaDeltaCodec.encode d)
                   """{"added":[{"name":"c","type":"string"}],"order":["b","a","c"],"removed":[{"name":"z","type":"bool"}],"reordered":true,"retyped":[{"from":"int","name":"a","to":"float"}]}"""
-                  "the canonical bytes: Ordinal-sorted keys, the column-type tags"
+                  "the canonical bytes: Ordinal-sorted keys, the column-type tags — and no `amended` member for a delta without one (Phase 427), so the pre-427 bytes stand"
+
+              // Phase 427 — a delta carrying metadata: the entries write the members a field states,
+              // and `amended` appears, one entry per member that moved, `from` / `to` absent where
+              // the field stated none.
+              let kg = Unit.parse "kg" |> Result.toOption |> Option.get
+              let lb = Unit.parse "[lb_av]" |> Result.toOption |> Option.get
+
+              let dm =
+                  { d with
+                      Added =
+                          [ Field.create "c" StringType
+                            |> Field.withLabel "C"
+                            |> Field.withExt "vendor.k" "v" ]
+                      Amended =
+                          [ "m", FieldChange.Unit(Some kg, Some lb)
+                            "m", FieldChange.Label(None, Some "Mass")
+                            "m", FieldChange.Description(Some "old", None)
+                            "m", FieldChange.Ext("vendor.k", Some "v", None) ] }
+
+              Expect.equal
+                  (SchemaDeltaCodec.encode dm)
+                  ("""{"added":[{"ext":{"vendor.k":"v"},"label":"C","name":"c","type":"string"}],"""
+                   + """"amended":[{"from":"kg","member":"unit","name":"m","to":"[lb_av]"},{"member":"label","name":"m","to":"Mass"},"""
+                   + """{"from":"old","member":"description","name":"m"},{"from":"v","key":"vendor.k","member":"ext","name":"m"}],"""
+                   + """"order":["b","a","c"],"removed":[{"name":"z","type":"bool"}],"reordered":true,"retyped":[{"from":"int","name":"a","to":"float"}]}""")
+                  "the canonical bytes of a delta with metadata"
+
+              Expect.equal (SchemaDeltaCodec.decode (SchemaDeltaCodec.encode dm)) (Ok dm) "and it round-trips"
 
           testCase "the delta codec refuses what it cannot carry, in the columnar envelope"
           <| fun () ->

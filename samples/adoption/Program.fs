@@ -264,7 +264,7 @@ let notesQuery: Query =
              Type = StringType
              Required = true }
           : QueryParam) ]
-      ResultSchema = [ "text", StringType ]
+      ResultSchema = [ Field.create "text" StringType ]
       Effect = Effect.pureDeterministic
       Source = Ref "outline"
       TimeoutMs = None
@@ -289,7 +289,7 @@ let notesResolver (args: (string * Cell) list) (_: Query) : Deferred<QueryResult
 
         Ready
             { Rows =
-                { Schema = [ "text", StringType ]
+                { Schema = [ Field.create "text" StringType ]
                   Columns = [ Column.ofStrs "text" (Vector.ofList texts) AllValid ] }
               PageNum = 0
               TotalRowCount = Some texts.Length

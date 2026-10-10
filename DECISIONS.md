@@ -1,5 +1,125 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-10 — D144: a schema entry is an opaque `Field` built through functions — name, type and the metadata that says what a column means (an optional `UnitOfMeasure`, a label, a description, an extension map); `Schema` is `Field list`; metadata is identity, not storage; the wire, the delta, the fingerprint and the query seam carry it, with every metadata-free byte unchanged
+
+**Context.** A schema was `(string * ColumnType) list` (`Table.fs`): a name and a type, and nowhere to say
+what a column measures or what it means — which lived in prose, chart titles and column names. Phase 426
+made a unit a runtime value (`Fuaran.Core.Unit`, [docs/units.md](docs/units.md)); Phase 427 attaches it
+to a column, with a label, a description and an extension map beside it, on the untagged `1.0.0` draft
+slot. Widening a tuple is a breaking change and so is adding a field to a public F# record (every
+full-literal construction stops compiling, FS0764), so the entry is reshaped ONCE into a type whose next
+member is additive. These are the rulings; each was settled before the code was written, and two of the
+shard's premises were sharpened against the tree (D144.1, D144.9).
+
+**D144.1 — `Field` is a record with an INTERNAL representation and public builders and readers.**
+`type Field = internal { FieldName; FieldType; FieldUnit: UnitOfMeasure option; FieldLabel: string
+option; FieldDescription: string option; FieldExt: Map<string, string> }`, read through the properties
+`Name`, `Type`, `Unit`, `Label`, `Description`, `Ext`, built with `Field.create name ty` and refined with
+`withType`, `withUnit` / `withoutUnit`, `withLabel` / `withoutLabel`, `withDescription` /
+`withoutDescription`, `withExt key value` / `withoutExt key`; `Field.hasMetadata` says whether any
+member is stated. Every builder is total and answers a new field. A consumer cannot write a record
+literal, so the next metadata member is a new internal field, a builder and a property — additive on
+the public surface, where a public record field would be a `record-widening` that breaks every literal.
+The record (rather than a class) keeps structural equality and hashing for free, on .NET and under Fable.
+**`Column` does NOT carry its `Field`** — the shard's sketch said it should, and the premise is
+SHARPENED: D142.3 made a column's `Type` a property DERIVED from its storage so that a column cannot
+disagree with itself, and a stored `Field` carries a stored `Type`, which would re-open exactly that
+disagreement (a second `TypeMismatch` clause, column against its own field). A column holds its name and
+its storage; its field is its schema entry, read from the table by name (`Table.tryField`) — Arrow's
+placement, where metadata belongs to the schema's fields and an array carries none. Nothing a column
+carried before is lost: `Column.Name` and `Column.Type` stand.
+
+**D144.2 — `Schema` is `Field list`, not an opaque type of its own.** The shard asked which. A list keeps
+every reader on `List` (`Table.columnNames` is `List.map _.Name`; a consumer's `List.tryFind` still
+finds a column), keeps the `Table` record's shape, and gives up nothing an opaque schema would hold,
+because the ENTRY is already opaque — there is no representation of a schema a consumer could depend on
+beyond the order of its fields, which is the one thing the list states. A metadata-free schema is spelled
+`[ Field.create "a" IntType; … ]` where it was `[ "a", IntType; … ]`: one token per entry at every
+construction site, and the compiler found every one (99 across `src/`, `tests/` and the sample).
+
+**D144.3 — metadata is part of a field's identity, and the fingerprint moves with it, injectively.**
+Equality is structural over every member, so two fields differing only in a unit differ, two schemas
+differing only in a unit differ, and `Schema.diff` reports the difference. `Schema.fingerprint` — the
+cross-host "same shape" stamp a consumer's provenance records — would otherwise read a `kg` column
+retagged `[lb_av]` as the same shape, which is the silent error Phase 426 exists to catch; so a field that
+states metadata contributes a SECOND pre-image element after its `name:type`: the canonical field
+encoding of `u<unit text>`, `l<label>`, `d<description>` (the letter says the member is stated, so an
+empty label differs from an absent one; an unstated member contributes the empty string) followed by each
+extension key and value in ordinal key order. Every member passes through the same injective
+`canonicalPreimage`, so the element ENDS WITH the fold separator, where a column element ends with a type
+tag's last character — the two kinds of element are told apart by their last character, the outer list
+stays injective, and a column whose NAME spells a metadata element is still a column (a test pins it). A
+schema with no metadata contributes no second element and keeps the fingerprint it had: every pinned
+`hashSweep` parity row and law vector stands.
+
+**D144.4 — the wire writes the members a field states and no other.** The schema entry (in a table's
+`schema` array, a delta's `added` and `removed`, and a query's `resultSchema`) is `{name, type}` plus
+`unit` (the unit's canonical text), `label`, `description` and `ext` (an object of string members), each
+ABSENT when the field states none and `ext` absent when empty — so every existing column's bytes stand
+(the suite's sample table is pinned to its pre-427 bytes). The entry codec is one pair,
+`ColumnCodec.fieldJson` / `ColumnCodec.decodeField`, which the schema-delta codec and the query codec
+call rather than copy (the query codec spelled its own `{name, type}` entry until now; that duplicate
+went). Decode READS A PARSEABLE SPELLING TO THE UNIT — `s-1.m` reads as the unit and re-encodes as its
+canonical text `m/s`, the lenient-ingest posture the decimal reader already takes — and REFUSES a text
+the algebra does not parse as `MalformedShape` naming the column, the text and the refusal class
+(`"m: unit 'furlong' is not a unit the kit parses: unknown unit symbol 'furlong' at position 0"`), the
+case `Table.validate` already uses for a cell's non-canonical text; a `unit`, `label` or `description`
+that is not a string, an `ext` that is not an object and an `ext` member that is not a string are the
+same class, each naming the column and the member. No `ColumnError` case is added: a typed `UnknownUnit`
+case was considered and declined — every exhaustive match in Core and in every consumer would move for a
+refusal whose detail already names everything a reader needs, and Phase 428's model of the field codec is
+the place to revisit that if the proof wants a case. A member the codec does not know is read past, as a
+member of the source object is, so a pre-427 reader meets a 427 document without refusing it.
+
+**D144.5 — the delta classifies a metadata change beside a retype, and the compatibility verdict reads
+the unit.** `SchemaDelta` gains `Amended: (string * FieldChange) list` — `[<RequireQualifiedAccess>] type
+FieldChange = Unit of before * after | Label of … | Description of … | Ext of key * before * after`, one
+entry per member that moved, in member order, extension keys ordinal, each carrying the value before and
+after (`None` where the field stated none) so `Schema.patch` can check it is applied to the schema it was
+computed against: a member that does not carry `before` is refused as the new `SchemaError.MetadataDisagrees
+(column, change)` (the retype's `TypeDisagrees` for metadata). `Added` and `Removed` carry whole fields,
+so `patch old (diff old target) = Ok target` holds with metadata (the Phase 317 generator now draws it).
+The wire gains `amended` ONLY WHEN NON-EMPTY — `{name, member, key?, from?, to?}`, `from`/`to` absent
+where the field stated none — so every delta between schemas without metadata keeps its bytes (pinned).
+**`Schema.classify`:** a depended-on column whose stated unit is REPLACED or WITHDRAWN is `Breaking`
+("its values no longer mean what was read"); a unit stated for the FIRST time is compatible (the consumer
+relied on no statement, and its bytes are unchanged — the information-widening reading, the same as a
+safe retype; the stricter reading, every unit change breaking, is a one-arm change if a consumer shows a
+case for it); a label or description change is compatible (presentation); an extension change on a
+depended-on column is `Unknown` — Core interprets no extension, so it cannot say, and this is the first
+production of a case that existed "so the verdict surface is complete" (GP5). `Breaking` outranks
+`Unknown`.
+
+**D144.6 — the query seam carries fields.** `Query.ResultSchema` is a `Schema` and so a `Field list`;
+its wire entries are the column codec's (D144.4); the strict reader's roster for a result column is
+`name, type, unit, label, description, ext`; `QueryShape.whereFault` and `orderFault` read a field's name
+and type, so a literal is held to the field's type as before; a settled result's `Rows.Schema` is held
+equal to the declaration's `ResultSchema` by the Phase 302 law, now field for field, and the query family
+states metadata on its result field one iteration in three (keyed on the iteration, so no earlier draw
+moves) so both codecs round-trip it under the law. `Query.toJsonSchema` is unchanged — projecting a
+label as `title` and a description as `description` into the model-facing schema is a natural next step
+and a contract the other hosts' twins would mirror, so it is left for a phase that names them.
+
+**D144.7 — the dependency runs `Column` → `Unit`, never the reverse**, as [docs/units.md](docs/units.md)
+states; `Fuaran.Core.Unit` keeps no project reference, so a consumer that needs units without columns
+takes only it. The package's stability entry and its `1.0.0` release entry are written by this phase
+(Phase 426 left them so as to stay off Phase 417's files); the README's dependency sentence follows.
+
+**D144.8 — what the models see.** `WireColumn.fst`'s bridge and `ColumnRefinement.fst`'s read a field's
+name and type and nothing else; the metadata members are OUTSIDE those models and recorded so at the
+bridge until Phase 428 extends it (the field codec and the unit algebra are its theorems). The
+ownership family (Phase 418) hashes data and mask and is untouched by metadata: metadata is not storage.
+Proofs.Coverage maps the new operations through the tested row `column-field-metadata`.
+
+**D144.9 — the law vectors.** A third family, `laws/field-laws.json` (`fieldLaws`), authored inputs
+over the entry's canonical bytes, the decode's canonicalisation and refusals, the fingerprint with and
+without metadata, the delta's `amended` member and its replay, and the compatibility verdict; the two
+existing files are re-emitted byte-identical. SHARPENED: the shared corpus indexes its `laws/` families
+in a hand-authored `manifest.json`, and adding a family to that index — and placing the file's copy
+beside it — is an edit in the corpus repository, which this phase declares (`copies.json`) and cannot
+perform; until it is made, the primary clone's corpus-copy and manifest-row checks for this family
+report the copy missing.
+
 ## 2026-10-10 — D143: temporal columns are integers — a date is `int32` days since 1970-01-01, a timestamp `float64` epoch seconds plus an `int32` fraction scaled to its `TimeUnit`; `TimestampType` carries the unit and `timestamp` stays the seconds tag; the canonical instant text is the minimal one, so `Cell.compare` orders timestamps chronologically rather than ordinally; and .NET date types exist only at the edge
 
 **Context.** Phase 417 made a column's storage a public typed vector and left dates and timestamps as

@@ -123,7 +123,7 @@ let private readingsQuery: Query =
           { Name = "limit"
             Type = IntType
             Required = false } ]
-      ResultSchema = [ "v", IntType ]
+      ResultSchema = [ Field.create "v" IntType ]
       Effect =
         { Host = ReadsHost
           Determinism = Effect.network }
@@ -146,7 +146,7 @@ let queryResolver (args: (string * Cell) list) (_: Query) : Deferred<QueryResult
     | _ ->
         Ready
             { Rows =
-                { Schema = [ "v", IntType ]
+                { Schema = [ Field.create "v" IntType ]
                   Columns = [ cellColumn "v" IntType [ Int 11 ] ] }
               PageNum = 0
               TotalRowCount = Some 1

@@ -195,7 +195,7 @@ module internal ColumnarSeamLaws =
                     Column.ofStrs name Vector.empty AllValid
 
             let t: Table =
-                { Schema = [ "a", aType; "s", StringType ]
+                { Schema = [ Field.create "a" aType; Field.create "s" StringType ]
                   Columns = [ built "a" aType aCells; built "s" StringType sCells ] }
 
             let defects = ColumnValidator.validate reg t

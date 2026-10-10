@@ -12,7 +12,7 @@ let private sampleQuery: Query =
           { Name = "region"
             Type = StringType
             Required = false } ]
-      ResultSchema = [ "region", StringType; "revenue", FloatType ]
+      ResultSchema = [ Field.create "region" StringType; Field.create "revenue" FloatType ]
       Effect =
         { Host = ReadsHost
           Determinism = Effect.network }
@@ -24,7 +24,7 @@ let private sampleQuery: Query =
 
 let private sampleResult: QueryResult =
     { Rows =
-        { Schema = [ "region", StringType; "revenue", FloatType ]
+        { Schema = [ Field.create "region" StringType; Field.create "revenue" FloatType ]
           Columns =
             [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) AllValid
               Column.ofFloats "revenue" (Vector.ofList [ 1234.5; 0.0 ]) (Validity.ofList [ true; false ]) ] }
@@ -141,7 +141,7 @@ let tests =
           <| fun _ ->
               let qr: QueryResult =
                   { Rows =
-                      { Schema = [ "region", StringType; "revenue", FloatType ]
+                      { Schema = [ Field.create "region" StringType; Field.create "revenue" FloatType ]
                         Columns =
                           [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) AllValid
                             Column.ofFloats "revenue" (Vector.ofList [ 1234.5; 0.0 ]) (Validity.ofList [ true; false ]) ] }
@@ -609,13 +609,13 @@ let private shaped: Query =
     { sampleQuery with
         Id = "shaped"
         ResultSchema =
-            [ "region", StringType
-              "revenue", FloatType
-              "day", DateType
-              "amount", DecimalType
-              "n", IntType
-              "ok", BoolType
-              "at", TimestampType TimeUnit.Seconds ]
+            [ Field.create "region" StringType
+              Field.create "revenue" FloatType
+              Field.create "day" DateType
+              Field.create "amount" DecimalType
+              Field.create "n" IntType
+              Field.create "ok" BoolType
+              Field.create "at" (TimestampType TimeUnit.Seconds) ]
         Where =
             [ ColumnPredicate.EqualTo("region", Str "UK")
               ColumnPredicate.GreaterThan("revenue", Float 1.5)
@@ -686,9 +686,67 @@ let whereOrderByTests =
               Expect.equal (QueryCodec.decode text) (Ok shaped) "lenient"
               Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok shaped) "strict"
 
+          testCase
+              "a declaration's result fields carry a unit, a label, a description and extensions through the codec and the registry (Phase 427)"
+          <| fun _ ->
+              let gbp =
+                  match Unit.parse "[GBP]" with
+                  | Ok u -> u
+                  | Error e -> failtestf "[GBP] did not parse: %A" e
+
+              let revenue =
+                  Field.create "revenue" FloatType
+                  |> Field.withUnit gbp
+                  |> Field.withLabel "Revenue"
+                  |> Field.withDescription "Net revenue in the period."
+                  |> Field.withExt "vendor.format" "#,##0"
+
+              let q =
+                  { sampleQuery with
+                      ResultSchema = [ Field.create "region" StringType; revenue ]
+                      Where = [ ColumnPredicate.GreaterThan("revenue", Float 0.0) ] }
+
+              let text = QueryCodec.encode q
+
+              Expect.stringContains
+                  text
+                  "{\"description\":\"Net revenue in the period.\",\"ext\":{\"vendor.format\":\"#,##0\"},\"label\":\"Revenue\",\"name\":\"revenue\",\"type\":\"float\",\"unit\":\"[GBP]\"}"
+                  "the result column is written as the column codec's schema entry"
+
+              Expect.equal (QueryCodec.decode text) (Ok q) "and read back, members and all (the lenient reader)"
+
+              Expect.equal
+                  (QueryCodec.decodeDetailedWith ReadPolicy.Strict text)
+                  (Ok q)
+                  "the strict reader admits the four metadata members of a result column"
+
+              Expect.isOk
+                  (QueryRegistry.register q QueryRegistry.empty)
+                  "the registry admits it, the literal held to the field's type"
+
+              match
+                  QueryRegistry.register
+                      { q with
+                          Where = [ ColumnPredicate.GreaterThan("revenue", Str "x") ] }
+                      QueryRegistry.empty
+              with
+              | Error(PredicateTypeMismatch("revenue", FloatType, StringType)) -> ()
+              | other -> failtestf "a literal of another type is refused against the field's type: %A" other
+
+              let result =
+                  { sampleResult with
+                      Rows =
+                          { sampleResult.Rows with
+                              Schema = q.ResultSchema } }
+
+              Expect.equal
+                  (QueryCodec.decodeResult (QueryCodec.encodeResult result))
+                  (Ok result)
+                  "a result's rows carry the fields through the result codec"
+
           testCase "the registry refuses a filter or an order its result schema does not admit, by name"
           <| fun _ ->
-              let declared = shaped.ResultSchema |> List.map fst
+              let declared = shaped.ResultSchema |> List.map _.Name
               Expect.isOk (QueryRegistry.register shaped QueryRegistry.empty) "the well-formed shape registers"
 
               Expect.equal
@@ -713,7 +771,9 @@ let whereOrderByTests =
               // literal fits a column at least as fine as its unit, and a finer literal is refused.
               let atMs =
                   { shaped with
-                      ResultSchema = shaped.ResultSchema @ [ "atMs", TimestampType TimeUnit.Milliseconds ] }
+                      ResultSchema =
+                          shaped.ResultSchema
+                          @ [ Field.create "atMs" (TimestampType TimeUnit.Milliseconds) ] }
 
               let register where =
                   QueryRegistry.register { atMs with Where = where } QueryRegistry.empty
@@ -776,7 +836,7 @@ let whereOrderByTests =
           testCase "the declaration reader refuses what the registry refuses, at the member at fault"
           <| fun _ ->
               let text = QueryCodec.encode shaped
-              let declared = shaped.ResultSchema |> List.map fst
+              let declared = shaped.ResultSchema |> List.map _.Name
 
               let refusedAt (edited: string) =
                   Expect.notEqual edited text "the probe edited the document"

@@ -10102,7 +10102,7 @@ let private queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query 
             { ModelQuery.query_param.p_name = p.Name
               ModelQuery.query_param.p_type = qColToModel p.Type
               ModelQuery.query_param.p_required = keepRequired && p.Required })
-      ModelQuery.query.q_schema = q.ResultSchema |> List.map (fun (n, t) -> n, qColToModel t)
+      ModelQuery.query.q_schema = q.ResultSchema |> List.map (fun f -> f.Name, qColToModel f.Type)
       ModelQuery.query.q_effect =
         { ModelQuery.effect_class.host = qHostToModel q.Effect.Host
           ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
@@ -10460,13 +10460,13 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
 
     let schema, where, order =
         if shaped = 0 then
-            [ "n", IntType ], [], []
+            [ Field.create "n" IntType ], [], []
         else
             let g = ref rng
             let t1, r8 = ConfRng.choose queryTypePool g.Value
             let t2, r9 = ConfRng.choose queryTypePool r8
             g.Value <- r9
-            let schema = [ "c1", t1; "c2", t2 ]
+            let schema = [ Field.create "c1" t1; Field.create "c2" t2 ]
 
             let column () =
                 let k, r = ConfRng.intBelow 8 g.Value
@@ -10475,9 +10475,9 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
                 if k = 0 then
                     "zz", StringType
                 else
-                    let c, r' = ConfRng.choose schema g.Value
+                    let f, r' = ConfRng.choose schema g.Value
                     g.Value <- r'
-                    c
+                    f.Name, f.Type
 
             let literal (ty: ColumnType) =
                 let k, r = ConfRng.intBelow 8 g.Value
@@ -10599,7 +10599,7 @@ let private genQueryArgs (q: Query) (r: ConfRng.T) : (string * Cell) list * Conf
 
 let private queryResultOf (page: int) : QueryResult =
     { Rows =
-        { Schema = [ "n", IntType ]
+        { Schema = [ Field.create "n" IntType ]
           Columns = [ Column.ofInts "n" (Vector.ofList [ page ]) AllValid ] }
       PageNum = page
       TotalRowCount = None
@@ -11100,7 +11100,9 @@ module private ColumnDiff =
         | WireColumn.Decimal s -> Decimal(canonFromChs s)
 
     let toModelTable (t: Table) : WireColumn.table<int, float> =
-        { schema = t.Schema |> List.map (fun (n, ty) -> canonToChs n, toModelType ty)
+        // Phase 427: the model's schema entry is a name and a type; a field's metadata (its unit,
+        // label, description and extension members) is OUTSIDE the model until Phase 428 extends it.
+        { schema = t.Schema |> List.map (fun f -> canonToChs f.Name, toModelType f.Type)
           columns =
             t.Columns
             |> List.map (fun c ->
@@ -11113,7 +11115,9 @@ module private ColumnDiff =
     /// already validated, so every column's cells fit its type and construction cannot refuse: a
     /// refusal here is a real defect, in the model's normal form or in `Column.ofCells`.
     let ofModelTable (t: WireColumn.table<int, float>) : Table =
-        { Schema = t.schema |> List.map (fun (n, ty) -> canonFromChs n, ofModelType ty)
+        { Schema =
+            t.schema
+            |> List.map (fun (n, ty) -> Field.create (canonFromChs n) (ofModelType ty))
           Columns =
             t.columns
             |> List.map (fun c ->
@@ -11201,7 +11205,7 @@ module private ColumnDiff =
                 + "]"
 
             (t.Schema
-             |> List.map (fun (n, ty) -> n + ":" + ColumnType.tag ty)
+             |> List.map (fun f -> f.Name + ":" + ColumnType.tag f.Type)
              |> String.concat ",")
             + " | "
             + (t.Columns |> List.map column |> String.concat " ")
@@ -11329,7 +11333,8 @@ module private ColumnDiff =
         // Out of schema order one draw in three — valid, and outside the normal form.
         let columns = if draw 3 = 0 then List.rev columns else columns
 
-        { Schema = picked; Columns = columns }
+        { Schema = picked |> List.map (fun (n, ty) -> Field.create n ty)
+          Columns = columns }
 
     type Tally =
         {
@@ -11584,7 +11589,7 @@ module private RefinementDiff =
         : ColumnRefinement.typed_column<int, float>)
 
     let toTypedTable (t: Table) : ColumnRefinement.typed_table<int, float> =
-        ({ tschema = t.Schema |> List.map (fun (n, ty) -> canonToChs n, ColumnDiff.toModelType ty)
+        ({ tschema = t.Schema |> List.map (fun f -> canonToChs f.Name, ColumnDiff.toModelType f.Type)
            tcolumns = t.Columns |> List.map toTyped }
         : ColumnRefinement.typed_table<int, float>)
 
@@ -18250,7 +18255,7 @@ let proofOracleTests =
                       [ { Name = "p0"
                           Type = IntType
                           Required = true } ]
-                    ResultSchema = [ "n", IntType ]
+                    ResultSchema = [ Field.create "n" IntType ]
                     Effect =
                       { Host = ReadsHost
                         Determinism = Effect.network }
@@ -18354,7 +18359,7 @@ let proofOracleTests =
                         { Name = "b"
                           Type = StringType
                           Required = false } ]
-                    ResultSchema = [ "n", IntType ]
+                    ResultSchema = [ Field.create "n" IntType ]
                     Effect =
                       { Host = ReadsHost
                         Determinism = Effect.network }
@@ -18441,7 +18446,7 @@ let proofOracleTests =
                         { Name = "b"
                           Type = StringType
                           Required = false } ]
-                    ResultSchema = [ "n", IntType ]
+                    ResultSchema = [ Field.create "n" IntType ]
                     Effect =
                       { Host = ReadsHost
                         Determinism = Effect.network }
@@ -18620,7 +18625,7 @@ let proofOracleTests =
               let qa: Query =
                   { Id = "q-adv"
                     Params = []
-                    ResultSchema = [ "n", IntType ]
+                    ResultSchema = [ Field.create "n" IntType ]
                     Effect =
                       { Host = ReadsHost
                         Determinism = Effect.network }

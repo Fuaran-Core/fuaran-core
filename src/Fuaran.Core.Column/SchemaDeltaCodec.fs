@@ -2,21 +2,44 @@ namespace Fuaran.Core
 
 /// The canonical wire codec for a `SchemaDelta` (Phase 317) — what a host that records deltas beside
 /// `Schema.fingerprint` as provenance writes, so that `Schema.patch` can replay them later. One
-/// object with five members, all required: `added` and `removed` as `{name, type}` entries (the
-/// columnar codec's schema entry), `retyped` as `{name, from, to}`, `reordered` a bool, and `order`
-/// the column names `Order` carries. Rendered under `Canon`, so the bytes are canonical across
-/// hosts; decode surfaces the columnar codec envelope (`ColumnError`). It decodes what it is handed
-/// and judges nothing about the schema the delta will meet — that is `Schema.patch`'s question.
+/// object with five members always present — `added` and `removed` as schema entries (the columnar
+/// codec's, `ColumnCodec.fieldJson`: `{name, type}` and the metadata members a field states),
+/// `retyped` as `{name, from, to}`, `reordered` a bool, and `order` the column names `Order` carries
+/// — and, since Phase 427, `amended` ONLY WHEN NON-EMPTY: one `{name, member, from?, to?}` per
+/// metadata change (`member` one of `unit`, `label`, `description`, `ext`; an `ext` entry carries its
+/// `key`; `from` and `to` are the member's text before and after, each absent where the field stated
+/// none, a unit as its canonical text), so every delta between schemas without metadata keeps the
+/// bytes it had. Rendered under `Canon`, so the bytes are canonical across hosts; decode surfaces the
+/// columnar codec envelope (`ColumnError`) and reads an absent `amended` as empty. It decodes what it
+/// is handed and judges nothing about the schema the delta will meet — that is `Schema.patch`'s
+/// question.
 module SchemaDeltaCodec =
 
-    let private entryJson (name: string, ty: ColumnType) : JVal =
-        JObj [ "name", JStr name; "type", JStr(ColumnType.tag ty) ]
+    let private stated (name: string) (v: string option) : (string * JVal) list =
+        match v with
+        | Some s -> [ name, JStr s ]
+        | None -> []
+
+    let private amendedJson (name: string, change: FieldChange) : JVal =
+        let entry (memberName: string) (key: (string * JVal) list) (before: string option) (after: string option) =
+            JObj(
+                [ "name", JStr name; "member", JStr memberName ]
+                @ key
+                @ stated "from" before
+                @ stated "to" after
+            )
+
+        match change with
+        | FieldChange.Unit(b, a) -> entry "unit" [] (Option.map Unit.render b) (Option.map Unit.render a)
+        | FieldChange.Label(b, a) -> entry "label" [] b a
+        | FieldChange.Description(b, a) -> entry "description" [] b a
+        | FieldChange.Ext(key, b, a) -> entry "ext" [ "key", JStr key ] b a
 
     /// Encode a delta to a `JVal`; `encode` renders it under `Canon`, which sorts the keys.
     let encodeJson (d: SchemaDelta) : JVal =
-        JObj
-            [ "added", JArr(d.Added |> List.map entryJson)
-              "removed", JArr(d.Removed |> List.map entryJson)
+        JObj(
+            [ "added", JArr(d.Added |> List.map ColumnCodec.fieldJson)
+              "removed", JArr(d.Removed |> List.map ColumnCodec.fieldJson)
               "retyped",
               JArr(
                   d.Retyped
@@ -28,6 +51,11 @@ module SchemaDeltaCodec =
               )
               "reordered", JBool d.Reordered
               "order", JArr(d.Order |> List.map JStr) ]
+            @ (if d.Amended.IsEmpty then
+                   []
+               else
+                   [ "amended", JArr(d.Amended |> List.map amendedJson) ])
+        )
 
     /// The canonical wire string for a delta. Total: every delta encodes.
     let encode (d: SchemaDelta) : string = Canon.render (encodeJson d)
@@ -62,13 +90,51 @@ module SchemaDeltaCodec =
 
             go [] xs)
 
-    let private entry (ctx: string) (el: JVal) : Result<string * ColumnType, ColumnError> =
+    /// An optional text member of an `amended` entry: absent is `None`, present must be a string.
+    let private optionalText (ctx: string) (name: string) (el: JVal) : Result<string option, ColumnError> =
+        match Decode.tryProp name el with
+        | None -> Ok None
+        | Some v -> text (ctx + "." + name) v |> Result.map Some
+
+    let private unitOf (ctx: string) (name: string) (v: string option) : Result<UnitOfMeasure option, ColumnError> =
+        match v with
+        | None -> Ok None
+        | Some s ->
+            match Unit.parse s with
+            | Ok u -> Ok(Some u)
+            | Error _ -> Error(MalformedShape(ctx + "." + name + ": '" + s + "' is not a unit the kit parses"))
+
+    let private amendedEntry (el: JVal) : Result<string * FieldChange, ColumnError> =
         field "name" el
-        |> Result.bind (text (ctx + ".name"))
+        |> Result.bind (text "amended.name")
         |> Result.bind (fun name ->
-            field "type" el
-            |> Result.bind (columnType (ctx + ".type"))
-            |> Result.map (fun ty -> name, ty))
+            field "member" el
+            |> Result.bind (text "amended.member")
+            |> Result.bind (fun memberName ->
+                optionalText "amended" "from" el
+                |> Result.bind (fun before ->
+                    optionalText "amended" "to" el
+                    |> Result.bind (fun after ->
+                        match memberName with
+                        | "unit" ->
+                            unitOf "amended" "from" before
+                            |> Result.bind (fun b ->
+                                unitOf "amended" "to" after
+                                |> Result.map (fun a -> name, FieldChange.Unit(b, a)))
+                        | "label" -> Ok(name, FieldChange.Label(before, after))
+                        | "description" -> Ok(name, FieldChange.Description(before, after))
+                        | "ext" ->
+                            field "key" el
+                            |> Result.bind (text "amended.key")
+                            |> Result.map (fun key -> name, FieldChange.Ext(key, before, after))
+                        | other ->
+                            Error(
+                                MalformedShape(
+                                    "amended.member: expected one of unit, label, description, ext; got '"
+                                    + other
+                                    + "'"
+                                )
+                            )))))
 
     let private retypedEntry (el: JVal) : Result<string * ColumnType * ColumnType, ColumnError> =
         field "name" el
@@ -83,25 +149,31 @@ module SchemaDeltaCodec =
 
     /// Decode a delta from a `JVal`. `decodeJson (encodeJson d) = Ok d` for every delta.
     let decodeJson (el: JVal) : Result<SchemaDelta, ColumnError> =
-        items "added" (entry "added") el
+        items "added" ColumnCodec.decodeField el
         |> Result.bind (fun added ->
-            items "removed" (entry "removed") el
+            items "removed" ColumnCodec.decodeField el
             |> Result.bind (fun removed ->
                 items "retyped" retypedEntry el
                 |> Result.bind (fun retyped ->
-                    field "reordered" el
-                    |> Result.bind (fun r ->
-                        match r with
-                        | JBool b -> Ok b
-                        | other -> Error(MalformedShape("reordered: expected bool, got " + JVal.kindName other)))
-                    |> Result.bind (fun reordered ->
-                        items "order" (text "order") el
-                        |> Result.map (fun order ->
-                            { Added = added
-                              Removed = removed
-                              Retyped = retyped
-                              Reordered = reordered
-                              Order = order })))))
+                    (match Decode.tryProp "amended" el with
+                     | None -> Ok []
+                     | Some _ -> items "amended" amendedEntry el)
+                    |> Result.bind (fun amended ->
+                        field "reordered" el
+                        |> Result.bind (fun r ->
+                            match r with
+                            | JBool b -> Ok b
+                            | other ->
+                                Error(MalformedShape("reordered: expected bool, got " + JVal.kindName other)))
+                        |> Result.bind (fun reordered ->
+                            items "order" (text "order") el
+                            |> Result.map (fun order ->
+                                { Added = added
+                                  Removed = removed
+                                  Retyped = retyped
+                                  Amended = amended
+                                  Reordered = reordered
+                                  Order = order }))))))
 
     /// Decode a wire string into a delta (a JSON-syntax failure is `NotJson`).
     let decode (s: string) : Result<SchemaDelta, ColumnError> =

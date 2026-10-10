@@ -258,7 +258,7 @@ let private decimalEncode (cells: Cell list) : string =
         |> Result.bind (fun col ->
             ColumnCodec.tryEncode (
                 Embedded
-                    { Schema = [ "c", DecimalType ]
+                    { Schema = [ Field.create "c" DecimalType ]
                       Columns = [ col ] }
             ))
 
@@ -848,7 +848,8 @@ let private sweepInputs: string list =
 /// A `Schema` built from a sweep input, so `Column`'s private FNV-1a copy is exercised over the same
 /// inputs as the other two — including the non-ASCII ones, where a code-unit-vs-byte fold would show.
 let private schemaOf (s: string) : Schema =
-    [ (if s = "" then "c" else s), IntType; "n" + s, FloatType ]
+    [ Field.create (if s = "" then "c" else s) IntType
+      Field.create ("n" + s) FloatType ]
 
 /// The hash sweep: one row per input, `hashSweep/NNN` (the input's index) to FOUR values joined by
 /// `/`, one per FNV-1a implementation the spine actually ships plus the digest beside them — the

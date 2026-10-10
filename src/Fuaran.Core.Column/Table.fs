@@ -1,7 +1,9 @@
 namespace Fuaran.Core
 
-/// A `(name, type)` ordered schema — the column order of a table follows it.
-type Schema = (string * ColumnType) list
+/// An ordered schema — one `Field` per column (its name, its type and its metadata, Phase 427); the
+/// column order of a table follows it. A schema with no metadata is the `(name, type)` list it was
+/// before Phase 427, spelled `[ Field.create name ty; … ]`.
+type Schema = Field list
 
 /// An embedded columnar table: its schema + the columns, every column the same length. The
 /// SCHEMA is the order authority: the encoder walks it and looks each column up by name, and the
@@ -12,7 +14,8 @@ type Schema = (string * ColumnType) list
 /// reasons).
 type Table =
     {
-        /// The column names and types, in the table's column order; no name may appear twice.
+        /// The fields — each column's name, type and metadata — in the table's column order; no
+        /// name may appear twice.
         Schema: Schema
         /// The columns, in any order, matched to `Schema` by name; all the same length.
         Columns: Column list
@@ -29,11 +32,17 @@ module Table =
 
     /// The names in SCHEMA order — the table's column order, whatever order `Columns` holds; read
     /// from the schema alone, so a name with no column is still listed.
-    let columnNames (t: Table) : string list = t.Schema |> List.map fst
+    let columnNames (t: Table) : string list = t.Schema |> List.map _.Name
 
     /// Find a column by name.
     let tryColumn (name: string) (t: Table) : Column option =
         t.Columns |> List.tryFind (fun c -> c.Name = name)
+
+    /// Find a column's field — its schema entry, which carries what the column MEANS (its unit,
+    /// label, description and extension members, Phase 427) — by name. A column holds only its name
+    /// and its storage, so its metadata is read here.
+    let tryField (name: string) (t: Table) : Field option =
+        t.Schema |> List.tryFind (fun f -> f.Name = name)
 
     /// The empty table (no columns, no rows).
     let empty: Table = { Schema = []; Columns = [] }
@@ -167,7 +176,7 @@ module Table =
     /// and `ColumnCodec.decode` ends in it, so a table that encodes is a table that decodes. It is
     /// not a data-quality check: those are the columnar validator's rules.
     let validate (t: Table) : Result<unit, ColumnError> =
-        let schemaNames = t.Schema |> List.map fst
+        let schemaNames = t.Schema |> List.map _.Name
         let columnNamesList = t.Columns |> List.map _.Name
 
         let missing =
@@ -188,9 +197,9 @@ module Table =
                 // Type agreement (schema order drives the check).
                 let typeFault =
                     t.Schema
-                    |> List.tryPick (fun (name, ty) ->
-                        match t.Columns |> List.tryFind (fun c -> c.Name = name) with
-                        | Some c when c.Type <> ty -> Some(TypeMismatch(name, ty, ColumnType.tag c.Type))
+                    |> List.tryPick (fun f ->
+                        match t.Columns |> List.tryFind (fun c -> c.Name = f.Name) with
+                        | Some c when c.Type <> f.Type -> Some(TypeMismatch(f.Name, f.Type, ColumnType.tag c.Type))
                         | _ -> None)
 
                 match typeFault with
@@ -213,9 +222,9 @@ module Table =
                         // The cells, schema order then row order.
                         let cellFault =
                             t.Schema
-                            |> List.tryPick (fun (name, _) ->
+                            |> List.tryPick (fun f ->
                                 t.Columns
-                                |> List.tryFind (fun c -> c.Name = name)
+                                |> List.tryFind (fun c -> c.Name = f.Name)
                                 |> Option.bind firstUncarriableCell)
 
                         match cellFault with

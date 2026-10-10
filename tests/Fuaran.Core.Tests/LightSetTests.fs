@@ -503,7 +503,7 @@ let tests =
                 testCase "ColumnValidator.unique keys on Cell.token: 1.5 and 1.50 are one key value"
                 <| fun _ ->
                     let t =
-                        { Schema = [ "d", DecimalType ]
+                        { Schema = [ Field.create "d" DecimalType ]
                           Columns = [ Column.ofDecimals "d" (Vector.ofList [ "1.5"; "1.50"; "2" ]) AllValid ] }
 
                     let defects =

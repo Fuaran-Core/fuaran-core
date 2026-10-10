@@ -334,6 +334,110 @@ let private decimalAnswer (case: string) (input: JVal) : Result<string * string 
         | None -> Error "input.fn missing"
     | other -> Error("unknown case " + other)
 
+// ---------------------------------------------------------------------------
+//  Phase 427 — the field vectors (laws/field-laws.json), checked by calling the kit.
+// ---------------------------------------------------------------------------
+
+let private fieldVectorsOf (json: string) : Result<JVal list, string> =
+    match Json.parse json with
+    | Error m -> Error("the field vector file did not parse: " + m)
+    | Ok doc ->
+        match field "vectors" doc with
+        | Some(JArr items) -> Ok items
+        | _ -> Error "the field vector file carries no `vectors` array"
+
+/// A schema from a vector member — the entry objects, read by the column codec's own reader.
+let private schemaOfJson (v: JVal option) : Result<Schema, string> =
+    match v with
+    | Some(JArr items) ->
+        (Ok [], items)
+        ||> List.fold (fun acc el ->
+            acc
+            |> Result.bind (fun fields ->
+                match ColumnCodec.decodeField el with
+                | Ok f -> Ok(fields @ [ f ])
+                | Error e -> Error("a schema entry did not read: " + ColumnCodec.errorString e)))
+    | _ -> Error "a schema member is missing or not an array"
+
+/// The kit's answer to one field vector's input: the verdict and the expected members, each as the
+/// canonical text the file carries (a JSON member that is not a string is compared by `Canon`).
+let private fieldAnswer (case: string) (input: JVal) : Result<string * (string * string) list, string> =
+    let accept members = Ok("accept", members)
+    let reject e = Ok("reject", [ "error", e ])
+    let columnClass (e: ColumnError) = caseName (sprintf "%A" e)
+
+    match case with
+    | "fieldEncode" ->
+        match ColumnCodec.decodeField input with
+        | Ok f -> accept [ "canonical", Canon.render (ColumnCodec.fieldJson f) ]
+        | Error e -> Error("the input members did not read as a field: " + ColumnCodec.errorString e)
+    | "codecDecode" ->
+        match str "document" input with
+        | Some doc ->
+            match ColumnCodec.decode doc with
+            | Ok src -> accept [ "canonical", ColumnCodec.encode src ]
+            | Error e -> reject (columnClass e)
+        | None -> Error "input.document missing"
+    | "fingerprint" ->
+        schemaOfJson (field "schema" input)
+        |> Result.map (fun s -> "accept", [ "fingerprint", Schema.fingerprint s ])
+    | "delta"
+    | "classify" ->
+        schemaOfJson (field "old" input)
+        |> Result.bind (fun old ->
+            schemaOfJson (field "target" input)
+            |> Result.bind (fun target ->
+                let delta = Schema.diff old target
+
+                if case = "delta" then
+                    match Schema.patch old delta with
+                    | Ok patched ->
+                        accept
+                            [ "canonical", SchemaDeltaCodec.encode delta
+                              "patched", LawVectorExport.Fields.schemaText patched ]
+                    | Error e -> Error(sprintf "the delta did not replay: %A" e)
+                else
+                    match field "dependsOn" input with
+                    | Some(JArr deps) ->
+                        let deps = deps |> List.choose jstrOf
+
+                        let tag =
+                            match Schema.classify deps delta with
+                            | SchemaCompat.Compatible -> "compatible"
+                            | SchemaCompat.Breaking _ -> "breaking"
+                            | SchemaCompat.Unknown _ -> "unknown"
+
+                        accept [ "compat", tag ]
+                    | _ -> Error "input.dependsOn missing"))
+    | other -> Error("unknown case " + other)
+
+/// `None` when the vector is true of this kit; otherwise what disagreed.
+let private checkFieldVector (v: JVal) : string option =
+    let id = str "id" v |> Option.defaultValue "<no id>"
+
+    match str "case" v, field "input" v, field "expected" v with
+    | Some case, Some input, Some expected ->
+        match fieldAnswer case input with
+        | Error m -> Some(sprintf "%s: %s" id m)
+        | Ok(verdict, members) ->
+            let fileValue (name: string) =
+                match field name expected with
+                | Some(JStr s) -> Some s
+                | Some other -> Some(Canon.render other)
+                | None -> None
+
+            let disagreements =
+                ("verdict", verdict) :: members
+                |> List.choose (fun (name, value) ->
+                    match fileValue name with
+                    | Some fv when fv = value -> None
+                    | fv -> Some(sprintf "%s: the file expects %s=%A, the kit answers %s" id name fv value))
+
+            match disagreements with
+            | [] -> None
+            | d :: _ -> Some d
+    | _ -> Some(sprintf "%s: case, input or expected missing" id)
+
 /// `None` when the vector is true of this kit; otherwise what disagreed.
 let private checkDecimalVector (v: JVal) : string option =
     let id = str "id" v |> Option.defaultValue "<no id>"
@@ -849,6 +953,145 @@ let tests =
                       announce
                           (banner
                               "DECIMAL CORPUS COPY DIFFERS"
+                              [ sprintf "copy  %s" copy
+                                SiblingCorpus.pinSummary root
+                                "    " + emitHere
+                                "    " + emitCopy ])
+                          fatal
+
+          // -------------------------------------------------------------------
+          //  Phase 427 — the field vectors.
+          // -------------------------------------------------------------------
+
+          testCase "every rendered field vector reads back from the file and is true of this kit"
+          <| fun _ ->
+              match fieldVectorsOf (LawVectorExport.Fields.render ()) with
+              | Error m -> failtest m
+              | Ok vectors ->
+                  Expect.equal
+                      (List.length vectors)
+                      (List.length (LawVectorExport.Fields.allVectors ()))
+                      "one rendered vector per authored input"
+
+                  let failures = vectors |> List.choose checkFieldVector
+                  Expect.isEmpty failures (sprintf "every vector agrees with the kit: %A" failures)
+
+          testCase "the field documents reach every case, and both verdicts where a case can refuse"
+          <| fun _ ->
+              let vectors = LawVectorExport.Fields.allVectors ()
+              let cases = vectors |> List.map _.Case |> List.distinct |> List.sort
+
+              Expect.equal
+                  cases
+                  [ "classify"; "codecDecode"; "delta"; "fieldEncode"; "fingerprint" ]
+                  "the five cases a host mirrors"
+
+              let verdicts (case: string) =
+                  vectors
+                  |> List.filter (fun v -> v.Case = case)
+                  |> List.map (fun v -> v.Expected |> List.find (fun (k, _) -> k = "verdict") |> snd)
+                  |> List.distinct
+                  |> List.sort
+
+              Expect.equal (verdicts "codecDecode") [ "\"accept\""; "\"reject\"" ] "decode reaches both verdicts"
+
+              let compats =
+                  vectors
+                  |> List.filter (fun v -> v.Case = "classify")
+                  |> List.map (fun v -> v.Expected |> List.find (fun (k, _) -> k = "compat") |> snd)
+                  |> List.distinct
+                  |> List.sort
+
+              Expect.equal compats [ "\"breaking\""; "\"compatible\""; "\"unknown\"" ] "classify reaches every verdict"
+
+              Expect.isTrue
+                  (vectors
+                   |> List.exists (fun v ->
+                       v.Case = "delta"
+                       && (v.Expected
+                           |> List.exists (fun (k, s) -> k = "canonical" && s.Contains "amended"))))
+                  "a delta vector carries the amended member"
+
+              Expect.isTrue
+                  (vectors
+                   |> List.exists (fun v ->
+                       v.Case = "delta"
+                       && (v.Expected
+                           |> List.exists (fun (k, s) -> k = "canonical" && not (s.Contains "amended")))))
+                  "and one does not, so the pre-427 delta bytes are pinned"
+
+          testCase "the field checker names a perturbed vector — the oracle leg can go red"
+          <| fun _ ->
+              let kit = LawVectorExport.Fields.render ()
+
+              let perturbed =
+                  match kit.IndexOf("\"fingerprint\": \"", StringComparison.Ordinal) with
+                  | -1 -> failtest "the rendered file carries no fingerprint to perturb"
+                  | i -> kit.Substring(0, i) + "\"fingerprint\": \"0" + kit.Substring(i + 16)
+
+              match fieldVectorsOf perturbed with
+              | Error m -> failtest m
+              | Ok vectors ->
+                  let failures = vectors |> List.choose checkFieldVector
+                  Expect.equal (List.length failures) 1 "exactly the perturbed vector is named"
+                  Expect.stringContains (List.head failures) "fingerprint-two-columns" "and by its id"
+
+          testCase "the rendered field artefact is LF-only and byte-stable across renders"
+          <| fun _ ->
+              let once = LawVectorExport.Fields.render ()
+              Expect.equal once (LawVectorExport.Fields.render ()) "two renders produce the same bytes"
+              Expect.isFalse (once.Contains "\r") "no CR may reach a corpus byte-compared across three OSes"
+
+          testCase "the committed conformance/laws/field-laws.json is the one this kit renders"
+          <| fun _ ->
+              let path = LawVectorExport.fieldPath (OwnedConformance.root ())
+
+              if not (File.Exists path) then
+                  failtestf
+                      "this repository carries no %s at '%s' — re-run `--emit-laws` (no argument writes into conformance/) and commit the result"
+                      LawVectorExport.Fields.fileName
+                      path
+              else
+                  let committed = File.ReadAllText path
+
+                  match fieldVectorsOf committed with
+                  | Error m -> failtest ("the committed field vectors did not read: " + m)
+                  | Ok vectors ->
+                      Expect.isEmpty
+                          (vectors |> List.choose checkFieldVector)
+                          "the committed field vectors agree with this kit"
+
+                  Expect.equal
+                      committed
+                      (LawVectorExport.Fields.render ())
+                      "the committed conformance/laws/field-laws.json is not what this kit renders — re-run `--emit-laws` (no argument) and commit conformance/"
+
+          testCase "the corpus copy of laws/field-laws.json is this renderer's output"
+          <| fun _ ->
+              match SiblingCorpus.freshness LawVectorExport.familyDirName with
+              | SiblingCorpus.NotChecked(why, true) -> failtest why
+              | SiblingCorpus.NotChecked(why, false) ->
+                  printfn "%s" (banner "FIELD CORPUS COPY NOT CHECKED" [ why ])
+                  Console.Out.Flush()
+                  skiptest why
+              | SiblingCorpus.Compare(root, fatal) ->
+                  let copy = LawVectorExport.fieldPath root
+
+                  if not (File.Exists copy) then
+                      announce
+                          (banner
+                              "FIELD CORPUS COPY MISSING"
+                              [ sprintf "expected at  %s" copy
+                                SiblingCorpus.pinSummary root
+                                "    " + emitCopy ])
+                          fatal
+                  elif
+                      OwnedConformance.fingerprint (File.ReadAllText copy)
+                      <> OwnedConformance.fingerprint (LawVectorExport.Fields.render ())
+                  then
+                      announce
+                          (banner
+                              "FIELD CORPUS COPY DIFFERS"
                               [ sprintf "copy  %s" copy
                                 SiblingCorpus.pinSummary root
                                 "    " + emitHere

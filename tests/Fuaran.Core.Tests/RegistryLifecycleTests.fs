@@ -32,7 +32,7 @@ let private query (id: string) : Query =
         [ { Name = "region"
             Type = StringType
             Required = true } ]
-      ResultSchema = [ "n", IntType ]
+      ResultSchema = [ Field.create "n" IntType ]
       Effect =
         { Host = ReadsHost
           Determinism = Effect.network }
@@ -280,7 +280,7 @@ let pagingTests =
 
                   Ready
                       { Rows =
-                          { Schema = [ "n", IntType ]
+                          { Schema = [ Field.create "n" IntType ]
                             Columns = [] }
                         PageNum = (if token.IsNone then 0 else 1)
                         TotalRowCount = None

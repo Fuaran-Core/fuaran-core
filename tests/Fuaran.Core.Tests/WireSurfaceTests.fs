@@ -248,6 +248,13 @@ let rec private build
             typeof<Vector<int>>.Assembly.GetType("Fuaran.Core.Vector").GetMethod("adopt").MakeGenericMethod(elemT)
 
         adopt.Invoke(null, [| box arr |])
+    elif t = typeof<UnitOfMeasure> then
+        // Phase 427 — a schema field's unit. The algebra's representation is internal and a value
+        // built from it by reflection would render as a symbol no parser admits, so the specimen is
+        // a parsed unit: the document carries a text a host can read back.
+        match Unit.parse "kg" with
+        | Ok u -> box u
+        | Error e -> failwithf "the unit specimen did not parse: %A" e
     elif isMap t then
         let args = t.GetGenericArguments()
         let tupleT = FSharpType.MakeTupleType args

@@ -166,7 +166,10 @@ let tests =
           testCase "ColumnValidator stock rules locate the faults they target"
           <| fun _ ->
               let t: Table =
-                  { Schema = [ "id", IntType; "score", IntType; "name", StringType ]
+                  { Schema =
+                      [ Field.create "id" IntType
+                        Field.create "score" IntType
+                        Field.create "name" StringType ]
                     Columns =
                       [ cellColumn "id" IntType [ Int 1; Int 2; Int 2 ] // duplicate id at row 2
                         cellColumn "score" IntType [ Int 50; Null; Int 200 ] // null + out-of-range
@@ -194,7 +197,7 @@ let tests =
           testCase "ColumnValidator reuses the shared severity summary + canonical-codes parity"
           <| fun _ ->
               let t: Table =
-                  { Schema = [ "a", IntType ]
+                  { Schema = [ Field.create "a" IntType ]
                     Columns = [ cellColumn "a" IntType [ Null; Int 5 ] ] }
 
               let reg =

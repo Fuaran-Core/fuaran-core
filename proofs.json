@@ -4209,6 +4209,40 @@
           "TimeUnit.widens"
         ]
       }
+    },
+    {
+      "id": "column-field-metadata",
+      "level": "tested",
+      "claim": "A schema entry is a `Field` that carries what a column MEANS (Phase 427): an optional `UnitOfMeasure`, an optional label, an optional description, and an extension map every host preserves verbatim, behind total builders over an internal representation, so the next member is a builder, not a break. Metadata is part of a field's identity (two schemas differing only in a unit differ) and is not storage (`Table.validate` reads none of it, a column holds its name and its storage, and its field is read from the table by name). The wire writes the members a field states and no other, so every table without metadata encodes byte-identically to before; decode reads a parseable unit spelling to the unit and refuses one the algebra does not parse, naming the column; `Schema.diff` reports a metadata change as `Amended` beside a retype, `Schema.patch` replays it and refuses one computed against another schema, `Schema.classify` reads a stated unit replaced or withdrawn as breaking and an extension change as unknown, and `Schema.fingerprint` is unchanged over a schema without metadata and injective over one with it. Sampled, not proved: the field codec and the unit algebra are Phase 428's theorems.",
+      "phase": "fuaran-core#427",
+      "evidence": {
+        "family": "Column fields: unit, label, description and extensions (Phase 427)",
+        "cases": [
+          "the builders state a member and the readers answer it; `create` states none",
+          "metadata is part of a field's identity: two schemas differing only in a unit are different schemas",
+          "a column can say what it means, and a table without metadata encodes byte-identically to before",
+          "decode reads a parseable unit to the unit, refuses one the algebra does not parse by column, and holds every member to its kind",
+          "Schema.diff reports a metadata change as Amended beside a retype, and Schema.patch replays it",
+          "Schema.classify: a stated unit replaced or withdrawn breaks a dependant; one stated afresh, a label, or an undepended change does not; an extension change is Unknown",
+          "Schema.fingerprint: a schema without metadata keeps its pre-427 value, metadata moves it, and the pre-image stays injective"
+        ],
+        "operations": [
+          "ColumnCodec.decodeField",
+          "ColumnCodec.fieldJson",
+          "Field.create",
+          "Field.hasMetadata",
+          "Field.withDescription",
+          "Field.withExt",
+          "Field.withLabel",
+          "Field.withType",
+          "Field.withUnit",
+          "Field.withoutDescription",
+          "Field.withoutExt",
+          "Field.withoutLabel",
+          "Field.withoutUnit",
+          "Table.tryField"
+        ]
+      }
     }
   ]
 }

@@ -16,13 +16,13 @@ let private mkCol (name: string) (ty: ColumnType) (cells: Cell list) : Column =
 /// divergence-zone values (0.1, 1/3, a large magnitude).
 let private sampleTable: Table =
     { Schema =
-        [ "i", IntType
-          "f", FloatType
-          "b", BoolType
-          "s", StringType
-          "d", DateType
-          "t", TimestampType TimeUnit.Seconds
-          "m", DecimalType ]
+        [ Field.create "i" IntType
+          Field.create "f" FloatType
+          Field.create "b" BoolType
+          Field.create "s" StringType
+          Field.create "d" DateType
+          Field.create "t" (TimestampType TimeUnit.Seconds)
+          Field.create "m" DecimalType ]
       Columns =
         [ mkCol "i" IntType [ Int 1; Null; Int -42 ]
           mkCol "f" FloatType [ Float 0.1; Float(1.0 / 3.0); Null ]
@@ -87,11 +87,48 @@ let private genSource (seed: int) : DataSource =
             | [] -> [ IntType ]
             | xs -> xs
 
-    let schema = types |> List.mapi (fun i ty -> "c" + string i, ty)
+    // Phase 427: a field states metadata one draw in three — a unit, a label, a description, an
+    // extension member, each on its own draw — so the round-trip law carries the schema entry's
+    // optional members as well as the columns.
+    let withMetadata (f: Field) : Field =
+        if pick 3 <> 0 then
+            f
+        else
+            let unit text =
+                match Unit.parse text with
+                | Ok u -> u
+                | Error e -> failwithf "the generator's unit %s did not parse: %A" text e
+
+            let f =
+                if pick 2 = 0 then
+                    Field.withUnit (unit (List.item (pick 4) [ "kg"; "m/s2"; "[GBP]"; "%" ])) f
+                else
+                    f
+
+            let f =
+                if pick 2 = 0 then
+                    Field.withLabel ("Label " + string (pick 9)) f
+                else
+                    f
+
+            let f =
+                if pick 2 = 0 then
+                    Field.withDescription ("what column " + f.Name + " holds\n") f
+                else
+                    f
+
+            if pick 2 = 0 then
+                Field.withExt "vendor.key" (string (pick 100)) f
+            else
+                f
+
+    let schema =
+        types
+        |> List.mapi (fun i ty -> Field.create ("c" + string i) ty |> withMetadata)
 
     let columns =
         schema
-        |> List.map (fun (name, ty) -> mkCol name ty [ for r in 0 .. rows - 1 -> mkCell ty r ])
+        |> List.map (fun f -> mkCol f.Name f.Type [ for r in 0 .. rows - 1 -> mkCell f.Type r ])
 
     Embedded { Schema = schema; Columns = columns }
 
@@ -179,14 +216,17 @@ let tests =
               | Ok(Embedded t) ->
                   Expect.equal
                       t.Schema
-                      [ "b", BoolType; "f", FloatType; "i", IntType; "s", StringType ]
+                      [ Field.create "b" BoolType
+                        Field.create "f" FloatType
+                        Field.create "i" IntType
+                        Field.create "s" StringType ]
                       "inferred types in Ordinal column order (any fractional ⇒ float; ints stay int)"
               | other -> failtestf "expected Ok Embedded, got %A" other
 
           testCase "Phase 88 — a date-looking string infers STRING (temporal types need a declared schema)"
           <| fun _ ->
               match ColumnCodec.decode """{"columns":{"d":["2026-07-18"]}}""" with
-              | Ok(Embedded t) -> Expect.equal t.Schema [ "d", StringType ] "never date"
+              | Ok(Embedded t) -> Expect.equal t.Schema [ Field.create "d" StringType ] "never date"
               | other -> failtestf "expected Ok Embedded, got %A" other
 
           testCase "Phase 88 — bare-array columns round-trip to the canonical wrapped bytes"
@@ -376,7 +416,7 @@ let tests =
           <| fun _ ->
               let src =
                   Embedded
-                      { Schema = [ "f", FloatType ]
+                      { Schema = [ Field.create "f" FloatType ]
                         Columns = [ mkCol "f" FloatType [ Float 1.0; Float(0.0 / 0.0) ] ] }
 
               match ColumnCodec.tryEncode src with
@@ -387,7 +427,7 @@ let tests =
           <| fun _ ->
               let mk f =
                   Embedded
-                      { Schema = [ "f", FloatType ]
+                      { Schema = [ Field.create "f" FloatType ]
                         Columns = [ mkCol "f" FloatType [ Float f ] ] }
 
               match ColumnCodec.tryEncode (mk System.Double.PositiveInfinity) with
@@ -409,7 +449,7 @@ let tests =
           testCase "Table.validate flags a ragged column"
           <| fun _ ->
               let t =
-                  { Schema = [ "a", IntType; "b", IntType ]
+                  { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
                     Columns = [ mkCol "a" IntType [ Int 1; Int 2 ]; mkCol "b" IntType [ Int 9 ] ] }
 
               // RaggedColumns since Phase 299 — LengthMismatch names one column's values and
@@ -421,7 +461,7 @@ let tests =
           testCase "Table.validate flags a schema name with no column, and an extra column"
           <| fun _ ->
               let missing =
-                  { Schema = [ "a", IntType; "b", IntType ]
+                  { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
                     Columns = [ mkCol "a" IntType [ Int 1 ] ] }
 
               match Table.validate missing with
@@ -429,7 +469,7 @@ let tests =
               | other -> failtestf "expected Malformed (missing column), got %A" other
 
               let extra =
-                  { Schema = [ "a", IntType ]
+                  { Schema = [ Field.create "a" IntType ]
                     Columns = [ mkCol "a" IntType [ Int 1 ]; mkCol "z" IntType [ Int 1 ] ] }
 
               match Table.validate extra with
@@ -439,7 +479,7 @@ let tests =
           testCase "Table.validate flags a column whose type disagrees with the schema"
           <| fun _ ->
               let t =
-                  { Schema = [ "a", IntType ]
+                  { Schema = [ Field.create "a" IntType ]
                     Columns = [ mkCol "a" StringType [ Str "x" ] ] }
 
               match Table.validate t with
@@ -452,7 +492,7 @@ let tests =
 
               let malformed =
                   Embedded
-                      { Schema = [ "a", IntType; "b", IntType ]
+                      { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
                         Columns = [ mkCol "a" IntType [ Int 1 ] ] }
 
               match ColumnCodec.tryEncode malformed with
@@ -462,22 +502,33 @@ let tests =
           // Phase 33 — Schema.diff + compatibility verdict + fingerprint.
           testCase "Schema.diff reports added / removed / retyped / reordered"
           <| fun _ ->
-              let old = [ "a", IntType; "b", StringType; "c", BoolType ]
-              let target = [ "b", StringType; "a", FloatType; "d", DateType ]
+              let old =
+                  [ Field.create "a" IntType
+                    Field.create "b" StringType
+                    Field.create "c" BoolType ]
+
+              let target =
+                  [ Field.create "b" StringType
+                    Field.create "a" FloatType
+                    Field.create "d" DateType ]
+
               let delta = Schema.diff old target
-              Expect.equal delta.Added [ "d", DateType ] "d added"
-              Expect.equal delta.Removed [ "c", BoolType ] "c removed"
+              Expect.equal delta.Added [ Field.create "d" DateType ] "d added"
+              Expect.equal delta.Removed [ Field.create "c" BoolType ] "c removed"
               Expect.equal delta.Retyped [ "a", IntType, FloatType ] "a retyped int→float"
               Expect.isTrue delta.Reordered "a/b swapped relative order"
 
           testCase "Schema.classify: widening a depended-on column is SchemaCompat.Compatible, narrowing is Breaking"
           <| fun _ ->
               let widened =
-                  Schema.diff [ "a", IntType; "b", StringType ] [ "a", FloatType; "b", StringType ]
+                  Schema.diff
+                      [ Field.create "a" IntType; Field.create "b" StringType ]
+                      [ Field.create "a" FloatType; Field.create "b" StringType ]
 
               Expect.equal (Schema.classify [ "a"; "b" ] widened) SchemaCompat.Compatible "int→float is a safe widening"
 
-              let narrowed = Schema.diff [ "a", FloatType ] [ "a", IntType ]
+              let narrowed =
+                  Schema.diff [ Field.create "a" FloatType ] [ Field.create "a" IntType ]
 
               match Schema.classify [ "a" ] narrowed with
               | SchemaCompat.Breaking reasons -> Expect.isNonEmpty reasons "narrowing names a reason"
@@ -486,7 +537,8 @@ let tests =
           testCase
               "Schema.classify: removing a depended-on column is SchemaCompat.Breaking; an un-depended change is Compatible"
           <| fun _ ->
-              let delta = Schema.diff [ "a", IntType; "b", IntType ] [ "a", IntType ]
+              let delta =
+                  Schema.diff [ Field.create "a" IntType; Field.create "b" IntType ] [ Field.create "a" IntType ]
 
               match Schema.classify [ "b" ] delta with
               | SchemaCompat.Breaking _ -> ()
@@ -496,21 +548,21 @@ let tests =
 
           testCase "Schema.fingerprint is stable + order-sensitive + type-sensitive"
           <| fun _ ->
-              let s1 = [ "a", IntType; "b", FloatType ]
+              let s1 = [ Field.create "a" IntType; Field.create "b" FloatType ]
 
               Expect.equal
                   (Schema.fingerprint s1)
-                  (Schema.fingerprint [ "a", IntType; "b", FloatType ])
+                  (Schema.fingerprint [ Field.create "a" IntType; Field.create "b" FloatType ])
                   "same schema ⇒ same fingerprint"
 
               Expect.notEqual
                   (Schema.fingerprint s1)
-                  (Schema.fingerprint [ "b", FloatType; "a", IntType ])
+                  (Schema.fingerprint [ Field.create "b" FloatType; Field.create "a" IntType ])
                   "reorder changes the fingerprint"
 
               Expect.notEqual
                   (Schema.fingerprint s1)
-                  (Schema.fingerprint [ "a", FloatType; "b", FloatType ])
+                  (Schema.fingerprint [ Field.create "a" FloatType; Field.create "b" FloatType ])
                   "retype changes the fingerprint"
 
           // Phase 36 — Column.aggregate public surface.
@@ -705,14 +757,14 @@ let tests =
           testCase "schema inference never infers decimal"
           <| fun _ ->
               match ColumnCodec.decode """{"columns":{"m":["12.50","3"]}}""" with
-              | Ok(Embedded t) -> Expect.equal t.Schema [ "m", StringType ] "digit strings are strings"
+              | Ok(Embedded t) -> Expect.equal t.Schema [ Field.create "m" StringType ] "digit strings are strings"
               | other -> failtestf "unexpected: %A" other
 
           testCase "tryEncode rejects a decimal cell that is not canonical"
           <| fun _ ->
               let build (text: string) =
                   Embedded
-                      { Schema = [ "m", DecimalType ]
+                      { Schema = [ Field.create "m" DecimalType ]
                         Columns = [ mkCol "m" DecimalType [ Decimal text ] ] }
 
               for text in [ "1.50"; "abc"; "01" ] do
@@ -754,10 +806,14 @@ let tests =
               Expect.isFalse (ColumnType.widens DecimalType FloatType) "and a decimal is not one"
               Expect.isFalse (ColumnType.widens DecimalType IntType) "narrowing is not a widening"
 
-              let widened = Schema.diff [ "a", IntType ] [ "a", DecimalType ]
+              let widened =
+                  Schema.diff [ Field.create "a" IntType ] [ Field.create "a" DecimalType ]
+
               Expect.equal (Schema.classify [ "a" ] widened) SchemaCompat.Compatible "int→decimal is compatible"
 
-              match Schema.classify [ "a" ] (Schema.diff [ "a", FloatType ] [ "a", DecimalType ]) with
+              match
+                  Schema.classify [ "a" ] (Schema.diff [ Field.create "a" FloatType ] [ Field.create "a" DecimalType ])
+              with
               | SchemaCompat.Breaking reasons -> Expect.isNonEmpty reasons "float→decimal names a reason"
               | other -> failtestf "expected SchemaCompat.Breaking, got %A" other
 
@@ -781,7 +837,7 @@ let tests =
 
 /// A table whose one column `c` of type `ty` holds `cells`.
 let private oneColumn (ty: ColumnType) (cells: Cell list) : Table =
-    { Schema = [ "c", ty ]
+    { Schema = [ Field.create "c" ty ]
       Columns = [ mkCol "c" ty cells ] }
 
 /// A source from `genSource`, with — on about half the seeds — one fault the codec cannot carry
@@ -902,14 +958,14 @@ let trustsNothingTests =
 
               Expect.equal
                   (Table.validate
-                      { Schema = [ "a", IntType; "a", IntType ]
+                      { Schema = [ Field.create "a" IntType; Field.create "a" IntType ]
                         Columns = [ col; col ] })
                   (Error(Malformed "duplicate schema name: a"))
                   "the schema names a twice"
 
               Expect.equal
                   (Table.validate
-                      { Schema = [ "a", IntType ]
+                      { Schema = [ Field.create "a" IntType ]
                         Columns = [ col; col ] })
                   (Error(Malformed "duplicate column name: a"))
                   "two columns named a"
@@ -918,7 +974,7 @@ let trustsNothingTests =
               match
                   ColumnCodec.tryEncode (
                       Embedded
-                          { Schema = [ "a", IntType; "a", IntType ]
+                          { Schema = [ Field.create "a" IntType; Field.create "a" IntType ]
                             Columns = [ col; col ] }
                   )
               with
@@ -985,7 +1041,7 @@ let trustsNothingTests =
 
               Expect.equal
                   (Table.validate
-                      { Schema = [ "a", IntType; "b", IntType ]
+                      { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
                         Columns = [ mkCol "a" IntType [ Int 1 ]; mkCol "b" IntType [] ] })
                   (Error(RaggedColumns("b", 1, 0)))
                   "ragged"
@@ -1170,7 +1226,7 @@ let trustsNothingTests =
               let rangeDefects (cells: Cell list) =
                   ColumnValidator.validate
                       reg
-                      { Schema = [ "m", DecimalType ]
+                      { Schema = [ Field.create "m" DecimalType ]
                         Columns = [ mkCol "m" DecimalType cells ] }
                   |> List.filter (fun d -> d.Code = "COL-INRANGE")
                   |> List.length
@@ -1505,7 +1561,7 @@ let typedColumnTests =
 
               Expect.equal
                   (Table.validate
-                      { Schema = [ "c", IntType ]
+                      { Schema = [ Field.create "c" IntType ]
                         Columns = [ c ] })
                   (Error(LengthMismatch("c", 2, 1)))
                   "values 2, validity 1"
@@ -1513,7 +1569,7 @@ let typedColumnTests =
               match
                   ColumnCodec.tryEncode (
                       Embedded
-                          { Schema = [ "c", IntType ]
+                          { Schema = [ Field.create "c" IntType ]
                             Columns = [ c ] }
                   )
               with
@@ -1797,7 +1853,7 @@ let coreColumnReads (columns: Column list) : unit =
         | Decimals(xs, _) -> readVector xs
 
     let table =
-        { Schema = columns |> List.map (fun c -> c.Name, c.Type)
+        { Schema = columns |> List.map (fun c -> Field.create c.Name c.Type)
           Columns = columns }
 
     Table.validate table |> ignore
@@ -1948,7 +2004,7 @@ let validityTests =
 
     let embedded (c: Column) =
         Embedded
-            { Schema = [ c.Name, c.Type ]
+            { Schema = [ Field.create c.Name c.Type ]
               Columns = [ c ] }
 
     let decodedValidity (json: string) =
@@ -2082,7 +2138,7 @@ let validityTests =
           testCase "Table.validate: an AllValid column cannot disagree with its values; a Mask of another length does"
           <| fun _ ->
               let table (c: Column) =
-                  { Schema = [ "n", IntType ]
+                  { Schema = [ Field.create "n" IntType ]
                     Columns = [ c ] }
 
               Expect.equal (Table.validate (table (ints AllValid))) (Ok()) "AllValid"
@@ -2490,7 +2546,7 @@ let temporalTests =
                       match Column.ofCells "t" (TimestampType u) cells with
                       | Ok c ->
                           Embedded
-                              { Schema = [ "t", TimestampType u ]
+                              { Schema = [ Field.create "t" (TimestampType u) ]
                                 Columns = [ c ] }
                       | Error e -> failtestf "%A" e
 
@@ -2507,7 +2563,7 @@ let temporalTests =
           <| fun _ ->
               let src =
                   Embedded
-                      { Schema = [ "d", DateType; "t", TimestampType TimeUnit.Seconds ]
+                      { Schema = [ Field.create "d" DateType; Field.create "t" (TimestampType TimeUnit.Seconds) ]
                         Columns =
                           [ mkCol "d" DateType [ Date "2026-06-22"; Null; Date "0000-01-01"; Date "9999-12-31" ]
                             mkCol
@@ -2578,7 +2634,7 @@ let temporalTests =
               let refuses (c: Column) (what: string) =
                   match
                       Table.validate
-                          { Schema = [ c.Name, c.Type ]
+                          { Schema = [ Field.create c.Name c.Type ]
                             Columns = [ c ] }
                   with
                   | Error(MalformedShape _) -> ()
@@ -2587,7 +2643,7 @@ let temporalTests =
               let accepts (c: Column) (what: string) =
                   Expect.equal
                       (Table.validate
-                          { Schema = [ c.Name, c.Type ]
+                          { Schema = [ Field.create c.Name c.Type ]
                             Columns = [ c ] })
                       (Ok())
                       what
@@ -2711,3 +2767,329 @@ let temporalTests =
               let writeFraction (_: Column list) = fraction[0] <- fraction[0] + 1
               let red = Conformance.columnOwnershipLawsWith writeFraction draw 7 3
               Expect.isFalse (red |> List.forall _.Passed) "a write into the fraction vector is seen" ]
+
+// ---- Phase 427: a schema entry is a Field that carries a unit and a description ----
+
+/// A unit from its canonical text; a refusal fails the test that asked for it.
+let private unitOf (text: string) : UnitOfMeasure =
+    match Unit.parse text with
+    | Ok u -> u
+    | Error e -> failtestf "unit %s did not parse: %A" text e
+
+/// The field every metadata member is stated on.
+let private massField: Field =
+    Field.create "mass" FloatType
+    |> Field.withUnit (unitOf "kg")
+    |> Field.withLabel "Payload mass"
+    |> Field.withDescription "The mass carried, measured at departure."
+    |> Field.withExt "vendor.format" "0.00"
+
+/// A one-column zero-row document whose entry carries `members` (raw JSON after `"type":"float"`).
+let private entryDocument (members: string) : string =
+    "{\"schema\":[{\"name\":\"c\",\"type\":\"float\""
+    + members
+    + "}],\"columns\":{\"c\":{\"values\":[],\"validity\":[]}}}"
+
+[<Tests>]
+let fieldTests =
+    testList
+        "Column fields: unit, label, description and extensions (Phase 427)"
+        [ testCase "the builders state a member and the readers answer it; `create` states none"
+          <| fun _ ->
+              let bare = Field.create "mass" FloatType
+              Expect.equal bare.Name "mass" "name"
+              Expect.equal bare.Type FloatType "type"
+              Expect.equal bare.Unit None "no unit"
+              Expect.equal bare.Label None "no label"
+              Expect.equal bare.Description None "no description"
+              Expect.isTrue bare.Ext.IsEmpty "no extension"
+              Expect.isFalse (Field.hasMetadata bare) "a bare field states no metadata"
+
+              Expect.equal massField.Unit (Some(unitOf "kg")) "unit"
+              Expect.equal massField.Label (Some "Payload mass") "label"
+              Expect.equal massField.Description (Some "The mass carried, measured at departure.") "description"
+              Expect.equal (Map.tryFind "vendor.format" massField.Ext) (Some "0.00") "extension"
+              Expect.isTrue (Field.hasMetadata massField) "it states metadata"
+
+              // every `without` clears exactly its member, and `withExt` replaces one of its key.
+              Expect.equal (massField |> Field.withoutUnit).Unit None "withoutUnit"
+              Expect.equal (massField |> Field.withoutLabel).Label None "withoutLabel"
+              Expect.equal (massField |> Field.withoutDescription).Description None "withoutDescription"
+              Expect.isTrue (massField |> Field.withoutExt "vendor.format").Ext.IsEmpty "withoutExt"
+
+              Expect.equal
+                  (massField |> Field.withoutExt "absent")
+                  massField
+                  "withoutExt of an absent key is the identity"
+
+              Expect.equal
+                  (Map.tryFind "vendor.format" (massField |> Field.withExt "vendor.format" "0.0").Ext)
+                  (Some "0.0")
+                  "withExt replaces"
+
+              Expect.equal
+                  (massField
+                   |> Field.withoutUnit
+                   |> Field.withoutLabel
+                   |> Field.withoutDescription
+                   |> Field.withoutExt "vendor.format")
+                  (Field.create "mass" FloatType)
+                  "clearing every member is the bare field"
+
+              // `withType` keeps the metadata — it is what `Schema.patch` retypes with.
+              let retyped = massField |> Field.withType DecimalType
+              Expect.equal retyped.Type DecimalType "retyped"
+              Expect.equal (retyped |> Field.withType FloatType) massField "and nothing else moved"
+
+          testCase "metadata is part of a field's identity: two schemas differing only in a unit are different schemas"
+          <| fun _ ->
+              let kg = Field.create "m" FloatType |> Field.withUnit (unitOf "kg")
+              let lb = Field.create "m" FloatType |> Field.withUnit (unitOf "[lb_av]")
+              Expect.notEqual kg lb "a unit tells two fields apart"
+              Expect.notEqual kg (Field.create "m" FloatType) "and from a field stating none"
+              Expect.notEqual [ kg ] [ lb ] "so two schemas differing only in a unit differ"
+
+              Expect.notEqual
+                  (Field.create "m" FloatType |> Field.withLabel "")
+                  (Field.create "m" FloatType)
+                  "an empty label is a stated label"
+
+              Expect.equal
+                  (Field.create "m" FloatType
+                   |> Field.withUnit (unitOf "m/s")
+                   |> Field.withLabel "v")
+                  (Field.create "m" FloatType
+                   |> Field.withLabel "v"
+                   |> Field.withUnit (unitOf "m.s-1"))
+                  "equal members in any build order, a unit by its algebra not its spelling"
+
+              Expect.equal
+                  (hash kg)
+                  (hash (Field.create "m" FloatType |> Field.withUnit (unitOf "kg")))
+                  "equal fields hash alike"
+
+          testCase "a column can say what it means, and a table without metadata encodes byte-identically to before"
+          <| fun _ ->
+              let t: Table =
+                  { Schema = [ massField; Field.create "n" IntType ]
+                    Columns =
+                      [ mkCol "mass" FloatType [ Float 1.5; Null ]
+                        mkCol "n" IntType [ Int 1; Int 2 ] ] }
+
+              Expect.equal (Table.validate t) (Ok()) "metadata is not storage: validate reads none of it"
+              Expect.equal (Table.tryField "mass" t) (Some massField) "the column's field is its schema entry"
+              Expect.equal (Table.tryField "mass" t |> Option.bind _.Unit) (Some(unitOf "kg")) "so it says it is kg"
+              Expect.equal (Table.tryField "absent" t) None "a name the schema lacks has no field"
+
+              let wire = ColumnCodec.encode (Embedded t)
+
+              Expect.stringContains
+                  wire
+                  "{\"description\":\"The mass carried, measured at departure.\",\"ext\":{\"vendor.format\":\"0.00\"},\"label\":\"Payload mass\",\"name\":\"mass\",\"type\":\"float\",\"unit\":\"kg\"}"
+                  "the entry writes the members it states, keys sorted, the unit as its canonical text"
+
+              Expect.stringContains wire "{\"name\":\"n\",\"type\":\"int\"}" "and no member a field does not state"
+
+              match ColumnCodec.decode wire with
+              | Ok(Embedded back) ->
+                  Expect.equal back t "the metadata survives the round trip"
+                  Expect.equal (ColumnCodec.encode (Embedded back)) wire "and re-encodes byte-identically"
+              | other -> failtestf "decode: %A" other
+
+              // The pre-427 bytes of the suite's sample table: no field states metadata, so nothing
+              // in the entries moved.
+              Expect.equal
+                  (ColumnCodec.encode sample)
+                  "{\"columns\":{\"b\":{\"validity\":[true,false,true],\"values\":[true,false,false]},\"d\":{\"validity\":[true,false,true],\"values\":[\"2026-06-22\",\"\",\"1970-01-01\"]},\"f\":{\"validity\":[true,true,false],\"values\":[0.1,0.3333333333333333,0]},\"i\":{\"validity\":[true,false,true],\"values\":[1,0,-42]},\"m\":{\"validity\":[true,false,true],\"values\":[\"12.5\",\"0\",\"-0.05\"]},\"s\":{\"validity\":[true,true,false],\"values\":[\"a\\\"b\",\"\",\"\"]},\"t\":{\"validity\":[true,false,true],\"values\":[\"2026-06-22T17:00:00Z\",\"\",\"2000-01-01T00:00:00Z\"]}},\"schema\":[{\"name\":\"i\",\"type\":\"int\"},{\"name\":\"f\",\"type\":\"float\"},{\"name\":\"b\",\"type\":\"bool\"},{\"name\":\"s\",\"type\":\"string\"},{\"name\":\"d\",\"type\":\"date\"},{\"name\":\"t\",\"type\":\"timestamp\"},{\"name\":\"m\",\"type\":\"decimal\"}]}"
+                  "a table whose fields state no metadata writes the bytes it wrote before Phase 427"
+
+          testCase
+              "decode reads a parseable unit to the unit, refuses one the algebra does not parse by column, and holds every member to its kind"
+          <| fun _ ->
+              let decoded (members: string) =
+                  match ColumnCodec.decode (entryDocument members) with
+                  | Ok(Embedded t) -> Ok(List.head t.Schema)
+                  | Ok(Ref r) -> failtestf "a ref: %s" r
+                  | Error e -> Error e
+
+              Expect.equal
+                  (decoded ",\"unit\":\"s-1.m\"" |> Result.map _.Unit)
+                  (Ok(Some(unitOf "m/s")))
+                  "a spelling the algebra parses reads to the unit"
+
+              match ColumnCodec.decode (entryDocument ",\"unit\":\"s-1.m\"") with
+              | Ok src ->
+                  Expect.stringContains
+                      (ColumnCodec.encode src)
+                      ("\"unit\":\"" + Unit.render (unitOf "m/s") + "\"")
+                      "and writes back the canonical text"
+              | Error e -> failtestf "decode: %A" e
+
+              Expect.equal
+                  (decoded ",\"ext\":{}" |> Result.map Field.hasMetadata)
+                  (Ok false)
+                  "an empty ext is no metadata"
+
+              Expect.equal
+                  (decoded ",\"nullable\":true")
+                  (Ok(Field.create "c" FloatType))
+                  "an unknown member is read past"
+
+              let refused (members: string) (expectedDetail: string) =
+                  match decoded members with
+                  | Error(MalformedShape d) ->
+                      Expect.stringContains d "c: " ("the refusal names the column: " + d)
+                      Expect.stringContains d expectedDetail ("and says why: " + d)
+                  | other -> failtestf "expected MalformedShape for %s, got %A" members other
+
+              refused
+                  ",\"unit\":\"furlong\""
+                  "unit 'furlong' is not a unit the kit parses: unknown unit symbol 'furlong' at position 0"
+
+              refused ",\"unit\":\"\"" "the text is empty"
+              refused ",\"unit\":\"Cel\"" "non-ratio unit"
+              refused ",\"unit\":1" "member 'unit' must be a string, got int"
+              refused ",\"label\":[]" "member 'label' must be a string, got array"
+              refused ",\"description\":7" "member 'description' must be a string, got int"
+              refused ",\"ext\":[\"a\"]" "member 'ext' must be an object, got array"
+              refused ",\"ext\":{\"vendor.n\":1}" "extension member 'vendor.n' must be a string, got int"
+
+          testCase "Schema.diff reports a metadata change as Amended beside a retype, and Schema.patch replays it"
+          <| fun _ ->
+              let kg = unitOf "kg"
+              let lb = unitOf "[lb_av]"
+
+              let old =
+                  [ Field.create "m" FloatType |> Field.withUnit kg |> Field.withExt "vendor.k" "1"
+                    Field.create "n" IntType ]
+
+              let target =
+                  [ Field.create "m" DecimalType
+                    |> Field.withUnit lb
+                    |> Field.withLabel "Mass"
+                    |> Field.withExt "vendor.k" "2"
+                    |> Field.withExt "vendor.j" "x"
+                    Field.create "n" IntType |> Field.withDescription "a count" ]
+
+              let delta = Schema.diff old target
+              Expect.equal delta.Retyped [ "m", FloatType, DecimalType ] "the retype is reported as before"
+
+              Expect.equal
+                  delta.Amended
+                  [ "m", FieldChange.Unit(Some kg, Some lb)
+                    "m", FieldChange.Label(None, Some "Mass")
+                    "m", FieldChange.Ext("vendor.j", None, Some "x")
+                    "m", FieldChange.Ext("vendor.k", Some "1", Some "2")
+                    "n", FieldChange.Description(None, Some "a count") ]
+                  "one entry per member that moved, in member order, extension keys ordinal"
+
+              Expect.equal (Schema.patch old delta) (Ok target) "patch replays the delta to the target"
+              Expect.equal (Schema.diff target target) Schema.identityDelta "diff a a is the identity"
+              Expect.equal (Schema.diff old old).Amended [] "a schema differing from itself in nothing amends nothing"
+
+              let elsewhere =
+                  [ Field.create "m" FloatType |> Field.withUnit lb; Field.create "n" IntType ]
+
+              Expect.equal
+                  (Schema.patch elsewhere delta)
+                  (Error(MetadataDisagrees("m", FieldChange.Unit(Some kg, Some lb))))
+                  "a delta computed against another schema is refused at the member that disagrees"
+
+              Expect.equal
+                  (Schema.patch
+                      [ Field.create "n" IntType ]
+                      { Schema.identityDelta with
+                          Amended = [ "m", FieldChange.Label(None, Some "x") ] })
+                  (Error(AbsentColumn "m"))
+                  "amending an absent column"
+
+          testCase
+              "Schema.classify: a stated unit replaced or withdrawn breaks a dependant; one stated afresh, a label, or an undepended change does not; an extension change is Unknown"
+          <| fun _ ->
+              let m = Field.create "m" FloatType |> Field.withUnit (unitOf "kg")
+
+              let verdict (old: Schema) (target: Schema) (deps: string list) =
+                  Schema.classify deps (Schema.diff old target)
+
+              match verdict [ m ] [ m |> Field.withUnit (unitOf "[lb_av]") ] [ "m" ] with
+              | SchemaCompat.Breaking [ reason ] -> Expect.stringContains reason "unit changed kg → [lb_av]" reason
+              | other -> failtestf "kg → lb on a dependant: %A" other
+
+              match verdict [ m ] [ Field.create "m" FloatType ] [ "m" ] with
+              | SchemaCompat.Breaking [ reason ] -> Expect.stringContains reason "unit changed kg → none" reason
+              | other -> failtestf "kg → none on a dependant: %A" other
+
+              Expect.equal
+                  (verdict [ Field.create "m" FloatType ] [ m ] [ "m" ])
+                  SchemaCompat.Compatible
+                  "a unit stated afresh"
+
+              Expect.equal (verdict [ m ] [ m |> Field.withLabel "Mass" ] [ "m" ]) SchemaCompat.Compatible "a label"
+
+              Expect.equal
+                  (verdict [ m ] [ m |> Field.withDescription "d" ] [ "m" ])
+                  SchemaCompat.Compatible
+                  "a description"
+
+              Expect.equal
+                  (verdict [ m ] [ m |> Field.withUnit (unitOf "[lb_av]") ] [ "x" ])
+                  SchemaCompat.Compatible
+                  "an undepended unit change"
+
+              match verdict [ m ] [ m |> Field.withExt "vendor.k" "v" ] [ "m" ] with
+              | SchemaCompat.Unknown [ reason ] -> Expect.stringContains reason "extension member vendor.k" reason
+              | other -> failtestf "an extension change on a dependant: %A" other
+
+              match verdict [ m; Field.create "z" IntType ] [ m |> Field.withExt "vendor.k" "v" ] [ "m"; "z" ] with
+              | SchemaCompat.Breaking reasons ->
+                  Expect.equal (List.length reasons) 1 "Breaking outranks Unknown and carries only the breaking reasons"
+              | other -> failtestf "a removal beside an extension change: %A" other
+
+          testCase
+              "Schema.fingerprint: a schema without metadata keeps its pre-427 value, metadata moves it, and the pre-image stays injective"
+          <| fun _ ->
+              let plain = [ Field.create "a" IntType; Field.create "b" FloatType ]
+              Expect.equal (Schema.fingerprint plain) "09da452b" "the value the pre-427 kit answered"
+
+              let fp (s: Schema) = Schema.fingerprint s
+
+              let b (f: Field -> Field) =
+                  [ Field.create "a" IntType; Field.create "b" FloatType |> f ]
+
+              Expect.notEqual (fp (b (Field.withUnit (unitOf "kg")))) (fp plain) "a unit moves it"
+
+              Expect.notEqual
+                  (fp (b (Field.withUnit (unitOf "kg"))))
+                  (fp (b (Field.withUnit (unitOf "[lb_av]"))))
+                  "and which unit"
+
+              Expect.notEqual
+                  (fp (b (Field.withUnit (unitOf "kg"))))
+                  (fp (b (Field.withLabel "kg")))
+                  "a unit kg is not a label kg"
+
+              Expect.notEqual (fp (b (Field.withLabel ""))) (fp plain) "an empty label is not an absent one"
+
+              Expect.notEqual
+                  (fp (b (Field.withExt "k" "v")))
+                  (fp (b (Field.withExt "kv" "")))
+                  "extension key and value do not run together"
+
+              Expect.notEqual
+                  (fp (b (Field.withLabel "x")))
+                  (fp (b (Field.withDescription "x")))
+                  "a label x is not a description x"
+
+              // The metadata element ends with the fold separator and a column element with a type
+              // tag, so a column whose NAME spells a metadata element cannot collide with one.
+              let spelled = plain @ [ Field.create "ukg\u0001l\u0001d\u0001" IntType ]
+
+              Expect.notEqual
+                  (fp spelled)
+                  (fp (b (Field.withUnit (unitOf "kg"))))
+                  "a column named like a metadata element is a column"
+
+              Expect.equal
+                  (fp (b (Field.withUnit (unitOf "m/s"))))
+                  (fp (b (Field.withUnit (unitOf "m.s-1"))))
+                  "a unit by its algebra, not its spelling" ]

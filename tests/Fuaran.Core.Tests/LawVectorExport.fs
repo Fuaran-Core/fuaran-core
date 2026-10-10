@@ -2,8 +2,9 @@ namespace Fuaran.Core.Tests
 
 // ============================================================================
 //  The host-neutral export of the law vectors this repository owns: the
-//  `capabilityLaws` vectors (`laws/capability-laws.json`, Phase 235) and the
-//  exact decimal's documents (`laws/decimal-laws.json`, Phase 276).
+//  `capabilityLaws` vectors (`laws/capability-laws.json`, Phase 235), the
+//  exact decimal's documents (`laws/decimal-laws.json`, Phase 276) and the
+//  schema field's documents (`laws/field-laws.json`, Phase 427).
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
@@ -374,7 +375,7 @@ module LawVectorExport =
             Column.ofCells "c" DecimalType cells
             |> Result.map (fun col ->
                 Embedded
-                    { Schema = [ "c", DecimalType ]
+                    { Schema = [ Field.create "c" DecimalType ]
                       Columns = [ col ] })
 
         /// `Column.aggregate` over a decimal column `c` holding `cells`. A cell of another type is
@@ -597,6 +598,261 @@ module LawVectorExport =
         let render () : string = renderAt (kitVersion ())
 
     // -----------------------------------------------------------------------
+    //  the field vectors (Phase 427)
+    // -----------------------------------------------------------------------
+    //  A schema entry is a `Field`: a name, a type and the metadata that says what the column MEANS
+    //  — an optional unit (Phase 426's `UnitOfMeasure`, as its canonical text on the wire), a label,
+    //  a description and an extension map every host preserves verbatim. These vectors are the
+    //  reference answers a host mirrors: the entry's canonical bytes (the members a field states and
+    //  no other, so an entry without metadata is the pre-427 `{name, type}`), the decode's refusals
+    //  and its unit canonicalisation, the schema fingerprint with and without metadata, the schema
+    //  delta's `amended` member and its replay, and the compatibility verdict a unit change earns.
+    //  AUTHORED inputs, as the decimal family's are: nothing is drawn.
+
+    module Fields =
+
+        let fileName = "field-laws.json"
+
+        let private accept (members: (string * string) list) = ("verdict", jstr "accept") :: members
+
+        let private reject (error: string) =
+            [ "verdict", jstr "reject"; "error", jstr error ]
+
+        let private columnErrorClass (e: ColumnError) : string =
+            match e with
+            | NotJson _ -> "NotJson"
+            | MissingField _ -> "MissingField"
+            | MalformedShape _ -> "MalformedShape"
+            | UnknownType _ -> "UnknownType"
+            | TypeMismatch _ -> "TypeMismatch"
+            | LengthMismatch _ -> "LengthMismatch"
+            | NonFiniteFloat _ -> "NonFiniteFloat"
+            | Malformed _ -> "Malformed"
+            | RaggedColumns _ -> "RaggedColumns"
+
+        let private unit (text: string) : UnitOfMeasure =
+            match Unit.parse text with
+            | Ok u -> u
+            | Error e -> failwithf "the field documents' unit %s did not parse: %A" text e
+
+        /// A schema as the wire spells it — the entry objects, under `Canon` — the shape a host
+        /// reads a schema in, so a vector's input needs no second schema notation.
+        let schemaText (s: Schema) : string =
+            Canon.render (JArr(s |> List.map ColumnCodec.fieldJson))
+
+        /// The zero-row document over `schema`: every column present and empty, so the entries are
+        /// the whole of what the bytes say.
+        let document (schema: Schema) : string =
+            let columns =
+                schema
+                |> List.map (fun f ->
+                    match Column.ofCells f.Name f.Type [] with
+                    | Ok c -> c
+                    | Error e -> failwithf "an empty column %s did not build: %A" f.Name e)
+
+            ColumnCodec.encode (Embedded { Schema = schema; Columns = columns })
+
+        // ---- the authored inputs ----
+
+        let private mass =
+            Field.create "mass" FloatType
+            |> Field.withUnit (unit "kg")
+            |> Field.withLabel "Payload mass"
+            |> Field.withDescription "The mass carried, measured at departure."
+            |> Field.withExt "vendor.format" "0.00"
+
+        /// `fieldEncode`: a field from its members, to the entry's canonical bytes.
+        let encodeInputs: (string * Field) list =
+            [ "bare", Field.create "n" IntType
+              "unit-only", Field.create "d" FloatType |> Field.withUnit (unit "m")
+              "every-member", mass
+              "empty-label", Field.create "n" IntType |> Field.withLabel ""
+              "currency-and-prefix", Field.create "price" DecimalType |> Field.withUnit (unit "c[GBP]")
+              "derived-unit", Field.create "v" FloatType |> Field.withUnit (unit "m/s2")
+              "dimensionless", Field.create "ratio" FloatType |> Field.withUnit Unit.dimensionless
+              "ext-keys-sorted",
+              Field.create "x" StringType
+              |> Field.withExt "vendor.b" "2"
+              |> Field.withExt "vendor.a" "1"
+              |> Field.withExt "other.z" "3" ]
+
+        /// `codecDecode`: a zero-row document whose entry carries members, raw JSON — the accepted
+        /// forms re-encode canonically, the refused ones name their class.
+        let decodeInputs: (string * string) list =
+            let entry (members: string) =
+                "{\"schema\":[{\"name\":\"c\",\"type\":\"float\""
+                + members
+                + "}],\"columns\":{\"c\":{\"values\":[],\"validity\":[]}}}"
+
+            [ "bare", entry ""
+              "every-member",
+              entry
+                  ",\"unit\":\"kg\",\"label\":\"Payload mass\",\"description\":\"A sentence.\",\"ext\":{\"vendor.format\":\"0.00\"}"
+              "canonicalises-unit-order", entry ",\"unit\":\"s-1.m\""
+              "canonicalises-unit-division", entry ",\"unit\":\"m/s/s\""
+              "canonicalises-unit-alias", entry ",\"unit\":\"l\""
+              "empty-ext", entry ",\"ext\":{}"
+              "unknown-member-read-past", entry ",\"nullable\":true"
+              "refuses-unknown-unit", entry ",\"unit\":\"furlong\""
+              "refuses-empty-unit", entry ",\"unit\":\"\""
+              "refuses-annotation-unit", entry ",\"unit\":\"m{tall}\""
+              "refuses-affine-unit", entry ",\"unit\":\"Cel\""
+              "refuses-unit-not-string", entry ",\"unit\":1"
+              "refuses-label-not-string", entry ",\"label\":[]"
+              "refuses-description-not-string", entry ",\"description\":7"
+              "refuses-ext-not-object", entry ",\"ext\":[\"a\"]"
+              "refuses-ext-member-not-string", entry ",\"ext\":{\"vendor.n\":1}" ]
+
+        /// `fingerprint`: schemas with and without metadata — the metadata-free values are the ones
+        /// the pre-427 kit answered.
+        let fingerprintInputs: (string * Schema) list =
+            [ "two-columns", [ Field.create "a" IntType; Field.create "b" FloatType ]
+              "with-unit",
+              [ Field.create "a" IntType
+                Field.create "b" FloatType |> Field.withUnit (unit "kg") ]
+              "with-label-kg", [ Field.create "a" IntType; Field.create "b" FloatType |> Field.withLabel "kg" ]
+              "with-empty-label", [ Field.create "a" IntType |> Field.withLabel "" ]
+              "every-member", [ mass ]
+              "unicode-name", [ Field.create "café" FloatType |> Field.withDescription "日本語" ] ]
+
+        /// `delta`: `(old, target)` pairs — the delta's canonical bytes and its replay.
+        let deltaInputs: (string * Schema * Schema) list =
+            let m = Field.create "m" FloatType |> Field.withUnit (unit "kg")
+
+            [ "no-metadata",
+              [ Field.create "a" IntType; Field.create "b" StringType ],
+              [ Field.create "b" StringType; Field.create "a" FloatType ]
+              "unit-changed", [ m ], [ m |> Field.withUnit (unit "[lb_av]") ]
+              "unit-added-and-label", [ Field.create "m" FloatType ], [ m |> Field.withLabel "Mass" ]
+              "unit-withdrawn-and-retyped", [ m ], [ Field.create "m" DecimalType ]
+              "ext-moved",
+              [ Field.create "m" FloatType |> Field.withExt "vendor.k" "1" ],
+              [ Field.create "m" FloatType
+                |> Field.withExt "vendor.k" "2"
+                |> Field.withExt "vendor.j" "x" ]
+              "added-with-metadata", [ Field.create "a" IntType ], [ Field.create "a" IntType; mass ] ]
+
+        /// `classify`: a delta against a depended-on set, to its verdict.
+        let classifyInputs: (string * Schema * Schema * string list) list =
+            let m = Field.create "m" FloatType |> Field.withUnit (unit "kg")
+
+            [ "unit-replaced-depended", [ m ], [ m |> Field.withUnit (unit "[lb_av]") ], [ "m" ]
+              "unit-replaced-undepended", [ m ], [ m |> Field.withUnit (unit "[lb_av]") ], [ "x" ]
+              "unit-withdrawn-depended", [ m ], [ Field.create "m" FloatType ], [ "m" ]
+              "unit-stated-depended", [ Field.create "m" FloatType ], [ m ], [ "m" ]
+              "label-changed-depended", [ m ], [ m |> Field.withLabel "Mass" ], [ "m" ]
+              "ext-changed-depended", [ m ], [ m |> Field.withExt "vendor.k" "v" ], [ "m" ]
+              "ext-changed-and-removed",
+              [ m; Field.create "z" IntType ],
+              [ m |> Field.withExt "vendor.k" "v" ],
+              [ "m"; "z" ] ]
+
+        let private compatTag (c: SchemaCompat) : string =
+            match c with
+            | SchemaCompat.Compatible -> "compatible"
+            | SchemaCompat.Breaking _ -> "breaking"
+            | SchemaCompat.Unknown _ -> "unknown"
+
+        // ---- the vectors, computed by calling the kit ----
+
+        let allVectors () : Vector list =
+            [ for name, f in encodeInputs ->
+                  let members =
+                      [ "name", jstr f.Name; "type", jstr (ColumnType.tag f.Type) ]
+                      @ (f.Unit
+                         |> Option.map (fun u -> [ "unit", jstr (Unit.render u) ])
+                         |> Option.defaultValue [])
+                      @ (f.Label |> Option.map (fun l -> [ "label", jstr l ]) |> Option.defaultValue [])
+                      @ (f.Description
+                         |> Option.map (fun d -> [ "description", jstr d ])
+                         |> Option.defaultValue [])
+                      @ (if f.Ext.IsEmpty then
+                             []
+                         else
+                             [ "ext", jobj (f.Ext |> Map.toList |> List.map (fun (k, v) -> k, jstr v)) ])
+
+                  { Id = "encode-" + name
+                    Case = "fieldEncode"
+                    Input = members
+                    Expected = accept [ "canonical", jstr (Canon.render (ColumnCodec.fieldJson f)) ] }
+              for name, doc in decodeInputs ->
+                  { Id = "decode-" + name
+                    Case = "codecDecode"
+                    Input = [ "document", jstr doc ]
+                    Expected =
+                      match ColumnCodec.decode doc with
+                      | Ok src -> accept [ "canonical", jstr (ColumnCodec.encode src) ]
+                      | Error e -> reject (columnErrorClass e) }
+              for name, schema in fingerprintInputs ->
+                  { Id = "fingerprint-" + name
+                    Case = "fingerprint"
+                    Input = [ "schema", schemaText schema ]
+                    Expected = accept [ "fingerprint", jstr (Schema.fingerprint schema) ] }
+              for name, old, target in deltaInputs ->
+                  let delta = Schema.diff old target
+
+                  { Id = "delta-" + name
+                    Case = "delta"
+                    Input = [ "old", schemaText old; "target", schemaText target ]
+                    Expected =
+                      match Schema.patch old delta with
+                      | Ok patched ->
+                          accept
+                              [ "canonical", jstr (SchemaDeltaCodec.encode delta)
+                                "patched", schemaText patched ]
+                      | Error e -> failwithf "the delta %s did not replay: %A" name e }
+              for name, old, target, deps in classifyInputs ->
+                  { Id = "classify-" + name
+                    Case = "classify"
+                    Input =
+                      [ "old", schemaText old
+                        "target", schemaText target
+                        "dependsOn", "[" + (deps |> List.map jstr |> String.concat ", ") + "]" ]
+                    Expected = accept [ "compat", jstr (compatTag (Schema.classify deps (Schema.diff old target))) ] } ]
+
+        let private description =
+            "The schema field (Phase 427): a column's name and type, and the metadata that says what it means — "
+            + "an optional unit (the canonical text of a unit the unit algebra parses), a label, a description, and an "
+            + "extension object of string members a host preserves verbatim. Authored inputs, each `expected` computed "
+            + "by calling the pinned kit; no seed. `fieldEncode` builds a field from its members (`name`, `type`, and "
+            + "whichever of `unit`, `label`, `description`, `ext` are given) and expects the schema entry's canonical "
+            + "bytes: the members the field states and no other, keys sorted, so an entry without metadata is `{name, "
+            + "type}`. `codecDecode` decodes a zero-row `document` and expects its canonical re-encoding — a parseable "
+            + "unit spelling is read to the unit and written back canonical, an empty `ext` is dropped, an unknown "
+            + "member is read past — or the refusal's class: a unit the algebra does not parse, a non-string `unit`, "
+            + "`label` or `description`, an `ext` that is not an object, and an `ext` member that is not a string are "
+            + "each `MalformedShape`. `fingerprint` reads a `schema` (an array of entries) and expects its FNV-1a "
+            + "fingerprint: a schema without metadata has the fingerprint it had before this phase, and metadata moves "
+            + "it. `delta` reads `old` and `target` schemas and expects the canonical bytes of the delta between them "
+            + "(`amended` present only when a member moved) and `patched`, the schema replaying that delta over `old` "
+            + "yields, which is `target`. `classify` reads the same pair and `dependsOn` and expects `compat`: "
+            + "`breaking` when a depended-on column's stated unit was replaced or withdrawn (or it was removed or "
+            + "narrowed), `unknown` when only a depended-on column's extension member moved, else `compatible`."
+
+        /// Rendered with an explicit `kitVersion`, as `Decimals.renderAt` is.
+        let renderAt (stamp: string) : string =
+            let sb = StringBuilder()
+            let line (s: string) = sb.Append(s).Append('\n') |> ignore
+
+            line "{"
+            line ("  \"family\": " + jstr "fieldLaws" + ",")
+            line ("  \"kitVersion\": " + jstr stamp + ",")
+            line ("  \"description\": " + jstr description + ",")
+            line "  \"vectors\": ["
+
+            let rendered = allVectors () |> List.map renderVector
+            let last = List.length rendered - 1
+
+            rendered
+            |> List.iteri (fun i v -> line ("    " + v + (if i = last then "" else ",")))
+
+            line "  ]"
+            line "}"
+            sb.ToString()
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
     //  writing
     // -----------------------------------------------------------------------
 
@@ -611,9 +867,13 @@ module LawVectorExport =
     let decimalPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, Decimals.fileName)
 
+    let fieldPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, Fields.fileName)
+
     let emitted (corpusDir: string) : (string * string) list =
         [ capabilityPath corpusDir, Capabilities.render ()
-          decimalPath corpusDir, Decimals.render () ]
+          decimalPath corpusDir, Decimals.render ()
+          fieldPath corpusDir, Fields.render () ]
 
     // -----------------------------------------------------------------------
     //  Phase 394 — the corpus `laws/manifest.json` rows beside the files
@@ -640,7 +900,9 @@ module LawVectorExport =
 
     /// Each emitted family's row id in the corpus manifest, with the file that row names.
     let manifestRows: (string * string) list =
-        [ "capabilityLaws", Capabilities.fileName; "decimal", Decimals.fileName ]
+        [ "capabilityLaws", Capabilities.fileName
+          "decimal", Decimals.fileName
+          "fieldLaws", Fields.fileName ]
 
     /// The members of a manifest row derived from the text of the file it names, in row order:
     /// `kitVersion` always; `seed` and `iterations` when the file declares them (a drawn family);

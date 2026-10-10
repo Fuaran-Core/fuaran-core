@@ -382,7 +382,10 @@ let private rebuild (c: Column) (cells: Cell list) : Result<Column, string> =
 let private orders (n: int) : Table =
     let rows = [ 0 .. n - 1 ]
 
-    { Schema = [ "id", IntType; "qty", IntType; "price", FloatType ]
+    { Schema =
+        [ Field.create "id" IntType
+          Field.create "qty" IntType
+          Field.create "price" FloatType ]
       Columns =
         [ column "id" IntType (rows |> List.map (fun i -> Int(i + 1)))
           column "qty" IntType (rows |> List.map (fun i -> Int(1 + i % 7)))
@@ -561,7 +564,7 @@ let private amountOf (f: LineFormula) (qty: Cell) (price: Cell) : Cell =
     | _ -> Null
 
 let private linesTable (amounts: Cell list) : Table =
-    { Schema = [ "amount", FloatType ]
+    { Schema = [ Field.create "amount" FloatType ]
       Columns = [ column "amount" FloatType amounts ] }
 
 /// Every row, from scratch: the state a prime builds.

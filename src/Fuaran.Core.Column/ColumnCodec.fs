@@ -73,10 +73,30 @@ module ColumnCodec =
         let validity = List.init n (fun i -> JBool(present i))
         JObj [ "values", JArr values; "validity", JArr validity ]
 
-    let private schemaJson (schema: Schema) : JVal =
-        schema
-        |> List.map (fun (name, ty) -> JObj [ "name", JStr name; "type", JStr(ColumnType.tag ty) ])
-        |> JArr
+    /// One schema entry as the wire carries it (Phase 427): `name` and `type` always, then the
+    /// metadata members a field states and no other — `unit` (the unit's canonical text), `label`,
+    /// `description`, and `ext` (an object of the extension members, each a string) — so a field
+    /// with no metadata writes exactly the `{name, type}` entry it wrote before this phase, and
+    /// every existing column's bytes stand. Shared with the schema-delta codec, whose `added` and
+    /// `removed` entries are these.
+    let fieldJson (f: Field) : JVal =
+        let stated (name: string) (v: string option) =
+            match v with
+            | Some s -> [ name, JStr s ]
+            | None -> []
+
+        JObj(
+            [ "name", JStr f.Name; "type", JStr(ColumnType.tag f.Type) ]
+            @ stated "unit" (f.Unit |> Option.map Unit.render)
+            @ stated "label" f.Label
+            @ stated "description" f.Description
+            @ (if f.Ext.IsEmpty then
+                   []
+               else
+                   [ "ext", JObj(f.Ext |> Map.toList |> List.map (fun (k, v) -> k, JStr v)) ])
+        )
+
+    let private schemaJson (schema: Schema) : JVal = schema |> List.map fieldJson |> JArr
 
     /// Encode a `DataSource` to a `JVal` — embedded columns keyed by name (type comes from the
     /// schema, so it is not repeated), or a `ref` string beside an empty `schema`. The members are
@@ -87,13 +107,13 @@ module ColumnCodec =
         | Embedded t ->
             let columns =
                 t.Schema
-                |> List.map (fun (name, _) ->
+                |> List.map (fun f ->
                     let col =
                         t.Columns
-                        |> List.tryFind (fun c -> c.Name = name)
-                        |> Option.defaultValue (Column.ofStrs name Vector.empty AllValid)
+                        |> List.tryFind (fun c -> c.Name = f.Name)
+                        |> Option.defaultValue (Column.ofStrs f.Name Vector.empty AllValid)
 
-                    name, columnJson col)
+                    f.Name, columnJson col)
 
             JObj [ "schema", schemaJson t.Schema; "columns", JObj columns ]
         | Ref r -> JObj [ "schema", JArr []; "ref", JStr r ]
@@ -291,7 +311,53 @@ module ColumnCodec =
         | _ -> mismatch v
 
 
-    let private decodeSchemaEntry (el: JVal) : Result<string * ColumnType, ColumnError> =
+    /// The sentence a unit refusal is reported in, naming the token (or the shape fault) and its
+    /// zero-based position in the text, as `Unit.parse` classifies it.
+    let private unitRefusalText (r: UnitRefusal) : string =
+        let at (what: string) (token: string) (position: int) =
+            what + " '" + token + "' at position " + string position
+
+        match r with
+        | UnitRefusal.Empty -> "the text is empty"
+        | UnitRefusal.Malformed(found, position, expected) ->
+            "expected "
+            + expected
+            + " at position "
+            + string position
+            + ", found '"
+            + found
+            + "'"
+        | UnitRefusal.UnknownAtom(token, position) -> at "unknown unit symbol" token position
+        | UnitRefusal.Annotation(token, position) -> at "annotation" token position
+        | UnitRefusal.ArbitraryUnit(token, position) -> at "arbitrary unit" token position
+        | UnitRefusal.NonRatioUnit(token, position) -> at "non-ratio unit" token position
+        | UnitRefusal.PrefixNotAllowed(token, position) -> at "prefix not allowed on" token position
+        | UnitRefusal.NumericFactor(token, position) -> at "numeric factor" token position
+
+    /// An optional string member of a schema entry: absent is `None`; present and not a string is
+    /// refused naming the column and the member.
+    let private optionalText (column: string) (name: string) (el: JVal) : Result<string option, ColumnError> =
+        match Decode.tryProp name el with
+        | None -> Ok None
+        | Some(JStr s) -> Ok(Some s)
+        | Some other ->
+            Error(
+                MalformedShape(
+                    column
+                    + ": schema entry member '"
+                    + name
+                    + "' must be a string, got "
+                    + JVal.kindName other
+                )
+            )
+
+    /// A schema entry from the wire (Phase 427): `name` and `type` as before, then the metadata
+    /// members when present — `unit` is parsed by `Unit.parse` and REFUSED, naming the column, when
+    /// it is not a unit the kit parses (a parseable spelling is read to the unit and re-encodes as
+    /// its canonical text); `label` and `description` must be strings; `ext` must be an object whose
+    /// every member is a string. A member this codec does not know is read past, as a member of
+    /// the source object is. The reader the schema-delta codec's entries share.
+    let decodeField (el: JVal) : Result<Field, ColumnError> =
         getField "name" el
         |> Result.bind (asStr "schema.name")
         |> Result.bind (fun name ->
@@ -299,8 +365,66 @@ module ColumnCodec =
             |> Result.bind (asStr "schema.type")
             |> Result.bind (fun tag ->
                 match ColumnType.ofTag tag with
-                | Some ty -> Ok(name, ty)
-                | None -> Error(UnknownType(tag, ColumnType.all))))
+                | Some ty -> Ok(Field.create name ty)
+                | None -> Error(UnknownType(tag, ColumnType.all)))
+            |> Result.bind (fun f ->
+                optionalText name "unit" el
+                |> Result.bind (fun unit ->
+                    match unit with
+                    | None -> Ok f
+                    | Some text ->
+                        match Unit.parse text with
+                        | Ok u -> Ok(Field.withUnit u f)
+                        | Error r ->
+                            Error(
+                                MalformedShape(
+                                    name
+                                    + ": unit '"
+                                    + text
+                                    + "' is not a unit the kit parses: "
+                                    + unitRefusalText r
+                                )
+                            )))
+            |> Result.bind (fun f ->
+                optionalText name "label" el
+                |> Result.map (fun label ->
+                    match label with
+                    | Some l -> Field.withLabel l f
+                    | None -> f))
+            |> Result.bind (fun f ->
+                optionalText name "description" el
+                |> Result.map (fun description ->
+                    match description with
+                    | Some d -> Field.withDescription d f
+                    | None -> f))
+            |> Result.bind (fun f ->
+                match Decode.tryProp "ext" el with
+                | None -> Ok f
+                | Some(JObj members) ->
+                    let rec go (f: Field) =
+                        function
+                        | [] -> Ok f
+                        | (k, JStr v) :: rest -> go (Field.withExt k v f) rest
+                        | (k, other) :: _ ->
+                            Error(
+                                MalformedShape(
+                                    name
+                                    + ": schema entry extension member '"
+                                    + k
+                                    + "' must be a string, got "
+                                    + JVal.kindName other
+                                )
+                            )
+
+                    go f members
+                | Some other ->
+                    Error(
+                        MalformedShape(
+                            name
+                            + ": schema entry member 'ext' must be an object, got "
+                            + JVal.kindName other
+                        )
+                    )))
 
     let private decodeSchema (el: JVal) : Result<Schema, ColumnError> =
         asArr "schema" el
@@ -309,7 +433,7 @@ module ColumnCodec =
                 function
                 | [] -> Ok(List.rev acc)
                 | x :: rest ->
-                    match decodeSchemaEntry x with
+                    match decodeField x with
                     | Ok e -> go (e :: acc) rest
                     | Error e -> Error e
 
@@ -548,7 +672,7 @@ module ColumnCodec =
                                                 columnParts name colEl
                                                 |> Result.bind (fun (values, _) ->
                                                     inferColumnType name values
-                                                    |> Result.map (fun ty -> entries @ [ name, ty ]))))
+                                                    |> Result.map (fun ty -> entries @ [ Field.create name ty ]))))
                                     (Ok [])
                             | _ -> Error(MalformedShape "columns: expected object")
 
@@ -557,8 +681,8 @@ module ColumnCodec =
                         let rec go acc =
                             function
                             | [] -> Ok(List.rev acc)
-                            | (name, ty) :: rest ->
-                                match decodeColumn columnsObj name ty with
+                            | (f: Field) :: rest ->
+                                match decodeColumn columnsObj f.Name f.Type with
                                 | Ok c -> go (c :: acc) rest
                                 | Error e -> Error e
 
