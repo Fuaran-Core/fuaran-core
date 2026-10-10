@@ -11041,7 +11041,9 @@ module private ColumnDiff =
           zero_int = 0
           zero_float = 0.0
           is_date = fun s -> TemporalText.isCanonicalDate (canonFromChs s)
-          is_timestamp = fun s -> TemporalText.isCanonicalTimestamp (canonFromChs s) }
+          // The model's one timestamp type is the seconds unit (Phase 422 gave production a unit;
+          // the model's is Phase 419's deferred task 3), so its predicate is canonical seconds text.
+          is_timestamp = fun s -> (TemporalText.tryInstant TimeUnit.Seconds (canonFromChs s)).IsSome }
 
     /// The column types the list model spells (Phase 422): `ColumnType.all` before the three
     /// sub-second units, which it APPENDS — so a draw over this list is the draw it was before them.

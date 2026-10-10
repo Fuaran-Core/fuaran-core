@@ -74,7 +74,9 @@ fraction digits milliseconds, four to six microseconds, seven to nine nanosecond
 canonical reads as seconds; its column refuses it as text either way). With the widening, `ofCells
 (TimestampType Nanoseconds)` admits every canonical instant, and a seconds column refuses a fractional
 one as the `TypeMismatch` naming the finer tag (`got = "timestamp_ms"`), exactly as an int column
-refuses a `Float`. Decode reads TEXT, not cells, and its `TypeMismatch` names a JSON kind; a canonical
+refuses a `Float`. A query's `Where` literal of a timestamp is typed the same way, so it fits a
+column at least as fine as its unit (`QueryShape.whereFault`); every other literal is still held to its
+column's exact type. Decode reads TEXT, not cells, and its `TypeMismatch` names a JSON kind; a canonical
 instant finer than the column's unit is text the column cannot read, so the codec refuses it as a
 `MalformedShape` naming the unit it would need — the class the corpus has pinned since Phase 299
 (`timestamp-fractional-second`), which therefore stays byte-identical. Integer storage cannot hold text that is not canonical, so `Column.ofCells` now
