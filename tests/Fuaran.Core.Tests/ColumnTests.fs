@@ -1221,6 +1221,13 @@ let vectorTests =
               Expect.equal view.Offset (parent.Offset + 2) "at the parent's offset plus the start"
               Expect.equal view.Length 3 "over the view's length"
 
+              // Phase 418 — the view reads its parent's storage itself, not a copy taken at the slice:
+              // a write through the parent's borrow (the broken promise the ownership family exists to
+              // catch) is what the view then reads. Restored after, so the rest of the test is unchanged.
+              parent.Array[parent.Offset + 3] <- 30
+              Expect.equal s[1] 30 "a write into the parent's storage is visible through the view"
+              parent.Array[parent.Offset + 3] <- 3
+
               let nested = Vector.slice 1 2 s
               Expect.equal (Vector.toList nested) [ 3; 4 ] "a view of a view"
 
@@ -1693,3 +1700,183 @@ let columnEqualityTests =
                   (Column.ofInts "c" (Vector.ofList [ 1 ]) (Validity.all 1))
                   (Column.ofFloats "c" (Vector.ofList [ 1.0 ]) (Validity.all 1))
                   "and the type: Int 1 and Float 1.0 compare equal but live in different columns" ]
+
+// ---- the ownership contract (Phase 418) ----
+
+/// Every read a `Vector` offers, over one vector — `Unsafe.borrow` included, read and never written.
+let private readVector (v: Vector<'T>) : unit =
+    Vector.toArray v |> ignore
+    Vector.toList v |> ignore
+    Vector.fold (fun k _ -> k + 1) 0 v |> ignore
+    Vector.iter ignore v
+    Vector.map id v |> ignore
+    Vector.exists (fun _ -> false) v |> ignore
+    Vector.slice 0 v.Length v |> ignore
+    let lent = Vector.Unsafe.borrow v
+
+    for i in lent.Offset .. lent.Offset + lent.Length - 1 do
+        lent.Array[i] |> ignore
+
+/// Every read Core's column layer offers, over a list of columns (Phase 418): the cell reads, every
+/// aggregate, the typed readers and every vector read, the cell bridge both ways, and the table check
+/// and the codec over a table of the columns. The operation Core certifies ITSELF against with the
+/// ownership family — a reader of Core's that wrote into the storage it was handed reds it.
+let coreColumnReads (columns: Column list) : unit =
+    for c in columns do
+        Column.toCells c |> Column.ofCells c.Name c.Type |> ignore
+
+        for i in -1 .. Column.length c do
+            Column.cell i c |> ignore
+            Column.isPresent i c |> ignore
+
+        readVector (Column.validity c)
+        Validity.presentCount (Column.validity c) |> ignore
+
+        for f in [ Sum; Mean; Min; Max; Count; Median; StdDev; First; Last; CountDistinct ] do
+            Column.aggregate f c |> ignore
+
+        match c.Data with
+        | Ints(xs, _) -> readVector xs
+        | Floats(xs, _) -> readVector xs
+        | Bools(xs, _) -> readVector xs
+        | Strs(xs, _)
+        | Dates(xs, _)
+        | Timestamps(xs, _)
+        | Decimals(xs, _) -> readVector xs
+
+    let table =
+        { Schema = columns |> List.map (fun c -> c.Name, c.Type)
+          Columns = columns }
+
+    Table.validate table |> ignore
+
+    match ColumnCodec.tryEncode (Embedded table) with
+    | Ok json -> ColumnCodec.decode json |> ignore
+    | Error _ -> ()
+
+/// A consumer's own draw for `Conformance.columnOwnershipLawsWith` (Phase 418): the two columns a
+/// pricing pipeline reads, rebuilt over fresh adopted arrays every iteration.
+let ownershipDraw (r: ConfRng.T) : Column list * ConfRng.T =
+    let k, r1 = ConfRng.intBelow 5 r
+    let n = k + 1
+
+    [ Column.ofInts "qty" (Vector.adopt (Array.init n id)) (Validity.all n)
+      Column.ofFloats "price" (Vector.adopt (Array.init n (fun i -> float i * 0.5))) (Validity.all n) ],
+    r1
+
+/// The single failing law of an ownership run, with its counterexample — or a test failure naming
+/// what the run said instead.
+let private ownershipFailure (results: LawResult list) : string =
+    match results |> List.filter (fun r -> not r.Passed) with
+    | [ { Counterexample = Some cx } ] -> cx
+    | other -> failtestf "expected the ownership law alone to fail, got %A" other
+
+/// The kit's sample order (`ColumnarSeamLaws.ownershipSample`): i, f, g, b, s, d, t, m — `f` and `g`
+/// adjacent views of one backing array and one mask array.
+let private sampleColumn (name: string) (columns: Column list) : Column =
+    columns |> List.find (fun c -> c.Name = name)
+
+[<Tests>]
+let ownershipTests =
+    testList
+        "Column.Vector ownership (Phase 418)"
+        [ testCase "the ownership family is green over every read Core's column layer offers"
+          <| fun _ ->
+              let results = Conformance.columnOwnershipLaws coreColumnReads 4242 300
+
+              for r in results do
+                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+
+              Expect.equal
+                  (Conformance.columnOwnershipLaws coreColumnReads 4242 300)
+                  results
+                  "same seed ⇒ identical report"
+
+              for r in Conformance.columnOwnershipLawsWith coreColumnReads ownershipDraw 4242 100 do
+                  Expect.isTrue r.Passed (sprintf "over a consumer's own draw — %s: %A" r.Law r.Counterexample)
+
+          testCase "go-red: a write through an Unsafe borrow fails the family, naming the column"
+          <| fun _ ->
+              let writeThroughBorrow (columns: Column list) =
+                  match Column.tryInts (sampleColumn "i" columns) with
+                  | Some xs ->
+                      let lent = Vector.Unsafe.borrow xs
+                      lent.Array[lent.Offset] <- lent.Array[lent.Offset] + 1
+                  | None -> failtest "the kit's sample has no int column i"
+
+              let cx =
+                  ownershipFailure (Conformance.columnOwnershipLaws writeThroughBorrow 4242 20)
+
+              Expect.stringContains cx "column 0 \"i\" (int): the bytes of its values moved" "the column, by name"
+              Expect.isFalse (cx.Contains "column 1") "and no other"
+
+          testCase "go-red: a borrowed write past one view's end is named as its NEIGHBOUR's bytes moving"
+          <| fun _ ->
+              // `f` and `g` are adjacent views of one array: the element one past `f`'s range is `g`'s
+              // first. The type let the borrower reach it; the fingerprint names whose value changed.
+              let overrun (columns: Column list) =
+                  match Column.tryFloats (sampleColumn "f" columns) with
+                  | Some xs ->
+                      let lent = Vector.Unsafe.borrow xs
+                      lent.Array[lent.Offset + lent.Length] <- 7.25
+                  | None -> failtest "the kit's sample has no float column f"
+
+              let cx = ownershipFailure (Conformance.columnOwnershipLaws overrun 4242 20)
+              Expect.stringContains cx "column 2 \"g\" (float): the bytes of its values moved" "the neighbour"
+              Expect.isFalse (cx.Contains "column 1 \"f\"") "not the column whose borrow was written through"
+
+          testCase "go-red: a write into a borrowed validity mask is named as the mask moving"
+          <| fun _ ->
+              let flipMask (columns: Column list) =
+                  let lent = Vector.Unsafe.borrow (Column.validity (sampleColumn "b" columns))
+                  lent.Array[lent.Offset] <- not lent.Array[lent.Offset]
+
+              let cx = ownershipFailure (Conformance.columnOwnershipLaws flipMask 4242 20)
+              Expect.stringContains cx "column 3 \"b\" (bool): the bytes of its validity mask moved" "the mask"
+
+          testCase "go-red: the caller writing an array it adopted fails; the same write after ofArray does not"
+          <| fun _ ->
+              let kept = ref [||]
+
+              let draw (build: int[] -> Vector<int>) (r: ConfRng.T) =
+                  let xs = [| 1; 2; 3 |]
+                  kept.Value <- xs
+                  [ Column.ofInts "a" (build xs) (Validity.all 3) ], r
+
+              let writeKept (_: Column list) = kept.Value[1] <- 9
+
+              let cx =
+                  ownershipFailure (Conformance.columnOwnershipLawsWith writeKept (draw Vector.adopt) 7 5)
+
+              Expect.stringContains cx "column 0 \"a\" (int): the bytes of its values moved" "adopt shares"
+
+              for r in Conformance.columnOwnershipLawsWith writeKept (draw Vector.ofArray) 7 5 do
+                  Expect.isTrue r.Passed (sprintf "ofArray copies, so the source's write reaches nothing: %A" r)
+
+          testCase "go-red: a write under an absent row, and -0.0 over 0.0, are writes"
+          <| fun _ ->
+              // Neither changes a CELL — column equality ignores the element under an absent row and
+              // calls -0.0 equal to 0.0 — but both change storage another holder may read.
+              let draw (r: ConfRng.T) =
+                  [ Column.ofFloats "x" (Vector.adopt [| 1.0; 0.0 |]) (Validity.ofList [ false; true ]) ], r
+
+              let write (index: int) (value: float) (columns: Column list) =
+                  match Column.tryFloats columns.Head with
+                  | Some xs ->
+                      let lent = Vector.Unsafe.borrow xs
+                      lent.Array[lent.Offset + index] <- value
+                  | None -> failtest "a float column"
+
+              for index, value, what in [ 0, 2.0, "under the absent row"; 1, -0.0, "-0.0 over 0.0" ] do
+                  let cx =
+                      ownershipFailure (Conformance.columnOwnershipLawsWith (write index value) draw 3 2)
+
+                  Expect.stringContains cx "column 0 \"x\" (float): the bytes of its values moved" what
+
+          testCase "a draw that builds no column reds the family as never reached, not green over nothing"
+          <| fun _ ->
+              let results = Conformance.columnOwnershipLawsWith ignore (fun r -> [], r) 4242 20
+
+              Expect.isFalse (results |> List.forall _.Passed) "an empty sample is not a pass"
+
+              Expect.stringContains (ownershipFailure results) SampleAdequacy.neverReached "named as the sample's fault" ]

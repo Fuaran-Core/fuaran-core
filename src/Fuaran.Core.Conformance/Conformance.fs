@@ -700,6 +700,21 @@ module Conformance =
     let columnVectorLaws (seed: int) (iterations: int) : LawResult list =
         ColumnarSeamLaws.columnVectorLaws seed iterations
 
+    /// Forward — see `ColumnarSeamLaws.columnOwnershipLaws` (Phase 418): the ownership law over the
+    /// kit's own sample, with `operation` the consumer's pipeline.
+    let columnOwnershipLaws (operation: Column list -> unit) (seed: int) (iterations: int) : LawResult list =
+        ColumnarSeamLaws.columnOwnershipLaws operation seed iterations
+
+    /// Forward — see `ColumnarSeamLaws.columnOwnershipLawsWith` (Phase 418): the ownership law over
+    /// columns the consumer draws itself (`draw` is the injected sample, last before the seed).
+    let columnOwnershipLawsWith
+        (operation: Column list -> unit)
+        (draw: ConfRng.T -> Column list * ConfRng.T)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        ColumnarSeamLaws.columnOwnershipLawsWith operation draw seed iterations
+
     /// Forward — see `ColumnarSeamLaws.columnarValidatorLaws`.
     let columnarValidatorLaws (seed: int) (iterations: int) : LawResult list =
         ColumnarSeamLaws.columnarValidatorLaws seed iterations

@@ -578,6 +578,15 @@ let private runs =
            run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
            run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)
            run "Conformance.columnVectorLaws" 200 (Conformance.columnVectorLaws 4242 200)
+           // Phase 418 — the ownership law, with Core's own column reads as the operation.
+           run
+               "Conformance.columnOwnershipLaws"
+               200
+               (Conformance.columnOwnershipLaws ColumnTests.coreColumnReads 4242 200)
+           run
+               "Conformance.columnOwnershipLawsWith"
+               200
+               (Conformance.columnOwnershipLawsWith ColumnTests.coreColumnReads ColumnTests.ownershipDraw 4242 200)
            run "Conformance.deferredLaws" 200 (Conformance.deferredLaws 4242 200)
            run "Conformance.capabilityPipelineLaws" 200 (Conformance.capabilityPipelineLaws 4242 200)
            run

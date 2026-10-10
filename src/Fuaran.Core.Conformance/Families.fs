@@ -950,6 +950,27 @@ module Families =
               (Unconditional
                   "each iteration builds a NaN pair, a signed-zero pair and a pair differing only under an absent row, beside the drawn pair")
               (NoRefusal, "equality and the reads answer values; no refusal path exists to reach")
+          // Phase 418 — the ownership contract: the operation a consumer hands the family writes into
+          // no column it is handed. One assertion per column, the fingerprint taken over every element
+          // of every column, so no draw can hide a write in a column the run built.
+          c
+              "columnOwnershipLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration builds a column of every type and two columns sharing one backing array and one mask array, and fingerprints every element of each")
+              (NoRefusal,
+               "the law compares digests taken before and after the operation; no refusal path exists to reach")
+          c
+              "columnOwnershipLawsWith"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "one assertion per column the caller's draw builds, over every element; a draw that builds none takes no evidence and reds as never reached")
+              (NoRefusal,
+               "the law compares digests taken before and after the operation; no refusal path exists to reach")
           c
               "deferredLaws"
               none
@@ -1666,6 +1687,8 @@ module Families =
                 "Dag.verifyCheckpoint"
                 "Dag.verifyDagFrom"
                 "Dag.toJsonlWithCheckpoints" ] }
+          { Family = "Conformance.columnOwnershipLaws"
+            Operations = [ "Vector.adopt"; "Vector.slice"; "Vector.Unsafe.borrow" ] }
           { Family = "Conformance.columnVectorLaws"
             Operations =
               [ "Cell.compare"
