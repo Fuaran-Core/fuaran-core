@@ -158,7 +158,6 @@
     },
     {
       "members": [
-        "Cell.compare",
         "Cell.token"
       ],
       "class": "measured-elsewhere",
@@ -167,20 +166,11 @@
     },
     {
       "members": [
-        "Column.aggType",
-        "Column.cell",
-        "Column.create"
+        "Column.aggType"
       ],
       "class": "measured-elsewhere",
-      "reason": "Column construction and aggregation typing; `Column.aggregate` itself is rostered, these are the constructors and type readers around it.",
+      "reason": "Aggregation typing; `Column.aggregate` itself is rostered, this is the type reader beside it. The column's constructors and reads are rostered by `columnVectorLaws` since Phase 417.",
       "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
-    },
-    {
-      "members": [
-        "Column.length"
-      ],
-      "class": "trivial",
-      "reason": "Returns the stored length of a column; no computation."
     },
     {
       "members": [

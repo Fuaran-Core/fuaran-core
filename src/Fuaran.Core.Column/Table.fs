@@ -18,45 +18,6 @@ type Table =
         Columns: Column list
     }
 
-/// THE CODEC ENVELOPE — the closed set of refusals of the columnar codec and of `Table.validate`,
-/// the substrate's recoverable error discipline (GP4/GP5): every failure *names what went wrong*
-/// and, where a closed set is expected, *enumerates the alternatives*. Its size is stated nowhere
-/// but in this type: a new case is a breaking-source change for every exhaustive match (FS0025),
-/// and is classed as one in STABILITY.md.
-type ColumnError =
-    /// The input was not valid JSON at all — the parser's structured failure (`Json.parseDetailed`):
-    /// its classified kind, its message and its position (Phase 299; it carried the string form,
-    /// already prefixed, before).
-    | NotJson of error: JsonError
-    /// A required field was absent from an object (`schema` / `values` / `validity` / `name` / `type`).
-    | MissingField of field: string
-    /// A value had the wrong JSON shape for its position (expected object/array/string where another
-    /// kind appeared), or a cell's TEXT is not its type's canonical form — decimal text, or an
-    /// ISO-8601 date or timestamp (`DecimalText`, `TemporalText`).
-    | MalformedShape of detail: string
-    /// A `type` tag was not one of the fixed scalar set; `expected` lists the valid types, in
-    /// `ColumnType.all`'s order (`ColumnType` since Phase 391; their tags before `1.0.0`).
-    | UnknownType of got: string * expected: ColumnType list
-    /// A present cell's type does not widen into its column's declared type — its JSON kind on
-    /// decode, its `Cell` case in `Table.validate` (Phase 299) — or a column's `Type` disagrees with
-    /// its schema entry. `expected` is the declared type (`ColumnType` since Phase 391; its tag before
-    /// `1.0.0`); `got` is what was found — a JSON value's kind on decode, a `Cell`'s or a column's
-    /// type tag otherwise.
-    | TypeMismatch of column: string * expected: ColumnType * got: string
-    /// A column's `values` and `validity` arrays had different lengths (they must co-index).
-    | LengthMismatch of column: string * values: int * validity: int
-    /// A present `Float` cell was non-finite (`NaN` / `Infinity` / `-Infinity`); the Fuaran wire has no
-    /// non-finite float (the same posture as the tree wire's `Json.tryRender`, Phase 12) — `encode`
-    /// would otherwise emit the JSON *string* `"NaN"`, which fails to decode back to a `FloatType` cell.
-    | NonFiniteFloat of column: string * value: string
-    /// The `Table` was structurally malformed (a duplicate schema or column name, or a schema/column
-    /// name disagreement) — `Table.validate` names the fault.
-    | Malformed of detail: string
-    /// The table's columns are not one length (Phase 299): `column` has `got` rows where the first
-    /// column has `expected`. Distinct from `LengthMismatch`, which is ONE column's `values` and
-    /// `validity` arrays disagreeing on the wire.
-    | RaggedColumns of column: string * expected: int * got: int
-
 /// Table reads and `validate`, the well-formedness check the codec encodes and decodes through.
 module Table =
 
@@ -87,58 +48,74 @@ module Table =
         go Set.empty names
 
     /// The first present cell of `c` the codec cannot carry as a cell of `c.Type`, as the refusal
-    /// naming it (Phase 299), in row order: a cell whose type does not widen into the column's
-    /// (`TypeMismatch`), a non-finite `Float` (`NonFiniteFloat` — the wire has none), and a
-    /// `Decimal` / `Date` / `Timestamp` whose text is not its type's canonical form (`MalformedShape`).
+    /// naming it (Phase 299), in row order: a non-finite `Float` (`NonFiniteFloat` — the wire has
+    /// none), and a `Decimal` / `Date` / `Timestamp` whose text is not its type's canonical form
+    /// (`MalformedShape`). Read off the typed storage (Phase 417): a float column is scanned for a
+    /// non-finite value and a text column for a non-canonical text, at the present rows only. A
+    /// cell of another type is not a case any more — the storage cannot hold one — and a mask that
+    /// is not the values' length is named first (`LengthMismatch`), because a column that disagrees
+    /// about its own row count has no rows to read.
     let private firstUncarriableCell (c: Column) : ColumnError option =
-        c.Cells
-        |> List.tryPick (fun cell ->
-            match cell with
-            | Null -> None
-            | _ ->
-                match Cell.typeOf cell with
-                | Some t when not (ColumnType.widens t c.Type) -> Some(TypeMismatch(c.Name, c.Type, ColumnType.tag t))
-                | _ ->
-                    match cell with
-                    | Float f -> JVal.nonFiniteToken f |> Option.map (fun tok -> NonFiniteFloat(c.Name, tok))
-                    | Decimal s when not (DecimalText.isCanonical s) ->
-                        Some(
-                            MalformedShape(
-                                c.Name
-                                + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
-                            )
-                        )
-                    | Date s when not (TemporalText.isCanonicalDate s) ->
-                        Some(
-                            MalformedShape(
-                                c.Name
-                                + ": a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
-                            )
-                        )
-                    | Timestamp s when not (TemporalText.isCanonicalTimestamp s) ->
-                        Some(
-                            MalformedShape(
-                                c.Name
-                                + ": a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ, naming an instant that exists"
-                            )
-                        )
-                    | _ -> None)
+        let mask = Column.validity c
+
+        let firstPresent (xs: Vector<'T>) (bad: 'T -> bool) : 'T option =
+            let mutable found = None
+            let mutable i = 0
+
+            while found.IsNone && i < xs.Length do
+                if Validity.isPresent i mask && bad xs[i] then
+                    found <- Some xs[i]
+
+                i <- i + 1
+
+            found
+
+        let notCanonical (xs: Vector<string>) (isCanonical: string -> bool) (message: string) =
+            firstPresent xs (fun s -> not (isCanonical s))
+            |> Option.map (fun _ -> MalformedShape(c.Name + ": " + message))
+
+        if Column.length c <> mask.Length then
+            Some(LengthMismatch(c.Name, Column.length c, mask.Length))
+        else
+            match c.Data with
+            | Ints _
+            | Bools _
+            | Strs _ -> None
+            | Floats(xs, _) ->
+                firstPresent xs (fun f -> System.Double.IsNaN f || System.Double.IsInfinity f)
+                |> Option.bind JVal.nonFiniteToken
+                |> Option.map (fun tok -> NonFiniteFloat(c.Name, tok))
+            | Decimals(xs, _) ->
+                notCanonical
+                    xs
+                    DecimalText.isCanonical
+                    "a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
+            | Dates(xs, _) ->
+                notCanonical
+                    xs
+                    TemporalText.isCanonicalDate
+                    "a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
+            | Timestamps(xs, _) ->
+                notCanonical
+                    xs
+                    TemporalText.isCanonicalTimestamp
+                    "a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ, naming an instant that exists"
 
     /// Well-formedness — THE TABLE THE CODEC CAN CARRY (Phase 43; widened to the cells by Phase 299).
-    /// `Column.create` does no validation, and `encodeJson` silently papers over a malformed table (a
-    /// schema name with no column emits an empty placeholder; an extra column is dropped; ragged
+    /// The typed builders do no validation, and `encodeJson` silently papers over a malformed table
+    /// (a schema name with no column emits an empty placeholder; an extra column is dropped; ragged
     /// columns encode against the first column's length; a repeated name emits a repeated member key
     /// its readers disagree about). `validate` names the fault instead, first found in this order:
     ///   (a) no schema name and no column name appears twice (`Malformed`);
     ///   (b) every schema name has exactly one matching column and vice-versa (`Malformed`);
     ///   (c) each column's `Type` matches its schema entry (`TypeMismatch`);
     ///   (d) all columns share one length (`RaggedColumns`);
-    ///   (e) every present cell, column by column in schema order and row by row, is one the codec
-    ///       carries as a cell of its column's type — its type WIDENS into the column's
-    ///       (`ColumnType.widens`: an `Int` in a float or decimal column is a widening, a `Bool` in an
-    ///       int column or a `Float` in a decimal column is a `TypeMismatch`), a `Float` is finite
-    ///       (`NonFiniteFloat`), and a `Decimal`, `Date` or `Timestamp` carries its type's canonical
-    ///       text (`MalformedShape`).
+    ///   (e) column by column in schema order: the column's values and validity mask are one length
+    ///       (`LengthMismatch`), and every present cell, row by row, is one the codec carries as a
+    ///       cell of its column's type — a `Float` is finite (`NonFiniteFloat`), and a `Decimal`,
+    ///       `Date` or `Timestamp` carries its type's canonical text (`MalformedShape`). A cell whose
+    ///       type does not widen into the column's was this clause's `TypeMismatch` until Phase 417;
+    ///       the typed storage cannot hold one, and `Column.ofCells` refuses it at construction.
     /// Over what it accepts, `ColumnCodec.tryEncode` is exactly `Ok (encode src)` — a law pins it —
     /// and `ColumnCodec.decode` ends in it, so a table that encodes is a table that decodes. It is
     /// not a data-quality check: those are the columnar validator's rules.

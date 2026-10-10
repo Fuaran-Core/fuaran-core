@@ -26,12 +26,8 @@ let private sampleResult: QueryResult =
     { Rows =
         { Schema = [ "region", StringType; "revenue", FloatType ]
           Columns =
-            [ { Name = "region"
-                Type = StringType
-                Cells = [ Str "UK"; Str "US" ] }
-              { Name = "revenue"
-                Type = FloatType
-                Cells = [ Float 1234.5; Null ] } ] }
+            [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) (Validity.all 2)
+              Column.ofFloats "revenue" (Vector.ofList [ 1234.5; 0.0 ]) (Validity.ofList [ true; false ]) ] }
       PageNum = 0
       TotalRowCount = Some 2
       NextPageToken = Some "tok-1" }
@@ -147,12 +143,8 @@ let tests =
                   { Rows =
                       { Schema = [ "region", StringType; "revenue", FloatType ]
                         Columns =
-                          [ { Name = "region"
-                              Type = StringType
-                              Cells = [ Str "UK"; Str "US" ] }
-                            { Name = "revenue"
-                              Type = FloatType
-                              Cells = [ Float 1234.5; Null ] } ] }
+                          [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) (Validity.all 2)
+                            Column.ofFloats "revenue" (Vector.ofList [ 1234.5; 0.0 ]) (Validity.ofList [ true; false ]) ] }
                     PageNum = 0
                     TotalRowCount = Some 2
                     NextPageToken = Some "tok-1" }

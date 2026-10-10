@@ -10,6 +10,13 @@ open Fuaran.Core.Tests.Reference2
 open Fuaran.Core.Tests.Reference.Counter
 open Fuaran.Core.Tests.ConformanceTests
 
+/// A column of type `ty` over `cells`, which fit it (Phase 417: the typed column is built through
+/// `Column.ofCells`, which refuses a cell of another type).
+let private cellColumn (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 [<Tests>]
 let seamLawTests =
     testList
@@ -117,7 +124,7 @@ let seamLawTests =
 
               // The semantics the law pins, read directly once so the sample's verdict has a
               // fixed point beside it: a Null is not counted.
-              let col = Column.create "c" IntType [ Int 1; Null; Int 2 ]
+              let col = cellColumn "c" IntType [ Int 1; Null; Int 2 ]
 
               Expect.equal
                   (Column.aggregate Count col)
@@ -125,7 +132,7 @@ let seamLawTests =
                   "Count over [1; null; 2] counts the two present cells"
 
               // ... and over a decimal column, a Null is not summed: the exact `Sum` skips it.
-              let dec = Column.create "d" DecimalType [ Decimal "0.1"; Null; Decimal "0.2" ]
+              let dec = cellColumn "d" DecimalType [ Decimal "0.1"; Null; Decimal "0.2" ]
               Expect.equal (Column.aggregate Sum dec) (Ok(Decimal "0.3")) "Sum over [0.1; null; 0.2] is 0.3, exactly"
 
           // Phase 276 — the column-type guard goes red on a run that never draws a decimal column. One

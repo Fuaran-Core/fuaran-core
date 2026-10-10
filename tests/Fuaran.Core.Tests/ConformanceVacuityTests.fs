@@ -37,6 +37,13 @@ open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.Reference2
 
+/// A column of type `ty` over `cells`, which fit it (Phase 417: the typed column is built through
+/// `Column.ofCells`, which refuses a cell of another type).
+let private cellColumn (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 // ---------------------------------------------------------------------------
 //  the reference run
 // ---------------------------------------------------------------------------
@@ -570,6 +577,7 @@ let private runs =
            run "Conformance.packLoadingLaws" 200 (Conformance.packLoadingLaws 4242 200)
            run "Conformance.aggregateNullSkipLaws" 200 (Conformance.aggregateNullSkipLaws 4242 200)
            run "Conformance.columnarValidatorLaws" 200 (Conformance.columnarValidatorLaws 4242 200)
+           run "Conformance.columnVectorLaws" 200 (Conformance.columnVectorLaws 4242 200)
            run "Conformance.deferredLaws" 200 (Conformance.deferredLaws 4242 200)
            run "Conformance.capabilityPipelineLaws" 200 (Conformance.capabilityPipelineLaws 4242 200)
            run
@@ -1500,7 +1508,7 @@ let floorTests =
                           { r with
                               Rows =
                                   { Schema = [ "other", IntType ]
-                                    Columns = [ Column.create "other" IntType [ Int 11 ] ] } }
+                                    Columns = [ cellColumn "other" IntType [ Int 11 ] ] } }
                   | d -> d
 
               let results = Conformance.queryLawsAt w lying 4242 200

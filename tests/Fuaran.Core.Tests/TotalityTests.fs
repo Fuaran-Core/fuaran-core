@@ -16,7 +16,17 @@ open Fuaran.Core
 // three intermediate lists, the plain formulas. It is the other side of the differential below:
 // the one-pass fold must answer what this answers, to the bit, wherever this answered a finite
 // value or a refusal. Kept here rather than in the package because it is evidence, not surface.
+//
+// Since Phase 417 it reads the column it is handed through a record of its own — the name, the
+// type and the `Cell list` the column held then — so it needs nothing of the typed `Column` and
+// can still be asked about a cell list the new storage refuses to hold.
 module private Before =
+    /// The column as `Before` read it: its name, its declared type and its cells.
+    type CellColumn =
+        { Name: string
+          Type: ColumnType
+          Cells: Cell list }
+
     let private aggAsNum (c: Cell) : float option =
         match c with
         | Int i -> Some(float i)
@@ -82,7 +92,7 @@ module private Before =
         | Decimal s -> "m:" + (DecimalText.tryCanonical s |> Option.defaultValue s)
         | Null -> "n:"
 
-    let private admit (col: Column) (c: Cell) : Result<Cell, AggregateError> =
+    let private admit (col: CellColumn) (c: Cell) : Result<Cell, AggregateError> =
         match c with
         | Null -> Ok Null
         | Decimal s when col.Type = DecimalType ->
@@ -95,7 +105,7 @@ module private Before =
             | Some t -> Error(CellOutsideType(col.Name, col.Type, ColumnType.tag t))
             | None -> Ok c
 
-    let private admitAll (col: Column) : Result<Cell list, AggregateError> =
+    let private admitAll (col: CellColumn) : Result<Cell list, AggregateError> =
         let rec go acc =
             function
             | [] -> Ok(List.rev acc)
@@ -112,7 +122,7 @@ module private Before =
         else
             Error(AggregateOverflow("sum overflowed int32: " + string r))
 
-    let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
+    let aggregateCells (fn: AggFn) (col: CellColumn) : Result<Cell, AggregateError> =
         admitAll col
         |> Result.bind (fun cells ->
             let present () =
@@ -237,7 +247,21 @@ module private Before =
 
                     Ok(List.fold pick first rest))
 
+    /// The aggregate over a typed column, read back as the cells it holds.
+    let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
+        aggregateCells
+            fn
+            { Name = col.Name
+              Type = col.Type
+              Cells = Column.toCells col }
+
 // ---- helpers ----
+
+/// A column of cells that fit its type (Phase 417: `Column.ofCells`, which refuses one that does not).
+let private column (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
 
 /// Run `f` on a thread with a 1 MB stack and hand back what it returned — the stack the recursive
 /// renderers died on at a nesting depth of about 1,400.
@@ -307,11 +331,12 @@ let private answer (r: Result<Cell, AggregateError>) : string =
 let private isFinite (f: float) =
     not (Double.IsNaN f || Double.IsInfinity f)
 
-/// A seed-replayable column of any type: nulls, the float edge values (NaN, both zeroes, an
-/// infinity, magnitudes whose sum or square leaves the range, a denormal), ints in float and
-/// decimal columns, decimal text canonical and not, a decimal past the float range, and now and
-/// then a cell outside the column's type.
-let private genColumn (seed: int) : Column =
+/// A seed-replayable column of any type, as its type and the cells drawn for it: nulls, the float
+/// edge values (NaN, both zeroes, an infinity, magnitudes whose sum or square leaves the range, a
+/// denormal), ints in float and decimal columns, decimal text canonical and not, a decimal past the
+/// float range, and now and then a cell outside the column's type — which, since Phase 417, no
+/// column can hold, so the law builds through `Column.ofCells` and meets that cell as a refusal.
+let private genColumn (seed: int) : ColumnType * Cell list =
     let mutable st = (uint32 seed * 2654435761u) + 1u
 
     let next () =
@@ -363,7 +388,7 @@ let private genColumn (seed: int) : Column =
                 else
                     Decimal decimals[pick decimals.Length]
 
-    Column.create "c" ty [ for _ in 1 .. pick 9 -> cellOf () ]
+    ty, [ for _ in 1 .. pick 9 -> cellOf () ]
 
 /// FNV-1a over any sequence of units, in 64-bit arithmetic reduced mod 2^32 — a reference that
 /// shares no line with `Hash.fnv1a`'s split multiply.
@@ -563,44 +588,77 @@ let tests =
           <| fun _ ->
               let mutable agreed = 0
               let mutable rescued = 0
+              let mutable refused = 0
 
               for seed in 1..6000 do
-                  let col = genColumn seed
+                  let ty, cells = genColumn seed
 
-                  let inputsFinite =
-                      col.Cells
-                      |> List.forall (fun c ->
-                          match c with
-                          | Float f -> isFinite f
-                          | _ -> true)
+                  match Column.ofCells "c" ty cells with
+                  | Error(TypeMismatch("c", t, tag)) when t = ty ->
+                      // A cell outside the column's type (Phase 417): construction refuses it, where
+                      // the fold refused it at `admit`. The differential stays honest by asking the
+                      // old fold about the same cells: it must have refused every aggregate, naming
+                      // that cell — or, in a decimal column, an EARLIER decimal text that is not
+                      // decimal, which it met first and `ofCells` holds as found.
+                      let old: Before.CellColumn = { Name = "c"; Type = ty; Cells = cells }
 
-                  for fn in allAggregates do
-                      let before = Before.aggregate fn col
-                      let after = Column.aggregate fn col
-
-                      match before with
-                      | Ok(Float f) when inputsFinite && not (isFinite f) ->
-                          // The one place the two are MEANT to differ: the old fold answered an
-                          // infinity (or a NaN built from two) over finite input.
-                          rescued <- rescued + 1
-
-                          match after with
-                          | Ok(Float g) when isFinite g -> ()
-                          | Error(AggregateOverflow _) -> ()
-                          | other -> failtestf "seed %d, %A over %A: was %A, is %A" seed fn col before other
-                      | _ ->
+                      for fn in allAggregates do
+                          // An agreement like any other: the old fold refused where construction does.
                           agreed <- agreed + 1
+                          refused <- refused + 1
 
-                          if answer before <> answer after then
-                              failtestf "seed %d, %A over %A: was %A, is %A" seed fn col before after
+                          match Before.aggregateCells fn old with
+                          | Error(CellOutsideType("c", t', cell)) when
+                              t' = ty
+                              && (cell = tag || (ty = DecimalType && cell.StartsWith "decimal text '"))
+                              ->
+                              ()
+                          | other ->
+                              failtestf
+                                  "seed %d, %A over %A %A: ofCells refused %s, the old fold answered %A"
+                                  seed
+                                  fn
+                                  ty
+                                  cells
+                                  tag
+                                  other
+                  | Error e -> failtestf "seed %d: ofCells %A %A refused with %A" seed ty cells e
+                  | Ok col ->
+                      let inputsFinite =
+                          Column.toCells col
+                          |> List.forall (fun c ->
+                              match c with
+                              | Float f -> isFinite f
+                              | _ -> true)
+
+                      for fn in allAggregates do
+                          let before = Before.aggregate fn col
+                          let after = Column.aggregate fn col
+
+                          match before with
+                          | Ok(Float f) when inputsFinite && not (isFinite f) ->
+                              // The one place the two are MEANT to differ: the old fold answered an
+                              // infinity (or a NaN built from two) over finite input.
+                              rescued <- rescued + 1
+
+                              match after with
+                              | Ok(Float g) when isFinite g -> ()
+                              | Error(AggregateOverflow _) -> ()
+                              | other -> failtestf "seed %d, %A over %A: was %A, is %A" seed fn col before other
+                          | _ ->
+                              agreed <- agreed + 1
+
+                              if answer before <> answer after then
+                                  failtestf "seed %d, %A over %A: was %A, is %A" seed fn col before after
 
               Expect.isGreaterThan agreed 50000 "the differential compared a real population"
               Expect.isGreaterThan rescued 20 "and the pool reached the overflow the phase is about"
+              Expect.isGreaterThan refused 5000 "and the cells outside the type, refused at construction"
 
           testCase "the probes that answered an infinity answer the value, and a float Sum past the range is named"
           <| fun _ ->
               let floats (xs: float list) =
-                  Column.create "f" FloatType (xs |> List.map Float)
+                  column "f" FloatType (xs |> List.map Float)
 
               let near (expected: float) (r: Result<Cell, AggregateError>) (label: string) =
                   match r with
@@ -634,7 +692,7 @@ let tests =
           testCase "StdDev is the population form"
           <| fun _ ->
               let col =
-                  Column.create "f" FloatType ([ 2.0; 4.0; 4.0; 4.0; 5.0; 5.0; 7.0; 9.0 ] |> List.map Float)
+                  column "f" FloatType ([ 2.0; 4.0; 4.0; 4.0; 5.0; 5.0; 7.0; 9.0 ] |> List.map Float)
 
               Expect.equal
                   (Column.aggregate StdDev col)
@@ -642,7 +700,7 @@ let tests =
                   "divides by n: the sample form would give 2.138…"
 
               Expect.equal
-                  (Column.aggregate StdDev (Column.create "f" FloatType [ Float 3.0 ]))
+                  (Column.aggregate StdDev (column "f" FloatType [ Float 3.0 ]))
                   (Ok(Float 0.0))
                   "one value deviates by nothing"
 
@@ -650,14 +708,15 @@ let tests =
           <| fun _ ->
               let huge = String.replicate 400 "9"
 
-              match Column.aggregate Mean (Column.create "m" DecimalType [ Decimal huge; Float 1.0 ]) with
-              | Error(CellOutsideType("m", DecimalType, "float")) -> ()
+              // A cell outside the type outranks everything an aggregate could say: since Phase 417
+              // it is refused at construction, before any aggregate runs — so a later `Float` in a
+              // decimal column still outranks an earlier decimal past the float range.
+              match Column.ofCells "m" DecimalType [ Decimal huge; Float 1.0 ] with
+              | Error(TypeMismatch("m", DecimalType, "float")) -> ()
               | other -> failtestf "a later cell outside the type outranks an earlier decimal past the range: %A" other
 
               match
-                  Column.aggregate
-                      Mean
-                      (Column.create "m" DecimalType [ Decimal "1"; Decimal huge; Decimal(huge + "9") ])
+                  Column.aggregate Mean (column "m" DecimalType [ Decimal "1"; Decimal huge; Decimal(huge + "9") ])
               with
               | Error(AggregateOverflow m) ->
                   Expect.stringContains
@@ -666,11 +725,12 @@ let tests =
                       "the FIRST one past the range"
               | other -> failtestf "%A" other
 
-              match Column.aggregate Sum (Column.create "s" StringType [ Str "a"; Bool true ]) with
-              | Error(CellOutsideType("s", StringType, "bool")) -> ()
+              // ... and outranks a non-numeric column's refusal the same way: refused at construction.
+              match Column.ofCells "s" StringType [ Str "a"; Bool true ] with
+              | Error(TypeMismatch("s", StringType, "bool")) -> ()
               | other -> failtestf "a cell outside the type outranks a non-numeric column: %A" other
 
-              match Column.aggregate Sum (Column.create "s" StringType [ Str "a" ]) with
+              match Column.aggregate Sum (column "s" StringType [ Str "a" ]) with
               | Error(IncompatibleAggType(Sum, StringType, _)) -> ()
               | other -> failtestf "%A" other
 
@@ -908,7 +968,7 @@ let tests =
               let expected =
                   Embedded
                       { Schema = [ "a", IntType ]
-                        Columns = [ Column.create "a" IntType [ Int 1 ] ] }
+                        Columns = [ column "a" IntType [ Int 1 ] ] }
 
               Expect.equal (ColumnCodec.decode wire) (Ok expected) "the table is the schema's"
 
