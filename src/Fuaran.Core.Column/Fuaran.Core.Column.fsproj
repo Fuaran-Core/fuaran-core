@@ -11,6 +11,7 @@
     <Compile Include="TemporalText.fs" />
     <Compile Include="ColumnType.fs" />
     <Compile Include="Cell.fs" />
+    <Compile Include="Vector.fs" />
     <Compile Include="Column.fs" />
     <Compile Include="Table.fs" />
     <Compile Include="Schema.fs" />

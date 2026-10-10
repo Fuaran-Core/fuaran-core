@@ -233,6 +233,21 @@ let rec private build
         let arr = Array.CreateInstance(t.GetElementType(), 1)
         arr.SetValue(recur (t.GetElementType()), 0)
         box arr
+    elif isGeneric typedefof<Vector<_>> t then
+        // Phase 417 — a column's storage is an opaque `Vector<'T>` with no public constructor, built
+        // through the public `Vector.adopt`. Two rows, so a column's values and its validity mask
+        // (a `Vector<bool>`, exhibited as `[true; false]`) carry one present row and one ABSENT row:
+        // the absent slot the `Cell.Null` document exhibited while `Cell` was a wire-reachable type
+        // stays in every column document, under the type that now carries it.
+        let elemT = t.GetGenericArguments()[0]
+        let arr = Array.CreateInstance(elemT, 2)
+        arr.SetValue(recur elemT, 0)
+        arr.SetValue((if elemT = typeof<bool> then box false else recur elemT), 1)
+
+        let adopt =
+            typeof<Vector<int>>.Assembly.GetType("Fuaran.Core.Vector").GetMethod("adopt").MakeGenericMethod(elemT)
+
+        adopt.Invoke(null, [| box arr |])
     elif isMap t then
         let args = t.GetGenericArguments()
         let tupleT = FSharpType.MakeTupleType args

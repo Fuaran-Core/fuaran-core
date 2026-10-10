@@ -4,6 +4,13 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+/// A column of type `ty` over `cells`, which fit it (Phase 417: the typed column is built through
+/// `Column.ofCells`, which refuses a cell of another type).
+let private cellColumn (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 // Reference rule families (rule CONTENT is domain-side; the framework is core).
 let private noEmptyPara =
     Validator.perNode "REF001" (fun w n ->
@@ -161,9 +168,9 @@ let tests =
               let t: Table =
                   { Schema = [ "id", IntType; "score", IntType; "name", StringType ]
                     Columns =
-                      [ Column.create "id" IntType [ Int 1; Int 2; Int 2 ] // duplicate id at row 2
-                        Column.create "score" IntType [ Int 50; Null; Int 200 ] // null + out-of-range
-                        Column.create "name" StringType [ Str "a"; Str "b"; Str "c" ] ] }
+                      [ cellColumn "id" IntType [ Int 1; Int 2; Int 2 ] // duplicate id at row 2
+                        cellColumn "score" IntType [ Int 50; Null; Int 200 ] // null + out-of-range
+                        cellColumn "name" StringType [ Str "a"; Str "b"; Str "c" ] ] }
 
               let reg =
                   ColumnValidator.ofRules
@@ -188,7 +195,7 @@ let tests =
           <| fun _ ->
               let t: Table =
                   { Schema = [ "a", IntType ]
-                    Columns = [ Column.create "a" IntType [ Null; Int 5 ] ] }
+                    Columns = [ cellColumn "a" IntType [ Null; Int 5 ] ] }
 
               let reg =
                   ColumnValidator.ofRules [ ColumnValidator.notNull "a" ]

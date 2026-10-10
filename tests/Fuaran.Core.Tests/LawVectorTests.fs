@@ -317,7 +317,7 @@ let private decimalAnswer (case: string) (input: JVal) : Result<string * string 
     | "codecEncode" ->
         cellsOf ()
         |> Result.bind (fun cells ->
-            match ColumnCodec.tryEncode (LawVectorExport.Decimals.source cells) with
+            match LawVectorExport.Decimals.source cells |> Result.bind ColumnCodec.tryEncode with
             | Ok text -> accept "canonical" text
             | Error e -> reject (columnClass e))
     | "aggregate" ->
@@ -328,7 +328,7 @@ let private decimalAnswer (case: string) (input: JVal) : Result<string * string 
             | Some fn ->
                 cellsOf ()
                 |> Result.bind (fun cells ->
-                    match Column.aggregate fn (Column.create "c" DecimalType cells) with
+                    match LawVectorExport.Decimals.aggregate fn cells with
                     | Ok cell -> accept "token" (Cell.token cell)
                     | Error e -> reject (caseName (sprintf "%A" e)))
         | None -> Error "input.fn missing"

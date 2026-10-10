@@ -938,6 +938,18 @@ module Families =
               (Guarded [ "null cell"; "out-of-range cell"; "int cell"; "decimal cell" ])
               (Drawn,
                "null and out-of-range faults are injected by the kit's own roll, and a fault-free draw satisfies the count laws trivially")
+          // Phase 417 — the typed column: equality is cell equality, the cell bridge and the typed
+          // builders build one column, and every vector read agrees with the indexer. Three pairs
+          // are built every iteration whatever the draw, so no run can miss the NaN or the signed
+          // zero the law exists for.
+          c
+              "columnVectorLaws"
+              none
+              (Some SeamNotEveryDomainHas)
+              []
+              (Unconditional
+                  "each iteration builds a NaN pair, a signed-zero pair and a pair differing only under an absent row, beside the drawn pair")
+              (NoRefusal, "equality and the reads answer values; no refusal path exists to reach")
           c
               "deferredLaws"
               none
@@ -1654,6 +1666,59 @@ module Families =
                 "Dag.verifyCheckpoint"
                 "Dag.verifyDagFrom"
                 "Dag.toJsonlWithCheckpoints" ] }
+          { Family = "Conformance.columnVectorLaws"
+            Operations =
+              [ "Cell.compare"
+                "ColumnData.Equals"
+                "ColumnData.GetHashCode"
+                "Vector.Equals"
+                "Vector.GetHashCode"
+                "Column.cell"
+                "Column.isPresent"
+                "Column.length"
+                "Column.validity"
+                "Column.ofCells"
+                "Column.toCells"
+                "Column.ofInts"
+                "Column.ofFloats"
+                "Column.ofBools"
+                "Column.ofStrs"
+                "Column.ofDates"
+                "Column.ofTimestamps"
+                "Column.ofDecimals"
+                "Column.tryInts"
+                "Column.tryFloats"
+                "Column.tryBools"
+                "Column.tryStrs"
+                "Column.tryDates"
+                "Column.tryTimestamps"
+                "Column.tryDecimals"
+                "Validity.all"
+                "Validity.ofArray"
+                "Validity.ofList"
+                "Validity.isPresent"
+                "Validity.presentCount"
+                "Vector.empty"
+                "Vector.length"
+                "Vector.isEmpty"
+                "Vector.item"
+                "Vector.tryItem"
+                "Vector.ofArray"
+                "Vector.adopt"
+                "Vector.ofList"
+                "Vector.ofSeq"
+                "Vector.init"
+                "Vector.toArray"
+                "Vector.toList"
+                "Vector.iter"
+                "Vector.iteri"
+                "Vector.fold"
+                "Vector.map"
+                "Vector.mapi"
+                "Vector.exists"
+                "Vector.tryFindIndex"
+                "Vector.slice"
+                "Vector.Unsafe.borrow" ] }
           { Family = "Conformance.columnarValidatorLaws"
             Operations =
               [ "ColumnValidator.inRange"

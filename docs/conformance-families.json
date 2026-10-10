@@ -238,6 +238,19 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.columnVectorLaws",
+      "module": "Conformance",
+      "entry": "columnVectorLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "600",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.columnarValidatorLaws",
       "module": "Conformance",
       "entry": "columnarValidatorLaws",

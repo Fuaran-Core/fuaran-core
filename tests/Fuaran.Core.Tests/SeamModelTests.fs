@@ -19,6 +19,13 @@ open Microsoft.FSharp.Reflection
 open Expecto
 open Fuaran.Core
 
+/// A column of type `ty` over `cells`, which fit it (Phase 417: the typed column is built through
+/// `Column.ofCells`, which refuses a cell of another type).
+let private cellColumn (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 let private valueHole (addr: string) (space: ValueSpace) (required: bool) : SigEntry =
     { Addr = addr
       Name = addr
@@ -787,7 +794,7 @@ let tests =
                     let result =
                         { Rows =
                             { Schema = [ "total", DecimalType ]
-                              Columns = [ Column.create "total" DecimalType [ Decimal "12.5" ] ] }
+                              Columns = [ cellColumn "total" DecimalType [ Decimal "12.5" ] ] }
                           PageNum = 1
                           TotalRowCount = Some 1
                           NextPageToken = Some "t" }

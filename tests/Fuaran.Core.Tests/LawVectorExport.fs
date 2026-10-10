@@ -366,10 +366,25 @@ module LawVectorExport =
             + (values |> List.map (fun _ -> "true") |> String.concat ",")
             + "]}}}"
 
-        let source (cells: Cell list) : DataSource =
-            Embedded
-                { Schema = [ "c", DecimalType ]
-                  Columns = [ Column.create "c" DecimalType cells ] }
+        /// The one-column decimal document over `cells`, or the construction's refusal. A cell of
+        /// another type is refused by `Column.ofCells` as the same `TypeMismatch` `Table.validate`
+        /// (and so `ColumnCodec.tryEncode`) used to answer for it (Phase 417), so the class a vector
+        /// exports does not move.
+        let source (cells: Cell list) : Result<DataSource, ColumnError> =
+            Column.ofCells "c" DecimalType cells
+            |> Result.map (fun col ->
+                Embedded
+                    { Schema = [ "c", DecimalType ]
+                      Columns = [ col ] })
+
+        /// `Column.aggregate` over a decimal column `c` holding `cells`. A cell of another type is
+        /// refused at construction now (Phase 417); it maps to the `CellOutsideType` the aggregate
+        /// itself answered for that cell before, so the class a vector exports does not move.
+        let aggregate (fn: AggFn) (cells: Cell list) : Result<Cell, AggregateError> =
+            match Column.ofCells "c" DecimalType cells with
+            | Ok col -> Column.aggregate fn col
+            | Error(TypeMismatch(name, ty, got)) -> Error(CellOutsideType(name, ty, got))
+            | Error e -> failwithf "decimal column c did not build: %A" e
 
         // ---- the authored inputs ----
 
@@ -529,7 +544,7 @@ module LawVectorExport =
                     Case = "codecEncode"
                     Input = [ "cells", jarr (cells |> List.map cellJson) ]
                     Expected =
-                      match ColumnCodec.tryEncode (source cells) with
+                      match source cells |> Result.bind ColumnCodec.tryEncode with
                       | Ok text -> accept [ "canonical", jstr text ]
                       | Error e -> reject (columnErrorClass e) }
               for name, fn, cells in aggregateInputs ->
@@ -537,7 +552,7 @@ module LawVectorExport =
                     Case = "aggregate"
                     Input = [ "fn", jstr (aggFnTag fn); "cells", jarr (cells |> List.map cellJson) ]
                     Expected =
-                      match Column.aggregate fn (Column.create "c" DecimalType cells) with
+                      match aggregate fn cells with
                       | Ok cell -> accept [ "token", jstr (Cell.token cell) ]
                       | Error e -> reject (aggregateErrorClass e) } ]
 

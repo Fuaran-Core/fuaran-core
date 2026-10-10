@@ -5,6 +5,13 @@ open Fuaran.Core
 
 // ---- fixtures ----
 
+/// A column of type `ty` holding `cells`, built through `Column.ofCells` (Phase 417) — for a fixture
+/// whose cells fit their type; a refusal fails the test that asked for it.
+let private mkCol (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 /// A table exercising every scalar type, nulls in every column, and the canonical-float
 /// divergence-zone values (0.1, 1/3, a large magnitude).
 let private sampleTable: Table =
@@ -17,13 +24,13 @@ let private sampleTable: Table =
           "t", TimestampType
           "m", DecimalType ]
       Columns =
-        [ Column.create "i" IntType [ Int 1; Null; Int -42 ]
-          Column.create "f" FloatType [ Float 0.1; Float(1.0 / 3.0); Null ]
-          Column.create "b" BoolType [ Bool true; Null; Bool false ]
-          Column.create "s" StringType [ Str "a\"b"; Str ""; Null ]
-          Column.create "d" DateType [ Date "2026-06-22"; Null; Date "1970-01-01" ]
-          Column.create "t" TimestampType [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2000-01-01T00:00:00Z" ]
-          Column.create "m" DecimalType [ Decimal "12.5"; Null; Decimal "-0.05" ] ] }
+        [ mkCol "i" IntType [ Int 1; Null; Int -42 ]
+          mkCol "f" FloatType [ Float 0.1; Float(1.0 / 3.0); Null ]
+          mkCol "b" BoolType [ Bool true; Null; Bool false ]
+          mkCol "s" StringType [ Str "a\"b"; Str ""; Null ]
+          mkCol "d" DateType [ Date "2026-06-22"; Null; Date "1970-01-01" ]
+          mkCol "t" TimestampType [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2000-01-01T00:00:00Z" ]
+          mkCol "m" DecimalType [ Decimal "12.5"; Null; Decimal "-0.05" ] ] }
 
 let private sample = Embedded sampleTable
 
@@ -71,7 +78,7 @@ let private genSource (seed: int) : DataSource =
 
     let columns =
         schema
-        |> List.map (fun (name, ty) -> Column.create name ty [ for r in 0 .. rows - 1 -> mkCell ty r ])
+        |> List.map (fun (name, ty) -> mkCol name ty [ for r in 0 .. rows - 1 -> mkCell ty r ])
 
     Embedded { Schema = schema; Columns = columns }
 
@@ -215,7 +222,7 @@ let tests =
                   match t.Columns with
                   | [ c ] ->
                       Expect.equal
-                          c.Cells
+                          (Column.toCells c)
                           [ Timestamp "2025-07-08T18:40:00Z"; Timestamp "2025-07-08T18:40:00Z" ]
                           "seconds and milliseconds decode to the same canonical ISO instant"
                   | other -> failtestf "expected one column, got %A" other
@@ -229,7 +236,8 @@ let tests =
               with
               | Ok(Embedded t) ->
                   match t.Columns with
-                  | [ c ] -> Expect.equal c.Cells [ Timestamp "1969-12-30T23:59:59Z" ] "one second before Dec 31"
+                  | [ c ] ->
+                      Expect.equal (Column.toCells c) [ Timestamp "1969-12-30T23:59:59Z" ] "one second before Dec 31"
                   | other -> failtestf "expected one column, got %A" other
               | other -> failtestf "expected Ok Embedded, got %A" other
 
@@ -356,7 +364,7 @@ let tests =
               let src =
                   Embedded
                       { Schema = [ "f", FloatType ]
-                        Columns = [ Column.create "f" FloatType [ Float 1.0; Float(0.0 / 0.0) ] ] }
+                        Columns = [ mkCol "f" FloatType [ Float 1.0; Float(0.0 / 0.0) ] ] }
 
               match ColumnCodec.tryEncode src with
               | Error(NonFiniteFloat("f", "NaN")) -> ()
@@ -367,7 +375,7 @@ let tests =
               let mk f =
                   Embedded
                       { Schema = [ "f", FloatType ]
-                        Columns = [ Column.create "f" FloatType [ Float f ] ] }
+                        Columns = [ mkCol "f" FloatType [ Float f ] ] }
 
               match ColumnCodec.tryEncode (mk System.Double.PositiveInfinity) with
               | Error(NonFiniteFloat("f", "Infinity")) -> ()
@@ -389,9 +397,7 @@ let tests =
           <| fun _ ->
               let t =
                   { Schema = [ "a", IntType; "b", IntType ]
-                    Columns =
-                      [ Column.create "a" IntType [ Int 1; Int 2 ]
-                        Column.create "b" IntType [ Int 9 ] ] }
+                    Columns = [ mkCol "a" IntType [ Int 1; Int 2 ]; mkCol "b" IntType [ Int 9 ] ] }
 
               // RaggedColumns since Phase 299 — LengthMismatch names one column's values and
               // validity arrays disagreeing on the wire, a different fault.
@@ -403,7 +409,7 @@ let tests =
           <| fun _ ->
               let missing =
                   { Schema = [ "a", IntType; "b", IntType ]
-                    Columns = [ Column.create "a" IntType [ Int 1 ] ] }
+                    Columns = [ mkCol "a" IntType [ Int 1 ] ] }
 
               match Table.validate missing with
               | Error(Malformed _) -> ()
@@ -411,7 +417,7 @@ let tests =
 
               let extra =
                   { Schema = [ "a", IntType ]
-                    Columns = [ Column.create "a" IntType [ Int 1 ]; Column.create "z" IntType [ Int 1 ] ] }
+                    Columns = [ mkCol "a" IntType [ Int 1 ]; mkCol "z" IntType [ Int 1 ] ] }
 
               match Table.validate extra with
               | Error(Malformed _) -> ()
@@ -421,7 +427,7 @@ let tests =
           <| fun _ ->
               let t =
                   { Schema = [ "a", IntType ]
-                    Columns = [ Column.create "a" StringType [ Str "x" ] ] }
+                    Columns = [ mkCol "a" StringType [ Str "x" ] ] }
 
               match Table.validate t with
               | Error(TypeMismatch("a", IntType, "string")) -> ()
@@ -434,7 +440,7 @@ let tests =
               let malformed =
                   Embedded
                       { Schema = [ "a", IntType; "b", IntType ]
-                        Columns = [ Column.create "a" IntType [ Int 1 ] ] }
+                        Columns = [ mkCol "a" IntType [ Int 1 ] ] }
 
               match ColumnCodec.tryEncode malformed with
               | Error(Malformed _) -> ()
@@ -497,7 +503,7 @@ let tests =
           // Phase 36 — Column.aggregate public surface.
           testCase "Column.aggregate computes the v1 aggregates with null-skip + pinned float semantics"
           <| fun _ ->
-              let ints = Column.create "x" IntType [ Int 10; Null; Int 30; Int 20 ]
+              let ints = mkCol "x" IntType [ Int 10; Null; Int 30; Int 20 ]
               Expect.equal (Column.aggregate Sum ints) (Ok(Int 60)) "Sum skips null, keeps int"
               Expect.equal (Column.aggregate Count ints) (Ok(Int 3)) "Count is present-only"
               Expect.equal (Column.aggregate Mean ints) (Ok(Float 20.0)) "Mean is float over present"
@@ -506,22 +512,19 @@ let tests =
               Expect.equal (Column.aggregate First ints) (Ok(Int 10)) "First keeps the first cell"
               Expect.equal (Column.aggregate Last ints) (Ok(Int 20)) "Last keeps the last cell"
 
-              let floats = Column.create "y" FloatType [ Float 1.0; Float 2.0; Float 6.0 ]
+              let floats = mkCol "y" FloatType [ Float 1.0; Float 2.0; Float 6.0 ]
               Expect.equal (Column.aggregate Median floats) (Ok(Float 2.0)) "Median of 3 is the middle"
               Expect.equal (Column.aggregate Mean floats) (Ok(Float 3.0)) "Mean is the pinned float mean"
 
           testCase "Column.aggregate over an all-null / empty numeric column is Null"
           <| fun _ ->
-              Expect.equal
-                  (Column.aggregate Sum (Column.create "x" IntType [ Null; Null ]))
-                  (Ok Null)
-                  "Sum of all-null is Null"
+              Expect.equal (Column.aggregate Sum (mkCol "x" IntType [ Null; Null ])) (Ok Null) "Sum of all-null is Null"
 
-              Expect.equal (Column.aggregate Mean (Column.create "x" IntType [])) (Ok Null) "Mean of empty is Null"
+              Expect.equal (Column.aggregate Mean (mkCol "x" IntType [])) (Ok Null) "Mean of empty is Null"
 
           testCase "Column.aggregate names an incompatible aggregate type"
           <| fun _ ->
-              let strs = Column.create "s" StringType [ Str "a"; Str "b" ]
+              let strs = mkCol "s" StringType [ Str "a"; Str "b" ]
 
               match Column.aggregate Sum strs with
               | Error(IncompatibleAggType(Sum, StringType, expected)) ->
@@ -530,7 +533,7 @@ let tests =
 
           testCase "Column.aggregate Sum overflow is a named AggregateOverflow"
           <| fun _ ->
-              let big = Column.create "x" IntType [ Int System.Int32.MaxValue; Int 1 ]
+              let big = mkCol "x" IntType [ Int System.Int32.MaxValue; Int 1 ]
 
               match Column.aggregate Sum big with
               | Error(AggregateOverflow _) -> ()
@@ -648,7 +651,11 @@ let tests =
               | Ok(Embedded t) ->
                   let m = Table.tryColumn "m" t |> Option.get
                   Expect.equal m.Type DecimalType "the declared type"
-                  Expect.equal m.Cells [ Decimal "12.5"; Null; Decimal "-3" ] "canonical cells, the masked one Null"
+
+                  Expect.equal
+                      (Column.toCells m)
+                      [ Decimal "12.5"; Null; Decimal "-3" ]
+                      "canonical cells, the masked one Null"
 
                   let again = ColumnCodec.encode (Embedded t)
                   Expect.stringContains again "\"12.5\"" "a decimal is emitted as a string"
@@ -668,7 +675,10 @@ let tests =
 
               match ColumnCodec.decode (withValues "3") with
               | Ok(Embedded t) ->
-                  Expect.equal (Table.tryColumn "m" t |> Option.get).Cells [ Decimal "3" ] "an integer is exact"
+                  Expect.equal
+                      (Table.tryColumn "m" t |> Option.get |> Column.toCells)
+                      [ Decimal "3" ]
+                      "an integer is exact"
               | other -> failtestf "unexpected: %A" other
 
               match ColumnCodec.decode (withValues "3.5") with
@@ -690,7 +700,7 @@ let tests =
               let build (text: string) =
                   Embedded
                       { Schema = [ "m", DecimalType ]
-                        Columns = [ Column.create "m" DecimalType [ Decimal text ] ] }
+                        Columns = [ mkCol "m" DecimalType [ Decimal text ] ] }
 
               for text in [ "1.50"; "abc"; "01" ] do
                   match ColumnCodec.tryEncode (build text) with
@@ -699,8 +709,7 @@ let tests =
 
           testCase "Column.aggregate over a decimal column: an exact Sum, exact Min and Max, a float Mean"
           <| fun _ ->
-              let col =
-                  Column.create "m" DecimalType [ Decimal "0.1"; Decimal "0.2"; Null; Decimal "-5" ]
+              let col = mkCol "m" DecimalType [ Decimal "0.1"; Decimal "0.2"; Null; Decimal "-5" ]
 
               Expect.equal (Column.aggregate Sum col) (Ok(Decimal "-4.7")) "Sum is exact and is a decimal"
               Expect.equal (Column.aggregate Min col) (Ok(Decimal "-5")) "Min compares by value"
@@ -717,12 +726,12 @@ let tests =
               Expect.equal (Column.aggType Mean DecimalType) FloatType "Mean is a float"
 
               Expect.equal
-                  (Column.aggregate Sum (Column.create "m" DecimalType [ Null; Null ]))
+                  (Column.aggregate Sum (mkCol "m" DecimalType [ Null; Null ]))
                   (Ok Null)
                   "Sum of all-null is Null"
 
               // Ten tenths: the float sum is 0.9999999999999999.
-              let tenths = Column.create "m" DecimalType (List.replicate 10 (Decimal "0.1"))
+              let tenths = mkCol "m" DecimalType (List.replicate 10 (Decimal "0.1"))
               Expect.equal (Column.aggregate Sum tenths) (Ok(Decimal "1")) "ten tenths are one"
 
           testCase "int→decimal is a safe widening; float and decimal are not interchangeable"
@@ -751,61 +760,70 @@ let tests =
 /// A table whose one column `c` of type `ty` holds `cells`.
 let private oneColumn (ty: ColumnType) (cells: Cell list) : Table =
     { Schema = [ "c", ty ]
-      Columns = [ Column.create "c" ty cells ] }
+      Columns = [ mkCol "c" ty cells ] }
 
 /// A source from `genSource`, with — on about half the seeds — one fault the codec cannot carry
-/// injected: a cell outside its column's type, a repeated column, non-canonical decimal or temporal
-/// text, a non-finite float, or a ragged column. The law below needs both outcomes.
+/// injected: a column whose type disagrees with its schema entry, a repeated column, non-canonical
+/// decimal or temporal text, a non-finite float, or a ragged column. The law below needs both
+/// outcomes.
+///
+/// Phase 417: fault 0 was a cell outside its column's type (a `Bool` prepended to the first column),
+/// which the typed storage can no longer represent — `Column.ofCells` refuses it at construction,
+/// and `trustsNothingTests` pins that refusal. It is replaced by the other `TypeMismatch` the table
+/// can still carry: the first column rebuilt as a column of another type under its schema entry's
+/// name. Faults 2–4 put their cell in the first column OF ITS TYPE (a decimal, date or float
+/// column), since in a column of any other type the cell is now unrepresentable too.
 let private genMaybeBroken (seed: int) : DataSource =
     match genSource seed with
     | Ref r -> Ref r
     | Embedded t ->
         let fault = (seed * 7 + 3) % 12
 
-        let mapFirst (f: Column -> Column) =
-            match t.Columns with
-            | c :: rest -> { t with Columns = f c :: rest }
-            | [] -> t
+        /// The column rebuilt — same name, same type — over `f` of its cells.
+        let rebuild (f: Cell list -> Cell list) (c: Column) : Column =
+            mkCol c.Name c.Type (f (Column.toCells c))
+
+        /// Replace the head cell of the first column of type `ty` (if any, and non-empty) with `cell`.
+        let replaceHeadOf (ty: ColumnType) (cell: Cell) : Table =
+            match t.Columns |> List.tryFindIndex (fun c -> c.Type = ty && Column.length c > 0) with
+            | Some k ->
+                { t with
+                    Columns =
+                        t.Columns
+                        |> List.mapi (fun i c ->
+                            if i = k then
+                                rebuild (fun cells -> cell :: List.tail cells) c
+                            else
+                                c) }
+            | None -> t
 
         let broken =
             match fault with
             | 0 ->
-                mapFirst (fun c ->
-                    { c with
-                        Cells = Bool true :: c.Cells |> List.truncate (max 1 (List.length c.Cells)) })
+                match t.Columns with
+                | c :: rest ->
+                    let n = Column.length c
+
+                    let retyped =
+                        if c.Type = BoolType then
+                            Column.ofInts c.Name (Vector.init n id) (Validity.all n)
+                        else
+                            Column.ofBools c.Name (Vector.init n (fun i -> i % 2 = 0)) (Validity.all n)
+
+                    { t with Columns = retyped :: rest }
+                | [] -> t
             | 1 ->
                 match t.Columns with
                 | c :: _ -> { t with Columns = t.Columns @ [ c ] }
                 | [] -> t
-            | 2 ->
-                mapFirst (fun c ->
-                    { c with
-                        Cells =
-                            (if List.isEmpty c.Cells then
-                                 []
-                             else
-                                 Decimal "1.50" :: List.tail c.Cells) })
-            | 3 ->
-                mapFirst (fun c ->
-                    { c with
-                        Cells =
-                            (if List.isEmpty c.Cells then
-                                 []
-                             else
-                                 Date "2026-02-30" :: List.tail c.Cells) })
-            | 4 ->
-                mapFirst (fun c ->
-                    { c with
-                        Cells =
-                            (if List.isEmpty c.Cells then
-                                 []
-                             else
-                                 Float nan :: List.tail c.Cells) })
+            | 2 -> replaceHeadOf DecimalType (Decimal "1.50")
+            | 3 -> replaceHeadOf DateType (Date "2026-02-30")
+            | 4 -> replaceHeadOf FloatType (Float nan)
             | 5 ->
                 match t.Columns with
-                | a :: b :: rest when not (List.isEmpty b.Cells) ->
+                | a :: b :: rest when Column.length b > 0 ->
                     { t with
-                        Columns = a :: { b with Cells = List.tail b.Cells } :: rest }
+                        Columns = a :: rebuild List.tail b :: rest }
                 | _ -> t
             | _ -> t
 
@@ -815,34 +833,44 @@ let private genMaybeBroken (seed: int) : DataSource =
 let trustsNothingTests =
     testList
         "Column.trusts nothing it is handed (Phase 299)"
-        [ testCase "validate refuses a cell outside its column's type, through ColumnType.widens"
+        [ // Phase 417: the refusal moved from `Table.validate` to construction — the typed storage
+          // cannot hold a cell outside its column's type, so `Column.ofCells` refuses it with the
+          // `TypeMismatch` validate used to name, through the same `ColumnType.widens`.
+          testCase "a cell outside its column's type is refused at construction, through ColumnType.widens"
           <| fun _ ->
               Expect.equal
-                  (Table.validate (oneColumn IntType [ Bool true ]))
+                  (Column.ofCells "c" IntType [ Bool true ])
                   (Error(TypeMismatch("c", IntType, "bool")))
                   "a Bool in an int column"
 
               Expect.equal
-                  (Table.validate (oneColumn DecimalType [ Float 1.5 ]))
+                  (Column.ofCells "c" DecimalType [ Float 1.5 ])
                   (Error(TypeMismatch("c", DecimalType, "float")))
                   "a Float in a decimal column"
 
               Expect.equal
-                  (Table.validate (oneColumn FloatType [ Decimal "1.5" ]))
+                  (Column.ofCells "c" FloatType [ Decimal "1.5" ])
                   (Error(TypeMismatch("c", FloatType, "decimal")))
                   "a Decimal in a float column"
 
               Expect.equal
-                  (Table.validate (oneColumn IntType [ Float 1.0 ]))
+                  (Column.ofCells "c" IntType [ Float 1.0 ])
                   (Error(TypeMismatch("c", IntType, "float")))
                   "a Float in an int column"
+
+              // genMaybeBroken's old fault 0 — a Bool prepended to a column of another type.
+              for ty in [ IntType; FloatType; StringType; DateType; TimestampType; DecimalType ] do
+                  Expect.equal
+                      (Column.ofCells "c0" ty [ Bool true; Null ])
+                      (Error(TypeMismatch("c0", ty, "bool")))
+                      (sprintf "a Bool at the head of a %A column" ty)
 
               Expect.equal (Table.validate (oneColumn FloatType [ Int 3; Null ])) (Ok()) "Int widens into float"
               Expect.equal (Table.validate (oneColumn DecimalType [ Int 3 ])) (Ok()) "Int widens into decimal"
 
           testCase "validate refuses a duplicate schema name and a duplicate column name"
           <| fun _ ->
-              let col = Column.create "a" IntType [ Int 1 ]
+              let col = mkCol "a" IntType [ Int 1 ]
 
               Expect.equal
                   (Table.validate
@@ -918,7 +946,7 @@ let trustsNothingTests =
               Expect.equal
                   (Table.validate
                       { Schema = [ "a", IntType; "b", IntType ]
-                        Columns = [ Column.create "a" IntType [ Int 1 ]; Column.create "b" IntType [] ] })
+                        Columns = [ mkCol "a" IntType [ Int 1 ]; mkCol "b" IntType [] ] })
                   (Error(RaggedColumns("b", 1, 0)))
                   "ragged"
 
@@ -949,40 +977,44 @@ let trustsNothingTests =
               Expect.isGreaterThan accepted 100 "the law measured acceptances"
               Expect.isGreaterThan refused 100 "the law measured refusals"
 
+          // Phase 417: a cell of another TYPE can no longer reach `aggregate` — `Column.ofCells` refuses
+          // it at construction (so it is neither truncated into a Sum nor dropped from one and counted
+          // in a Mean, because no column can hold it). `CellOutsideType` remains for the one cell the
+          // storage can hold and `aggregate` cannot read: a `Decimal` whose text is not decimal.
           testCase "aggregate refuses a cell outside its column's type by name, rather than truncating or dropping"
           <| fun _ ->
-              let intCol = Column.create "a" IntType [ Int 1; Float 2.7 ]
+              Expect.equal
+                  (Column.ofCells "a" IntType [ Int 1; Float 2.7 ])
+                  (Error(TypeMismatch("a", IntType, "float")))
+                  "a Float in an int column cannot be built, so it is never truncated into the Sum"
 
               Expect.equal
-                  (Column.aggregate Sum intCol)
-                  (Error(CellOutsideType("a", IntType, "float")))
-                  "a Float in an int column is not truncated into the Sum"
-
-              let decCol = Column.create "m" DecimalType [ Decimal "1"; Float 2.5 ]
+                  (Column.ofCells "m" DecimalType [ Decimal "1"; Float 2.5 ])
+                  (Error(TypeMismatch("m", DecimalType, "float")))
+                  "a Float in a decimal column cannot be built, so it is never dropped from Sum and counted in Mean"
 
               Expect.equal
-                  (Column.aggregate Mean decCol)
-                  (Error(CellOutsideType("m", DecimalType, "float")))
-                  "a Float in a decimal column is not dropped from Sum and counted in Mean"
+                  (Column.ofCells "b" IntType [ Bool true ])
+                  (Error(TypeMismatch("b", IntType, "bool")))
+                  "a Bool in an int column cannot be built"
 
-              Expect.equal
-                  (Column.aggregate Count (Column.create "b" IntType [ Bool true ]))
-                  (Error(CellOutsideType("b", IntType, "bool")))
-                  "every aggregate admits its cells first"
+              match Column.aggregate Count (mkCol "m" DecimalType [ Decimal "1"; Decimal "abc" ]) with
+              | Error(CellOutsideType("m", DecimalType, cell)) ->
+                  Expect.stringContains cell "abc" "every aggregate admits its cells first"
+              | other -> failtestf "expected CellOutsideType from Count, got %A" other
 
-              match Column.aggregate Sum (Column.create "m" DecimalType [ Decimal "abc" ]) with
+              match Column.aggregate Sum (mkCol "m" DecimalType [ Decimal "abc" ]) with
               | Error(CellOutsideType("m", DecimalType, cell)) -> Expect.stringContains cell "abc" "names the text"
               | other -> failtestf "expected CellOutsideType, got %A" other
 
               Expect.equal
-                  (Column.aggregate Sum (Column.create "f" FloatType [ Int 1; Float 0.5 ]))
+                  (Column.aggregate Sum (mkCol "f" FloatType [ Int 1; Float 0.5 ]))
                   (Ok(Float 1.5))
                   "an Int widens into a float column's Sum"
 
           testCase "aggregate canonicalises decimal text at entry"
           <| fun _ ->
-              let col =
-                  Column.create "m" DecimalType [ Decimal "1.50"; Decimal "1.5"; Decimal "02" ]
+              let col = mkCol "m" DecimalType [ Decimal "1.50"; Decimal "1.5"; Decimal "02" ]
 
               Expect.equal (Column.aggregate CountDistinct col) (Ok(Int 2)) "1.50 and 1.5 are one value"
               Expect.equal (Column.aggregate Min col) (Ok(Decimal "1.5")) "Min answers canonical text"
@@ -991,8 +1023,7 @@ let trustsNothingTests =
 
           testCase "Min / Max / Median order NaN last and -0 equal to 0, on every host"
           <| fun _ ->
-              let col =
-                  Column.create "f" FloatType [ Float 3.0; Float nan; Float -1.0; Float -0.0 ]
+              let col = mkCol "f" FloatType [ Float 3.0; Float nan; Float -1.0; Float -0.0 ]
 
               Expect.equal (Column.aggregate Min col) (Ok(Float -1.0)) "Min is not NaN"
 
@@ -1004,9 +1035,7 @@ let trustsNothingTests =
               Expect.equal (Column.aggregate Median col) (Ok(Float 1.5)) "Median counts NaN at the top"
 
               Expect.equal
-                  (Column.aggregate
-                      CountDistinct
-                      (Column.create "f" FloatType [ Float 0.0; Float -0.0; Float nan; Float nan ]))
+                  (Column.aggregate CountDistinct (mkCol "f" FloatType [ Float 0.0; Float -0.0; Float nan; Float nan ]))
                   (Ok(Int 2))
                   "-0 is 0 and NaN is one value"
 
@@ -1037,13 +1066,13 @@ let trustsNothingTests =
               for a in specials do
                   for b in specials do
                       let minOf (x: float) (y: float) =
-                          bits (Column.aggregate Min (Column.create "f" FloatType [ Float x; Float y ]))
+                          bits (Column.aggregate Min (mkCol "f" FloatType [ Float x; Float y ]))
 
                       let bitsOf (x: float) = System.BitConverter.DoubleToInt64Bits x
                       let tie = minOf a b = bitsOf a && minOf b a = bitsOf b
 
                       let oneValue =
-                          Column.aggregate CountDistinct (Column.create "f" FloatType [ Float a; Float b ]) = Ok(Int 1)
+                          Column.aggregate CountDistinct (mkCol "f" FloatType [ Float a; Float b ]) = Ok(Int 1)
 
                       Expect.equal tie oneValue (sprintf "%g vs %g: tie ⇔ one distinct value" a b)
 
@@ -1058,7 +1087,7 @@ let trustsNothingTests =
 
               let cells (r: Result<DataSource, ColumnError>) =
                   match r with
-                  | Ok(Embedded t) -> t.Columns |> List.collect _.Cells
+                  | Ok(Embedded t) -> t.Columns |> List.collect Column.toCells
                   | other -> failtestf "unexpected: %A" other
 
               Expect.equal (cells (decode "3000000000")) [ Decimal "3000000000" ] "past int32, as 12 always was"
@@ -1081,7 +1110,7 @@ let trustsNothingTests =
               Expect.equal (DecimalText.tryToFloat ("-" + huge)) None "nor to its negation"
               Expect.equal (DecimalText.tryToFloat "1.5") (Some 1.5) "a float-range decimal reads"
 
-              let col = Column.create "m" DecimalType [ Decimal huge; Decimal "1" ]
+              let col = mkCol "m" DecimalType [ Decimal huge; Decimal "1" ]
 
               match Column.aggregate Mean col with
               | Error(AggregateOverflow d) -> Expect.stringContains d "past the float range" "named"
@@ -1102,7 +1131,7 @@ let trustsNothingTests =
                   ColumnValidator.validate
                       reg
                       { Schema = [ "m", DecimalType ]
-                        Columns = [ Column.create "m" DecimalType cells ] }
+                        Columns = [ mkCol "m" DecimalType cells ] }
                   |> List.filter (fun d -> d.Code = "COL-INRANGE")
                   |> List.length
 
@@ -1136,7 +1165,8 @@ let trustsNothingTests =
                   ColumnCodec.decode
                       """{"schema":[{"name":"t","type":"date"}],"columns":{"t":{"values":[""],"validity":[false]}}}"""
               with
-              | Ok(Embedded t) -> Expect.equal (t.Columns |> List.collect _.Cells) [ Null ] "the masked slot is Null"
+              | Ok(Embedded t) ->
+                  Expect.equal (t.Columns |> List.collect Column.toCells) [ Null ] "the masked slot is Null"
               | other -> failtestf "unexpected: %A" other
 
           testCase "decode ends in validate: a ragged, duplicated or repeated-key table is refused at decode"
@@ -1155,3 +1185,511 @@ let trustsNothingTests =
               match ColumnCodec.decode """{"schema":[{"name":"a","type":"int"}],"columns":{"a":[1],"a":[2]}}""" with
               | Error(Malformed d) -> Expect.stringContains d "duplicate column key" "a repeated key"
               | other -> failtestf "expected Malformed, got %A" other ]
+
+// ---- Phase 417: the typed vector, the typed column, and column equality ----
+
+[<Tests>]
+let vectorTests =
+    testList
+        "Column.Vector (Phase 417)"
+        [ testCase "ofArray copies: a later write into the source array does not reach the vector"
+          <| fun _ ->
+              let source = [| 1; 2; 3 |]
+              let v = Vector.ofArray source
+              source[0] <- 99
+              Expect.equal (Vector.toList v) [ 1; 2; 3 ] "the vector holds its own copy"
+
+          testCase "adopt shares: a write through the adopted array IS visible (the contract it documents)"
+          <| fun _ ->
+              // The caller promised not to do this (Phase 418 adds the law family); the test pins
+              // that `adopt` is the zero-copy route, which is exactly why the promise is needed.
+              let source = [| 1; 2; 3 |]
+              let v = Vector.adopt source
+              source[0] <- 99
+              Expect.equal v[0] 99 "the vector reads the adopted array itself"
+
+          testCase "slice is a zero-copy view; an out-of-range slice raises"
+          <| fun _ ->
+              let v = Vector.ofList [ 0..9 ]
+              let s = Vector.slice 2 3 v
+              Expect.equal (Vector.toList s) [ 2; 3; 4 ] "the view's elements"
+              Expect.equal s.Length 3 "the view's length"
+
+              let parent = Vector.Unsafe.borrow v
+              let view = Vector.Unsafe.borrow s
+              Expect.isTrue (obj.ReferenceEquals(view.Array, parent.Array)) "the view borrows the parent's array"
+              Expect.equal view.Offset (parent.Offset + 2) "at the parent's offset plus the start"
+              Expect.equal view.Length 3 "over the view's length"
+
+              let nested = Vector.slice 1 2 s
+              Expect.equal (Vector.toList nested) [ 3; 4 ] "a view of a view"
+
+              Expect.isTrue
+                  (obj.ReferenceEquals((Vector.Unsafe.borrow nested).Array, parent.Array))
+                  "a view of a view still shares the storage"
+
+              Expect.equal (Vector.Unsafe.borrow nested).Offset 3 "offsets compose"
+
+              Expect.throwsT<System.ArgumentOutOfRangeException>
+                  (fun () -> Vector.slice 8 3 v |> ignore)
+                  "a range past the end"
+
+              Expect.throwsT<System.ArgumentOutOfRangeException>
+                  (fun () -> Vector.slice -1 2 v |> ignore)
+                  "a negative start"
+
+              Expect.throwsT<System.ArgumentOutOfRangeException>
+                  (fun () -> Vector.slice 0 4 s |> ignore)
+                  "past the VIEW's end, though the parent is longer"
+
+              Expect.equal (Vector.slice 10 0 v).Length 0 "an empty slice at the end is in range"
+
+          testCase "the indexer raises past the view's end even though the backing array is longer"
+          <| fun _ ->
+              let s = Vector.slice 2 3 (Vector.ofList [ 0..9 ])
+              Expect.equal s[2] 4 "the view's last element"
+
+              Expect.throwsT<System.IndexOutOfRangeException> (fun () -> s[3] |> ignore) "one past the view's end"
+
+              Expect.throwsT<System.IndexOutOfRangeException> (fun () -> s[-1] |> ignore) "before the view's start"
+
+              Expect.throwsT<System.IndexOutOfRangeException>
+                  (fun () -> Vector.item 5 s |> ignore)
+                  "Vector.item is the indexer"
+
+          testCase "tryItem is total"
+          <| fun _ ->
+              let s = Vector.slice 2 3 (Vector.ofList [ 0..9 ])
+              Expect.equal (Vector.tryItem 0 s) (Some 2) "in range"
+              Expect.equal (Vector.tryItem 2 s) (Some 4) "the last"
+              Expect.equal (Vector.tryItem 3 s) None "past the view's end"
+              Expect.equal (Vector.tryItem -1 s) None "negative"
+              Expect.equal (Vector.tryItem 0 Vector.empty<int>) None "the empty vector"
+
+          testCase "map yields a new vector and leaves the source; toArray is a copy"
+          <| fun _ ->
+              let v = Vector.ofList [ 1; 2; 3 ]
+              let m = Vector.map (fun x -> x * 10) v
+              Expect.equal (Vector.toList m) [ 10; 20; 30 ] "mapped"
+              Expect.equal (Vector.toList v) [ 1; 2; 3 ] "the source is unchanged"
+
+              Expect.isFalse
+                  (obj.ReferenceEquals((Vector.Unsafe.borrow m).Array, (Vector.Unsafe.borrow v).Array))
+                  "new storage"
+
+              let a = Vector.toArray v
+              a[0] <- 99
+              Expect.equal (Vector.toList v) [ 1; 2; 3 ] "a write into toArray's result does not reach the vector"
+              Expect.isFalse (obj.ReferenceEquals(a, (Vector.Unsafe.borrow v).Array)) "never the storage"
+
+              Expect.equal
+                  (Vector.toArray (Vector.slice 1 2 (Vector.ofList [ 7; 8; 9 ])))
+                  [| 8; 9 |]
+                  "a view's toArray is the view's range only"
+
+          testCase "float equality is Cell.compare's identity: NaN is one value, -0.0 is 0.0"
+          <| fun _ ->
+              Expect.equal (Vector.ofList [ nan ]) (Vector.ofList [ nan ]) "NaN equals NaN"
+              Expect.equal (Vector.ofList [ nan ]) (Vector.ofList [ -nan ]) "every NaN is one value"
+              Expect.equal (Vector.ofList [ -0.0 ]) (Vector.ofList [ 0.0 ]) "-0.0 equals 0.0"
+              Expect.notEqual (Vector.ofList [ 1.0 ]) (Vector.ofList [ 2.0 ]) "distinct values differ"
+              Expect.notEqual (Vector.ofList [ 1.0 ]) (Vector.ofList [ 1.0; 1.0 ]) "lengths differ ⇒ unequal"
+              Expect.notEqual (Vector.ofList [ nan ]) (Vector.ofList [ 0.0 ]) "NaN is not zero"
+
+              Expect.equal (hash (Vector.ofList [ nan ])) (hash (Vector.ofList [ -nan ])) "equal NaN vectors hash equal"
+              Expect.equal (hash (Vector.ofList [ -0.0 ])) (hash (Vector.ofList [ 0.0 ])) "and both zeroes"
+
+              Expect.equal
+                  (hash (Vector.ofList [ 1.0; 2.5; nan ]))
+                  (hash (Vector.ofArray [| 1.0; 2.5; nan |]))
+                  "equal vectors hash equal"
+
+          testCase "a Vector<int> and a Vector<string> behave structurally"
+          <| fun _ ->
+              Expect.equal (Vector.ofList [ 1; 2 ]) (Vector.ofArray [| 1; 2 |]) "ints by element"
+              Expect.notEqual (Vector.ofList [ 1; 2 ]) (Vector.ofList [ 2; 1 ]) "order matters"
+
+              Expect.equal
+                  (Vector.ofList [ "a"; "" ])
+                  (Vector.ofSeq (
+                      seq {
+                          "a"
+                          ""
+                      }
+                  ))
+                  "strings by element"
+
+              Expect.notEqual (Vector.ofList [ "a" ]) (Vector.ofList [ "A" ]) "exactly"
+              Expect.equal (hash (Vector.ofList [ "a"; "b" ])) (hash (Vector.ofList [ "a"; "b" ])) "hash agrees"
+
+              let viewed = Vector.slice 1 2 (Vector.ofList [ 9; 1; 2; 9 ])
+              Expect.equal viewed (Vector.ofList [ 1; 2 ]) "a view equals a fresh vector of its range"
+              Expect.equal (hash viewed) (hash (Vector.ofList [ 1; 2 ])) "and hashes as one"
+              Expect.equal Vector.empty<string> (Vector.ofList []) "the empty vectors" ]
+
+[<Tests>]
+let typedColumnTests =
+    testList
+        "Column.typed storage (Phase 417)"
+        [ testCase "cell is Null for an absent row and for an out-of-range index"
+          <| fun _ ->
+              let c = mkCol "x" IntType [ Int 1; Null; Int 3 ]
+              Expect.equal (Column.cell 0 c) (Int 1) "present"
+              Expect.equal (Column.cell 1 c) Null "absent"
+              Expect.equal (Column.cell 3 c) Null "past the end"
+              Expect.equal (Column.cell -1 c) Null "negative"
+              Expect.isFalse (Column.isPresent 1 c) "the absent row is not present"
+              Expect.isFalse (Column.isPresent 3 c) "nor is an out-of-range one"
+
+          testCase "the typed builders round-trip through the typed readers without conversion or copy"
+          <| fun _ ->
+              let same (handed: Vector<'T>) (read: Vector<'T> option) (what: string) =
+                  match read with
+                  | Some v -> Expect.isTrue (obj.ReferenceEquals(v, handed)) (what + ": the vector handed in")
+                  | None -> failtestf "%s: the reader answered None" what
+
+              let ints = Vector.ofList [ 1; 2 ]
+              same ints (Column.tryInts (Column.ofInts "n" ints (Validity.all 2))) "ints"
+
+              let floats = Vector.ofList [ 1.5; nan ]
+              same floats (Column.tryFloats (Column.ofFloats "n" floats (Validity.all 2))) "floats"
+
+              let bools = Vector.ofList [ true; false ]
+              same bools (Column.tryBools (Column.ofBools "n" bools (Validity.all 2))) "bools"
+
+              let strs = Vector.ofList [ "a"; "b" ]
+              same strs (Column.tryStrs (Column.ofStrs "n" strs (Validity.all 2))) "strings"
+
+              let dates = Vector.ofList [ "2026-06-22" ]
+              same dates (Column.tryDates (Column.ofDates "n" dates (Validity.all 1))) "dates"
+
+              let stamps = Vector.ofList [ "2026-06-22T17:00:00Z" ]
+              same stamps (Column.tryTimestamps (Column.ofTimestamps "n" stamps (Validity.all 1))) "timestamps"
+
+              let decs = Vector.ofList [ "12.5" ]
+              same decs (Column.tryDecimals (Column.ofDecimals "n" decs (Validity.all 1))) "decimals"
+
+          testCase "a typed reader answers None for a column of another type"
+          <| fun _ ->
+              let ints = Column.ofInts "n" (Vector.ofList [ 1 ]) (Validity.all 1)
+              Expect.isNone (Column.tryFloats ints) "tryFloats on an int column"
+              Expect.isNone (Column.tryBools ints) "tryBools"
+              Expect.isNone (Column.tryStrs ints) "tryStrs"
+              Expect.isNone (Column.tryDates ints) "tryDates"
+              Expect.isNone (Column.tryTimestamps ints) "tryTimestamps"
+              Expect.isNone (Column.tryDecimals ints) "tryDecimals"
+
+              Expect.isNone
+                  (Column.tryInts (Column.ofDecimals "m" (Vector.ofList [ "1" ]) (Validity.all 1)))
+                  "tryInts on a decimal column"
+
+              Expect.isNone
+                  (Column.tryStrs (Column.ofDates "d" (Vector.ofList [ "2026-01-01" ]) (Validity.all 1)))
+                  "a date column is not a string column"
+
+          testCase "ofCells and toCells round-trip exactly for cells already in normal form"
+          <| fun _ ->
+              let cases =
+                  [ IntType, [ Int 1; Null; Int -7 ]
+                    FloatType, [ Float 0.1; Null; Float -1.5; Float infinity ]
+                    BoolType, [ Bool false; Bool true; Null ]
+                    StringType, [ Str ""; Null; Str "a\"b" ]
+                    DateType, [ Date "2026-06-22"; Null ]
+                    TimestampType, [ Null; Timestamp "2026-06-22T17:00:00Z" ]
+                    DecimalType, [ Decimal "12.5"; Null; Decimal "-0.05" ]
+                    IntType, []
+                    StringType, [ Null; Null ] ]
+
+              for ty, cells in cases do
+                  let c = mkCol "c" ty cells
+                  Expect.equal c.Type ty (sprintf "%A: the declared type" ty)
+                  Expect.equal (Column.toCells c) cells (sprintf "%A: toCells (ofCells cells) = cells" ty)
+                  Expect.equal (Column.length c) (List.length cells) (sprintf "%A: the length" ty)
+
+              match Column.toCells (mkCol "f" FloatType [ Float nan ]) with
+              | [ Float f ] -> Expect.isTrue (System.Double.IsNaN f) "a NaN is held as found"
+              | other -> failtestf "expected one NaN, got %A" other
+
+          testCase "ofCells normalises a widened Int: Float in a float column, Decimal in a decimal column"
+          <| fun _ ->
+              let f = mkCol "f" FloatType [ Int 1; Null; Float 2.5 ]
+              Expect.equal (Column.toCells f) [ Float 1.0; Null; Float 2.5 ] "Int 1 reads back as Float 1.0"
+              Expect.equal (Column.tryFloats f |> Option.map (Vector.item 0)) (Some 1.0) "held as the float"
+
+              let m = mkCol "m" DecimalType [ Int 1; Decimal "2.5"; Int -30 ]
+              Expect.equal (Column.toCells m) [ Decimal "1"; Decimal "2.5"; Decimal "-30" ] "Int reads back as Decimal"
+
+              Expect.equal
+                  (Column.tryDecimals m |> Option.map Vector.toList)
+                  (Some [ "1"; "2.5"; "-30" ])
+                  "held as its digits"
+
+              Expect.equal f (mkCol "f" FloatType [ Float 1.0; Null; Float 2.5 ]) "and equals the column built normal"
+
+          testCase "ofCells refuses in row order: the FIRST offending cell is named"
+          <| fun _ ->
+              Expect.equal
+                  (Column.ofCells "c" IntType [ Null; Int 1; Str "x"; Bool true ])
+                  (Error(TypeMismatch("c", IntType, "string")))
+                  "the Str at row 2, not the Bool at row 3"
+
+              Expect.equal
+                  (Column.ofCells "c" IntType [ Null; Int 1; Bool true; Str "x" ])
+                  (Error(TypeMismatch("c", IntType, "bool")))
+                  "the Bool when it comes first"
+
+              Expect.equal
+                  (Column.ofCells "c" FloatType [ Int 1; Decimal "2"; Date "2026-01-01" ])
+                  (Error(TypeMismatch("c", FloatType, "decimal")))
+                  "a widened Int passes, the Decimal after it does not"
+
+              Expect.isOk (Column.ofCells "c" BoolType [ Null; Null ]) "a Null fits every type"
+
+          testCase "Table.validate names LengthMismatch for storage whose values and validity disagree"
+          <| fun _ ->
+              let c =
+                  { Name = "c"
+                    Data = Ints(Vector.ofList [ 1; 2 ], Validity.all 1) }
+
+              Expect.equal
+                  (Table.validate
+                      { Schema = [ "c", IntType ]
+                        Columns = [ c ] })
+                  (Error(LengthMismatch("c", 2, 1)))
+                  "values 2, validity 1"
+
+              match
+                  ColumnCodec.tryEncode (
+                      Embedded
+                          { Schema = [ "c", IntType ]
+                            Columns = [ c ] }
+                  )
+              with
+              | Error(LengthMismatch("c", 2, 1)) -> ()
+              | other -> failtestf "tryEncode refuses with validate's error, got %A" other ]
+
+/// A pair of columns of one type for the equality law, from a seed, with the cell lists they were
+/// built from: the second column is the first with each row, independently, swapped for an
+/// EQUIVALENT cell (one NaN for another, -0.0 for 0.0, an `Int` for the `Float` / `Decimal` it
+/// widens to) or, now and then, for an arbitrary one — so the pairs land on both sides of the law,
+/// and on its edges; one pair in eight has two lengths. Float columns are built through the typed
+/// builder with GARBAGE under every absent row, drawn independently for each column, so the law
+/// also covers the element an absent row holds and nothing reads.
+let private genColumnPair (seed: int) : (Cell list * Column) * (Cell list * Column) =
+    let mutable st = (uint32 seed * 2246822519u) + 7u
+
+    let next () =
+        st <- (st * 1664525u) + 1013904223u
+        int (st >>> 1)
+
+    let pick n = next () % n
+
+    // Each pool lists cells in classes of equivalents: `partner` picks a member of the cell's class.
+    let floatClasses =
+        [ [ Float 0.0; Float -0.0 ]
+          [ Float nan; Float -nan ]
+          [ Float 1.0; Int 1 ]
+          [ Float 2.0; Int 2 ]
+          [ Float 2.5 ]
+          [ Float -1.0; Int -1 ]
+          [ Float infinity ]
+          [ Null ] ]
+
+    let intClasses = [ [ Int 0 ]; [ Int 1 ]; [ Int -1 ]; [ Int 1000 ]; [ Null ] ]
+
+    let decimalClasses =
+        [ [ Decimal "0"; Int 0 ]
+          [ Decimal "1"; Int 1 ]
+          [ Decimal "-2.5" ]
+          [ Decimal "10"; Int 10 ]
+          [ Null ] ]
+
+    let stringClasses =
+        [ [ Str "" ]; [ Str "a" ]; [ Str "A" ]; [ Str "a\n" ]; [ Null ] ]
+
+    let boolClasses = [ [ Bool true ]; [ Bool false ]; [ Null ] ]
+
+    let ty, classes =
+        match pick 10 with
+        | 0 -> IntType, intClasses
+        | 1 -> DecimalType, decimalClasses
+        | 2 -> StringType, stringClasses
+        | 3 -> BoolType, boolClasses
+        | _ -> FloatType, floatClasses
+
+    let draw () =
+        let cls = classes[pick classes.Length]
+        cls[pick cls.Length]
+
+    // A cell's class, found by its `Cell.token` — `List.contains` would miss NaN, which `=` on a
+    // `Cell` does not find equal to itself.
+    let partner (cell: Cell) =
+        let cls =
+            classes |> List.find (List.exists (fun c -> Cell.token c = Cell.token cell))
+
+        cls[pick cls.Length]
+
+    let lenA = pick 5
+    let lenB = if pick 8 = 0 then pick 5 else lenA
+    let cellsA = List.init lenA (fun _ -> draw ())
+
+    let cellsB =
+        List.init lenB (fun i ->
+            if i < lenA && pick 5 <> 0 then
+                partner cellsA[i]
+            else
+                draw ())
+
+    let garbage () =
+        [| nan; 7.0; -3.0; 0.0; 1e300 |][pick 5]
+
+    let build (cells: Cell list) : Column =
+        if ty = FloatType then
+            let values =
+                cells
+                |> List.map (fun c ->
+                    match c with
+                    | Float f -> f
+                    | Int i -> float i
+                    | _ -> garbage ())
+                |> Array.ofList
+
+            let mask = cells |> List.map (fun c -> c <> Null)
+            Column.ofFloats "c" (Vector.adopt values) (Validity.ofList mask)
+        else
+            mkCol "c" ty cells
+
+    (cellsA, build cellsA), (cellsB, build cellsB)
+
+[<Tests>]
+let columnEqualityTests =
+    testList
+        "Column.equality (Phase 417)"
+        [ // THE EQUALITY LAW: two columns of one type are equal exactly when they hold one row count,
+          // one validity mask, and at every present row cells `Cell.compare` calls equal — so a column
+          // compares the way its cells do — and equal columns hash equal.
+          testCase "columns are equal exactly when their cells compare equal, and equal columns hash equal"
+          <| fun _ ->
+              let mutable equalPairs = 0
+              let mutable unequalPairs = 0
+              let mutable nanEqual = 0
+              let mutable zeroEqual = 0
+              let mutable widenedEqual = 0
+              let mutable garbageEqual = 0
+              let mutable nullMismatch = 0
+
+              let isNaNCell (c: Cell) =
+                  match c with
+                  | Float f -> System.Double.IsNaN f
+                  | _ -> false
+
+              let isNegZero (c: Cell) =
+                  match c with
+                  | Float f -> f = 0.0 && System.Double.IsNegative f
+                  | _ -> false
+
+              let isInt (c: Cell) =
+                  match c with
+                  | Int _ -> true
+                  | _ -> false
+
+              for seed in 1..500 do
+                  let (cellsA, a), (cellsB, b) = genColumnPair seed
+                  let n = Column.length a
+
+                  let presence (c: Column) =
+                      List.init (Column.length c) (fun i -> Column.isPresent i c)
+
+                  let spec =
+                      n = Column.length b
+                      && presence a = presence b
+                      && List.forall
+                          (fun i ->
+                              not (Column.isPresent i a)
+                              || Cell.compare (Column.cell i a) (Column.cell i b) = Some 0)
+                          [ 0 .. n - 1 ]
+
+                  Expect.equal (a = b) spec (sprintf "seed %d: %A vs %A" seed cellsA cellsB)
+                  Expect.equal (b = a) spec (sprintf "seed %d: symmetric" seed)
+
+                  if a = b then
+                      equalPairs <- equalPairs + 1
+                      Expect.equal (hash a) (hash b) (sprintf "seed %d: equal columns hash equal" seed)
+                      let rows = List.zip cellsA cellsB
+
+                      if List.exists (fun (x, _) -> isNaNCell x) rows then
+                          nanEqual <- nanEqual + 1
+
+                      if List.exists (fun (x, y) -> isNegZero x <> isNegZero y) rows then
+                          zeroEqual <- zeroEqual + 1
+
+                      if List.exists (fun (x, y) -> isInt x <> isInt y) rows then
+                          widenedEqual <- widenedEqual + 1
+
+                      if a.Type = FloatType && List.exists (fun (x, _) -> x = Null) rows then
+                          garbageEqual <- garbageEqual + 1
+                  else
+                      unequalPairs <- unequalPairs + 1
+
+                      if
+                          List.length cellsA = List.length cellsB
+                          && List.exists2 (fun x y -> (x = Null) <> (y = Null)) cellsA cellsB
+                      then
+                          nullMismatch <- nullMismatch + 1
+
+              Expect.isGreaterThan equalPairs 100 "the law measured equal pairs"
+              Expect.isGreaterThan unequalPairs 100 "the law measured unequal pairs"
+              Expect.isGreaterThan nanEqual 10 "equal pairs holding NaN"
+              Expect.isGreaterThan zeroEqual 10 "equal pairs differing in the sign of a zero"
+              Expect.isGreaterThan widenedEqual 10 "equal pairs differing as Int against Float or Decimal"
+              Expect.isGreaterThan garbageEqual 10 "equal float pairs with an absent row (garbage beneath it)"
+              Expect.isGreaterThan nullMismatch 10 "unequal pairs whose nulls sit at different rows"
+
+          testCase "falsifier: a NaN column equals itself, where = on its float list would not"
+          <| fun _ ->
+              Expect.isFalse ([ nan ] = [ nan ]) "= on the underlying float list says false"
+
+              let c = mkCol "c" FloatType [ Float nan; Float 1.0 ]
+              Expect.isTrue (c = c) "the column equals itself"
+              Expect.equal c (mkCol "c" FloatType [ Float nan; Float 1.0 ]) "and a column built alike"
+              Expect.equal c (mkCol "c" FloatType [ Float -nan; Int 1 ]) "whichever NaN, and the widened Int"
+              Expect.equal (hash c) (hash (mkCol "c" FloatType [ Float -nan; Int 1 ])) "hashes agree"
+              Expect.equal (mkCol "z" FloatType [ Float -0.0 ]) (mkCol "z" FloatType [ Float 0.0 ]) "-0.0 is 0.0"
+
+          testCase "falsifier: columns differing only at an ABSENT row are equal"
+          <| fun _ ->
+              let mask = Validity.ofList [ true; false; true ]
+              let a = Column.ofFloats "c" (Vector.adopt [| 1.0; 99.0; 3.0 |]) mask
+              let b = Column.ofFloats "c" (Vector.adopt [| 1.0; -5.0; 3.0 |]) mask
+              Expect.notEqual (Column.tryFloats a) (Column.tryFloats b) "the values vectors differ"
+              Expect.equal a b "the columns do not — the absent row is not a cell"
+              Expect.equal (hash a) (hash b) "and hash equal"
+
+              let ia =
+                  Column.ofInts "i" (Vector.adopt [| 0; 1 |]) (Validity.ofList [ false; true ])
+
+              let ib =
+                  Column.ofInts "i" (Vector.adopt [| 42; 1 |]) (Validity.ofList [ false; true ])
+
+              Expect.equal ia ib "an int column alike"
+              Expect.equal (hash ia) (hash ib) "and hash equal"
+
+              let sa =
+                  Column.ofStrs "s" (Vector.adopt [| "x"; "kept" |]) (Validity.ofList [ false; true ])
+
+              let sb =
+                  Column.ofStrs "s" (Vector.adopt [| "y"; "kept" |]) (Validity.ofList [ false; true ])
+
+              Expect.equal sa sb "a string column alike"
+
+              Expect.notEqual
+                  a
+                  (Column.ofFloats "c" (Vector.adopt [| 1.0; 99.0; 3.0 |]) (Validity.all 3))
+                  "but presence itself is part of the value"
+
+              Expect.notEqual a { a with Name = "d" } "and so is the name"
+
+              Expect.notEqual
+                  (Column.ofInts "c" (Vector.ofList [ 1 ]) (Validity.all 1))
+                  (Column.ofFloats "c" (Vector.ofList [ 1.0 ]) (Validity.all 1))
+                  "and the type: Int 1 and Float 1.0 compare equal but live in different columns" ]

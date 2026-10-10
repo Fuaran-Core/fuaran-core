@@ -87,7 +87,7 @@ let private nested (depth: int) : JVal =
 
 /// A float aggregate over a float column, through the canonical layout, or the refusal's class.
 let private floatAggregate (fn: AggFn) (xs: float list) : string =
-    match Column.aggregate fn (Column.create "f" FloatType (xs |> List.map Float)) with
+    match Column.aggregate fn (Column.ofFloats "f" (Vector.ofList xs) (Validity.all xs.Length)) with
     | Ok(Float f) -> Canon.canonicalFloat f
     | Ok _ -> "<not-a-float>"
     | Error(AggregateOverflow _) -> "<overflow>"
@@ -165,7 +165,7 @@ let private recordAt (i: int) (project: OpRecord<int> -> string) : string =
 /// and -0 equals 0.
 let private aggregateNanOrder: string =
     let col =
-        Column.create "f" FloatType [ Float 3.0; Float nan; Float -1.0; Float -0.0; Float nan ]
+        Column.ofFloats "f" (Vector.ofList [ 3.0; nan; -1.0; -0.0; nan ]) (Validity.all 5)
 
     [ Min; Max; Median; CountDistinct ]
     |> List.map (fun fn ->
@@ -249,15 +249,21 @@ let private columnErrorClass (e: ColumnError) : string =
     | Malformed _ -> "Malformed"
     | RaggedColumns _ -> "RaggedColumns"
 
-/// A one-column decimal source, embedded.
-let private decimalSource (cells: Cell list) : DataSource =
-    Embedded
-        { Schema = [ "c", DecimalType ]
-          Columns = [ Column.create "c" DecimalType cells ] }
-
-/// `ColumnCodec.tryEncode`'s answer: `ok:<canonical bytes>`, or `refused:<class>`.
+/// `ColumnCodec.tryEncode`'s answer over a one-column decimal source: `ok:<canonical bytes>`, or
+/// `refused:<class>`. A cell outside the decimal type is refused by `Column.ofCells` since Phase
+/// 417, with the `TypeMismatch` `Table.validate` named for it before — the same class, so the row's
+/// bytes are the ones the `Cell list` column produced.
 let private decimalEncode (cells: Cell list) : string =
-    match ColumnCodec.tryEncode (decimalSource cells) with
+    let encoded =
+        Column.ofCells "c" DecimalType cells
+        |> Result.bind (fun col ->
+            ColumnCodec.tryEncode (
+                Embedded
+                    { Schema = [ "c", DecimalType ]
+                      Columns = [ col ] }
+            ))
+
+    match encoded with
     | Ok text -> "ok:" + text
     | Error e -> "refused:" + columnErrorClass e
 
@@ -287,13 +293,18 @@ let private decimalDecode (values: string) : string =
     | Ok src -> "ok:" + ColumnCodec.encode src
     | Error e -> "refused:" + columnErrorClass e
 
-/// `Column.aggregate` over a decimal column, as the result cell's token or the refusal's class.
+/// `Column.aggregate` over a decimal column, as the result cell's token or the refusal's class. A
+/// cell of another type is `<outside-type>` whether the aggregate's admission named it (before
+/// Phase 417) or `Column.ofCells` refuses it at construction (since): one class, one row.
 let private decimalAggregate (fn: AggFn) (cells: Cell list) : string =
-    match Column.aggregate fn (Column.create "d" DecimalType cells) with
-    | Ok cell -> Cell.token cell
-    | Error(IncompatibleAggType _) -> "<incompatible>"
-    | Error(AggregateOverflow _) -> "<overflow>"
-    | Error(CellOutsideType _) -> "<outside-type>"
+    match Column.ofCells "d" DecimalType cells with
+    | Error _ -> "<outside-type>"
+    | Ok col ->
+        match Column.aggregate fn col with
+        | Ok cell -> Cell.token cell
+        | Error(IncompatibleAggType _) -> "<incompatible>"
+        | Error(AggregateOverflow _) -> "<overflow>"
+        | Error(CellOutsideType _) -> "<outside-type>"
 
 /// The decimal column the aggregate rows read: two spellings of one value (`1.50` built directly,
 /// `1.5` canonical), a negative, an `Int` (the lossless promotion `widens` pins), and a `Null`.

@@ -14,6 +14,13 @@ module Fuaran.Core.Tests.WitnessTakingFamiliesTests
 open Expecto
 open Fuaran.Core
 
+/// A column of type `ty` over `cells`, which fit it (Phase 417: the typed column is built through
+/// `Column.ofCells`, which refuses a cell of another type).
+let private cellColumn (name: string) (ty: ColumnType) (cells: Cell list) : Column =
+    match Column.ofCells name ty cells with
+    | Ok c -> c
+    | Error e -> failtestf "column %s did not build: %A" name e
+
 // ---------------------------------------------------------------------------
 //  the capability seam: three capabilities, one per outcome a body gives
 // ---------------------------------------------------------------------------
@@ -140,7 +147,7 @@ let queryResolver (args: (string * Cell) list) (_: Query) : Deferred<QueryResult
         Ready
             { Rows =
                 { Schema = [ "v", IntType ]
-                  Columns = [ Column.create "v" IntType [ Int 11 ] ] }
+                  Columns = [ cellColumn "v" IntType [ Int 11 ] ] }
               PageNum = 0
               TotalRowCount = Some 1
               NextPageToken = None }

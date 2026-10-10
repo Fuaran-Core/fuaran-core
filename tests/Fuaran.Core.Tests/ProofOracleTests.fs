@@ -10596,10 +10596,7 @@ let private genQueryArgs (q: Query) (r: ConfRng.T) : (string * Cell) list * Conf
 let private queryResultOf (page: int) : QueryResult =
     { Rows =
         { Schema = [ "n", IntType ]
-          Columns =
-            [ { Name = "n"
-                Type = IntType
-                Cells = [ Cell.Int page ] } ] }
+          Columns = [ Column.ofInts "n" (Vector.ofList [ page ]) (Validity.all 1) ] }
       PageNum = page
       TotalRowCount = None
       NextPageToken = None }
@@ -11091,17 +11088,22 @@ module private ColumnDiff =
             |> List.map (fun c ->
                 ({ name = canonToChs c.Name
                    ctype = toModelType c.Type
-                   cells = c.Cells |> List.map toModelCell }
+                   cells = Column.toCells c |> List.map toModelCell }
                 : WireColumn.column<int, float>)) }
 
+    /// The model's table as production's. Used for the model's NORMAL FORM of a table production
+    /// already validated, so every column's cells fit its type and construction cannot refuse: a
+    /// refusal here is a real defect, in the model's normal form or in `Column.ofCells`.
     let ofModelTable (t: WireColumn.table<int, float>) : Table =
         { Schema = t.schema |> List.map (fun (n, ty) -> canonFromChs n, ofModelType ty)
           Columns =
             t.columns
             |> List.map (fun c ->
-                { Name = canonFromChs c.name
-                  Type = ofModelType c.ctype
-                  Cells = c.cells |> List.map ofModelCell }) }
+                let name = canonFromChs c.name
+
+                match Column.ofCells name (ofModelType c.ctype) (c.cells |> List.map ofModelCell) with
+                | Result.Ok col -> col
+                | Result.Error e -> failtestf "the model's column %s did not build as production's: %A" name e) }
 
     let toModelSource (src: DataSource) : WireColumn.data_source<int, float> =
         match src with
@@ -11177,7 +11179,7 @@ module private ColumnDiff =
                 + ":"
                 + ColumnType.tag c.Type
                 + "["
-                + (c.Cells |> List.map cell |> String.concat ";")
+                + (Column.toCells c |> List.map cell |> String.concat ";")
                 + "]"
 
             (t.Schema
@@ -11215,9 +11217,21 @@ module private ColumnDiff =
 
     /// One drawn table. `wild` is how far outside what `validate` accepts the draw may wander:
     /// at 0 the table is valid but NOT necessarily in normal form (its columns may be in another
-    /// order than its schema, and an int may sit in a float or a decimal column); above 0 it may
-    /// also carry a duplicate name, a missing or an extra column, a column of another type, a
-    /// ragged length, a cell outside its column's type, a non-finite float and non-canonical text.
+    /// order than its schema); above 0 it may also carry a duplicate name, a missing or an extra
+    /// column, a column whose type is not its schema entry's, a ragged length, a non-finite float
+    /// and non-canonical text.
+    ///
+    /// Every column is built through `Column.ofCells`, so every cell it draws is one the COLUMN'S
+    /// type can hold (Phase 417): a cell of another type is unrepresentable in the typed storage,
+    /// and `ofCells` refuses it at construction. So the wild cells are drawn per type — a `Float nan`
+    /// only into a float column, a `Decimal "1.50"` only into a decimal column, a `Date "2026-02-30"`
+    /// only into a date column, an `Int` into an int, a float or a decimal column (the last two
+    /// widened, and normalised by `ofCells` to the `Float` / `Decimal` it reads back as). With the
+    /// cell-of-another-type wildness gone, the model's clause-(e) `TypeMismatch` arm (a present cell
+    /// whose type does not widen into its column's) is no longer reached FROM PRODUCTION: production
+    /// cannot hand it such a column. `TypeMismatch` is still reached, through clause (c) — a column
+    /// whose type differs from its schema entry (`ty'` below). Phase 419's refinement theorem is
+    /// where the typed column and the model's cell-list column are shown to be one value.
     let genTable (r: int ref) (wild: int) : Table =
         let draw (n: int) =
             r.Value <- nextCanonSeed r.Value
@@ -11232,17 +11246,24 @@ module private ColumnDiff =
             [ for i in 0 .. ncols - 1 ->
                   (if chance 8 then names[0] else names[i]), ColumnType.all[draw ColumnType.all.Length] ]
 
+        /// The wild cells a column of `ty` can hold — empty for a type with none of its own.
+        let wildFor (ty: ColumnType) : Cell[] =
+            match ty with
+            | IntType -> [| Int 3 |]
+            | FloatType -> [| Float nan; Int 3 |]
+            | DecimalType -> [| Decimal "1.50"; Int 3 |]
+            | DateType -> [| Date "2026-02-30" |]
+            | BoolType
+            | StringType
+            | TimestampType -> [||]
+
         let cellOf (ty: ColumnType) : Cell =
+            let pool = wildFor ty
+
             if draw 5 = 0 then
                 Null
-            elif chance 9 then
-                [| Bool true
-                   Float 1.5
-                   Str "x"
-                   Int 3
-                   Float nan
-                   Decimal "1.50"
-                   Date "2026-02-30" |][draw 7]
+            elif pool.Length > 0 && chance 9 then
+                pool[draw pool.Length]
             else
                 match ty with
                 | IntType -> Int(draw 2001 - 1000)
@@ -11262,9 +11283,16 @@ module private ColumnDiff =
                     | 1 -> Decimal(sprintf "%d.%d" (draw 90 - 45) (1 + draw 9))
                     | _ -> Decimal(string (draw 2000 - 1000))
 
+        let build (n: string) (ty: ColumnType) (cells: Cell list) : Column =
+            match Column.ofCells n ty cells with
+            | Result.Ok c -> c
+            | Result.Error e -> failtestf "the generator drew a column %s it cannot build (seed now %d): %A" n r.Value e
+
         let columns =
             picked
             |> List.map (fun (n, ty) ->
+                // A column whose type is not its schema entry's: its cells are drawn for ITS type,
+                // so it builds, and the schema still says `ty` — clause (c)'s `TypeMismatch`.
                 let ty' =
                     if chance 10 then
                         ColumnType.all[draw ColumnType.all.Length]
@@ -11272,11 +11300,12 @@ module private ColumnDiff =
                         ty
 
                 let len = if chance 10 then rows + 1 else rows
-                Column.create n ty' [ for _ in 1..len -> cellOf ty ])
+                build n ty' [ for _ in 1..len -> cellOf ty' ])
 
         let columns =
             if chance 10 then
-                columns @ [ Column.create "zz" IntType [ for _ in 1..rows -> Int 1 ] ]
+                columns
+                @ [ Column.ofInts "zz" (Vector.init rows (fun _ -> 1)) (Validity.all rows) ]
             elif chance 10 && not columns.IsEmpty then
                 List.tail columns
             else
@@ -16597,10 +16626,13 @@ let proofOracleTests =
               "the column oracle agrees with Table.validate, encodeJson and decodeJson, and the round trip is the model's normal form"
           <| fun _ ->
               // Two pools. The first holds only tables `validate` accepts — and NOT only tables in
-              // normal form: a third have their columns out of schema order, and a float or a
-              // decimal column may hold an int. The second wanders outside what `validate` accepts.
-              // MEASURED at seed 3063, 2,000 tables: 355 outside the normal form. The threshold sits
-              // under it with headroom and well above zero.
+              // normal form: a third have their columns out of schema order. The second wanders
+              // outside what `validate` accepts.
+              // MEASURED at seed 3063, 2,000 tables: 192 outside the normal form (355 before Phase
+              // 417, when a float or a decimal column could also hold an `Int` cell; `Column.ofCells`
+              // now normalises a widened `Int` at construction, so a production table reaches the
+              // model's normal form for that arm before it is encoded, and only the column order is
+              // left). The threshold sits under it with headroom and well above zero.
               let valid = onBigStack (fun () -> ColumnDiff.generated false 3063 2000 0)
               let wild = onBigStack (fun () -> ColumnDiff.generated false 3064 3000 1)
 
@@ -16613,7 +16645,7 @@ let proofOracleTests =
 
               Expect.isGreaterThan
                   valid.OutsideNormalForm
-                  250
+                  150
                   (sprintf
                       "valid tables OUTSIDE the normal form — where the round trip is not the literal one (%d)"
                       valid.OutsideNormalForm)
@@ -16671,7 +16703,9 @@ let proofOracleTests =
               // on no table already in normal form.
               let t = onBigStack (fun () -> ColumnDiff.generated true 3063 2000 0)
 
-              Expect.isGreaterThan t.OutsideNormalForm 250 "the pool holds tables outside the normal form"
+              // The same pool as above: 192 tables outside the normal form, all by column order
+              // since Phase 417 (see the measurement there).
+              Expect.isGreaterThan t.OutsideNormalForm 150 "the pool holds tables outside the normal form"
 
               Expect.equal
                   (List.length t.Diffs)

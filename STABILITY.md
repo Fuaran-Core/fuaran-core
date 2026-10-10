@@ -441,6 +441,23 @@ are **conformance-certified**, not asserted. Stable surfaces:
   ordering / **canonical-float** semantics — floats route through `Wire.Canon.canonicalFloat`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or
   a coercion/widening rule is a **major** bump.
+- **The typed column storage (Phase 417, `1.0.0`)** — a `Column` is `{ Name; Data }`, its `Data` one
+  case of `ColumnData` per column type, each an opaque immutable `Vector<'T>` of values beside a
+  `Validity` mask, and its `Type` the case the storage carries, so a column cannot disagree with its own
+  storage and a present cell is always of its column's type (`Column.ofCells` refuses one that is
+  not, as the `TypeMismatch` `Table.validate` named for it before). Three promises ride the storage:
+  **the wire is untouched** — every column the codec carried as a `Cell list` encodes to the same bytes
+  and decodes to the same table, held by the corpus families; **equality is cell equality** — two
+  columns of one type are equal exactly when their masks agree and `Cell.compare` answers `Some 0` at
+  every present row, every NaN one value and `-0.0` equal to `0.0`, on every host, held by
+  `Conformance.columnVectorLaws`; and **a vector never changes after construction** — no public member
+  of `Vector` writes, `Vector.ofArray` copies, `Vector.adopt` takes ownership of an array the caller
+  promises not to touch again, `Vector.slice` is a view, and `Vector.Unsafe.borrow` is the one route to
+  the backing array, under the rule that the borrower does not write (Phase 418 states the contract in
+  full and adds its law family). What is NOT promised: the storage of `Dates` and `Timestamps` (canonical
+  text in this slot; Phase 422 makes them integers with a unit) and the shape of `Validity` (a
+  `Vector<bool>` in this slot; Phase 420 elides it for a null-free column) — both ride the untagged
+  `1.0.0` draft and are decided before it is cut, which is why they are named here rather than frozen.
 - **`Query`** — the data-acquisition seam + its invocation key (also `canonicalFloat`-routed) are
   certified by `Conformance.queryLaws`.
 

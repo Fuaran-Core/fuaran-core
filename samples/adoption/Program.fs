@@ -284,20 +284,13 @@ let notesResolver (args: (string * Cell) list) (_: Query) : Deferred<QueryResult
     | Some(Str section) ->
         let texts =
             match Tree.tryFind nodew idw section sampleTree with
-            | Some s ->
-                s.Children
-                |> List.filter (fun c -> c.Kind = Note)
-                |> List.map (fun c -> Str c.Text)
+            | Some s -> s.Children |> List.filter (fun c -> c.Kind = Note) |> List.map (fun c -> c.Text)
             | None -> []
 
         Ready
             { Rows =
                 { Schema = [ "text", StringType ]
-                  Columns =
-                    [ ({ Name = "text"
-                         Type = StringType
-                         Cells = texts }
-                      : Column) ] }
+                  Columns = [ Column.ofStrs "text" (Vector.ofList texts) (Validity.all texts.Length) ] }
               PageNum = 0
               TotalRowCount = Some texts.Length
               NextPageToken = None }
@@ -402,7 +395,7 @@ let main _ =
         let args = [ "section", Str section ]
 
         QueryRegistry.dispatch queries "outline.notes" args (notesResolver args)
-        |> Result.map (Deferred.map (fun r -> r.Rows.Columns |> List.collect _.Cells))
+        |> Result.map (Deferred.map (fun r -> r.Rows.Columns |> List.collect Column.toCells))
         |> Result.mapError QueryError.describe
         |> outcome
 

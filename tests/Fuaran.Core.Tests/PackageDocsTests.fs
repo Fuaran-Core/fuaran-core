@@ -337,9 +337,19 @@ let internal docId (unions: Set<string>) (token: string) : string option =
         None
 
 /// The documentation ids an XML documentation file gives TEXT to — a `<member>` whose comment is
-/// blank documents nothing.
+/// blank documents nothing. An INDEXED property's id carries its parameter list
+/// (`P:Fuaran.Core.Vector`1.Item(System.Int32)`) where the baseline's `property` token, and so
+/// `docIdOf`, names the property alone; the list is dropped so the two spell one member (Phase 417).
 let internal documentedIds (xmlText: string) : Set<string> =
     let doc = XDocument.Parse xmlText
+
+    let propertyAlone (id: string) =
+        if id.StartsWith("P:", StringComparison.Ordinal) then
+            match id.IndexOf '(' with
+            | -1 -> id
+            | paren -> id.Substring(0, paren)
+        else
+            id
 
     match doc.Root with
     | null -> Set.empty
@@ -352,7 +362,7 @@ let internal documentedIds (xmlText: string) : Set<string> =
                 match m.Attribute(XName.Get "name") with
                 | null -> None
                 | _ when String.IsNullOrWhiteSpace m.Value -> None
-                | a -> Some a.Value)
+                | a -> Some(propertyAlone a.Value))
             |> Set.ofSeq
 
 /// One package's measurement: how many members it counts, and which of them carry no doc comment.

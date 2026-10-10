@@ -504,7 +504,7 @@ let tests =
                 <| fun _ ->
                     let t =
                         { Schema = [ "d", DecimalType ]
-                          Columns = [ Column.create "d" DecimalType [ Decimal "1.5"; Decimal "1.50"; Decimal "2" ] ] }
+                          Columns = [ Column.ofDecimals "d" (Vector.ofList [ "1.5"; "1.50"; "2" ]) (Validity.all 3) ] }
 
                     let defects =
                         ColumnValidator.validate

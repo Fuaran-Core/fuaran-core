@@ -696,6 +696,10 @@ module Conformance =
     let aggregateNullSkipLaws (seed: int) (iterations: int) : LawResult list =
         ColumnarSeamLaws.aggregateNullSkipLaws seed iterations
 
+    /// Forward — see `ColumnarSeamLaws.columnVectorLaws` (Phase 417).
+    let columnVectorLaws (seed: int) (iterations: int) : LawResult list =
+        ColumnarSeamLaws.columnVectorLaws seed iterations
+
     /// Forward — see `ColumnarSeamLaws.columnarValidatorLaws`.
     let columnarValidatorLaws (seed: int) (iterations: int) : LawResult list =
         ColumnarSeamLaws.columnarValidatorLaws seed iterations
