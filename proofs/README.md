@@ -980,9 +980,10 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
+| `Fuaran.Core.Unit` | 9 | 0 | 0 | 1 | 1 | 0 | 0 | 7 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1157 | 141 | 437 | 29 | 13 | 0 | 3 | 534 |
+| **Total** | 1166 | 141 | 437 | 30 | 14 | 0 | 3 | 541 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
