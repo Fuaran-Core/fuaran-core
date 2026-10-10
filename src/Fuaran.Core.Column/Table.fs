@@ -54,16 +54,17 @@ module Table =
     /// non-finite value and a text column for a non-canonical text, at the present rows only. A
     /// cell of another type is not a case any more — the storage cannot hold one — and a mask that
     /// is not the values' length is named first (`LengthMismatch`), because a column that disagrees
-    /// about its own row count has no rows to read.
+    /// about its own row count has no rows to read. An `AllValid` column (Phase 420) holds no mask
+    /// and so cannot disagree.
     let private firstUncarriableCell (c: Column) : ColumnError option =
-        let mask = Column.validity c
+        let rows = Column.validity c
 
         let firstPresent (xs: Vector<'T>) (bad: 'T -> bool) : 'T option =
             let mutable found = None
             let mutable i = 0
 
             while found.IsNone && i < xs.Length do
-                if Validity.isPresent i mask && bad xs[i] then
+                if Validity.isPresent i rows && bad xs[i] then
                     found <- Some xs[i]
 
                 i <- i + 1
@@ -74,9 +75,9 @@ module Table =
             firstPresent xs (fun s -> not (isCanonical s))
             |> Option.map (fun _ -> MalformedShape(c.Name + ": " + message))
 
-        if Column.length c <> mask.Length then
-            Some(LengthMismatch(c.Name, Column.length c, mask.Length))
-        else
+        match rows with
+        | Mask m when m.Length <> Column.length c -> Some(LengthMismatch(c.Name, Column.length c, m.Length))
+        | _ ->
             match c.Data with
             | Ints _
             | Bools _

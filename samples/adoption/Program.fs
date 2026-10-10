@@ -290,7 +290,7 @@ let notesResolver (args: (string * Cell) list) (_: Query) : Deferred<QueryResult
         Ready
             { Rows =
                 { Schema = [ "text", StringType ]
-                  Columns = [ Column.ofStrs "text" (Vector.ofList texts) (Validity.all texts.Length) ] }
+                  Columns = [ Column.ofStrs "text" (Vector.ofList texts) AllValid ] }
               PageNum = 0
               TotalRowCount = Some texts.Length
               NextPageToken = None }

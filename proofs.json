@@ -4125,6 +4125,44 @@
       }
     },
     {
+      "id": "column-refinement-validity-two-cases",
+      "level": "proved",
+      "claim": "A NULL-FREE COLUMN'S `AllValid` IS THE ALL-TRUE MASK OF ITS LENGTH (Phase 420). `Validity` is two cases since Phase 420 — `AllValid`, holding no mask, or a `Mask` — and the refinement's sections 1 to 6 read it MATERIALISED (`Validity.toMask`, `Column.mask`). Section 7 of `proofs/ColumnRefinement.fst` models the two cases, the materialisation, the normalising constructors and `ColumnStorage.sameMask`, and proves the three facts that reading rests on: `AllValid` materialises to one set bit per row and no row past the end, so an `AllValid` column is always well-formed (`all_valid_reads_all_true`, `all_valid_wf`); the normalising constructors lose nothing and never build an all-true `Mask` (`of_mask_to_mask`, `of_mask_normal`); and `sameMask`, which compares two validities without materialising either, IS equality of the materialised masks at every length (`same_mask_is_mask_equality`) — so column equality reads `AllValid` and a hand-built all-true `Mask` of the column's length as one value, and nothing else as that value. Measured red, one perturbation per run, with `sameMask` dropping the length check, with the all-true mask writing a clear bit, and with the constructor's normalisation inverted.",
+      "phase": "fuaran-core#420",
+      "evidence": {
+        "theorem": "same_mask_is_mask_equality",
+        "model": "proofs/ColumnRefinement.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Validity.ofArray",
+          "Validity.ofList",
+          "Validity.ofVector",
+          "Validity.toMask",
+          "Column.mask"
+        ]
+      }
+    },
+    {
+      "id": "column-refinement-validity-differential",
+      "level": "tested",
+      "claim": "The extracted two-case validity agrees with the shipped `Validity` (Phase 420). Per drawn mask: `Validity.ofList`, `ofArray` and `ofVector` beside the model's `of_mask`; per drawn pair of validities of one row count — `AllValid`, a built mask, a hand-built all-true `Mask` of the right length or of another, a hand-built `Mask` with a clear bit — `Validity.toMask` beside `to_mask`, and the equality of two columns over ONE values vector, so only the validities differ, beside `same_mask`. The go-red is the model that compares the representations with `=`, which loses on exactly the pairs where `AllValid` meets an all-true `Mask` of the column's length and on no other. The draws are asserted to reach both constructor answers and both answers of the mixed comparison.",
+      "phase": "fuaran-core#420",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/ColumnRefinement.fst",
+        "cases": [
+          "the two-case validity oracle agrees with production: the normalising constructors, toMask, and column equality (Phase 420)",
+          "a model that compares the validities' representations loses - on the mixed equal pairs"
+        ],
+        "operations": [
+          "Validity.ofArray",
+          "Validity.ofList",
+          "Validity.ofVector",
+          "Validity.toMask"
+        ]
+      }
+    },
+    {
       "id": "column-vector-is-its-contents",
       "level": "assumed",
       "claim": "A `Vector` IS WHAT ITS `toArray` ANSWERS, AND STAYS SO (Phase 419). The refinement model reads every vector through `Vector.toArray` — a list of its elements — and sees no storage: no offset, no sharing, no backing array, and no mutation to speak of. Two things are therefore assumed rather than proved. That the read is faithful: `toArray`, `Length` and the indexer agree, which the element identity `VectorElements.equal` (every NaN one value, `-0.0` equal to `0.0`) qualifies and the differential samples with the host record's other fields. And that the contents never change after construction — no public member of `Vector` writes, `adopt` takes a fresh array, `Vector.Unsafe.borrow` lends under a written rule — which is out of the model's reach: the ownership contract is Phase 418's, stated in `STABILITY.md` and held by the consumer-runnable law family that hashes every column before and after an operation and names the column whose bytes moved. Permanent: a model of mutation is a model of a different language.",

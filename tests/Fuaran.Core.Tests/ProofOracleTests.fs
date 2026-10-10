@@ -10597,7 +10597,7 @@ let private genQueryArgs (q: Query) (r: ConfRng.T) : (string * Cell) list * Conf
 let private queryResultOf (page: int) : QueryResult =
     { Rows =
         { Schema = [ "n", IntType ]
-          Columns = [ Column.ofInts "n" (Vector.ofList [ page ]) (Validity.all 1) ] }
+          Columns = [ Column.ofInts "n" (Vector.ofList [ page ]) AllValid ] }
       PageNum = page
       TotalRowCount = None
       NextPageToken = None }
@@ -11305,8 +11305,7 @@ module private ColumnDiff =
 
         let columns =
             if chance 10 then
-                columns
-                @ [ Column.ofInts "zz" (Vector.init rows (fun _ -> 1)) (Validity.all rows) ]
+                columns @ [ Column.ofInts "zz" (Vector.init rows (fun _ -> 1)) AllValid ]
             elif chance 10 && not columns.IsEmpty then
                 List.tail columns
             else
@@ -11540,7 +11539,7 @@ module private RefinementDiff =
 
     /// Production's column as the model's typed column: the case, every vector through `toArray`.
     let toTyped (c: Column) : ColumnRefinement.typed_column<int, float> =
-        let mask = Column.validity c |> Vector.toArray |> List.ofArray
+        let mask = Column.mask c |> Vector.toArray |> List.ofArray
 
         let texts (xs: Vector<string>) =
             Vector.toArray xs |> List.ofArray |> List.map canonToChs
@@ -11690,7 +11689,7 @@ module private RefinementDiff =
                     diff label "to_cells of the production column through toArray" (showCells prodCells) viaModel t
 
             // the mask, and the model's `Equals` between the two typed columns
-            let prodMask = Column.validity pc |> Vector.toArray |> List.ofArray
+            let prodMask = Column.mask pc |> Vector.toArray |> List.ofArray
             let modelMask = ColumnRefinement.data_mask mc.col_data
 
             let t =
@@ -11852,6 +11851,119 @@ module private RefinementDiff =
 
         for i in 1..trials do
             t <- probeTable (sprintf "generated seed=%d iteration=%d" seed i) (ColumnDiff.genTable r wild) t
+
+        t
+
+    // ---- Phase 420: the two-case validity (`ColumnRefinement` section 7) ----
+
+    /// Production's `Validity` as the model's: `AllValid`, or a `Mask` read through `toArray`.
+    let toModelValidity (v: Validity) : ColumnRefinement.validity_rep =
+        match v with
+        | AllValid -> ColumnRefinement.AllValid
+        | Mask m -> ColumnRefinement.Mask(Vector.toArray m |> List.ofArray)
+
+    /// A row count as the model writes one: a list of that length.
+    let units (n: int) : unit list = List.replicate n ()
+
+    type ValidityTally =
+        { Draws: int
+          Diffs: string list
+          Normalised: int
+          Masked: int
+          EqualMixed: int
+          UnequalMixed: int }
+
+    /// Drawn masks and validities beside the model's: the normalising constructors against
+    /// `of_mask`, `Validity.toMask` against `to_mask`, and column equality over one values vector
+    /// (so only the validities can differ) against `same_mask`. `reading` is the model's equality
+    /// the column equality is held to; the go-red hands it the representation's `=`.
+    let generatedValidities
+        (seed: int)
+        (trials: int)
+        (reading: unit list -> ColumnRefinement.validity_rep -> ColumnRefinement.validity_rep -> bool)
+        : ValidityTally =
+        let r = ref seed
+
+        let draw (n: int) =
+            r.Value <- nextCanonSeed r.Value
+            r.Value % n
+
+        let mutable t =
+            { Draws = 0
+              Diffs = []
+              Normalised = 0
+              Masked = 0
+              EqualMixed = 0
+              UnequalMixed = 0 }
+
+        let diff (label: string) (what: string) (p: string) (m: string) =
+            t <-
+                { t with
+                    Diffs = sprintf "%s: %s - production %s, model %s" label what p m :: t.Diffs }
+
+        /// A validity of a column of `n` rows, from every corner the representation has: `AllValid`,
+        /// a built (normalised) mask, a hand-built all-true `Mask` of the right length or of another,
+        /// and a hand-built `Mask` with a clear bit.
+        let validityOf (n: int) : Validity =
+            match draw 5 with
+            | 0 -> AllValid
+            | 1 -> Validity.ofArray (Array.init n (fun _ -> draw 4 <> 0))
+            | 2 -> Mask(Vector.ofArray (Array.create n true))
+            | 3 -> Mask(Vector.ofArray (Array.create (max 0 (n + 1 - draw 3)) true))
+            | _ -> Mask(Vector.ofArray (Array.init n (fun _ -> draw 3 <> 0)))
+
+        for i in 1..trials do
+            let label = sprintf "generated seed=%d iteration=%d" seed i
+            let n = draw 7
+            let bits = List.init n (fun _ -> draw 4 <> 0)
+
+            // the normalising constructors, against `of_mask`
+            let built = Validity.ofList bits
+            let modelBuilt = ColumnRefinement.of_mask bits
+
+            if toModelValidity built <> modelBuilt then
+                diff label "Validity.ofList" (sprintf "%A" built) (sprintf "%A" modelBuilt)
+
+            if toModelValidity (Validity.ofArray (Array.ofList bits)) <> modelBuilt then
+                diff
+                    label
+                    "Validity.ofArray"
+                    (sprintf "%A" (Validity.ofArray (Array.ofList bits)))
+                    (sprintf "%A" modelBuilt)
+
+            if toModelValidity (Validity.ofVector (Vector.ofList bits)) <> modelBuilt then
+                diff label "Validity.ofVector" "a different validity" (sprintf "%A" modelBuilt)
+
+            // the materialised mask, against `to_mask`
+            let a = validityOf n
+            let b = validityOf n
+            let prodMask = Validity.toMask n a |> Vector.toArray |> List.ofArray
+            let modelMask = ColumnRefinement.to_mask (units n) (toModelValidity a)
+
+            if prodMask <> modelMask then
+                diff label "Validity.toMask" (sprintf "%A" prodMask) (sprintf "%A" modelMask)
+
+            // column equality over ONE values vector, against the model's reading of the validities
+            let values = Vector.init n id
+            let prodEqual = Column.ofInts "c" values a = Column.ofInts "c" values b
+            let modelEqual = reading (units n) (toModelValidity a) (toModelValidity b)
+
+            if prodEqual <> modelEqual then
+                diff label (sprintf "equality of %A and %A" a b) (string prodEqual) (string modelEqual)
+
+            let mixed =
+                match a, b with
+                | AllValid, Mask _
+                | Mask _, AllValid -> true
+                | _ -> false
+
+            t <-
+                { t with
+                    Draws = t.Draws + 1
+                    Normalised = t.Normalised + (if built = AllValid then 1 else 0)
+                    Masked = t.Masked + (if built = AllValid then 0 else 1)
+                    EqualMixed = t.EqualMixed + (if mixed && prodEqual then 1 else 0)
+                    UnequalMixed = t.UnequalMixed + (if mixed && not prodEqual then 1 else 0) }
 
         t
 
@@ -17185,6 +17297,50 @@ let proofOracleTests =
               Expect.isGreaterThan t.Widened 150 "the pool holds widened draws"
               Expect.isGreaterThan (t.Built - t.Widened) 500 "and draws with nothing to widen"
               Expect.equal t.LiteralLost t.Widened "the literal bridge lost on the widened draws, and on no other"
+
+          testCase
+              "the two-case validity oracle agrees with production: the normalising constructors, toMask, and column equality (Phase 420)"
+          <| fun _ ->
+              // `ColumnRefinement` section 7 beside the shipped `Validity`: `of_mask` against the
+              // three normalising constructors, `to_mask` against `Validity.toMask`, and `same_mask`
+              // against column equality over one values vector, so only the validities differ.
+              let t = RefinementDiff.generatedValidities 4201 3000 ColumnRefinement.same_mask
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the validity oracle disagreed with production:\n%s" (String.concat "\n" (List.rev t.Diffs)))
+
+              // adequacy: both cases built, and both answers of the mixed comparison reached
+              Expect.isGreaterThan t.Normalised 300 (sprintf "draws the constructors made AllValid (%d)" t.Normalised)
+              Expect.isGreaterThan t.Masked 300 (sprintf "draws they kept as a Mask (%d)" t.Masked)
+
+              Expect.isGreaterThan
+                  t.EqualMixed
+                  50
+                  (sprintf "AllValid beside an all-true Mask of the length, found equal (%d)" t.EqualMixed)
+
+              Expect.isGreaterThan
+                  t.UnequalMixed
+                  50
+                  (sprintf "AllValid beside any other Mask, found unequal (%d)" t.UnequalMixed)
+
+          testCase "a model that compares the validities' representations loses - on the mixed equal pairs"
+          <| fun _ ->
+              // The go-red: column equality held to `=` on the two representations rather than on
+              // the materialised masks. `same_mask_is_mask_equality` says the right-hand side is the
+              // masks' equality, so the representation's `=` disagrees with production exactly where
+              // `AllValid` meets an all-true `Mask` of the column's length.
+              let representational
+                  (_: unit list)
+                  (a: ColumnRefinement.validity_rep)
+                  (b: ColumnRefinement.validity_rep)
+                  =
+                  a = b
+
+              let t = RefinementDiff.generatedValidities 4201 3000 representational
+
+              Expect.isGreaterThan t.EqualMixed 50 "the pool holds the mixed equal pairs"
+              Expect.equal t.Diffs.Length t.EqualMixed "the representational model lost on those, and on no other"
 
           // ---- the evolution policy, over the envelope family and perturbed IDL pairs (Phase 151) ----
 

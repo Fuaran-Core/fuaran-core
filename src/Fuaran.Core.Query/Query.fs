@@ -348,7 +348,7 @@ module internal QueryShape =
             | Error _ ->
                 match Column.ofCells column (Cell.typeOf c |> Option.defaultValue ty) [ c ] with
                 | Ok col -> col
-                | Error _ -> Column.ofStrs column Vector.empty Vector.empty
+                | Error _ -> Column.ofStrs column Vector.empty AllValid
 
         { Schema = [ column, col.Type ]
           Columns = [ col ] }

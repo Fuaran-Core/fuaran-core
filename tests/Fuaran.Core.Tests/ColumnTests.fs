@@ -806,9 +806,9 @@ let private genMaybeBroken (seed: int) : DataSource =
 
                     let retyped =
                         if c.Type = BoolType then
-                            Column.ofInts c.Name (Vector.init n id) (Validity.all n)
+                            Column.ofInts c.Name (Vector.init n id) AllValid
                         else
-                            Column.ofBools c.Name (Vector.init n (fun i -> i % 2 = 0)) (Validity.all n)
+                            Column.ofBools c.Name (Vector.init n (fun i -> i % 2 = 0)) AllValid
 
                     { t with Columns = retyped :: rest }
                 | [] -> t
@@ -1356,29 +1356,29 @@ let typedColumnTests =
                   | None -> failtestf "%s: the reader answered None" what
 
               let ints = Vector.ofList [ 1; 2 ]
-              same ints (Column.tryInts (Column.ofInts "n" ints (Validity.all 2))) "ints"
+              same ints (Column.tryInts (Column.ofInts "n" ints AllValid)) "ints"
 
               let floats = Vector.ofList [ 1.5; nan ]
-              same floats (Column.tryFloats (Column.ofFloats "n" floats (Validity.all 2))) "floats"
+              same floats (Column.tryFloats (Column.ofFloats "n" floats AllValid)) "floats"
 
               let bools = Vector.ofList [ true; false ]
-              same bools (Column.tryBools (Column.ofBools "n" bools (Validity.all 2))) "bools"
+              same bools (Column.tryBools (Column.ofBools "n" bools AllValid)) "bools"
 
               let strs = Vector.ofList [ "a"; "b" ]
-              same strs (Column.tryStrs (Column.ofStrs "n" strs (Validity.all 2))) "strings"
+              same strs (Column.tryStrs (Column.ofStrs "n" strs AllValid)) "strings"
 
               let dates = Vector.ofList [ "2026-06-22" ]
-              same dates (Column.tryDates (Column.ofDates "n" dates (Validity.all 1))) "dates"
+              same dates (Column.tryDates (Column.ofDates "n" dates AllValid)) "dates"
 
               let stamps = Vector.ofList [ "2026-06-22T17:00:00Z" ]
-              same stamps (Column.tryTimestamps (Column.ofTimestamps "n" stamps (Validity.all 1))) "timestamps"
+              same stamps (Column.tryTimestamps (Column.ofTimestamps "n" stamps AllValid)) "timestamps"
 
               let decs = Vector.ofList [ "12.5" ]
-              same decs (Column.tryDecimals (Column.ofDecimals "n" decs (Validity.all 1))) "decimals"
+              same decs (Column.tryDecimals (Column.ofDecimals "n" decs AllValid)) "decimals"
 
           testCase "a typed reader answers None for a column of another type"
           <| fun _ ->
-              let ints = Column.ofInts "n" (Vector.ofList [ 1 ]) (Validity.all 1)
+              let ints = Column.ofInts "n" (Vector.ofList [ 1 ]) AllValid
               Expect.isNone (Column.tryFloats ints) "tryFloats on an int column"
               Expect.isNone (Column.tryBools ints) "tryBools"
               Expect.isNone (Column.tryStrs ints) "tryStrs"
@@ -1387,11 +1387,11 @@ let typedColumnTests =
               Expect.isNone (Column.tryDecimals ints) "tryDecimals"
 
               Expect.isNone
-                  (Column.tryInts (Column.ofDecimals "m" (Vector.ofList [ "1" ]) (Validity.all 1)))
+                  (Column.tryInts (Column.ofDecimals "m" (Vector.ofList [ "1" ]) AllValid))
                   "tryInts on a decimal column"
 
               Expect.isNone
-                  (Column.tryStrs (Column.ofDates "d" (Vector.ofList [ "2026-01-01" ]) (Validity.all 1)))
+                  (Column.tryStrs (Column.ofDates "d" (Vector.ofList [ "2026-01-01" ]) AllValid))
                   "a date column is not a string column"
 
           testCase "ofCells and toCells round-trip exactly for cells already in normal form"
@@ -1456,7 +1456,7 @@ let typedColumnTests =
           <| fun _ ->
               let c =
                   { Name = "c"
-                    Data = Ints(Vector.ofList [ 1; 2 ], Validity.all 1) }
+                    Data = Ints(Vector.ofList [ 1; 2 ], Mask(Vector.ofList [ true ])) }
 
               Expect.equal
                   (Table.validate
@@ -1691,14 +1691,14 @@ let columnEqualityTests =
 
               Expect.notEqual
                   a
-                  (Column.ofFloats "c" (Vector.adopt [| 1.0; 99.0; 3.0 |]) (Validity.all 3))
+                  (Column.ofFloats "c" (Vector.adopt [| 1.0; 99.0; 3.0 |]) AllValid)
                   "but presence itself is part of the value"
 
               Expect.notEqual a { a with Name = "d" } "and so is the name"
 
               Expect.notEqual
-                  (Column.ofInts "c" (Vector.ofList [ 1 ]) (Validity.all 1))
-                  (Column.ofFloats "c" (Vector.ofList [ 1.0 ]) (Validity.all 1))
+                  (Column.ofInts "c" (Vector.ofList [ 1 ]) AllValid)
+                  (Column.ofFloats "c" (Vector.ofList [ 1.0 ]) AllValid)
                   "and the type: Int 1 and Float 1.0 compare equal but live in different columns" ]
 
 // ---- the ownership contract (Phase 418) ----
@@ -1729,8 +1729,13 @@ let coreColumnReads (columns: Column list) : unit =
             Column.cell i c |> ignore
             Column.isPresent i c |> ignore
 
-        readVector (Column.validity c)
-        Validity.presentCount (Column.validity c) |> ignore
+        readVector (Column.mask c)
+
+        match Column.validity c with
+        | Mask m -> readVector m
+        | AllValid -> ()
+
+        Validity.presentCount (Column.length c) (Column.validity c) |> ignore
 
         for f in [ Sum; Mean; Min; Max; Count; Median; StdDev; First; Last; CountDistinct ] do
             Column.aggregate f c |> ignore
@@ -1760,8 +1765,8 @@ let ownershipDraw (r: ConfRng.T) : Column list * ConfRng.T =
     let k, r1 = ConfRng.intBelow 5 r
     let n = k + 1
 
-    [ Column.ofInts "qty" (Vector.adopt (Array.init n id)) (Validity.all n)
-      Column.ofFloats "price" (Vector.adopt (Array.init n (fun i -> float i * 0.5))) (Validity.all n) ],
+    [ Column.ofInts "qty" (Vector.adopt (Array.init n id)) AllValid
+      Column.ofFloats "price" (Vector.adopt (Array.init n (fun i -> float i * 0.5))) AllValid ],
     r1
 
 /// The single failing law of an ownership run, with its counterexample — or a test failure naming
@@ -1828,8 +1833,13 @@ let ownershipTests =
           testCase "go-red: a write into a borrowed validity mask is named as the mask moving"
           <| fun _ ->
               let flipMask (columns: Column list) =
-                  let lent = Vector.Unsafe.borrow (Column.validity (sampleColumn "b" columns))
-                  lent.Array[lent.Offset] <- not lent.Array[lent.Offset]
+                  // An `AllValid` draw holds no mask to write into (Phase 420); the sample's `b`
+                  // column carries a `Mask` whenever its draw left a row absent.
+                  match Column.validity (sampleColumn "b" columns) with
+                  | Mask m ->
+                      let lent = Vector.Unsafe.borrow m
+                      lent.Array[lent.Offset] <- not lent.Array[lent.Offset]
+                  | AllValid -> ()
 
               let cx = ownershipFailure (Conformance.columnOwnershipLaws flipMask 4242 20)
               Expect.stringContains cx "column 3 \"b\" (bool): the bytes of its validity mask moved" "the mask"
@@ -1841,7 +1851,7 @@ let ownershipTests =
               let draw (build: int[] -> Vector<int>) (r: ConfRng.T) =
                   let xs = [| 1; 2; 3 |]
                   kept.Value <- xs
-                  [ Column.ofInts "a" (build xs) (Validity.all 3) ], r
+                  [ Column.ofInts "a" (build xs) AllValid ], r
 
               let writeKept (_: Column list) = kept.Value[1] <- 9
 
@@ -1880,3 +1890,196 @@ let ownershipTests =
               Expect.isFalse (results |> List.forall _.Passed) "an empty sample is not a pass"
 
               Expect.stringContains (ownershipFailure results) SampleAdequacy.neverReached "named as the sample's fault" ]
+
+/// The two-case validity (Phase 420): a null-free column carries no mask. The builders normalise —
+/// no row absent is `AllValid` — and column equality reads `AllValid` as the all-true mask of the
+/// column's length, so a hand-built all-true `Mask` is the same column. The wire is unchanged.
+[<Tests>]
+let validityTests =
+    let ints (validity: Validity) =
+        Column.ofInts "n" (Vector.ofList [ 1; 2; 3 ]) validity
+
+    let embedded (c: Column) =
+        Embedded
+            { Schema = [ c.Name, c.Type ]
+              Columns = [ c ] }
+
+    let decodedValidity (json: string) =
+        match ColumnCodec.decode json with
+        | Ok(Embedded t) -> Column.validity t.Columns.Head
+        | other -> failtestf "decode: %A" other
+
+    testList
+        "Column validity: AllValid or a Mask (Phase 420)"
+        [ testCase "the constructors normalise: no absent row is AllValid, and only then"
+          <| fun _ ->
+              Expect.equal (Validity.ofArray [| true; true |]) AllValid "ofArray, all set"
+              Expect.equal (Validity.ofList [ true; true; true ]) AllValid "ofList, all set"
+              Expect.equal (Validity.ofVector (Vector.ofList [ true ])) AllValid "ofVector, all set"
+              Expect.equal (Validity.ofArray [||]) AllValid "an empty mask has no absent row"
+
+              Expect.equal
+                  (Validity.ofArray [| true; false |])
+                  (Mask(Vector.ofList [ true; false ]))
+                  "a clear bit keeps a Mask"
+
+              let source = [| false; true |]
+              let copied = Validity.ofArray source
+              source[0] <- true
+              Expect.equal copied (Mask(Vector.ofList [ false; true ])) "ofArray masks over its own copy"
+
+              let held = Vector.ofList [ true; false ]
+
+              match Validity.ofVector held with
+              | Mask m -> Expect.isTrue (obj.ReferenceEquals(m, held)) "ofVector keeps the vector it was handed"
+              | AllValid -> failtest "a clear bit keeps a Mask"
+
+          testCase "ofCells and decode hold a null-free column as AllValid, a column with a Null as a Mask"
+          <| fun _ ->
+              for ty in ColumnType.all do
+                  let present =
+                      match ty with
+                      | IntType -> Int 1
+                      | FloatType -> Float 1.5
+                      | BoolType -> Bool true
+                      | StringType -> Str "a"
+                      | DateType -> Date "2026-01-01"
+                      | TimestampType -> Timestamp "2026-01-01T00:00:00Z"
+                      | DecimalType -> Decimal "1.5"
+
+                  match Column.ofCells "c" ty [ present; present ], Column.ofCells "c" ty [ present; Null ] with
+                  | Ok full, Ok holed ->
+                      Expect.equal (Column.validity full) AllValid (sprintf "%A: ofCells, no Null" ty)
+
+                      Expect.equal
+                          (Column.validity holed)
+                          (Mask(Vector.ofList [ true; false ]))
+                          (sprintf "%A: a Null" ty)
+
+                      Expect.equal
+                          (decodedValidity (ColumnCodec.encode (embedded full)))
+                          AllValid
+                          (sprintf "%A: decode of an all-true validity array" ty)
+
+                      Expect.equal
+                          (decodedValidity (ColumnCodec.encode (embedded holed)))
+                          (Mask(Vector.ofList [ true; false ]))
+                          (sprintf "%A: decode of a validity array with an absent row" ty)
+                  | other -> failtestf "%A: ofCells refused %A" ty other
+
+              Expect.equal
+                  (decodedValidity """{"columns":{"n":{"values":[1,2]}},"schema":[{"name":"n","type":"int"}]}""")
+                  AllValid
+                  "the lenient form with no validity array"
+
+          testCase "the wire is unchanged: AllValid writes the all-true validity array a Mask of all true wrote"
+          <| fun _ ->
+              let viaAllValid = ColumnCodec.encode (embedded (ints AllValid))
+
+              let viaMask =
+                  ColumnCodec.encode (embedded (ints (Mask(Vector.ofList [ true; true; true ]))))
+
+              Expect.equal viaAllValid viaMask "one byte string"
+
+              Expect.equal
+                  viaAllValid
+                  """{"columns":{"n":{"validity":[true,true,true],"values":[1,2,3]}},"schema":[{"name":"n","type":"int"}]}"""
+                  "the pinned bytes"
+
+              match ColumnCodec.decode viaAllValid with
+              | Ok(Embedded t) -> Expect.equal t.Columns [ ints AllValid ] "and it decodes back to the column"
+              | other -> failtestf "decode: %A" other
+
+          testCase "equality: AllValid and an all-true Mask of the column's length are one column, and nothing else is"
+          <| fun _ ->
+              let allValid = ints AllValid
+              let allTrue = ints (Mask(Vector.ofList [ true; true; true ]))
+              Expect.equal allValid allTrue "AllValid = an all-true Mask"
+              Expect.equal allTrue allValid "and the other way round"
+              Expect.equal (hash allValid) (hash allTrue) "equal columns hash equal"
+
+              Expect.notEqual
+                  allValid
+                  (ints (Mask(Vector.ofList [ true; true; true; true ])))
+                  "an all-true Mask of another length is malformed, and not the same column"
+
+              Expect.notEqual allValid (ints (Mask(Vector.ofList [ true; false; true ]))) "an absent row"
+
+              // `=` on bare validities compares representations: with no length, AllValid has no mask.
+              Expect.notEqual AllValid (Mask(Vector.ofList [ true ])) "Validity alone is representational"
+
+          testCase "the mask is materialised on request, and AllValid's is the all-true mask of the right length"
+          <| fun _ ->
+              Expect.equal
+                  (Column.mask (ints AllValid) |> Vector.toList)
+                  [ true; true; true ]
+                  "AllValid: the column's length, every bit set"
+
+              Expect.equal (Validity.toMask 0 AllValid |> Vector.length) 0 "an empty column's mask is empty"
+
+              let held = Vector.ofList [ true; false; true ]
+              Expect.isTrue (obj.ReferenceEquals(Column.mask (ints (Mask held)), held)) "a Mask is answered uncopied"
+              Expect.equal (Validity.presentCount 3 AllValid) 3 "every row present"
+              Expect.equal (Validity.presentCount 3 (Mask held)) 2 "the set bits"
+
+          testCase "reads stay total over AllValid: an out-of-range row is absent"
+          <| fun _ ->
+              let c = ints AllValid
+
+              for i in [ -1; 3; 99 ] do
+                  Expect.isFalse (Column.isPresent i c) (sprintf "isPresent %d" i)
+                  Expect.equal (Column.cell i c) Null (sprintf "cell %d" i)
+
+              Expect.equal (Column.toCells c) [ Int 1; Int 2; Int 3 ] "every row present"
+
+          testCase "Table.validate: an AllValid column cannot disagree with its values; a Mask of another length does"
+          <| fun _ ->
+              let table (c: Column) =
+                  { Schema = [ "n", IntType ]
+                    Columns = [ c ] }
+
+              Expect.equal (Table.validate (table (ints AllValid))) (Ok()) "AllValid"
+
+              Expect.equal
+                  (Table.validate (table (ints (Mask(Vector.ofList [ true; true ])))))
+                  (Error(LengthMismatch("n", 3, 2)))
+                  "a short Mask"
+
+          testCase "the ownership family runs over both cases, and still sees a write into a borrowed Mask"
+          <| fun _ ->
+              let seen = ResizeArray<Validity>()
+
+              let record (columns: Column list) =
+                  for c in columns do
+                      seen.Add(Column.validity c)
+
+              for r in Conformance.columnOwnershipLaws record 4242 20 do
+                  Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+
+              Expect.isTrue (seen |> Seq.exists (fun v -> v = AllValid)) "the kit's sample draws AllValid columns"
+
+              Expect.isTrue
+                  (seen
+                   |> Seq.exists (function
+                       | Mask _ -> true
+                       | AllValid -> false))
+                  "and Mask columns"
+
+              let draw (r: ConfRng.T) =
+                  [ Column.ofInts "a" (Vector.ofList [ 1; 2 ]) AllValid
+                    Column.ofInts "b" (Vector.ofList [ 1; 2 ]) (Mask(Vector.ofList [ true; false ])) ],
+                  r
+
+              let flip (columns: Column list) =
+                  match Column.validity columns[1] with
+                  | Mask m ->
+                      let lent = Vector.Unsafe.borrow m
+                      lent.Array[lent.Offset + 1] <- true
+                  | AllValid -> failtest "b holds a Mask"
+
+              for r in Conformance.columnOwnershipLawsWith ignore draw 5 3 do
+                  Expect.isTrue r.Passed (sprintf "untouched AllValid and Mask columns pass: %A" r)
+
+              let cx = ownershipFailure (Conformance.columnOwnershipLawsWith flip draw 5 3)
+              Expect.stringContains cx "column 1 \"b\" (int): the bytes of its validity mask moved" "the Mask"
+              Expect.isFalse (cx.Contains "column 0 \"a\"") "not the AllValid column" ]

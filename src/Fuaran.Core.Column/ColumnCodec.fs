@@ -43,11 +43,12 @@ module ColumnCodec =
     /// element at a present row as its JSON value, the absent slot at an absent one — never what
     /// the vector happens to hold there — so the bytes are those the `Cell list` column wrote. A
     /// widened cell was normalised at construction, so a float column writes floats and a decimal
-    /// column its texts, as the cell encoder wrote them before.
+    /// column its texts, as the cell encoder wrote them before. An `AllValid` column (Phase 420)
+    /// holds no mask and writes its all-true validity array directly, without materialising one.
     let private columnJson (c: Column) : JVal =
         let n = Column.length c
-        let mask = Column.validity c
-        let present (i: int) = Validity.isPresent i mask
+        let rows = Column.validity c
+        let present (i: int) = Validity.isPresent i rows
 
         let values =
             match c.Data with
@@ -80,7 +81,7 @@ module ColumnCodec =
                     let col =
                         t.Columns
                         |> List.tryFind (fun c -> c.Name = name)
-                        |> Option.defaultValue (Column.ofStrs name Vector.empty Vector.empty)
+                        |> Option.defaultValue (Column.ofStrs name Vector.empty AllValid)
 
                     name, columnJson col)
 
@@ -329,7 +330,8 @@ module ColumnCodec =
     /// Decode a single named column against its declared type from the `columns` object, straight
     /// into its typed storage (Phase 417): the `values` and `validity` arrays are walked once in
     /// lockstep, a present value read by the type's reader into the vector and an absent one left
-    /// as the type's zero with its mask bit clear. The refusals and their order are the `Cell list`
+    /// as the type's zero with its mask bit clear; a column with no absent row is `AllValid` and keeps
+    /// no mask (Phase 420). The refusals and their order are the `Cell list`
     /// decoder's: the two lengths first (`LengthMismatch`), then row by row a validity entry that is
     /// not a bool (`MalformedShape`) before the value beside it.
     let private decodeColumn (columnsObj: JVal) (name: string) (ty: ColumnType) : Result<Column, ColumnError> =
@@ -373,7 +375,7 @@ module ColumnCodec =
 
                         match fault with
                         | Some e -> Error e
-                        | None -> Ok(Vector.adopt out, Vector.adopt mask)
+                        | None -> Ok(Vector.adopt out, Validity.ofVector (Vector.adopt mask))
 
                     match ty with
                     | IntType ->

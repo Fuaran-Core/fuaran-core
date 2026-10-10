@@ -26,7 +26,7 @@ let private sampleResult: QueryResult =
     { Rows =
         { Schema = [ "region", StringType; "revenue", FloatType ]
           Columns =
-            [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) (Validity.all 2)
+            [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) AllValid
               Column.ofFloats "revenue" (Vector.ofList [ 1234.5; 0.0 ]) (Validity.ofList [ true; false ]) ] }
       PageNum = 0
       TotalRowCount = Some 2
@@ -143,7 +143,7 @@ let tests =
                   { Rows =
                       { Schema = [ "region", StringType; "revenue", FloatType ]
                         Columns =
-                          [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) (Validity.all 2)
+                          [ Column.ofStrs "region" (Vector.ofList [ "UK"; "US" ]) AllValid
                             Column.ofFloats "revenue" (Vector.ofList [ 1234.5; 0.0 ]) (Validity.ofList [ true; false ]) ] }
                     PageNum = 0
                     TotalRowCount = Some 2

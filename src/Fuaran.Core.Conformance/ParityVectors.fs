@@ -87,7 +87,7 @@ let private nested (depth: int) : JVal =
 
 /// A float aggregate over a float column, through the canonical layout, or the refusal's class.
 let private floatAggregate (fn: AggFn) (xs: float list) : string =
-    match Column.aggregate fn (Column.ofFloats "f" (Vector.ofList xs) (Validity.all xs.Length)) with
+    match Column.aggregate fn (Column.ofFloats "f" (Vector.ofList xs) AllValid) with
     | Ok(Float f) -> Canon.canonicalFloat f
     | Ok _ -> "<not-a-float>"
     | Error(AggregateOverflow _) -> "<overflow>"
@@ -164,8 +164,7 @@ let private recordAt (i: int) (project: OpRecord<int> -> string) : string =
 /// column answered by host until Phase 299 spelled the order out: NaN is one value and sorts LAST,
 /// and -0 equals 0.
 let private aggregateNanOrder: string =
-    let col =
-        Column.ofFloats "f" (Vector.ofList [ 3.0; nan; -1.0; -0.0; nan ]) (Validity.all 5)
+    let col = Column.ofFloats "f" (Vector.ofList [ 3.0; nan; -1.0; -0.0; nan ]) AllValid
 
     [ Min; Max; Median; CountDistinct ]
     |> List.map (fun fn ->

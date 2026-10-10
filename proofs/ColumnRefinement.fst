@@ -5,7 +5,8 @@
 
    WHAT IS MODELLED. The column `src/Fuaran.Core.Column/Column.fs` has held since Phase 417, clause
    for clause: `Validity` and `Validity.isPresent`, the `ColumnData` union (one typed vector and a
-   mask per case), `Column` with its derived `Type`, `Column.cell`, `Column.toCells`,
+   mask per case — since Phase 420 the MATERIALISED mask, `Validity.toMask` of the column's two-case
+   `Validity`, whose own model and the three facts that reading rests on are section 7), `Column` with its derived `Type`, `Column.cell`, `Column.toCells`,
    `Column.ofCells` with its private `storageOfCells` (the per-type `pick`, the `fill` loop and the
    type's zero at an absent row), `ColumnData.Equals` through `ColumnStorage.presentEqual`, the
    typed form `Table.firstUncarriableCell` took in that phase (a mask that is not the values'
@@ -92,7 +93,8 @@
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. Section 1 is
    the typed column and the map, 2 `toCells` and `ofCells`, 3 the typed `validate`, 4 the typed
-   encoder, 5 the four theorems, 6 what follows for the typed column, 7 the twins. No `assume`, no
+   encoder, 5 the four theorems, 6 what follows for the typed column, 7 the two-case validity
+   (Phase 420), 8 the twins. No `assume`, no
    `admit`; every fuel setting is scoped to the computations that need it.
 
    Apache-2.0, like everything beside it.
@@ -108,11 +110,14 @@ open WireColumn
    1. THE TYPED COLUMN (F#: `Validity`, `ColumnData`, `Column`), and the map to the list column.
    ====================================================================================== *)
 
-(* F#: `Validity = Vector<bool>`, read through `Vector.toArray`: one bool per row, `true` where the
-   row is present. *)
+(* F#: the MATERIALISED mask, `Validity.toMask (Column.length c) (Column.validity c)` (`Column.mask`),
+   read through `Vector.toArray`: one bool per row, `true` where the row is present. Phase 420 made
+   F#'s `Validity` two cases, `AllValid` (no mask held) or a `Mask`; section 7 models those cases and
+   proves that reading them through `to_mask` is sound. *)
 type validity = list bool
 
-(* F#: `Validity.isPresent i v` = `i >= 0 && i < v.Length && v[i]` — total, `false` off the end.
+(* F#: `Validity.isPresent i (Mask v)` = `i >= 0 && i < v.Length && v[i]`, read over the
+   materialised mask — total, `false` off the end.
    PROOF-ONLY: the one index the model keeps, for the statement that the O(1) read is the list read. *)
 [@@ noextract_to "FSharp"]
 let rec is_present (i: nat) (v: validity) : Tot bool (decreases v) =
@@ -1626,7 +1631,147 @@ let typed_round_trip_in_schema_order (#num #flt: eqtype) (h: host num flt) (t: t
   in_order_is_normal t.tschema t.tcolumns
 
 (* ======================================================================================
-   7. TWINS (Phase 309) — the extractor premise, sampled at this model. See `WireColumn.fst`'s
+   7. THE TWO-CASE VALIDITY (Phase 420): a null-free column carries no mask. F#'s `Validity` is
+      `AllValid | Mask of Vector<bool>`, and sections 1 to 6 read it MATERIALISED — `validity`
+      above is the mask `Validity.toMask` answers (`Column.mask`), which is what `cell`, `toCells`,
+      the typed `validate` and the encoder's walks see. This section models the two cases and that
+      materialisation, and proves the three facts the materialised reading rests on:
+        - `all_valid_reads_all_true`: `AllValid` reads as the all-true mask of the column's length —
+          every row present, none past the end — so an `AllValid` column is always well-formed
+          (`all_valid_wf`) and `data_wf` is a claim about `Mask` columns alone;
+        - `of_mask_to_mask`: the normalising constructors (`Validity.ofArray` / `ofList` /
+          `ofVector`, and through them `ofCells` and decode) lose nothing — materialising what they
+          built at the mask's own length gives the mask back — and never build an all-true `Mask`
+          (`of_mask_normal`);
+        - `same_mask_is_mask_equality`: `ColumnStorage.sameMask`, which compares two validities
+          WITHOUT materialising either, is equality of the materialised masks — so `ColumnData`'s
+          equality is the `present_equal` of section 2 over materialised masks, an `AllValid` column
+          and a hand-built all-true `Mask` of its length are one value, and nothing else is.
+   ====================================================================================== *)
+
+(* F# (Phase 420): `Validity = AllValid | Mask of present: Vector<bool>`, a `Mask` read through
+   `Vector.toArray`. *)
+type validity_rep =
+  | AllValid : validity_rep
+  | Mask     : present:validity -> validity_rep
+
+(* F#: the vector `Vector.init n (fun _ -> true)` builds — `n` rows, every bit set, `n` written as a
+   list of that length (the header's "counts"). *)
+let rec all_true (n: list unit) : Tot validity (decreases n) =
+  match n with
+  | [] -> []
+  | _ :: t -> true :: all_true t
+
+(* F#: `Validity.toMask n v` — a `Mask`'s own vector, and for `AllValid` the all-true mask of `n`. *)
+let to_mask (n: list unit) (v: validity_rep) : Tot validity =
+  match v with
+  | AllValid -> all_true n
+  | Mask m -> m
+
+(* F#: `Array.forall id` / `not (Vector.exists not m)` — no bit clear. *)
+let rec all_set (m: validity) : Tot bool (decreases m) =
+  match m with
+  | [] -> true
+  | b :: t -> b && all_set t
+
+(* F#: `Validity.ofVector` (and `ofArray` / `ofList` over their copy) — `AllValid` when no bit is
+   clear, else a `Mask` over the bits. *)
+let of_mask (m: validity) : Tot validity_rep =
+  if all_set m then AllValid else Mask m
+
+(* F#: `ColumnStorage.sameMask n vx vy` — the two arms that mix the cases ask whether the `Mask` is
+   all set AND of the column's length. *)
+let same_mask (n: list unit) (a b: validity_rep) : Tot bool =
+  match a, b with
+  | AllValid, AllValid -> true
+  | AllValid, Mask m -> same_len m n && all_set m
+  | Mask m, AllValid -> same_len m n && all_set m
+  | Mask x, Mask y -> x = y
+
+[@@ noextract_to "FSharp"]
+let rec all_true_len (n: list unit)
+  : Lemma (ensures same_len (all_true n) n) (decreases n) =
+  match n with
+  | [] -> ()
+  | _ :: t -> all_true_len t
+
+[@@ noextract_to "FSharp"]
+let rec all_true_present (n: list unit) (i: nat)
+  : Lemma (ensures is_present i (all_true n) == (i < List.Tot.length n)) (decreases n) =
+  match n with
+  | [] -> ()
+  | _ :: t -> if i = 0 then () else all_true_present t (i - 1)
+
+[@@ noextract_to "FSharp"]
+let rec same_len_trans_units (#a: Type) (xs: list a) (m: validity)
+  : Lemma (requires same_len m (units xs)) (ensures same_len xs m) (decreases xs) =
+  match xs, m with
+  | _ :: xt, _ :: mt -> same_len_trans_units xt mt
+  | _ -> ()
+
+(* THEOREM — `AllValid` reads as the all-true mask of the column's length: one bit per row, and
+   row `i` present exactly when it is a row. *)
+[@@ noextract_to "FSharp"]
+let all_valid_reads_all_true (n: list unit) (i: nat)
+  : Lemma (ensures to_mask n AllValid == all_true n /\
+                   same_len (to_mask n AllValid) n /\
+                   is_present i (to_mask n AllValid) == (i < List.Tot.length n)) =
+  all_true_len n;
+  all_true_present n i
+
+(* So an `AllValid` column is well-formed whatever its values: `data_wf` of any case over the
+   materialised mask holds. *)
+[@@ noextract_to "FSharp"]
+let all_valid_wf (#a: Type) (xs: list a)
+  : Lemma (ensures same_len xs (to_mask (units xs) AllValid)) =
+  all_true_len (units xs);
+  same_len_trans_units xs (all_true (units xs))
+
+[@@ noextract_to "FSharp"]
+let rec all_set_is_all_true (m: validity)
+  : Lemma (requires all_set m) (ensures all_true (units m) == m) (decreases m) =
+  match m with
+  | [] -> ()
+  | _ :: t -> all_set_is_all_true t
+
+(* THEOREM — the normalising constructors lose nothing: materialised at the mask's own length, what
+   `of_mask` built IS the mask. *)
+[@@ noextract_to "FSharp"]
+let of_mask_to_mask (m: validity)
+  : Lemma (ensures to_mask (units m) (of_mask m) == m) =
+  if all_set m then all_set_is_all_true m else ()
+
+(* And they never build an all-true `Mask`: a `Mask` they answer has a clear bit. *)
+[@@ noextract_to "FSharp"]
+let of_mask_normal (m: validity)
+  : Lemma (ensures (match of_mask m with
+                    | AllValid -> all_set m
+                    | Mask m' -> m' == m /\ not (all_set m'))) =
+  ()
+
+[@@ noextract_to "FSharp"]
+let rec all_true_eq (n: list unit) (m: validity)
+  : Lemma (ensures (all_true n = m) == (same_len m n && all_set m)) (decreases n) =
+  match n, m with
+  | [], [] -> ()
+  | [], _ :: _ -> ()
+  | _ :: _, [] -> ()
+  | _ :: nt, b :: mt -> all_true_eq nt mt
+
+(* THEOREM — `sameMask` is equality of the materialised masks, on every pair of validities and at
+   every length: so `AllValid` equals a `Mask` exactly when that mask is all set and of the
+   column's length, and two `Mask`s exactly when they are one mask. *)
+[@@ noextract_to "FSharp"]
+let same_mask_is_mask_equality (n: list unit) (a b: validity_rep)
+  : Lemma (ensures same_mask n a b == (to_mask n a = to_mask n b)) =
+  match a, b with
+  | AllValid, AllValid -> ()
+  | AllValid, Mask m -> all_true_eq n m
+  | Mask m, AllValid -> all_true_eq n m
+  | Mask _, Mask _ -> ()
+
+(* ======================================================================================
+   8. TWINS (Phase 309) — the extractor premise, sampled at this model. See `WireColumn.fst`'s
       section of the same name for what the list is and why the kit refuses a model without one.
       The host here is the simplest the record admits — both number carriers `nat`, the text of a
       number empty, every float finite, every text a date — because what is sampled is the walks,
@@ -1669,6 +1814,16 @@ let twins : list twin = [
     tholds = (fun () ->
       column_json_t twin_host ({ col_name = []; col_data = Ints #nat #nat [7; 9] [false; true] })
       = JObj [ (values_key, JArr [JInt #nat #nat 0; JInt #nat #nat 9]); (validity_key, JArr [JBool false; JBool true]) ]) };
+  { tname = "of-mask-normalises-an-all-set-mask";
+    tholds = (fun () ->
+      of_mask [true; true] = AllValid && of_mask [true; false] = Mask [true; false]
+      && of_mask [] = AllValid) };
+  { tname = "same-mask-reads-all-valid-as-the-all-true-mask-of-the-length";
+    tholds = (fun () ->
+      same_mask [(); ()] AllValid (Mask [true; true])
+      && not (same_mask [(); ()] AllValid (Mask [true; true; true]))
+      && not (same_mask [(); ()] (Mask [true; false]) AllValid)
+      && to_mask [(); ()] AllValid = [true; true]) };
   { tname = "data-eq-ignores-an-absent-element";
     tholds = (fun () ->
       data_eq (Ints #nat #nat [7; 9] [false; true]) (Ints #nat #nat [0; 9] [false; true])

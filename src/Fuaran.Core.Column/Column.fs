@@ -15,47 +15,120 @@ namespace Fuaran.Core
 //  numeric column is byte-identical across the .NET and Fable hosts).
 //
 //  Since Phase 417 (the `1.0.0` slot) a column's storage is one typed `Vector` per
-//  column behind the `ColumnData` union, with a validity mask beside it, where it
+//  column behind the `ColumnData` union, with its `Validity` beside it, where it
 //  was a `Cell list`: a consumer holds typed storage, an indexed read is O(1), and
-//  a cell outside its column's type cannot be represented. `Cell` stays the scalar
+//  a cell outside its column's type cannot be represented. Since Phase 420 a
+//  null-free column carries no mask (`AllValid`); only a column with an absent
+//  row holds one (`Mask`). `Cell` stays the scalar
 //  read type; `Column.ofCells` / `Column.toCells` are the migration bridge.
 // ============================================================================
 
-/// The validity mask of a column (Phase 417): one `bool` per row, `true` where the cell is
-/// PRESENT and `false` where it is the `Null` the wire's validity array marks absent. The in-memory
-/// form of that array. Its shape is this phase's; Phase 420 elides it for a null-free column.
-type Validity = Vector<bool>
+/// Which rows of a column are PRESENT and which are the `Null` the wire's validity array marks
+/// absent (Phase 417; two cases since Phase 420). A column with no null carries no mask at all —
+/// `AllValid` — so the common case holds nothing beside its values; a column with a null carries a
+/// `Mask`, one `bool` per row, `true` where the row is present.
+///
+/// `AllValid` carries no length: it reads as the all-true mask of its column's length, the values
+/// vector's (`Validity.toMask` materialises it). Core's builders NORMALISE — `Validity.ofArray`,
+/// `ofList` and `ofVector`, `Column.ofCells` and decode answer `AllValid` wherever no row is absent
+/// — so Core never builds a `Mask` without a clear bit. A `Mask` built by hand may still be all
+/// true, and a column holding one is EQUAL to the same column holding `AllValid`: column equality
+/// compares the materialised masks (`ColumnData`). `=` on two `Validity` values alone compares the
+/// representations, because with no length `AllValid` has no mask to compare — compare columns.
+[<NoComparison>]
+type Validity =
+    /// Every row of the column is present; no mask is held.
+    | AllValid
+    /// One `bool` per row, `true` where the row is present — the in-memory form of the wire's
+    /// validity array, for a column with at least one absent row.
+    | Mask of present: Vector<bool>
 
-/// Validity-mask reads and constructors.
+/// Validity reads and constructors.
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Validity =
 
-    /// Every one of `n` rows present.
-    let all (n: int) : Validity = Vector.init n (fun _ -> true)
+    /// The validity a mask vector describes, without a copy: `AllValid` when every bit is set (an
+    /// empty vector included), else a `Mask` over `present` itself.
+    let ofVector (present: Vector<bool>) : Validity =
+        if Vector.exists not present then Mask present else AllValid
 
-    /// A mask over ITS OWN COPY of `present`.
-    let ofArray (present: bool[]) : Validity = Vector.ofArray present
+    /// The validity of the bits of `present`: `AllValid` when every bit is set, else a `Mask` over
+    /// ITS OWN COPY of `present`.
+    let ofArray (present: bool[]) : Validity =
+        if Array.forall id present then
+            AllValid
+        else
+            Mask(Vector.ofArray present)
 
-    /// A mask of the list's bits, in order.
-    let ofList (present: bool list) : Validity = Vector.ofList present
+    /// The validity of the list's bits, in order: `AllValid` when every bit is set.
+    let ofList (present: bool list) : Validity =
+        if List.forall id present then
+            AllValid
+        else
+            Mask(Vector.ofList present)
 
-    /// Is row `i` present? `false` for an out-of-range index — total.
-    let isPresent (i: int) (v: Validity) : bool = i >= 0 && i < v.Length && v[i]
+    /// Is row `i` present? Under a `Mask`, `false` for an index off either end — total. `AllValid`
+    /// has no length, so every non-negative row is present under it: a reader bounds the index by
+    /// the values first, as `Column.isPresent` and `Column.cell` do.
+    let isPresent (i: int) (v: Validity) : bool =
+        match v with
+        | AllValid -> i >= 0
+        | Mask m -> i >= 0 && i < m.Length && m[i]
 
-    /// How many rows are present.
-    let presentCount (v: Validity) : int =
-        Vector.fold (fun n b -> if b then n + 1 else n) 0 v
+    /// The mask of a column of `n` rows, materialised on request: a `Mask`'s own vector, with no
+    /// copy, and for `AllValid` a fresh vector of `n` set bits — the all-true mask of the right
+    /// length, which is what the wire's validity array of a null-free column holds.
+    let toMask (n: int) (v: Validity) : Vector<bool> =
+        match v with
+        | AllValid -> Vector.init n (fun _ -> true)
+        | Mask m -> m
 
-/// Equality over a column's storage (Phase 417): two typed vectors with their masks hold the same
-/// cells when the masks agree and, at every PRESENT row, the elements are equal under the vector's
-/// element identity. The element at an absent row is not a cell and takes no part — a builder that
-/// copies writes the type's zero there, and a builder that adopts leaves what it was handed.
+    /// How many of a column's `n` rows are present: `n` under `AllValid`, the mask's set bits under
+    /// a `Mask`.
+    let presentCount (n: int) (v: Validity) : int =
+        match v with
+        | AllValid -> n
+        | Mask m -> Vector.fold (fun k b -> if b then k + 1 else k) 0 m
+
+/// Equality over a column's storage (Phase 417): two typed vectors with their validities hold the
+/// same cells when their MATERIALISED masks agree (Phase 420: `AllValid` is the all-true mask of the
+/// values' length, so it equals a `Mask` that is all true and of that length, and nothing else) and,
+/// at every PRESENT row, the elements are equal under the vector's element identity. The element at
+/// an absent row is not a cell and takes no part — a builder that copies writes the type's zero
+/// there, and a builder that adopts leaves what it was handed.
 module internal ColumnStorage =
+
+    /// The masks of two validities of `n`-row columns are one mask — `Validity.toMask n` of each
+    /// equal, without materialising either.
+    let sameMask (n: int) (vx: Validity) (vy: Validity) : bool =
+        match vx, vy with
+        | AllValid, AllValid -> true
+        | AllValid, Mask m
+        | Mask m, AllValid -> m.Length = n && not (Vector.exists not m)
+        | Mask a, Mask b -> a = b
+
+    /// A hash agreeing with `sameMask`: the materialised mask's length and its first few bits.
+    let maskHash (n: int) (v: Validity) : int =
+        match v with
+        | AllValid ->
+            let mutable h = n
+
+            for _ in 1 .. min n VectorElements.HashedPrefix do
+                h <- (h * 31) + 1
+
+            h
+        | Mask m ->
+            let mutable h = m.Length
+
+            for i in 0 .. min m.Length VectorElements.HashedPrefix - 1 do
+                h <- (h * 31) + (if m[i] then 1 else 0)
+
+            h
 
     /// Equal at every present row, under `VectorElements.equal`.
     let presentEqual (xs: Vector<'T>) (vx: Validity) (ys: Vector<'T>) (vy: Validity) : bool =
         xs.Length = ys.Length
-        && vx = vy
+        && sameMask xs.Length vx vy
         && (let mutable same = true
             let mutable i = 0
 
@@ -69,7 +142,7 @@ module internal ColumnStorage =
 
     /// A hash agreeing with `presentEqual`: the length, the mask, and the first few present elements.
     let presentHash (xs: Vector<'T>) (vx: Validity) : int =
-        let mutable h = xs.Length * 31 + vx.GetHashCode()
+        let mutable h = xs.Length * 31 + maskHash xs.Length vx
         let mutable seen = 0
         let mutable i = 0
 
@@ -82,18 +155,20 @@ module internal ColumnStorage =
 
         h
 
-/// A column's storage (Phase 417): one typed, immutable `Vector` of values and the `Validity` mask
-/// that says which rows are present, one case per `ColumnType`. The element at an absent row is a
+/// A column's storage (Phase 417): one typed, immutable `Vector` of values and the `Validity` that
+/// says which rows are present — `AllValid`, holding nothing, or a `Mask` (Phase 420) — one case per
+/// `ColumnType`. The element at an absent row is a
 /// placeholder, never a cell — a reader that wants the cell asks `Column.cell`, which answers
-/// `Null` there. `values` and `validity` have one length; `Table.validate` names a pair that does
-/// not (`LengthMismatch`).
+/// `Null` there. A `Mask` and its `values` have one length; `Table.validate` names a pair that does
+/// not (`LengthMismatch`), and an `AllValid` column cannot disagree with its values.
 ///
 /// A widened cell is held NORMALISED: an `Int` in a float column is the float it widens to, and in
 /// a decimal column the decimal text of its digits, exactly as decode already normalised it; so
 /// `Floats` holds floats only and `Decimals` decimal text only. `Dates` and `Timestamps` hold their
 /// canonical ISO-8601 text in this phase, as the cells do; Phase 422 makes them integers.
 ///
-/// Equality is by the CELLS: two storages are equal when their masks agree and every present
+/// Equality is by the CELLS: two storages are equal when their materialised masks agree (so
+/// `AllValid` equals an all-true `Mask` of the same length) and every present
 /// element is equal under the vector's identity (every NaN one value, `-0.0` equal to `0.0`), so a
 /// column compares the way `Cell.compare` compares its cells, on every host.
 [<CustomEquality; NoComparison>]
@@ -124,7 +199,7 @@ type ColumnData =
         | Timestamps _ -> TimestampType
         | Decimals _ -> DecimalType
 
-    /// The validity mask, whatever the case.
+    /// The validity, whatever the case.
     member this.Validity: Validity =
         match this with
         | Ints(_, v)
@@ -307,16 +382,23 @@ module Column =
     /// The number of rows in a column.
     let length (c: Column) : int = c.Data.Length
 
-    /// The validity mask: which rows are present.
+    /// The validity: which rows are present — `AllValid` for a null-free column, which holds no mask.
     let validity (c: Column) : Validity = c.Data.Validity
 
+    /// The validity mask, materialised on request (Phase 420): one `bool` per row, `true` where the
+    /// row is present. A `Mask` column answers the mask it holds, with no copy; an `AllValid` column
+    /// a fresh all-true vector of its length.
+    let mask (c: Column) : Vector<bool> =
+        Validity.toMask c.Data.Length c.Data.Validity
+
     /// Is row `i` present (not `Null`)? `false` for an out-of-range index — total.
-    let isPresent (i: int) (c: Column) : bool = Validity.isPresent i c.Data.Validity
+    let isPresent (i: int) (c: Column) : bool =
+        i < c.Data.Length && Validity.isPresent i c.Data.Validity
 
     /// The cell at row `i` (`Null` for an absent row and for an out-of-range index — total). O(1)
-    /// since Phase 417: one mask read and one vector read.
+    /// since Phase 417: one validity read and one vector read.
     let cell (i: int) (c: Column) : Cell =
-        if not (Validity.isPresent i c.Data.Validity) then
+        if not (isPresent i c) then
             Null
         else
             match c.Data with
@@ -330,10 +412,12 @@ module Column =
 
     // ---- the typed builders and readers (Phase 417) ----
     // Each builder takes the storage as built — a `Vector` the caller copied into (`Vector.ofArray`)
-    // or adopted (`Vector.adopt`) — and checks nothing: `values` and `validity` are expected to be
-    // one length, and `Table.validate` names a pair that is not. Each reader answers the values
-    // vector where the column is of that type, with no conversion and no copy; the mask is
-    // `Column.validity`.
+    // or adopted (`Vector.adopt`), and `AllValid` or a `Mask` — and checks nothing: a `Mask` is
+    // expected to be the values' length, and `Table.validate` names one that is not. A builder
+    // does not normalise the `Validity` it is handed (an all-true `Mask` is held as given, and is
+    // equal to `AllValid`); `Validity.ofArray` / `ofList` / `ofVector` are the normalising
+    // constructors. Each reader answers the values vector where the column is of that type, with no
+    // conversion and no copy; the validity is `Column.validity`, the materialised mask `Column.mask`.
 
     /// An `int` column over `values`, present where `validity` says.
     let ofInts (name: string) (values: Vector<int>) (validity: Validity) : Column =
@@ -417,7 +501,8 @@ module Column =
     /// The typed storage of `cells` for a column of type `ty`, or the first present cell whose type
     /// does not widen into `ty` (`ColumnType.widens`) as the `TypeMismatch` naming it, in row order.
     /// A widened cell is normalised (an `Int` in a float column to its float, in a decimal column to
-    /// its digits); the type's zero is written at every absent row. Everything else a cell can carry
+    /// its digits); the type's zero is written at every absent row, and a list with no `Null` is
+    /// `AllValid` (Phase 420). Everything else a cell can carry
     /// is held as found — a non-finite float, decimal, date or timestamp text that is not canonical —
     /// and is `Table.validate`'s to refuse at the codec, as before.
     let private storageOfCells (name: string) (ty: ColumnType) (cells: Cell list) : Result<ColumnData, ColumnError> =
@@ -444,7 +529,7 @@ module Column =
 
             match fault with
             | Some e -> Error e
-            | None -> Ok(Vector.adopt out, Vector.adopt mask)
+            | None -> Ok(Vector.adopt out, Validity.ofVector (Vector.adopt mask))
 
         let outside (c: Cell) : Result<'T option, ColumnType> =
             match Cell.typeOf c with

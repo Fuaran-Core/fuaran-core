@@ -192,7 +192,7 @@ module internal ColumnarSeamLaws =
                         fun () -> at (sprintf "the kit's own draw did not build column %s (%A)" name e)
                     )
 
-                    Column.ofStrs name Vector.empty Vector.empty
+                    Column.ofStrs name Vector.empty AllValid
 
             let t: Table =
                 { Schema = [ "a", aType; "s", StringType ]
@@ -273,11 +273,12 @@ module internal ColumnarSeamLaws =
     // agrees with its indexer. The kit is compiled on both pipelines, so a law here is certified
     // under Fable as on .NET — which is where array equality and NaN diverge between hosts.
 
-    /// The cell-level reading `=` on columns is held to: one length, one validity mask, and at every
-    /// present row `Cell.compare` answers `Some 0`.
+    /// The cell-level reading `=` on columns is held to: one length, one MATERIALISED validity mask
+    /// (so `AllValid` and an all-true `Mask` of the column's length read alike, Phase 420), and at
+    /// every present row `Cell.compare` answers `Some 0`.
     let private cellsEqual (a: Column) (b: Column) : bool =
         Column.length a = Column.length b
-        && Column.validity a = Column.validity b
+        && Column.mask a = Column.mask b
         && (let mutable same = true
             let mutable i = 0
 
@@ -298,12 +299,16 @@ module internal ColumnarSeamLaws =
     ///    column holding a NaN equals another holding a NaN there, `-0.0` equals `0.0`, the element
     ///    under an absent row takes no part, and equal columns hash equal. Three pairs are built every
     ///    iteration whatever the draw: a NaN pair, a signed-zero pair, and a pair that differs only
-    ///    under an absent row. The law is stated over columns in the storage's contract (canonical
+    ///    under an absent row. And per drawn type (Phase 420), the drawn values under `AllValid` and
+    ///    under a hand-built all-true `Mask` of their length are ONE column, hashing alike, while an
+    ///    all-true `Mask` one row longer is not. The law is stated over columns in the storage's contract (canonical
     ///    decimal text): a non-canonical decimal text is a column `Table.validate` refuses, and its
     ///    equality is by text.
     /// 2. **The bridge and the typed builders build one column.** `Column.ofCells` over the drawn
     ///    cells equals the typed builder over the drawn vector and mask, `toCells` reads the drawn
-    ///    cells back, and the typed reader hands back the vector the builder was given.
+    ///    cells back, and the typed reader hands back the vector the builder was given. The
+    ///    normalising constructors answer `AllValid` exactly when no row is absent, and the
+    ///    materialised mask (`Column.mask`) is the drawn one.
     /// 3. **Every vector read agrees with the indexer.** `toList`, `toArray`, `fold`, `iter`, `iteri`,
     ///    `map`, `mapi`, `exists`, `tryFindIndex`, `tryItem`, a `slice` and a borrowed array all answer
     ///    what indexing answers, over the drawn vector.
@@ -372,6 +377,24 @@ module internal ColumnarSeamLaws =
                 let b = build "c" (Vector.adopt ys) (Validity.ofArray maskB)
                 checkEquality what a b
 
+                // Phase 420: `AllValid` reads as the all-true mask of the column's length, so it is
+                // one column with a hand-built all-true `Mask` of that length - and only that length.
+                let allValid = build "c" va AllValid
+                let allTrue = build "c" va (Mask(Vector.ofArray (Array.create n true)))
+
+                equality.Check(
+                    allValid = allTrue && allTrue = allValid && hash allValid = hash allTrue,
+                    fun () ->
+                        at (sprintf "%s: AllValid and an all-true Mask of the column's length are not one column" what)
+                )
+
+                checkEquality (what + " (AllValid, all-true Mask)") allValid allTrue
+
+                checkEquality
+                    (what + " (AllValid, a longer all-true Mask)")
+                    allValid
+                    (build "c" va (Mask(Vector.ofArray (Array.create (n + 1) true))))
+
                 // The bridge: the same cells through `ofCells`, and back out through `toCells`.
                 let cells = [ for i in 0 .. n - 1 -> if maskA[i] then cellOf xs[i] else Null ]
 
@@ -395,9 +418,12 @@ module internal ColumnarSeamLaws =
                      | Some v -> obj.ReferenceEquals(v, va)
                      | None -> false)
                     && Column.validity a = Validity.ofList (List.ofArray maskA)
-                    && Validity.presentCount (Column.validity a) = (maskA |> Array.filter id |> Array.length)
+                    && (Column.validity a = AllValid) = Array.forall id maskA
+                    && Vector.toArray (Column.mask a) = maskA
+                    && Validity.presentCount n (Column.validity a) = (maskA |> Array.filter id |> Array.length)
                     && Column.length a = n
-                    && (Column.validity (build "c" va (Validity.all n))) = Validity.ofArray (Array.create n true),
+                    && Validity.ofArray (Array.create n true) = AllValid
+                    && Vector.toArray (Column.mask allValid) = Array.create n true,
                     fun () ->
                         at (sprintf "%s: the typed reader, the mask or the length disagree with what was built" what)
                 )
@@ -465,7 +491,7 @@ module internal ColumnarSeamLaws =
 
             // The three pairs every iteration builds, whatever the draw.
             let one (f: float) =
-                Column.ofFloats "f" (Vector.ofList [ f ]) (Validity.all 1)
+                Column.ofFloats "f" (Vector.ofList [ f ]) AllValid
 
             checkEquality "NaN pair" (one nan) (one nan)
             checkEquality "signed-zero pair" (one -0.0) (one 0.0)
@@ -589,7 +615,8 @@ module internal ColumnarSeamLaws =
 
         Hash.sha256HexOfBytes (buf.ToArray())
 
-    /// A column's fingerprint at one moment: the digest of its values and the digest of its mask.
+    /// A column's fingerprint at one moment: the digest of its values and the digest of its mask
+    /// (a fixed token for an `AllValid` column, which holds none).
     let private fingerprint (c: Column) : string * string =
         let values =
             match c.Data with
@@ -601,7 +628,14 @@ module internal ColumnarSeamLaws =
             | Timestamps(xs, _)
             | Decimals(xs, _) -> vectorDigest putString xs
 
-        values, vectorDigest putBool (Column.validity c)
+        // An `AllValid` column holds no mask (Phase 420), so there is nothing to write into: its
+        // validity reads as one fixed token, and only a `Mask` is hashed.
+        let validity =
+            match Column.validity c with
+            | AllValid -> "all-valid"
+            | Mask m -> vectorDigest putBool m
+
+        values, validity
 
     /// The ownership law over the columns `draw` builds (Phase 418): every column is fingerprinted
     /// as it is drawn, `operation` is run over the list, and every column is fingerprinted again; a
@@ -661,17 +695,18 @@ module internal ColumnarSeamLaws =
         LawKit.results [ untouched ]
 
     /// The kit's own sample for the ownership law (Phase 418), every column one length: a column of
-    /// each of the seven types over an adopted array, nulls drawn; and two float columns that are
-    /// ADJACENT VIEWS of one backing array, their masks adjacent views of one mask array — so a write
-    /// that runs past one column's range lands in its neighbour's, and a write through either is one
-    /// the other's holder sees.
+    /// each of the seven types over an adopted array, nulls drawn — `AllValid` where the draw left no
+    /// row absent and an adopted `Mask` otherwise (Phase 420), so the law runs over both — and two
+    /// float columns that are ADJACENT VIEWS of one backing array, their masks adjacent views of one
+    /// mask array held as a `Mask` whatever the draw — so a write that runs past one column's range
+    /// lands in its neighbour's, and a write through either is one the other's holder sees.
     let private ownershipSample (r: ConfRng.T) : Column list * ConfRng.T =
         let rng = LawKit.Draws 0
         rng.State <- r
         let n = 1 + rng.IntBelow 6
 
         let mask () =
-            Array.init n (fun _ -> rng.IntBelow 4 <> 0)
+            Validity.ofVector (Vector.adopt (Array.init n (fun _ -> rng.IntBelow 4 <> 0)))
 
         let pick (xs: 'T[]) = xs[rng.IntBelow xs.Length]
 
@@ -688,14 +723,14 @@ module internal ColumnarSeamLaws =
         let own (xs: 'T[]) = Vector.adopt xs
 
         let columns =
-            [ Column.ofInts "i" (own (Array.init n (fun _ -> rng.IntBelow 9 - 4))) (own (mask ()))
-              Column.ofFloats "f" (Vector.slice 0 n shared) (Vector.slice 0 n sharedMask)
-              Column.ofFloats "g" (Vector.slice n n shared) (Vector.slice n n sharedMask)
-              Column.ofBools "b" (own (Array.init n (fun _ -> rng.IntBelow 2 = 0))) (own (mask ()))
-              Column.ofStrs "s" (own (Array.init n (fun _ -> pick texts))) (own (mask ()))
-              Column.ofDates "d" (own (Array.init n (fun _ -> pick dates))) (own (mask ()))
-              Column.ofTimestamps "t" (own (Array.init n (fun _ -> pick instants))) (own (mask ()))
-              Column.ofDecimals "m" (own (Array.init n (fun _ -> pick decimals))) (own (mask ())) ]
+            [ Column.ofInts "i" (own (Array.init n (fun _ -> rng.IntBelow 9 - 4))) (mask ())
+              Column.ofFloats "f" (Vector.slice 0 n shared) (Mask(Vector.slice 0 n sharedMask))
+              Column.ofFloats "g" (Vector.slice n n shared) (Mask(Vector.slice n n sharedMask))
+              Column.ofBools "b" (own (Array.init n (fun _ -> rng.IntBelow 2 = 0))) (mask ())
+              Column.ofStrs "s" (own (Array.init n (fun _ -> pick texts))) (mask ())
+              Column.ofDates "d" (own (Array.init n (fun _ -> pick dates))) (mask ())
+              Column.ofTimestamps "t" (own (Array.init n (fun _ -> pick instants))) (mask ())
+              Column.ofDecimals "m" (own (Array.init n (fun _ -> pick decimals))) (mask ()) ]
 
         columns, rng.State
 

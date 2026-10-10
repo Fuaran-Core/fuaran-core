@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 306 claims — 223 proved across 29 models, 47 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 308 claims — 224 proved across 29 models, 48 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -966,7 +966,7 @@ families credit are credited over nested batches as well as flat ones.
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
-| `Fuaran.Core.Column` | 85 | 8 | 51 | 3 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.Column` | 87 | 13 | 48 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 151 | 1 | 104 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 33 | 64 | 5 | 0 | 0 | 0 | 40 |
@@ -984,7 +984,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 0 | 0 | 1 | 1 | 0 | 0 | 7 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1168 | 143 | 437 | 30 | 14 | 0 | 3 | 541 |
+| **Total** | 1170 | 148 | 434 | 30 | 14 | 0 | 3 | 541 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

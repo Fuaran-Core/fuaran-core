@@ -1096,6 +1096,84 @@ let rec normal_columns_t = (fun ( s  :  Prims.list<(Prims.list<WireCanon.ch> * W
 
 let normal_table_t = (fun ( t  :  typed_table<'num, 'flt> ) -> {tschema = t.tschema; tcolumns = (normal_columns_t t.tschema t.tcolumns)})
 
+type validity_rep =
+| AllValid
+| Mask of validity
+
+
+let uu___is_AllValid : validity_rep  ->  Prims.bool = (fun ( projectee  :  validity_rep ) -> (match (projectee) with
+| AllValid -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Mask : validity_rep  ->  Prims.bool = (fun ( projectee  :  validity_rep ) -> (match (projectee) with
+| Mask (present) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__Mask__item__present : validity_rep  ->  validity = (fun ( projectee  :  validity_rep ) -> (match (projectee) with
+| Mask (present) -> begin
+     present
+     end))
+
+
+let rec all_true : Prims.list<unit>  ->  validity = (fun ( n  :  Prims.list<unit> ) -> (match (n) with
+| [] -> begin
+     []
+     end
+| (uu___)::t -> begin
+     (true)::(all_true t)
+     end))
+
+
+let to_mask : Prims.list<unit>  ->  validity_rep  ->  validity = (fun ( n  :  Prims.list<unit> ) ( v  :  validity_rep ) -> (match (v) with
+| AllValid -> begin
+     (all_true n)
+     end
+| Mask (m) -> begin
+     m
+     end))
+
+
+let rec all_set : validity  ->  Prims.bool = (fun ( m  :  validity ) -> (match (m) with
+| [] -> begin
+     true
+     end
+| (b)::t -> begin
+     (b && (all_set t))
+     end))
+
+
+let of_mask : validity  ->  validity_rep = (fun ( m  :  validity ) ->  
+if (all_set m) then begin
+     AllValid
+     end else begin
+     Mask (m)
+     end)
+
+
+let same_mask : Prims.list<unit>  ->  validity_rep  ->  validity_rep  ->  Prims.bool = (fun ( n  :  Prims.list<unit> ) ( a  :  validity_rep ) ( b  :  validity_rep ) -> (match (((a), (b))) with
+| (AllValid, AllValid) -> begin
+     true
+     end
+| (AllValid, Mask (m)) -> begin
+     ((WireColumn.same_len m n) && (all_set m))
+     end
+| (Mask (m), AllValid) -> begin
+     ((WireColumn.same_len m n) && (all_set m))
+     end
+| (Mask (x), Mask (y)) -> begin
+     (Prims.op_Equals x y)
+     end))
+
 
 let twin_host : WireColumn.host<Prims.nat, Prims.nat> = {WireColumn.to_float = (fun ( i  :  Prims.nat ) -> i); WireColumn.int_text = (fun ( uu___  :  Prims.nat ) -> []); WireColumn.finite = (fun ( uu___  :  Prims.nat ) -> true); WireColumn.zero_int = (Prims.parse_int "0"); WireColumn.zero_float = (Prims.parse_int "0"); WireColumn.is_date = (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> true); WireColumn.is_timestamp = (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> true)}
 
@@ -1123,7 +1201,7 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "to-cells-reads-the-mask"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_cells {col_name = []; col_data = Ints (((Prims.parse_int "1"))::((Prims.parse_int "2"))::((Prims.parse_int "3"))::[], (true)::(false)::[])}) ((WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Null)::(WireColumn.Null)::[])))})::({tname = "of-cells-widens-an-int-into-a-float-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.FloatType ((WireColumn.Int ((Prims.parse_int "3")))::(WireColumn.Null)::(WireColumn.Float ((Prims.parse_int "4")))::[])) (WireColumn.Good ({col_name = []; col_data = Floats (((Prims.parse_int "3"))::((Prims.parse_int "0"))::((Prims.parse_int "4"))::[], (true)::(false)::(true)::[])}))))})::({tname = "of-cells-refuses-the-first-cell-outside"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.BoolType ((WireColumn.Null)::(WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Bool (true))::[])) (WireColumn.Bad (WireColumn.TypeMismatch ([], WireColumn.BoolType)))))})::({tname = "first-uncarriable-names-the-mask-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_uncarriable_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "1"))::[], [])}) (FStar_Pervasives_Native.Some (WireColumn.LengthMismatch ([])))))})::({tname = "column-json-writes-the-absent-slot-not-the-element"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (column_json_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])}) (WireCanon.JObj ((((WireColumn.values_key), (WireCanon.JArr ((WireCanon.JInt ((Prims.parse_int "0")))::(WireCanon.JInt ((Prims.parse_int "9")))::[]))))::(((WireColumn.validity_key), (WireCanon.JArr ((WireCanon.JBool (false))::(WireCanon.JBool (true))::[]))))::[]))))})::({tname = "data-eq-ignores-an-absent-element"; tholds = (fun ( uu___  :  unit ) -> ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (false)::(true)::[]))) && (not ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (true)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (true)::(true)::[])))))))})::[]
+let twins : Prims.list<twin> = ({tname = "to-cells-reads-the-mask"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_cells {col_name = []; col_data = Ints (((Prims.parse_int "1"))::((Prims.parse_int "2"))::((Prims.parse_int "3"))::[], (true)::(false)::[])}) ((WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Null)::(WireColumn.Null)::[])))})::({tname = "of-cells-widens-an-int-into-a-float-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.FloatType ((WireColumn.Int ((Prims.parse_int "3")))::(WireColumn.Null)::(WireColumn.Float ((Prims.parse_int "4")))::[])) (WireColumn.Good ({col_name = []; col_data = Floats (((Prims.parse_int "3"))::((Prims.parse_int "0"))::((Prims.parse_int "4"))::[], (true)::(false)::(true)::[])}))))})::({tname = "of-cells-refuses-the-first-cell-outside"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.BoolType ((WireColumn.Null)::(WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Bool (true))::[])) (WireColumn.Bad (WireColumn.TypeMismatch ([], WireColumn.BoolType)))))})::({tname = "first-uncarriable-names-the-mask-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_uncarriable_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "1"))::[], [])}) (FStar_Pervasives_Native.Some (WireColumn.LengthMismatch ([])))))})::({tname = "column-json-writes-the-absent-slot-not-the-element"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (column_json_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])}) (WireCanon.JObj ((((WireColumn.values_key), (WireCanon.JArr ((WireCanon.JInt ((Prims.parse_int "0")))::(WireCanon.JInt ((Prims.parse_int "9")))::[]))))::(((WireColumn.validity_key), (WireCanon.JArr ((WireCanon.JBool (false))::(WireCanon.JBool (true))::[]))))::[]))))})::({tname = "of-mask-normalises-an-all-set-mask"; tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (of_mask ((true)::(true)::[])) AllValid) && (Prims.op_Equals (of_mask ((true)::(false)::[])) (Mask ((true)::(false)::[])))) && (Prims.op_Equals (of_mask []) AllValid)))})::({tname = "same-mask-reads-all-valid-as-the-all-true-mask-of-the-length"; tholds = (fun ( uu___  :  unit ) -> ((((same_mask ((())::(())::[]) AllValid (Mask ((true)::(true)::[]))) && (not ((same_mask ((())::(())::[]) AllValid (Mask ((true)::(true)::(true)::[])))))) && (not ((same_mask ((())::(())::[]) (Mask ((true)::(false)::[])) AllValid)))) && (Prims.op_Equals (to_mask ((())::(())::[]) AllValid) ((true)::(true)::[]))))})::({tname = "data-eq-ignores-an-absent-element"; tholds = (fun ( uu___  :  unit ) -> ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (false)::(true)::[]))) && (not ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (true)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (true)::(true)::[])))))))})::[]
 
 
 
