@@ -63,7 +63,7 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 (D66) and whose own generated census lists them; every family here ships from
 `Fuaran.Core.Conformance`.
 
-96 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
+98 families, across `Conformance`, `EncodingProfileVectors`, `FoldConfluence`, `ParityVectors`, `StoredIdentity`, `StringEscapeVectors`, `WireNullTolerance`, from `Fuaran.Core.Conformance`.
 
 | Family | Package | Run by | Why opt-in | Witness | Discharges | Cases | Adequacy | Refusal |
 |---|---|---|---|---|---|---|---|---|
@@ -85,6 +85,8 @@ The families that read the dataframe layer ship from `Fuaran.Core.DataFrame.Conf
 | `Conformance.changeLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `NodeWitness`, `IdWitness`, `OpGen` | — | 1600 | `guarded-reached` | `none` |
 | `Conformance.checkpointLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 900 | `guarded-reached` | `drawn` |
 | `Conformance.codecInjectivityLaws` | `Fuaran.Core.Conformance` | opt-in | `stronger-promise` | `StreamWitness`, `StreamGen` | — | 600 | `unconditional` | `none` |
+| `Conformance.columnOwnershipLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 200 | `unconditional` | `none` |
+| `Conformance.columnOwnershipLawsWith` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 200 | `unconditional` | `none` |
 | `Conformance.columnVectorLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 600 | `unconditional` | `none` |
 | `Conformance.columnarValidatorLaws` | `Fuaran.Core.Conformance` | opt-in | `seam-not-every-domain-has` | — | — | 400 | `guarded-reached` | `drawn` |
 | `Conformance.compositionLawsAt` | `Fuaran.Core.Conformance` | opt-in | `needs-witness-capability` | `ArtifactWitness` | — | 800 | `unconditional` | `none` |

@@ -129,7 +129,8 @@ module Vector =
     /// A vector that TAKES OWNERSHIP of `xs` without copying (Phase 418). The caller promises not
     /// to read or write `xs` again: from this call the array is the vector's, and a write through
     /// the caller's reference would change a value every holder of the vector sees. The zero-copy
-    /// route for an array the caller has just built and will not keep.
+    /// route for an array the caller has just built and will not keep. A broken promise here is
+    /// invisible to the type; `Conformance.columnOwnershipLaws` is the check that names it.
     let adopt (xs: 'T[]) : Vector<'T> = Vector<'T>(xs, 0, xs.Length)
 
     /// A vector of the list's elements, in order.
@@ -243,7 +244,10 @@ module Vector =
             }
 
         /// Lend the backing array. The borrower promises not to write through it: the vector is
-        /// immutable by contract, not by copy, and a write here is visible to everyone holding it.
+        /// immutable by contract, not by copy, and a write here is visible to everyone holding it —
+        /// past the vector's own range too, into a neighbouring view of the same array. A consumer
+        /// that borrows proves its pipeline keeps the promise with `Conformance.columnOwnershipLaws`,
+        /// which fingerprints every column before and after and names the one whose bytes moved.
         let borrow (v: Vector<'T>) : Borrowed<'T> =
             { Array = v.Items
               Offset = v.Offset

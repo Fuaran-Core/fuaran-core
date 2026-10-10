@@ -1,7 +1,8 @@
 namespace Fuaran.Core
 
 /// The columnar layer's seam families: the aggregate null-skip (Phase 36) and the columnar validator
-/// (Phase 37) — `SeamLaws` until the Phase 388 split along its banners.
+/// (Phase 37) — `SeamLaws` until the Phase 388 split along its banners — then the typed column
+/// (Phase 417) and its ownership contract (Phase 418).
 module internal ColumnarSeamLaws =
     // ---- aggregate null-skip (Phase 36; split by Phase 257) ----
     // The `Column.aggregate` half of what was `aggregateParityLaws`. The parity half compares the
@@ -531,3 +532,176 @@ module internal ColumnarSeamLaws =
             reads.Check(agree, fun () -> at "a Vector read disagreed with the indexer"))
 
         LawKit.results [ equality; bridge; reads ]
+
+    // ---- the ownership contract (Phase 418) ----
+    // A `Vector` is immutable by contract, not by copy: two holders of one column share its storage,
+    // `Vector.adopt` hands the caller's array to the vector without a copy, and `Vector.Unsafe.borrow`
+    // lends the backing array to interop. No public member of `Vector` writes, so a write can reach a
+    // vector's storage only through a broken promise — an adopted array written by the caller who gave
+    // it away, or a borrowed one written by the borrower. The type cannot see either, so this family
+    // does: it fingerprints every column it hands an operation, runs the operation, fingerprints them
+    // again, and names the column whose bytes moved. The kit is compiled on both pipelines, so the
+    // fingerprint is built from shifts, masks and code units only, and reads the same under Fable.
+
+    /// Four big-endian bytes of `n`.
+    let private putInt (buf: ResizeArray<byte>) (n: int) =
+        buf.Add(byte ((n >>> 24) &&& 0xFF))
+        buf.Add(byte ((n >>> 16) &&& 0xFF))
+        buf.Add(byte ((n >>> 8) &&& 0xFF))
+        buf.Add(byte (n &&& 0xFF))
+
+    /// A string as its length and its UTF-16 code units, two bytes each — total over every string,
+    /// an unpaired surrogate included, where a UTF-8 encoding would replace one and could not tell
+    /// two of them apart.
+    let private putString (buf: ResizeArray<byte>) (s: string) =
+        putInt buf s.Length
+
+        for ch in s do
+            let u = int ch
+            buf.Add(byte ((u >>> 8) &&& 0xFF))
+            buf.Add(byte (u &&& 0xFF))
+
+    /// A float by its canonical text (`Canon.canonicalFloat`, the shortest round-trip form), with the
+    /// sign of zero kept: a write of `-0.0` over `0.0` is a write, though the two are one cell. Every
+    /// NaN is one text, because the payload of a NaN is not portable — a JavaScript engine may
+    /// canonicalise it on any store — so a write of one NaN over another is the one write this
+    /// fingerprint does not see.
+    let private putFloat (buf: ResizeArray<byte>) (f: float) =
+        putString
+            buf
+            (if System.Double.IsNaN f then "NaN"
+             elif System.Double.IsPositiveInfinity f then "Inf"
+             elif System.Double.IsNegativeInfinity f then "-Inf"
+             elif f = 0.0 then (if 1.0 / f < 0.0 then "-0" else "0")
+             else Canon.canonicalFloat f)
+
+    let private putBool (buf: ResizeArray<byte>) (b: bool) = buf.Add(if b then 1uy else 0uy)
+
+    /// The SHA-256 of a vector's length and EVERY element in its range, read through its own
+    /// indexer — an element under an absent row included, because the backing array is shared and a
+    /// write under one column's absent row is a write into a value another holder may present.
+    let private vectorDigest (put: ResizeArray<byte> -> 'T -> unit) (v: Vector<'T>) : string =
+        let buf = ResizeArray<byte>()
+        putInt buf v.Length
+
+        for i in 0 .. v.Length - 1 do
+            put buf v[i]
+
+        Hash.sha256HexOfBytes (buf.ToArray())
+
+    /// A column's fingerprint at one moment: the digest of its values and the digest of its mask.
+    let private fingerprint (c: Column) : string * string =
+        let values =
+            match c.Data with
+            | Ints(xs, _) -> vectorDigest putInt xs
+            | Floats(xs, _) -> vectorDigest putFloat xs
+            | Bools(xs, _) -> vectorDigest putBool xs
+            | Strs(xs, _)
+            | Dates(xs, _)
+            | Timestamps(xs, _)
+            | Decimals(xs, _) -> vectorDigest putString xs
+
+        values, vectorDigest putBool (Column.validity c)
+
+    /// The ownership law over the columns `draw` builds (Phase 418): every column is fingerprinted
+    /// as it is drawn, `operation` is run over the list, and every column is fingerprinted again; a
+    /// column whose values or mask hash differently afterwards is named — its position, its name and
+    /// its type — with the part that moved, and every other column that moved in the same run beside
+    /// it. One assertion per column, so a `draw` that builds no column takes no evidence and the law
+    /// reds as never reached rather than passing over nothing. An exception `operation` raises
+    /// propagates: the law reads only what the operation leaves behind.
+    let columnOwnershipLawsWith
+        (operation: Column list -> unit)
+        (draw: ConfRng.T -> Column list * ConfRng.T)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        let untouched =
+            LawKit.LawCell
+                "the operation writes into no column it is handed: every column's values and mask hash after it as they did when it was built"
+
+        LawKit.run iterations seed (fun rng _ at ->
+            let columns = rng.Draw draw
+            let before = List.map fingerprint columns
+            operation columns
+            let after = List.map fingerprint columns
+
+            let moved =
+                List.zip columns (List.zip before after)
+                |> List.indexed
+                |> List.choose (fun (i, (c, ((v0, m0), (v1, m1)))) ->
+                    let parts =
+                        [ if v0 <> v1 then
+                              yield "values"
+                          if m0 <> m1 then
+                              yield "validity mask" ]
+
+                    if List.isEmpty parts then
+                        None
+                    else
+                        Some(
+                            i,
+                            sprintf
+                                "column %d \"%s\" (%s): the bytes of its %s moved"
+                                i
+                                c.Name
+                                (ColumnType.tag c.Type)
+                                (String.concat " and " parts)
+                        ))
+
+            let report () =
+                at (
+                    "the operation wrote into storage it was handed — "
+                    + (moved |> List.map snd |> String.concat "; ")
+                )
+
+            for i in 0 .. List.length columns - 1 do
+                untouched.Check(not (List.exists (fun (j, _) -> j = i) moved), report))
+
+        LawKit.results [ untouched ]
+
+    /// The kit's own sample for the ownership law (Phase 418), every column one length: a column of
+    /// each of the seven types over an adopted array, nulls drawn; and two float columns that are
+    /// ADJACENT VIEWS of one backing array, their masks adjacent views of one mask array — so a write
+    /// that runs past one column's range lands in its neighbour's, and a write through either is one
+    /// the other's holder sees.
+    let private ownershipSample (r: ConfRng.T) : Column list * ConfRng.T =
+        let rng = LawKit.Draws 0
+        rng.State <- r
+        let n = 1 + rng.IntBelow 6
+
+        let mask () =
+            Array.init n (fun _ -> rng.IntBelow 4 <> 0)
+
+        let pick (xs: 'T[]) = xs[rng.IntBelow xs.Length]
+
+        let floats = [| 0.0; -0.0; nan; 1.5; -2.0; 1e300; 0.1; infinity |]
+        // An unpaired surrogate is built from its code unit: a `\u` escape of one in a string literal
+        // compiles as U+FFFD.
+        let texts = [| ""; "a"; "é"; string (char 0xD800) |]
+        let decimals = [| "0"; "1.5"; "-0.3"; "12.25" |]
+        let dates = [| "2026-01-01"; "1999-12-31" |]
+        let instants = [| "2026-01-01T00:00:00Z"; "2026-06-22T17:00:00Z" |]
+
+        let shared = Vector.adopt (Array.init (2 * n) (fun _ -> pick floats))
+        let sharedMask = Vector.adopt (Array.init (2 * n) (fun _ -> rng.IntBelow 4 <> 0))
+        let own (xs: 'T[]) = Vector.adopt xs
+
+        let columns =
+            [ Column.ofInts "i" (own (Array.init n (fun _ -> rng.IntBelow 9 - 4))) (own (mask ()))
+              Column.ofFloats "f" (Vector.slice 0 n shared) (Vector.slice 0 n sharedMask)
+              Column.ofFloats "g" (Vector.slice n n shared) (Vector.slice n n sharedMask)
+              Column.ofBools "b" (own (Array.init n (fun _ -> rng.IntBelow 2 = 0))) (own (mask ()))
+              Column.ofStrs "s" (own (Array.init n (fun _ -> pick texts))) (own (mask ()))
+              Column.ofDates "d" (own (Array.init n (fun _ -> pick dates))) (own (mask ()))
+              Column.ofTimestamps "t" (own (Array.init n (fun _ -> pick instants))) (own (mask ()))
+              Column.ofDecimals "m" (own (Array.init n (fun _ -> pick decimals))) (own (mask ())) ]
+
+        columns, rng.State
+
+    /// The ownership law (Phase 418) over the kit's own sample — a column of every type, nulls drawn,
+    /// and two columns sharing one backing array and one mask array — with `operation` the
+    /// consumer's pipeline, handed the columns as a list. `columnOwnershipLawsWith` is the same law
+    /// over columns the consumer draws itself, for a pipeline that wants a schema of its own.
+    let columnOwnershipLaws (operation: Column list -> unit) (seed: int) (iterations: int) : LawResult list =
+        columnOwnershipLawsWith operation ownershipSample seed iterations

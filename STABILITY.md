@@ -453,11 +453,36 @@ are **conformance-certified**, not asserted. Stable surfaces:
   `Conformance.columnVectorLaws`; and **a vector never changes after construction** — no public member
   of `Vector` writes, `Vector.ofArray` copies, `Vector.adopt` takes ownership of an array the caller
   promises not to touch again, `Vector.slice` is a view, and `Vector.Unsafe.borrow` is the one route to
-  the backing array, under the rule that the borrower does not write (Phase 418 states the contract in
-  full and adds its law family). What is NOT promised: the storage of `Dates` and `Timestamps` (canonical
+  the backing array, under the rule that the borrower does not write (the next entry states that
+  contract in full). What is NOT promised: the storage of `Dates` and `Timestamps` (canonical
   text in this slot; Phase 422 makes them integers with a unit) and the shape of `Validity` (a
   `Vector<bool>` in this slot; Phase 420 elides it for a null-free column) — both ride the untagged
   `1.0.0` draft and are decided before it is cut, which is why they are named here rather than frozen.
+- **The ownership contract of `Vector` (Phase 418, `1.0.0`)** — the type is the contract, not a
+  convention over arrays. **Guaranteed:** no public member of `Vector<'T>`, of the `Vector` module or
+  of the column layer writes into a vector's storage, so a vector's contents never change after
+  construction except through an array its builder handed over with `Vector.adopt` or one lent by
+  `Vector.Unsafe.borrow`. Every other constructor copies what it is handed (`ofArray`, `ofList`,
+  `ofSeq`, `init`, `map`, `mapi`, `Validity.ofArray`) or builds a fresh array it keeps; `toArray`
+  answers a copy; and `Vector.slice` is a VIEW, the same storage under a new range, never a copy — so
+  two holders of a column, and a column and its slices, share one array, which is what makes a column
+  cheap to pass, slice and cache. **What `adopt` hands the caller:** the zero-copy route from an
+  array it has just built, and the obligation to touch that array no more — from the call the array
+  is the vector's. **What `Unsafe.borrow` hands the caller:** the backing array itself, with the
+  `Offset` and `Length` the vector occupies in it (the array may hold other views' elements outside
+  that range), for interop that needs a raw typed array — and the obligation not to write through it,
+  inside the range or outside it. Both names say so, and so do both doc comments. A broken obligation
+  is invisible to the type, so it is **certified, not assumed**: `Conformance.columnOwnershipLaws`
+  hands a consumer's operation the kit's sample (a column of every type, nulls drawn, two columns
+  that are adjacent views of one array and one mask), and `Conformance.columnOwnershipLawsWith` the
+  columns the consumer draws itself; each fingerprints every column (SHA-256 over every element in
+  its range, an absent row's element included, and over its mask) before the operation and after it,
+  and fails naming the column — position, name, type — whose values or mask moved. Core runs it over
+  its own column reads, and a write through a borrow reds it, on .NET and under Fable (the family is
+  compiled on both pipelines and uses no host-specific API). One write the fingerprint does not see,
+  by design: one NaN over another, because a NaN's payload is not portable across hosts. The contract
+  is NOT an F* theorem — the models carry no mutation — and changing it (a public member that writes,
+  a `slice` that copies, a second route to the backing array) is a **major** bump.
 - **`Query`** — the data-acquisition seam + its invocation key (also `canonicalFloat`-routed) are
   certified by `Conformance.queryLaws`.
 

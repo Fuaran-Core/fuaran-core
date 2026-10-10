@@ -238,6 +238,32 @@
       "refusal": "none"
     },
     {
+      "id": "Conformance.columnOwnershipLaws",
+      "module": "Conformance",
+      "entry": "columnOwnershipLaws",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "200",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
+      "id": "Conformance.columnOwnershipLawsWith",
+      "module": "Conformance",
+      "entry": "columnOwnershipLawsWith",
+      "package": "Fuaran.Core.Conformance",
+      "witness": [],
+      "optIn": true,
+      "reason": "seam-not-every-domain-has",
+      "discharges": [],
+      "cases": "200",
+      "adequacy": "unconditional",
+      "refusal": "none"
+    },
+    {
       "id": "Conformance.columnVectorLaws",
       "module": "Conformance",
       "entry": "columnVectorLaws",

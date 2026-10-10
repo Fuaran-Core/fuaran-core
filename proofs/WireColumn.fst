@@ -2,16 +2,41 @@
    WireColumn — an F* model of the COLUMNAR CODEC, with its image and its round trip as machine-checked
    theorems (fuaran-core Phase 306).
 
-   WHAT IS MODELLED. `src/Fuaran.Core.Column/`, clause for clause: `ColumnType.tag` /
-   `ofTag` / `widens`, `Cell.typeOf`, `DecimalText.tryCanonical` / `isCanonical`, `Table.validate`
-   with its private `firstUncarriableCell`, and `ColumnCodec.encodeJson` / `decodeJson` /
-   `tryEncode` with every private function those three reach (`absentSlot`, `cellJson`,
-   `columnJson`, `schemaJson`, `decodeCell`, `decodeSchemaEntry`, `decodeSchema`, `columnParts`,
-   `decodeColumn`, `uniqueColumnKeys`). The level is the `JVal`: `encodeJson` builds one and
-   `decodeJson` reads one, and everything the codec decides it decides there. The strings either
-   side of it are `Canon.render` and the parser, which `WireCanon.fst` and `JsonParse.fst` already
-   model; section 9 says exactly how far this module's theorems compose with those, and where they
-   stop.
+   WHAT IS MODELLED. `src/Fuaran.Core.Column/` at the LIST LEVEL: a column is its name, its type
+   and its cells, `{ name; ctype; cells }`, and over that column `ColumnType.tag` / `ofTag` /
+   `widens`, `Cell.typeOf`, `DecimalText.tryCanonical` / `isCanonical`, `Table.validate`'s five
+   clauses with the cell scan `firstUncarriableCell` performed before Phase 417, and
+   `ColumnCodec.encodeJson` / `decodeJson` / `tryEncode` with every private function those three
+   reach (`absentSlot`, the cell encoder `cellJson` that `columnJson` applied per cell, `schemaJson`,
+   the cell reader `decodeCell` that `decodeColumn` applied per slot, `decodeSchemaEntry`,
+   `decodeSchema`, `columnParts`, `uniqueColumnKeys`), each clause for clause as the source had
+   it. The level is the `JVal`: `encodeJson` builds one and `decodeJson` reads one, and everything
+   the codec decides it decides there. The strings either side of it are `Canon.render` and the
+   parser, which `WireCanon.fst` and `JsonParse.fst` already model; section 9 says exactly how far
+   this module's theorems compose with those, and where they stop.
+
+   WHAT THE SOURCE IS NOW, AND WHY THE LIST MODEL STANDS (Phase 419). Since Phase 417 a column is
+   NOT a cell list: `Column` holds one typed `Vector` and a validity mask behind the `ColumnData`
+   union, `Table.validate`'s clause (e) scans the typed storage (a mask of the wrong length first,
+   then the case's own scan at the present rows), `columnJson` walks the vector and the mask rather
+   than mapping `cellJson` over cells, and `decodeColumn` fills a typed vector through typed readers
+   rather than building cells. The cells are reached through `Column.toCells`, built through
+   `Column.ofCells`. This module keeps the list form, and `ColumnRefinement.fst` is the bridge that
+   makes its theorems about the code that runs: it models the typed column clause for clause —
+   every `Vector` read through its `toArray`, so the models see CONTENTS and never storage — and
+   proves the map from the typed column to this module's column (name, the case's type, `toCells`)
+   a bijection on the columns `validate` accepts, under which `validate` and `encodeJson` agree
+   (`validate_agrees`, `encode_agrees`), with `ofCells` then `toCells` answering this module's
+   `norm_cells` (`to_cells_of_cells`) and `ofCells` of `toCells` the column itself
+   (`of_cells_to_cells`). Theorems 1 and 2 below are restated there OF THE TYPED COLUMN
+   (`typed_decode_image_is_valid`, `typed_round_trip`), and the widening half of `normal_table` is
+   proved VACUOUS on it (`norm_cells_vacuous`): a typed float or decimal column holds no `Int` to
+   widen, so of the three refutations in section 8 only the column-order one still arises for a
+   typed table, and a typed table in schema order round-trips LITERALLY
+   (`typed_round_trip_in_schema_order`). One consequence for the differential is recorded where it
+   bites: clause (e)'s `TypeMismatch` arm (a present cell outside its column's type) is proved
+   unreachable through the map, so from production it is reached only through clause (c), a column
+   whose type is not its schema entry's.
 
    WHY THE PHASE EXISTS. The source makes two promises in doc comments. `Table.validate`: "Over
    what it accepts, `ColumnCodec.tryEncode` is exactly `Ok (encode src)` … and `ColumnCodec.decode`
