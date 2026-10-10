@@ -62,22 +62,25 @@ module Table =
     /// instant whose second or fraction, the canonical form cannot spell (`MalformedShape`). Read off
     /// the typed storage (Phase 417): a float column is scanned for a non-finite value, a decimal
     /// column for a non-canonical text and a temporal column for an integer out of range, at the
-    /// present rows only; a timestamp column whose fraction vector is not its seconds' length is
-    /// named before any row. A
-    /// cell of another type is not a case any more — the storage cannot hold one — and a mask that
-    /// is not the values' length is named first (`LengthMismatch`), because a column that disagrees
-    /// about its own row count has no rows to read. An `AllValid` column (Phase 420) holds no mask
-    /// and so cannot disagree.
+    /// present rows only, read off the validity with no match per row (Phase 421); a timestamp
+    /// column whose fraction vector is not its seconds' length is named before any row. A cell of
+    /// another type is not a case any more — the storage cannot hold one — and a mask that is not
+    /// the values' length is named first (`LengthMismatch`), because a column that disagrees about
+    /// its own row count has no rows to read. An `AllValid` column (Phase 420) holds no mask and so
+    /// cannot disagree.
     let private firstUncarriableCell (c: Column) : ColumnError option =
-        let rows = Column.validity c
+        let validity = Column.validity c
+        let rows = ColumnStorage.presentRows (Column.length c) validity
 
         let firstPresent (xs: Vector<'T>) (bad: 'T -> bool) : 'T option =
+            let items = xs.Items
+            let offset = xs.Offset
             let mutable found = None
             let mutable i = 0
 
-            while found.IsNone && i < xs.Length do
-                if Validity.isPresent i rows && bad xs[i] then
-                    found <- Some xs[i]
+            while found.IsNone && i < rows.Count do
+                if ColumnStorage.isSet rows i && bad items[offset + i] then
+                    found <- Some items[offset + i]
 
                 i <- i + 1
 
@@ -87,7 +90,7 @@ module Table =
             firstPresent xs (fun s -> not (isCanonical s))
             |> Option.map (fun _ -> MalformedShape(c.Name + ": " + message))
 
-        match rows with
+        match validity with
         | Mask m when m.Length <> Column.length c -> Some(LengthMismatch(c.Name, Column.length c, m.Length))
         | _ ->
             match c.Data with
@@ -132,9 +135,9 @@ module Table =
                     let mutable found = None
                     let mutable i = 0
 
-                    while found.IsNone && i < xs.Length do
+                    while found.IsNone && i < rows.Count do
                         if
-                            Validity.isPresent i rows
+                            ColumnStorage.isSet rows i
                             && not (TemporalText.isInstantInRange u xs[i] (ColumnStorage.fractionAt f i))
                         then
                             found <-
