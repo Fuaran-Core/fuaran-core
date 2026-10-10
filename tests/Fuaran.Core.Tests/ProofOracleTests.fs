@@ -42,6 +42,10 @@ module ModelQuery = Query
 // open.
 module ModelDecimal = DecimalText
 
+// Phase 428 — the unit algebra's model. Aliased for the same reason: production's `Unit` module
+// (`Fuaran.Core.Unit`) is opened below, and the oracle's `Unit` would be shadowed by it.
+module ModelUnit = Unit
+
 // Phase 309 — TWIN EVALUATION. Every extracted model ends with a `twins` list: fixtures that apply
 // the model's own functions to a concrete input and compare the result with the value the model
 // means there, asserted `true` by F*'s NORMALISER (`assert_norm (twins_hold twins == true)` in the
@@ -65,6 +69,7 @@ let twinRoster: (string * (string * (unit -> bool)) list) list =
       "WireVersioning", WireVersioning.twins |> List.map (fun t -> t.tname, t.tholds)
       "WireColumn", WireColumn.twins |> List.map (fun t -> t.tname, t.tholds)
       "ColumnRefinement", ColumnRefinement.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Unit", ModelUnit.twins |> List.map (fun t -> t.tname, t.tholds)
       "Capability", Capability.twins |> List.map (fun t -> t.tname, t.tholds)
       "Propagation", Propagation.twins |> List.map (fun t -> t.tname, t.tholds)
       "Query", Query.twins |> List.map (fun t -> t.tname, t.tholds)
@@ -12012,6 +12017,1043 @@ module private RefinementDiff =
 //  units `int c - int '0'` reads them as, and that `string` on a digit writes the one character
 //  the model's `of_digits` stands for. Neither is modelled; both are what this family measures.
 // ---------------------------------------------------------------------------
+// Phase 428 — the UNIT ALGEBRA beside its model (`proofs/Unit.fst`), and the FIELD CODEC beside
+// its (`proofs/WireColumn.fst`, section 10). The unit model reads a list of symbols over an
+// enumerated ASCII alphabet; the bridge maps a character to its symbol and back, and carries a
+// production unit to the model through its canonical text — so a disagreement about a text is a
+// disagreement about `parse`, never about the bridge.
+// ---------------------------------------------------------------------------
+
+module private UnitDiff =
+
+    /// A character of a unit's text as the model's symbol; anything outside the alphabet is `Other`.
+    let uchOf (c: char) : ModelUnit.uch =
+        match c with
+        | 'a' -> ModelUnit.La
+        | 'b' -> ModelUnit.Lb
+        | 'c' -> ModelUnit.Lc
+        | 'd' -> ModelUnit.Ld
+        | 'e' -> ModelUnit.Le
+        | 'f' -> ModelUnit.Lf
+        | 'g' -> ModelUnit.Lg
+        | 'h' -> ModelUnit.Lh
+        | 'i' -> ModelUnit.Li
+        | 'j' -> ModelUnit.Lj
+        | 'k' -> ModelUnit.Lk
+        | 'l' -> ModelUnit.Ll
+        | 'm' -> ModelUnit.Lm
+        | 'n' -> ModelUnit.Ln
+        | 'o' -> ModelUnit.Lo
+        | 'p' -> ModelUnit.Lp
+        | 'q' -> ModelUnit.Lq
+        | 'r' -> ModelUnit.Lr
+        | 's' -> ModelUnit.Ls
+        | 't' -> ModelUnit.Lt
+        | 'u' -> ModelUnit.Lu
+        | 'v' -> ModelUnit.Lv
+        | 'w' -> ModelUnit.Lw
+        | 'x' -> ModelUnit.Lx
+        | 'y' -> ModelUnit.Ly
+        | 'z' -> ModelUnit.Lz
+        | 'A' -> ModelUnit.UA
+        | 'B' -> ModelUnit.UB
+        | 'C' -> ModelUnit.UC
+        | 'D' -> ModelUnit.UD
+        | 'E' -> ModelUnit.UE
+        | 'F' -> ModelUnit.UF
+        | 'G' -> ModelUnit.UG
+        | 'H' -> ModelUnit.UH
+        | 'I' -> ModelUnit.UI
+        | 'J' -> ModelUnit.UJ
+        | 'K' -> ModelUnit.UK
+        | 'L' -> ModelUnit.UL
+        | 'M' -> ModelUnit.UM
+        | 'N' -> ModelUnit.UN
+        | 'O' -> ModelUnit.UO
+        | 'P' -> ModelUnit.UP
+        | 'Q' -> ModelUnit.UQ
+        | 'R' -> ModelUnit.UR
+        | 'S' -> ModelUnit.US
+        | 'T' -> ModelUnit.UT
+        | 'U' -> ModelUnit.UU
+        | 'V' -> ModelUnit.UV
+        | 'W' -> ModelUnit.UW
+        | 'X' -> ModelUnit.UX
+        | 'Y' -> ModelUnit.UY
+        | 'Z' -> ModelUnit.UZ
+        | '0' -> ModelUnit.D0
+        | '1' -> ModelUnit.D1
+        | '2' -> ModelUnit.D2
+        | '3' -> ModelUnit.D3
+        | '4' -> ModelUnit.D4
+        | '5' -> ModelUnit.D5
+        | '6' -> ModelUnit.D6
+        | '7' -> ModelUnit.D7
+        | '8' -> ModelUnit.D8
+        | '9' -> ModelUnit.D9
+        | '.' -> ModelUnit.Dot
+        | '/' -> ModelUnit.Slash
+        | '(' -> ModelUnit.LPar
+        | ')' -> ModelUnit.RPar
+        | '[' -> ModelUnit.LBr
+        | ']' -> ModelUnit.RBr
+        | '{' -> ModelUnit.LCur
+        | '}' -> ModelUnit.RCur
+        | '%' -> ModelUnit.Pct
+        | '_' -> ModelUnit.Under
+        | ''' -> ModelUnit.Apos
+        | '-' -> ModelUnit.Minus
+        | '+' -> ModelUnit.Plus
+        | '*' -> ModelUnit.Star
+        | '^' -> ModelUnit.Caret
+        | _ -> ModelUnit.Other
+
+    /// The model's symbol as a character; `Other` has none and is written `?`.
+    let charOf (c: ModelUnit.uch) : char =
+        match c with
+        | ModelUnit.La -> 'a'
+        | ModelUnit.Lb -> 'b'
+        | ModelUnit.Lc -> 'c'
+        | ModelUnit.Ld -> 'd'
+        | ModelUnit.Le -> 'e'
+        | ModelUnit.Lf -> 'f'
+        | ModelUnit.Lg -> 'g'
+        | ModelUnit.Lh -> 'h'
+        | ModelUnit.Li -> 'i'
+        | ModelUnit.Lj -> 'j'
+        | ModelUnit.Lk -> 'k'
+        | ModelUnit.Ll -> 'l'
+        | ModelUnit.Lm -> 'm'
+        | ModelUnit.Ln -> 'n'
+        | ModelUnit.Lo -> 'o'
+        | ModelUnit.Lp -> 'p'
+        | ModelUnit.Lq -> 'q'
+        | ModelUnit.Lr -> 'r'
+        | ModelUnit.Ls -> 's'
+        | ModelUnit.Lt -> 't'
+        | ModelUnit.Lu -> 'u'
+        | ModelUnit.Lv -> 'v'
+        | ModelUnit.Lw -> 'w'
+        | ModelUnit.Lx -> 'x'
+        | ModelUnit.Ly -> 'y'
+        | ModelUnit.Lz -> 'z'
+        | ModelUnit.UA -> 'A'
+        | ModelUnit.UB -> 'B'
+        | ModelUnit.UC -> 'C'
+        | ModelUnit.UD -> 'D'
+        | ModelUnit.UE -> 'E'
+        | ModelUnit.UF -> 'F'
+        | ModelUnit.UG -> 'G'
+        | ModelUnit.UH -> 'H'
+        | ModelUnit.UI -> 'I'
+        | ModelUnit.UJ -> 'J'
+        | ModelUnit.UK -> 'K'
+        | ModelUnit.UL -> 'L'
+        | ModelUnit.UM -> 'M'
+        | ModelUnit.UN -> 'N'
+        | ModelUnit.UO -> 'O'
+        | ModelUnit.UP -> 'P'
+        | ModelUnit.UQ -> 'Q'
+        | ModelUnit.UR -> 'R'
+        | ModelUnit.US -> 'S'
+        | ModelUnit.UT -> 'T'
+        | ModelUnit.UU -> 'U'
+        | ModelUnit.UV -> 'V'
+        | ModelUnit.UW -> 'W'
+        | ModelUnit.UX -> 'X'
+        | ModelUnit.UY -> 'Y'
+        | ModelUnit.UZ -> 'Z'
+        | ModelUnit.D0 -> '0'
+        | ModelUnit.D1 -> '1'
+        | ModelUnit.D2 -> '2'
+        | ModelUnit.D3 -> '3'
+        | ModelUnit.D4 -> '4'
+        | ModelUnit.D5 -> '5'
+        | ModelUnit.D6 -> '6'
+        | ModelUnit.D7 -> '7'
+        | ModelUnit.D8 -> '8'
+        | ModelUnit.D9 -> '9'
+        | ModelUnit.Dot -> '.'
+        | ModelUnit.Slash -> '/'
+        | ModelUnit.LPar -> '('
+        | ModelUnit.RPar -> ')'
+        | ModelUnit.LBr -> '['
+        | ModelUnit.RBr -> ']'
+        | ModelUnit.LCur -> '{'
+        | ModelUnit.RCur -> '}'
+        | ModelUnit.Pct -> '%'
+        | ModelUnit.Under -> '_'
+        | ModelUnit.Apos -> '''
+        | ModelUnit.Minus -> '-'
+        | ModelUnit.Plus -> '+'
+        | ModelUnit.Star -> '*'
+        | ModelUnit.Caret -> '^'
+        | ModelUnit.Other -> '?'
+
+    let toText (s: string) : ModelUnit.text = s |> Seq.map uchOf |> List.ofSeq
+
+    let ofText (t: ModelUnit.text) : string =
+        t |> List.map charOf |> Array.ofList |> System.String
+
+    /// Production's unit as the model's, through its canonical text — a refusal here is a real
+    /// defect: the model declines a text production wrote as canonical.
+    let toModel (u: UnitOfMeasure) : ModelUnit.uom =
+        match ModelUnit.parse (toText (Unit.render u)) with
+        | ModelUnit.Ok m -> m
+        | ModelUnit.Refused r -> failtestf "the model refused production's canonical text %s: %A" (Unit.render u) r
+
+    let modelRender (m: ModelUnit.uom) : string = ofText (ModelUnit.render m)
+
+    /// Production's `expected` prose as the model's enumeration — the one place the two spell a
+    /// refusal differently, mapped once.
+    let private expectOf (prose: string) : string =
+        match prose with
+        | "a unit" -> "ExpUnit"
+        | "'}' closing the annotation" -> "ExpCloseAnnotation"
+        | "']' closing the symbol" -> "ExpCloseSymbol"
+        | "the digits of an exponent" -> "ExpExponentDigits"
+        | "an exponent within ±2147483647" -> "ExpExponentRange"
+        | "'.', '/' or the end" -> "ExpSepOrEnd"
+        | "'.', '/' or ')'" -> "ExpSepOrClose"
+        | p when p.StartsWith "')' closing the '(' at " ->
+            "ExpCloseParen " + p.Substring("')' closing the '(' at ".Length)
+        | p -> "<unmapped: " + p + ">"
+
+    let private modelExpect (e: ModelUnit.expect) : string =
+        match e with
+        | ModelUnit.ExpUnit -> "ExpUnit"
+        | ModelUnit.ExpCloseAnnotation -> "ExpCloseAnnotation"
+        | ModelUnit.ExpCloseSymbol -> "ExpCloseSymbol"
+        | ModelUnit.ExpExponentDigits -> "ExpExponentDigits"
+        | ModelUnit.ExpExponentRange -> "ExpExponentRange"
+        | ModelUnit.ExpCloseParen opened -> "ExpCloseParen " + opened.ToString()
+        | ModelUnit.ExpSepOrEnd -> "ExpSepOrEnd"
+        | ModelUnit.ExpSepOrClose -> "ExpSepOrClose"
+
+    /// A refusal as the class, the token, the position and (for `Malformed`) what was expected.
+    let prodRefusal (r: UnitRefusal) : string =
+        let at (case: string) (token: string) (position: int) =
+            case + " '" + token + "' @" + string position
+
+        match r with
+        | UnitRefusal.Empty -> "Empty"
+        | UnitRefusal.Malformed(found, position, expected) ->
+            at "Malformed" found position + " expecting " + expectOf expected
+        | UnitRefusal.UnknownAtom(token, position) -> at "UnknownAtom" token position
+        | UnitRefusal.Annotation(token, position) -> at "Annotation" token position
+        | UnitRefusal.ArbitraryUnit(token, position) -> at "ArbitraryUnit" token position
+        | UnitRefusal.NonRatioUnit(token, position) -> at "NonRatioUnit" token position
+        | UnitRefusal.PrefixNotAllowed(token, position) -> at "PrefixNotAllowed" token position
+        | UnitRefusal.NumericFactor(token, position) -> at "NumericFactor" token position
+
+    /// The model's refusal, its token read back out of the TEXT at the position it names: the
+    /// alphabet carries every character outside it as one `Other`, so the token's spelling is the
+    /// input's, and its position and length are the model's.
+    let modelRefusal (text: string) (r: ModelUnit.refusal) : string =
+        let at (case: string) (token: ModelUnit.text) (position: bigint) =
+            let start = int position
+            let length = min (List.length token) (max 0 (text.Length - start))
+            case + " '" + text.Substring(start, length) + "' @" + position.ToString()
+
+        match r with
+        | ModelUnit.Empty -> "Empty"
+        | ModelUnit.Malformed(found, position, expected) ->
+            at "Malformed" found position + " expecting " + modelExpect expected
+        | ModelUnit.UnknownAtom(token, position) -> at "UnknownAtom" token position
+        | ModelUnit.Annotation(token, position) -> at "Annotation" token position
+        | ModelUnit.ArbitraryUnit(token, position) -> at "ArbitraryUnit" token position
+        | ModelUnit.NonRatioUnit(token, position) -> at "NonRatioUnit" token position
+        | ModelUnit.PrefixNotAllowed(token, position) -> at "PrefixNotAllowed" token position
+        | ModelUnit.NumericFactor(token, position) -> at "NumericFactor" token position
+
+    type Tally =
+        { Texts: int
+          Parsed: int
+          NotCanonical: int
+          Refusals: Set<string>
+          Pairs: int
+          Compatible: int
+          Overflowed: int
+          Reordered: int
+          LiteralLost: int
+          Diffs: string list }
+
+    let empty =
+        { Texts = 0
+          Parsed = 0
+          NotCanonical = 0
+          Refusals = Set.empty
+          Pairs = 0
+          Compatible = 0
+          Overflowed = 0
+          Reordered = 0
+          LiteralLost = 0
+          Diffs = [] }
+
+    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
+                :: t.Diffs }
+
+    /// One text, asked of `Unit.parse` and of the model's: a unit on both sides renders to one text
+    /// and is canonical in the model's sense; a refusal on both sides is one class, token, position
+    /// and expectation.
+    let probeText (label: string) (text: string) (t: Tally) : Tally =
+        let t = { t with Texts = t.Texts + 1 }
+
+        match Unit.parse text, ModelUnit.parse (toText text) with
+        | Ok pu, ModelUnit.Ok mu ->
+            let t = { t with Parsed = t.Parsed + 1 }
+
+            let t =
+                if Unit.render pu = modelRender mu then
+                    t
+                else
+                    diff label ("render of " + text) (Unit.render pu) (modelRender mu) t
+
+            if ModelUnit.canonical mu then
+                t
+            else
+                { t with
+                    NotCanonical = t.NotCanonical + 1 }
+        | Error pr, ModelUnit.Refused mr ->
+            let t =
+                { t with
+                    Refusals = t.Refusals.Add((prodRefusal pr).Split(' ')[0]) }
+
+            if prodRefusal pr = modelRefusal text mr then
+                t
+            else
+                diff label ("refusal of " + text) (prodRefusal pr) (modelRefusal text mr) t
+        | Ok pu, ModelUnit.Refused mr ->
+            diff label ("parse of " + text) ("ok " + Unit.render pu) ("refused " + modelRefusal text mr) t
+        | Error pr, ModelUnit.Ok mu ->
+            diff label ("parse of " + text) ("refused " + prodRefusal pr) ("ok " + modelRender mu) t
+
+    let private prodUnit (f: unit -> UnitOfMeasure) : string =
+        try
+            Unit.render (f ())
+        with :? System.ArgumentException ->
+            "overflow"
+
+    let private modelUnit (r: FStar_Pervasives_Native.option<ModelUnit.uom>) : string =
+        match r with
+        | FStar_Pervasives_Native.Some m -> modelRender m
+        | FStar_Pervasives_Native.None -> "overflow"
+
+    let private prodFactor (a: UnitOfMeasure) (b: UnitOfMeasure) : string =
+        try
+            match Unit.conversionFactor a b with
+            | Ok r -> r.Numerator.ToString() + "/" + r.Denominator.ToString()
+            | Error(UnitConversionRefusal.Incompatible _) -> "incompatible"
+        with :? System.ArgumentException ->
+            "overflow"
+
+    let private modelFactor
+        (r: FStar_Pervasives_Native.option<ModelUnit.result<ModelUnit.rat, ModelUnit.conv_refusal>>)
+        : string =
+        match r with
+        | FStar_Pervasives_Native.Some(ModelUnit.Ok q) -> q.rn.ToString() + "/" + q.rd.ToString()
+        | FStar_Pervasives_Native.Some(ModelUnit.Refused _) -> "incompatible"
+        | FStar_Pervasives_Native.None -> "overflow"
+
+    /// One pair, asked of the algebra on both sides: `mul`, `div`, `pow` (at a drawn exponent, and
+    /// at one that leaves the bound), `compatible` and `conversionFactor`.
+    let probePair (label: string) (a: UnitOfMeasure) (b: UnitOfMeasure) (n: int) (t: Tally) : Tally =
+        let am = toModel a
+        let bm = toModel b
+        let t = { t with Pairs = t.Pairs + 1 }
+
+        let check (what: string) (prod: string) (model: string) (t: Tally) =
+            if prod = model then t else diff label what prod model t
+
+        let t =
+            check "mul" (prodUnit (fun () -> Unit.mul a b)) (modelUnit (ModelUnit.mul am bm)) t
+
+        let t =
+            check "div" (prodUnit (fun () -> Unit.div a b)) (modelUnit (ModelUnit.div am bm)) t
+
+        let t =
+            check (sprintf "pow %d" n) (prodUnit (fun () -> Unit.pow a n)) (modelUnit (ModelUnit.pow am (bigint n))) t
+
+        let big = 1000000000
+        let powBig = prodUnit (fun () -> Unit.pow a big)
+
+        let t =
+            check (sprintf "pow %d" big) powBig (modelUnit (ModelUnit.pow am (bigint big))) t
+
+        let t =
+            if powBig = "overflow" then
+                { t with Overflowed = t.Overflowed + 1 }
+            else
+                t
+
+        let t =
+            check "compatible" (string (Unit.compatible a b)) (string (ModelUnit.compatible am bm)) t
+
+        let t =
+            if Unit.compatible a b then
+                { t with Compatible = t.Compatible + 1 }
+            else
+                t
+
+        let t =
+            check "conversionFactor" (prodFactor a b) (modelFactor (ModelUnit.conversion_factor am bm)) t
+
+        check "conversionFactor reversed" (prodFactor b a) (modelFactor (ModelUnit.conversion_factor bm am)) t
+
+    /// The GO-RED: the canonicaliser that SKIPS THE MERGE. The model's `render` is handed the
+    /// CONCATENATION of the two factor lists where `mul` merges them, and compared with production's
+    /// `render (mul a b)`. It loses on exactly the draws whose concatenation is not already the merge:
+    /// a shared atom (merged into one factor, or cancelled), or an atom of `b` that sorts before one
+    /// of `a` among the numerators or among the denominators. `Reordered` counts those by that
+    /// description, computed here and not by rendering, so the equality below is a claim.
+    let probeConcat (label: string) (a: UnitOfMeasure) (b: UnitOfMeasure) (t: Tally) : Tally =
+        let am = toModel a
+        let bm = toModel b
+        let concat: ModelUnit.uom = { factors = am.factors @ bm.factors }
+
+        let shared =
+            am.factors
+            |> List.exists (fun (x, _) -> bm.factors |> List.exists (fun (y, _) -> x = y))
+
+        let outOfOrder (keep: bigint -> bool) =
+            let ap = am.factors |> List.filter (fun (_, e) -> keep e)
+            let bp = bm.factors |> List.filter (fun (_, e) -> keep e)
+
+            ap
+            |> List.exists (fun (x, _) -> bp |> List.exists (fun (y, _) -> not (ModelUnit.atom_lt x y)))
+
+        let reordered =
+            shared || outOfOrder (fun e -> e > 0I) || outOfOrder (fun e -> e < 0I)
+
+        let t = { t with Pairs = t.Pairs + 1 }
+
+        let t =
+            if reordered then
+                { t with Reordered = t.Reordered + 1 }
+            else
+                t
+
+        match
+            (try
+                Some(Unit.mul a b)
+             with :? System.ArgumentException ->
+                 None)
+        with
+        | None -> t
+        | Some p ->
+            if Unit.render p = modelRender concat then
+                t
+            else
+                { t with
+                    LiteralLost = t.LiteralLost + 1 }
+
+    // ---- the pools ----
+
+    /// The atoms the SOURCE admits, read from `Unit.fs`'s vocabulary table as `(symbol, metric)` —
+    /// as `UnitTests` reads them — so the pool reaches every admitted atom whatever the table holds.
+    let sourceAtoms: (string * bool) list =
+        let row =
+            System.Text.RegularExpressions.Regex(@"^\s+""(?<sym>[^""]+)"", def (?<metric>true|false) ")
+
+        File.ReadAllLines(Snapshots.repoFile "src/Fuaran.Core.Unit/Unit.fs")
+        |> Array.choose (fun l ->
+            let m = row.Match l
+
+            if m.Success then
+                Some(m.Groups["sym"].Value, m.Groups["metric"].Value = "true")
+            else
+                None)
+        |> List.ofArray
+
+    let private prefixes =
+        [| "Y"
+           "Z"
+           "E"
+           "P"
+           "T"
+           "G"
+           "M"
+           "k"
+           "h"
+           "da"
+           "d"
+           "c"
+           "m"
+           "u"
+           "n"
+           "p"
+           "f"
+           "a"
+           "z"
+           "y" |]
+
+    /// Every admitted atom bare, and every metric atom under every prefix (the alias `l` too), as the
+    /// texts production renders them: the pool's floor, before the draws.
+    let atomTexts: string list =
+        let atoms = sourceAtoms @ [ "[GBP]", true; "[USD]", true; "[JPY]", true; "l", true ]
+
+        [ for sym, metric in atoms do
+              yield sym
+
+              if metric then
+                  for p in prefixes do
+                      yield p + sym ]
+
+    /// Drawn units: products of one to three prefixed atoms under exponents in -3..3, as texts the
+    /// shipped parser reads (a prefixed text the parser reads as another atom — `Pa`, `cd` — is kept
+    /// as it reads it). Seeded, so a red names a unit a rerun reproduces.
+    let drawn (seed: int) (count: int) : UnitOfMeasure list =
+        let rng = System.Random(seed)
+
+        let atoms =
+            (sourceAtoms @ [ "[GBP]", true; "[USD]", true; "[JPY]", true ]) |> Array.ofList
+
+        let one () =
+            let sym, metric = atoms[rng.Next atoms.Length]
+
+            let p =
+                if metric && rng.Next 3 = 0 then
+                    prefixes[rng.Next prefixes.Length]
+                else
+                    ""
+
+            let u =
+                match Unit.parse (p + sym) with
+                | Ok u -> u
+                | Error _ ->
+                    match Unit.parse sym with
+                    | Ok u -> u
+                    | Error e -> failtestf "the pool's atom %s does not parse: %A" sym e
+
+            Unit.pow u (rng.Next 7 - 3)
+
+        [ for _ in 1..count ->
+              let k = 1 + rng.Next 3
+              List.init k (fun _ -> one ()) |> List.fold Unit.mul Unit.dimensionless ]
+
+    /// Texts outside the canonical form the parser still reads, and texts it refuses — one per
+    /// refusal class at least, each with the token and position the class names.
+    let corpus: string list =
+        [ "s-1.m"
+          "m.s-1"
+          "ml"
+          "L/l"
+          "kg/(m.s2)"
+          "(m)"
+          "((m/s)/s)"
+          "/min"
+          "m/s/s"
+          "m2.m-2"
+          "1"
+          "1/s"
+          "m.1"
+          "k[GBP]"
+          "[GBP]/h"
+          "m+2"
+          "m-0"
+          "m2147483647"
+          "m-2147483647"
+          ""
+          "m2147483648"
+          "m-"
+          "m+"
+          "{dry}"
+          "m{dry}"
+          "m{dry"
+          "[GBP"
+          "[IU]"
+          "k[IU]"
+          "Cel"
+          "kCel"
+          "B[SPL]"
+          "kmin"
+          "k%"
+          "10*3"
+          "10^-3"
+          "2.m"
+          "xyz"
+          "m)"
+          "(m"
+          "m."
+          ".m"
+          "m//s"
+          "m s"
+          "m,s"
+          "(m.s"
+          "m)s"
+          "[AAA]"
+          "da[GBP]"
+          "mol/L"
+          "[in_i]2/[ft_i]" ]
+
+    /// The whole differential over a seed: every atom text, the corpus, and `count` drawn units, as
+    /// texts and in pairs.
+    let generated (seed: int) (count: int) : Tally =
+        let units = drawn seed count
+        let t = atomTexts |> List.fold (fun t text -> probeText "atom" text t) empty
+        let t = corpus |> List.fold (fun t text -> probeText "corpus" text t) t
+        let t = units |> List.fold (fun t u -> probeText "drawn" (Unit.render u) t) t
+        let rng = System.Random(seed + 1)
+
+        let t =
+            units
+            |> List.pairwise
+            |> List.fold (fun t (a, b) -> probePair "pair" a b (rng.Next 9 - 4) t) t
+
+        // Consecutive draws are rarely compatible, so every unit is also paired with itself scaled
+        // by a per cent — one dimension, factor 100 — which is where the factor's exactness is asked.
+        let percent =
+            match Unit.parse "%" with
+            | Ok u -> u
+            | Error e -> failtestf "the per cent does not parse: %A" e
+
+        units
+        |> List.fold (fun t u -> probePair "scaled" u (Unit.mul u percent) (rng.Next 9 - 4) t) t
+
+    let concatenated (seed: int) (count: int) : Tally =
+        drawn seed count
+        |> List.pairwise
+        |> List.fold (fun t (a, b) -> probeConcat "pair" a b t) empty
+
+// ---------------------------------------------------------------------------
+// Phase 428 — the field codec beside `WireColumn.fst` section 10.
+// ---------------------------------------------------------------------------
+
+module private FieldDiff =
+
+    let host = ColumnDiff.host
+
+    let private toOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> =
+        match o with
+        | Some x -> FStar_Pervasives_Native.Some x
+        | None -> FStar_Pervasives_Native.None
+
+    let private ofOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option =
+        match o with
+        | FStar_Pervasives_Native.Some x -> Some x
+        | FStar_Pervasives_Native.None -> None
+
+    /// Production's field as the model's: the unit through `UnitDiff.toModel`, the extension map in
+    /// the key order `Map.toList` answers. `reverseExt` is the go-red's dial.
+    let toModelFieldWith (reverseExt: bool) (f: Field) : WireColumn.field =
+        let ext = f.Ext |> Map.toList |> List.map (fun (k, v) -> canonToChs k, canonToChs v)
+
+        { fname = canonToChs f.Name
+          fty = ColumnDiff.toModelType f.Type
+          funit = f.Unit |> Option.map UnitDiff.toModel |> toOpt
+          flabel = f.Label |> Option.map canonToChs |> toOpt
+          fdesc = f.Description |> Option.map canonToChs |> toOpt
+          fext = (if reverseExt then List.rev ext else ext) }
+
+    let toModelField (f: Field) : WireColumn.field = toModelFieldWith false f
+
+    /// The model's field as production's — the unit through its canonical text, the extension
+    /// members through `withExt` in the list's order.
+    let ofModelField (f: WireColumn.field) : Field =
+        let unit =
+            match ofOpt f.funit with
+            | Some m ->
+                match Unit.parse (UnitDiff.modelRender m) with
+                | Ok u -> Some u
+                | Error e -> failtestf "production refused the model's unit text %s: %A" (UnitDiff.modelRender m) e
+            | None -> None
+
+        let f0 = Field.create (canonFromChs f.fname) (ColumnDiff.ofModelType f.fty)
+
+        let f1 =
+            (match unit with
+             | Some u -> Field.withUnit u f0
+             | None -> f0)
+
+        let f2 =
+            (match ofOpt f.flabel with
+             | Some l -> Field.withLabel (canonFromChs l) f1
+             | None -> f1)
+
+        let f3 =
+            match ofOpt f.fdesc with
+            | Some d -> Field.withDescription (canonFromChs d) f2
+            | None -> f2
+
+        f.fext
+        |> List.fold (fun g (k, v) -> Field.withExt (canonFromChs k) (canonFromChs v) g) f3
+
+    let showField (f: Field) : string =
+        f.Name
+        + ":"
+        + ColumnType.tag f.Type
+        + (match f.Unit with
+           | Some u -> " unit=" + Unit.render u
+           | None -> "")
+        + (match f.Label with
+           | Some l -> " label=" + l
+           | None -> "")
+        + (match f.Description with
+           | Some d -> " description=" + d
+           | None -> "")
+        + (if f.Ext.IsEmpty then
+               ""
+           else
+               " ext="
+               + (f.Ext |> Map.toList |> List.map (fun (k, v) -> k + "=" + v) |> String.concat ","))
+
+    let private showProdField (r: Result<Field, ColumnError>) : string =
+        match r with
+        | Result.Ok f -> "ok " + showField f
+        | Result.Error e -> "refused " + ColumnDiff.prodClass e
+
+    let private showModelField (r: WireColumn.res<WireColumn.field>) : string =
+        match r with
+        | WireColumn.Good f -> "ok " + showField (ofModelField f)
+        | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+
+    type Tally =
+        { Fields: int
+          WithUnit: int
+          WithExt: int
+          ExtMulti: int
+          Docs: int
+          Refusals: Set<string>
+          Tables: int
+          Valid: int
+          OutsideNormalForm: int
+          LiteralLost: int
+          Diffs: string list }
+
+    let empty =
+        { Fields = 0
+          WithUnit = 0
+          WithExt = 0
+          ExtMulti = 0
+          Docs = 0
+          Refusals = Set.empty
+          Tables = 0
+          Valid = 0
+          OutsideNormalForm = 0
+          LiteralLost = 0
+          Diffs = [] }
+
+    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
+                :: t.Diffs }
+
+    /// One document, asked of `decodeField` and of the model's `decode_field`.
+    let probeDoc (label: string) (el: JVal) (t: Tally) : Tally =
+        let t = { t with Docs = t.Docs + 1 }
+        let prod = ColumnCodec.decodeField el
+        let model = WireColumn.decode_field (canonToModel el)
+
+        let t =
+            match prod with
+            | Result.Error e ->
+                { t with
+                    Refusals = t.Refusals.Add((ColumnDiff.prodClass e).Split(' ')[0]) }
+            | Result.Ok _ -> t
+
+        if showProdField prod = showModelField model then
+            t
+        else
+            diff label "decodeField" (showProdField prod) (showModelField model) t
+
+    /// One field: `fieldJson` beside `field_json` byte for byte, then the document back through
+    /// both readers. `reverseExt` is the go-red: the model handed the extension members reversed.
+    let probeField (reverseExt: bool) (label: string) (f: Field) (t: Tally) : Tally =
+        let t = { t with Fields = t.Fields + 1 }
+
+        let t =
+            if f.Unit.IsSome then
+                { t with WithUnit = t.WithUnit + 1 }
+            else
+                t
+
+        let t =
+            if f.Ext.IsEmpty then
+                t
+            else
+                { t with WithExt = t.WithExt + 1 }
+
+        let t =
+            if f.Ext.Count >= 2 then
+                { t with ExtMulti = t.ExtMulti + 1 }
+            else
+                t
+
+        let prodJson = ColumnCodec.fieldJson f
+        let modelJson = canonOfModel (WireColumn.field_json (toModelFieldWith reverseExt f))
+
+        if reverseExt then
+            if Json.render prodJson = Json.render modelJson then
+                t
+            else
+                { t with
+                    LiteralLost = t.LiteralLost + 1 }
+        else
+            let t =
+                if Json.render prodJson = Json.render modelJson then
+                    t
+                else
+                    diff label "fieldJson" (Json.render prodJson) (Json.render modelJson) t
+
+            probeDoc label prodJson t
+
+    // ---- tables with metadata ----
+
+    let toModelTable (t: Table) : WireColumn.table_f<int, float> =
+        let m = ColumnDiff.toModelTable t
+
+        { fschema = t.Schema |> List.map toModelField
+          fcolumns = m.columns }
+
+    let ofModelTable (m: WireColumn.table_f<int, float>) : Table =
+        let stripped = ColumnDiff.ofModelTable (WireColumn.strip m)
+
+        { stripped with
+            Schema = m.fschema |> List.map ofModelField }
+
+    let showTable (t: Table) : string =
+        (t.Schema |> List.map showField |> String.concat ", ")
+        + " | "
+        + ColumnDiff.showSource (Embedded t)
+
+    let private showProdSource (r: Result<DataSource, ColumnError>) : string =
+        match r with
+        | Result.Ok(Embedded t) -> "ok " + showTable t
+        | Result.Ok(Ref r) -> "ok ref " + r
+        | Result.Error e -> "refused " + ColumnDiff.prodClass e
+
+    let private showModelSource (r: WireColumn.res<WireColumn.data_source_f<int, float>>) : string =
+        match r with
+        | WireColumn.Good(WireColumn.Embedded_f t) -> "ok " + showTable (ofModelTable t)
+        | WireColumn.Good(WireColumn.Ref_f r) -> "ok ref " + canonFromChs r
+        | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+
+    /// One table: `validate`; `encodeJson` beside `encode_json_f`; `decodeJson` of the encoding beside
+    /// `decode_json_f`; and, for a table `validate` accepts, the round trip against the model's
+    /// `normal_table_f` — the columns in schema order, every field intact.
+    let probeTable (label: string) (table: Table) (t: Tally) : Tally =
+        let m = toModelTable table
+        let t = { t with Tables = t.Tables + 1 }
+        let prodValid = Table.validate table
+        let modelValid = WireColumn.validate_f host m
+
+        let prodV =
+            match prodValid with
+            | Result.Ok() -> "ok"
+            | Result.Error e -> "refused " + ColumnDiff.prodClass e
+
+        let modelV =
+            match modelValid with
+            | WireColumn.Good _ -> "ok"
+            | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+
+        let t =
+            if prodV = modelV then
+                t
+            else
+                diff label "validate" prodV modelV t
+
+        let t =
+            (match prodValid with
+             | Result.Ok() -> { t with Valid = t.Valid + 1 }
+             | _ -> t)
+
+        let prodJson = ColumnCodec.encodeJson (Embedded table)
+        let modelJson = WireColumn.encode_json_f host (WireColumn.Embedded_f m)
+
+        let t =
+            if Json.render prodJson = Json.render (canonOfModel modelJson) then
+                t
+            else
+                diff label "encodeJson" (Json.render prodJson) (Json.render (canonOfModel modelJson)) t
+
+        let prodBack = ColumnCodec.decodeJson prodJson
+        let modelBack = WireColumn.decode_json_f host modelJson
+
+        let t =
+            if showProdSource prodBack = showModelSource modelBack then
+                t
+            else
+                diff label "decodeJson (encodeJson t)" (showProdSource prodBack) (showModelSource modelBack) t
+
+        match prodValid with
+        | Result.Error _ -> t
+        | Result.Ok() ->
+            let normal = ofModelTable (WireColumn.normal_table_f host m)
+
+            let t =
+                if showTable normal = showTable table then
+                    t
+                else
+                    { t with
+                        OutsideNormalForm = t.OutsideNormalForm + 1 }
+
+            let expected = "ok " + showTable normal
+
+            if showProdSource prodBack = expected then
+                t
+            else
+                diff label "the round trip" (showProdSource prodBack) expected t
+
+    // ---- the pools ----
+
+    let private words =
+        [| "Revenue"; "payload mass"; "speed, km/h"; "x"; "é"; "a \"quoted\" one"; "" |]
+
+    /// A drawn field: a type the list model spells, a unit from the unit pool or none, a label, a
+    /// description and up to three extension members, each stated or not.
+    let drawnFields (seed: int) (count: int) : Field list =
+        let rng = System.Random(seed)
+        let units = UnitDiff.drawn (seed + 7) 64 |> Array.ofList
+        let names = [| "a"; "b"; "c"; "value"; "k\"q" |]
+
+        [ for i in 1..count ->
+              let f =
+                  Field.create
+                      (names[rng.Next names.Length] + string i)
+                      ColumnDiff.modelTypes[rng.Next ColumnDiff.modelTypes.Length]
+
+              let f =
+                  if rng.Next 2 = 0 then
+                      Field.withUnit units[rng.Next units.Length] f
+                  else
+                      f
+
+              let f =
+                  if rng.Next 2 = 0 then
+                      Field.withLabel words[rng.Next words.Length] f
+                  else
+                      f
+
+              let f =
+                  if rng.Next 2 = 0 then
+                      Field.withDescription words[rng.Next words.Length] f
+                  else
+                      f
+
+              [ 1 .. rng.Next 4 ]
+              |> List.fold
+                  (fun g k ->
+                      Field.withExt (sprintf "vendor.k%d" (k * (1 + rng.Next 3))) words[rng.Next words.Length] g)
+                  f ]
+
+    /// The hand-written documents: what `decodeField` refuses and what it reads past.
+    let handWritten: (string * JVal) list =
+        let entry (members: (string * JVal) list) = JObj members
+        let plain = [ "name", JStr "m"; "type", JStr "float" ]
+
+        [ "plain entry", entry plain
+          "no name", entry [ "type", JStr "int" ]
+          "no type", entry [ "name", JStr "m" ]
+          "unknown type", entry [ "name", JStr "m"; "type", JStr "complex" ]
+          "name not a string", entry [ "name", JInt 1; "type", JStr "int" ]
+          "not an object", JArr []
+          "a unit the kit parses", entry (plain @ [ "unit", JStr "km/h" ])
+          "a unit in non-canonical spelling", entry (plain @ [ "unit", JStr "s-1.m" ])
+          "an aliased unit", entry (plain @ [ "unit", JStr "ml" ])
+          "a unit the kit does not parse", entry (plain @ [ "unit", JStr "furlongs" ])
+          "an annotated unit", entry (plain @ [ "unit", JStr "m{dry}" ])
+          "an empty unit", entry (plain @ [ "unit", JStr "" ])
+          "a unit that is not a string", entry (plain @ [ "unit", JInt 3 ])
+          "a label", entry (plain @ [ "label", JStr "Length" ])
+          "a label that is not a string", entry (plain @ [ "label", JBool true ])
+          "a description", entry (plain @ [ "description", JStr "How far." ])
+          "a description that is not a string", entry (plain @ [ "description", JArr [] ])
+          "extension members", entry (plain @ [ "ext", JObj [ "vendor.b", JStr "2"; "vendor.a", JStr "1" ] ])
+          "an extension member repeated", entry (plain @ [ "ext", JObj [ "k", JStr "1"; "k", JStr "2" ] ])
+          "an extension that is not an object", entry (plain @ [ "ext", JArr [] ])
+          "an extension member that is not a string", entry (plain @ [ "ext", JObj [ "vendor.a", JInt 1 ] ])
+          "an empty extension object", entry (plain @ [ "ext", JObj [] ])
+          "every member",
+          entry (
+              plain
+              @ [ "unit", JStr "kg"
+                  "label", JStr "Mass"
+                  "description", JStr "d"
+                  "ext", JObj [ "x.y", JStr "z" ] ]
+          )
+          "an unknown member, read past", entry (plain @ [ "colour", JStr "red" ])
+          "members out of order", entry [ "unit", JStr "m"; "type", JStr "float"; "name", JStr "m" ] ]
+
+    /// Drawn tables carrying metadata: two or three columns the shipped builders accept (so the
+    /// stripped table is one `validate` accepts), a third with their columns out of schema order.
+    let drawnTables (seed: int) (count: int) : Table list =
+        let rng = System.Random(seed)
+        let fields = drawnFields (seed + 3) (count * 3) |> Array.ofList
+
+        /// The drawn field's metadata on a field of the column's own name, through the builders.
+        let named (name: string) (f: Field) : Field =
+            let g = Field.create name f.Type
+
+            let g =
+                (match f.Unit with
+                 | Some u -> Field.withUnit u g
+                 | None -> g)
+
+            let g =
+                (match f.Label with
+                 | Some l -> Field.withLabel l g
+                 | None -> g)
+
+            let g =
+                (match f.Description with
+                 | Some d -> Field.withDescription d g
+                 | None -> g)
+
+            f.Ext |> Map.toList |> List.fold (fun h (k, v) -> Field.withExt k v h) g
+
+        [ for i in 0 .. count - 1 ->
+              let k = 2 + rng.Next 2
+
+              let schema =
+                  List.init k (fun j -> named (sprintf "c%d" j) fields[(i * 3 + j) % fields.Length])
+
+              let rows = 1 + rng.Next 4
+
+              let columns =
+                  schema
+                  |> List.map (fun f ->
+                      let cells =
+                          List.init rows (fun r ->
+                              if rng.Next 4 = 0 then
+                                  Null
+                              else
+                                  match f.Type with
+                                  | IntType -> Int r
+                                  | FloatType -> Float(float r * 0.5)
+                                  | BoolType -> Bool(r % 2 = 0)
+                                  | StringType -> Str(words[rng.Next words.Length])
+                                  | DateType -> Date "2026-02-28"
+                                  | TimestampType _ -> Timestamp "2026-06-22T17:00:00Z"
+                                  | DecimalType -> Decimal "1.5")
+
+                      match Column.ofCells f.Name f.Type cells with
+                      | Result.Ok c -> c
+                      | Result.Error e -> failtestf "the pool's column %s did not build: %A" f.Name e)
+
+              let columns = if i % 3 = 0 then List.rev columns else columns
+              { Schema = schema; Columns = columns } ]
+
+    let generated (reverseExt: bool) (seed: int) (count: int) : Tally =
+        let t =
+            drawnFields seed count
+            |> List.fold (fun t f -> probeField reverseExt "drawn field" f t) empty
+
+        if reverseExt then
+            t
+        else
+            handWritten |> List.fold (fun t (label, el) -> probeDoc label el t) t
+
+    let generatedTables (seed: int) (count: int) : Tally =
+        drawnTables seed count
+        |> List.fold (fun t table -> probeTable "drawn table" table t) empty
+
+
+// ---------------------------------------------------------------------------
 
 let private decToSyms (s: string) : ModelDecimal.sym list =
     [ for c in s ->
@@ -17336,6 +18378,140 @@ let proofOracleTests =
               Expect.isGreaterThan t.Widened 150 "the pool holds widened draws"
               Expect.isGreaterThan (t.Built - t.Widened) 500 "and draws with nothing to widen"
               Expect.equal t.LiteralLost t.Widened "the literal bridge lost on the widened draws, and on no other"
+
+          // ---- Phase 428: the unit algebra beside Unit.fst, the field codec beside WireColumn.fst §10 ----
+
+          testCase "the unit oracle agrees with Unit.parse and Unit.render over the drawn pool and the refusal corpus"
+          <| fun _ ->
+              // Every admitted atom bare and under every prefix it takes, the corpus (non-canonical
+              // spellings the parser reads, and a text per refusal class), and 600 drawn products;
+              // then 599 drawn pairs through the algebra. Every unit either side answers must be
+              // CANONICAL in the model's sense — the premise `parse_render` is stated over.
+              let t = onBigStack (fun () -> UnitDiff.generated 428 600)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the unit oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.Texts 700 (sprintf "texts asked of both parsers (%d)" t.Texts)
+              Expect.isGreaterThan t.Parsed 650 (sprintf "texts both parsed (%d)" t.Parsed)
+              Expect.equal t.NotCanonical 0 "every unit the shipped parser answers is canonical in the model"
+
+              for cls in
+                  [ "Empty"
+                    "Malformed"
+                    "UnknownAtom"
+                    "Annotation"
+                    "ArbitraryUnit"
+                    "NonRatioUnit"
+                    "PrefixNotAllowed"
+                    "NumericFactor" ] do
+                  Expect.isTrue
+                      (t.Refusals.Contains cls)
+                      (sprintf "the corpus reached a %s refusal (reached: %A)" cls t.Refusals)
+
+          testCase "the unit oracle agrees with mul, div, pow, compatible and conversionFactor over drawn pairs"
+          <| fun _ ->
+              // The same run: `mul`, `div`, `pow` at a drawn exponent and at one past the bound
+              // (production's ArgumentException is the model's None), `compatible`, and the factor
+              // both ways — production's Ratio in lowest terms against the model's reduced pair,
+              // which is where uniqueness of the reduced form, not proved, is held.
+              let t = onBigStack (fun () -> UnitDiff.generated 428 600)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the unit oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.Pairs 1100 (sprintf "pairs asked of the algebra (%d)" t.Pairs)
+
+              Expect.isGreaterThan
+                  t.Compatible
+                  600
+                  (sprintf "compatible pairs, with a factor on both sides (%d)" t.Compatible)
+
+              Expect.isGreaterThan
+                  t.Overflowed
+                  400
+                  (sprintf "pairs where the big power left the bound on both sides (%d)" t.Overflowed)
+
+          testCase "a canonicaliser that skips the merge loses - on exactly the reordered draws"
+          <| fun _ ->
+              // The go-red: the model's `render` handed the CONCATENATION of two factor lists where
+              // `mul` merges them. It loses on exactly the pairs whose concatenation is not already
+              // the merge — a shared atom, or an atom of the second sorting before one of the first
+              // among the numerators or the denominators — and on no other.
+              let t = onBigStack (fun () -> UnitDiff.concatenated 428 600)
+
+              Expect.isGreaterThan
+                  t.Reordered
+                  150
+                  (sprintf "pairs whose concatenation is not the merge (%d)" t.Reordered)
+
+              Expect.isGreaterThan
+                  (t.Pairs - t.Reordered)
+                  50
+                  (sprintf "pairs whose concatenation is the merge (%d)" (t.Pairs - t.Reordered))
+
+              Expect.equal t.LiteralLost t.Reordered "the concatenation lost on the reordered pairs, and on no other"
+
+          testCase
+              "the field oracle agrees with fieldJson and decodeField over drawn fields and the hand-written documents"
+          <| fun _ ->
+              // 800 drawn fields (a unit from the drawn pool or none, a label, a description, up to
+              // three extension members, each stated or not), each written by both and read back by
+              // both; then the hand-written documents — every refusal `decodeField` has, the
+              // non-canonical and aliased unit spellings it reads, and the member it reads past.
+              let t = onBigStack (fun () -> FieldDiff.generated false 4280 800)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the field oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.isGreaterThan t.WithUnit 300 (sprintf "fields stating a unit (%d)" t.WithUnit)
+              Expect.isGreaterThan t.WithExt 400 (sprintf "fields with extension members (%d)" t.WithExt)
+              Expect.equal t.Docs (800 + FieldDiff.handWritten.Length) "every document was read by both"
+
+              for cls in [ "MissingField"; "UnknownType"; "MalformedShape" ] do
+                  Expect.isTrue
+                      (t.Refusals.Contains cls)
+                      (sprintf "the documents reached a %s refusal (reached: %A)" cls t.Refusals)
+
+          testCase
+              "the field codec oracle agrees with encodeJson and decodeJson over tables with metadata, and the round trip keeps every field"
+          <| fun _ ->
+              // 300 drawn tables whose stripped form `validate` accepts, a third with their columns
+              // out of schema order: `validate`, `encodeJson` beside `encode_json_f`, `decodeJson`
+              // beside `decode_json_f`, and the round trip against `normal_table_f` — the columns in
+              // schema order, every field's metadata intact.
+              let t = onBigStack (fun () -> FieldDiff.generatedTables 4281 300)
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the field codec oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              Expect.equal t.Valid t.Tables "every drawn table is one validate accepts"
+
+              Expect.isGreaterThan
+                  t.OutsideNormalForm
+                  60
+                  (sprintf "tables outside the normal form, by column order (%d)" t.OutsideNormalForm)
+
+          testCase
+              "a bridge that drops the extension order loses - on exactly the fields with two or more extension members"
+          <| fun _ ->
+              // The go-red: the model handed the extension members in REVERSED order. Production
+              // holds a map and writes the members in key order, so the documents differ on exactly
+              // the fields with two or more members, and on no other.
+              let t = onBigStack (fun () -> FieldDiff.generated true 4280 800)
+
+              Expect.isGreaterThan t.ExtMulti 200 (sprintf "fields with two or more extension members (%d)" t.ExtMulti)
+
+              Expect.isGreaterThan
+                  (t.Fields - t.ExtMulti)
+                  300
+                  (sprintf "fields with fewer (%d)" (t.Fields - t.ExtMulti))
+
+              Expect.equal t.LiteralLost t.ExtMulti "the reversed bridge lost on those fields, and on no other"
 
           testCase
               "the two-case validity oracle agrees with production: the normalising constructors, toMask, and column equality (Phase 420)"

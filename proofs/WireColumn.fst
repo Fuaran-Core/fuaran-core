@@ -2376,6 +2376,804 @@ let float_column_reads_a_whole_token (#num #flt: eqtype) (h: host num flt) (cn: 
           (ensures decode_cell h cn FloatType (JInt i) == decode_cell h cn FloatType (JFloat f)) = ()
 
 (* ======================================================================================
+   10. THE SCHEMA ENTRY AS A FIELD (Phases 427 and 428).
+
+   Since Phase 427 a schema entry is a `Field`: its name and type, and the metadata that says what
+   the column MEANS — an optional unit (`UnitOfMeasure`, Phase 426's value; `proofs/Unit.fst` is
+   its model), an optional label, an optional description, and an extension map of namespaced keys
+   to strings a host preserves verbatim. `ColumnCodec.fieldJson` writes the entry with each stated
+   member after `name` and `type`, and `decodeField` reads them back — parsing the unit's text and
+   REFUSING a text the kit cannot parse, holding the three text members to strings, and the
+   extension object to string members. `Table.validate` reads a field's name and type and nothing
+   else, so the table model of sections 1 to 9 — `table`, `validate`, `encode_json`, `decode_json`
+   and every theorem over them — stands UNCHANGED as the model of the entry's name-and-type half,
+   and this section is the metadata layer over it:
+
+     - `field`, `field_create`, the `with_*` builders and `has_metadata`, clause for clause with
+       `Field.fs`. The extension map is held as a key-unique association list, in whatever order it
+       arrived: production holds a `Map<string, string>` (key order), and the two are one map.
+     - `field_json` / `decode_field` clause for clause with `ColumnCodec.fieldJson` / `decodeField`;
+       `encode_json_f` / `decode_json_f` are `encodeJson` / `decodeJson` as Phase 427 left them, the
+       schema read as fields and the columns written and read by the entries' names and types.
+     - THE UNIT'S TEXT crosses between this module's alphabet (`ch`, the canonical encoder's) and
+       `Unit.fst`'s (`uch`) through `ch_of_uch` / `uch_of_ch`, which are inverse on every character
+       a canonical unit's text can carry (`uch_ch_inverse`, `unit_text_inverse`).
+
+   THE THEOREMS, restated over fields:
+     - `field_json_plain` / `encode_json_f_plain`: an entry with no metadata encodes EXACTLY as the
+       `(name, type)` entry did — the document is byte for byte the one section 4 writes.
+     - `decode_field_inverts`: for a well-formed field (its unit canonical, its extension keys
+       distinct) `decode_field (field_json f) == Good f` — the metadata survives encode then decode,
+       and the unit survives because `Unit.parse_render` says its text reads back to it.
+     - `round_trip_f`: for every table whose stripped form `validate` accepts and whose fields are
+       well-formed, `decode_json_f (encode_json_f (Embedded_f t))` is `Good (Embedded_f (normal_table_f t))`
+       — the columns in the normal form section 6 defines, EVERY FIELD'S METADATA intact.
+     - `decode_image_f_is_valid`: whatever `decode_json_f` answers `Embedded_f t` for is a table
+       `validate` accepts, as before.
+     - `decode_field_entry`: a field decode that answers is the entry decode of section 5 with
+       metadata on top — the name and type it reads are the ones `decode_schema_entry` reads.
+
+   NOT MODELLED here: the timestamp unit inside `ColumnType` (Phase 422), which is Phase 430's.
+   ====================================================================================== *)
+
+(* ---- the member names, in `WireCanon`'s alphabet, as `name_key` and `type_key` are above ---- *)
+
+let unit_key : list ch = [CLu; CPlain "n"; CPlain "i"; CPlain "t"]
+
+let label_key : list ch = [CPlain "l"; CHexCh HDa; CHexCh HDb; CHexCh HDe; CPlain "l"]
+
+let description_key : list ch =
+  [CHexCh HDd; CHexCh HDe; CPlain "s"; CHexCh HDc; CPlain "r"; CPlain "i"; CPlain "p"; CPlain "t";
+   CPlain "i"; CPlain "o"; CPlain "n"]
+
+let ext_key : list ch = [CHexCh HDe; CPlain "x"; CPlain "t"]
+
+(* ---- the unit's text, between the two alphabets ---- *)
+
+let ch_of_uch (c: Unit.uch) : Tot ch =
+  match c with
+  | Unit.La -> CHexCh HDa
+  | Unit.Lb -> CHexCh HDb
+  | Unit.Lc -> CHexCh HDc
+  | Unit.Ld -> CHexCh HDd
+  | Unit.Le -> CHexCh HDe
+  | Unit.Lf -> CHexCh HDf
+  | Unit.Lg -> CPlain "g"
+  | Unit.Lh -> CPlain "h"
+  | Unit.Li -> CPlain "i"
+  | Unit.Lj -> CPlain "j"
+  | Unit.Lk -> CPlain "k"
+  | Unit.Ll -> CPlain "l"
+  | Unit.Lm -> CPlain "m"
+  | Unit.Ln -> CPlain "n"
+  | Unit.Lo -> CPlain "o"
+  | Unit.Lp -> CPlain "p"
+  | Unit.Lq -> CPlain "q"
+  | Unit.Lr -> CPlain "r"
+  | Unit.Ls -> CPlain "s"
+  | Unit.Lt -> CPlain "t"
+  | Unit.Lu -> CLu
+  | Unit.Lv -> CPlain "v"
+  | Unit.Lw -> CPlain "w"
+  | Unit.Lx -> CPlain "x"
+  | Unit.Ly -> CPlain "y"
+  | Unit.Lz -> CPlain "z"
+  | Unit.UA -> CPlain "A"
+  | Unit.UB -> CPlain "B"
+  | Unit.UC -> CPlain "C"
+  | Unit.UD -> CPlain "D"
+  | Unit.UE -> CUpE
+  | Unit.UF -> CPlain "F"
+  | Unit.UG -> CPlain "G"
+  | Unit.UH -> CPlain "H"
+  | Unit.UI -> CPlain "I"
+  | Unit.UJ -> CPlain "J"
+  | Unit.UK -> CPlain "K"
+  | Unit.UL -> CPlain "L"
+  | Unit.UM -> CPlain "M"
+  | Unit.UN -> CPlain "N"
+  | Unit.UO -> CPlain "O"
+  | Unit.UP -> CPlain "P"
+  | Unit.UQ -> CPlain "Q"
+  | Unit.UR -> CPlain "R"
+  | Unit.US -> CPlain "S"
+  | Unit.UT -> CPlain "T"
+  | Unit.UU -> CPlain "U"
+  | Unit.UV -> CPlain "V"
+  | Unit.UW -> CPlain "W"
+  | Unit.UX -> CPlain "X"
+  | Unit.UY -> CPlain "Y"
+  | Unit.UZ -> CPlain "Z"
+  | Unit.D0 -> CHexCh HD0
+  | Unit.D1 -> CHexCh HD1
+  | Unit.D2 -> CHexCh HD2
+  | Unit.D3 -> CHexCh HD3
+  | Unit.D4 -> CHexCh HD4
+  | Unit.D5 -> CHexCh HD5
+  | Unit.D6 -> CHexCh HD6
+  | Unit.D7 -> CHexCh HD7
+  | Unit.D8 -> CHexCh HD8
+  | Unit.D9 -> CHexCh HD9
+  | Unit.Dot -> CDot
+  | Unit.Slash -> CPlain "/"
+  | Unit.LPar -> CPlain "("
+  | Unit.RPar -> CPlain ")"
+  | Unit.LBr -> CLBrack
+  | Unit.RBr -> CRBrack
+  | Unit.LCur -> CLBrace
+  | Unit.RCur -> CRBrace
+  | Unit.Pct -> CPlain "%"
+  | Unit.Under -> CPlain "_"
+  | Unit.Apos -> CPlain "'"
+  | Unit.Minus -> CMinus
+  | Unit.Plus -> CPlus
+  | Unit.Star -> CPlain "*"
+  | Unit.Caret -> CPlain "^"
+  | Unit.Other -> CPlain "?"
+
+let uch_of_plain (s: string) : Tot Unit.uch =
+  if s = "g" then Unit.Lg
+  else if s = "h" then Unit.Lh
+  else if s = "i" then Unit.Li
+  else if s = "j" then Unit.Lj
+  else if s = "k" then Unit.Lk
+  else if s = "l" then Unit.Ll
+  else if s = "m" then Unit.Lm
+  else if s = "n" then Unit.Ln
+  else if s = "o" then Unit.Lo
+  else if s = "p" then Unit.Lp
+  else if s = "q" then Unit.Lq
+  else if s = "r" then Unit.Lr
+  else if s = "s" then Unit.Ls
+  else if s = "t" then Unit.Lt
+  else if s = "v" then Unit.Lv
+  else if s = "w" then Unit.Lw
+  else if s = "x" then Unit.Lx
+  else if s = "y" then Unit.Ly
+  else if s = "z" then Unit.Lz
+  else if s = "A" then Unit.UA
+  else if s = "B" then Unit.UB
+  else if s = "C" then Unit.UC
+  else if s = "D" then Unit.UD
+  else if s = "F" then Unit.UF
+  else if s = "G" then Unit.UG
+  else if s = "H" then Unit.UH
+  else if s = "I" then Unit.UI
+  else if s = "J" then Unit.UJ
+  else if s = "K" then Unit.UK
+  else if s = "L" then Unit.UL
+  else if s = "M" then Unit.UM
+  else if s = "N" then Unit.UN
+  else if s = "O" then Unit.UO
+  else if s = "P" then Unit.UP
+  else if s = "Q" then Unit.UQ
+  else if s = "R" then Unit.UR
+  else if s = "S" then Unit.US
+  else if s = "T" then Unit.UT
+  else if s = "U" then Unit.UU
+  else if s = "V" then Unit.UV
+  else if s = "W" then Unit.UW
+  else if s = "X" then Unit.UX
+  else if s = "Y" then Unit.UY
+  else if s = "Z" then Unit.UZ
+  else if s = "/" then Unit.Slash
+  else if s = "(" then Unit.LPar
+  else if s = ")" then Unit.RPar
+  else if s = "%" then Unit.Pct
+  else if s = "_" then Unit.Under
+  else if s = "'" then Unit.Apos
+  else if s = "*" then Unit.Star
+  else if s = "^" then Unit.Caret
+  else Unit.Other
+
+let uch_of_ch (c: ch) : Tot Unit.uch =
+  match c with
+  | CHexCh d -> (match d with
+      HD0 -> Unit.D0 | HD1 -> Unit.D1 | HD2 -> Unit.D2 | HD3 -> Unit.D3 | HD4 -> Unit.D4 | HD5 -> Unit.D5 | HD6 -> Unit.D6 | HD7 -> Unit.D7 | HD8 -> Unit.D8 | HD9 -> Unit.D9 | HDa -> Unit.La | HDb -> Unit.Lb | HDc -> Unit.Lc | HDd -> Unit.Ld | HDe -> Unit.Le | HDf -> Unit.Lf)
+  | CLu -> Unit.Lu | CUpE -> Unit.UE | CDot -> Unit.Dot | CMinus -> Unit.Minus | CPlus -> Unit.Plus
+  | CLBrack -> Unit.LBr | CRBrack -> Unit.RBr | CLBrace -> Unit.LCur | CRBrace -> Unit.RCur
+  | CPlain s -> uch_of_plain s
+  | _ -> Unit.Other
+
+[@@ noextract_to "FSharp"]
+let uch_ch_inverse (c: Unit.uch) : Lemma (requires c <> Unit.Other) (ensures uch_of_ch (ch_of_uch c) == c) =
+  match c with
+  | Unit.La -> assert_norm (uch_of_ch (ch_of_uch Unit.La) == Unit.La)
+  | Unit.Lb -> assert_norm (uch_of_ch (ch_of_uch Unit.Lb) == Unit.Lb)
+  | Unit.Lc -> assert_norm (uch_of_ch (ch_of_uch Unit.Lc) == Unit.Lc)
+  | Unit.Ld -> assert_norm (uch_of_ch (ch_of_uch Unit.Ld) == Unit.Ld)
+  | Unit.Le -> assert_norm (uch_of_ch (ch_of_uch Unit.Le) == Unit.Le)
+  | Unit.Lf -> assert_norm (uch_of_ch (ch_of_uch Unit.Lf) == Unit.Lf)
+  | Unit.Lg -> assert_norm (uch_of_ch (ch_of_uch Unit.Lg) == Unit.Lg)
+  | Unit.Lh -> assert_norm (uch_of_ch (ch_of_uch Unit.Lh) == Unit.Lh)
+  | Unit.Li -> assert_norm (uch_of_ch (ch_of_uch Unit.Li) == Unit.Li)
+  | Unit.Lj -> assert_norm (uch_of_ch (ch_of_uch Unit.Lj) == Unit.Lj)
+  | Unit.Lk -> assert_norm (uch_of_ch (ch_of_uch Unit.Lk) == Unit.Lk)
+  | Unit.Ll -> assert_norm (uch_of_ch (ch_of_uch Unit.Ll) == Unit.Ll)
+  | Unit.Lm -> assert_norm (uch_of_ch (ch_of_uch Unit.Lm) == Unit.Lm)
+  | Unit.Ln -> assert_norm (uch_of_ch (ch_of_uch Unit.Ln) == Unit.Ln)
+  | Unit.Lo -> assert_norm (uch_of_ch (ch_of_uch Unit.Lo) == Unit.Lo)
+  | Unit.Lp -> assert_norm (uch_of_ch (ch_of_uch Unit.Lp) == Unit.Lp)
+  | Unit.Lq -> assert_norm (uch_of_ch (ch_of_uch Unit.Lq) == Unit.Lq)
+  | Unit.Lr -> assert_norm (uch_of_ch (ch_of_uch Unit.Lr) == Unit.Lr)
+  | Unit.Ls -> assert_norm (uch_of_ch (ch_of_uch Unit.Ls) == Unit.Ls)
+  | Unit.Lt -> assert_norm (uch_of_ch (ch_of_uch Unit.Lt) == Unit.Lt)
+  | Unit.Lu -> assert_norm (uch_of_ch (ch_of_uch Unit.Lu) == Unit.Lu)
+  | Unit.Lv -> assert_norm (uch_of_ch (ch_of_uch Unit.Lv) == Unit.Lv)
+  | Unit.Lw -> assert_norm (uch_of_ch (ch_of_uch Unit.Lw) == Unit.Lw)
+  | Unit.Lx -> assert_norm (uch_of_ch (ch_of_uch Unit.Lx) == Unit.Lx)
+  | Unit.Ly -> assert_norm (uch_of_ch (ch_of_uch Unit.Ly) == Unit.Ly)
+  | Unit.Lz -> assert_norm (uch_of_ch (ch_of_uch Unit.Lz) == Unit.Lz)
+  | Unit.UA -> assert_norm (uch_of_ch (ch_of_uch Unit.UA) == Unit.UA)
+  | Unit.UB -> assert_norm (uch_of_ch (ch_of_uch Unit.UB) == Unit.UB)
+  | Unit.UC -> assert_norm (uch_of_ch (ch_of_uch Unit.UC) == Unit.UC)
+  | Unit.UD -> assert_norm (uch_of_ch (ch_of_uch Unit.UD) == Unit.UD)
+  | Unit.UE -> assert_norm (uch_of_ch (ch_of_uch Unit.UE) == Unit.UE)
+  | Unit.UF -> assert_norm (uch_of_ch (ch_of_uch Unit.UF) == Unit.UF)
+  | Unit.UG -> assert_norm (uch_of_ch (ch_of_uch Unit.UG) == Unit.UG)
+  | Unit.UH -> assert_norm (uch_of_ch (ch_of_uch Unit.UH) == Unit.UH)
+  | Unit.UI -> assert_norm (uch_of_ch (ch_of_uch Unit.UI) == Unit.UI)
+  | Unit.UJ -> assert_norm (uch_of_ch (ch_of_uch Unit.UJ) == Unit.UJ)
+  | Unit.UK -> assert_norm (uch_of_ch (ch_of_uch Unit.UK) == Unit.UK)
+  | Unit.UL -> assert_norm (uch_of_ch (ch_of_uch Unit.UL) == Unit.UL)
+  | Unit.UM -> assert_norm (uch_of_ch (ch_of_uch Unit.UM) == Unit.UM)
+  | Unit.UN -> assert_norm (uch_of_ch (ch_of_uch Unit.UN) == Unit.UN)
+  | Unit.UO -> assert_norm (uch_of_ch (ch_of_uch Unit.UO) == Unit.UO)
+  | Unit.UP -> assert_norm (uch_of_ch (ch_of_uch Unit.UP) == Unit.UP)
+  | Unit.UQ -> assert_norm (uch_of_ch (ch_of_uch Unit.UQ) == Unit.UQ)
+  | Unit.UR -> assert_norm (uch_of_ch (ch_of_uch Unit.UR) == Unit.UR)
+  | Unit.US -> assert_norm (uch_of_ch (ch_of_uch Unit.US) == Unit.US)
+  | Unit.UT -> assert_norm (uch_of_ch (ch_of_uch Unit.UT) == Unit.UT)
+  | Unit.UU -> assert_norm (uch_of_ch (ch_of_uch Unit.UU) == Unit.UU)
+  | Unit.UV -> assert_norm (uch_of_ch (ch_of_uch Unit.UV) == Unit.UV)
+  | Unit.UW -> assert_norm (uch_of_ch (ch_of_uch Unit.UW) == Unit.UW)
+  | Unit.UX -> assert_norm (uch_of_ch (ch_of_uch Unit.UX) == Unit.UX)
+  | Unit.UY -> assert_norm (uch_of_ch (ch_of_uch Unit.UY) == Unit.UY)
+  | Unit.UZ -> assert_norm (uch_of_ch (ch_of_uch Unit.UZ) == Unit.UZ)
+  | Unit.D0 -> assert_norm (uch_of_ch (ch_of_uch Unit.D0) == Unit.D0)
+  | Unit.D1 -> assert_norm (uch_of_ch (ch_of_uch Unit.D1) == Unit.D1)
+  | Unit.D2 -> assert_norm (uch_of_ch (ch_of_uch Unit.D2) == Unit.D2)
+  | Unit.D3 -> assert_norm (uch_of_ch (ch_of_uch Unit.D3) == Unit.D3)
+  | Unit.D4 -> assert_norm (uch_of_ch (ch_of_uch Unit.D4) == Unit.D4)
+  | Unit.D5 -> assert_norm (uch_of_ch (ch_of_uch Unit.D5) == Unit.D5)
+  | Unit.D6 -> assert_norm (uch_of_ch (ch_of_uch Unit.D6) == Unit.D6)
+  | Unit.D7 -> assert_norm (uch_of_ch (ch_of_uch Unit.D7) == Unit.D7)
+  | Unit.D8 -> assert_norm (uch_of_ch (ch_of_uch Unit.D8) == Unit.D8)
+  | Unit.D9 -> assert_norm (uch_of_ch (ch_of_uch Unit.D9) == Unit.D9)
+  | Unit.Dot -> assert_norm (uch_of_ch (ch_of_uch Unit.Dot) == Unit.Dot)
+  | Unit.Slash -> assert_norm (uch_of_ch (ch_of_uch Unit.Slash) == Unit.Slash)
+  | Unit.LPar -> assert_norm (uch_of_ch (ch_of_uch Unit.LPar) == Unit.LPar)
+  | Unit.RPar -> assert_norm (uch_of_ch (ch_of_uch Unit.RPar) == Unit.RPar)
+  | Unit.LBr -> assert_norm (uch_of_ch (ch_of_uch Unit.LBr) == Unit.LBr)
+  | Unit.RBr -> assert_norm (uch_of_ch (ch_of_uch Unit.RBr) == Unit.RBr)
+  | Unit.LCur -> assert_norm (uch_of_ch (ch_of_uch Unit.LCur) == Unit.LCur)
+  | Unit.RCur -> assert_norm (uch_of_ch (ch_of_uch Unit.RCur) == Unit.RCur)
+  | Unit.Pct -> assert_norm (uch_of_ch (ch_of_uch Unit.Pct) == Unit.Pct)
+  | Unit.Under -> assert_norm (uch_of_ch (ch_of_uch Unit.Under) == Unit.Under)
+  | Unit.Apos -> assert_norm (uch_of_ch (ch_of_uch Unit.Apos) == Unit.Apos)
+  | Unit.Minus -> assert_norm (uch_of_ch (ch_of_uch Unit.Minus) == Unit.Minus)
+  | Unit.Plus -> assert_norm (uch_of_ch (ch_of_uch Unit.Plus) == Unit.Plus)
+  | Unit.Star -> assert_norm (uch_of_ch (ch_of_uch Unit.Star) == Unit.Star)
+  | Unit.Caret -> assert_norm (uch_of_ch (ch_of_uch Unit.Caret) == Unit.Caret)
+  | Unit.Other -> ()
+
+let rec unit_text_of (t: Unit.text) : Tot (list ch) =
+  match t with
+  | [] -> []
+  | c :: r -> ch_of_uch c :: unit_text_of r
+
+let rec unit_text_to (s: list ch) : Tot Unit.text =
+  match s with
+  | [] -> []
+  | c :: r -> uch_of_ch c :: unit_text_to r
+
+[@@ noextract_to "FSharp"]
+let rec unit_text_inverse (t: Unit.text)
+  : Lemma (requires Unit.no_other t) (ensures unit_text_to (unit_text_of t) == t) =
+  match t with
+  | [] -> ()
+  | c :: r -> uch_ch_inverse c; unit_text_inverse r
+
+(* ---- the field (F#: `Field.fs`) ---- *)
+
+(* F#: `Field` — the internal record, one member per metadata member; `Map<string, string>` as a
+   key-unique association list. *)
+type field = {
+  fname: list ch;
+  fty: column_type;
+  funit: option Unit.uom;
+  flabel: option (list ch);
+  fdesc: option (list ch);
+  fext: list (list ch & list ch);
+}
+
+(* F#: `Field.create` — a field of the name and type, no metadata: the entry `(name, ty)` was. *)
+let field_create (n: list ch) (ty: column_type) : Tot field =
+  { fname = n; fty = ty; funit = None; flabel = None; fdesc = None; fext = [] }
+
+(* F#: `Map.add key value` on the extension map — replace the key's value where it is held, else
+   add the member. *)
+let rec ext_add (k v: list ch) (m: list (list ch & list ch)) : Tot (list (list ch & list ch)) =
+  match m with
+  | [] -> [(k, v)]
+  | (k', v') :: t -> if k' = k then (k, v) :: t else (k', v') :: ext_add k v t
+
+(* F#: `Field.withUnit` / `withLabel` / `withDescription` / `withExt`. *)
+let with_unit (u: Unit.uom) (f: field) : Tot field = { f with funit = Some u }
+let with_label (l: list ch) (f: field) : Tot field = { f with flabel = Some l }
+let with_description (d: list ch) (f: field) : Tot field = { f with fdesc = Some d }
+let with_ext (k v: list ch) (f: field) : Tot field = { f with fext = ext_add k v f.fext }
+
+(* F#: `Field.hasMetadata`. *)
+let has_metadata (f: field) : Tot bool =
+  Some? f.funit || Some? f.flabel || Some? f.fdesc || Cons? f.fext
+
+(* F#: `Schema = Field list`, and the entry a field is read as by `Table.validate` and the column
+   walks: its name and type. *)
+let entry_of (f: field) : Tot (list ch & column_type) = (f.fname, f.fty)
+
+let rec entries (fs: list field) : Tot (list (list ch & column_type)) =
+  match fs with
+  | [] -> []
+  | f :: t -> entry_of f :: entries t
+
+(* F#: `Table` since Phase 427 — the schema a field list. `strip` is the table section 1 models. *)
+type table_f (num flt: eqtype) = {
+  fschema: list field;
+  fcolumns: list (column num flt);
+}
+
+type data_source_f (num flt: eqtype) =
+  | Embedded_f : t:table_f num flt -> data_source_f num flt
+  | Ref_f      : r:list ch -> data_source_f num flt
+
+let strip (#num #flt: eqtype) (t: table_f num flt) : Tot (table num flt) =
+  { schema = entries t.fschema; columns = t.fcolumns }
+
+(* F#: `Table.validate` since Phase 427 reads a field's name and type: the list model's `validate`
+   of the stripped table, clause for clause. *)
+let validate_f (#num #flt: eqtype) (h: host num flt) (t: table_f num flt) : Tot (res unit) =
+  validate h (strip t)
+
+(* ---- encode (F#: `fieldJson`, `schemaJson`, `encodeJson`) ---- *)
+
+(* F#: `fieldJson`'s `stated` — the member when the value is stated, nothing when it is not. *)
+let stated (#num #flt: eqtype) (k: list ch) (v: option (list ch)) : Tot (list (list ch & jval num flt)) =
+  match v with
+  | Some s -> [(k, JStr s)]
+  | None -> []
+
+(* F#: the `Map.toList |> List.map (fun (k, v) -> k, JStr v)` of the `ext` member. *)
+let rec ext_json (#num #flt: eqtype) (m: list (list ch & list ch)) : Tot (list (list ch & jval num flt)) =
+  match m with
+  | [] -> []
+  | (k, v) :: t -> (k, JStr v) :: ext_json t
+
+(* The unit member's text: `Unit.render`, in this module's alphabet. *)
+let unit_text (u: option Unit.uom) : Tot (option (list ch)) =
+  match u with
+  | Some u -> Some (unit_text_of (Unit.render u))
+  | None -> None
+
+(* F#: `ColumnCodec.fieldJson` — `name` and `type`, then `unit`, `label`, `description` when stated,
+   then `ext` when the map is not empty. *)
+let field_json (#num #flt: eqtype) (f: field) : Tot (jval num flt) =
+  JObj (app [(name_key, JStr f.fname); (type_key, JStr (tag f.fty))]
+            (app (stated unit_key (unit_text f.funit))
+                 (app (stated label_key f.flabel)
+                      (app (stated description_key f.fdesc)
+                           (match f.fext with
+                            | [] -> []
+                            | _ -> [(ext_key, JObj (ext_json f.fext))])))))
+
+(* F#: `schemaJson` since Phase 427 — `List.map fieldJson`. *)
+let rec fields_json (#num #flt: eqtype) (fs: list field) : Tot (list (jval num flt)) =
+  match fs with
+  | [] -> []
+  | f :: t -> field_json f :: fields_json t
+
+(* F#: `ColumnCodec.encodeJson` since Phase 427: the schema as fields; the columns one per entry,
+   keyed by its name, as section 4 writes them. *)
+let encode_json_f (#num #flt: eqtype) (h: host num flt) (src: data_source_f num flt) : Tot (jval num flt) =
+  match src with
+  | Embedded_f t ->
+      JObj [ (schema_key, JArr (fields_json t.fschema));
+             (columns_key, JObj (columns_json h (entries t.fschema) t.fcolumns)) ]
+  | Ref_f r -> JObj [ (schema_key, JArr []); (ref_key, JStr r) ]
+
+(* ---- decode (F#: `optionalText`, `decodeField`, `decodeSchema`, `decodeJson`) ---- *)
+
+(* F#: `optionalText` — absent is `None`; present and not a string is refused. *)
+let optional_text (#num #flt: eqtype) (k: list ch) (el: jval num flt) : Tot (res (option (list ch))) =
+  match try_prop k el with
+  | None -> Good None
+  | Some (JStr s) -> Good (Some s)
+  | Some _ -> Bad MalformedShape
+
+(* F#: `decodeField`'s `go` over the `ext` object — every member a string, each added through
+   `withExt` in document order; a member of another kind is refused. *)
+let rec decode_ext (#num #flt: eqtype) (f: field) (ms: list (list ch & jval num flt)) : Tot (res field) (decreases ms) =
+  match ms with
+  | [] -> Good f
+  | (k, v) :: rest ->
+      (match v with
+       | JStr s -> decode_ext (with_ext k s f) rest
+       | _ -> Bad MalformedShape)
+
+(* F#: `decodeField` after the unit — `label`, `description`, then `ext`. *)
+let decode_field_tail (#num #flt: eqtype) (el: jval num flt) (f: field) : Tot (res field) =
+  match optional_text label_key el with
+  | Bad e -> Bad e
+  | Good l ->
+      let f = (match l with Some l -> with_label l f | None -> f) in
+      (match optional_text description_key el with
+       | Bad e -> Bad e
+       | Good d ->
+           let f = (match d with Some d -> with_description d f | None -> f) in
+           (match try_prop ext_key el with
+            | None -> Good f
+            | Some (JObj ms) -> decode_ext f ms
+            | Some _ -> Bad MalformedShape))
+
+(* F#: `decodeField` — `name` and `type` as `decodeSchemaEntry` read them, then `unit` through
+   `Unit.parse` (a text the kit cannot parse is refused), then the rest. A member this codec does
+   not know is read past. *)
+let decode_field (#num #flt: eqtype) (el: jval num flt) : Tot (res field) =
+  match decode_schema_entry el with
+  | Bad e -> Bad e
+  | Good (n, ty) ->
+      let f0 = field_create n ty in
+      (match optional_text unit_key el with
+       | Bad e -> Bad e
+       | Good None -> decode_field_tail el f0
+       | Good (Some text) ->
+           (match Unit.parse (unit_text_to text) with
+            | Unit.Ok u -> decode_field_tail el (with_unit u f0)
+            | Unit.Refused _ -> Bad MalformedShape))
+
+(* F#: `decodeSchema`'s `go` since Phase 427 — see the header on the accumulate-and-reverse loops. *)
+let rec decode_fields (#num #flt: eqtype) (xs: list (jval num flt)) : Tot (res (list field)) (decreases xs) =
+  match xs with
+  | [] -> Good []
+  | x :: rest ->
+      (match decode_field x with
+       | Bad e -> Bad e
+       | Good f ->
+           (match decode_fields rest with
+            | Bad e -> Bad e
+            | Good fs -> Good (f :: fs)))
+
+let decode_schema_f (#num #flt: eqtype) (el: jval num flt) : Tot (res (list field)) =
+  match as_arr el with
+  | Bad e -> Bad e
+  | Good xs -> decode_fields xs
+
+(* F#: `ColumnCodec.decodeJson` since Phase 427 — section 5's `decode_json` with the schema read as
+   fields; the columns are decoded over the fields' names and types, and the table built carries
+   the fields. *)
+let decode_json_f (#num #flt: eqtype) (h: host num flt) (el: jval num flt) : Tot (res (data_source_f num flt)) =
+  let schema_r : res (option (list field)) =
+    (match try_prop schema_key el with
+     | Some schema_el ->
+         (match decode_schema_f schema_el with
+          | Bad e -> Bad e
+          | Good fs -> Good (Some fs))
+     | None -> Good None) in
+  match schema_r with
+  | Bad e -> Bad e
+  | Good schema_opt ->
+      (match try_prop ref_key el with
+       | Some ref_el ->
+           (match as_str ref_el with
+            | Bad e -> Bad e
+            | Good r -> Good (Ref_f r))
+       | None ->
+           (match get_field columns_key el with
+            | Bad e -> Bad e
+            | Good columns_el ->
+                (match unique_column_keys columns_el with
+                 | Bad e -> Bad e
+                 | Good columns_obj ->
+                     (match schema_opt with
+                      | None -> Bad OutOfModel
+                      | Some fs ->
+                          (match decode_columns h columns_obj (entries fs) with
+                           | Bad e -> Bad e
+                           | Good cs ->
+                               let t : table_f num flt = { fschema = fs; fcolumns = cs } in
+                               (match validate_f h t with
+                                | Bad e -> Bad e
+                                | Good _ -> Good (Embedded_f t)))))))
+
+(* The normal form, over fields: the columns of section 6's, the fields as they were. *)
+let normal_table_f (#num #flt: eqtype) (h: host num flt) (t: table_f num flt) : Tot (table_f num flt) =
+  { fschema = t.fschema; fcolumns = normal_columns h (entries t.fschema) t.fcolumns }
+
+(* ---- well-formedness: what production's field satisfies by construction ---- *)
+
+let rec ext_keys (m: list (list ch & list ch)) : Tot (list (list ch)) =
+  match m with
+  | [] -> []
+  | (k, _) :: t -> k :: ext_keys t
+
+let rec ext_distinct (m: list (list ch & list ch)) : Tot bool =
+  match m with
+  | [] -> true
+  | (k, _) :: t -> not (mem k (ext_keys t)) && ext_distinct t
+
+(* A unit production holds is canonical; a map's keys are distinct. *)
+let field_wf (f: field) : Tot bool =
+  (match f.funit with None -> true | Some u -> Unit.canonical u) && ext_distinct f.fext
+
+let rec fields_wf (fs: list field) : Tot bool =
+  match fs with
+  | [] -> true
+  | f :: t -> field_wf f && fields_wf t
+
+let rec all_plain (fs: list field) : Tot bool =
+  match fs with
+  | [] -> true
+  | f :: t -> not (has_metadata f) && all_plain t
+
+(* ---- THEOREM: an entry without metadata encodes exactly as before ---- *)
+
+[@@ noextract_to "FSharp"]
+let field_json_plain (#num #flt: eqtype) (f: field)
+  : Lemma (requires not (has_metadata f))
+          (ensures field_json #num #flt f == JObj [(name_key, JStr f.fname); (type_key, JStr (tag f.fty))]) = ()
+
+[@@ noextract_to "FSharp"]
+let rec fields_json_plain (#num #flt: eqtype) (fs: list field)
+  : Lemma (requires all_plain fs) (ensures fields_json #num #flt fs == schema_json_items (entries fs)) =
+  match fs with
+  | [] -> ()
+  | f :: t -> field_json_plain #num #flt f; fields_json_plain #num #flt t
+
+[@@ noextract_to "FSharp"]
+let encode_json_f_plain (#num #flt: eqtype) (h: host num flt) (t: table_f num flt)
+  : Lemma (requires all_plain t.fschema)
+          (ensures encode_json_f h (Embedded_f t) == encode_json h (Embedded (strip t))) =
+  fields_json_plain #num #flt t.fschema
+
+(* ---- THEOREM: the metadata survives encode then decode ---- *)
+
+(* The six member names of a schema entry are pairwise different — by computation. *)
+[@@ noextract_to "FSharp"]
+let field_keys_differ ()
+  : Lemma (ensures name_key <> type_key /\ name_key <> unit_key /\ name_key <> label_key /\
+                   name_key <> description_key /\ name_key <> ext_key /\
+                   type_key <> unit_key /\ type_key <> label_key /\ type_key <> description_key /\
+                   type_key <> ext_key /\
+                   unit_key <> label_key /\ unit_key <> description_key /\ unit_key <> ext_key /\
+                   label_key <> description_key /\ label_key <> ext_key /\
+                   description_key <> ext_key) =
+  assert_norm (name_key <> type_key); assert_norm (name_key <> unit_key);
+  assert_norm (name_key <> label_key); assert_norm (name_key <> description_key);
+  assert_norm (name_key <> ext_key);
+  assert_norm (type_key <> unit_key); assert_norm (type_key <> label_key);
+  assert_norm (type_key <> description_key); assert_norm (type_key <> ext_key);
+  assert_norm (unit_key <> label_key); assert_norm (unit_key <> description_key);
+  assert_norm (unit_key <> ext_key);
+  assert_norm (label_key <> description_key); assert_norm (label_key <> ext_key);
+  assert_norm (description_key <> ext_key)
+
+(* A lookup skips a stated member of another name, and finds its own. *)
+[@@ noextract_to "FSharp"]
+let find_kv_stated_other (#num #flt: eqtype) (k k': list ch) (v: option (list ch)) (m: list (list ch & jval num flt))
+  : Lemma (requires k <> k') (ensures find_kv k (app (stated k' v) m) == find_kv k m) =
+  match v with
+  | Some _ -> ()
+  | None -> ()
+
+[@@ noextract_to "FSharp"]
+let find_kv_stated_self (#num #flt: eqtype) (k: list ch) (v: option (list ch)) (m: list (list ch & jval num flt))
+  : Lemma (ensures find_kv k (app (stated k v) m) == (match v with Some s -> Some (JStr s) | None -> find_kv k m)) =
+  match v with
+  | Some _ -> ()
+  | None -> ()
+
+(* The `ext` member, looked up by every other key, is not there. *)
+[@@ noextract_to "FSharp"]
+let find_kv_ext_other (#num #flt: eqtype) (k: list ch) (m: list (list ch & list ch))
+  : Lemma (requires k <> ext_key)
+          (ensures find_kv k (match m with | [] -> [] | _ -> [(ext_key, JObj (ext_json #num #flt m))]) == None) =
+  match m with
+  | [] -> ()
+  | _ -> ()
+
+(* Adding a fresh key appends it. *)
+[@@ noextract_to "FSharp"]
+let rec ext_add_fresh (k v: list ch) (m: list (list ch & list ch))
+  : Lemma (requires not (mem k (ext_keys m))) (ensures ext_add k v m == app m [(k, v)]) =
+  match m with
+  | [] -> ()
+  | _ :: t -> ext_add_fresh k v t
+
+[@@ noextract_to "FSharp"]
+let rec ext_keys_app (l m: list (list ch & list ch)) (k: list ch)
+  : Lemma (mem k (ext_keys (app l m)) == (mem k (ext_keys l) || mem k (ext_keys m))) =
+  match l with
+  | [] -> ()
+  | _ :: t -> ext_keys_app t m k
+
+(* Reading the extension members back, in document order, rebuilds the map they were written from. *)
+[@@ noextract_to "FSharp"]
+let rec decode_ext_inverts (#num #flt: eqtype) (f: field) (m: list (list ch & list ch))
+  : Lemma (requires ext_distinct m /\ (forall (k: list ch). mem k (ext_keys m) ==> not (mem k (ext_keys f.fext))))
+          (ensures decode_ext #num #flt f (ext_json m) == Good ({ f with fext = app f.fext m }))
+          (decreases m) =
+  match m with
+  | [] -> app_nil f.fext
+  | (k, v) :: t ->
+      ext_add_fresh k v f.fext;
+      let f' = with_ext k v f in
+      assert (f'.fext == app f.fext [(k, v)]);
+      let aux (k': list ch) : Lemma (mem k' (ext_keys t) ==> not (mem k' (ext_keys f'.fext))) =
+        ext_keys_app f.fext [(k, v)] k' in
+      FStar.Classical.forall_intro aux;
+      decode_ext_inverts #num #flt f' t;
+      app_assoc f.fext [(k, v)] t
+
+#push-options "--z3rlimit 120"
+[@@ noextract_to "FSharp"]
+let decode_field_inverts (#num #flt: eqtype) (f: field)
+  : Lemma (requires field_wf f) (ensures decode_field #num #flt (field_json f) == Good f) =
+  field_keys_differ ();
+  let el : jval num flt = field_json f in
+  let ut = unit_text f.funit in
+  let e_tail : list (list ch & jval num flt) = (match f.fext with | [] -> [] | _ -> [(ext_key, JObj (ext_json f.fext))]) in
+  let d_tail = app (stated description_key f.fdesc) e_tail in
+  let l_tail = app (stated label_key f.flabel) d_tail in
+  let u_tail = app (stated unit_key ut) l_tail in
+  assert (el == JObj ((name_key, JStr f.fname) :: (type_key, JStr (tag f.fty)) :: u_tail));
+  (* name and type, as the entry reader reads them *)
+  of_tag_inverts_tag f.fty;
+  assert (decode_schema_entry el == Good (f.fname, f.fty));
+  (* each optional member is found by its own key and skipped by every other *)
+  find_kv_stated_self #num #flt unit_key ut l_tail;
+  find_kv_stated_other #num #flt unit_key label_key f.flabel d_tail;
+  find_kv_stated_other #num #flt unit_key description_key f.fdesc e_tail;
+  find_kv_ext_other #num #flt unit_key f.fext;
+  find_kv_stated_other #num #flt label_key unit_key ut l_tail;
+  find_kv_stated_self #num #flt label_key f.flabel d_tail;
+  find_kv_stated_other #num #flt label_key description_key f.fdesc e_tail;
+  find_kv_ext_other #num #flt label_key f.fext;
+  find_kv_stated_other #num #flt description_key unit_key ut l_tail;
+  find_kv_stated_other #num #flt description_key label_key f.flabel d_tail;
+  find_kv_stated_self #num #flt description_key f.fdesc e_tail;
+  find_kv_ext_other #num #flt description_key f.fext;
+  find_kv_stated_other #num #flt ext_key unit_key ut l_tail;
+  find_kv_stated_other #num #flt ext_key label_key f.flabel d_tail;
+  find_kv_stated_other #num #flt ext_key description_key f.fdesc e_tail;
+  assert (optional_text unit_key el == Good ut);
+  assert (optional_text label_key el == Good f.flabel);
+  assert (optional_text description_key el == Good f.fdesc);
+  assert (try_prop ext_key el == (match f.fext with | [] -> None | _ -> Some (JObj (ext_json #num #flt f.fext))));
+  (* the unit's text reads back to the unit *)
+  let f0 = field_create f.fname f.fty in
+  let f1 = (match f.funit with Some u -> with_unit u f0 | None -> f0) in
+  (match f.funit with
+   | Some u ->
+       Unit.render_no_other u; unit_text_inverse (Unit.render u); Unit.parse_render u;
+       assert (Unit.parse (unit_text_to (unit_text_of (Unit.render u))) == Unit.Ok u)
+   | None -> ());
+  assert (decode_field el == decode_field_tail el f1);
+  (* the label and the description *)
+  let f2 = (match f.flabel with Some l -> with_label l f1 | None -> f1) in
+  let f3 = (match f.fdesc with Some d -> with_description d f2 | None -> f2) in
+  assert (f3.fext == []);
+  (* the extension members *)
+  (match f.fext with
+   | [] -> ()
+   | _ -> decode_ext_inverts #num #flt f3 f.fext);
+  assert (decode_field_tail el f1 == Good ({ f3 with fext = f.fext }));
+  (match f with | Mkfield _ _ _ _ _ _ -> ())
+#pop-options
+
+[@@ noextract_to "FSharp"]
+let rec decode_fields_inverts (#num #flt: eqtype) (fs: list field)
+  : Lemma (requires fields_wf fs) (ensures decode_fields #num #flt (fields_json fs) == Good fs) =
+  match fs with
+  | [] -> ()
+  | f :: t -> decode_field_inverts #num #flt f; decode_fields_inverts #num #flt t
+
+(* `decodeJson`'s embedded arm over fields, as the composition it is — the twin of
+   `decode_json_embedded`. *)
+[@@ noextract_to "FSharp"]
+let decode_json_f_embedded (#num #flt: eqtype) (h: host num flt)
+                           (el schema_el columns_el: jval num flt)
+                           (fs: list field) (cs: list (column num flt))
+  : Lemma (requires try_prop schema_key el == Some schema_el /\
+                    decode_schema_f schema_el == Good fs /\
+                    None? (try_prop ref_key el) /\
+                    get_field columns_key el == Good columns_el /\
+                    unique_column_keys columns_el == Good columns_el /\
+                    decode_columns h columns_el (entries fs) == Good cs)
+          (ensures decode_json_f h el
+                   == (match validate h ({ schema = entries fs; columns = cs }) with
+                       | Bad e -> Bad e
+                       | Good _ -> Good (Embedded_f ({ fschema = fs; fcolumns = cs })))) = ()
+
+(* THE ROUND TRIP, OVER FIELDS. For every table whose name-and-type form `validate` accepts and
+   whose fields are well-formed, decoding its encoding answers the normal form of its columns with
+   every field's metadata intact. *)
+[@@ noextract_to "FSharp"]
+let round_trip_f (#num #flt: eqtype) (h: host num flt) (t: table_f num flt)
+  : Lemma (requires host_ok h /\ validate h (strip t) == Good () /\ fields_wf t.fschema)
+          (ensures decode_json_f h (encode_json_f h (Embedded_f t))
+                   == Good (Embedded_f (normal_table_f h t))) =
+  let fs = t.fschema in
+  let s = entries fs in
+  let cs = t.fcolumns in
+  let t' = strip t in
+  let columns_el : jval num flt = JObj (columns_json h s cs) in
+  validate_good h t';
+  keys_differ ();
+  decode_fields_inverts #num #flt fs;
+  columns_json_keys h s cs;
+  validated_entries_ok h cs s;
+  decode_columns_inverts h s cs s;
+  encode_image_revalidates h t';
+  decode_json_f_embedded h (encode_json_f h (Embedded_f t)) (JArr (fields_json fs)) columns_el fs
+    (normal_columns h s cs)
+
+(* A `ref` source round-trips exactly, as before. *)
+[@@ noextract_to "FSharp"]
+let ref_round_trip_f (#num #flt: eqtype) (h: host num flt) (r: list ch)
+  : Lemma (ensures decode_json_f h (encode_json_f h (Ref_f #num #flt r)) == Good (Ref_f r)) =
+  keys_differ ()
+
+(* THE IMAGE, OVER FIELDS: whatever `decode_json_f` answers `Embedded_f t` for, `validate` accepts. *)
+[@@ noextract_to "FSharp"]
+let decode_image_f_is_valid (#num #flt: eqtype) (h: host num flt) (el: jval num flt) (t: table_f num flt)
+  : Lemma (requires decode_json_f h el == Good (Embedded_f t))
+          (ensures validate h (strip t) == Good ()) = ()
+
+(* The field reader refines the entry reader: a field it answers has the name and type
+   `decode_schema_entry` answers for the same object. *)
+[@@ noextract_to "FSharp"]
+let rec decode_ext_entry (#num #flt: eqtype) (f: field) (ms: list (list ch & jval num flt))
+  : Lemma (requires Good? (decode_ext #num #flt f ms))
+          (ensures (let g = Good?.v (decode_ext #num #flt f ms) in g.fname == f.fname /\ g.fty == f.fty))
+          (decreases ms) =
+  match ms with
+  | [] -> ()
+  | (k, v) :: rest ->
+      (match v with
+       | JStr s -> decode_ext_entry #num #flt (with_ext k s f) rest
+       | _ -> ())
+
+[@@ noextract_to "FSharp"]
+let decode_field_entry (#num #flt: eqtype) (el: jval num flt)
+  : Lemma (requires Good? (decode_field #num #flt el))
+          (ensures decode_schema_entry el == Good (entry_of (Good?.v (decode_field #num #flt el)))) =
+  match decode_schema_entry el with
+  | Bad _ -> ()
+  | Good (n, ty) ->
+      let f0 = field_create n ty in
+      let tail (f: field) : Lemma (requires Good? (decode_field_tail #num #flt el f))
+                                  (ensures (let g = Good?.v (decode_field_tail #num #flt el f) in g.fname == f.fname /\ g.fty == f.fty)) =
+        (match optional_text label_key el with
+         | Bad _ -> ()
+         | Good l ->
+             let f = (match l with Some l -> with_label l f | None -> f) in
+             (match optional_text description_key el with
+              | Bad _ -> ()
+              | Good d ->
+                  let f = (match d with Some d -> with_description d f | None -> f) in
+                  (match try_prop ext_key el with
+                   | Some (JObj ms) -> decode_ext_entry #num #flt f ms
+                   | _ -> ()))) in
+      (match optional_text unit_key el with
+       | Bad _ -> ()
+       | Good None -> tail f0
+       | Good (Some text) ->
+           (match Unit.parse (unit_text_to text) with
+            | Unit.Ok u -> tail (with_unit u f0)
+            | Unit.Refused _ -> ()))
+
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model.
 
    The leg's extraction diff makes "the oracle is the model" a checked claim about TEXT. Nothing
@@ -2404,6 +3202,14 @@ let twins : list twin = [
   { tname = "try-canonical-refuses-a-bare-point";
     tholds = (fun () -> try_canonical [ CHexCh HD1; CDot ] = None) };
   { tname = "of-tag-reads-int";
-    tholds = (fun () -> of_tag [ CPlain "i"; CPlain "n"; CPlain "t" ] = Some IntType) } ]
+    tholds = (fun () -> of_tag [ CPlain "i"; CPlain "n"; CPlain "t" ] = Some IntType) };
+  { tname = "field-json-plain-is-the-entry";
+    tholds = (fun () ->
+      field_json #int #int (field_create [CPlain "x"] IntType)
+      = JObj [ (name_key, JStr [CPlain "x"]); (type_key, JStr (tag IntType)) ]) };
+  { tname = "decode-field-reads-a-unit-back";
+    tholds = (fun () ->
+      let f = with_label [CPlain "s"] (with_unit Unit.km_per_h (field_create [CPlain "v"] FloatType)) in
+      decode_field #int #int (field_json f) = Good f) } ]
 
 let _ = assert_norm (twins_hold twins == true)

@@ -285,7 +285,32 @@ let private expected: (string * string) list =
       "sample/nodes/seed-0", "d79fef4d5f0e03bf97e01c6856bd5718e9e676465304b2c6cef25f2542e85d9c"
       "sample/nodes/seed-1488", "99a43020e793bd8c06be6fb123efff4bc673b27102feb4d80ec62f13db4e8443"
       "sample/refusal/empty-enum",
-      "refused:cannot sample enum 'Nothing': there is nothing to choose from (it declares no case)" ]
+      "refused:cannot sample enum 'Nothing': there is nothing to choose from (it declares no case)"
+      // Phase 428 — the unit algebra: the canonical text (`kg/(m.s2)` is `kg/m/s2`, `ml` is `mL`, the
+      // factors in symbol order), the exact factor in lowest terms (`km/h` to `m/s` is 5/18, an inch
+      // 127/5000 of a metre, a penny 1/100 of a pound, the newton 1/1 against its base product),
+      // incompatibility, three refusals with their positions, and the algebra over a seeded draw.
+      "unit/render/km-per-h", "km/h"
+      "unit/render/kg.m-per-s2", "kg.m/s2"
+      "unit/render/alias-litre", "mL"
+      "unit/render/non-canonical-order", "m/s"
+      "unit/render/dimensionless", "1"
+      "unit/render/leading-slash", "/min"
+      "unit/render/nested", "kg/m/s2"
+      "unit/render/currency", "k[GBP]/h"
+      "unit/factor/km-per-h-to-m-per-s", "5/18"
+      "unit/factor/inch-to-metre", "127/5000"
+      "unit/factor/pence-to-pound", "1/100"
+      "unit/factor/newton-to-base", "1/1"
+      "unit/factor/incompatible", "incompatible"
+      "unit/factor/currencies-differ", "incompatible"
+      "unit/refusal/annotation", "refused:Annotation@1"
+      "unit/refusal/prefix-not-allowed", "refused:PrefixNotAllowed@0"
+      "unit/refusal/exponent-range", "refused:Malformed@1"
+      "unit/drawn/seed-0",
+      "/h2=c:1/1|k[GBP]=x|/ks3=x|dag3=x|1=x|/cPa3/h2=x|/kPa2=x|/min3=x|[GBP]2.[in_i]2=x|cPa3/[in_i]2/um2=x|h3.ms2/dacd3=x|m[GBP]3=x"
+      "unit/drawn/seed-428",
+      "/Pa2=c:1/1|%3/uN2/min3=x|[in_i]/mN2=x|daL3=x|/[GBP]/min2=x|/cL3/km3=x|/min3=x|%3.k[GBP]/um=x|/dacd2/min=x|c[GBP]2=x|Pa/min=x|cd3.kcd.min=x" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -314,7 +339,8 @@ let private families =
       "decimal/"
       "decimalCodec/"
       "decimalAggregate/"
-      "sample/" ]
+      "sample/"
+      "unit/" ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the

@@ -445,6 +445,85 @@ let private sampleDraws (seed: int) : string =
 let private sampleNodes (seed: int) : string =
     sampledLines shapeVocab seed 12 |> String.concat "\n" |> Hash.sha256Hex
 
+/// A unit's canonical text, or its typed refusal as `refused:<case>@<position>` (Phase 428): the
+/// parse and the render on this pipeline, the refusal's class and position where there is one.
+let private unitRender (text: string) : string =
+    match Unit.parse text with
+    | Ok u -> Unit.render u
+    | Error r ->
+        let at (case: string) (position: int) =
+            "refused:" + case + "@" + string position
+
+        match r with
+        | UnitRefusal.Empty -> "refused:Empty"
+        | UnitRefusal.Malformed(_, position, _) -> at "Malformed" position
+        | UnitRefusal.UnknownAtom(_, position) -> at "UnknownAtom" position
+        | UnitRefusal.Annotation(_, position) -> at "Annotation" position
+        | UnitRefusal.ArbitraryUnit(_, position) -> at "ArbitraryUnit" position
+        | UnitRefusal.NonRatioUnit(_, position) -> at "NonRatioUnit" position
+        | UnitRefusal.PrefixNotAllowed(_, position) -> at "PrefixNotAllowed" position
+        | UnitRefusal.NumericFactor(_, position) -> at "NumericFactor" position
+
+/// The exact factor from one unit to another as `num/den` (bigint digits), or `incompatible`.
+let private unitFactor (source: string) (target: string) : string =
+    match Unit.parse source, Unit.parse target with
+    | Ok s, Ok t ->
+        match Unit.conversionFactor s t with
+        | Ok r -> r.Numerator.ToString() + "/" + r.Denominator.ToString()
+        | Error(UnitConversionRefusal.Incompatible _) -> "incompatible"
+    | _ -> "unparsed"
+
+/// The unit algebra over a seeded draw: twelve units, each a product of one to three prefixed atoms
+/// under `mul`, `div` and `pow` with exponents in -3..3, rendered, and against the FIRST draw its
+/// compatibility (`c` or `x`) and, where compatible, the exact factor. `ConfRng` draws, so the
+/// sequence is the same on both pipelines; the atoms are a fixed roster spanning the metric,
+/// non-metric and currency rules.
+let private unitDrawn (seed: int) : string =
+    let atoms =
+        [| "m"; "g"; "s"; "h"; "N"; "L"; "min"; "[in_i]"; "[GBP]"; "%"; "Pa"; "cd" |]
+
+    let prefixes = [| ""; "k"; "m"; "c"; "da"; "u" |]
+    let mutable r = ConfRng.ofSeed seed
+
+    let draw (n: int) =
+        let v, r' = ConfRng.next r
+        r <- r'
+        ((v % n) + n) % n
+
+    let atom () =
+        let sym = atoms[draw atoms.Length]
+        let p = prefixes[draw prefixes.Length]
+
+        // A prefix on a non-metric atom is refused; the bare atom stands in, as the suite's pool does.
+        let u =
+            match Unit.parse (p + sym) with
+            | Ok u when Unit.render u = p + sym -> u
+            | _ ->
+                match Unit.parse sym with
+                | Ok u -> u
+                | Error _ -> Unit.dimensionless
+
+        Unit.pow u (draw 7 - 3)
+
+    let one () =
+        let k = 1 + draw 3
+
+        List.init k (fun _ -> atom ())
+        |> List.fold (fun acc u -> if draw 4 = 0 then Unit.div acc u else Unit.mul acc u) Unit.dimensionless
+
+    let units = List.init 12 (fun _ -> one ())
+    let first = List.head units
+
+    units
+    |> List.map (fun u ->
+        let factor =
+            match Unit.conversionFactor u first with
+            | Ok f -> "c:" + f.Numerator.ToString() + "/" + f.Denominator.ToString()
+            | Error _ -> "x"
+
+        Unit.render u + "=" + factor)
+    |> String.concat "|"
+
 /// The named table: `(label, value)` pairs, each value computed by calling a public surface
 /// and ASCII by construction. Only the first part of what `lines` emits — the hash and
 /// sanitiser sweeps follow it there — and its order is part of the comparison.
@@ -804,7 +883,33 @@ let vectors: (string * string) list =
       "sample/draws/seed-1488", sampleDraws 1488
       "sample/nodes/seed-0", sampleNodes 0
       "sample/nodes/seed-1488", sampleNodes 1488
-      "sample/refusal/empty-enum", sampledLines emptyEnumVocab 0 1 |> String.concat "|" ]
+      "sample/refusal/empty-enum", sampledLines emptyEnumVocab 0 1 |> String.concat "|"
+
+      // ---- Unit — the unit algebra (Phase 426), its parse / render / compatibility / factor on both
+      //      pipelines (Phase 428). The algebra is bigint arithmetic, ordinal string order and a
+      //      hand-rolled parser — three places a transpiled pipeline can drift with every compile
+      //      green — and `Fuaran.Core.Unit` had no row until these. `unitDrawn` is the algebra over a
+      //      seeded draw: products of prefixed atoms under `mul` / `div` / `pow`, each rendered, with
+      //      its compatibility and exact factor against the first draw.
+      "unit/render/km-per-h", unitRender "km/h"
+      "unit/render/kg.m-per-s2", unitRender "kg.m/s2"
+      "unit/render/alias-litre", unitRender "ml"
+      "unit/render/non-canonical-order", unitRender "s-1.m"
+      "unit/render/dimensionless", unitRender "m/m"
+      "unit/render/leading-slash", unitRender "/min"
+      "unit/render/nested", unitRender "kg/(m.s2)"
+      "unit/render/currency", unitRender "k[GBP]/h"
+      "unit/factor/km-per-h-to-m-per-s", unitFactor "km/h" "m/s"
+      "unit/factor/inch-to-metre", unitFactor "[in_i]" "m"
+      "unit/factor/pence-to-pound", unitFactor "c[GBP]" "[GBP]"
+      "unit/factor/newton-to-base", unitFactor "N" "kg.m/s2"
+      "unit/factor/incompatible", unitFactor "m" "s"
+      "unit/factor/currencies-differ", unitFactor "[GBP]" "[USD]"
+      "unit/refusal/annotation", unitRender "m{dry}"
+      "unit/refusal/prefix-not-allowed", unitRender "kmin"
+      "unit/refusal/exponent-range", unitRender "m2147483648"
+      "unit/drawn/seed-0", unitDrawn 0
+      "unit/drawn/seed-428", unitDrawn 428 ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

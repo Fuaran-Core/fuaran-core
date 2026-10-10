@@ -49,3 +49,19 @@ let parse_int (s: string) : nat = System.Numerics.BigInteger.Parse s
 /// the F# primitive under an F* spelling, `bigint` because F*'s integers are unbounded — and
 /// the same boundary: a host converts at the edge, and the width assumption lives there.
 type int = System.Numerics.BigInteger
+
+/// F*'s `pos` — an UNBOUNDED integer, refined to be positive. Named by the Phase 428 extraction
+/// (`Unit.fst`), whose rational scale factors hold a positive numerator and denominator and whose
+/// Euclid's gcd takes a positive first argument. The same rule as `nat` and `int` above — the F#
+/// primitive under an F* spelling, `bigint` because F*'s integers are unbounded — and the same
+/// erasure: the positivity is a refinement the prover checked and this alias cannot carry.
+type pos = System.Numerics.BigInteger
+
+/// F*'s `%` on integers — `Prims.op_Modulus`, which the F# backend emits as `mod_f`. Named by the
+/// Phase 428 extraction (Euclid's gcd, and the digit of a number). F*'s `%` is the EUCLIDEAN
+/// remainder, non-negative for a positive divisor, where .NET's `%` on `BigInteger` keeps the
+/// dividend's sign; the two agree on the non-negative operands every model here applies it to, and
+/// the Euclidean form is written out so that a negative dividend would read as F* reads it.
+let inline mod_f (a: int) (b: int) : int =
+    let r = a % b
+    if r.Sign < 0 then (if b.Sign > 0 then r + b else r - b) else r

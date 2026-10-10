@@ -111,6 +111,12 @@
          the only place a value divergence under Fable is caught (DECISIONS.md D55). Idl depends on
          Wire alone, which is already here, so this adds one package to the kit's closure. -->
     <ProjectReference Include="..\Fuaran.Core.Idl\Fuaran.Core.Idl.fsproj" />
+    <!-- Phase 428 — for ParityVectors' unit rows alone: the unit algebra (Fuaran.Core.Unit, Phase 426)
+         is a Fable-surface package whose VALUES the cross-pipeline table did not reach — parse, render,
+         compatibility and the exact conversion factor are computed on both pipelines and compared
+         here. Unit takes no project reference of its own, so this adds one package to the kit's
+         closure; a consumer compiling the kit's `fable/` sources references it too. -->
+    <ProjectReference Include="..\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

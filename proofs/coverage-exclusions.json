@@ -6,7 +6,7 @@
     "facade": "The package is a surface over packages that ARE modelled and adds no semantics of its own — what a theorem here would state is its callee's theorem, restated in a second syntax. A defect in a facade is a mapping defect, which is what the certification tests it carries are for.",
     "law-tested-by-design": "The package HAS concrete computation and the theorem has been declined in favour of a shipped `Conformance` law family, which the entry NAMES. That is a weaker claim than a proof and the entry says so: a law is sampled at a witness, a theorem is not. The named family must exist in the shipped law-family roster (`Fuaran.Core.Families`, Phase 184), so an entry cannot cite a law no census enumerates.",
     "content-free-seam": "The package is a generic seam whose content is supplied entirely by the domain — Core owns no concrete computation here to state a theorem ABOUT. What it can promise is the shape of the seam, and that is stated where a domain meets it rather than as a theorem over a model of nothing.",
-    "model-scheduled": "The package HAS concrete computation and its model is FILED, not declined: an open phase, which the note names, carries the theorems. The entry is the interval between a package shipping and its model landing, and it is the weakest of the four reasons for that reason — the laws are sampled by the tests the operation entries name, not proved. The model's phase deletes the entry when it lands (the file's second direction fails an exclusion beside a model), and with it this term if no other entry carries it."
+    "model-scheduled": "The package HAS concrete computation and its model is FILED, not declined: an open phase, which the note names, carries the theorems. The entry is the interval between a package shipping and its model landing, and it is the weakest of the four reasons for that reason — the laws are sampled by the tests the operation entries name, not proved. The model's phase deletes the ENTRY when it lands (the file's second direction fails an exclusion beside a model); the TERM stays in this vocabulary whether or not an entry carries it (operator decision 2026-10-10, recorded by Phase 428, which retired the first entry — `Fuaran.Core.Unit`, filed by Phase 426 — and kept the term for the next package that ships ahead of its model)."
   },
   "$reasonsNotCarried": "Phase 203 was filed naming four reasons and carries three. `tooling` (a build-time tool whose contract is the shape of what it emits) was written for `Fuaran.Core.Idl.Codegen`'s emitter, and by the time this file was cut that package HAD a model: the six generated-vocabulary modules are its F* target's own output, and `check.ps1`'s header says in as many words that what the leg proves over them is the F* BACKEND. A `tooling` entry for it would have been stale on arrival, which is exactly what this file's second direction fails. `leaving-core` was written for a `Lease` package that had already left. A closed vocabulary term with no entry is a term nothing tests — so both were dropped rather than carried, and `content-free-seam` was added for the three packages whose content is the domain's. The reasoning is recorded in `README.md` under \"Coverage is total or declared\".",
   "exclusions": [
@@ -53,12 +53,6 @@
       "family": "Conformance.aiSurfaceLawsAt",
       "phase": "fuaran-core#203",
       "note": "The proposal surface — pattern bank, proposals, decide/submit plumbing. The family runs the domain's own `Decide` (Phase 246) and is starved unless that policy allows, parks and denies something the generator draws; `Conformance.aiSurfaceKitPolicyLawsAt` is the variant that swaps in the kit's policy to certify the plumbing for any policy. The one part of this strand that IS proved is arbitration, and it is proved where it lives: `Arbitration` ships in `Fuaran.Core.Ops` and carries `proofs/Arbitrate.fst` — which is why this entry is about the surface and not about the algorithm behind it."
-    },
-    {
-      "package": "Fuaran.Core.Unit",
-      "reason": "model-scheduled",
-      "phase": "fuaran-core#426",
-      "note": "The unit algebra (Phase 426, `docs/units.md`): a canonical product of prefixed atoms with integer exponents, its parse and canonical render, `mul`/`div`/`pow`, `compatible` and the exact rational `conversionFactor`. It has real computation, so none of the other three reasons is true of it, and its model is Phase 428's `proofs/Unit.fst` (exponent vectors an abelian group, one canonical text, `parse (render u) = u`, factors that compose). Until that lands the laws are sampled over a drawn pool by `UnitTests.fs`, which the operation entries name."
     }
   ],
   "$retired": "Phase 154 RETIRED the `Fuaran.Core.DataFrame` entry (`law-tested-by-design`, citing `Conformance.incrementalLaws`, filed by Phase 203): the package has a model now — `proofs/Pipeline.fst`, the counted pipeline driver over an abstract step evaluator — and clause 1's second direction fails an exclusion for a package that has since gained one. What that entry declined is still declined and is still a recorded decision, only now it is the model's own: the fourteen verb SEMANTICS are the step evaluator, a parameter, and stay with the laws the entry named (`incrementalLaws`, `schemaWalkLaws`, `aggregateParityLaws`) rather than with a theorem — see `pipeline-step-evaluator-abstract` in `../proofs.json` and theorem 14 in `README.md`. The supersession of D14's reading for this package is `DECISIONS.md` D57 (operator decision 2026-09-25), which is where the decision lives; an operator who wants a verb proved reads that row and that entry, not this file. Phase 258 moved the package itself, with `proofs/Pipeline.fst`, `proofs/ColumnOps.fst`, their `proofs.json` rows and the two Phase 257 exclusions (`Fuaran.Core.DataFrame.CSharp`, `Fuaran.Core.DataFrame.Conformance`), to https://github.com/Fuaran-Core/fuaran-core-compute (DECISIONS.md D66); the rows and theorems this note cites are that repository's now. Phase 306 RETIRED the `Fuaran.Core.Column` entry (`law-tested-by-design`, citing `Conformance.aggregateNullSkipLaws`, filed by Phase 203): the package has a model now — `proofs/WireColumn.fst`, the columnar codec at the `JVal`, with the codec's image proved inside what `Table.validate` accepts and the round trip proved up to a normal form — which is the theorem that entry said an operator who wanted the codec proved would ask for by deleting it. What the entry cited is unchanged and is NOT what the model is about: `Column.aggregate` is still held by `aggregateNullSkipLaws` and, since the same phase, by a bit-for-bit differential against the fold it replaced; `DecimalText`'s arithmetic, `Schema.*` and the lenient-ingest arms of the decoder are not modelled, and the model's header says so.",
@@ -1931,49 +1925,6 @@
       "reason": "Re-points an index entry after an op; `Ops.Index.afterOp` calls it and the index tests compare its result with a rebuild.",
       "through": "Index.afterOp",
       "standIn": "tests/Fuaran.Core.Tests/AlgebraSymmetryTests.fs"
-    },
-    {
-      "members": [
-        "Unit.parse"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The UCUM-subset reader (Phase 426): every row of the atom table in `docs/units.md`, every prefix on every metric atom, the canonical-text cases and the drawn pool round-tripped; each refusal class reached with the token and position it names; drawn strings over the grammar's alphabet answered without a throw, and nesting depth kept off the machine stack.",
-      "standIn": "tests/Fuaran.Core.Tests/UnitTests.fs"
-    },
-    {
-      "members": [
-        "Unit.mul",
-        "Unit.div",
-        "Unit.pow"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The exponent algebra: associativity, commutativity, identity, inverses and the power laws over a seeded drawn pool, and the 32-bit exponent bound raising rather than wrapping. Phase 428 proves the group laws over a model.",
-      "standIn": "tests/Fuaran.Core.Tests/UnitTests.fs"
-    },
-    {
-      "members": [
-        "Unit.compatible",
-        "Unit.conversionFactor"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Dimension equality and the exact rational factor: every atom converted to its stated definition by its stated factor, `km/h` to `m/s` as 5/18, factors composing, inverting and multiplying over `mul`, and every currency incompatible with every other dimension and currency.",
-      "standIn": "tests/Fuaran.Core.Tests/UnitTests.fs"
-    },
-    {
-      "members": [
-        "UnitOfMeasure.ToString"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The canonical text: factor order, denominators, exponent spelling and the dimensionless `1`, pinned by example and read back by `parse` over the drawn pool.",
-      "standIn": "tests/Fuaran.Core.Tests/UnitTests.fs"
-    },
-    {
-      "members": [
-        "Unit.render"
-      ],
-      "class": "forward",
-      "reason": "The canonical text under a module spelling; forwards to `UnitOfMeasure.ToString`.",
-      "forwardsTo": "UnitOfMeasure.ToString"
     },
     {
       "members": [
