@@ -228,6 +228,21 @@ let internal stampsOf (readme: string) : (string * string) list =
 
 // ---- the release history ------------------------------------------------------
 
+/// The key under which an index records that a PACKAGE's baseline exists (`api/<id>.txt`), so that a
+/// claim spelt as a package's short name (`Unit` for `Fuaran.Core.Unit`) is stamped with the package's
+/// arrival rather than with that of an older member whose trailing segment happens to share the name
+/// (`IllFormedUtf16.Unit`, a record field since `0.33.0`). Phase 426.
+let internal packageKey (baselineFile: string) : string option =
+    let name = Path.GetFileName baselineFile
+
+    if
+        name.StartsWith("Fuaran.Core.", StringComparison.Ordinal)
+        && name.EndsWith(".txt", StringComparison.Ordinal)
+    then
+        Some("package:" + name.Substring(12, name.Length - 16))
+    else
+        None
+
 /// `(version, index)` for every release tag whose tree carries the baselines, oldest first.
 let private releaseIndexes (root: string) : Result<(string * Set<string>) list, string> =
     ChildProcess.git root "tag --list"
@@ -257,16 +272,27 @@ let private releaseIndexes (root: string) : Result<(string * Set<string>) list, 
                     if not hasBaselines then
                         go acc rest
                     else
+                        let packages =
+                            listing.Split('\n')
+                            |> Array.map _.Trim()
+                            |> Array.filter (fun p -> p.StartsWith("api/", StringComparison.Ordinal))
+                            |> Array.choose packageKey
+                            |> Set.ofArray
+
                         match ChildProcess.git root (sprintf "grep -h -e . %s -- \":(glob)api/*.txt\"" tag) with
                         | Error e -> Error e
-                        | Ok text -> go ((sprintf "%d.%d.%d" ma mi pa, indexOf (text.Split('\n'))) :: acc) rest
+                        | Ok text ->
+                            go
+                                ((sprintf "%d.%d.%d" ma mi pa, Set.union (indexOf (text.Split('\n'))) packages)
+                                 :: acc)
+                                rest
 
         go [] tags)
 
 let private currentIndex (root: string) : Set<string> =
-    Directory.GetFiles(Path.Combine(root, "api"), "*.txt")
-    |> Seq.collect File.ReadAllLines
-    |> indexOf
+    let files = Directory.GetFiles(Path.Combine(root, "api"), "*.txt")
+
+    Set.union (files |> Seq.collect File.ReadAllLines |> indexOf) (files |> Array.choose packageKey |> Set.ofArray)
 
 /// The arrival function the derivation stamps with: the first release resolving a name, else the
 /// standing version, unreleased — `None` for a span that names nothing current. A surface no release
@@ -279,6 +305,13 @@ let internal arrivalOf
     (standing: string)
     (name: string)
     : Arrival option =
+    // A package's short name claims the package: its arrival is its baseline's (see `packageKey`).
+    let name =
+        if current.Contains("package:" + name) then
+            "package:" + name
+        else
+            name
+
     if not (current.Contains name) then
         None
     else
@@ -950,6 +983,34 @@ let tests =
               Expect.isNonEmpty
                   (stampFaults (Some "0.34.0") stability "`C.d` (since `0.32.0`)")
                   "a released stamp no entry header names is refused"
+          }
+
+          test "a package's short name is stamped with the package's arrival, not a colliding member's (Phase 426)" {
+              // `IllFormedUtf16.Unit` (a record field) indexes the key `Unit` from 0.33.0; the package
+              // `Fuaran.Core.Unit` arrives in the draft. A bare `Unit` in the dependency sentence means
+              // the package, so it is stamped unreleased — and a name no package shares is unchanged.
+              let field =
+                  indexOf [ "record-field Fuaran.Core.IllFormedUtf16.Unit #1 : System.Int32" ]
+
+              Expect.isTrue (field.Contains "Unit") "the field indexes the bare key the collision is about"
+
+              let releases = [ "0.27.0", Set.empty; "0.33.0", field ]
+
+              let current = Set.union field (Set.ofList [ "Unit"; "Unit.parse"; "package:Unit" ])
+
+              Expect.equal (packageKey "api/Fuaran.Core.Unit.txt") (Some "package:Unit") "the key of a baseline"
+              Expect.equal (packageKey "api/wire") None "a non-baseline path is no package"
+              Expect.equal (arrivalOf releases current "1.0.0" "Unit") (Some(Unreleased "1.0.0")) "the package"
+
+              Expect.equal
+                  (arrivalOf releases (Set.remove "package:Unit" current) "1.0.0" "Unit")
+                  (Some(Released "0.33.0"))
+                  "without the package's baseline the member's arrival stands - the go-red"
+
+              Expect.equal
+                  (arrivalOf releases current "1.0.0" "IllFormedUtf16.Unit")
+                  (Some(Released "0.33.0"))
+                  "the member"
           }
 
           test

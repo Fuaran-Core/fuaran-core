@@ -1,0 +1,52 @@
+# Fuaran.Core.Unit — public contract surface (Phase 183).
+# GENERATED from the built assembly's IL metadata. Do not hand-edit: regenerate with
+#   CORE_APPROVE_API=1 dotnet run --project tests/Fuaran.Core.Tests
+# and stage the baselines you meant to move BY NAME — the switch rewrites them all.
+# One ordinal-sorted line per externally-visible type, member, record field and union case.
+# See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Ratio NoComparison
+attribute Fuaran.Core.Unit RequireQualifiedAccess
+attribute Fuaran.Core.UnitConversionRefusal RequireQualifiedAccess
+attribute Fuaran.Core.UnitRefusal RequireQualifiedAccess
+field Fuaran.Core.UnitRefusal+Tags.Annotation : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.ArbitraryUnit : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.Empty : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.Malformed : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.NonRatioUnit : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.NumericFactor : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.PrefixNotAllowed : System.Int32 (literal)
+field Fuaran.Core.UnitRefusal+Tags.UnknownAtom : System.Int32 (literal)
+method Fuaran.Core.Ratio.ToString() : System.String
+method Fuaran.Core.Unit.compatible(Fuaran.Core.UnitOfMeasure, Fuaran.Core.UnitOfMeasure) : System.Boolean
+method Fuaran.Core.Unit.conversionFactor(Fuaran.Core.UnitOfMeasure, Fuaran.Core.UnitOfMeasure) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Ratio, Fuaran.Core.UnitConversionRefusal>
+method Fuaran.Core.Unit.div(Fuaran.Core.UnitOfMeasure, Fuaran.Core.UnitOfMeasure) : Fuaran.Core.UnitOfMeasure
+method Fuaran.Core.Unit.mul(Fuaran.Core.UnitOfMeasure, Fuaran.Core.UnitOfMeasure) : Fuaran.Core.UnitOfMeasure
+method Fuaran.Core.Unit.parse(System.String) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.UnitOfMeasure, Fuaran.Core.UnitRefusal>
+method Fuaran.Core.Unit.pow(Fuaran.Core.UnitOfMeasure, System.Int32) : Fuaran.Core.UnitOfMeasure
+method Fuaran.Core.Unit.render(Fuaran.Core.UnitOfMeasure) : System.String
+method Fuaran.Core.UnitOfMeasure.ToString() : System.String
+property Fuaran.Core.Ratio.Denominator : System.Numerics.BigInteger { get }
+property Fuaran.Core.Ratio.Numerator : System.Numerics.BigInteger { get }
+property Fuaran.Core.Unit.dimensionless : Fuaran.Core.UnitOfMeasure { get }
+type Fuaran.Core.Ratio (record)
+type Fuaran.Core.Unit (module)
+type Fuaran.Core.UnitConversionRefusal (union)
+type Fuaran.Core.UnitOfMeasure (record)
+type Fuaran.Core.UnitRefusal (union)
+type Fuaran.Core.UnitRefusal+Annotation (type)
+type Fuaran.Core.UnitRefusal+ArbitraryUnit (type)
+type Fuaran.Core.UnitRefusal+Malformed (type)
+type Fuaran.Core.UnitRefusal+NonRatioUnit (type)
+type Fuaran.Core.UnitRefusal+NumericFactor (type)
+type Fuaran.Core.UnitRefusal+PrefixNotAllowed (type)
+type Fuaran.Core.UnitRefusal+Tags (type)
+type Fuaran.Core.UnitRefusal+UnknownAtom (type)
+union-case Fuaran.Core.UnitConversionRefusal.NewIncompatible #0(source: Fuaran.Core.UnitOfMeasure, target: Fuaran.Core.UnitOfMeasure)
+union-case Fuaran.Core.UnitRefusal.Empty #0()
+union-case Fuaran.Core.UnitRefusal.NewAnnotation #3(token: System.String, position: System.Int32)
+union-case Fuaran.Core.UnitRefusal.NewArbitraryUnit #4(token: System.String, position: System.Int32)
+union-case Fuaran.Core.UnitRefusal.NewMalformed #1(found: System.String, position: System.Int32, expected: System.String)
+union-case Fuaran.Core.UnitRefusal.NewNonRatioUnit #5(token: System.String, position: System.Int32)
+union-case Fuaran.Core.UnitRefusal.NewNumericFactor #7(token: System.String, position: System.Int32)
+union-case Fuaran.Core.UnitRefusal.NewPrefixNotAllowed #6(token: System.String, position: System.Int32)
+union-case Fuaran.Core.UnitRefusal.NewUnknownAtom #2(token: System.String, position: System.Int32)

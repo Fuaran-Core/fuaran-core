@@ -859,7 +859,7 @@ deletes an exclusion — at which point the gate names the gap, and keeps naming
 exists. That is the whole mechanism: the exclusions are not a way of avoiding proofs, they are the
 list of proofs nobody has asked for, written down where deleting a line is how you ask.
 
-### The six exclusions, and the two reasons that were not carried
+### The exclusions, and the two reasons that were not carried
 
 The six packages with no model are `Fuaran.Core.Idl.Cli` (**`facade`** — a surface over modelled
 packages, whose every claim is its callee's restated in a second syntax);
@@ -885,6 +885,16 @@ then removed `Fuaran.Core.CSharp`, the other `facade` entry, with the package it
 which left seven. Phase 306 retired `Fuaran.Core.Column`'s — the entry said an operator who wanted the
 codec proved would delete it, and `WireColumn.fst` is that theorem (theorem 15) — which leaves the six
 above. What the entry cited is unchanged: `Column.aggregate` is still held by its law family.
+
+Two entries have joined since, which makes eight. Phase 382's `Fuaran.Core.ContentAddress` is a
+**`facade`**: the digest of `Wire`'s canonical text by `Tree`'s hash, so a theorem would restate its two
+callees'. Phase 426's `Fuaran.Core.Unit` carries a fourth reason, **`model-scheduled`** — real
+computation whose model is FILED rather than declined: the unit algebra's model is Phase 428's
+`Unit.fst`, and until it lands the laws are sampled by `UnitTests.fs`, which the package's operation
+entries name. None of the other three reasons was true of it (it is no facade, its content is its own,
+and no law family states its laws), and leaving it in neither file is the state clause 1 refuses. The
+term is the weakest of the four and says so; Phase 428 deletes the entry when the model lands, and the
+term with it unless another entry carries it, because a term no entry carries is refused.
 
 Phase 203 was filed naming four reasons and this file carries three, which is a correction and is
 recorded rather than quietly absorbed. **`tooling`** was written for `Fuaran.Core.Idl.Codegen`'s
@@ -980,9 +990,10 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Propagation` | 25 | 3 | 7 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Query` | 50 | 13 | 18 | 0 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Tree` | 67 | 9 | 8 | 1 | 2 | 0 | 0 | 47 |
+| `Fuaran.Core.Unit` | 9 | 0 | 0 | 1 | 1 | 0 | 0 | 7 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1109 | 141 | 385 | 30 | 13 | 0 | 3 | 537 |
+| **Total** | 1118 | 141 | 385 | 31 | 14 | 0 | 3 | 544 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

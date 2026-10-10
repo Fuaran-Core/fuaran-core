@@ -463,6 +463,12 @@
          them, no breaking surface move within a major; vacuous by name at major 0. Reads
          PackageRosterTests.fs, PublicSurfaceTests.fs and ChildProcess.fs. Appended (append-only). -->
     <Compile Include="OneDotZeroTests.fs" />
+    <!-- Phase 426 - the unit algebra (Fuaran.Core.Unit): parse and render round-trip over the
+         admitted vocabulary, the algebra laws over drawn units, exact conversion factors, currencies
+         as dimensions of their own, and every refusal class reached. Reads Snapshots.fs for the
+         repository root (docs/units.md's atom table and the source's vocabulary). Appended
+         (append-only). -->
+    <Compile Include="UnitTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
@@ -490,6 +496,7 @@
     <ProjectReference Include="..\..\src\Fuaran.Core.Projection\Fuaran.Core.Projection.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.Propagation\Fuaran.Core.Propagation.fsproj" />
     <ProjectReference Include="..\..\src\Fuaran.Core.ContentAddress\Fuaran.Core.ContentAddress.fsproj" />
+    <ProjectReference Include="..\..\src\Fuaran.Core.Unit\Fuaran.Core.Unit.fsproj" />
     <!-- Phase 131 — the F*-extracted oracle (never packed; see proofs/README.md). -->
     <ProjectReference Include="..\..\proofs\oracle\Fuaran.Core.Proofs.Oracle.fsproj" />
   </ItemGroup>
