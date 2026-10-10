@@ -100,6 +100,30 @@ module Validity =
 /// there, and a builder that adopts leaves what it was handed.
 module internal ColumnStorage =
 
+    /// Which rows of an `n`-row column a walk reads as present (Phase 421), so a loop over a typed
+    /// vector reads presence with no match per row: `Count` rows can be present — every row of an
+    /// `AllValid` column, and none past a `Mask`'s end, as `Validity.isPresent` reads it — and
+    /// `Bits` is the mask's backing array from `Offset`, or `null` for `AllValid`, where every one of
+    /// those rows is present. `isSet` reads one row.
+    [<NoComparison; NoEquality>]
+    type PresentRows =
+        { Count: int
+          Bits: bool[]
+          Offset: int }
+
+    /// The rows of an `n`-row column under `v` (see `PresentRows`).
+    let presentRows (n: int) (v: Validity) : PresentRows =
+        match v with
+        | AllValid -> { Count = n; Bits = null; Offset = 0 }
+        | Mask m ->
+            { Count = min n m.Length
+              Bits = m.Items
+              Offset = m.Offset }
+
+    /// Is row `i` (below `rows.Count`) present?
+    let inline isSet (rows: PresentRows) (i: int) : bool =
+        isNull rows.Bits || rows.Bits[rows.Offset + i]
+
     /// The masks of two validities of `n`-row columns are one mask — `Validity.toMask n` of each
     /// equal, without materialising either.
     let sameMask (n: int) (vx: Validity) (vy: Validity) : bool =
@@ -382,7 +406,10 @@ type AggregateError =
     /// the text that is not decimal text. Since Phase 417 a cell of another TYPE cannot sit in a
     /// column (`Column.ofCells` refuses it, and the typed storage cannot hold it), so the one cell
     /// this names is a `Decimal` whose text is not decimal: refused, by name, before any aggregate
-    /// reads it.
+    /// reads it. The case stays (Phase 421) because that text CAN still reach an aggregate: a
+    /// decimal vector holds any string, `Column.ofDecimals` checks nothing and `Column.ofCells` holds
+    /// decimal text as found, and `aggregate` reads a column without validating its table —
+    /// `Table.validate` refuses the same text, as `MalformedShape`, only where a table is validated.
     | CellOutsideType of column: string * colType: ColumnType * cell: string
 
 /// THE CODEC ENVELOPE — the closed set of refusals of the columnar codec, of `Table.validate` and of
@@ -840,19 +867,11 @@ module Column =
 
 
     // ---- pinned aggregate semantics (Phase 36) — the single source the compute layer's GroupBy/Pivot call ----
-
-    let private aggAsNum (c: Cell) : float option =
-        match c with
-        | Int i -> Some(float i)
-        | Float f -> Some f
-        | Decimal s -> DecimalText.tryToFloat s
-        | _ -> None
-
-    // ---- THE float order, the cell order and the cell token (Phase 299; public since Phase 315) ----
-    // One normal form of a float, which the aggregate ORDER and the distinct TOKEN both read, so
-    // they agree by construction. Since Phase 315 both are `Cell`'s public `compare` / `token`
-    // (`Cell.compareFloat` the float order beneath them), read here rather than kept as private
-    // copies — the aggregate keys `CountDistinct` on the token every consumer keys on.
+    // Since Phase 421 every aggregate is a loop over the column's typed vector: a present row is read
+    // off the `Validity` with no match per row (`ColumnStorage.presentRows`), and an `int`, `float`,
+    // `string` or `decimal` value is folded as itself, never wrapped in a `Cell`. The answers and the
+    // refusals are the cell walk's, to the bit — a differential law in TotalityTests holds the
+    // pre-421 cell walk, kept there as the oracle, to it.
 
     let private aggFnTag =
         function
@@ -867,17 +886,37 @@ module Column =
         | Last -> "last"
         | CountDistinct -> "countDistinct"
 
-    /// A present cell as `aggregate` admits it (Phase 299): a `Decimal` cell passes CANONICALISED,
-    /// and one whose text is not decimal text is a named `CellOutsideType`. Every other cell passes:
-    /// since Phase 417 a cell read from a column is of its column's type by construction, so the
-    /// type check this once made is the storage's, and `Null` is type-agnostic.
-    let private admit (col: Column) (c: Cell) : Result<Cell, AggregateError> =
-        match c with
-        | Decimal s ->
-            match DecimalText.tryCanonical s with
-            | Some canonical -> Ok(Decimal canonical)
-            | None -> Error(CellOutsideType(col.Name, col.Type, "decimal text '" + s + "' (not decimal)"))
-        | _ -> Ok c
+    /// A decimal column's present rows as `aggregate` admits them (Phase 299), walked in row order:
+    /// each text CANONICALISED and handed to `step` with its row, so `1.50` and `1.5` are one value
+    /// everywhere below; the first text that is not decimal text stops the walk as the named
+    /// `CellOutsideType` it answers. This is the one admission an aggregate makes — a cell of every
+    /// other column is of its column's type by construction (Phase 417) — and since it covers the
+    /// whole column before any answer is given, it outranks every other refusal. The canonical texts
+    /// are not kept: a column-long array of them would hold every fresh text alive at once.
+    let private walkDecimals
+        (col: Column)
+        (xs: Vector<string>)
+        (v: Validity)
+        (step: int -> string -> unit)
+        : AggregateError option =
+        let rows = ColumnStorage.presentRows xs.Length v
+        let items = xs.Items
+        let offset = xs.Offset
+        let mutable outside = None
+        let mutable i = 0
+
+        while outside.IsNone && i < rows.Count do
+            if ColumnStorage.isSet rows i then
+                let text = items[offset + i]
+
+                match DecimalText.tryCanonical text with
+                | Some c -> step i c
+                | None ->
+                    outside <- Some(CellOutsideType(col.Name, col.Type, "decimal text '" + text + "' (not decimal)"))
+
+            i <- i + 1
+
+        outside
 
     let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
         if r >= int64 System.Int32.MinValue && r <= int64 System.Int32.MaxValue then
@@ -936,117 +975,48 @@ module Column =
 
         mean / scale, sqrt (m2 / float k) / scale
 
-    /// What the admission pass learns for every aggregate, whatever it folds (Phase 388): the first
-    /// and the last admitted cell (a `Null` included) and how many were PRESENT.
-    type private Pass = { First: Cell; Last: Cell; Count: int }
+    /// The number of present rows (`Count`), counted within the column's own length.
+    let private presentRowCount (n: int) (v: Validity) : int =
+        match v with
+        | AllValid -> n
+        | Mask _ ->
+            let rows = ColumnStorage.presentRows n v
+            let mutable count = 0
 
-    /// One aggregate as a fold (Phase 388): `Step` folds one admitted PRESENT cell, in row order, and
-    /// `Finish` answers from what was folded and the pass. `admitAll` drives every one of them, so an
-    /// aggregate is one walk of the column whatever it keeps.
-    type private AggFold =
-        { Step: Cell -> unit
-          Finish: Pass -> Result<Cell, AggregateError> }
-
-    /// The one pass (Phase 306): every cell admitted in row order (Phase 299), each present one
-    /// handed to `step`. The first cell outside the column's type stops the pass and is the answer —
-    /// the refusal that outranks every other.
-    let private admitAll (col: Column) (step: Cell -> unit) : Result<Pass, AggregateError> =
-        let mutable outside: AggregateError option = None
-        let mutable seenAny = false
-        let mutable first = Null
-        let mutable last = Null
-        let mutable count = 0
-        let n = length col
-        let mutable i = 0
-
-        while outside.IsNone && i < n do
-            match admit col (cell i col) with
-            | Error e -> outside <- Some e
-            | Ok cell ->
-                if not seenAny then
-                    first <- cell
-                    seenAny <- true
-
-                last <- cell
-
-                match cell with
-                | Null -> ()
-                | _ ->
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
                     count <- count + 1
-                    step cell
 
-            i <- i + 1
+            count
 
-        match outside with
-        | Some e -> Error e
-        | None ->
-            Ok
-                { First = first
-                  Last = last
-                  Count = count }
+    /// `Sum` over an int column: exact, then range-checked against int32 (Phase 39 no-silent-wrap),
+    /// so the result is host-deterministic; `Null` over no present row. The values are added as
+    /// floats in runs of at most 2^22, each run's total moved into an `int64` at its end: every
+    /// partial total of a run is an integer of magnitude at most 2^22 * 2^31 = 2^53, which a float
+    /// holds exactly, so the answer is the `int64` sum's — without an `int64` add per row, which
+    /// Fable compiles to a `BigInt`.
+    let private intSum (xs: Vector<int>) (v: Validity) : Result<Cell, AggregateError> =
+        let rows = ColumnStorage.presentRows xs.Length v
+        let items = xs.Items
+        let offset = xs.Offset
+        let mutable total = 0L
+        let mutable run = 0.0
+        let mutable inRun = 0
+        let mutable seen = false
 
-    /// A fold that keeps nothing: the answer is the pass's (`Count`, `First`, `Last`) or a refusal.
-    let private passFold (finish: Pass -> Result<Cell, AggregateError>) : AggFold = { Step = ignore; Finish = finish }
+        for i in 0 .. rows.Count - 1 do
+            if ColumnStorage.isSet rows i then
+                run <- run + float items[offset + i]
+                inRun <- inRun + 1
 
-    /// `CountDistinct` (Phase 101): the distinct present values, by the canonical token.
-    let private distinctFold () : AggFold =
-        let tokens = System.Collections.Generic.HashSet<string>()
+                if inRun = 4194304 then
+                    total <- total + int64 run
+                    run <- 0.0
+                    inRun <- 0
 
-        { Step = fun cell -> tokens.Add(Cell.token cell) |> ignore
-          Finish = fun _ -> Ok(Int tokens.Count) }
+                seen <- true
 
-    /// `Min` / `Max` (Phase 299): the least / greatest present cell by `Cell.compare`, an incomparable
-    /// pair keeping the incumbent; `Null` over no present cell.
-    let private extremeFold (isMin: bool) : AggFold =
-        let best = ref Null
-        let seen = ref false
-
-        { Step =
-            fun cell ->
-                if not seen.Value then
-                    best.Value <- cell
-                    seen.Value <- true
-                else
-                    match Cell.compare best.Value cell with
-                    | Some c ->
-                        if isMin <> (c <= 0) then
-                            best.Value <- cell
-                    | None -> ()
-          Finish = fun _ -> Ok best.Value }
-
-    /// `Sum` over a decimal column (`0.33.0`): EXACT — never through `float`, so nothing is rounded
-    /// and nothing overflows — and a `Decimal`; `Null` over no present cell.
-    let private decimalSumFold () : AggFold =
-        let total = ref DecimalText.zero
-        let seen = ref false
-
-        { Step =
-            fun cell ->
-                match Cell.asDecimal cell with
-                | Some d ->
-                    if seen.Value then
-                        total.Value <- DecimalText.add total.Value d |> Option.defaultValue total.Value
-                    else
-                        total.Value <- d
-                        seen.Value <- true
-                | None -> ()
-          Finish = fun _ -> Ok(if seen.Value then Decimal total.Value else Null) }
-
-    /// `Sum` over an int column: folded in int64, then range-checked (Phase 39 no-silent-wrap), so the
-    /// result is host-deterministic. Admitted cells of an int column are `Int`s, so nothing is
-    /// truncated.
-    let private intSumFold () : AggFold =
-        let total = ref 0L
-        let seen = ref false
-
-        { Step =
-            fun cell ->
-                match cell with
-                | Int i ->
-                    total.Value <- total.Value + int64 i
-                    seen.Value <- true
-                | _ -> ()
-          Finish = fun _ -> if seen.Value then checkedSumInt total.Value else Ok Null }
+        if seen then checkedSumInt (total + int64 run) else Ok Null
 
     /// The float fold every float-valued aggregate shares (Phase 306): the running total, left to
     /// right from zero; how many numbers; whether every one was finite; the numbers themselves where
@@ -1059,6 +1029,53 @@ module Column =
           mutable PastFloat: AggregateError option
           Kept: ResizeArray<float> }
 
+    let inline private addNumber (acc: FloatAcc) (keeps: bool) (f: float) : unit =
+        acc.Total <- acc.Total + f
+        acc.Numbers <- acc.Numbers + 1
+
+        if not (isFiniteFloat f) then
+            acc.AllFinite <- false
+
+        if keeps then
+            acc.Kept.Add f
+
+    let private emptyAcc () : FloatAcc =
+        { Total = 0.0
+          Numbers = 0
+          AllFinite = true
+          PastFloat = None
+          Kept = ResizeArray<float>() }
+
+    /// The numbers of an int or a float column folded into a fresh `FloatAcc`, in row order: an
+    /// int as its float, a float as itself. A decimal column's numbers are folded as it is admitted
+    /// (`aggregateDecimals`); the other columns hold no number.
+    let private foldNumbers (col: Column) (keeps: bool) : FloatAcc =
+        let acc = emptyAcc ()
+        let rows = ColumnStorage.presentRows (length col) (validity col)
+
+        match col.Data with
+        | Ints(xs, _) ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    addNumber acc keeps (float items[offset + i])
+        | Floats(xs, _) ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    addNumber acc keeps items[offset + i]
+        | Decimals _
+        | Bools _
+        | Strs _
+        | Dates _
+        | Timestamps _ -> ()
+
+        acc
+
     /// A float answer over finite input: itself where it is finite, and a named overflow where even
     /// the form that cannot overflow an intermediate left the range.
     let private finiteOr (col: Column) (what: string) (f: float) : Result<Cell, AggregateError> =
@@ -1066,61 +1083,6 @@ module Column =
             Ok(Float f)
         else
             Error(AggregateOverflow(col.Name + ": " + what + " overflowed the float range"))
-
-    /// The float fold over a NUMERIC column, answered by `finish` unless a decimal past the float
-    /// range was met — that refusal ranks below the admission and the non-numeric ones, which the
-    /// pass and `aggregate` give first.
-    let private floatFold
-        (col: Column)
-        (fn: AggFn)
-        (keeps: bool)
-        (finish: FloatAcc -> Result<Cell, AggregateError>)
-        : AggFold =
-        let acc =
-            { Total = 0.0
-              Numbers = 0
-              AllFinite = true
-              PastFloat = None
-              Kept = ResizeArray<float>() }
-
-        { Step =
-            fun cell ->
-                if acc.PastFloat.IsNone then
-                    // Every admitted present cell of a numeric column is a number here; the one that
-                    // is not is a decimal past the float range, which `tryToFloat` refuses rather than
-                    // reading as an infinity.
-                    match aggAsNum cell with
-                    | Some f ->
-                        acc.Total <- acc.Total + f
-                        acc.Numbers <- acc.Numbers + 1
-
-                        if not (isFiniteFloat f) then
-                            acc.AllFinite <- false
-
-                        if keeps then
-                            acc.Kept.Add f
-                    | None ->
-                        let text =
-                            match cell with
-                            | Decimal s -> s
-                            | other -> Cell.token other
-
-                        acc.PastFloat <-
-                            Some(
-                                AggregateOverflow(
-                                    col.Name
-                                    + ": the decimal "
-                                    + text
-                                    + " is past the float range, and "
-                                    + aggFnTag fn
-                                    + " is a float"
-                                )
-                            )
-          Finish =
-            fun _ ->
-                match acc.PastFloat with
-                | Some e -> Error e
-                | None -> finish acc }
 
     /// `Sum` over a float column: the running total, which has no second form — a total that leaves
     /// the range over finite input is a named overflow.
@@ -1130,9 +1092,9 @@ module Column =
         else Ok(Float acc.Total)
 
     /// `Mean`: the plain formula, recomputed by `scaledMoments` where it overflowed over finite input.
-    /// That recomputation walks the column's numbers again — the one case that kept none — and every
-    /// cell was admitted by the pass.
-    let private floatMean (col: Column) (acc: FloatAcc) : Result<Cell, AggregateError> =
+    /// That recomputation folds the column's numbers again (`refold`), keeping them — the one case
+    /// that kept none.
+    let private floatMean (col: Column) (refold: unit -> FloatAcc) (acc: FloatAcc) : Result<Cell, AggregateError> =
         if acc.Numbers = 0 then
             Ok Null
         else
@@ -1141,17 +1103,7 @@ module Column =
             if isFiniteFloat mean || not acc.AllFinite then
                 Ok(Float mean)
             else
-                let xs = ResizeArray<float>()
-
-                for c in toCells col do
-                    match admit col c with
-                    | Ok cell ->
-                        match aggAsNum cell with
-                        | Some f -> xs.Add f
-                        | None -> ()
-                    | Error _ -> ()
-
-                finiteOr col "mean" (fst (scaledMoments xs))
+                finiteOr col "mean" (fst (scaledMoments (refold ()).Kept))
 
     /// `StdDev`, the POPULATION form, over the kept numbers: the plain second moment, recomputed by
     /// `scaledMoments` where it overflowed over finite input.
@@ -1173,8 +1125,9 @@ module Column =
             else
                 finiteOr col "stddev" (snd (scaledMoments acc.Kept))
 
-    /// `Median` over the kept numbers in the float order; an even count halves before it adds where
-    /// the plain mid-point overflowed over finite input.
+    /// `Median` over the kept numbers in the float order — a STABLE sort, so of two numbers the order
+    /// calls equal (`-0` and `0`) the one met first stays first; an even count halves before it adds
+    /// where the plain mid-point overflowed over finite input.
     let private floatMedian (col: Column) (acc: FloatAcc) : Result<Cell, AggregateError> =
         match List.sortWith Cell.compareFloat (List.ofSeq acc.Kept) with
         | [] -> Ok Null
@@ -1195,13 +1148,258 @@ module Column =
                     // Halved first: each half is exact, and their sum is within the range.
                     finiteOr col "median" (a / 2.0 + b / 2.0)
 
+    /// `Min` / `Max` (Phase 299): the least / greatest present value by `Cell.compare`'s order — an
+    /// incomparable pair keeping the incumbent, `Min` keeping the FIRST of equals and `Max` taking the
+    /// LAST, which is what tells `-0` from `0` — and `Null` over no present row. An int, float or
+    /// string column is compared as its values. A bool, date, timestamp or decimal column is compared
+    /// as the cells it renders, whose order (chronological for an instant, Phase 422; exact for a
+    /// decimal, whatever its text) is `Cell.compare`'s own, and a decimal answer is canonicalised.
+    let private extreme (isMin: bool) (col: Column) : Cell =
+        let rows = ColumnStorage.presentRows (length col) (validity col)
+        let mutable best = -1
+
+        // Does a present row replace the incumbent, whose order against it is `c`?
+        let inline replaces (c: int) = if isMin then c > 0 else c <= 0
+
+        match col.Data with
+        | Ints(xs, _) ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if
+                    ColumnStorage.isSet rows i
+                    && (best < 0 || replaces (compare items[offset + best] items[offset + i]))
+                then
+                    best <- i
+
+            if best < 0 then Null else Int items[offset + best]
+        | Floats(xs, _) ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if
+                    ColumnStorage.isSet rows i
+                    && (best < 0 || replaces (Cell.compareFloat items[offset + best] items[offset + i]))
+                then
+                    best <- i
+
+            if best < 0 then Null else Float items[offset + best]
+        | Strs(xs, _) ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if
+                    ColumnStorage.isSet rows i
+                    && (best < 0
+                        || replaces (System.String.CompareOrdinal(items[offset + best], items[offset + i])))
+                then
+                    best <- i
+
+            if best < 0 then Null else Str items[offset + best]
+        | Bools _
+        | Dates _
+        | Timestamps _
+        | Decimals _ ->
+            let mutable found = Null
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    let c = cell i col
+
+                    if best < 0 then
+                        found <- c
+                        best <- i
+                    else
+                        match Cell.compare found c with
+                        | Some k when replaces k -> found <- c
+                        | _ -> ()
+
+            match found with
+            | Decimal s -> Decimal(DecimalText.tryCanonical s |> Option.defaultValue s)
+            | other -> other
+
+    /// `CountDistinct` (Phase 101): the distinct present values under `Cell.token`'s identity — an
+    /// int and a string as themselves; a float with every NaN one value and `-0` one with `0` (the
+    /// two floats `token` merges, and the only two); a bool, date, timestamp or decimal column by the
+    /// token of the cell it renders, which reads a decimal canonically.
+    let private distinctCount (col: Column) : int =
+        let rows = ColumnStorage.presentRows (length col) (validity col)
+
+        match col.Data with
+        | Ints(xs, _) ->
+            let seen = System.Collections.Generic.HashSet<int>()
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    seen.Add items[offset + i] |> ignore
+
+            seen.Count
+        | Floats(xs, _) ->
+            let seen = System.Collections.Generic.HashSet<float>()
+            let mutable nan = 0
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    let f = items[offset + i]
+
+                    if System.Double.IsNaN f then nan <- 1
+                    elif f = 0.0 then seen.Add 0.0 |> ignore
+                    else seen.Add f |> ignore
+
+            seen.Count + nan
+        | Strs(xs, _) ->
+            let seen = System.Collections.Generic.HashSet<string>()
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    let s = items[offset + i]
+                    // A null string has no text of its own: it is keyed as `token` spells it after the
+                    // tag, which is the host's own spelling of a null concatenated.
+                    seen.Add(if isNull s then (Cell.token (Str s)).Substring 2 else s) |> ignore
+
+            seen.Count
+        | Bools _
+        | Dates _
+        | Timestamps _
+        | Decimals _ ->
+            let seen = System.Collections.Generic.HashSet<string>()
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    seen.Add(Cell.token (cell i col)) |> ignore
+
+            seen.Count
+
+    /// A float-valued aggregate's answer from its fold: the refusal of the first decimal past the
+    /// float range, where one was met, and otherwise `Sum`, `Mean`, `StdDev` or `Median` of what was
+    /// folded; `refold` folds the column again, keeping its numbers, for `Mean`'s second form.
+    let private floatAnswer
+        (col: Column)
+        (fn: AggFn)
+        (refold: unit -> FloatAcc)
+        (acc: FloatAcc)
+        : Result<Cell, AggregateError> =
+        match acc.PastFloat, fn with
+        | Some e, _ -> Error e
+        | None, Sum -> floatSum col acc
+        | None, Mean -> floatMean col refold acc
+        | None, StdDev -> floatStdDev col acc
+        | None, _ -> floatMedian col acc
+
+    /// Does `fn` keep the numbers it folds? `StdDev` and `Median` do: a second moment and a sort need
+    /// them.
+    let private keepsNumbers (fn: AggFn) : bool =
+        match fn with
+        | StdDev
+        | Median -> true
+        | Sum
+        | Mean
+        | Min
+        | Max
+        | Count
+        | First
+        | Last
+        | CountDistinct -> false
+
+    /// Every aggregate over a decimal column: the admission walk (`walkDecimals`), whose refusal
+    /// outranks every answer, folding `Count`, `First`, `Last`, the exact `Sum` and the float-valued
+    /// aggregates as it goes; `Min`, `Max` and `CountDistinct` read the column once it is admitted.
+    let private aggregateDecimals
+        (fn: AggFn)
+        (col: Column)
+        (xs: Vector<string>)
+        (v: Validity)
+        : Result<Cell, AggregateError> =
+        let walk = walkDecimals col xs v
+
+        let answer (refusal: AggregateError option) (k: unit -> Result<Cell, AggregateError>) =
+            match refusal with
+            | Some e -> Error e
+            | None -> k ()
+
+        // The float fold over the admitted texts: each its nearest float, and the first one past the
+        // float range recorded as the refusal `fn` (a float-valued aggregate) owes it, after which
+        // nothing more is folded — while the walk goes on, since a later text that is not decimal
+        // outranks it.
+        let foldDecimals (keeps: bool) : AggregateError option * FloatAcc =
+            let acc = emptyAcc ()
+
+            let refusal =
+                walk (fun _ text ->
+                    if acc.PastFloat.IsNone then
+                        match DecimalText.tryToFloat text with
+                        | Some f -> addNumber acc keeps f
+                        | None ->
+                            acc.PastFloat <-
+                                Some(
+                                    AggregateOverflow(
+                                        col.Name
+                                        + ": the decimal "
+                                        + text
+                                        + " is past the float range, and "
+                                        + aggFnTag fn
+                                        + " is a float"
+                                    )
+                                ))
+
+            refusal, acc
+
+        match fn with
+        | Count ->
+            let count = ref 0
+            answer (walk (fun _ _ -> count.Value <- count.Value + 1)) (fun () -> Ok(Int count.Value))
+        | First
+        | Last ->
+            // The first or the last ROW, a `Null` included.
+            let row =
+                match fn with
+                | First -> 0
+                | _ -> xs.Length - 1
+
+            let edge = ref Null
+
+            answer
+                (walk (fun i text ->
+                    if i = row then
+                        edge.Value <- Decimal text))
+                (fun () -> Ok edge.Value)
+        | Min -> answer (walk (fun _ _ -> ())) (fun () -> Ok(extreme true col))
+        | Max -> answer (walk (fun _ _ -> ())) (fun () -> Ok(extreme false col))
+        | CountDistinct -> answer (walk (fun _ _ -> ())) (fun () -> Ok(Int(distinctCount col)))
+        | Sum ->
+            // EXACT (`0.33.0`) — never through `float`, so nothing is rounded and nothing overflows —
+            // and a `Decimal`; `Null` over no present row.
+            let total: string option ref = ref None
+
+            let add _ text =
+                total.Value <-
+                    match total.Value with
+                    | None -> Some text
+                    | Some t -> Some(DecimalText.add t text |> Option.defaultValue t)
+
+            answer (walk add) (fun () -> Ok(total.Value |> Option.map Decimal |> Option.defaultValue Null))
+        | Mean
+        | StdDev
+        | Median ->
+            let refusal, acc = foldDecimals (keepsNumbers fn)
+            answer refusal (fun () -> floatAnswer col fn (fun () -> snd (foldDecimals true)) acc)
+
     /// Compute one aggregate over a column with the pinned null/coercion/float semantics (Phase 36) —
     /// the public surface the compute layer's `GroupBy`/`Pivot` *call* (the single source of truth, not
     /// a second copy). Null/NA is skipped; a numeric aggregate (`Sum`/`Mean`/`Median`/`StdDev`) over a
     /// non-numeric column is a named `IncompatibleAggType`; an integer `Sum` overflow is a named
     /// `AggregateOverflow` (Phase 39 no-silent-wrap). `Min`/`Max` order any same-family present cells;
-    /// `First`/`Last` keep the first/last cell (a `Null` included). Int sums fold in int64 then range-
-    /// check, so the result is host-deterministic. `Float` sums fold left to right from zero.
+    /// `First`/`Last` keep the first/last cell (a `Null` included). Int sums are exact, then range-
+    /// checked, so the result is host-deterministic. `Float` sums fold left to right from zero.
     /// `CountDistinct` (Phase 101) counts distinct PRESENT values by the canonical `Distinct` token, so
     /// it never depends on a host's float equality.
     ///
@@ -1210,24 +1408,23 @@ module Column =
     /// for every source type, and are the nearest float to each value — a value past the float
     /// range is a named `AggregateOverflow`, never an infinity.
     ///
-    /// EVERY CELL IS ADMITTED FIRST (Phase 299): a present cell whose type does not widen into
-    /// `col.Type` (`ColumnType.widens`), or a `Decimal` whose text is not decimal text, is a named
-    /// `CellOutsideType` — never truncated, dropped or counted by shape. A `Decimal` cell is read
-    /// canonicalised, so `1.50` and `1.5` are one value everywhere below. Numbers ORDER through the
-    /// column layer's float order: NaN is one value and sorts last, `-0` equals `0`, so `Min`, `Max`
-    /// and `Median` over a column holding a NaN answer the same on every host (`Max` is NaN, `Min`
-    /// is not, and `Median` counts NaN at the top).
+    /// A DECIMAL COLUMN IS ADMITTED FIRST (Phase 299): a present `Decimal` whose text is not decimal
+    /// text is a named `CellOutsideType` — never truncated, dropped or counted by shape — and every
+    /// one is read canonicalised, so `1.50` and `1.5` are one value everywhere below. No other
+    /// column can hold a cell outside its type (Phase 417). Numbers ORDER through the column layer's
+    /// float order: NaN is one value and sorts last, `-0` equals `0`, so `Min`, `Max` and `Median`
+    /// over a column holding a NaN answer the same on every host (`Max` is NaN, `Min` is not, and
+    /// `Median` counts NaN at the top).
     ///
-    /// ONE PASS (Phase 306). The column is walked once: each cell is admitted and folded into the
-    /// one accumulator its aggregate needs, in row order, with no intermediate list of admitted,
-    /// present or numeric cells (there were three; `Sum` over 20,000 cells cost some twenty times a
-    /// direct loop). The fold order is the order those lists were folded in, so every answer that
-    /// was finite is the same value to the bit. The refusals keep their precedence: a cell outside
-    /// its column's type anywhere in the column first, then a non-numeric column, then the first
-    /// decimal past the float range. `Median` and `StdDev` keep the column's numbers, because a
-    /// sort and a second moment need them. Since Phase 388 the pass is `admitAll` and each aggregate
-    /// is the one fold record it drives, so the walk is written once and an aggregate's accumulator
-    /// is the only state it carries.
+    /// A LOOP OVER THE TYPED VECTOR (Phase 421). Each aggregate walks the column's vector once,
+    /// reading presence off the `Validity` and folding the values as themselves, in row order, into
+    /// the one accumulator it needs — no `Cell` per row (`Sum` over 20,000 cells cost some twenty
+    /// times a direct loop when it read three intermediate lists, Phase 306, and still built a cell
+    /// per row until this phase). The fold order is the cell walk's, so every answer is the same
+    /// value to the bit. The refusals keep their precedence: a decimal text that is not decimal
+    /// anywhere in the column first, then a non-numeric column, then the first decimal past the
+    /// float range. `Median` and `StdDev` keep the column's numbers, because a sort and a second
+    /// moment need them.
     ///
     /// NO FLOAT AGGREGATE ANSWERS AN INFINITY OVER FINITE INPUT (Phase 306). `Median` of
     /// `[1e308; 1e308]`, `Mean` of `[1.7e308; 1.7e308; -1.7e308]` and `StdDev` of `[1e200; -1e200]`
@@ -1243,41 +1440,29 @@ module Column =
     /// `StdDev` IS THE POPULATION FORM: the square root of the mean squared deviation, dividing by
     /// the count `n`, not the sample form's `n - 1`. One value has a standard deviation of `0`.
     let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
-        // The aggregate and the column type are read by PATTERN, never by `=` (Phase 353): a union's
-        // `=` is a structural-equality call under Fable, and these tests ran a dozen of them per call
-        // and two more per cell — 16% of a node pivot that calls this once per (group, on-value) pair.
+        // The aggregate and the column are read by PATTERN, never by `=` (Phase 353): a union's `=`
+        // is a structural-equality call under Fable, and a pivot calls this once per (group,
+        // on-value) pair.
         let isNumeric =
-            match col.Type with
-            | IntType
-            | FloatType
-            | DecimalType -> true
-            | BoolType
-            | StringType
-            | DateType
-            | TimestampType _ -> false
+            match col.Data with
+            | Ints _
+            | Floats _
+            | Decimals _ -> true
+            | Bools _
+            | Strs _
+            | Dates _
+            | Timestamps _ -> false
 
-        // The one accumulator this aggregate folds into (Phase 388). A numeric aggregate over a
-        // non-numeric column folds nothing and is refused once the pass has admitted every cell.
-        let fold =
-            match fn with
-            | Count -> passFold (fun p -> Ok(Int p.Count))
-            | First -> passFold (fun p -> Ok p.First)
-            | Last -> passFold (fun p -> Ok p.Last)
-            | CountDistinct -> distinctFold ()
-            | Min -> extremeFold true
-            | Max -> extremeFold false
-            | Sum
-            | Mean
-            | StdDev
-            | Median when not isNumeric ->
-                passFold (fun _ -> Error(IncompatibleAggType(fn, col.Type, [ IntType; FloatType; DecimalType ])))
-            | Sum ->
-                match col.Type with
-                | DecimalType -> decimalSumFold ()
-                | IntType -> intSumFold ()
-                | _ -> floatFold col fn false (floatSum col)
-            | Mean -> floatFold col fn false (floatMean col)
-            | StdDev -> floatFold col fn true (floatStdDev col)
-            | Median -> floatFold col fn true (floatMedian col)
-
-        admitAll col fold.Step |> Result.bind fold.Finish
+        match col.Data, fn with
+        | Decimals(xs, v), _ -> aggregateDecimals fn col xs v
+        | _, Count -> Ok(Int(presentRowCount (length col) (validity col)))
+        | _, First -> Ok(cell 0 col)
+        | _, Last -> Ok(cell (length col - 1) col)
+        | _, CountDistinct -> Ok(Int(distinctCount col))
+        | _, Min -> Ok(extreme true col)
+        | _, Max -> Ok(extreme false col)
+        | _, (Sum | Mean | StdDev | Median) when not isNumeric ->
+            Error(IncompatibleAggType(fn, col.Type, [ IntType; FloatType; DecimalType ]))
+        | Ints(xs, v), Sum -> intSum xs v
+        | _, (Sum | Mean | StdDev | Median) ->
+            floatAnswer col fn (fun () -> foldNumbers col true) (foldNumbers col (keepsNumbers fn))

@@ -255,6 +255,468 @@ module private Before =
               Type = col.Type
               Cells = Column.toCells col }
 
+// ---- the aggregate as it stood before Phase 421: the one-pass walk over the column's cells ----
+//
+// A VERBATIM COPY of `Column.aggregate` and its private helpers at fuaran-core 75c0f70, the tree
+// Phase 421 started from: Phase 306's one pass and Phase 388's fold records, reading each row as a
+// `Cell` (`Column.cell`) and admitting it. It is the oracle of the Phase 421 differential below —
+// the loop over the typed vector must answer what this answers, to the bit, refusals included —
+// and is kept here rather than in the package because it is evidence, not surface. Five reads
+// differ, all spelling and none behaviour: `Column.length` / `Column.cell` / `Column.toCells` where
+// the package wrote `length` / `cell` / `toCells` from inside the module, and the package-internal
+// `Cell.compareFloat` / `Cell.asDecimal`, copied above it verbatim.
+module private CellWalk =
+    let private compareFloat (a: float) (b: float) : int =
+        match System.Double.IsNaN a, System.Double.IsNaN b with
+        | true, true -> 0
+        | true, false -> 1
+        | false, true -> -1
+        | false, false ->
+            if a < b then -1
+            elif a > b then 1
+            else 0
+
+    let private asDecimal (c: Cell) : string option =
+        match c with
+        | Decimal s -> DecimalText.tryCanonical s
+        | Int i -> Some(string i)
+        | _ -> None
+
+    let private aggAsNum (c: Cell) : float option =
+        match c with
+        | Int i -> Some(float i)
+        | Float f -> Some f
+        | Decimal s -> DecimalText.tryToFloat s
+        | _ -> None
+
+    let private aggFnTag =
+        function
+        | Sum -> "sum"
+        | Mean -> "mean"
+        | Min -> "min"
+        | Max -> "max"
+        | Count -> "count"
+        | Median -> "median"
+        | StdDev -> "stddev"
+        | First -> "first"
+        | Last -> "last"
+        | CountDistinct -> "countDistinct"
+
+    /// A present cell as `aggregate` admits it (Phase 299): a `Decimal` cell passes CANONICALISED,
+    /// and one whose text is not decimal text is a named `CellOutsideType`. Every other cell passes:
+    /// since Phase 417 a cell read from a column is of its column's type by construction, so the
+    /// type check this once made is the storage's, and `Null` is type-agnostic.
+    let private admit (col: Column) (c: Cell) : Result<Cell, AggregateError> =
+        match c with
+        | Decimal s ->
+            match DecimalText.tryCanonical s with
+            | Some canonical -> Ok(Decimal canonical)
+            | None -> Error(CellOutsideType(col.Name, col.Type, "decimal text '" + s + "' (not decimal)"))
+        | _ -> Ok c
+
+    let private checkedSumInt (r: int64) : Result<Cell, AggregateError> =
+        if r >= int64 System.Int32.MinValue && r <= int64 System.Int32.MaxValue then
+            Ok(Int(int r))
+        else
+            Error(AggregateOverflow("sum overflowed int32: " + string r))
+
+    /// The output column type of an aggregate over a source of type `srcType` (Phase 36) — `Count` is
+    /// int; `Mean`/`Median`/`StdDev` are float; the rest keep the source type.
+    let aggType (fn: AggFn) (srcType: ColumnType) : ColumnType =
+        match fn with
+        | Count
+        | CountDistinct -> IntType
+        | Mean
+        | Median
+        | StdDev -> FloatType
+        | Sum
+        | Min
+        | Max
+        | First
+        | Last -> srcType
+
+    let private isFiniteFloat (f: float) : bool =
+        not (System.Double.IsNaN f || System.Double.IsInfinity f)
+
+    /// The mean and the POPULATION standard deviation of finite values, computed so that no
+    /// intermediate leaves the float range (Phase 306) — the path `aggregate` takes only when the
+    /// plain formulas overflowed on finite input. The values are scaled by a power of two (exact
+    /// in binary floating point) until the largest magnitude is at most one, the two moments are
+    /// accumulated by Welford's recurrence — a running mean and a running sum of squared
+    /// deviations, neither of which can exceed the count once every value is within one — and the
+    /// results are scaled back. Both answers are bounded by the largest input magnitude, so
+    /// scaling back cannot overflow except by the last rounding, which the caller names.
+    let private scaledMoments (xs: ResizeArray<float>) : float * float =
+        let mutable maxAbs = 0.0
+
+        for x in xs do
+            if abs x > maxAbs then
+                maxAbs <- abs x
+
+        let mutable scale = 1.0
+
+        while maxAbs * scale > 1.0 do
+            scale <- scale * 0.5
+
+        let mutable mean = 0.0
+        let mutable m2 = 0.0
+        let mutable k = 0
+
+        for x in xs do
+            k <- k + 1
+            let y = x * scale
+            let d = y - mean
+            mean <- mean + d / float k
+            m2 <- m2 + d * (y - mean)
+
+        mean / scale, sqrt (m2 / float k) / scale
+
+    /// What the admission pass learns for every aggregate, whatever it folds (Phase 388): the first
+    /// and the last admitted cell (a `Null` included) and how many were PRESENT.
+    type private Pass = { First: Cell; Last: Cell; Count: int }
+
+    /// One aggregate as a fold (Phase 388): `Step` folds one admitted PRESENT cell, in row order, and
+    /// `Finish` answers from what was folded and the pass. `admitAll` drives every one of them, so an
+    /// aggregate is one walk of the column whatever it keeps.
+    type private AggFold =
+        { Step: Cell -> unit
+          Finish: Pass -> Result<Cell, AggregateError> }
+
+    /// The one pass (Phase 306): every cell admitted in row order (Phase 299), each present one
+    /// handed to `step`. The first cell outside the column's type stops the pass and is the answer —
+    /// the refusal that outranks every other.
+    let private admitAll (col: Column) (step: Cell -> unit) : Result<Pass, AggregateError> =
+        let mutable outside: AggregateError option = None
+        let mutable seenAny = false
+        let mutable first = Null
+        let mutable last = Null
+        let mutable count = 0
+        let n = Column.length col
+        let mutable i = 0
+
+        while outside.IsNone && i < n do
+            match admit col (Column.cell i col) with
+            | Error e -> outside <- Some e
+            | Ok cell ->
+                if not seenAny then
+                    first <- cell
+                    seenAny <- true
+
+                last <- cell
+
+                match cell with
+                | Null -> ()
+                | _ ->
+                    count <- count + 1
+                    step cell
+
+            i <- i + 1
+
+        match outside with
+        | Some e -> Error e
+        | None ->
+            Ok
+                { First = first
+                  Last = last
+                  Count = count }
+
+    /// A fold that keeps nothing: the answer is the pass's (`Count`, `First`, `Last`) or a refusal.
+    let private passFold (finish: Pass -> Result<Cell, AggregateError>) : AggFold = { Step = ignore; Finish = finish }
+
+    /// `CountDistinct` (Phase 101): the distinct present values, by the canonical token.
+    let private distinctFold () : AggFold =
+        let tokens = System.Collections.Generic.HashSet<string>()
+
+        { Step = fun cell -> tokens.Add(Cell.token cell) |> ignore
+          Finish = fun _ -> Ok(Int tokens.Count) }
+
+    /// `Min` / `Max` (Phase 299): the least / greatest present cell by `Cell.compare`, an incomparable
+    /// pair keeping the incumbent; `Null` over no present cell.
+    let private extremeFold (isMin: bool) : AggFold =
+        let best = ref Null
+        let seen = ref false
+
+        { Step =
+            fun cell ->
+                if not seen.Value then
+                    best.Value <- cell
+                    seen.Value <- true
+                else
+                    match Cell.compare best.Value cell with
+                    | Some c ->
+                        if isMin <> (c <= 0) then
+                            best.Value <- cell
+                    | None -> ()
+          Finish = fun _ -> Ok best.Value }
+
+    /// `Sum` over a decimal column (`0.33.0`): EXACT — never through `float`, so nothing is rounded
+    /// and nothing overflows — and a `Decimal`; `Null` over no present cell.
+    let private decimalSumFold () : AggFold =
+        let total = ref DecimalText.zero
+        let seen = ref false
+
+        { Step =
+            fun cell ->
+                match asDecimal cell with
+                | Some d ->
+                    if seen.Value then
+                        total.Value <- DecimalText.add total.Value d |> Option.defaultValue total.Value
+                    else
+                        total.Value <- d
+                        seen.Value <- true
+                | None -> ()
+          Finish = fun _ -> Ok(if seen.Value then Decimal total.Value else Null) }
+
+    /// `Sum` over an int column: folded in int64, then range-checked (Phase 39 no-silent-wrap), so the
+    /// result is host-deterministic. Admitted cells of an int column are `Int`s, so nothing is
+    /// truncated.
+    let private intSumFold () : AggFold =
+        let total = ref 0L
+        let seen = ref false
+
+        { Step =
+            fun cell ->
+                match cell with
+                | Int i ->
+                    total.Value <- total.Value + int64 i
+                    seen.Value <- true
+                | _ -> ()
+          Finish = fun _ -> if seen.Value then checkedSumInt total.Value else Ok Null }
+
+    /// The float fold every float-valued aggregate shares (Phase 306): the running total, left to
+    /// right from zero; how many numbers; whether every one was finite; the numbers themselves where
+    /// the aggregate keeps them (a sort and a second moment need them); and the first decimal past
+    /// the float range, after which nothing more is folded.
+    type private FloatAcc =
+        { mutable Total: float
+          mutable Numbers: int
+          mutable AllFinite: bool
+          mutable PastFloat: AggregateError option
+          Kept: ResizeArray<float> }
+
+    /// A float answer over finite input: itself where it is finite, and a named overflow where even
+    /// the form that cannot overflow an intermediate left the range.
+    let private finiteOr (col: Column) (what: string) (f: float) : Result<Cell, AggregateError> =
+        if isFiniteFloat f then
+            Ok(Float f)
+        else
+            Error(AggregateOverflow(col.Name + ": " + what + " overflowed the float range"))
+
+    /// The float fold over a NUMERIC column, answered by `finish` unless a decimal past the float
+    /// range was met — that refusal ranks below the admission and the non-numeric ones, which the
+    /// pass and `aggregate` give first.
+    let private floatFold
+        (col: Column)
+        (fn: AggFn)
+        (keeps: bool)
+        (finish: FloatAcc -> Result<Cell, AggregateError>)
+        : AggFold =
+        let acc =
+            { Total = 0.0
+              Numbers = 0
+              AllFinite = true
+              PastFloat = None
+              Kept = ResizeArray<float>() }
+
+        { Step =
+            fun cell ->
+                if acc.PastFloat.IsNone then
+                    // Every admitted present cell of a numeric column is a number here; the one that
+                    // is not is a decimal past the float range, which `tryToFloat` refuses rather than
+                    // reading as an infinity.
+                    match aggAsNum cell with
+                    | Some f ->
+                        acc.Total <- acc.Total + f
+                        acc.Numbers <- acc.Numbers + 1
+
+                        if not (isFiniteFloat f) then
+                            acc.AllFinite <- false
+
+                        if keeps then
+                            acc.Kept.Add f
+                    | None ->
+                        let text =
+                            match cell with
+                            | Decimal s -> s
+                            | other -> Cell.token other
+
+                        acc.PastFloat <-
+                            Some(
+                                AggregateOverflow(
+                                    col.Name
+                                    + ": the decimal "
+                                    + text
+                                    + " is past the float range, and "
+                                    + aggFnTag fn
+                                    + " is a float"
+                                )
+                            )
+          Finish =
+            fun _ ->
+                match acc.PastFloat with
+                | Some e -> Error e
+                | None -> finish acc }
+
+    /// `Sum` over a float column: the running total, which has no second form — a total that leaves
+    /// the range over finite input is a named overflow.
+    let private floatSum (col: Column) (acc: FloatAcc) : Result<Cell, AggregateError> =
+        if acc.Numbers = 0 then Ok Null
+        elif acc.AllFinite then finiteOr col "sum" acc.Total
+        else Ok(Float acc.Total)
+
+    /// `Mean`: the plain formula, recomputed by `scaledMoments` where it overflowed over finite input.
+    /// That recomputation walks the column's numbers again — the one case that kept none — and every
+    /// cell was admitted by the pass.
+    let private floatMean (col: Column) (acc: FloatAcc) : Result<Cell, AggregateError> =
+        if acc.Numbers = 0 then
+            Ok Null
+        else
+            let mean = acc.Total / float acc.Numbers
+
+            if isFiniteFloat mean || not acc.AllFinite then
+                Ok(Float mean)
+            else
+                let xs = ResizeArray<float>()
+
+                for c in Column.toCells col do
+                    match admit col c with
+                    | Ok cell ->
+                        match aggAsNum cell with
+                        | Some f -> xs.Add f
+                        | None -> ()
+                    | Error _ -> ()
+
+                finiteOr col "mean" (fst (scaledMoments xs))
+
+    /// `StdDev`, the POPULATION form, over the kept numbers: the plain second moment, recomputed by
+    /// `scaledMoments` where it overflowed over finite input.
+    let private floatStdDev (col: Column) (acc: FloatAcc) : Result<Cell, AggregateError> =
+        if acc.Numbers = 0 then
+            Ok Null
+        else
+            let n = float acc.Numbers
+            let mean = acc.Total / n
+            let mutable squares = 0.0
+
+            for x in acc.Kept do
+                squares <- squares + (x - mean) * (x - mean)
+
+            let deviation = sqrt (squares / n)
+
+            if isFiniteFloat deviation || not acc.AllFinite then
+                Ok(Float deviation)
+            else
+                finiteOr col "stddev" (snd (scaledMoments acc.Kept))
+
+    /// `Median` over the kept numbers in the float order; an even count halves before it adds where
+    /// the plain mid-point overflowed over finite input.
+    let private floatMedian (col: Column) (acc: FloatAcc) : Result<Cell, AggregateError> =
+        match List.sortWith compareFloat (List.ofSeq acc.Kept) with
+        | [] -> Ok Null
+        | sorted ->
+            let n = List.length sorted
+            let mid = n / 2
+
+            if n % 2 = 1 then
+                Ok(Float(List.item mid sorted))
+            else
+                let a = List.item (mid - 1) sorted
+                let b = List.item mid sorted
+                let plain = (a + b) / 2.0
+
+                if isFiniteFloat plain || not (isFiniteFloat a && isFiniteFloat b) then
+                    Ok(Float plain)
+                else
+                    // Halved first: each half is exact, and their sum is within the range.
+                    finiteOr col "median" (a / 2.0 + b / 2.0)
+
+    /// Compute one aggregate over a column with the pinned null/coercion/float semantics (Phase 36) —
+    /// the public surface the compute layer's `GroupBy`/`Pivot` *call* (the single source of truth, not
+    /// a second copy). Null/NA is skipped; a numeric aggregate (`Sum`/`Mean`/`Median`/`StdDev`) over a
+    /// non-numeric column is a named `IncompatibleAggType`; an integer `Sum` overflow is a named
+    /// `AggregateOverflow` (Phase 39 no-silent-wrap). `Min`/`Max` order any same-family present cells;
+    /// `First`/`Last` keep the first/last cell (a `Null` included). Int sums fold in int64 then range-
+    /// check, so the result is host-deterministic. `Float` sums fold left to right from zero.
+    /// `CountDistinct` (Phase 101) counts distinct PRESENT values by the canonical `Distinct` token, so
+    /// it never depends on a host's float equality.
+    ///
+    /// A `DecimalType` column is numeric (`0.33.0`). Its `Sum` is EXACT and is a `Decimal`; its
+    /// `Min`/`Max` compare exactly; its `Mean`/`Median`/`StdDev` are `float`, as `aggType` declares
+    /// for every source type, and are the nearest float to each value — a value past the float
+    /// range is a named `AggregateOverflow`, never an infinity.
+    ///
+    /// EVERY CELL IS ADMITTED FIRST (Phase 299): a present cell whose type does not widen into
+    /// `col.Type` (`ColumnType.widens`), or a `Decimal` whose text is not decimal text, is a named
+    /// `CellOutsideType` — never truncated, dropped or counted by shape. A `Decimal` cell is read
+    /// canonicalised, so `1.50` and `1.5` are one value everywhere below. Numbers ORDER through the
+    /// column layer's float order: NaN is one value and sorts last, `-0` equals `0`, so `Min`, `Max`
+    /// and `Median` over a column holding a NaN answer the same on every host (`Max` is NaN, `Min`
+    /// is not, and `Median` counts NaN at the top).
+    ///
+    /// ONE PASS (Phase 306). The column is walked once: each cell is admitted and folded into the
+    /// one accumulator its aggregate needs, in row order, with no intermediate list of admitted,
+    /// present or numeric cells (there were three; `Sum` over 20,000 cells cost some twenty times a
+    /// direct loop). The fold order is the order those lists were folded in, so every answer that
+    /// was finite is the same value to the bit. The refusals keep their precedence: a cell outside
+    /// its column's type anywhere in the column first, then a non-numeric column, then the first
+    /// decimal past the float range. `Median` and `StdDev` keep the column's numbers, because a
+    /// sort and a second moment need them. Since Phase 388 the pass is `admitAll` and each aggregate
+    /// is the one fold record it drives, so the walk is written once and an aggregate's accumulator
+    /// is the only state it carries.
+    ///
+    /// NO FLOAT AGGREGATE ANSWERS AN INFINITY OVER FINITE INPUT (Phase 306). `Median` of
+    /// `[1e308; 1e308]`, `Mean` of `[1.7e308; 1.7e308; -1.7e308]` and `StdDev` of `[1e200; -1e200]`
+    /// each overflowed an intermediate — a sum, or a square — though the answer is representable.
+    /// Each is computed by its plain formula first; where that leaves the float range while every
+    /// input was finite, `Median` halves before it adds, and `Mean` and `StdDev` are recomputed by
+    /// a scaled Welford recurrence (`scaledMoments`), whose intermediates cannot overflow. A float
+    /// `Sum` has no such second form — the running total is the answer — so a total that leaves
+    /// the range over finite input is a named `AggregateOverflow`, as an int `Sum` past int32
+    /// always was. A column that itself HOLDS a NaN or an infinity is a different matter: the
+    /// answer is whatever IEEE arithmetic gives, and that is not an overflow.
+    ///
+    /// `StdDev` IS THE POPULATION FORM: the square root of the mean squared deviation, dividing by
+    /// the count `n`, not the sample form's `n - 1`. One value has a standard deviation of `0`.
+    let aggregate (fn: AggFn) (col: Column) : Result<Cell, AggregateError> =
+        // The aggregate and the column type are read by PATTERN, never by `=` (Phase 353): a union's
+        // `=` is a structural-equality call under Fable, and these tests ran a dozen of them per call
+        // and two more per cell — 16% of a node pivot that calls this once per (group, on-value) pair.
+        let isNumeric =
+            match col.Type with
+            | IntType
+            | FloatType
+            | DecimalType -> true
+            | BoolType
+            | StringType
+            | DateType
+            | TimestampType _ -> false
+
+        // The one accumulator this aggregate folds into (Phase 388). A numeric aggregate over a
+        // non-numeric column folds nothing and is refused once the pass has admitted every cell.
+        let fold =
+            match fn with
+            | Count -> passFold (fun p -> Ok(Int p.Count))
+            | First -> passFold (fun p -> Ok p.First)
+            | Last -> passFold (fun p -> Ok p.Last)
+            | CountDistinct -> distinctFold ()
+            | Min -> extremeFold true
+            | Max -> extremeFold false
+            | Sum
+            | Mean
+            | StdDev
+            | Median when not isNumeric ->
+                passFold (fun _ -> Error(IncompatibleAggType(fn, col.Type, [ IntType; FloatType; DecimalType ])))
+            | Sum ->
+                match col.Type with
+                | DecimalType -> decimalSumFold ()
+                | IntType -> intSumFold ()
+                | _ -> floatFold col fn false (floatSum col)
+            | Mean -> floatFold col fn false (floatMean col)
+            | StdDev -> floatFold col fn true (floatStdDev col)
+            | Median -> floatFold col fn true (floatMedian col)
+
+        admitAll col fold.Step |> Result.bind fold.Finish
+
 // ---- helpers ----
 
 /// A column of cells that fit its type (Phase 417: `Column.ofCells`, which refuses one that does not).
@@ -389,6 +851,158 @@ let private genColumn (seed: int) : ColumnType * Cell list =
                     Decimal decimals[pick decimals.Length]
 
     ty, [ for _ in 1 .. pick 9 -> cellOf () ]
+
+/// A seed-replayable TYPED column (Phase 421), built through the typed builders rather than
+/// `Column.ofCells`, so it reaches what construction from cells cannot: every column type, each
+/// timestamp unit included; an all-true `Mask` beside `AllValid`; a mask shorter or longer than its
+/// values (which `Table.validate` refuses, and which `aggregate` must still answer); vectors that are
+/// views into a larger array; decimal text that is not canonical or not decimal at all; a null
+/// string; a day, an instant or a fraction outside the canonical range — over the values that tell
+/// two folds apart: nulls, NaN (two payloads), both zeroes, the infinities, magnitudes whose sum or
+/// square leaves the float range, a denormal, and ints at both int32 bounds, whose sums cross them.
+let private genTypedColumn (seed: int) : Column =
+    let mutable st = (uint32 seed * 2246822519u) + 7u
+
+    let next () =
+        st <- (st * 1664525u) + 1013904223u
+        int (st >>> 1)
+
+    let pick (n: int) = next () % n
+    let ty = ColumnType.all[pick ColumnType.all.Length]
+    let n = if pick 6 = 0 then pick 40 else pick 10
+    let lead = if pick 3 = 0 then 1 + pick 3 else 0
+
+    // A view of `n` elements after `lead` of the array's own: the backing array is longer than the
+    // vector wherever `lead` is not zero.
+    let view (draw: unit -> 'T) : Vector<'T> =
+        Vector.slice lead n (Vector.adopt (Array.init (lead + n) (fun _ -> draw ())))
+
+    let validity =
+        match pick 6 with
+        | 0
+        | 1 -> AllValid
+        | 2 -> Mask(Vector.adopt (Array.init (max 0 (n + pick 5 - 2)) (fun _ -> pick 4 <> 0)))
+        | 3 -> Mask(view (fun () -> true))
+        | _ -> Mask(view (fun () -> pick 4 <> 0))
+
+    let ints =
+        [| Int32.MaxValue
+           Int32.MinValue
+           Int32.MaxValue - 1
+           Int32.MinValue + 1
+           1
+           -1
+           0 |]
+
+    let floats =
+        [| 0.0
+           -0.0
+           nan
+           BitConverter.Int64BitsToDouble 0x7FF8000000000123L
+           infinity
+           -infinity
+           1e308
+           -1e308
+           1.7e308
+           1e200
+           -1e200
+           1e-320 |]
+
+    let strs = [| ""; "a"; "b"; "B"; "ab"; "é"; "null" |]
+
+    let decimals =
+        [| "1.5"
+           "1.50"
+           "-0"
+           "0.05"
+           "12"
+           "-3.25"
+           "0"
+           "007.10"
+           String.replicate 400 "9" |]
+
+    match ty with
+    | IntType ->
+        Column.ofInts
+            "c"
+            (view (fun () ->
+                if pick 2 = 0 then
+                    ints[pick ints.Length]
+                else
+                    pick 2001 - 1000))
+            validity
+    | FloatType ->
+        Column.ofFloats
+            "c"
+            (view (fun () ->
+                if pick 3 = 0 then
+                    floats[pick floats.Length]
+                else
+                    float (pick 4000 - 2000) / 8.0))
+            validity
+    | BoolType -> Column.ofBools "c" (view (fun () -> pick 2 = 0)) validity
+    | StringType -> Column.ofStrs "c" (view (fun () -> if pick 25 = 0 then null else strs[pick strs.Length])) validity
+    | DateType ->
+        Column.ofDates
+            "c"
+            (view (fun () ->
+                match pick 20 with
+                | 0 -> TemporalText.MinDay - 1 + pick 2
+                | 1 -> TemporalText.MaxDay + pick 2
+                | _ -> 20400 + pick 30))
+            validity
+    | TimestampType unit ->
+        let scale = TimeUnit.scale unit
+
+        let seconds =
+            view (fun () ->
+                match pick 25 with
+                | 0 -> 1767225600.5
+                | 1 -> TemporalText.maxSecond + 1.0
+                | _ -> 1767225600.0 + float (pick 40))
+
+        let fraction =
+            match pick 4 with
+            | 0 -> None
+            | 1 -> Some(Vector.adopt (Array.init (max 0 (n - 1)) (fun _ -> pick scale)))
+            | _ ->
+                Some(
+                    view (fun () ->
+                        if pick 30 = 0 then
+                            scale
+                        else
+                            (if pick 2 = 0 then 0 else pick scale))
+                )
+
+        Column.ofTimestamps "c" unit seconds fraction validity
+    | DecimalType ->
+        Column.ofDecimals "c" (view (fun () -> if pick 40 = 0 then "x" else decimals[pick decimals.Length])) validity
+
+/// Two aggregate answers are the SAME answer: equal, with a float compared by its BITS — so `-0`
+/// and `0`, and two floats one ulp apart, are different answers. A float the column HOLDS and the
+/// aggregate hands back (`Min`, `Max`, `First`, `Last`) is compared to its NaN payload, which is
+/// what tells the first of two equal values from the last. A float the aggregate COMPUTES is a NaN
+/// whatever its payload: which NaN an addition of two NaNs yields is the processor's, and the JIT
+/// may order a commutative operand pair either way (a Release build did, on .NET, for both folds).
+let private sameAnswer (fn: AggFn) (a: Result<Cell, AggregateError>) (b: Result<Cell, AggregateError>) : bool =
+    match a, b with
+    | Ok(Float x), Ok(Float y) ->
+        let held =
+            match fn with
+            | Min
+            | Max
+            | First
+            | Last -> true
+            | Sum
+            | Mean
+            | Count
+            | Median
+            | StdDev
+            | CountDistinct -> false
+
+        BitConverter.DoubleToInt64Bits x = BitConverter.DoubleToInt64Bits y
+        || (not held && Double.IsNaN x && Double.IsNaN y)
+    | _ -> a = b
 
 /// FNV-1a over any sequence of units, in 64-bit arithmetic reduced mod 2^32 — a reference that
 /// shares no line with `Hash.fnv1a`'s split multiply.
@@ -654,6 +1268,94 @@ let tests =
               Expect.isGreaterThan agreed 50000 "the differential compared a real population"
               Expect.isGreaterThan rescued 20 "and the pool reached the overflow the phase is about"
               Expect.isGreaterThan refused 5000 "and the cells outside the type, refused at construction"
+
+          testCase
+              "the loop over the typed vector answers what the cell walk answered, to the bit, refusals included (Phase 421)"
+          <| fun _ ->
+              let mutable compared = 0
+              let mutable outside = 0
+              let mutable incompatible = 0
+              let mutable overflow = 0
+              let mutable negativeZero = 0
+              let mutable nans = 0
+              let types = Collections.Generic.HashSet<string>()
+
+              let compare (label: string) (seed: int) (col: Column) =
+                  for fn in allAggregates do
+                      let before = CellWalk.aggregate fn col
+                      let after = Column.aggregate fn col
+                      compared <- compared + 1
+
+                      match before with
+                      | Error(CellOutsideType _) -> outside <- outside + 1
+                      | Error(IncompatibleAggType _) -> incompatible <- incompatible + 1
+                      | Error(AggregateOverflow _) -> overflow <- overflow + 1
+                      | Ok(Float f) when Double.IsNaN f -> nans <- nans + 1
+                      | Ok(Float f) when BitConverter.DoubleToInt64Bits f = Int64.MinValue ->
+                          negativeZero <- negativeZero + 1
+                      | _ -> ()
+
+                      if not (sameAnswer fn before after) then
+                          failtestf
+                              "%s seed %d, %A over %A: the cell walk answered %A, the typed loop %A"
+                              label
+                              seed
+                              fn
+                              col
+                              before
+                              after
+
+              for seed in 1..20000 do
+                  let col = genTypedColumn seed
+                  types.Add(ColumnType.tag col.Type) |> ignore
+                  compare "typed" seed col
+
+              // ... and the columns built from cells, as every consumer that has not moved builds them.
+              for seed in 1..6000 do
+                  let ty, cells = genColumn seed
+
+                  match Column.ofCells "c" ty cells with
+                  | Ok col -> compare "cells" seed col
+                  | Error _ -> ()
+
+              Expect.equal types.Count ColumnType.all.Length "every column type, each timestamp unit, was drawn"
+              Expect.isGreaterThan compared 240000 "the differential compared a real population"
+              Expect.isGreaterThan outside 3000 "a decimal text that is not decimal, refused by name"
+              Expect.isGreaterThan incompatible 10000 "a numeric aggregate over a non-numeric column"
+              Expect.isGreaterThan overflow 500 "an int32 sum past either bound, and a float past the range"
+              Expect.isGreaterThan negativeZero 50 "-0 answered as itself, where the order cannot tell it from 0"
+              Expect.isGreaterThan nans 500 "NaN answered with its own payload"
+
+          testCase "an int Sum is exact past 2^22 rows, where a float total alone would round (Phase 421)"
+          <| fun _ ->
+              // 2^22 + 3 rows of int32's maximum: past 2^53 / (2^31 - 1) rows a single float total
+              // rounds, so the run of 2^22 rows the typed loop folds as floats must hand over to the
+              // int64 total for the refusal to name the exact sum.
+              let n = 4194304 + 3
+
+              let col =
+                  Column.ofInts "big" (Vector.adopt (Array.create n Int32.MaxValue)) AllValid
+
+              let exact = int64 n * int64 Int32.MaxValue
+
+              Expect.equal
+                  (Column.aggregate Sum col)
+                  (Error(AggregateOverflow("sum overflowed int32: " + string exact)))
+                  "names the exact int64 sum"
+
+              Expect.equal (Column.aggregate Sum col) (CellWalk.aggregate Sum col) "and the cell walk's answer"
+
+              let back =
+                  Column.ofInts
+                      "back"
+                      (Vector.adopt (Array.init n (fun i -> if i % 2 = 0 then Int32.MaxValue else -Int32.MaxValue)))
+                      AllValid
+
+              Expect.equal
+                  (Column.aggregate Sum back)
+                  (Ok(Int Int32.MaxValue))
+                  "a total that returns into range is exact"
+
 
           testCase "the probes that answered an infinity answer the value, and a float Sum past the range is named"
           <| fun _ ->

@@ -1574,7 +1574,34 @@ let typedColumnTests =
                   )
               with
               | Error(LengthMismatch("c", 2, 1)) -> ()
-              | other -> failtestf "tryEncode refuses with validate's error, got %A" other ]
+              | other -> failtestf "tryEncode refuses with validate's error, got %A" other
+
+          testCase "Table.validate reads the typed storage through a view and a mask, and refuses as before (Phase 421)"
+          <| fun _ ->
+              // The validity is read off the mask's array: an absent row's placeholder is never read,
+              // and a view's neighbours outside it never are.
+              let floats =
+                  Column.ofFloats
+                      "f"
+                      (Vector.slice 1 3 (Vector.adopt [| nan; 1.0; infinity; 2.0; nan |]))
+                      (Mask(Vector.adopt [| true; false; true |]))
+
+              Expect.equal
+                  (Table.validate
+                      { Schema = [ Field.create "f" FloatType ]
+                        Columns = [ floats ] })
+                  (Ok())
+                  "the infinity sits at an absent row, and the NaNs outside the view"
+
+              let present =
+                  Column.ofFloats "f" (Vector.slice 1 3 (Vector.adopt [| 0.0; 1.0; infinity; 2.0 |])) AllValid
+
+              Expect.equal
+                  (Table.validate
+                      { Schema = [ Field.create "f" FloatType ]
+                        Columns = [ present ] })
+                  (Error(NonFiniteFloat("f", "Infinity")))
+                  "present, it is refused" ]
 
 /// A pair of columns of one type for the equality law, from a seed, with the cell lists they were
 /// built from: the second column is the first with each row, independently, swapped for an
