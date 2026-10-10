@@ -10020,7 +10020,10 @@ let private qColToModel (t: ColumnType) : ModelQuery.column_type =
     | BoolType -> ModelQuery.BoolType
     | StringType -> ModelQuery.StringType
     | DateType -> ModelQuery.DateType
-    | TimestampType -> ModelQuery.TimestampType
+    | TimestampType TimeUnit.Seconds -> ModelQuery.TimestampType
+    // The query model's column type carries no unit (Phase 419's deferred task 3); the pools below
+    // draw only the seconds unit, which is the model's `TimestampType`.
+    | TimestampType u -> failwithf "the query model has no %A timestamp" u
     | DecimalType -> ModelQuery.DecimalType
 
 let private qColTag (t: ColumnType) : string =
@@ -10030,7 +10033,7 @@ let private qColTag (t: ColumnType) : string =
     | BoolType -> "bool"
     | StringType -> "string"
     | DateType -> "date"
-    | TimestampType -> "timestamp"
+    | TimestampType u -> ColumnType.tag (TimestampType u)
     | DecimalType -> "decimal"
 
 let private qModelColTag (t: ModelQuery.column_type) : string =
@@ -10388,7 +10391,7 @@ let private queryTypePool =
       BoolType
       StringType
       DateType
-      TimestampType
+      TimestampType TimeUnit.Seconds
       DecimalType ]
 
 /// A present cell of the given type, from a small pool that reaches the key's edges: a negative
@@ -10411,7 +10414,7 @@ let private genCellOf (t: ColumnType) (r: ConfRng.T) : Cell * ConfRng.T =
     | DateType ->
         let v, r1 = ConfRng.choose [ "2026-09-20"; "1970-01-01" ] r
         Cell.Date v, r1
-    | TimestampType ->
+    | TimestampType _ ->
         let v, r1 = ConfRng.choose [ "2026-09-20T00:00:00Z"; "1970-01-01T00:00:00Z" ] r
         Cell.Timestamp v, r1
     | DecimalType ->
@@ -11040,6 +11043,15 @@ module private ColumnDiff =
           is_date = fun s -> TemporalText.isCanonicalDate (canonFromChs s)
           is_timestamp = fun s -> TemporalText.isCanonicalTimestamp (canonFromChs s) }
 
+    /// The column types the list model spells (Phase 422): `ColumnType.all` before the three
+    /// sub-second units, which it APPENDS — so a draw over this list is the draw it was before them.
+    let modelTypes: ColumnType list =
+        ColumnType.all
+        |> List.filter (fun t ->
+            match t with
+            | TimestampType u -> u = TimeUnit.Seconds
+            | _ -> true)
+
     let toModelType (t: ColumnType) : WireColumn.column_type =
         match t with
         | IntType -> WireColumn.IntType
@@ -11047,7 +11059,10 @@ module private ColumnDiff =
         | BoolType -> WireColumn.BoolType
         | StringType -> WireColumn.StringType
         | DateType -> WireColumn.DateType
-        | TimestampType -> WireColumn.TimestampType
+        | TimestampType TimeUnit.Seconds -> WireColumn.TimestampType
+        // `WireColumn`'s column type carries no unit (Phase 419's deferred task 3); every pool here
+        // draws from `modelTypes`, whose one timestamp is the seconds unit.
+        | TimestampType u -> failwithf "the WireColumn model has no %A timestamp" u
         | DecimalType -> WireColumn.DecimalType
 
     let ofModelType (t: WireColumn.column_type) : ColumnType =
@@ -11057,7 +11072,7 @@ module private ColumnDiff =
         | WireColumn.BoolType -> BoolType
         | WireColumn.StringType -> StringType
         | WireColumn.DateType -> DateType
-        | WireColumn.TimestampType -> TimestampType
+        | WireColumn.TimestampType -> TimestampType TimeUnit.Seconds
         | WireColumn.DecimalType -> DecimalType
 
     let toModelCell (c: Cell) : WireColumn.cell<int, float> =
@@ -11244,8 +11259,7 @@ module private ColumnDiff =
         let rows = draw 4
 
         let picked =
-            [ for i in 0 .. ncols - 1 ->
-                  (if chance 8 then names[0] else names[i]), ColumnType.all[draw ColumnType.all.Length] ]
+            [ for i in 0 .. ncols - 1 -> (if chance 8 then names[0] else names[i]), modelTypes[draw modelTypes.Length] ]
 
         /// The wild cells a column of `ty` can hold — empty for a type with none of its own.
         let wildFor (ty: ColumnType) : Cell[] =
@@ -11253,10 +11267,13 @@ module private ColumnDiff =
             | IntType -> [| Int 3 |]
             | FloatType -> [| Float nan; Int 3 |]
             | DecimalType -> [| Decimal "1.50"; Int 3 |]
-            | DateType -> [| Date "2026-02-30" |]
+            // Phase 422: a date column holds days, so a `Date` whose text names no day cannot be
+            // built (`ofCells` refuses it as the model's validate does); the date column has no
+            // wild cell of its own any more.
+            | DateType
             | BoolType
             | StringType
-            | TimestampType -> [||]
+            | TimestampType _ -> [||]
 
         let cellOf (ty: ColumnType) : Cell =
             let pool = wildFor ty
@@ -11277,7 +11294,7 @@ module private ColumnDiff =
                 | BoolType -> Bool(draw 2 = 0)
                 | StringType -> Str texts[draw texts.Length]
                 | DateType -> Date(sprintf "2026-01-%02d" (1 + draw 28))
-                | TimestampType -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60))
+                | TimestampType _ -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60))
                 | DecimalType ->
                     match draw 3 with
                     | 0 -> Int(draw 50 - 25)
@@ -11294,11 +11311,7 @@ module private ColumnDiff =
             |> List.map (fun (n, ty) ->
                 // A column whose type is not its schema entry's: its cells are drawn for ITS type,
                 // so it builds, and the schema still says `ty` — clause (c)'s `TypeMismatch`.
-                let ty' =
-                    if chance 10 then
-                        ColumnType.all[draw ColumnType.all.Length]
-                    else
-                        ty
+                let ty' = if chance 10 then modelTypes[draw modelTypes.Length] else ty
 
                 let len = if chance 10 then rows + 1 else rows
                 build n ty' [ for _ in 1..len -> cellOf ty' ])
@@ -11550,8 +11563,18 @@ module private RefinementDiff =
             | Floats(xs, _) -> ColumnRefinement.Floats(Vector.toArray xs |> List.ofArray, mask)
             | Bools(xs, _) -> ColumnRefinement.Bools(Vector.toArray xs |> List.ofArray, mask)
             | Strs(xs, _) -> ColumnRefinement.Strs(texts xs, mask)
-            | Dates(xs, _) -> ColumnRefinement.Dates(texts xs, mask)
-            | Timestamps(xs, _) -> ColumnRefinement.Timestamps(texts xs, mask)
+            // Phase 422: the integers through their canonical text, the cells' form the model holds.
+            | Dates(xs, _) -> ColumnRefinement.Dates(texts (Vector.map TemporalText.dateText xs), mask)
+            | Timestamps(u, xs, f, _) ->
+                let fractionAt (i: int) =
+                    match f with
+                    | Some fs -> fs[i]
+                    | None -> 0
+
+                let instants =
+                    Vector.mapi (fun i s -> TemporalText.instantText u s (fractionAt i)) xs
+
+                ColumnRefinement.Timestamps(texts instants, mask)
             | Decimals(xs, _) -> ColumnRefinement.Decimals(texts xs, mask)
 
         ({ col_name = canonToChs c.Name
@@ -11595,13 +11618,17 @@ module private RefinementDiff =
                 | _ -> Float(float (draw 4000 - 2000) / 8.0), false
             | BoolType -> Bool(draw 2 = 0), false
             | StringType -> Str texts[draw texts.Length], false
+            // Phase 422: a date column holds days, so a `Date` whose text names no day is refused at
+            // construction (`ofCells`) where the list model holds it and refuses it at `validate`;
+            // the two are no longer one `ofCells`, and the pool draws canonical dates only. The
+            // construction refusal is `ColumnTests`' "ofCells refuses temporal text it cannot hold".
             | DateType ->
                 (if draw 7 = 0 then
-                     Date "2026-02-30"
+                     Date "2024-02-29"
                  else
                      Date(sprintf "2026-01-%02d" (1 + draw 28))),
                 false
-            | TimestampType -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60)), false
+            | TimestampType _ -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60)), false
             | DecimalType ->
                 match draw 3 with
                 | 0 -> Int(draw 50 - 25), true
@@ -11616,7 +11643,7 @@ module private RefinementDiff =
         | BoolType -> Int 1
         | StringType -> Bool false
         | DateType -> Str "2026-01-01"
-        | TimestampType -> Int 5
+        | TimestampType _ -> Int 5
         | DecimalType -> Float 1.5
 
     type Tally =
@@ -11761,7 +11788,7 @@ module private RefinementDiff =
         let mutable t = empty
 
         for i in 1..trials do
-            let ty = ColumnType.all[draw ColumnType.all.Length]
+            let ty = ColumnDiff.modelTypes[draw ColumnDiff.modelTypes.Length]
             let rows = draw 5
             let drawn = [ for _ in 1..rows -> cellOf draw ty ]
             let cells = drawn |> List.map fst
@@ -17252,7 +17279,12 @@ let proofOracleTests =
 
               // adequacy: every type, nulls, widened cells; and the refusal
               Expect.equal fitting.Built fitting.Draws "every draw of the fitting pool builds"
-              Expect.equal fitting.Types (ColumnType.allTags |> Set.ofList) "every column type was drawn"
+
+              Expect.equal
+                  fitting.Types
+                  (ColumnDiff.modelTypes |> List.map ColumnType.tag |> Set.ofList)
+                  "every column type the list model spells was drawn"
+
               Expect.isGreaterThan fitting.Widened 150 (sprintf "draws holding a widened Int (%d)" fitting.Widened)
               Expect.isGreaterThan fitting.WithNull 400 (sprintf "draws holding a Null (%d)" fitting.WithNull)
               Expect.isGreaterThan wild.Refused 150 (sprintf "the wild pool reached ofCells' refusal (%d)" wild.Refused)

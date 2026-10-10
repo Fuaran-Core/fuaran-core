@@ -358,10 +358,17 @@ module internal QueryShape =
     /// `Table.validate` accepts, so the one-cell document always has the shape matched here; the
     /// fallback (the whole document) is unreachable for an admitted declaration and is total
     /// rather than a throw.
+    ///
+    /// A date or timestamp literal whose text its column cannot hold (Phase 422: the column holds
+    /// integers) is written as its text, as it was before, rather than through the fallback.
     let private literalJson (ty: ColumnType) (c: Cell) : JVal =
-        match ColumnCodec.encodeJson (Embedded(oneCell "v" ty c)) with
-        | JObj [ _; "columns", JObj [ _, JObj [ "values", JArr [ v ]; _ ] ] ] -> v
-        | other -> other
+        match c with
+        | Date s
+        | Timestamp s when Result.isError (Column.ofCells "v" ty [ c ]) -> JStr s
+        | _ ->
+            match ColumnCodec.encodeJson (Embedded(oneCell "v" ty c)) with
+            | JObj [ _; "columns", JObj [ _, JObj [ "values", JArr [ v ]; _ ] ] ] -> v
+            | other -> other
 
     /// A literal read back at the type its document states, through the column codec's one cell
     /// decoder; `None` when the value is not one a column of that type carries.
@@ -477,6 +484,20 @@ module internal QueryShape =
         | MalformedShape detail -> detail
         | _ -> "it is not a value its column carries"
 
+    /// The refusal of a literal of its column's type that its column cannot carry: `ofCells`'s
+    /// (text a date or timestamp column cannot hold, Phase 422), else `Table.validate`'s.
+    let private literalFault (c: string) (ty: ColumnType) (v: Cell) : QueryError option =
+        match Column.ofCells c ty [ v ] with
+        | Error e -> Some(IllFormedLiteral(c, literalReason e))
+        | Ok col ->
+            match
+                Table.validate
+                    { Schema = [ c, col.Type ]
+                      Columns = [ col ] }
+            with
+            | Ok() -> None
+            | Error e -> Some(IllFormedLiteral(c, literalReason e))
+
     /// The first refusal a `Where` earns against `schema`, with the index of the predicate at
     /// fault: an undeclared column (`UnknownColumn`), `contains` on a column that is not a string
     /// (`PredicateNotApplicable`), a `Null` literal or one its column cannot carry
@@ -497,11 +518,17 @@ module internal QueryShape =
                     Some(IllFormedLiteral(c, "a null literal compares with nothing; test for absence with isNull"))
                 | _, Some v ->
                     match Cell.typeOf v with
+                    // An instant's cell type is the coarsest unit that holds it (Phase 422), so a
+                    // timestamp literal fits any column at least as fine; every other literal is
+                    // held to its column's exact type.
+                    | Some(TimestampType got) when
+                        (match ty with
+                         | TimestampType unit -> TimeUnit.widens got unit
+                         | _ -> false)
+                        ->
+                        literalFault c ty v
                     | Some got when got <> ty -> Some(PredicateTypeMismatch(c, ty, got))
-                    | _ ->
-                        match Table.validate (oneCell c ty v) with
-                        | Ok() -> None
-                        | Error e -> Some(IllFormedLiteral(c, literalReason e))
+                    | _ -> literalFault c ty v
                 | _, None -> None
 
         where
@@ -550,7 +577,11 @@ module QueryError =
         | DecimalType ->
             " Write a decimal as a JSON string of decimal text, such as \"12.50\": an optional '-', digits, and an optional '.' followed by digits; never as a JSON number."
         | DateType -> " Write a date as a JSON string, YYYY-MM-DD."
-        | TimestampType -> " Write a timestamp as a JSON string, YYYY-MM-DDThh:mm:ssZ."
+        | TimestampType TimeUnit.Seconds -> " Write a timestamp as a JSON string, YYYY-MM-DDThh:mm:ssZ."
+        | TimestampType u ->
+            " Write a timestamp as a JSON string, YYYY-MM-DDThh:mm:ssZ, or YYYY-MM-DDThh:mm:ss.FZ with up to "
+            + string (TimeUnit.digits u)
+            + " fraction digits and no trailing zero."
         | _ -> ""
 
     /// One sentence a model can act on, naming the failure and what would be accepted.
@@ -1138,8 +1169,15 @@ module Query =
     let private decimalPattern = "^-?[0-9]+(\\.[0-9]+)?$"
     let private datePattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 
-    let private timestampPattern =
-        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    /// The canonical instant text at a unit (Phase 422): whole seconds, or a fraction of up to the
+    /// unit's digits with no trailing zero. The seconds pattern is the one this schema always wrote.
+    let private timestampPattern (u: TimeUnit) =
+        match u with
+        | TimeUnit.Seconds -> "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        | _ ->
+            "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{0,"
+            + string (TimeUnit.digits u - 1)
+            + "}[1-9])?Z$"
 
     /// The JSON Schema of one value of a column type, as a model emits it and the codec reads it.
     /// A `decimal` is a STRING with the decimal-text pattern, never a number: a model told
@@ -1158,7 +1196,7 @@ module Query =
         | BoolType -> JObj [ "type", JStr "boolean" ]
         | StringType -> JObj [ "type", JStr "string" ]
         | DateType -> JObj [ "type", JStr "string"; "pattern", JStr datePattern ]
-        | TimestampType -> JObj [ "type", JStr "string"; "pattern", JStr timestampPattern ]
+        | TimestampType u -> JObj [ "type", JStr "string"; "pattern", JStr(timestampPattern u) ]
         | DecimalType -> JObj [ "type", JStr "string"; "pattern", JStr decimalPattern ]
 
     /// Project a query into a STANDARD JSON Schema `object` — `Function.toJsonSchema`'s twin, over

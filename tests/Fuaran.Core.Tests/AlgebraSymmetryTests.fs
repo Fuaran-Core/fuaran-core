@@ -34,7 +34,7 @@ let private allTypes =
       BoolType
       StringType
       DateType
-      TimestampType
+      TimestampType TimeUnit.Seconds
       DecimalType ]
 
 let private namePool = [ "a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"; "x|y"; "\u0001" ]

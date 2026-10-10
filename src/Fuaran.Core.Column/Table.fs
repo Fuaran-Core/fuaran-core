@@ -49,9 +49,12 @@ module Table =
 
     /// The first present cell of `c` the codec cannot carry as a cell of `c.Type`, as the refusal
     /// naming it (Phase 299), in row order: a non-finite `Float` (`NonFiniteFloat` — the wire has
-    /// none), and a `Decimal` / `Date` / `Timestamp` whose text is not its type's canonical form
-    /// (`MalformedShape`). Read off the typed storage (Phase 417): a float column is scanned for a
-    /// non-finite value and a text column for a non-canonical text, at the present rows only. A
+    /// none), a `Decimal` whose text is not canonical, and (Phase 422) a date whose day count, or an
+    /// instant whose second or fraction, the canonical form cannot spell (`MalformedShape`). Read off
+    /// the typed storage (Phase 417): a float column is scanned for a non-finite value, a decimal
+    /// column for a non-canonical text and a temporal column for an integer out of range, at the
+    /// present rows only; a timestamp column whose fraction vector is not its seconds' length is
+    /// named before any row. A
     /// cell of another type is not a case any more — the storage cannot hold one — and a mask that
     /// is not the values' length is named first (`LengthMismatch`), because a column that disagrees
     /// about its own row count has no rows to read. An `AllValid` column (Phase 420) holds no mask
@@ -92,15 +95,56 @@ module Table =
                     DecimalText.isCanonical
                     "a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
             | Dates(xs, _) ->
-                notCanonical
-                    xs
-                    TemporalText.isCanonicalDate
-                    "a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
-            | Timestamps(xs, _) ->
-                notCanonical
-                    xs
-                    TemporalText.isCanonicalTimestamp
-                    "a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ, naming an instant that exists"
+                firstPresent xs (fun d -> not (TemporalText.isDayInRange d))
+                |> Option.map (fun d ->
+                    MalformedShape(
+                        c.Name
+                        + ": a date column holds days since 1970-01-01 from "
+                        + string TemporalText.MinDay
+                        + " (0000-01-01) to "
+                        + string TemporalText.MaxDay
+                        + " (9999-12-31); "
+                        + string d
+                        + " names no day the canonical form spells"
+                    ))
+            | Timestamps(u, xs, f, _) ->
+                match f with
+                | Some fs when fs.Length <> xs.Length ->
+                    Some(
+                        MalformedShape(
+                            c.Name
+                            + ": a timestamp column's fraction vector has "
+                            + string fs.Length
+                            + " rows where its seconds have "
+                            + string xs.Length
+                        )
+                    )
+                | _ ->
+                    let mutable found = None
+                    let mutable i = 0
+
+                    while found.IsNone && i < xs.Length do
+                        if
+                            Validity.isPresent i rows
+                            && not (TemporalText.isInstantInRange u xs[i] (ColumnStorage.fractionAt f i))
+                        then
+                            found <-
+                                Some(
+                                    MalformedShape(
+                                        c.Name
+                                        + ": a "
+                                        + ColumnType.tag c.Type
+                                        + " column holds whole epoch seconds from 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z and a fraction in [0, "
+                                        + string (TimeUnit.scale u)
+                                        + "); row "
+                                        + string i
+                                        + " holds an instant the canonical form cannot spell"
+                                    )
+                                )
+
+                        i <- i + 1
+
+                    found
 
     /// Well-formedness — THE TABLE THE CODEC CAN CARRY (Phase 43; widened to the cells by Phase 299).
     /// The typed builders do no validation, and `encodeJson` silently papers over a malformed table
@@ -113,8 +157,10 @@ module Table =
     ///   (d) all columns share one length (`RaggedColumns`);
     ///   (e) column by column in schema order: the column's values and validity mask are one length
     ///       (`LengthMismatch`), and every present cell, row by row, is one the codec carries as a
-    ///       cell of its column's type — a `Float` is finite (`NonFiniteFloat`), and a `Decimal`,
-    ///       `Date` or `Timestamp` carries its type's canonical text (`MalformedShape`). A cell whose
+    ///       cell of its column's type — a `Float` is finite (`NonFiniteFloat`), a `Decimal` carries
+    ///       canonical text, and a date's day count or an instant's second and fraction is one the
+    ///       canonical form spells (`MalformedShape`; Phase 422 — a `Date` or `Timestamp` whose TEXT is
+    ///       not canonical is refused at construction by `Column.ofCells`). A cell whose
     ///       type does not widen into the column's was this clause's `TypeMismatch` until Phase 417;
     ///       the typed storage cannot hold one, and `Column.ofCells` refuses it at construction.
     /// Over what it accepts, `ColumnCodec.tryEncode` is exactly `Ok (encode src)` — a law pins it —

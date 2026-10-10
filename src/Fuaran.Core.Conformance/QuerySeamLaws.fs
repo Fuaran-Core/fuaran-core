@@ -289,7 +289,12 @@ module internal QuerySeamLaws =
                 | BoolType -> Bool true
                 | StringType -> Str "s"
                 | DateType -> Date "2026-10-02"
-                | TimestampType -> Timestamp "2026-10-02T00:00:00Z"
+                // The coarsest unit of each instant is its column type's (Phase 422), so a finer
+                // declared unit admits a coarser cell and a coarser one refuses a finer cell.
+                | TimestampType TimeUnit.Seconds -> Timestamp "2026-10-02T00:00:00Z"
+                | TimestampType TimeUnit.Milliseconds -> Timestamp "2026-10-02T00:00:00.5Z"
+                | TimestampType TimeUnit.Microseconds -> Timestamp "2026-10-02T00:00:00.0005Z"
+                | TimestampType TimeUnit.Nanoseconds -> Timestamp "2026-10-02T00:00:00.0000005Z"
                 | DecimalType -> Decimal "1.5"
 
             // The numeric types are where both seams carry a number: there the widening IS the space

@@ -433,8 +433,15 @@ module internal ColumnarSeamLaws =
             let floats = [| 0.0; -0.0; nan; 1.5; -2.0; 1e300; 0.1 |]
             let texts = [| ""; "a"; "b"; "é" |]
             let decimals = [| "0"; "1.5"; "-0.3"; "2"; "12.25" |]
-            let dates = [| "2026-01-01"; "2026-02-28"; "1999-12-31" |]
-            let instants = [| "2026-01-01T00:00:00Z"; "2026-06-22T17:00:00Z" |]
+            // Phase 422: dates and instants are held as integers, drawn from canonical texts.
+            let dates =
+                [| "2026-01-01"; "2026-02-28"; "1999-12-31" |]
+                |> Array.choose TemporalText.tryDays
+
+            let instants =
+                [| "2026-01-01T00:00:00Z"; "2026-06-22T17:00:00Z" |]
+                |> Array.choose (TemporalText.tryInstant TimeUnit.Seconds)
+                |> Array.map fst
 
             let vector: Vector<float> =
                 match rng.IntBelow 7 with
@@ -474,20 +481,28 @@ module internal ColumnarSeamLaws =
                     drawn
                         "date"
                         (fun () -> dates[rng.IntBelow dates.Length])
-                        (fun s -> if s = "2026-01-01" then "2026-01-02" else "2026-01-01")
+                        (fun d -> d + 1)
                         Column.ofDates
                         Column.tryDates
-                        Date
-                    |> Vector.map (fun s -> float s.Length)
+                        (fun d -> Date(TemporalText.dateText d))
+                    |> Vector.map float
                 | _ ->
+                    // Whole-second instants in a column of a drawn unit, so every unit's builder,
+                    // reader and cell bridge is held to one storage (`None` for the fractions).
+                    let unit =
+                        rng.Choose
+                            [ TimeUnit.Seconds
+                              TimeUnit.Milliseconds
+                              TimeUnit.Microseconds
+                              TimeUnit.Nanoseconds ]
+
                     drawn
-                        "timestamp"
+                        ("timestamp at " + ColumnType.tag (TimestampType unit))
                         (fun () -> instants[rng.IntBelow instants.Length])
-                        (fun s -> if s = instants[0] then instants[1] else instants[0])
-                        Column.ofTimestamps
-                        Column.tryTimestamps
-                        Timestamp
-                    |> Vector.map (fun s -> float s.Length)
+                        (fun s -> s + 1.0)
+                        (fun name seconds validity -> Column.ofTimestamps name unit seconds None validity)
+                        (fun c -> Column.tryTimestamps c |> Option.map _.Seconds)
+                        (fun s -> Timestamp(TemporalText.instantText unit s 0))
 
             // The three pairs every iteration builds, whatever the draw.
             let one (f: float) =
@@ -623,9 +638,14 @@ module internal ColumnarSeamLaws =
             | Ints(xs, _) -> vectorDigest putInt xs
             | Floats(xs, _) -> vectorDigest putFloat xs
             | Bools(xs, _) -> vectorDigest putBool xs
+            | Dates(xs, _) -> vectorDigest putInt xs
+            // Phase 422: the seconds and, where the column holds one, the fraction vector.
+            | Timestamps(_, xs, f, _) ->
+                vectorDigest putFloat xs
+                + (match f with
+                   | Some fs -> "+" + vectorDigest putInt fs
+                   | None -> "")
             | Strs(xs, _)
-            | Dates(xs, _)
-            | Timestamps(xs, _)
             | Decimals(xs, _) -> vectorDigest putString xs
 
         // An `AllValid` column holds no mask (Phase 420), so there is nothing to write into: its
@@ -715,8 +735,9 @@ module internal ColumnarSeamLaws =
         // compiles as U+FFFD.
         let texts = [| ""; "a"; "é"; string (char 0xD800) |]
         let decimals = [| "0"; "1.5"; "-0.3"; "12.25" |]
-        let dates = [| "2026-01-01"; "1999-12-31" |]
-        let instants = [| "2026-01-01T00:00:00Z"; "2026-06-22T17:00:00Z" |]
+        // Phase 422: days since 1970-01-01, and whole epoch seconds with a millisecond fraction.
+        let dates = [| 20454; 10956 |]
+        let instants = [| 1767225600.0; 1782147600.0 |]
 
         let shared = Vector.adopt (Array.init (2 * n) (fun _ -> pick floats))
         let sharedMask = Vector.adopt (Array.init (2 * n) (fun _ -> rng.IntBelow 4 <> 0))
@@ -729,7 +750,12 @@ module internal ColumnarSeamLaws =
               Column.ofBools "b" (own (Array.init n (fun _ -> rng.IntBelow 2 = 0))) (mask ())
               Column.ofStrs "s" (own (Array.init n (fun _ -> pick texts))) (mask ())
               Column.ofDates "d" (own (Array.init n (fun _ -> pick dates))) (mask ())
-              Column.ofTimestamps "t" (own (Array.init n (fun _ -> pick instants))) (mask ())
+              Column.ofTimestamps
+                  "t"
+                  TimeUnit.Milliseconds
+                  (own (Array.init n (fun _ -> pick instants)))
+                  (Some(own (Array.init n (fun _ -> rng.IntBelow 1000))))
+                  (mask ())
               Column.ofDecimals "m" (own (Array.init n (fun _ -> pick decimals))) (mask ()) ]
 
         columns, rng.State

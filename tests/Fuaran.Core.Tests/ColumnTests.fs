@@ -21,7 +21,7 @@ let private sampleTable: Table =
           "b", BoolType
           "s", StringType
           "d", DateType
-          "t", TimestampType
+          "t", TimestampType TimeUnit.Seconds
           "m", DecimalType ]
       Columns =
         [ mkCol "i" IntType [ Int 1; Null; Int -42 ]
@@ -29,7 +29,10 @@ let private sampleTable: Table =
           mkCol "b" BoolType [ Bool true; Null; Bool false ]
           mkCol "s" StringType [ Str "a\"b"; Str ""; Null ]
           mkCol "d" DateType [ Date "2026-06-22"; Null; Date "1970-01-01" ]
-          mkCol "t" TimestampType [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2000-01-01T00:00:00Z" ]
+          mkCol
+              "t"
+              (TimestampType TimeUnit.Seconds)
+              [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2000-01-01T00:00:00Z" ]
           mkCol "m" DecimalType [ Decimal "12.5"; Null; Decimal "-0.05" ] ] }
 
 let private sample = Embedded sampleTable
@@ -56,7 +59,14 @@ let private genSource (seed: int) : DataSource =
             | BoolType -> Bool(pick 2 = 0)
             | StringType -> Str("v" + string i + "\\\n")
             | DateType -> Date("20" + string (10 + pick 80) + "-01-15")
-            | TimestampType -> Timestamp("20" + string (10 + pick 80) + "-01-15T12:00:00Z")
+            // Phase 422: an instant at the column's unit, its fraction drawn (zero now and then),
+            // through the canonical renderer so the text is the one the column writes back.
+            | TimestampType u ->
+                let second =
+                    float (TemporalText.daysOfCivil (2010 + pick 80) 1 15) * 86400.0 + 43200.0
+
+                let fraction = if pick 3 = 0 then 0 else pick (TimeUnit.scale u)
+                Timestamp(TemporalText.instantText u second fraction)
             // Canonical by construction: an integer part as `string` lays it out, and a fraction
             // that does not end in zero.
             | DecimalType -> Decimal(string (pick 2000 - 1000) + "." + string (pick 90) + string (1 + pick 9))
@@ -67,8 +77,11 @@ let private genSource (seed: int) : DataSource =
           BoolType
           StringType
           DateType
-          TimestampType
-          DecimalType ]
+          TimestampType TimeUnit.Seconds
+          DecimalType
+          TimestampType TimeUnit.Milliseconds
+          TimestampType TimeUnit.Microseconds
+          TimestampType TimeUnit.Nanoseconds ]
         |> List.filter (fun _ -> pick 2 = 0)
         |> function
             | [] -> [ IntType ]
@@ -748,12 +761,21 @@ let tests =
               | SchemaCompat.Breaking reasons -> Expect.isNonEmpty reasons "float→decimal names a reason"
               | other -> failtestf "expected SchemaCompat.Breaking, got %A" other
 
-          testCase "the type tag set names decimal, last"
+          testCase "the type tag set names decimal after the pre-422 types, and the three sub-second units last"
           <| fun _ ->
               Expect.equal
                   ColumnType.allTags
-                  [ "int"; "float"; "bool"; "string"; "date"; "timestamp"; "decimal" ]
-                  "the closed set, in encode order"
+                  [ "int"
+                    "float"
+                    "bool"
+                    "string"
+                    "date"
+                    "timestamp"
+                    "decimal"
+                    "timestamp_ms"
+                    "timestamp_us"
+                    "timestamp_ns" ]
+                  "the closed set, in encode order: Phase 422 appends the units, keeping the earlier prefix"
 
               Expect.equal (ColumnType.ofTag "decimal") (Some DecimalType) "the tag resolves" ]
 
@@ -859,7 +881,13 @@ let trustsNothingTests =
                   "a Float in an int column"
 
               // genMaybeBroken's old fault 0 — a Bool prepended to a column of another type.
-              for ty in [ IntType; FloatType; StringType; DateType; TimestampType; DecimalType ] do
+              for ty in
+                  [ IntType
+                    FloatType
+                    StringType
+                    DateType
+                    TimestampType TimeUnit.Seconds
+                    DecimalType ] do
                   Expect.equal
                       (Column.ofCells "c0" ty [ Bool true; Null ])
                       (Error(TypeMismatch("c0", ty, "bool")))
@@ -897,12 +925,16 @@ let trustsNothingTests =
               | Error(Malformed _) -> ()
               | other -> failtestf "tryEncode refuses the duplicate, got %A" other
 
-          testCase "validate refuses non-canonical decimal, date and timestamp text"
+          testCase
+              "validate refuses non-canonical decimal text; ofCells refuses date and timestamp text it cannot hold (Phase 422)"
           <| fun _ ->
               for cell in [ Decimal "1.50"; Decimal "abc"; Decimal "01" ] do
                   match Table.validate (oneColumn DecimalType [ cell ]) with
                   | Error(MalformedShape d) -> Expect.stringContains d "canonical decimal text" "names the rule"
                   | other -> failtestf "expected MalformedShape for %A, got %A" cell other
+
+              // Phase 422: a date or timestamp column holds integers, so text that names no day or
+              // no instant is refused at construction, with the MalformedShape validate named.
 
               for text in
                   [ ""
@@ -912,7 +944,7 @@ let trustsNothingTests =
                     "2026-6-1"
                     "2026-13-01"
                     "26-06-01" ] do
-                  match Table.validate (oneColumn DateType [ Date text ]) with
+                  match Column.ofCells "c" DateType [ Date text ] with
                   | Error(MalformedShape d) -> Expect.stringContains d "YYYY-MM-DD" "names the form"
                   | other -> failtestf "expected MalformedShape for date '%s', got %A" text other
 
@@ -924,10 +956,18 @@ let trustsNothingTests =
                     "2026-06-22 17:00:00Z"
                     "2026-06-22T17:00:00"
                     "2026-06-22T17:00:00+00:00"
-                    "2026-06-22T17:00:00.000Z" ] do
-                  match Table.validate (oneColumn TimestampType [ Timestamp text ]) with
-                  | Error(MalformedShape d) -> Expect.stringContains d "YYYY-MM-DDThh:mm:ssZ" "names the form"
-                  | other -> failtestf "expected MalformedShape for timestamp '%s', got %A" text other
+                    "2026-06-22T17:00:00.000Z"
+                    "2026-06-22T17:00:00.50Z"
+                    "2026-06-22T17:00:00.Z"
+                    "2026-06-22T17:00:00.1234567891Z" ] do
+                  for u in
+                      [ TimeUnit.Seconds
+                        TimeUnit.Milliseconds
+                        TimeUnit.Microseconds
+                        TimeUnit.Nanoseconds ] do
+                      match Column.ofCells "c" (TimestampType u) [ Timestamp text ] with
+                      | Error(MalformedShape d) -> Expect.stringContains d "YYYY-MM-DDThh:mm:ssZ" "names the form"
+                      | other -> failtestf "expected MalformedShape for timestamp '%s' at %A, got %A" text u other
 
               for text in [ "2024-02-29"; "2000-02-29"; "0000-01-01"; "9999-12-31" ] do
                   Expect.isTrue (TemporalText.isCanonicalDate text) (sprintf "%s is a date" text)
@@ -1367,11 +1407,16 @@ let typedColumnTests =
               let strs = Vector.ofList [ "a"; "b" ]
               same strs (Column.tryStrs (Column.ofStrs "n" strs AllValid)) "strings"
 
-              let dates = Vector.ofList [ "2026-06-22" ]
+              let dates = Vector.ofList [ 20626 ]
               same dates (Column.tryDates (Column.ofDates "n" dates AllValid)) "dates"
 
-              let stamps = Vector.ofList [ "2026-06-22T17:00:00Z" ]
-              same stamps (Column.tryTimestamps (Column.ofTimestamps "n" stamps AllValid)) "timestamps"
+              let stamps = Vector.ofList [ 1782147600.0 ]
+
+              same
+                  stamps
+                  (Column.tryTimestamps (Column.ofTimestamps "n" TimeUnit.Seconds stamps None AllValid)
+                   |> Option.map _.Seconds)
+                  "timestamps"
 
               let decs = Vector.ofList [ "12.5" ]
               same decs (Column.tryDecimals (Column.ofDecimals "n" decs AllValid)) "decimals"
@@ -1391,8 +1436,8 @@ let typedColumnTests =
                   "tryInts on a decimal column"
 
               Expect.isNone
-                  (Column.tryStrs (Column.ofDates "d" (Vector.ofList [ "2026-01-01" ]) AllValid))
-                  "a date column is not a string column"
+                  (Column.tryInts (Column.ofDates "d" (Vector.ofList [ 20454 ]) AllValid))
+                  "a date column is not an int column"
 
           testCase "ofCells and toCells round-trip exactly for cells already in normal form"
           <| fun _ ->
@@ -1402,7 +1447,7 @@ let typedColumnTests =
                     BoolType, [ Bool false; Bool true; Null ]
                     StringType, [ Str ""; Null; Str "a\"b" ]
                     DateType, [ Date "2026-06-22"; Null ]
-                    TimestampType, [ Null; Timestamp "2026-06-22T17:00:00Z" ]
+                    TimestampType TimeUnit.Seconds, [ Null; Timestamp "2026-06-22T17:00:00Z" ]
                     DecimalType, [ Decimal "12.5"; Null; Decimal "-0.05" ]
                     IntType, []
                     StringType, [ Null; Null ] ]
@@ -1744,9 +1789,11 @@ let coreColumnReads (columns: Column list) : unit =
         | Ints(xs, _) -> readVector xs
         | Floats(xs, _) -> readVector xs
         | Bools(xs, _) -> readVector xs
+        | Dates(xs, _) -> readVector xs
+        | Timestamps(_, xs, f, _) ->
+            readVector xs
+            Option.iter readVector f
         | Strs(xs, _)
-        | Dates(xs, _)
-        | Timestamps(xs, _)
         | Decimals(xs, _) -> readVector xs
 
     let table =
@@ -1944,7 +1991,7 @@ let validityTests =
                       | BoolType -> Bool true
                       | StringType -> Str "a"
                       | DateType -> Date "2026-01-01"
-                      | TimestampType -> Timestamp "2026-01-01T00:00:00Z"
+                      | TimestampType _ -> Timestamp "2026-01-01T00:00:00Z"
                       | DecimalType -> Decimal "1.5"
 
                   match Column.ofCells "c" ty [ present; present ], Column.ofCells "c" ty [ present; Null ] with
@@ -2083,3 +2130,584 @@ let validityTests =
               let cx = ownershipFailure (Conformance.columnOwnershipLawsWith flip draw 5 3)
               Expect.stringContains cx "column 1 \"b\" (int): the bytes of its validity mask moved" "the Mask"
               Expect.isFalse (cx.Contains "column 0 \"a\"") "not the AllValid column" ]
+
+// ---- Phase 422: temporal columns are integers, and timestamps carry a unit ----
+
+let private allUnits =
+    [ TimeUnit.Seconds
+      TimeUnit.Milliseconds
+      TimeUnit.Microseconds
+      TimeUnit.Nanoseconds ]
+
+/// A drawn valid instant at `u`: an epoch second anywhere in the canonical range (the two ends
+/// included now and then) and a fraction in the unit's range (zero now and then).
+let private drawInstant (next: int -> int) (u: TimeUnit) : float * int =
+    let second =
+        match next 20 with
+        | 0 -> TemporalText.minSecond
+        | 1 -> TemporalText.maxSecond
+        | _ ->
+            let day = TemporalText.MinDay + next (TemporalText.MaxDay - TemporalText.MinDay + 1)
+            float day * 86400.0 + float (next 86400)
+
+    let fraction =
+        match u, next 4 with
+        | TimeUnit.Seconds, _
+        | _, 0 -> 0
+        | _ -> next (TimeUnit.scale u)
+
+    second, fraction
+
+let private lcg (seed: int) : int -> int =
+    let mutable st = (uint32 seed * 2654435761u) + 1u
+
+    fun (n: int) ->
+        st <- (st * 1664525u) + 1013904223u
+        int ((st >>> 1) % uint32 n)
+
+/// The instant `(second, fraction at u)` in nanoseconds, as an exact pair a comparison can read.
+let private asNanos (u: TimeUnit) (second: float, fraction: int) : float * int =
+    second, fraction * (1000000000 / TimeUnit.scale u)
+
+let private decodeOne (tag: string) (value: string) : Result<DataSource, ColumnError> =
+    ColumnCodec.decode (
+        "{\"schema\":[{\"name\":\"t\",\"type\":\""
+        + tag
+        + "\"}],\"columns\":{\"t\":{\"values\":["
+        + value
+        + "],\"validity\":[true]}}}"
+    )
+
+let private onlyCell (src: Result<DataSource, ColumnError>) : Cell =
+    match src with
+    | Ok(Embedded t) -> Column.cell 0 t.Columns.Head
+    | other -> failtestf "expected one decoded column, got %A" other
+
+[<Tests>]
+let temporalTests =
+    testList
+        "Column temporal integers and timestamp units (Phase 422)"
+        [ testCase "every canonical date round-trips text to days to text, and the day count orders chronologically"
+          <| fun _ ->
+              let mutable expected = TemporalText.MinDay
+              let mutable dates = 0
+
+              for y in 0..9999 do
+                  for m in 1..12 do
+                      for d in 1..31 do
+                          let text =
+                              (string y).PadLeft(4, '0')
+                              + "-"
+                              + (string m).PadLeft(2, '0')
+                              + "-"
+                              + (string d).PadLeft(2, '0')
+
+                          match TemporalText.tryDays text with
+                          | Some days ->
+                              // consecutive canonical dates are consecutive day counts: the order
+                              // of the integers is the order of the texts, which is chronology
+                              if days <> expected then
+                                  failtestf "%s is day %d where %d was next" text days expected
+
+                              if TemporalText.dateText days <> text then
+                                  failtestf "%s reads back as %s" text (TemporalText.dateText days)
+
+                              let c = TemporalText.civilOfDays days
+
+                              if c.Year <> y || c.Month <> m || c.Day <> d then
+                                  failtestf "civilOfDays %d is %A, not %s" days c text
+
+                              expected <- expected + 1
+                              dates <- dates + 1
+                          | None -> ()
+
+              Expect.equal (expected - 1) TemporalText.MaxDay "9999-12-31 is the last day"
+              Expect.equal dates (TemporalText.MaxDay - TemporalText.MinDay + 1) "every day between was named"
+              Expect.equal (TemporalText.tryDays "1970-01-01") (Some 0) "the epoch is day 0"
+              Expect.equal (TemporalText.tryDays "0000-01-01") (Some TemporalText.MinDay) "the first day"
+              Expect.equal (TemporalText.tryDays "2026-02-29") None "no 29 February in 2026"
+
+          testCase "a drawn set of instants per unit round-trips text to integers to text byte-identically"
+          <| fun _ ->
+              let next = lcg 4220
+
+              for u in allUnits do
+                  let mutable fractional = 0
+
+                  for _ in 1..20000 do
+                      let second, fraction = drawInstant next u
+                      let text = TemporalText.instantText u second fraction
+
+                      if fraction <> 0 then
+                          fractional <- fractional + 1
+
+                      match TemporalText.tryInstant u text with
+                      | Some(s, f) when s = second && f = fraction ->
+                          if TemporalText.instantText u s f <> text then
+                              failtestf "%s does not render back at %A" text u
+                      | other -> failtestf "%s at %A read back as %A, not (%g, %d)" text u other second fraction
+
+                      // one instant, one text: the text does not depend on the unit holding it
+                      if not (TimeUnit.widens (TemporalText.unitOf text) u) then
+                          failtestf "%s claims a unit finer than %A holds it at" text u
+
+                  if u <> TimeUnit.Seconds then
+                      Expect.isGreaterThan fractional 10000 (sprintf "%A drew fractional instants" u)
+
+          testCase "widening a coarser unit into a finer one preserves the instant, its text and its cell"
+          <| fun _ ->
+              let next = lcg 4221
+
+              for (coarse, fine) in
+                  [ for a in allUnits do
+                        for b in allUnits do
+                            if TimeUnit.digits a < TimeUnit.digits b then
+                                yield a, b ] do
+                  Expect.isTrue (ColumnType.widens (TimestampType coarse) (TimestampType fine)) "coarser into finer"
+                  Expect.isFalse (ColumnType.widens (TimestampType fine) (TimestampType coarse)) "never back"
+
+                  let cells =
+                      [ for i in 1..200 ->
+                            if i % 7 = 0 then
+                                Null
+                            else
+                                let s, f = drawInstant next coarse
+                                Timestamp(TemporalText.instantText coarse s f) ]
+
+                  match
+                      Column.ofCells "t" (TimestampType coarse) cells, Column.ofCells "t" (TimestampType fine) cells
+                  with
+                  | Ok a, Ok b ->
+                      Expect.equal (Column.toCells a) cells "the coarse column reads its cells back"
+                      Expect.equal (Column.toCells b) cells "the finer column reads the same texts back"
+
+                      for i in 0 .. cells.Length - 1 do
+                          if Column.isPresent i a then
+                              let ta = Option.get (Column.tryTimestamps a)
+                              let tb = Option.get (Column.tryTimestamps b)
+
+                              let fa i =
+                                  match ta.Fraction with
+                                  | Some f -> f[i]
+                                  | None -> 0
+
+                              let fb i =
+                                  match tb.Fraction with
+                                  | Some f -> f[i]
+                                  | None -> 0
+
+                              Expect.equal
+                                  (asNanos coarse (ta.Seconds[i], fa i))
+                                  (asNanos fine (tb.Seconds[i], fb i))
+                                  "the same instant at both units"
+                  | other -> failtestf "%A into %A did not build: %A" coarse fine other
+
+              // the whole lattice, seconds through nanoseconds, on the codec: a seconds document
+              // read as nanoseconds writes the same values
+              let doc =
+                  "\"2026-06-22T17:00:00Z\",\"0000-01-01T00:00:00Z\",\"9999-12-31T23:59:59Z\""
+
+              for u in allUnits do
+                  match
+                      ColumnCodec.decode (
+                          "{\"schema\":[{\"name\":\"t\",\"type\":\""
+                          + ColumnType.tag (TimestampType u)
+                          + "\"}],\"columns\":{\"t\":["
+                          + doc
+                          + "]}}"
+                      )
+                  with
+                  | Ok src ->
+                      Expect.stringContains
+                          (ColumnCodec.encode src)
+                          ("\"values\":[" + doc + "]")
+                          (sprintf "whole seconds write the same text at %A" u)
+                  | Error e -> failtestf "%A: %A" u e
+
+          testCase "Cell order over timestamps is chronological, not ordinal, and over dates agrees with the day count"
+          <| fun _ ->
+              let order a b =
+                  Cell.compare (Timestamp a) (Timestamp b) |> Option.map sign
+
+              Expect.equal (order "2026-06-22T17:00:12Z" "2026-06-22T17:00:12.5Z") (Some -1) "12 before 12.5"
+
+              Expect.isGreaterThan
+                  (System.String.CompareOrdinal("2026-06-22T17:00:12Z", "2026-06-22T17:00:12.5Z"))
+                  0
+                  "where ordinal order says otherwise"
+
+              Expect.equal (order "2026-06-22T17:00:12.05Z" "2026-06-22T17:00:12.5Z") (Some -1) ".05 before .5"
+              Expect.equal (order "2026-06-22T17:00:12.5Z" "2026-06-22T17:00:12.51Z") (Some -1) ".5 before .51"
+              Expect.equal (order "2026-06-22T17:00:12.999999999Z" "2026-06-22T17:00:13Z") (Some -1) "the next second"
+              Expect.equal (order "2026-06-22T17:00:12.5Z" "2026-06-22T17:00:12.5Z") (Some 0) "one instant"
+              // text that is not canonical sorts after every canonical text, and the order stays total
+              Expect.equal (order "garbage" "9999-12-31T23:59:59Z") (Some 1) "a non-instant sorts last"
+
+              let next = lcg 4222
+
+              let drawn =
+                  [ for _ in 1..3000 ->
+                        let u = allUnits[next 4]
+                        let s, f = drawInstant next u
+                        asNanos u (s, f), TemporalText.instantText u s f ]
+
+              for (ia, ta), (ib, tb) in List.pairwise drawn do
+                  if order ta tb <> Some(sign (compare ia ib)) then
+                      failtestf "%s against %s: the cell order %A, chronology %d" ta tb (order ta tb) (compare ia ib)
+
+              let sorted =
+                  drawn
+                  |> List.sortWith (fun (_, a) (_, b) -> Option.get (order a b))
+                  |> List.map fst
+
+              Expect.equal sorted (List.sort (List.map fst drawn)) "sorting cells sorts chronologically"
+
+              for _ in 1..3000 do
+                  let a = TemporalText.MinDay + next 3652425
+                  let b = TemporalText.MinDay + next 3652425
+
+                  if
+                      Cell.compare (Date(TemporalText.dateText a)) (Date(TemporalText.dateText b))
+                      |> Option.map sign
+                      <> Some(sign (compare a b))
+                  then
+                      failtestf "day %d against day %d" a b
+
+          testCase "Cell.typeOf names the coarsest unit that holds an instant, and ofCells refuses a finer one"
+          <| fun _ ->
+              let unitOf text = Cell.typeOf (Timestamp text)
+              Expect.equal (unitOf "2026-06-22T17:00:00Z") (Some(TimestampType TimeUnit.Seconds)) "no fraction"
+              Expect.equal (unitOf "2026-06-22T17:00:00.5Z") (Some(TimestampType TimeUnit.Milliseconds)) "one digit"
+              Expect.equal (unitOf "2026-06-22T17:00:00.123Z") (Some(TimestampType TimeUnit.Milliseconds)) "three"
+              Expect.equal (unitOf "2026-06-22T17:00:00.1234Z") (Some(TimestampType TimeUnit.Microseconds)) "four"
+              Expect.equal (unitOf "2026-06-22T17:00:00.123456Z") (Some(TimestampType TimeUnit.Microseconds)) "six"
+              Expect.equal (unitOf "2026-06-22T17:00:00.1234567Z") (Some(TimestampType TimeUnit.Nanoseconds)) "seven"
+              Expect.equal (unitOf "2026-06-22T17:00:00.123456789Z") (Some(TimestampType TimeUnit.Nanoseconds)) "nine"
+
+              Expect.equal
+                  (Column.ofCells "t" (TimestampType TimeUnit.Seconds) [ Timestamp "2026-06-22T17:00:00.5Z" ])
+                  (Error(TypeMismatch("t", TimestampType TimeUnit.Seconds, "timestamp_ms")))
+                  "a seconds column refuses a fractional instant, naming its unit"
+
+              Expect.equal
+                  (Column.ofCells "t" (TimestampType TimeUnit.Milliseconds) [ Timestamp "2026-06-22T17:00:00.1234Z" ])
+                  (Error(TypeMismatch("t", TimestampType TimeUnit.Milliseconds, "timestamp_us")))
+                  "a millisecond column refuses a microsecond instant"
+
+              match Column.ofCells "t" (TimestampType TimeUnit.Nanoseconds) [ Timestamp "1969-12-31T23:59:59.5Z" ] with
+              | Ok c ->
+                  let tv = Option.get (Column.tryTimestamps c)
+                  Expect.equal tv.Seconds[0] -1.0 "the floor second before the epoch"
+
+                  Expect.equal
+                      (tv.Fraction |> Option.map (fun f -> f[0]))
+                      (Some 500000000)
+                      "and a non-negative fraction"
+              | Error e -> failtestf "%A" e
+
+          testCase "the codec reads and writes every unit, reads epoch numbers per unit, and refuses a finer fraction"
+          <| fun _ ->
+              for u in allUnits do
+                  let tag = ColumnType.tag (TimestampType u)
+                  Expect.equal (ColumnType.ofTag tag) (Some(TimestampType u)) "the tag resolves"
+
+              let ms = "timestamp_ms"
+              let us = "timestamp_us"
+              let ns = "timestamp_ns"
+
+              Expect.equal
+                  (onlyCell (decodeOne ms "\"2026-06-22T17:00:00.25Z\""))
+                  (Timestamp "2026-06-22T17:00:00.25Z")
+                  "ms text"
+
+              Expect.equal
+                  (onlyCell (decodeOne us "\"2026-06-22T17:00:00.000001Z\""))
+                  (Timestamp "2026-06-22T17:00:00.000001Z")
+                  "us text"
+
+              Expect.equal
+                  (onlyCell (decodeOne ns "\"2026-06-22T17:00:00.000000001Z\""))
+                  (Timestamp "2026-06-22T17:00:00.000000001Z")
+                  "ns text"
+
+              // epoch numbers: a seconds column keeps Phase 94's magnitude reading; a sub-second
+              // column reads its own unit
+              Expect.equal (onlyCell (decodeOne "timestamp" "1752000000")) (Timestamp "2025-07-08T18:40:00Z") "seconds"
+
+              Expect.equal
+                  (onlyCell (decodeOne "timestamp" "1752000000123"))
+                  (Timestamp "2025-07-08T18:40:00Z")
+                  "milliseconds by magnitude, to the second"
+
+              Expect.equal
+                  (onlyCell (decodeOne ms "1752000000123"))
+                  (Timestamp "2025-07-08T18:40:00.123Z")
+                  "ms in a ms column"
+
+              Expect.equal
+                  (onlyCell (decodeOne ms "1500"))
+                  (Timestamp "1970-01-01T00:00:01.5Z")
+                  "a small ms count is ms, not seconds"
+
+              Expect.equal (onlyCell (decodeOne ms "-1")) (Timestamp "1969-12-31T23:59:59.999Z") "before the epoch"
+              Expect.equal (onlyCell (decodeOne us "1752000000123456")) (Timestamp "2025-07-08T18:40:00.123456Z") "us"
+              Expect.equal (onlyCell (decodeOne ns "1000000001")) (Timestamp "1970-01-01T00:00:01.000000001Z") "ns"
+
+              // an integer token past 2^53 never reaches the column: the parser refuses it
+              match decodeOne ns "9007199254740993" with
+              | Error(NotJson _) -> ()
+              | other -> failtestf "an epoch token past 2^53 is refused by the parser, got %A" other
+
+              match decodeOne "timestamp" "\"2026-06-22T17:00:00.5Z\"" with
+              | Error(MalformedShape d) -> Expect.stringContains d "finer than the column's unit" "names why"
+              | other -> failtestf "a fraction in a seconds column is MalformedShape (the corpus vector), got %A" other
+
+              match decodeOne ms "\"2026-06-22T17:00:00.0005Z\"" with
+              | Error(MalformedShape d) -> Expect.stringContains d "timestamp_us" "names the unit it needs"
+              | other -> failtestf "a microsecond in a ms column is refused, got %A" other
+
+              match decodeOne ms "\"2026-06-22T17:00:00.500Z\"" with
+              | Error(MalformedShape _) -> ()
+              | other -> failtestf "a padded fraction is not canonical, got %A" other
+
+              match decodeOne us "\"10000-01-01T00:00:00Z\"" with
+              | Error(MalformedShape _) -> ()
+              | other -> failtestf "past the canonical years, got %A" other
+
+              // what decodes, encodes back byte-identically, at every unit
+              for u in allUnits do
+                  let next = lcg (4223 + TimeUnit.digits u)
+
+                  let cells =
+                      [ for i in 1..50 ->
+                            if i % 9 = 0 then
+                                Null
+                            else
+                                let s, f = drawInstant next u
+                                Timestamp(TemporalText.instantText u s f) ]
+
+                  let src =
+                      match Column.ofCells "t" (TimestampType u) cells with
+                      | Ok c ->
+                          Embedded
+                              { Schema = [ "t", TimestampType u ]
+                                Columns = [ c ] }
+                      | Error e -> failtestf "%A" e
+
+                  let bytes = ColumnCodec.encode src
+                  Expect.equal (ColumnCodec.tryEncode src) (Ok bytes) "validate accepts what ofCells built"
+
+                  match ColumnCodec.decode bytes with
+                  | Ok back ->
+                      Expect.equal back src "decode is the column"
+                      Expect.equal (ColumnCodec.encode back) bytes "and writes the same bytes"
+                  | Error e -> failtestf "%A: %A" u e
+
+          testCase "a seconds or date column writes the bytes it wrote before Phase 422"
+          <| fun _ ->
+              let src =
+                  Embedded
+                      { Schema = [ "d", DateType; "t", TimestampType TimeUnit.Seconds ]
+                        Columns =
+                          [ mkCol "d" DateType [ Date "2026-06-22"; Null; Date "0000-01-01"; Date "9999-12-31" ]
+                            mkCol
+                                "t"
+                                (TimestampType TimeUnit.Seconds)
+                                [ Timestamp "2026-06-22T17:00:00Z"
+                                  Null
+                                  Timestamp "0000-01-01T00:00:00Z"
+                                  Timestamp "9999-12-31T23:59:59Z" ] ] }
+
+              Expect.equal
+                  (ColumnCodec.encode src)
+                  "{\"columns\":{\"d\":{\"validity\":[true,false,true,true],\"values\":[\"2026-06-22\",\"\",\"0000-01-01\",\"9999-12-31\"]},\"t\":{\"validity\":[true,false,true,true],\"values\":[\"2026-06-22T17:00:00Z\",\"\",\"0000-01-01T00:00:00Z\",\"9999-12-31T23:59:59Z\"]}},\"schema\":[{\"name\":\"d\",\"type\":\"date\"},{\"name\":\"t\",\"type\":\"timestamp\"}]}"
+                  "the pre-422 bytes"
+
+          testCase "a fraction None equals an all-zero fraction, hashes alike, and Core's builders normalise to None"
+          <| fun _ ->
+              let seconds = Vector.ofList [ 0.0; 60.0; 120.0 ]
+
+              let none =
+                  Column.ofTimestamps "t" TimeUnit.Milliseconds seconds None (Validity.ofList [ true; false; true ])
+
+              let zeros =
+                  Column.ofTimestamps
+                      "t"
+                      TimeUnit.Milliseconds
+                      seconds
+                      (Some(Vector.ofList [ 0; 999; 0 ]))
+                      (Validity.ofList [ true; false; true ])
+
+              Expect.equal none zeros "the fraction under an absent row takes no part"
+              Expect.equal (hash none) (hash zeros) "and the hashes agree"
+
+              let other =
+                  Column.ofTimestamps
+                      "t"
+                      TimeUnit.Milliseconds
+                      seconds
+                      (Some(Vector.ofList [ 1; 0; 0 ]))
+                      (Validity.ofList [ true; false; true ])
+
+              Expect.notEqual none other "a present fraction is part of the instant"
+
+              Expect.notEqual
+                  (Column.ofTimestamps "t" TimeUnit.Seconds seconds None AllValid)
+                  (Column.ofTimestamps "t" TimeUnit.Milliseconds seconds None AllValid)
+                  "two units are two column types"
+
+              match
+                  Column.ofCells
+                      "t"
+                      (TimestampType TimeUnit.Nanoseconds)
+                      [ Timestamp "2026-06-22T17:00:00Z"; Null; Timestamp "2026-06-22T17:00:01Z" ]
+              with
+              | Ok c -> Expect.isNone (Option.get (Column.tryTimestamps c)).Fraction "whole seconds hold no fraction"
+              | Error e -> failtestf "%A" e
+
+              match
+                  ColumnCodec.decode
+                      "{\"schema\":[{\"name\":\"t\",\"type\":\"timestamp_ns\"}],\"columns\":{\"t\":[\"2026-06-22T17:00:00Z\"]}}"
+              with
+              | Ok(Embedded t) ->
+                  Expect.isNone (Option.get (Column.tryTimestamps t.Columns.Head)).Fraction "decode normalises too"
+              | other -> failtestf "%A" other
+
+          testCase "validate names a temporal integer the canonical form cannot spell"
+          <| fun _ ->
+              let refuses (c: Column) (what: string) =
+                  match
+                      Table.validate
+                          { Schema = [ c.Name, c.Type ]
+                            Columns = [ c ] }
+                  with
+                  | Error(MalformedShape _) -> ()
+                  | other -> failtestf "%s: expected MalformedShape, got %A" what other
+
+              let accepts (c: Column) (what: string) =
+                  Expect.equal
+                      (Table.validate
+                          { Schema = [ c.Name, c.Type ]
+                            Columns = [ c ] })
+                      (Ok())
+                      what
+
+              refuses (Column.ofDates "d" (Vector.ofList [ TemporalText.MaxDay + 1 ]) AllValid) "a day past 9999"
+              refuses (Column.ofDates "d" (Vector.ofList [ TemporalText.MinDay - 1 ]) AllValid) "a day before 0000"
+
+              accepts
+                  (Column.ofDates "d" (Vector.ofList [ TemporalText.MaxDay + 1 ]) (Validity.ofList [ false ]))
+                  "an absent row is not read"
+
+              let ts u seconds fraction =
+                  Column.ofTimestamps "t" u (Vector.ofList seconds) fraction AllValid
+
+              refuses (ts TimeUnit.Seconds [ 0.5 ] None) "a second that is not whole"
+              refuses (ts TimeUnit.Seconds [ nan ] None) "a NaN second"
+              refuses (ts TimeUnit.Seconds [ TemporalText.maxSecond + 1.0 ] None) "past 9999"
+              refuses (ts TimeUnit.Seconds [ 0.0 ] (Some(Vector.ofList [ 1 ]))) "a fraction in a seconds column"
+              refuses (ts TimeUnit.Milliseconds [ 0.0 ] (Some(Vector.ofList [ 1000 ]))) "a fraction of a whole second"
+              refuses (ts TimeUnit.Milliseconds [ 0.0 ] (Some(Vector.ofList [ -1 ]))) "a negative fraction"
+              refuses (ts TimeUnit.Milliseconds [ 0.0; 1.0 ] (Some(Vector.ofList [ 1 ]))) "a short fraction vector"
+
+              accepts
+                  (ts
+                      TimeUnit.Nanoseconds
+                      [ TemporalText.minSecond; TemporalText.maxSecond ]
+                      (Some(Vector.ofList [ 0; 999999999 ])))
+                  "both ends"
+
+          testCase
+              "the .NET edge converts DateOnly and DateTimeOffset through the integers, and refuses a tick the unit cannot hold"
+          <| fun _ ->
+              let days =
+                  [ Some(System.DateOnly(2026, 6, 22))
+                    None
+                    Some System.DateOnly.MinValue
+                    Some System.DateOnly.MaxValue
+                    Some(System.DateOnly(1969, 12, 31)) ]
+
+              let dc = Column.ofDateOnlys "d" days
+              Expect.equal [ for i in 0 .. days.Length - 1 -> Column.tryDateOnly i dc ] days "DateOnly round-trips"
+
+              Expect.equal
+                  (Column.toCells dc)
+                  [ Date "2026-06-22"
+                    Null
+                    Date "0001-01-01"
+                    Date "9999-12-31"
+                    Date "1969-12-31" ]
+                  "and is the canonical day"
+
+              Expect.isNone (Column.tryDateOnly 9 dc) "off the end"
+
+              match Column.ofCells "d" DateType [ Date "0000-06-01" ] with
+              | Ok c -> Expect.isNone (Column.tryDateOnly 0 c) "the year 0000 has no DateOnly"
+              | Error e -> failtestf "%A" e
+
+              let instants =
+                  [ Some(System.DateTimeOffset(2026, 6, 22, 17, 0, 0, 123, System.TimeSpan.Zero))
+                    None
+                    Some(System.DateTimeOffset(2026, 6, 22, 18, 0, 0, System.TimeSpan.FromHours 1.0))
+                    Some(System.DateTimeOffset(1969, 12, 31, 23, 59, 59, 500, System.TimeSpan.Zero)) ]
+
+              match Column.ofDateTimeOffsets "t" TimeUnit.Milliseconds instants with
+              | Ok tc ->
+                  Expect.equal
+                      (Column.toCells tc)
+                      [ Timestamp "2026-06-22T17:00:00.123Z"
+                        Null
+                        Timestamp "2026-06-22T17:00:00Z"
+                        Timestamp "1969-12-31T23:59:59.5Z" ]
+                      "the instant each names, offsets read as UTC"
+
+                  Expect.equal
+                      [ for i in 0..3 -> Column.tryDateTimeOffset i tc ]
+                      (instants |> List.map (Option.map (fun v -> v.ToUniversalTime())))
+                      "DateTimeOffset round-trips as its UTC instant"
+              | Error e -> failtestf "%A" e
+
+              match Column.ofDateTimeOffsets "t" TimeUnit.Seconds instants with
+              | Error(TypeMismatch("t", TimestampType TimeUnit.Seconds, "timestamp_ms")) -> ()
+              | other -> failtestf "a millisecond in a seconds column is refused, got %A" other
+
+              let tick =
+                  System.DateTimeOffset(2026, 6, 22, 17, 0, 0, System.TimeSpan.Zero).AddTicks 1L
+
+              match Column.ofDateTimeOffsets "t" TimeUnit.Microseconds [ Some tick ] with
+              | Error(TypeMismatch(_, _, "timestamp_ns")) -> ()
+              | other -> failtestf "a 100 ns tick in a us column is refused, got %A" other
+
+              match Column.ofDateTimeOffsets "t" TimeUnit.Nanoseconds [ Some tick ] with
+              | Ok tc ->
+                  Expect.equal (Column.cell 0 tc) (Timestamp "2026-06-22T17:00:00.0000001Z") "a tick is 100 ns"
+                  Expect.equal (Column.tryDateTimeOffset 0 tc) (Some tick) "and reads back"
+              | Error e -> failtestf "%A" e
+
+              match
+                  Column.ofCells "t" (TimestampType TimeUnit.Nanoseconds) [ Timestamp "2026-06-22T17:00:00.000000001Z" ]
+              with
+              | Ok c -> Expect.isNone (Column.tryDateTimeOffset 0 c) "a nanosecond has no tick: refused, not rounded"
+              | Error e -> failtestf "%A" e
+
+          testCase "the ownership law holds over the integer temporal vectors, the fraction vector included"
+          <| fun _ ->
+              let seconds = [| 0.0; 60.0 |]
+              let fraction = [| 5; 7 |]
+
+              let draw (r: ConfRng.T) =
+                  [ Column.ofTimestamps
+                        "t"
+                        TimeUnit.Milliseconds
+                        (Vector.adopt seconds)
+                        (Some(Vector.adopt fraction))
+                        AllValid
+                    Column.ofDates "d" (Vector.adopt [| 1; 2 |]) AllValid ],
+                  r
+
+              let clean = Conformance.columnOwnershipLawsWith coreColumnReads draw 7 3
+              Expect.isTrue (clean |> List.forall _.Passed) (sprintf "Core's reads write nothing: %A" clean)
+
+              let writeFraction (_: Column list) = fraction[0] <- fraction[0] + 1
+              let red = Conformance.columnOwnershipLawsWith writeFraction draw 7 3
+              Expect.isFalse (red |> List.forall _.Passed) "a write into the fraction vector is seen" ]

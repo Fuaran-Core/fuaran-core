@@ -144,7 +144,7 @@ let private invoices: Query =
           { Name = "day"
             Type = DateType
             Required = false } ]
-      ResultSchema = [ "total", DecimalType; "at", TimestampType ]
+      ResultSchema = [ "total", DecimalType; "at", TimestampType TimeUnit.Seconds ]
       Effect = Effect.pureDeterministic
       Source = Ref "ledger"
       TimeoutMs = None
@@ -236,7 +236,7 @@ let private queryErrors: QueryError list =
               BoolType
               StringType
               DateType
-              TimestampType
+              TimestampType TimeUnit.Seconds
               DecimalType ] -> ParamTypeMismatch("p", expected, StringType) ]
 
 /// A document with one more member, `name: value`, on its top-level object.

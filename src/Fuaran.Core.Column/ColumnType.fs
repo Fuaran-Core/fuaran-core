@@ -13,11 +13,16 @@ type ColumnType =
     | BoolType
     /// Free text, tagged `string`; ordered ordinally, never by culture.
     | StringType
-    /// Calendar days as canonical `YYYY-MM-DD` text, tagged `date` (`TemporalText.isCanonicalDate`).
+    /// Calendar days, held as `int32` days since 1970-01-01 (Arrow's Date32, Phase 422) and written
+    /// as canonical `YYYY-MM-DD` text.
     | DateType
-    /// UTC instants as canonical `YYYY-MM-DDThh:mm:ssZ` text, tagged `timestamp`; the decoder also
-    /// reads an epoch number in seconds or milliseconds.
-    | TimestampType
+    /// UTC instants at a `TimeUnit` (Phase 422, Arrow's `Timestamp(unit)`), held as integer-valued
+    /// epoch seconds plus, for a sub-second unit, the fraction scaled to the unit; written as the
+    /// canonical instant text (`TemporalText`). Tagged `timestamp` (seconds), `timestamp_ms`,
+    /// `timestamp_us` or `timestamp_ns`; a coarser unit widens into a finer one. The decoder also
+    /// reads an epoch number: in a `timestamp` column in seconds or milliseconds by magnitude, in a
+    /// sub-second column in its own unit (DECISIONS.md D143.5).
+    | TimestampType of unit: TimeUnit
     /// An EXACT decimal (`0.33.0`): a value a `float` cannot hold without rounding, such as a sum of
     /// money. Unparameterised — it carries no precision and no scale, because the text a cell
     /// carries has exactly the digits it has. A host that maps it to a fixed-scale store type reads
@@ -36,7 +41,10 @@ module ColumnType =
         | BoolType -> "bool"
         | StringType -> "string"
         | DateType -> "date"
-        | TimestampType -> "timestamp"
+        | TimestampType TimeUnit.Seconds -> "timestamp"
+        | TimestampType TimeUnit.Milliseconds -> "timestamp_ms"
+        | TimestampType TimeUnit.Microseconds -> "timestamp_us"
+        | TimestampType TimeUnit.Nanoseconds -> "timestamp_ns"
         | DecimalType -> "decimal"
 
     /// The type's position in `all` — the identity `widens` compares by, as an integer (Phase 353).
@@ -47,18 +55,26 @@ module ColumnType =
         | BoolType -> 2
         | StringType -> 3
         | DateType -> 4
-        | TimestampType -> 5
+        | TimestampType TimeUnit.Seconds -> 5
         | DecimalType -> 6
+        | TimestampType TimeUnit.Milliseconds -> 7
+        | TimestampType TimeUnit.Microseconds -> 8
+        | TimestampType TimeUnit.Nanoseconds -> 9
 
     /// The full closed set of valid type tags — the `UnknownType` enumeration (and the encode order).
+    /// The three sub-second timestamp units (Phase 422) are APPENDED after `DecimalType`, so the
+    /// enumeration keeps its earlier prefix in its earlier order.
     let all =
         [ IntType
           FloatType
           BoolType
           StringType
           DateType
-          TimestampType
-          DecimalType ]
+          TimestampType TimeUnit.Seconds
+          DecimalType
+          TimestampType TimeUnit.Milliseconds
+          TimestampType TimeUnit.Microseconds
+          TimestampType TimeUnit.Nanoseconds ]
 
     /// The wire tags in `all`'s order — the tags of the `expected` list an `UnknownType` refusal
     /// carries.
@@ -80,10 +96,15 @@ module ColumnType =
     /// Decimal` is NOT a widening, in either direction: a float is an approximation and a decimal is
     /// a statement of digits, so a retype between them changes what the column claims.
     ///
+    /// A coarser timestamp unit widens into a finer one (Phase 422: `timestamp` into
+    /// `timestamp_ms`, and so on, `TimeUnit.widens`) — the scaling is exact, so the retype is
+    /// lossless; a finer unit never widens into a coarser one.
+    ///
     /// Read by pattern, not by `=` (Phase 353): a union's `=` is a structural-equality call under
     /// Fable, and `Column.aggregate` asks this once per cell. The identity is `ordinal`'s, whose
     /// match is exhaustive, so a new type cannot silently fail to widen into itself.
     let widens (from: ColumnType) (target: ColumnType) : bool =
         match from, target with
         | IntType, (FloatType | DecimalType) -> true
+        | TimestampType a, TimestampType b -> TimeUnit.widens a b
         | _ -> ordinal from = ordinal target

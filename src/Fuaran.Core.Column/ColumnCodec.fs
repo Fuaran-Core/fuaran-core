@@ -36,7 +36,7 @@ module ColumnCodec =
         | BoolType -> JBool false
         | StringType
         | DateType
-        | TimestampType -> JStr ""
+        | TimestampType _ -> JStr ""
         | DecimalType -> JStr DecimalText.zero
 
     /// One column's `values` and `validity` arrays, walked off the typed storage (Phase 417): the
@@ -55,9 +55,19 @@ module ColumnCodec =
             | Ints(xs, _) -> List.init n (fun i -> if present i then JInt xs[i] else absentSlot IntType)
             | Floats(xs, _) -> List.init n (fun i -> if present i then JFloat xs[i] else absentSlot FloatType)
             | Bools(xs, _) -> List.init n (fun i -> if present i then JBool xs[i] else absentSlot BoolType)
+            | Dates(xs, _) ->
+                List.init n (fun i ->
+                    if present i then
+                        JStr(TemporalText.dateText xs[i])
+                    else
+                        absentSlot DateType)
+            | Timestamps(u, xs, f, _) ->
+                List.init n (fun i ->
+                    if present i then
+                        JStr(TemporalText.instantText u xs[i] (ColumnStorage.fractionAt f i))
+                    else
+                        absentSlot c.Type)
             | Strs(xs, _)
-            | Dates(xs, _)
-            | Timestamps(xs, _)
             | Decimals(xs, _) -> List.init n (fun i -> if present i then JStr xs[i] else absentSlot c.Type)
 
         let validity = List.init n (fun i -> JBool(present i))
@@ -123,26 +133,6 @@ module ColumnCodec =
 
     let private asStr (ctx: string) (el: JVal) : Result<string, ColumnError> = Decode.stringWith (fault ctx) el
 
-    /// Phase 94 (lenient-ingest) — render an epoch-seconds instant as the canonical
-    /// ISO-8601 UTC timestamp string. Pure integer arithmetic (civil-from-days), so it
-    /// is Fable-portable and clock-free; negative epochs (pre-1970) are handled.
-    let private isoOfEpochSeconds (secs: int64) : string =
-        let days =
-            let d = secs / 86400L
-            if secs % 86400L < 0L then d - 1L else d
-
-        let sod = secs - days * 86400L
-        let z = days + 719468L
-        let era = (if z >= 0L then z else z - 146096L) / 146097L
-        let doe = z - era * 146097L
-        let yoe = (doe - doe / 1460L + doe / 36524L - doe / 146096L) / 365L
-        let doy = doe - (365L * yoe + yoe / 4L - yoe / 100L)
-        let mp = (5L * doy + 2L) / 153L
-        let day = doy - (153L * mp + 2L) / 5L + 1L
-        let month = if mp < 10L then mp + 3L else mp - 9L
-        let year = yoe + era * 400L + (if month <= 2L then 1L else 0L)
-        sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" year month day (sod / 3600L) (sod % 3600L / 60L) (sod % 60L)
-
     /// The largest magnitude a whole-valued float token carries exactly: 2^53, the parser's int53
     /// guard. A decimal column reads a whole-valued `JFloat` up to it and no further.
     let private int53Max = 9007199254740992.0
@@ -158,38 +148,41 @@ module ColumnCodec =
 
         mismatch, notCanonical
 
-    /// A date or timestamp text, held to its canonical form.
-    let private temporalText
-        (notCanonical: string -> Result<string, ColumnError>)
+    /// The refusal of a date or timestamp text that is not canonical, naming the form.
+    let private notCanonicalText
+        (notCanonical: string -> Result<'T, ColumnError>)
         (ty: ColumnType)
-        (isCanonical: string -> bool)
         (form: string)
-        (s: string)
-        : Result<string, ColumnError> =
-        if isCanonical s then
-            Ok s
-        else
-            notCanonical (
-                "a "
-                + ColumnType.tag ty
-                + " value must be canonical ISO-8601 text, "
-                + form
-                + ", naming a moment that exists"
-            )
+        : Result<'T, ColumnError> =
+        notCanonical (
+            "a "
+            + ColumnType.tag ty
+            + " value must be canonical ISO-8601 text, "
+            + form
+            + ", naming a moment that exists"
+        )
 
-    /// An epoch number as the canonical timestamp text it names (Phase 94 — models emit epoch
-    /// instants against their own correct `"timestamp"` schema; unit by magnitude: ≥ 1e11 ⇒
-    /// milliseconds, else seconds — epoch-seconds stay below 1e11 until year 5138), refused where the
-    /// instant falls outside the years the canonical form spells (Phase 299).
-    let private epochToIso
-        (notCanonical: string -> Result<string, ColumnError>)
+    /// An epoch number as the instant it names in a column at `unit` (DECISIONS.md D143.5), as its
+    /// epoch second and its fraction scaled to the unit. A `timestamp` (seconds) column keeps Phase 94's
+    /// reading — models emit epoch instants against their own correct `"timestamp"` schema; unit by
+    /// magnitude: ≥ 1e11 ⇒ milliseconds, truncated to the second, else seconds (epoch-seconds stay below
+    /// 1e11 until year 5138). A sub-second column reads the number IN ITS OWN UNIT, with no magnitude
+    /// guess. Refused where the instant falls outside the years the canonical form spells (Phase 299).
+    let private epochInstant
+        (notCanonical: string -> Result<float * int, ColumnError>)
+        (unit: TimeUnit)
         (i: int64)
-        : Result<string, ColumnError> =
-        let secs = if abs i >= 100_000_000_000L then i / 1000L else i
-        let iso = isoOfEpochSeconds secs
+        : Result<float * int, ColumnError> =
+        let second, fraction =
+            match unit with
+            | TimeUnit.Seconds -> (if abs i >= 100_000_000_000L then i / 1000L else i), 0L
+            | _ ->
+                let scale = int64 (TimeUnit.scale unit)
+                let s = (if i < 0L then i - scale + 1L else i) / scale
+                s, i - s * scale
 
-        if TemporalText.isCanonicalTimestamp iso then
-            Ok iso
+        if TemporalText.isInstantInRange unit (float second) (int fraction) then
+            Ok(float second, int fraction)
         else
             notCanonical (
                 "the epoch "
@@ -214,7 +207,12 @@ module ColumnCodec =
     //
     // A date or timestamp column (Phase 299) reads only its canonical ISO-8601 text
     // (`TemporalText`), and an epoch number only where the instant it names falls in the years the
-    // canonical form spells (`0000`–`9999`); anything else is a `MalformedShape`.
+    // canonical form spells (`0000`–`9999`); anything else is a `MalformedShape`. Since Phase 422 it
+    // reads them into integers: a date's day count, an instant's epoch second and its fraction at the
+    // column's unit. An instant whose fraction is finer than the unit is a `MalformedShape` naming the
+    // coarsest unit that holds it — text the column cannot read, as the corpus has pinned since Phase
+    // 299 (`timestamp-fractional-second`). An epoch number is exact in every unit: the parser refuses
+    // an integer token past 2^53 before any column reads it, and one at or past 9e15 is a `TypeMismatch`.
 
     let private readInt (colName: string) (v: JVal) : Result<int, ColumnError> =
         let mismatch, _ = valueFaults colName IntType
@@ -245,22 +243,37 @@ module ColumnCodec =
         | JStr s -> Ok s
         | _ -> mismatch v
 
-    let private readDate (colName: string) (v: JVal) : Result<string, ColumnError> =
+    let private readDate (colName: string) (v: JVal) : Result<int, ColumnError> =
         let mismatch, notCanonical = valueFaults colName DateType
 
         match v with
-        | JStr s -> temporalText notCanonical DateType TemporalText.isCanonicalDate "YYYY-MM-DD" s
+        | JStr s ->
+            match TemporalText.tryDays s with
+            | Some d -> Ok d
+            | None -> notCanonicalText notCanonical DateType "YYYY-MM-DD"
         | _ -> mismatch v
 
-    let private readTimestamp (colName: string) (v: JVal) : Result<string, ColumnError> =
-        let mismatch, notCanonical = valueFaults colName TimestampType
+    let private readTimestamp (colName: string) (unit: TimeUnit) (v: JVal) : Result<float * int, ColumnError> =
+        let ty = TimestampType unit
+        let mismatch, notCanonical = valueFaults colName ty
 
         match v with
-        | JStr s -> temporalText notCanonical TimestampType TemporalText.isCanonicalTimestamp "YYYY-MM-DDThh:mm:ssZ" s
+        | JStr s ->
+            match TemporalText.tryInstant unit s with
+            | Some pair -> Ok pair
+            | None when TemporalText.isCanonicalTimestamp s ->
+                notCanonical (
+                    "a "
+                    + ColumnType.tag ty
+                    + " value's fraction is finer than the column's unit holds: "
+                    + ColumnType.tag (TimestampType(TemporalText.unitOf s))
+                    + " or finer is needed"
+                )
+            | None -> notCanonicalText notCanonical ty "YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss.FZ"
         // Epoch-seconds fit Int32 (so arrive as JInt); epoch-milliseconds overflow the
         // parser's Int32 path and arrive as a whole-valued JFloat.
-        | JInt i -> epochToIso notCanonical (int64 i)
-        | JFloat f when f = floor f && abs f < 9e15 -> epochToIso notCanonical (int64 f)
+        | JInt i -> epochInstant notCanonical unit (int64 i)
+        | JFloat f when f = floor f && abs f < 9e15 -> epochInstant notCanonical unit (int64 f)
         | _ -> mismatch v
 
     let private readDecimal (colName: string) (v: JVal) : Result<string, ColumnError> =
@@ -391,11 +404,25 @@ module ColumnCodec =
                         fill (Array.create n "") (readStr name)
                         |> Result.map (fun (v, m) -> Column.ofStrs name v m)
                     | DateType ->
-                        fill (Array.create n "") (readDate name)
+                        fill (Array.zeroCreate n) (readDate name)
                         |> Result.map (fun (v, m) -> Column.ofDates name v m)
-                    | TimestampType ->
-                        fill (Array.create n "") (readTimestamp name)
-                        |> Result.map (fun (v, m) -> Column.ofTimestamps name v m)
+                    | TimestampType unit ->
+                        fill (Array.create n (0.0, 0)) (readTimestamp name unit)
+                        |> Result.map (fun (pairs, m) ->
+                            let seconds = Array.zeroCreate<float> n
+                            let fraction = Array.zeroCreate<int> n
+
+                            for i in 0 .. n - 1 do
+                                let (second, f) = pairs[i]
+                                seconds[i] <- second
+                                fraction[i] <- f
+
+                            Column.ofTimestamps
+                                name
+                                unit
+                                (Vector.adopt seconds)
+                                (Column.normalFraction unit fraction m)
+                                m)
                     | DecimalType ->
                         fill (Array.create n DecimalText.zero) (readDecimal name)
                         |> Result.map (fun (v, m) -> Column.ofDecimals name v m))

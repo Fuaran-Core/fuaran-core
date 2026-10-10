@@ -381,7 +381,7 @@ let private genColumn (seed: int) : ColumnType * Cell list =
             | BoolType -> Bool(pick 2 = 0)
             | StringType -> Str(string (pick 5))
             | DateType -> Date(sprintf "2026-01-%02d" (1 + pick 28))
-            | TimestampType -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (pick 60))
+            | TimestampType _ -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (pick 60))
             | DecimalType ->
                 if pick 3 = 0 then
                     Int(pick 50)

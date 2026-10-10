@@ -19,8 +19,10 @@ namespace Fuaran.Core
 //  was a `Cell list`: a consumer holds typed storage, an indexed read is O(1), and
 //  a cell outside its column's type cannot be represented. Since Phase 420 a
 //  null-free column carries no mask (`AllValid`); only a column with an absent
-//  row holds one (`Mask`). `Cell` stays the scalar
-//  read type; `Column.ofCells` / `Column.toCells` are the migration bridge.
+//  row holds one (`Mask`). Since Phase 422 a date column holds `int32` days and
+//  a timestamp column integer epoch seconds plus a fraction at its `TimeUnit`.
+//  `Cell` stays the scalar read type; `Column.ofCells` / `Column.toCells` are
+//  the migration bridge.
 // ============================================================================
 
 /// Which rows of a column are PRESENT and which are the `Null` the wire's validity array marks
@@ -140,6 +142,31 @@ module internal ColumnStorage =
 
             same)
 
+    /// The fraction of row `i` of a timestamp column: `0` where the column holds none (`None` reads
+    /// as every fraction zero, Phase 422) and for an index off the fraction vector's end.
+    let fractionAt (fraction: Vector<int> option) (i: int) : int =
+        match fraction with
+        | Some f when i >= 0 && i < f.Length -> f[i]
+        | _ -> 0
+
+    /// Two timestamp columns' fractions agree at every present row of `vx` (the masks were already
+    /// compared), a `None` reading as zeros — the materialised fractions, as `sameMask` compares the
+    /// materialised masks.
+    let sameFraction (n: int) (vx: Validity) (fx: Vector<int> option) (fy: Vector<int> option) : bool =
+        match fx, fy with
+        | None, None -> true
+        | _ ->
+            let mutable same = true
+            let mutable i = 0
+
+            while same && i < n do
+                if Validity.isPresent i vx then
+                    same <- fractionAt fx i = fractionAt fy i
+
+                i <- i + 1
+
+            same
+
     /// A hash agreeing with `presentEqual`: the length, the mask, and the first few present elements.
     let presentHash (xs: Vector<'T>) (vx: Validity) : int =
         let mutable h = xs.Length * 31 + maskHash xs.Length vx
@@ -164,8 +191,10 @@ module internal ColumnStorage =
 ///
 /// A widened cell is held NORMALISED: an `Int` in a float column is the float it widens to, and in
 /// a decimal column the decimal text of its digits, exactly as decode already normalised it; so
-/// `Floats` holds floats only and `Decimals` decimal text only. `Dates` and `Timestamps` hold their
-/// canonical ISO-8601 text in this phase, as the cells do; Phase 422 makes them integers.
+/// `Floats` holds floats only and `Decimals` decimal text only. `Dates` and `Timestamps` hold
+/// integers (Phase 422, DECISIONS.md D143): a date its day count since 1970-01-01, a timestamp its
+/// floor epoch second as an integer-valued float and, for a sub-second unit, the fraction of that
+/// second scaled to the unit; the cell a reader is handed is the canonical text (`TemporalText`).
 ///
 /// Equality is by the CELLS: two storages are equal when their materialised masks agree (so
 /// `AllValid` equals an all-true `Mask` of the same length) and every present
@@ -181,10 +210,15 @@ type ColumnData =
     | Bools of values: Vector<bool> * validity: Validity
     /// A `string` column's values and mask.
     | Strs of values: Vector<string> * validity: Validity
-    /// A `date` column's canonical `YYYY-MM-DD` texts and mask.
-    | Dates of values: Vector<string> * validity: Validity
-    /// A `timestamp` column's canonical `YYYY-MM-DDThh:mm:ssZ` texts and mask.
-    | Timestamps of values: Vector<string> * validity: Validity
+    /// A `date` column's days since 1970-01-01 (Arrow's Date32) and mask; the canonical range is
+    /// `TemporalText.MinDay`..`MaxDay` (`0000-01-01`..`9999-12-31`).
+    | Dates of values: Vector<int> * validity: Validity
+    /// A timestamp column at `unit`: each row's floor epoch second, an integer-valued float, and for
+    /// a sub-second unit the fraction of that second scaled to the unit (`0 <= f <
+    /// TimeUnit.scale unit`), with its mask. `fraction = None` reads as every fraction zero — a
+    /// seconds column holds none, and Core's builders answer `None` wherever no present row has a
+    /// fraction; equality compares the materialised fractions, so `None` equals an all-zero `Some`.
+    | Timestamps of unit: TimeUnit * seconds: Vector<float> * fraction: Vector<int> option * validity: Validity
     /// A `decimal` column's canonical decimal texts and mask; a widened `Int` is held as its digits.
     | Decimals of values: Vector<string> * validity: Validity
 
@@ -196,7 +230,7 @@ type ColumnData =
         | Bools _ -> BoolType
         | Strs _ -> StringType
         | Dates _ -> DateType
-        | Timestamps _ -> TimestampType
+        | Timestamps(u, _, _, _) -> TimestampType u
         | Decimals _ -> DecimalType
 
     /// The validity, whatever the case.
@@ -207,7 +241,7 @@ type ColumnData =
         | Bools(_, v)
         | Strs(_, v)
         | Dates(_, v)
-        | Timestamps(_, v)
+        | Timestamps(_, _, _, v)
         | Decimals(_, v) -> v
 
     /// The number of rows — the values vector's length.
@@ -216,9 +250,9 @@ type ColumnData =
         | Ints(xs, _) -> xs.Length
         | Floats(xs, _) -> xs.Length
         | Bools(xs, _) -> xs.Length
+        | Dates(xs, _) -> xs.Length
+        | Timestamps(_, xs, _, _) -> xs.Length
         | Strs(xs, _)
-        | Dates(xs, _)
-        | Timestamps(xs, _)
         | Decimals(xs, _) -> xs.Length
 
     /// Equal by their cells (see the type).
@@ -231,7 +265,10 @@ type ColumnData =
             | Bools(xs, vx), Bools(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
             | Strs(xs, vx), Strs(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
             | Dates(xs, vx), Dates(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
-            | Timestamps(xs, vx), Timestamps(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
+            | Timestamps(ux, xs, fx, vx), Timestamps(uy, ys, fy, vy) ->
+                ux = uy
+                && ColumnStorage.presentEqual xs vx ys vy
+                && ColumnStorage.sameFraction xs.Length vx fx fy
             | Decimals(xs, vx), Decimals(ys, vy) -> ColumnStorage.presentEqual xs vx ys vy
             | _ -> false
         | _ -> false
@@ -253,12 +290,25 @@ type ColumnData =
             | Ints(xs, v) -> ColumnStorage.presentHash xs v
             | Floats(xs, v) -> ColumnStorage.presentHash xs v
             | Bools(xs, v) -> ColumnStorage.presentHash xs v
+            | Dates(xs, v) -> ColumnStorage.presentHash xs v
+            // The seconds only: two equal columns hold equal seconds whatever their fractions' form.
+            | Timestamps(_, xs, _, v) -> ColumnStorage.presentHash xs v
             | Strs(xs, v)
-            | Dates(xs, v)
-            | Timestamps(xs, v)
             | Decimals(xs, v) -> ColumnStorage.presentHash xs v
 
         (tag * 397) ^^^ body
+
+/// A timestamp column's storage as `Column.tryTimestamps` answers it (Phase 422): the unit, the
+/// floor epoch seconds, and the fractions scaled to the unit (`None` for every fraction zero).
+type TimestampVectors =
+    {
+        /// The resolution the column holds its instants at.
+        Unit: TimeUnit
+        /// Each row's floor epoch second, an integer-valued float.
+        Seconds: Vector<float>
+        /// Each row's fraction of its second, scaled to `Unit`; `None` where every fraction is zero.
+        Fraction: Vector<int> option
+    }
 
 /// A typed, null-aware column (Phase 417: typed storage, where it was a `Cell list`). `Data` holds
 /// one typed vector and a validity mask that co-index with the table's rows; the column's `Type` is
@@ -406,8 +456,8 @@ module Column =
             | Floats(xs, _) -> Float xs[i]
             | Bools(xs, _) -> Bool xs[i]
             | Strs(xs, _) -> Str xs[i]
-            | Dates(xs, _) -> Date xs[i]
-            | Timestamps(xs, _) -> Timestamp xs[i]
+            | Dates(xs, _) -> Date(TemporalText.dateText xs[i])
+            | Timestamps(u, xs, f, _) -> Timestamp(TemporalText.instantText u xs[i] (ColumnStorage.fractionAt f i))
             | Decimals(xs, _) -> Decimal xs[i]
 
     // ---- the typed builders and readers (Phase 417) ----
@@ -439,15 +489,24 @@ module Column =
         { Name = name
           Data = Strs(values, validity) }
 
-    /// A `date` column over canonical `YYYY-MM-DD` texts, present where `validity` says.
-    let ofDates (name: string) (values: Vector<string>) (validity: Validity) : Column =
+    /// A `date` column over day counts since 1970-01-01, present where `validity` says.
+    let ofDates (name: string) (values: Vector<int>) (validity: Validity) : Column =
         { Name = name
           Data = Dates(values, validity) }
 
-    /// A `timestamp` column over canonical `YYYY-MM-DDThh:mm:ssZ` texts, present where `validity` says.
-    let ofTimestamps (name: string) (values: Vector<string>) (validity: Validity) : Column =
+    /// A timestamp column at `unit` over floor epoch seconds and, for a sub-second unit, their
+    /// fractions scaled to the unit (`None` for every fraction zero), present where `validity` says.
+    /// Like every typed builder it checks nothing; `Table.validate` names a second that is not whole
+    /// or in range, a fraction out of range, and a fraction vector of another length.
+    let ofTimestamps
+        (name: string)
+        (unit: TimeUnit)
+        (seconds: Vector<float>)
+        (fraction: Vector<int> option)
+        (validity: Validity)
+        : Column =
         { Name = name
-          Data = Timestamps(values, validity) }
+          Data = Timestamps(unit, seconds, fraction, validity) }
 
     /// A `decimal` column over canonical decimal texts, present where `validity` says.
     let ofDecimals (name: string) (values: Vector<string>) (validity: Validity) : Column =
@@ -478,16 +537,17 @@ module Column =
         | Strs(xs, _) -> Some xs
         | _ -> None
 
-    /// The texts of a `date` column, or `None` for a column of another type.
-    let tryDates (c: Column) : Vector<string> option =
+    /// The day counts of a `date` column, or `None` for a column of another type.
+    let tryDates (c: Column) : Vector<int> option =
         match c.Data with
         | Dates(xs, _) -> Some xs
         | _ -> None
 
-    /// The texts of a `timestamp` column, or `None` for a column of another type.
-    let tryTimestamps (c: Column) : Vector<string> option =
+    /// The unit, the epoch seconds and the fractions (`None` for every fraction zero) of a timestamp
+    /// column, or `None` for a column of another type.
+    let tryTimestamps (c: Column) : TimestampVectors option =
         match c.Data with
-        | Timestamps(xs, _) -> Some xs
+        | Timestamps(u, xs, f, _) -> Some { Unit = u; Seconds = xs; Fraction = f }
         | _ -> None
 
     /// The texts of a `decimal` column, or `None` for a column of another type.
@@ -498,20 +558,54 @@ module Column =
 
     // ---- the cell-list bridge (Phase 417) ----
 
-    /// The typed storage of `cells` for a column of type `ty`, or the first present cell whose type
-    /// does not widen into `ty` (`ColumnType.widens`) as the `TypeMismatch` naming it, in row order.
-    /// A widened cell is normalised (an `Int` in a float column to its float, in a decimal column to
-    /// its digits); the type's zero is written at every absent row, and a list with no `Null` is
-    /// `AllValid` (Phase 420). Everything else a cell can carry
-    /// is held as found — a non-finite float, decimal, date or timestamp text that is not canonical —
-    /// and is `Table.validate`'s to refuse at the codec, as before.
+    /// The refusal of a `Date` or `Timestamp` cell whose text is not canonical (Phase 422: the
+    /// integer storage cannot hold it) — the `MalformedShape` `Table.validate` named for it before.
+    let internal notCanonicalDate (name: string) : ColumnError =
+        MalformedShape(
+            name
+            + ": a date cell must carry a canonical ISO-8601 date, YYYY-MM-DD, naming a day that exists"
+        )
+
+    /// As `notCanonicalDate`, for an instant.
+    let internal notCanonicalInstant (name: string) : ColumnError =
+        MalformedShape(
+            name
+            + ": a timestamp cell must carry a canonical ISO-8601 UTC timestamp, YYYY-MM-DDThh:mm:ssZ or YYYY-MM-DDThh:mm:ss.FZ with one to nine fraction digits and no trailing zero, naming an instant that exists"
+        )
+
+    /// The fraction vector a timestamp column at `unit` keeps for `fraction`: `None` for a seconds
+    /// column and wherever no PRESENT row has a fraction (Phase 422's normal form), else the vector.
+    let internal normalFraction (unit: TimeUnit) (fraction: int[]) (validity: Validity) : Vector<int> option =
+        let mutable any = false
+        let mutable i = 0
+
+        while not any && i < fraction.Length do
+            if fraction[i] <> 0 && Validity.isPresent i validity then
+                any <- true
+
+            i <- i + 1
+
+        match unit with
+        | TimeUnit.Seconds -> None
+        | _ when not any -> None
+        | _ -> Some(Vector.adopt fraction)
+
+    /// The typed storage of `cells` for a column of type `ty`, or the first present cell it cannot
+    /// hold, in row order: a cell whose type does not widen into `ty` (`ColumnType.widens`) as the
+    /// `TypeMismatch` naming it, and a `Date` or `Timestamp` whose text is not canonical as a
+    /// `MalformedShape` (Phase 422 — the integer storage cannot hold it). A widened cell is
+    /// normalised (an `Int` in a float column to its float, in a decimal column to its digits, an
+    /// instant into a finer unit's scaled fraction); the type's zero is written at every absent row,
+    /// and a list with no `Null` is `AllValid` (Phase 420). Everything else a cell can carry is held
+    /// as found — a non-finite float, decimal text that is not canonical — and is `Table.validate`'s
+    /// to refuse at the codec, as before.
     let private storageOfCells (name: string) (ty: ColumnType) (cells: Cell list) : Result<ColumnData, ColumnError> =
         let n = List.length cells
         let mask = Array.zeroCreate<bool> n
 
         /// Fill `out` from the cells through `pick`, which reads the typed value of a present cell
-        /// that fits, or names the type that does not.
-        let fill (out: 'T[]) (pick: Cell -> Result<'T option, ColumnType>) =
+        /// that fits, or names the refusal.
+        let fill (out: 'T[]) (pick: Cell -> Result<'T option, ColumnError>) =
             let mutable fault = None
             let mutable i = 0
             let mutable rest = cells
@@ -522,60 +616,80 @@ module Column =
                     out[i] <- v
                     mask[i] <- true
                 | Ok None -> ()
-                | Error got -> fault <- Some(TypeMismatch(name, ty, ColumnType.tag got))
+                | Error e -> fault <- Some e
 
                 i <- i + 1
                 rest <- rest.Tail
 
             match fault with
             | Some e -> Error e
-            | None -> Ok(Vector.adopt out, Validity.ofVector (Vector.adopt mask))
+            | None -> Ok(out, Validity.ofVector (Vector.adopt mask))
 
-        let outside (c: Cell) : Result<'T option, ColumnType> =
+        let typed (out: 'T[]) pick =
+            fill out pick |> Result.map (fun (xs, v) -> Vector.adopt xs, v)
+
+        let outside (c: Cell) : Result<'T option, ColumnError> =
             match Cell.typeOf c with
-            | Some t -> Error t
+            | Some t -> Error(TypeMismatch(name, ty, ColumnType.tag t))
             | None -> Ok None
 
         match ty with
         | IntType ->
-            fill (Array.zeroCreate n) (fun c ->
+            typed (Array.zeroCreate n) (fun c ->
                 match c with
                 | Int i -> Ok(Some i)
                 | other -> outside other)
             |> Result.map Ints
         | FloatType ->
-            fill (Array.zeroCreate n) (fun c ->
+            typed (Array.zeroCreate n) (fun c ->
                 match c with
                 | Float f -> Ok(Some f)
                 | Int i -> Ok(Some(float i))
                 | other -> outside other)
             |> Result.map Floats
         | BoolType ->
-            fill (Array.zeroCreate n) (fun c ->
+            typed (Array.zeroCreate n) (fun c ->
                 match c with
                 | Bool b -> Ok(Some b)
                 | other -> outside other)
             |> Result.map Bools
         | StringType ->
-            fill (Array.create n "") (fun c ->
+            typed (Array.create n "") (fun c ->
                 match c with
                 | Str s -> Ok(Some s)
                 | other -> outside other)
             |> Result.map Strs
         | DateType ->
-            fill (Array.create n "") (fun c ->
+            typed (Array.zeroCreate n) (fun c ->
                 match c with
-                | Date s -> Ok(Some s)
+                | Date s ->
+                    match TemporalText.tryDays s with
+                    | Some d -> Ok(Some d)
+                    | None -> Error(notCanonicalDate name)
                 | other -> outside other)
             |> Result.map Dates
-        | TimestampType ->
-            fill (Array.create n "") (fun c ->
+        | TimestampType unit ->
+            let fraction = Array.zeroCreate<int> n
+
+            fill (Array.create n (0.0, 0)) (fun c ->
                 match c with
-                | Timestamp s -> Ok(Some s)
+                | Timestamp s when not (TemporalText.isCanonicalTimestamp s) -> Error(notCanonicalInstant name)
+                | Timestamp s ->
+                    match TemporalText.tryInstant unit s with
+                    | Some pair -> Ok(Some pair)
+                    | None -> outside c
                 | other -> outside other)
-            |> Result.map Timestamps
+            |> Result.map (fun (pairs: (float * int)[], v) ->
+                let seconds = Array.zeroCreate<float> n
+
+                for i in 0 .. n - 1 do
+                    let (second, f) = pairs[i]
+                    seconds[i] <- second
+                    fraction[i] <- f
+
+                Timestamps(unit, Vector.adopt seconds, normalFraction unit fraction v, v))
         | DecimalType ->
-            fill (Array.create n DecimalText.zero) (fun c ->
+            typed (Array.create n DecimalText.zero) (fun c ->
                 match c with
                 | Decimal s -> Ok(Some s)
                 | Int i -> Ok(Some(string i))
@@ -605,6 +719,124 @@ module Column =
             acc <- cell i c :: acc
 
         acc
+
+#if !FABLE_COMPILER
+    // ---- the .NET edge (Phase 422, DECISIONS.md D143.6) ----
+    // `DateOnly` and `DateTimeOffset` are edge types, never the storage: each converts from and to
+    // the integers through `DateOnly.DayNumber` and `DateTimeOffset.UtcTicks` with integer arithmetic
+    // and no intermediate string. Absent under Fable, where either is a JavaScript `Date` per value.
+
+    /// `DateOnly.DayNumber` of 1970-01-01.
+    let private epochDayNumber = 719162
+
+    /// `DateTimeOffset.UnixEpoch.UtcTicks`.
+    let private epochTicks = 621355968000000000L
+
+    /// .NET ticks (100 ns) in a second.
+    let private ticksPerSecond = 10000000L
+
+    /// The date at row `i` of a `date` column as a `DateOnly` — `None` where the row is absent or
+    /// out of range, the column is of another type, or the day falls outside `DateOnly`'s years
+    /// (`0001`–`9999`: the canonical form's year `0000` has no `DateOnly`).
+    let tryDateOnly (i: int) (c: Column) : System.DateOnly option =
+        match c.Data with
+        | Dates(xs, _) when isPresent i c ->
+            let dn = int64 xs[i] + int64 epochDayNumber
+
+            if
+                dn >= int64 System.DateOnly.MinValue.DayNumber
+                && dn <= int64 System.DateOnly.MaxValue.DayNumber
+            then
+                Some(System.DateOnly.FromDayNumber(int dn))
+            else
+                None
+        | _ -> None
+
+    /// The instant at row `i` of a timestamp column as a UTC `DateTimeOffset` — `None` where the row
+    /// is absent or out of range, the column is of another type, or the instant has no exact
+    /// `DateTimeOffset`: before year `0001`, or a nanosecond fraction finer than the type's 100 ns
+    /// tick (refused, not rounded).
+    let tryDateTimeOffset (i: int) (c: Column) : System.DateTimeOffset option =
+        match c.Data with
+        | Timestamps(u, xs, f, _) when isPresent i c ->
+            let scale = int64 (TimeUnit.scale u)
+            let fractionTicks = int64 (ColumnStorage.fractionAt f i) * ticksPerSecond
+
+            if fractionTicks % scale <> 0L || xs[i] <> floor xs[i] then
+                None
+            else
+                let ticks = int64 xs[i] * ticksPerSecond + fractionTicks / scale + epochTicks
+
+                if
+                    ticks >= System.DateTimeOffset.MinValue.UtcTicks
+                    && ticks <= System.DateTimeOffset.MaxValue.UtcTicks
+                then
+                    Some(System.DateTimeOffset(ticks, System.TimeSpan.Zero))
+                else
+                    None
+        | _ -> None
+
+    /// A `date` column of the days `values` name, `None` an absent row. Total: every `DateOnly` is a
+    /// day the canonical form spells.
+    let ofDateOnlys (name: string) (values: System.DateOnly option list) : Column =
+        let days =
+            values
+            |> List.map (fun v ->
+                match v with
+                | Some d -> d.DayNumber - epochDayNumber
+                | None -> 0)
+            |> Array.ofList
+
+        ofDates name (Vector.adopt days) (Validity.ofList (values |> List.map Option.isSome))
+
+    /// A timestamp column at `unit` of the instants `values` name, `None` an absent row. An offset
+    /// is read as the instant it names. REFUSES the first instant finer than `unit` holds, as the
+    /// `TypeMismatch` naming the coarsest unit that holds it — as `ofCells` refuses that instant's
+    /// text — rather than rounding it.
+    let ofDateTimeOffsets
+        (name: string)
+        (unit: TimeUnit)
+        (values: System.DateTimeOffset option list)
+        : Result<Column, ColumnError> =
+        let n = List.length values
+        let seconds = Array.zeroCreate<float> n
+        let fraction = Array.zeroCreate<int> n
+        let scale = int64 (TimeUnit.scale unit)
+        let mutable fault = None
+        let mutable i = 0
+        let mutable rest = values
+
+        while fault.IsNone && not rest.IsEmpty do
+            match rest.Head with
+            | Some v ->
+                let ticks = v.UtcTicks - epochTicks
+
+                let second =
+                    (if ticks < 0L then ticks - ticksPerSecond + 1L else ticks) / ticksPerSecond
+
+                let remainder = ticks - second * ticksPerSecond
+
+                if (remainder * scale) % ticksPerSecond <> 0L then
+                    let finer =
+                        if remainder % 10000L = 0L then TimeUnit.Milliseconds
+                        elif remainder % 10L = 0L then TimeUnit.Microseconds
+                        else TimeUnit.Nanoseconds
+
+                    fault <- Some(TypeMismatch(name, TimestampType unit, ColumnType.tag (TimestampType finer)))
+                else
+                    seconds[i] <- float second
+                    fraction[i] <- int ((remainder * scale) / ticksPerSecond)
+            | None -> ()
+
+            i <- i + 1
+            rest <- rest.Tail
+
+        match fault with
+        | Some e -> Error e
+        | None ->
+            let validity = Validity.ofList (values |> List.map Option.isSome)
+            Ok(ofTimestamps name unit (Vector.adopt seconds) (normalFraction unit fraction validity) validity)
+#endif
 
 
     // ---- pinned aggregate semantics (Phase 36) — the single source the compute layer's GroupBy/Pivot call ----
@@ -1022,7 +1254,7 @@ module Column =
             | BoolType
             | StringType
             | DateType
-            | TimestampType -> false
+            | TimestampType _ -> false
 
         // The one accumulator this aggregate folds into (Phase 388). A numeric aggregate over a
         // non-numeric column folds nothing and is refused once the pass has admitted every cell.

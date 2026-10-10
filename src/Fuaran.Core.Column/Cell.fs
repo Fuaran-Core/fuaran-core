@@ -2,9 +2,10 @@ namespace Fuaran.Core
 
 /// A single realized scalar cell. Null/NA is a first-class case (`Null`), never a sentinel
 /// value buried in the data — the in-memory form of the wire's validity mask. `Date` /
-/// `Timestamp` carry their canonical ISO-8601 string (`YYYY-MM-DD` / `YYYY-MM-DDThh:mm:ssZ`,
+/// `Timestamp` carry their canonical ISO-8601 string (`YYYY-MM-DD` / `YYYY-MM-DDThh:mm:ss[.F]Z`,
 /// `TemporalText`) so the model needs no host `DateTime` dependency and stays Fable-clean +
-/// byte-identical; `Table.validate` and the codec's decode refuse any other text (Phase 299).
+/// byte-identical; `Column.ofCells` and the codec's decode refuse any other text (Phase 299; a column
+/// holds them as integers since Phase 422).
 type Cell =
     /// A 32-bit integer. It belongs in an int column and also widens into a float or a decimal
     /// column, where the codec writes it as that type.
@@ -18,10 +19,11 @@ type Cell =
     /// A string cell, compared ordinally. Any text is valid, including the empty string — absence
     /// is `Null`, not `""`.
     | Str of string
-    /// A date's canonical `YYYY-MM-DD` text; any other text is refused by `Table.validate` and decode.
+    /// A date's canonical `YYYY-MM-DD` text; any other text is refused by `Column.ofCells` and decode.
     | Date of string
-    /// A UTC instant's canonical `YYYY-MM-DDThh:mm:ssZ` text (whole seconds); any other text is
-    /// refused by `Table.validate` and decode.
+    /// A UTC instant's canonical text: `YYYY-MM-DDThh:mm:ssZ`, or with a fraction of one to nine
+    /// digits and no trailing zero, `YYYY-MM-DDThh:mm:ss.FZ` — ONE text per instant, whatever unit a
+    /// column holds it at (Phase 422). Any other text is refused by `Column.ofCells` and decode.
     | Timestamp of string
     /// The absent cell, valid in a column of any type. Aggregates skip it (`First` / `Last` keep it),
     /// and on the wire it is a `false` validity bit over a placeholder slot.
@@ -50,7 +52,10 @@ module Cell =
     let decimal (text: string) : Cell option =
         DecimalText.tryCanonical text |> Option.map Decimal
 
-    /// The column type a present cell carries (`None` for `Null`, which is type-agnostic).
+    /// The column type a present cell carries (`None` for `Null`, which is type-agnostic). A
+    /// `Timestamp` carries the COARSEST unit that holds its instant exactly (Phase 422): seconds with
+    /// no fraction, milliseconds for one to three fraction digits, and so on — so it widens into every
+    /// finer unit (`ColumnType.widens`) and a seconds column refuses a fractional instant.
     let typeOf (c: Cell) : ColumnType option =
         match c with
         | Int _ -> Some IntType
@@ -58,7 +63,7 @@ module Cell =
         | Bool _ -> Some BoolType
         | Str _ -> Some StringType
         | Date _ -> Some DateType
-        | Timestamp _ -> Some TimestampType
+        | Timestamp s -> Some(TimestampType(TemporalText.unitOf s))
         | Decimal _ -> Some DecimalType
         | Null -> None
 
@@ -100,8 +105,10 @@ module Cell =
     /// `Max` order since Phase 299), or `None` where they are incomparable. `Int` and `Float` compare
     /// as floats through `compareFloat` — NaN last, `-0 = 0`, one answer on every host; `Decimal`
     /// and `Int` compare EXACTLY (`DecimalText.compare`), so two decimals a float cannot tell apart
-    /// are still ordered; `Bool` false before true; `Str` / `Date` / `Timestamp` by ordinal (ISO text
-    /// sorts chronologically). Anything else — a `Decimal` beside a `Float` (`widens` refuses that
+    /// are still ordered; `Bool` false before true; `Str` and `Date` by ordinal (a date's fixed-width
+    /// text sorts chronologically); `Timestamp` CHRONOLOGICALLY (`TemporalText.compareInstants`,
+    /// Phase 422) — not ordinally, which breaks once fraction lengths vary (`…12.5Z` is below `…12Z`
+    /// as a string). Anything else — a `Decimal` beside a `Float` (`widens` refuses that
     /// retype), two families, a `Null`, a `Decimal` whose text is not decimal — is `None`.
     ///
     /// An ORDER, not an identity: `Int 1` and `Float 1.0` compare equal and have two `token`s.
@@ -119,7 +126,7 @@ module Cell =
             )
         | Str x, Str y -> Some(System.String.CompareOrdinal(x, y))
         | Date x, Date y -> Some(System.String.CompareOrdinal(x, y))
-        | Timestamp x, Timestamp y -> Some(System.String.CompareOrdinal(x, y))
+        | Timestamp x, Timestamp y -> Some(TemporalText.compareInstants x y)
         | _ -> None
 
     /// THE canonical, host-deterministic identity token of a cell (Phase 315; the key the compute

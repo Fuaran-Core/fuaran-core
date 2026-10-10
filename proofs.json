@@ -4172,6 +4172,43 @@
       "evidence": {
         "assumption": "a Vector is the list its toArray answers and its contents do not change after construction — the element identity sampled by the differential, the ownership contract held by Phase 418's law family"
       }
+    },
+    {
+      "id": "column-temporal-encodings",
+      "level": "tested",
+      "claim": "The integer temporal storage is the canonical text it replaces (Phase 422). EVERY canonical date `0000-01-01`..`9999-12-31` reads to its day count and renders back byte-identically, consecutive dates are consecutive day counts (so the integers order chronologically), and `civilOfDays` inverts `daysOfCivil`; per unit, twenty thousand drawn instants (the range's two ends included) read to their epoch second and scaled fraction and render back byte-identically, one text whatever unit holds them; widening every coarser unit into every finer one keeps each instant, its text and its cell; `Cell.compare` over timestamp text is chronological where ordinal order is not, and over date text agrees with the day count; the codec reads every unit and the epoch number per unit, refuses a fraction finer than its unit as the corpus vector does, and writes the pre-422 bytes for a seconds or date column; the .NET edge converts through the integers and refuses a tick its unit cannot hold. Sampled, not proved: the calendar arithmetic is not yet an F* theorem (Phase 419's deferred task 2).",
+      "phase": "fuaran-core#422",
+      "evidence": {
+        "family": "Column temporal integers and timestamp units (Phase 422)",
+        "cases": [
+          "every canonical date round-trips text to days to text, and the day count orders chronologically",
+          "a drawn set of instants per unit round-trips text to integers to text byte-identically",
+          "widening a coarser unit into a finer one preserves the instant, its text and its cell",
+          "Cell order over timestamps is chronological, not ordinal, and over dates agrees with the day count",
+          "the codec reads and writes every unit, reads epoch numbers per unit, and refuses a finer fraction",
+          "the .NET edge converts DateOnly and DateTimeOffset through the integers, and refuses a tick the unit cannot hold"
+        ],
+        "operations": [
+          "Column.ofDateOnlys",
+          "Column.ofDateTimeOffsets",
+          "Column.tryDateOnly",
+          "Column.tryDateTimeOffset",
+          "TemporalText.civilOfDays",
+          "TemporalText.compareInstants",
+          "TemporalText.dateText",
+          "TemporalText.daysOfCivil",
+          "TemporalText.instantText",
+          "TemporalText.isDayInRange",
+          "TemporalText.isInstantInRange",
+          "TemporalText.tryDays",
+          "TemporalText.tryInstant",
+          "TemporalText.unitOf",
+          "TimeUnit.digits",
+          "TimeUnit.ofDigits",
+          "TimeUnit.scale",
+          "TimeUnit.widens"
+        ]
+      }
     }
   ]
 }

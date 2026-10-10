@@ -615,7 +615,7 @@ let private shaped: Query =
               "amount", DecimalType
               "n", IntType
               "ok", BoolType
-              "at", TimestampType ]
+              "at", TimestampType TimeUnit.Seconds ]
         Where =
             [ ColumnPredicate.EqualTo("region", Str "UK")
               ColumnPredicate.GreaterThan("revenue", Float 1.5)

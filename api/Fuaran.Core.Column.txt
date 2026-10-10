@@ -8,12 +8,16 @@ attribute Fuaran.Core.ColumnData NoComparison
 attribute Fuaran.Core.DecimalText RequireQualifiedAccess
 attribute Fuaran.Core.SchemaCompat RequireQualifiedAccess
 attribute Fuaran.Core.TemporalText RequireQualifiedAccess
+attribute Fuaran.Core.TimeUnit RequireQualifiedAccess
+attribute Fuaran.Core.TimeUnitModule RequireQualifiedAccess
 attribute Fuaran.Core.Validity NoComparison
 attribute Fuaran.Core.Vector+Unsafe+Borrowed`1 Struct
 attribute Fuaran.Core.Vector`1 Sealed
+ctor Fuaran.Core.CivilDate..ctor(System.Int32, System.Int32, System.Int32)
 ctor Fuaran.Core.Column..ctor(System.String, Fuaran.Core.ColumnData)
 ctor Fuaran.Core.SchemaDelta..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Table..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Column>)
+ctor Fuaran.Core.TimestampVectors..ctor(Fuaran.Core.TimeUnit, Fuaran.Core.Vector`1<System.Double>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Int32>>)
 ctor Fuaran.Core.Vector+Unsafe+Borrowed`1..ctor(!0[], System.Int32, System.Int32)
 field Fuaran.Core.AggFn+Tags.Count : System.Int32 (literal)
 field Fuaran.Core.AggFn+Tags.CountDistinct : System.Int32 (literal)
@@ -69,6 +73,12 @@ field Fuaran.Core.SchemaError+Tags.AlreadyPresent : System.Int32 (literal)
 field Fuaran.Core.SchemaError+Tags.DuplicateColumn : System.Int32 (literal)
 field Fuaran.Core.SchemaError+Tags.OrderMismatch : System.Int32 (literal)
 field Fuaran.Core.SchemaError+Tags.TypeDisagrees : System.Int32 (literal)
+field Fuaran.Core.TemporalText.MaxDay : System.Int32 (literal)
+field Fuaran.Core.TemporalText.MinDay : System.Int32 (literal)
+field Fuaran.Core.TimeUnit+Tags.Microseconds : System.Int32 (literal)
+field Fuaran.Core.TimeUnit+Tags.Milliseconds : System.Int32 (literal)
+field Fuaran.Core.TimeUnit+Tags.Nanoseconds : System.Int32 (literal)
+field Fuaran.Core.TimeUnit+Tags.Seconds : System.Int32 (literal)
 field Fuaran.Core.Validity+Tags.AllValid : System.Int32 (literal)
 field Fuaran.Core.Validity+Tags.Mask : System.Int32 (literal)
 method Fuaran.Core.CellModule.compare(Fuaran.Core.Cell, Fuaran.Core.Cell) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
@@ -92,20 +102,24 @@ method Fuaran.Core.ColumnModule.length(Fuaran.Core.Column) : System.Int32
 method Fuaran.Core.ColumnModule.mask(Fuaran.Core.Column) : Fuaran.Core.Vector`1<System.Boolean>
 method Fuaran.Core.ColumnModule.ofBools(System.String, Fuaran.Core.Vector`1<System.Boolean>, Fuaran.Core.Validity) : Fuaran.Core.Column
 method Fuaran.Core.ColumnModule.ofCells(System.String, Fuaran.Core.ColumnType, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Column, Fuaran.Core.ColumnError>
-method Fuaran.Core.ColumnModule.ofDates(System.String, Fuaran.Core.Vector`1<System.String>, Fuaran.Core.Validity) : Fuaran.Core.Column
+method Fuaran.Core.ColumnModule.ofDateOnlys(System.String, Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Core.FSharpOption`1<System.DateOnly>>) : Fuaran.Core.Column
+method Fuaran.Core.ColumnModule.ofDateTimeOffsets(System.String, Fuaran.Core.TimeUnit, Microsoft.FSharp.Collections.FSharpList`1<Microsoft.FSharp.Core.FSharpOption`1<System.DateTimeOffset>>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Column, Fuaran.Core.ColumnError>
+method Fuaran.Core.ColumnModule.ofDates(System.String, Fuaran.Core.Vector`1<System.Int32>, Fuaran.Core.Validity) : Fuaran.Core.Column
 method Fuaran.Core.ColumnModule.ofDecimals(System.String, Fuaran.Core.Vector`1<System.String>, Fuaran.Core.Validity) : Fuaran.Core.Column
 method Fuaran.Core.ColumnModule.ofFloats(System.String, Fuaran.Core.Vector`1<System.Double>, Fuaran.Core.Validity) : Fuaran.Core.Column
 method Fuaran.Core.ColumnModule.ofInts(System.String, Fuaran.Core.Vector`1<System.Int32>, Fuaran.Core.Validity) : Fuaran.Core.Column
 method Fuaran.Core.ColumnModule.ofStrs(System.String, Fuaran.Core.Vector`1<System.String>, Fuaran.Core.Validity) : Fuaran.Core.Column
-method Fuaran.Core.ColumnModule.ofTimestamps(System.String, Fuaran.Core.Vector`1<System.String>, Fuaran.Core.Validity) : Fuaran.Core.Column
+method Fuaran.Core.ColumnModule.ofTimestamps(System.String, Fuaran.Core.TimeUnit, Fuaran.Core.Vector`1<System.Double>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Int32>>, Fuaran.Core.Validity) : Fuaran.Core.Column
 method Fuaran.Core.ColumnModule.toCells(Fuaran.Core.Column) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Cell>
 method Fuaran.Core.ColumnModule.tryBools(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Boolean>>
-method Fuaran.Core.ColumnModule.tryDates(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.String>>
+method Fuaran.Core.ColumnModule.tryDateOnly(System.Int32, Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<System.DateOnly>
+method Fuaran.Core.ColumnModule.tryDateTimeOffset(System.Int32, Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<System.DateTimeOffset>
+method Fuaran.Core.ColumnModule.tryDates(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Int32>>
 method Fuaran.Core.ColumnModule.tryDecimals(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.String>>
 method Fuaran.Core.ColumnModule.tryFloats(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Double>>
 method Fuaran.Core.ColumnModule.tryInts(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Int32>>
 method Fuaran.Core.ColumnModule.tryStrs(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.String>>
-method Fuaran.Core.ColumnModule.tryTimestamps(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.String>>
+method Fuaran.Core.ColumnModule.tryTimestamps(Fuaran.Core.Column) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.TimestampVectors>
 method Fuaran.Core.ColumnModule.validity(Fuaran.Core.Column) : Fuaran.Core.Validity
 method Fuaran.Core.ColumnTypeModule.ofTag(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.ColumnType>
 method Fuaran.Core.ColumnTypeModule.tag(Fuaran.Core.ColumnType) : System.String
@@ -127,8 +141,22 @@ method Fuaran.Core.TableModule.columnNames(Fuaran.Core.Table) : Microsoft.FSharp
 method Fuaran.Core.TableModule.rowCount(Fuaran.Core.Table) : System.Int32
 method Fuaran.Core.TableModule.tryColumn(System.String, Fuaran.Core.Table) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Column>
 method Fuaran.Core.TableModule.validate(Fuaran.Core.Table) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.ColumnError>
+method Fuaran.Core.TemporalText.civilOfDays(System.Int32) : Fuaran.Core.CivilDate
+method Fuaran.Core.TemporalText.compareInstants(System.String, System.String) : System.Int32
+method Fuaran.Core.TemporalText.dateText(System.Int32) : System.String
+method Fuaran.Core.TemporalText.daysOfCivil(System.Int32, System.Int32, System.Int32) : System.Int32
+method Fuaran.Core.TemporalText.instantText(Fuaran.Core.TimeUnit, System.Double, System.Int32) : System.String
 method Fuaran.Core.TemporalText.isCanonicalDate(System.String) : System.Boolean
 method Fuaran.Core.TemporalText.isCanonicalTimestamp(System.String) : System.Boolean
+method Fuaran.Core.TemporalText.isDayInRange(System.Int32) : System.Boolean
+method Fuaran.Core.TemporalText.isInstantInRange(Fuaran.Core.TimeUnit, System.Double, System.Int32) : System.Boolean
+method Fuaran.Core.TemporalText.tryDays(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
+method Fuaran.Core.TemporalText.tryInstant(Fuaran.Core.TimeUnit, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Double, System.Int32>>
+method Fuaran.Core.TemporalText.unitOf(System.String) : Fuaran.Core.TimeUnit
+method Fuaran.Core.TimeUnitModule.digits(Fuaran.Core.TimeUnit) : System.Int32
+method Fuaran.Core.TimeUnitModule.ofDigits(System.Int32) : Fuaran.Core.TimeUnit
+method Fuaran.Core.TimeUnitModule.scale(Fuaran.Core.TimeUnit) : System.Int32
+method Fuaran.Core.TimeUnitModule.widens(Fuaran.Core.TimeUnit, Fuaran.Core.TimeUnit) : System.Boolean
 method Fuaran.Core.ValidityModule.isPresent(System.Int32, Fuaran.Core.Validity) : System.Boolean
 method Fuaran.Core.ValidityModule.ofArray(System.Boolean[]) : Fuaran.Core.Validity
 method Fuaran.Core.ValidityModule.ofList(Microsoft.FSharp.Collections.FSharpList`1<System.Boolean>) : Fuaran.Core.Validity
@@ -169,8 +197,13 @@ property Fuaran.Core.DecimalText.zero : System.String { get }
 property Fuaran.Core.SchemaDeltaCodec.codec : Fuaran.Core.Corpus+Codec`1<Fuaran.Core.SchemaDelta> { get }
 property Fuaran.Core.SchemaModule.identityDelta : Fuaran.Core.SchemaDelta { get }
 property Fuaran.Core.TableModule.empty : Fuaran.Core.Table { get }
+property Fuaran.Core.TemporalText.maxSecond : System.Double { get }
+property Fuaran.Core.TemporalText.minSecond : System.Double { get }
 property Fuaran.Core.Vector`1.Item : !0 { get }
 property Fuaran.Core.Vector`1.Length : System.Int32 { get }
+record-field Fuaran.Core.CivilDate.Day #2 : System.Int32
+record-field Fuaran.Core.CivilDate.Month #1 : System.Int32
+record-field Fuaran.Core.CivilDate.Year #0 : System.Int32
 record-field Fuaran.Core.Column.Data #1 : Fuaran.Core.ColumnData
 record-field Fuaran.Core.Column.Name #0 : System.String
 record-field Fuaran.Core.SchemaDelta.Added #0 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
@@ -180,6 +213,9 @@ record-field Fuaran.Core.SchemaDelta.Reordered #3 : System.Boolean
 record-field Fuaran.Core.SchemaDelta.Retyped #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`3<System.String, Fuaran.Core.ColumnType, Fuaran.Core.ColumnType>>
 record-field Fuaran.Core.Table.Columns #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Column>
 record-field Fuaran.Core.Table.Schema #0 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.ColumnType>>
+record-field Fuaran.Core.TimestampVectors.Fraction #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Int32>>
+record-field Fuaran.Core.TimestampVectors.Seconds #1 : Fuaran.Core.Vector`1<System.Double>
+record-field Fuaran.Core.TimestampVectors.Unit #0 : Fuaran.Core.TimeUnit
 record-field Fuaran.Core.Vector+Unsafe+Borrowed`1.Array #0 : !0[]
 record-field Fuaran.Core.Vector+Unsafe+Borrowed`1.Length #2 : System.Int32
 record-field Fuaran.Core.Vector+Unsafe+Borrowed`1.Offset #1 : System.Int32
@@ -200,6 +236,7 @@ type Fuaran.Core.Cell+Str (type)
 type Fuaran.Core.Cell+Tags (type)
 type Fuaran.Core.Cell+Timestamp (type)
 type Fuaran.Core.CellModule (module)
+type Fuaran.Core.CivilDate (record)
 type Fuaran.Core.Column (record)
 type Fuaran.Core.ColumnCodec (module)
 type Fuaran.Core.ColumnData (union)
@@ -225,6 +262,7 @@ type Fuaran.Core.ColumnError+UnknownType (type)
 type Fuaran.Core.ColumnModule (module)
 type Fuaran.Core.ColumnType (union)
 type Fuaran.Core.ColumnType+Tags (type)
+type Fuaran.Core.ColumnType+TimestampType (type)
 type Fuaran.Core.ColumnTypeModule (module)
 type Fuaran.Core.DataSource (union)
 type Fuaran.Core.DataSource+Embedded (type)
@@ -248,6 +286,10 @@ type Fuaran.Core.SchemaModule (module)
 type Fuaran.Core.Table (record)
 type Fuaran.Core.TableModule (module)
 type Fuaran.Core.TemporalText (module)
+type Fuaran.Core.TimeUnit (union)
+type Fuaran.Core.TimeUnit+Tags (type)
+type Fuaran.Core.TimeUnitModule (module)
+type Fuaran.Core.TimestampVectors (record)
 type Fuaran.Core.Validity (union)
 type Fuaran.Core.Validity+Mask (type)
 type Fuaran.Core.Validity+Tags (type)
@@ -278,12 +320,12 @@ union-case Fuaran.Core.Cell.NewStr #3(Item: System.String)
 union-case Fuaran.Core.Cell.NewTimestamp #5(Item: System.String)
 union-case Fuaran.Core.Cell.Null #6()
 union-case Fuaran.Core.ColumnData.NewBools #2(values: Fuaran.Core.Vector`1<System.Boolean>, validity: Fuaran.Core.Validity)
-union-case Fuaran.Core.ColumnData.NewDates #4(values: Fuaran.Core.Vector`1<System.String>, validity: Fuaran.Core.Validity)
+union-case Fuaran.Core.ColumnData.NewDates #4(values: Fuaran.Core.Vector`1<System.Int32>, validity: Fuaran.Core.Validity)
 union-case Fuaran.Core.ColumnData.NewDecimals #6(values: Fuaran.Core.Vector`1<System.String>, validity: Fuaran.Core.Validity)
 union-case Fuaran.Core.ColumnData.NewFloats #1(values: Fuaran.Core.Vector`1<System.Double>, validity: Fuaran.Core.Validity)
 union-case Fuaran.Core.ColumnData.NewInts #0(values: Fuaran.Core.Vector`1<System.Int32>, validity: Fuaran.Core.Validity)
 union-case Fuaran.Core.ColumnData.NewStrs #3(values: Fuaran.Core.Vector`1<System.String>, validity: Fuaran.Core.Validity)
-union-case Fuaran.Core.ColumnData.NewTimestamps #5(values: Fuaran.Core.Vector`1<System.String>, validity: Fuaran.Core.Validity)
+union-case Fuaran.Core.ColumnData.NewTimestamps #5(unit: Fuaran.Core.TimeUnit, seconds: Fuaran.Core.Vector`1<System.Double>, fraction: Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Vector`1<System.Int32>>, validity: Fuaran.Core.Validity)
 union-case Fuaran.Core.ColumnError.NewLengthMismatch #5(column: System.String, values: System.Int32, validity: System.Int32)
 union-case Fuaran.Core.ColumnError.NewMalformed #7(detail: System.String)
 union-case Fuaran.Core.ColumnError.NewMalformedShape #2(detail: System.String)
@@ -298,8 +340,8 @@ union-case Fuaran.Core.ColumnType.DateType #4()
 union-case Fuaran.Core.ColumnType.DecimalType #6()
 union-case Fuaran.Core.ColumnType.FloatType #1()
 union-case Fuaran.Core.ColumnType.IntType #0()
+union-case Fuaran.Core.ColumnType.NewTimestampType #5(unit: Fuaran.Core.TimeUnit)
 union-case Fuaran.Core.ColumnType.StringType #3()
-union-case Fuaran.Core.ColumnType.TimestampType #5()
 union-case Fuaran.Core.DataSource.NewEmbedded #0(Item: Fuaran.Core.Table)
 union-case Fuaran.Core.DataSource.NewRef #1(Item: System.String)
 union-case Fuaran.Core.SchemaCompat.Compatible #0()
@@ -310,5 +352,9 @@ union-case Fuaran.Core.SchemaError.NewAlreadyPresent #3(column: System.String)
 union-case Fuaran.Core.SchemaError.NewDuplicateColumn #0(column: System.String)
 union-case Fuaran.Core.SchemaError.NewOrderMismatch #4(expected: Microsoft.FSharp.Collections.FSharpList`1<System.String>, got: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.SchemaError.NewTypeDisagrees #2(column: System.String, expected: Fuaran.Core.ColumnType, got: Fuaran.Core.ColumnType)
+union-case Fuaran.Core.TimeUnit.Microseconds #2()
+union-case Fuaran.Core.TimeUnit.Milliseconds #1()
+union-case Fuaran.Core.TimeUnit.Nanoseconds #3()
+union-case Fuaran.Core.TimeUnit.Seconds #0()
 union-case Fuaran.Core.Validity.AllValid #0()
 union-case Fuaran.Core.Validity.NewMask #1(present: Fuaran.Core.Vector`1<System.Boolean>)

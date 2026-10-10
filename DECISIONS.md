@@ -1,5 +1,114 @@
 # Fuaran.Core — decisions (newest first)
 
+## 2026-10-10 — D143: temporal columns are integers — a date is `int32` days since 1970-01-01, a timestamp `float64` epoch seconds plus an `int32` fraction scaled to its `TimeUnit`; `TimestampType` carries the unit and `timestamp` stays the seconds tag; the canonical instant text is the minimal one, so `Cell.compare` orders timestamps chronologically rather than ordinally; and .NET date types exist only at the edge
+
+**Context.** Phase 417 made a column's storage a public typed vector and left dates and timestamps as
+canonical text (`YYYY-MM-DD`, `YYYY-MM-DDThh:mm:ssZ`), the representation the cells carry. Phase 271
+declined integer dates on the evidence of the evaluator's path; once the vector is a 1.0 contract every
+consumer holds, the layout is decided by design (operator ruling 2026-10-09, requirement
+`suggest-2026-10-09-column-typed-vectors`), and adding a unit to `TimestampType` after 1.0 would change
+a published union case. Phase 422 ships it on the untagged `1.0.0` draft slot. This entry records the
+rulings the shard left to its design note; each was settled before the code was written.
+
+**D143.1 — the storage.** `Dates of values: Vector<int> * validity` holds days since 1970-01-01, Arrow's
+Date32 layout; the canonical range `0000-01-01`..`9999-12-31` is days `-719528`..`2932896`.
+`Timestamps of unit: TimeUnit * seconds: Vector<float> * fraction: Vector<int> option * validity`
+holds integer-valued epoch seconds (the floor, so an instant before 1970 with a fraction has a
+negative second and a non-negative fraction) and, for a sub-second unit, the fraction of that second
+scaled to the unit (`0 <= f < 10^digits`). The pair is the shard's: one `float64` count of
+microseconds is exact only within about 285 years of 1970, which does not cover `0000`..`9999`, and an
+`int64` compiles to a BigInt under Fable; a `float64` holding whole seconds is exact over the whole
+range (`|s| < 2^38`) and an `int32` fraction is a typed array on both hosts. `fraction = None` reads as
+every fraction zero — the `AllValid` precedent (Phase 420): a seconds column holds none, and Core's
+builders (`Column.ofCells`, decode, the edge builders) answer `None` for a sub-second column whose every
+present fraction is zero, so a column of whole-second instants in a nanosecond column holds one vector,
+not two. Equality compares the MATERIALISED fraction at present rows (a `None` equals an all-zero
+`Some`), so the normalisation is an economy, not the guarantee — as for `Validity`. The day and second
+arithmetic is pure integer arithmetic (days-from-civil and civil-from-days, Hinnant's algorithms over
+`int`; the second-of-day split over integer-valued floats, exact at these magnitudes), so every host
+computes the same calendar with no host date type.
+
+**D143.2 — `TimeUnit` and the wire tags.** `[<RequireQualifiedAccess>] type TimeUnit = Seconds |
+Milliseconds | Microseconds | Nanoseconds` (qualified because the case names are common words a
+consumer's own unions use). `ColumnType.TimestampType of unit: TimeUnit`. The tags: **`timestamp`**
+stays the seconds tag, so every existing schema and column byte stands; the three new tags are
+**`timestamp_ms`**, **`timestamp_us`** and **`timestamp_ns`** — an identifier in every host's tag
+switch (no bracket or colon a host would have to escape or split), Arrow's unit abbreviations, and a
+prefix that keeps the family together in a sorted tag list. `ColumnType.all` APPENDS the three after
+`decimal` (the `Decimal`-after-`Null` precedent), so the enumeration an `UnknownType` refusal carries
+keeps its existing prefix in its existing order. A coarser unit WIDENS into a finer one
+(`ColumnType.widens`: seconds into any, milliseconds into micro- and nanoseconds, and so on): the
+scaling is exact, so the retype is lossless; a finer into a coarser one is not a widening. fuaran#2206
+specifies the tags across the five hosts; until it lands no producer may emit a sub-second column,
+and Core's codec decodes and encodes them so the hosts have an authority to certify against.
+
+**D143.3 — the canonical instant text, and the order.** The question the shard put: ordinal string
+order breaks once fraction lengths vary (`…12.5Z` sorts BEFORE `…12Z`, since `.` is below `Z`), so
+either the text carries exactly the unit's fraction digits, or `Cell.compare` stops comparing timestamp
+text ordinally. **Ruled: the text is the MINIMAL one and the order is chronological.** The canonical
+text of an instant is `YYYY-MM-DDThh:mm:ssZ` when its fraction is zero and `YYYY-MM-DDThh:mm:ss.FZ`
+otherwise, `F` one to nine digits with no trailing zero — the `DecimalText` rule for a fraction — and it
+does not depend on the column's unit. The two invariants:
+- *One instant has one text.* A whole-second instant reads the same in all four units and is the
+  pre-422 text, so every existing column byte stands with no special case; `Cell.token` keys an
+  instant identically whichever column it came from; widening a column changes no cell's text. The
+  rejected alternative (exactly the unit's digits) gives one instant four texts, so `token` and
+  `Distinct` would split an instant by the column it was read from, a widening retype would rewrite
+  every cell, and the seconds tag would be the one unit whose text is not padded.
+- *Cell order over valid cells is chronological.* `Cell.compare` on two `Timestamp` cells compares the
+  fixed-width `YYYY-MM-DDThh:mm:ss` prefix ordinally and then the fraction digits ordinally, the
+  absent fraction as empty — with no trailing zero, digit-string order with a prefix sorting first IS
+  numeric order (`5` < `51` < `6`). A text that is not canonical sorts after every canonical one and
+  among its own kind ordinally, so the order stays total and transitive over any text a hand-built
+  cell carries. A date's canonical text is fixed-width, so `Date` keeps ordinal order.
+
+Decode stays STRICT (Phase 299's posture): a column reads only canonical text, with a fraction no finer
+than its unit — `…00.5Z` in a `timestamp` column is the corpus refusal `timestamp-fractional-second`,
+unchanged, and `…00.500Z` is refused in every unit as text that is not canonical, as `…00.000Z` always
+was. A lenient reading of padded fractions (the form a JavaScript `Date.toISOString` writes) is an
+additive decode change a later phase may make; admitting it now could not be withdrawn.
+
+**D143.4 — `Cell.typeOf` of an instant, and `Column.ofCells`.** `Cell.typeOf (Timestamp s)` is
+`TimestampType` of the COARSEST unit that holds `s` exactly: no fraction is seconds, one to three
+fraction digits milliseconds, four to six microseconds, seven to nine nanoseconds (a text that is not
+canonical reads as seconds; its column refuses it as text either way). With the widening, `ofCells
+(TimestampType Nanoseconds)` admits every canonical instant, and a seconds column refuses a fractional
+one as the `TypeMismatch` naming the finer tag (`got = "timestamp_ms"`), exactly as an int column
+refuses a `Float`. Decode reads TEXT, not cells, and its `TypeMismatch` names a JSON kind; a canonical
+instant finer than the column's unit is text the column cannot read, so the codec refuses it as a
+`MalformedShape` naming the unit it would need — the class the corpus has pinned since Phase 299
+(`timestamp-fractional-second`), which therefore stays byte-identical. Integer storage cannot hold text that is not canonical, so `Column.ofCells` now
+REFUSES a `Date` or `Timestamp` cell whose text is not canonical, with the `MalformedShape` that
+`Table.validate` named for it — the same error, at construction (Phase 417 moved the type refusal there
+on the same ground). `Table.validate`'s clause (e) checks what a hand-built integer column can still get
+wrong: a day outside the canonical range, a second that is not a whole number or falls outside it, a
+fraction outside `[0, 10^digits)`, or a fraction vector of another length than the seconds
+(`MalformedShape`).
+
+**D143.5 — the epoch-number reading, per unit.** A `timestamp` (seconds) column keeps Phase 94's
+reading verbatim — a magnitude of `1e11` or more is milliseconds, truncated to the second, else seconds
+— because it is existing decode behaviour the corpus pins (`timestamp-epoch-seconds`,
+`timestamp-epoch-past-year-9999`) and the hosts implement. A sub-second column reads an epoch number IN
+ITS OWN UNIT, with no magnitude guess: the declared unit is the statement the heuristic was guessing
+at. Every epoch number a column reads is exact: the parser refuses an integer token past `2^53`
+before any column sees it, and a whole-valued token at or past `9e15` is a `TypeMismatch` (Phase 94's
+bound), so most nanosecond instants travel as text. An instant outside `0000`..`9999` is refused in
+every unit, as before.
+
+**D143.6 — .NET types only at the edge.** No `DateOnly`, `DateTime` or `DateTimeOffset` appears in
+Core's storage or under `FABLE_COMPILER` (under Fable each is a JavaScript `Date` object per value, and
+`DateTime`'s `Kind` is the ambiguity a UTC-only wire rules out). Under `#if !FABLE_COMPILER` the column
+module carries `Column.tryDateOnly` and `Column.tryDateTimeOffset` (one row's value; `None` where the
+row is absent, out of range, of another type, or outside the .NET type's own range) and the builders
+`Column.ofDateOnlys` and `Column.ofDateTimeOffsets`, which convert through `DateOnly.DayNumber` and
+`DateTimeOffset.UtcTicks` with integer arithmetic and no intermediate string. An offset is read as the
+instant it names; a tick finer than the column's unit is refused, not rounded.
+
+**D143.7 — what this entry does not decide.** Compute's `DatePart` and `DateDiffDays` reading the
+integer form, and the dated pipeline in the compute benchmark corpus, are Phase 423's: Compute pins Core
+0.36.0 until that phase raises it. The specification and corpus vectors of the three tags are
+fuaran#2206's.
+
 ## 2026-10-10 — D142: a column's storage is an opaque immutable `Vector<'T>` per column behind the `ColumnData` union, on the `1.0.0` slot; `Column.Type` is derived from the storage; a widened cell is normalised at construction; no `Cells` fallback survives in Core; and this reverses the 2026-09-26 out-of-scope clause
 
 **Context.** `Column.Cells` was a `Cell list` (`Column.fs:23-33`): an indexed read was O(i), a present

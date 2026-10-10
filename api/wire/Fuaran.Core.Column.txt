@@ -6,12 +6,12 @@
 # class since v0.36.0: breaking
 doc	dataSource	sha256:b0be0f6f841f353133ab26bb08f0bc50421688ebb6e3bfb53b07e84228d5be7e	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / ColumnData.Bools	sha256:1ac88e2b7e0b2714c9f5ee545ffdfb40f118b382109ebc42bb776c1d50192f35	{"columns":{"s":{"validity":[true,true],"values":[true,false]}},"schema":[{"name":"s","type":"int"}]}
-doc	dataSource / ColumnData.Dates	sha256:ef0c8575e78ed3712226e4dce63213aa72e5ef8f398796c15ccd988fb0c012a0	{"columns":{"s":{"validity":[true,true],"values":["s","s"]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / ColumnData.Dates	sha256:2aca7b4fe1c40765762d2caa2ba3bdb39f48bdcdd15ecd9eb1131abddb25087e	{"columns":{"s":{"validity":[true,true],"values":["1970-01-02","1970-01-02"]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / ColumnData.Decimals	sha256:ef0c8575e78ed3712226e4dce63213aa72e5ef8f398796c15ccd988fb0c012a0	{"columns":{"s":{"validity":[true,true],"values":["s","s"]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / ColumnData.Floats	sha256:5fa798a0db068d1935feab148a02995b3cd023fec7199394835b59816189baf7	{"columns":{"s":{"validity":[true,true],"values":[1.5,1.5]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / ColumnData.Ints	sha256:b0be0f6f841f353133ab26bb08f0bc50421688ebb6e3bfb53b07e84228d5be7e	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / ColumnData.Strs	sha256:ef0c8575e78ed3712226e4dce63213aa72e5ef8f398796c15ccd988fb0c012a0	{"columns":{"s":{"validity":[true,true],"values":["s","s"]}},"schema":[{"name":"s","type":"int"}]}
-doc	dataSource / ColumnData.Timestamps	sha256:ef0c8575e78ed3712226e4dce63213aa72e5ef8f398796c15ccd988fb0c012a0	{"columns":{"s":{"validity":[true,true],"values":["s","s"]}},"schema":[{"name":"s","type":"int"}]}
+doc	dataSource / ColumnData.Timestamps	sha256:ce0c8857ed8055b7867e943910605096fd5cf8fd2fb6795d1981ada8f102aefd	{"columns":{"s":{"validity":[true,true],"values":["1970-01-01T00:00:01.1Z","1970-01-01T00:00:01.1Z"]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / ColumnType.BoolType	sha256:703efd739c09d970f0bcca1cfda76a2f296b221c0af2efac856dd486042cb902	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"bool"}]}
 doc	dataSource / ColumnType.DateType	sha256:d0c99c5602939bbdbaa3eb7765fb8d3db88185d0d2fa7a5b87b89db96aee8fdc	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"date"}]}
 doc	dataSource / ColumnType.DecimalType	sha256:57018a0e458e386c1a9f2f97d481579804a99fba17547b4a78c2b133b978e4b1	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"decimal"}]}
@@ -21,5 +21,9 @@ doc	dataSource / ColumnType.StringType	sha256:a7c2ecca02d6b842f05c25cee9c86dea2f
 doc	dataSource / ColumnType.TimestampType	sha256:d894371fec72116567f5cd6dcdcba0f35438e8d39a9f54c5a818e522f0f3647b	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"timestamp"}]}
 doc	dataSource / DataSource.Embedded	sha256:b0be0f6f841f353133ab26bb08f0bc50421688ebb6e3bfb53b07e84228d5be7e	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / DataSource.Ref	sha256:b17b8d24a1ac0d33e98736a0b107bbdf771c530bc96fc3d49a2b471b362dcf66	{"ref":"s","schema":[]}
+doc	dataSource / TimeUnit.Microseconds	sha256:a78e497bf4d62ea3b766716e2124056c4ed15bdd1a2984c7051836cc4854f079	{"columns":{"s":{"validity":[true,true],"values":["1970-01-01T00:00:01.000001Z","1970-01-01T00:00:01.000001Z"]}},"schema":[{"name":"s","type":"timestamp_us"}]}
+doc	dataSource / TimeUnit.Milliseconds	sha256:19631eac7b4be2e49676fedabf17d174fef590ddfdfe0dbc657caf0a719305f5	{"columns":{"s":{"validity":[true,true],"values":["1970-01-01T00:00:01.001Z","1970-01-01T00:00:01.001Z"]}},"schema":[{"name":"s","type":"timestamp_ms"}]}
+doc	dataSource / TimeUnit.Nanoseconds	sha256:a618a6208b9a69eebf3777963607ef4768c1ccecef56bb39cdf37e2f6fb6733d	{"columns":{"s":{"validity":[true,true],"values":["1970-01-01T00:00:01.000000001Z","1970-01-01T00:00:01.000000001Z"]}},"schema":[{"name":"s","type":"timestamp_ns"}]}
+doc	dataSource / TimeUnit.Seconds	sha256:536c79fdb942324e3cd3712979a0cdde3a6958bec85e50d2fe9cd683ac7381c1	{"columns":{"s":{"validity":[true,true],"values":["1970-01-01T00:00:01.1Z","1970-01-01T00:00:01.1Z"]}},"schema":[{"name":"s","type":"timestamp"}]}
 doc	dataSource / Validity.AllValid	sha256:b0be0f6f841f353133ab26bb08f0bc50421688ebb6e3bfb53b07e84228d5be7e	{"columns":{"s":{"validity":[true,true],"values":[1,1]}},"schema":[{"name":"s","type":"int"}]}
 doc	dataSource / Validity.Mask	sha256:16784da7cb9bb68dc08160ef0df83c6b2c2e4a5aad6d95e796013c4c92f5c727	{"columns":{"s":{"validity":[true,false],"values":[1,0]}},"schema":[{"name":"s","type":"int"}]}

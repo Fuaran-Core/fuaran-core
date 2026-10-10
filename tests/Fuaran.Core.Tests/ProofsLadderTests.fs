@@ -785,6 +785,9 @@ let private realCases () =
     // Phase 311: the lane store's tested row, evidenced by `Conformance.laneLaws`, whose cases live in
     // `LaneTests`.
     |> Set.union (caseNames LaneTests.laneLawTests |> Set.ofList)
+    // Phase 422: the temporal encodings' tested row, evidenced by the column suite's own laws (the
+    // calendar arithmetic is not yet an F* theorem).
+    |> Set.union (caseNames ColumnTests.temporalTests |> Set.ofList)
 
 /// The law names a `domain-obligation` row may cite — the entry points of the shipped kit's
 /// declared law-family ROSTER (`Fuaran.Core.Families`, Phase 184), never restated here.
