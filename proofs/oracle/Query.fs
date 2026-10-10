@@ -78,13 +78,73 @@ let rec all_in : Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Pri
      ((mem x m) && (all_in t m))
      end))
 
+type time_unit =
+| Seconds
+| Milliseconds
+| Microseconds
+| Nanoseconds
+
+
+let uu___is_Seconds : time_unit  ->  Prims.bool = (fun ( projectee  :  time_unit ) -> (match (projectee) with
+| Seconds -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Milliseconds : time_unit  ->  Prims.bool = (fun ( projectee  :  time_unit ) -> (match (projectee) with
+| Milliseconds -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Microseconds : time_unit  ->  Prims.bool = (fun ( projectee  :  time_unit ) -> (match (projectee) with
+| Microseconds -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let uu___is_Nanoseconds : time_unit  ->  Prims.bool = (fun ( projectee  :  time_unit ) -> (match (projectee) with
+| Nanoseconds -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let unit_digits : time_unit  ->  Prims.int = (fun ( u  :  time_unit ) -> (match (u) with
+| Seconds -> begin
+     (Prims.parse_int "0")
+     end
+| Milliseconds -> begin
+     (Prims.parse_int "3")
+     end
+| Microseconds -> begin
+     (Prims.parse_int "6")
+     end
+| Nanoseconds -> begin
+     (Prims.parse_int "9")
+     end))
+
+
+let unit_widens : time_unit  ->  time_unit  ->  Prims.bool = (fun ( from  :  time_unit ) ( target  :  time_unit ) -> ((unit_digits from) <= (unit_digits target)))
+
 type column_type =
 | IntType
 | FloatType
 | BoolType
 | StringType
 | DateType
-| TimestampType
+| TimestampType of time_unit
 | DecimalType
 
 
@@ -134,11 +194,17 @@ let uu___is_DateType : column_type  ->  Prims.bool = (fun ( projectee  :  column
 
 
 let uu___is_TimestampType : column_type  ->  Prims.bool = (fun ( projectee  :  column_type ) -> (match (projectee) with
-| TimestampType -> begin
+| TimestampType (_0) -> begin
      true
      end
 | uu___ -> begin
      false
+     end))
+
+
+let __proj__TimestampType__item___0 : column_type  ->  time_unit = (fun ( projectee  :  column_type ) -> (match (projectee) with
+| TimestampType (_0) -> begin
+     _0
      end))
 
 
@@ -156,7 +222,7 @@ type cell =
 | Bool of Prims.bool
 | Str of Prims.string
 | Date of Prims.string
-| Timestamp of Prims.string
+| Timestamp of time_unit * Prims.string
 | Null
 | Decimal of Prims.string
 
@@ -237,7 +303,7 @@ let __proj__Date__item___0 : cell  ->  Prims.string = (fun ( projectee  :  cell 
 
 
 let uu___is_Timestamp : cell  ->  Prims.bool = (fun ( projectee  :  cell ) -> (match (projectee) with
-| Timestamp (_0) -> begin
+| Timestamp (_0, _1) -> begin
      true
      end
 | uu___ -> begin
@@ -245,9 +311,15 @@ let uu___is_Timestamp : cell  ->  Prims.bool = (fun ( projectee  :  cell ) -> (m
      end))
 
 
-let __proj__Timestamp__item___0 : cell  ->  Prims.string = (fun ( projectee  :  cell ) -> (match (projectee) with
-| Timestamp (_0) -> begin
+let __proj__Timestamp__item___0 : cell  ->  time_unit = (fun ( projectee  :  cell ) -> (match (projectee) with
+| Timestamp (_0, _1) -> begin
      _0
+     end))
+
+
+let __proj__Timestamp__item___1 : cell  ->  Prims.string = (fun ( projectee  :  cell ) -> (match (projectee) with
+| Timestamp (_0, _1) -> begin
+     _1
      end))
 
 
@@ -940,8 +1012,8 @@ let cell_type : cell  ->  FStar_Pervasives_Native.option<column_type> = (fun ( c
 | Date (uu___) -> begin
      FStar_Pervasives_Native.Some (DateType)
      end
-| Timestamp (uu___) -> begin
-     FStar_Pervasives_Native.Some (TimestampType)
+| Timestamp (u, uu___) -> begin
+     FStar_Pervasives_Native.Some (TimestampType (u))
      end
 | Decimal (uu___) -> begin
      FStar_Pervasives_Native.Some (DecimalType)
@@ -1052,7 +1124,7 @@ let cell_tag : cell  ->  Prims.string = (fun ( c  :  cell ) -> (match (c) with
 | Date (uu___) -> begin
      "d"
      end
-| Timestamp (uu___) -> begin
+| Timestamp (uu___, uu___1) -> begin
      "t"
      end
 | Decimal (uu___) -> begin
@@ -1084,7 +1156,7 @@ if v then begin
 | Date (v) -> begin
      v
      end
-| Timestamp (v) -> begin
+| Timestamp (uu___, v) -> begin
      v
      end
 | Decimal (v) -> begin
@@ -1201,7 +1273,13 @@ let rec param_names : Prims.list<query_param>  ->  Prims.list<Prims.string> = (f
      end))
 
 
-let widens : column_type  ->  column_type  ->  Prims.bool = (fun ( from  :  column_type ) ( target  :  column_type ) -> (((Prims.op_Equals from target) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target FloatType))) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target DecimalType))))
+let widens : column_type  ->  column_type  ->  Prims.bool = (fun ( from  :  column_type ) ( target  :  column_type ) -> (match (((from), (target))) with
+| (TimestampType (a), TimestampType (b)) -> begin
+     (unit_widens a b)
+     end
+| uu___ -> begin
+     (((Prims.op_Equals from target) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target FloatType))) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target DecimalType)))
+     end))
 
 
 let rec check_args : Prims.list<query_param>  ->  Prims.list<Prims.string>  ->  arguments  ->  outcome<unit, query_error> = (fun ( ps  :  Prims.list<query_param> ) ( declared  :  Prims.list<Prims.string> ) ( a  :  arguments ) -> (match (a) with
@@ -1510,7 +1588,13 @@ if (Prims.op_Equals ty StringType) then begin
      (match ((cell_type v)) with
 | FStar_Pervasives_Native.Some (got) -> begin
       
-if (Prims.op_Equals got ty) then begin
+if (match (((got), (ty))) with
+| (TimestampType (a), TimestampType (b)) -> begin
+     (unit_widens a b)
+     end
+| uu___1 -> begin
+     (Prims.op_Equals got ty)
+     end) then begin
      FStar_Pervasives_Native.None
      end else begin
      FStar_Pervasives_Native.Some (PredicateTypeMismatch (c, ty, got))
@@ -1654,6 +1738,24 @@ let rec sorted : (Prims.string  ->  Prims.string  ->  Prims.bool)  ->  arguments
 | (y)::uu___ -> begin
      ((le (FStar_Pervasives_Native.fst x) (FStar_Pervasives_Native.fst y)) && (sorted le tl))
      end)
+     end))
+
+
+let unit_named : (Prims.string  ->  time_unit)  ->  cell  ->  Prims.bool = (fun ( uo  :  Prims.string  ->  time_unit ) ( c  :  cell ) -> (match (c) with
+| Timestamp (u, s) -> begin
+     (Prims.op_Equals u (uo s))
+     end
+| uu___ -> begin
+     true
+     end))
+
+
+let rec units_named : (Prims.string  ->  time_unit)  ->  arguments  ->  Prims.bool = (fun ( uo  :  Prims.string  ->  time_unit ) ( a  :  arguments ) -> (match (a) with
+| [] -> begin
+     true
+     end
+| ((uu___, c))::t -> begin
+     ((unit_named uo c) && (units_named uo t))
      end))
 
 
@@ -1847,7 +1949,7 @@ let twin_rn : renderers = {render_int = (fun ( uu___  :  Prims.int ) -> ""); ren
 let twin_shaped : query = {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "eu"))::[]; q_order_by = ({k_column = "n"; k_direction = Descending})::[]}
 
 
-let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None twin_query (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_query []) (("")::("p")::("t")::[])))})::({tname = "a-shaped-declaration-leads-with-its-filter-then-its-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_shaped (((("a"), (Str ("x"))))::[])) (("")::("p")::("t")::("")::("w")::("W")::("")::("o")::("O")::("a")::("s")::("x")::[])))})::({tname = "an-order-alone-adds-only-its-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (key_fields twin_rn {q_id = twin_shaped.q_id; q_params = twin_shaped.q_params; q_schema = twin_shaped.q_schema; q_effect = twin_shaped.q_effect; q_source = twin_shaped.q_source; q_timeout_ms = twin_shaped.q_timeout_ms; q_page_size = twin_shaped.q_page_size; q_where = []; q_order_by = twin_shaped.q_order_by} []) (("")::("o")::("O")::[])))})::({tname = "register-admits-a-well-formed-filter-and-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_shaped empty) (Ok ({queries = (twin_shaped)::[]}))))})::({tname = "register-refuses-an-undeclared-filter-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (IsNull ("x"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (UnknownColumn ("x", ("n")::[])))))})::({tname = "register-refuses-contains-on-a-column-that-is-not-a-string"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("n"), (IntType)))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "1"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateNotApplicable ("contains", "n", IntType)))))})::({tname = "register-refuses-a-null-literal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (EqualTo ("n", Null))::[]; q_order_by = twin_query.q_order_by} empty) (Error (IllFormedLiteral ("n", null_literal_reason)))))})::({tname = "register-refuses-a-literal-of-another-type"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("n", Int ((Prims.parse_int "3"))))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("n", StringType, IntType)))))})::({tname = "register-refuses-an-order-naming-a-column-twice"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = ({k_column = "n"; k_direction = Ascending})::({k_column = "n"; k_direction = Descending})::[]} empty) (Error (DuplicateSortColumn ("n")))))})::[]
+let twins : Prims.list<twin> = ({tname = "validate-params-accepts-a-bound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Str ("eu"))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-an-unbound-required-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query []) (Error (RequiredParamsUnbound (("region")::[])))))})::({tname = "validate-params-refuses-a-type-mismatch"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params twin_query (((("region"), (Bool (true))))::[])) (Error (ParamTypeMismatch ("region", StringType, BoolType)))))})::({tname = "validate-params-widens-an-int-into-a-float-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = FloatType; p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Int ((Prims.parse_int "3")))))::[])) (Ok (()))))})::({tname = "validate-params-refuses-a-float-for-an-int-param"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (widens FloatType IntType) false))})::({tname = "validate-params-widens-a-seconds-timestamp-into-a-nanoseconds-param"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (validate_params {q_id = twin_query.q_id; q_params = ({p_name = "region"; p_type = TimestampType (Nanoseconds); p_required = true})::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} (((("region"), (Timestamp (Seconds, "2026-01-01T00:00:00Z"))))::[])) (Ok (()))) && (Prims.op_Equals (widens (TimestampType (Milliseconds)) (TimestampType (Seconds))) false)))})::({tname = "register-admits-a-coarser-timestamp-literal-and-refuses-a-finer"; tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Ok ({queries = ({q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Seconds, "2026-01-01T00:00:00Z")))::[]; q_order_by = twin_query.q_order_by})::[]}))) && (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("t"), (TimestampType (Milliseconds))))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("t", Timestamp (Microseconds, "2026-01-01T00:00:00.000001Z")))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("t", TimestampType (Milliseconds), TimestampType (Microseconds)))))))})::({tname = "register-refuses-a-duplicate"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_query {queries = (twin_query)::[]}) (Error (DuplicateQuery ("q")))))})::({tname = "register-refuses-a-repeated-parameter-name"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = (twin_param)::(twin_param)::[]; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = twin_query.q_order_by} empty) (Error (DuplicateParam ("region")))))})::({tname = "unregister-undoes-register"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (unregister "q" {queries = (twin_query)::[]}) (Ok (empty))))})::({tname = "the-first-page-adds-no-field"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn FStar_Pervasives_Native.None twin_query (((("a"), (Str ("x"))))::[])) (("a")::("s")::("x")::[])))})::({tname = "a-later-page-leads-with-the-page-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_query []) (("")::("p")::("t")::[])))})::({tname = "a-shaped-declaration-leads-with-its-filter-then-its-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (page_fields twin_rn (FStar_Pervasives_Native.Some ("t")) twin_shaped (((("a"), (Str ("x"))))::[])) (("")::("p")::("t")::("")::("w")::("W")::("")::("o")::("O")::("a")::("s")::("x")::[])))})::({tname = "an-order-alone-adds-only-its-triple"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (key_fields twin_rn {q_id = twin_shaped.q_id; q_params = twin_shaped.q_params; q_schema = twin_shaped.q_schema; q_effect = twin_shaped.q_effect; q_source = twin_shaped.q_source; q_timeout_ms = twin_shaped.q_timeout_ms; q_page_size = twin_shaped.q_page_size; q_where = []; q_order_by = twin_shaped.q_order_by} []) (("")::("o")::("O")::[])))})::({tname = "register-admits-a-well-formed-filter-and-order"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register twin_shaped empty) (Ok ({queries = (twin_shaped)::[]}))))})::({tname = "register-refuses-an-undeclared-filter-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (IsNull ("x"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (UnknownColumn ("x", ("n")::[])))))})::({tname = "register-refuses-contains-on-a-column-that-is-not-a-string"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = ((("n"), (IntType)))::[]; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (Contains ("n", "1"))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateNotApplicable ("contains", "n", IntType)))))})::({tname = "register-refuses-a-null-literal"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (EqualTo ("n", Null))::[]; q_order_by = twin_query.q_order_by} empty) (Error (IllFormedLiteral ("n", null_literal_reason)))))})::({tname = "register-refuses-a-literal-of-another-type"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = (AtLeast ("n", Int ((Prims.parse_int "3"))))::[]; q_order_by = twin_query.q_order_by} empty) (Error (PredicateTypeMismatch ("n", StringType, IntType)))))})::({tname = "register-refuses-an-order-naming-a-column-twice"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (register {q_id = twin_query.q_id; q_params = twin_query.q_params; q_schema = twin_query.q_schema; q_effect = twin_query.q_effect; q_source = twin_query.q_source; q_timeout_ms = twin_query.q_timeout_ms; q_page_size = twin_query.q_page_size; q_where = twin_query.q_where; q_order_by = ({k_column = "n"; k_direction = Ascending})::({k_column = "n"; k_direction = Descending})::[]} empty) (Error (DuplicateSortColumn ("n")))))})::[]
 
 
 

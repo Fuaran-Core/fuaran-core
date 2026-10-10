@@ -785,8 +785,8 @@ let private realCases () =
     // Phase 311: the lane store's tested row, evidenced by `Conformance.laneLaws`, whose cases live in
     // `LaneTests`.
     |> Set.union (caseNames LaneTests.laneLawTests |> Set.ofList)
-    // Phase 422: the temporal encodings' tested row, evidenced by the column suite's own laws (the
-    // calendar arithmetic is not yet an F* theorem).
+    // Phase 422: the temporal rows evidenced by the column suite's own laws — since Phase 430 the .NET
+    // edge's row alone (the calendar, the texts and the order are `Temporal.fst`'s theorems).
     |> Set.union (caseNames ColumnTests.temporalTests |> Set.ofList)
     // Phase 427: the schema field's tested row, evidenced by the column suite's field cases (the
     // field codec is Phase 428's theorem).

@@ -2674,7 +2674,7 @@
     {
       "id": "query-invocation-key-injective",
       "level": "proved",
-      "claim": "THE SECOND FINDING, CLOSED (Phase 225; it was `key_collision`). `Query.invocationKey`'s pre-image is INJECTIVE: two (declaration, argument list) pairs whose pre-images agree have the SAME `Where`, the SAME `OrderBy` (Phase 398) and name-sorted argument lists that ARE the same list, holding exactly the same bindings (`invocation_key_injective`), so declarations filtered or ordered differently, and distinct argument sets, have distinct pre-images, for every declaration, accepted or not, and with no premise about the name comparator. The pre-image is `Hash.canonicalFields` over the declaration's shape fields — for a non-empty filter an empty name, the tag `w` and its canonical text, then for a non-empty order the same with `o`, tags no cell carries (`cell_tag_not_shape`), recovered by `shape_fields_injective` — then three fields per binding (name, cell tag, cell payload): every field is escaped (`U+0010` before each `U+0010` and `U+0001` it carries) and terminated by `U+0001`, so the first unescaped terminator ends each field (`esc_split`), the field list is recovered (`fields_injective`), and three fields per binding recover the bindings (`arg_fields_injective`). The pre-225 join of `name=cellKey` pairs on the empty string let `[a = \"1b=s2\"]` and `[a = \"1\"; b = \"2\"]` share `a=s1b=s2`; those two exhibits now key apart on production. What it spends is named in `key_premises`: the Chain-style reading of a string as its symbols (`symbols_faithful`), the escaper premise (`field_faithful`, measured by the round-trip case), and injectivity of the int and float renderers over the model's carriers and, since Phase 398, of the filter and order renderers (`query-renderers-abstract` says where the float one fails). Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made.",
+      "claim": "THE SECOND FINDING, CLOSED (Phase 225; it was `key_collision`). `Query.invocationKey`'s pre-image is INJECTIVE: two (declaration, argument list) pairs whose pre-images agree have the SAME `Where`, the SAME `OrderBy` (Phase 398) and name-sorted argument lists that ARE the same list, holding exactly the same bindings (`invocation_key_injective`), so declarations filtered or ordered differently, and distinct argument sets, have distinct pre-images, for every declaration, accepted or not, and with no premise about the name comparator — over argument lists whose timestamp cells carry the unit their text names (`units_named`, Phase 430: the model's `Timestamp` carries the coarsest unit `Cell.typeOf` reads off the text, the key writes the text alone as production does, and every cell production builds satisfies the premise, the oracle host computing the unit from the text at the edge). The pre-image is `Hash.canonicalFields` over the declaration's shape fields — for a non-empty filter an empty name, the tag `w` and its canonical text, then for a non-empty order the same with `o`, tags no cell carries (`cell_tag_not_shape`), recovered by `shape_fields_injective` — then three fields per binding (name, cell tag, cell payload): every field is escaped (`U+0010` before each `U+0010` and `U+0001` it carries) and terminated by `U+0001`, so the first unescaped terminator ends each field (`esc_split`), the field list is recovered (`fields_injective`), and three fields per binding recover the bindings (`arg_fields_injective`). The pre-225 join of `name=cellKey` pairs on the empty string let `[a = \"1b=s2\"]` and `[a = \"1\"; b = \"2\"]` share `a=s1b=s2`; those two exhibits now key apart on production. What it spends is named in `key_premises`: the Chain-style reading of a string as its symbols (`symbols_faithful`), the escaper premise (`field_faithful`, measured by the round-trip case), and injectivity of the int and float renderers over the model's carriers and, since Phase 398, of the filter and order renderers (`query-renderers-abstract` says where the float one fails). Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made.",
       "phase": "fuaran-core#225",
       "evidence": {
         "theorem": "invocation_key_injective",
@@ -3024,12 +3024,12 @@
     {
       "id": "column-codec-abstractions",
       "level": "assumed",
-      "claim": "WHAT THE CODEC MODEL IS HANDED RATHER THAN DERIVES. The calendar: `TemporalText.isCanonicalDate` / `isCanonicalTimestamp` are fields of the model's host record, because the theorems need `validate` and the decoder to ask the SAME predicate of the same text — which the model reproduces — and not what the predicate computes. The loops: production's three accumulate-and-reverse `go` loops are written as the direct recursion they are equal to, a claim about `List.rev` rather than about the codec. The envelope: a refusal keeps its class and column and loses its prose and its counts, the extraction carrying no integers. And `Table.firstDuplicate`'s `Set` is a list asked for membership. Each is sampled by `column-codec-differential` and none is proved.",
+      "claim": "WHAT THE CODEC MODEL IS HANDED RATHER THAN DERIVES. (The calendar WAS handed — `TemporalText.isCanonicalDate` / `isCanonicalTimestamp` were fields of the model's host record, because the theorems needed `validate` and the decoder to ask the SAME predicate of the same text and not what it computes — until Phase 430 modelled it in `Temporal.fst`, which `WireColumn` now opens: the unit a timestamp cell's type carries is read off its text, and a typing that reads text cannot be a host field without making every theorem about the typing a theorem about the host.) The loops: production's three accumulate-and-reverse `go` loops are written as the direct recursion they are equal to, a claim about `List.rev` rather than about the codec. The envelope: a refusal keeps its class and column and loses its prose and its counts, the extraction carrying no integers. And `Table.firstDuplicate`'s `Set` is a list asked for membership. Each is sampled by `column-codec-differential` and none is proved.",
       "phase": "fuaran-core#306",
       "class": "model-bridge",
       "closes": "permanent",
       "evidence": {
-        "assumption": "the temporal-text predicates, the reversal of three accumulator loops and the dropped error prose are as the model takes them"
+        "assumption": "the reversal of three accumulator loops and the dropped error prose are as the model takes them"
       }
     },
     {
@@ -4037,7 +4037,7 @@
     {
       "id": "column-refinement-to-cells-of-cells",
       "level": "proved",
-      "claim": "`toCells (ofCells n ty cs)` IS THE NORMAL FORM OF THE CELLS (Phase 419). `proofs/ColumnRefinement.fst` models the column Phase 417 left — `Validity`, the `ColumnData` union, `Column.toCells`, `Column.ofCells` with its per-type `pick`, `fill` loop and the type's zero at an absent row — clause for clause, every `Vector` read through `toArray`. When `ofCells` builds, the cells its column reads back are `WireColumn.norm_cells` of the cells it was handed — the SAME function the codec model's round trip is stated up to, so a widened `Int` is normalised at construction exactly as decode normalises it (`to_cells_of_cells`). It builds exactly when every present cell's type widens into the column's, and refuses otherwise as the `TypeMismatch` naming the column (`of_cells_good_iff`); so a list column `validate`'s clause (e) passes is one `ofCells` builds, and reads back as its normal form (`validated_cells_build`). Measured red with `pick`'s widening arm writing the wrong value.",
+      "claim": "`toCells (ofCells n ty cs)` IS THE NORMAL FORM OF THE CELLS (Phase 419). `proofs/ColumnRefinement.fst` models the column Phase 417 left — `Validity`, the `ColumnData` union, `Column.toCells`, `Column.ofCells` with its per-type `pick`, `fill` loop and the type's zero at an absent row — clause for clause, every `Vector` read through `toArray`. When `ofCells` builds, the cells its column reads back are `WireColumn.norm_cells` of the cells it was handed — the SAME function the codec model's round trip is stated up to, so a widened `Int` is normalised at construction exactly as decode normalises it (`to_cells_of_cells`). It builds exactly when every present cell's type widens into the column's AND every temporal text reads (Phase 430: a date or an instant the integer storage cannot hold is the `MalformedShape` production spells, `Unreadable` in the model), and refuses otherwise — as the `TypeMismatch` naming the column when every text reads (`of_cells_good_iff`); so a list column `validate`'s clause (e) passes is one `ofCells` builds, and reads back as its normal form (`validated_cells_build`). Since Phase 430 the temporal arms read the text through `Temporal.fst` — `tryDays` to a day count, `tryInstant` at the column's unit to a second and a scaled fraction, with `normalFraction` dropping a fraction vector no present row sets — and the theorem rests on the text reading back to itself (`date_text_try_days`, `instant_text_try_instant`). Measured red with `pick`'s widening arm writing the wrong value.",
       "phase": "fuaran-core#419",
       "evidence": {
         "theorem": "to_cells_of_cells",
@@ -4052,7 +4052,7 @@
     {
       "id": "column-refinement-of-cells-to-cells",
       "level": "proved",
-      "claim": "`ofCells n ty (toCells c)` IS `c` (Phase 419): for every well-formed typed column — its mask the values' length — `ofCells` of its `toCells` builds a column EQUAL to it under `ColumnData.Equals` (`ColumnStorage.presentEqual`, modelled: one case, one mask, equal at every present row), and is the column ITSELF where the absent rows hold the type's zero (`of_cells_to_cells_exact`), which every column `ofCells` or decode builds does (`of_cells_wf_zeroed`). With `column-refinement-to-cells-of-cells` this makes the map from the typed column to the list column a bijection on the columns `validate` accepts, which is what lets every list-level theorem transfer. Well-formedness is NEEDED and the witness is in the file: a column whose mask is shorter than its values reads its tail as absent and comes back with a longer mask (`of_cells_to_cells_needs_wf`). Measured red with the model's `toCells` ignoring an absent bit, and with `Equals` not comparing the masks.",
+      "claim": "`ofCells n ty (toCells c)` IS `c` (Phase 419): for every well-formed typed column — its mask the values' length — whose temporal values are in range (Phase 430, `temporal_ok`: a day the canonical form spells, an instant whose second and fraction it spells; out of range `toCells` renders a text `ofCells` refuses, which is `validate`'s to catch first), `ofCells` of its `toCells` builds a column EQUAL to it under `ColumnData.Equals` (`ColumnStorage.presentEqual`, modelled: one case, one mask, equal at every present row; a timestamp column also one unit and `sameFraction`, the fractions equal at the present rows whether kept or dropped to `None`), and is the column ITSELF where the absent rows hold the type's zero and the fraction vector is in its normal form (`of_cells_to_cells_exact`), which every column `ofCells` or decode builds does (`of_cells_wf_zeroed`). With `column-refinement-to-cells-of-cells` this makes the map from the typed column to the list column a bijection on the columns `validate` accepts, which is what lets every list-level theorem transfer. Well-formedness is NEEDED and the witness is in the file: a column whose mask is shorter than its values reads its tail as absent and comes back with a longer mask (`of_cells_to_cells_needs_wf`). Measured red with the model's `toCells` ignoring an absent bit, and with `Equals` not comparing the masks.",
       "phase": "fuaran-core#419",
       "evidence": {
         "theorem": "of_cells_to_cells",
@@ -4067,7 +4067,7 @@
     {
       "id": "column-refinement-validate-agrees",
       "level": "proved",
-      "claim": "THE TYPED `Table.validate` IS THE LIST MODEL'S, THROUGH THE MAP (Phase 419). `validate_t` is `Table.validate` as Phase 417 left it, clause for clause — (a)-(d) over a column's name, type and length, and (e) the typed `firstUncarriableCell`: a mask that is not the values' length first (`LengthMismatch`), then one scan per case at the present rows. On every typed table whose columns are well-formed it answers what `WireColumn.validate` answers of the table's image (`validate_agrees`), and a typed table it accepts IS well-formed (`validate_t_good_wf`), so the agreement covers every table either validator accepts. The one arm the list model has and the typed scan does not — a present cell outside its column's type — is proved unreachable through the map: `toCells` writes a cell of the column's own type at every present row (`first_uncarriable_agree`). Measured red with the scan reading an absent row, and with the mask check dropped.",
+      "claim": "THE TYPED `Table.validate` IS THE LIST MODEL'S, THROUGH THE MAP (Phase 419). `validate_t` is `Table.validate` as Phase 417 left it, clause for clause — (a)-(d) over a column's name, type and length, and (e) the typed `firstUncarriableCell`: a mask that is not the values' length first (`LengthMismatch`), then one scan per case at the present rows. On every typed table whose columns are well-formed and whose timestamp columns hold their fractions in `[0, scale)` with a fraction vector, when held, of the seconds' length (Phase 430, `frac_ok`: a fraction at or past the scale renders as ANOTHER instant's canonical text, which the typed clause (e) refuses and the list clause cannot see, and the fraction-length clause has no list counterpart), it answers what `WireColumn.validate` answers of the table's image (`validate_agrees`), and a typed table it accepts IS well-formed with its fractions in range (`validate_t_good_wf`), so the agreement covers every table either validator accepts. The temporal scans agree through `Temporal.fst`: `dateText` is canonical exactly on the range (`date_scan`), and with its fraction in range an instant's text is canonical exactly when its second is (`timestamp_scan`). The one arm the list model has and the typed scan does not — a present cell outside its column's type — is proved unreachable through the map: `toCells` writes a cell of the column's own type at every present row (`first_uncarriable_agree`). Measured red with the scan reading an absent row, and with the mask check dropped.",
       "phase": "fuaran-core#419",
       "evidence": {
         "theorem": "validate_agrees",
@@ -4095,7 +4095,7 @@
     {
       "id": "column-refinement-ladder-transfers",
       "level": "proved",
-      "claim": "`WireColumn`'S TWO THEOREMS, STATED OF THE TYPED COLUMN (Phase 419). The widening half of the codec model's normal form is the IDENTITY on a typed column — an `Int` cell comes only from an `Ints` column, where `norm_cell` changes nothing (`norm_cells_vacuous`) — so the normal form of a typed table moves its column ORDER and nothing else: `normal_table_t`'s columns are the table's own, found by schema name (`normal_columns_are_the_columns`). Composed with the agreements: `typed_round_trip` — for every typed table the typed `validate` accepts, `decode_json (encode_json_t (TEmbedded t))` is `Good (Embedded (to_list_table (normal_table_t t)))`; `typed_round_trip_in_schema_order` — when the columns are already in schema order that is the table itself, the LITERAL round trip, false of the list column three ways and of the typed column one; and `typed_decode_image_is_valid` — a well-formed typed table whose image is what decode answered is one the typed `validate` accepts. Measured red with the typed normal form dropping a schema entry. What stays with the differential: that the typed column production's decode builds through the typed readers has `toCells` equal to the model's decoded cells (`column-refinement-differential`).",
+      "claim": "`WireColumn`'S TWO THEOREMS, STATED OF THE TYPED COLUMN (Phase 419). The widening half of the codec model's normal form is the IDENTITY on a typed column — an `Int` cell comes only from an `Ints` column, where `norm_cell` changes nothing (`norm_cells_vacuous`) — so the normal form of a typed table moves its column ORDER and nothing else: `normal_table_t`'s columns are the table's own, found by schema name (`normal_columns_are_the_columns`). Composed with the agreements: `typed_round_trip` — for every typed table the typed `validate` accepts, `decode_json (encode_json_t (TEmbedded t))` is `Good (Embedded (to_list_table (normal_table_t t)))`; `typed_round_trip_in_schema_order` — when the columns are already in schema order that is the table itself, the LITERAL round trip, false of the list column three ways and of the typed column one; and `typed_decode_image_is_valid` — a well-formed typed table with its fractions in range whose image is what decode answered is one the typed `validate` accepts (Phase 430 added the fraction premise; production's decode builds every fraction in range through `tryInstant`). Measured red with the typed normal form dropping a schema entry. What stays with the differential: that the typed column production's decode builds through the typed readers has `toCells` equal to the model's decoded cells (`column-refinement-differential`).",
       "phase": "fuaran-core#419",
       "evidence": {
         "theorem": "typed_round_trip",
@@ -4106,7 +4106,7 @@
     {
       "id": "column-refinement-differential",
       "level": "tested",
-      "claim": "The extracted refinement agrees with the shipped column over drawn columns of every type, with nulls and widened cells (Phase 419). Per drawn cell list: `Column.ofCells` beside the model's `of_cells` — the verdict, the refusal's class and column, and the cells of what each built; `Column.toCells` beside the model's `to_cells` of the production column read through its typed reader and `Vector.toArray` (the bridge the theorems are stated over). Per drawn table (the Phase 306 pools, valid and wild): `Table.validate` beside `validate_t`, and `ColumnCodec.encodeJson` beside `encode_json_t`, both over the typed column rather than its cells. The go-red is the bridge that DROPS the widening normalisation — `toCells (ofCells cs)` held to `cs` itself rather than to `norm_cells` — which loses on exactly the draws holding an `Int` in a float or decimal column and on no other. The draws are asserted to reach every column type, nulls, widened cells and every refusal class `ofCells` has, so a pool that stopped sampling one would say so.",
+      "claim": "The extracted refinement agrees with the shipped column over drawn columns of every type, with nulls and widened cells (Phase 419). Per drawn cell list: `Column.ofCells` beside the model's `of_cells` — the verdict, the refusal's class and column, and the cells of what each built; `Column.toCells` beside the model's `to_cells` of the production column read through its typed reader and `Vector.toArray` (the bridge the theorems are stated over). Per drawn table (the Phase 306 pools, valid and wild): `Table.validate` beside `validate_t`, and `ColumnCodec.encodeJson` beside `encode_json_t`, both over the typed column rather than its cells. The go-red is the bridge that DROPS the widening normalisation — `toCells (ofCells cs)` held to `cs` itself rather than to `norm_cells` — which loses on exactly the draws holding an `Int` in a float or decimal column and on no other. Since Phase 430 the pools draw every timestamp unit, an instant of a coarser unit in a finer column, an instant FINER than its column (refused as the `TypeMismatch` naming the finer type) and temporal text that is not canonical (refused as `MalformedShape`), and the typed column crosses as the integers the model holds — day counts, whole seconds and the fraction vector where held. The draws are asserted to reach every column type, nulls, widened cells and both refusal classes `ofCells` has, so a pool that stopped sampling one would say so.",
       "phase": "fuaran-core#419",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -4174,31 +4174,35 @@
       }
     },
     {
-      "id": "column-temporal-encodings",
-      "level": "tested",
-      "claim": "The integer temporal storage is the canonical text it replaces (Phase 422). EVERY canonical date `0000-01-01`..`9999-12-31` reads to its day count and renders back byte-identically, consecutive dates are consecutive day counts (so the integers order chronologically), and `civilOfDays` inverts `daysOfCivil`; per unit, twenty thousand drawn instants (the range's two ends included) read to their epoch second and scaled fraction and render back byte-identically, one text whatever unit holds them; widening every coarser unit into every finer one keeps each instant, its text and its cell; `Cell.compare` over timestamp text is chronological where ordinal order is not, and over date text agrees with the day count; the codec reads every unit and the epoch number per unit, refuses a fraction finer than its unit as the corpus vector does, and writes the pre-422 bytes for a seconds or date column; the .NET edge converts through the integers and refuses a tick its unit cannot hold. Sampled, not proved: the calendar arithmetic is not yet an F* theorem (Phase 419's deferred task 2).",
-      "phase": "fuaran-core#422",
+      "id": "column-temporal-calendar",
+      "level": "proved",
+      "claim": "THE CALENDAR IS A BIJECTION (Phase 430; the storage Phase 422 introduced). `proofs/Temporal.fst` models `TemporalText.daysOfCivil` / `civilOfDays` line for line — Hinnant's days-from-civil and civil-from-days in integers, era-shifted as production shifts them — and proves that `civilOfDays` answers a civil date that exists for EVERY day count (`civil_valid_days`: a month `1`..`12`, a day `1`..`daysIn`), that `daysOfCivil` of it is the count it was asked for (`days_civil_days`), and that `civilOfDays (daysOfCivil y m d)` is `{y; m; d}` for every civil date that exists (`civil_days_civil`). A later civil date is a larger day count (`days_of_civil_mono`), so the integers order chronologically, and the canonical range `0000-01-01`..`9999-12-31` is exactly `MinDay`..`MaxDay` (`year_in_range`, `day_in_range_year`). The one hard fact — that the corrected quotient `(doe - doe/1460 + doe/36524 - doe/146096) / 365` recovers the year of the era — is proved from the quotient's monotonicity and its value at the two ends of each of the 400 years of an era, those 800 values computed by normalisation (`year_ends_ok`): a theorem about 146,097 day counts the solver never searches. Measured red with the corrected quotient losing its `36524` term, and with February given 29 days in every year.",
+      "phase": "fuaran-core#430",
       "evidence": {
-        "family": "Column temporal integers and timestamp units (Phase 422)",
-        "cases": [
-          "every canonical date round-trips text to days to text, and the day count orders chronologically",
-          "a drawn set of instants per unit round-trips text to integers to text byte-identically",
-          "widening a coarser unit into a finer one preserves the instant, its text and its cell",
-          "Cell order over timestamps is chronological, not ordinal, and over dates agrees with the day count",
-          "the codec reads and writes every unit, reads epoch numbers per unit, and refuses a finer fraction",
-          "the .NET edge converts DateOnly and DateTimeOffset through the integers, and refuses a tick the unit cannot hold"
-        ],
+        "theorem": "civil_days_civil",
+        "model": "proofs/Temporal.fst",
+        "prover": "proofs/fstar-pin.json",
         "operations": [
-          "Column.ofDateOnlys",
-          "Column.ofDateTimeOffsets",
-          "Column.tryDateOnly",
-          "Column.tryDateTimeOffset",
           "TemporalText.civilOfDays",
-          "TemporalText.compareInstants",
-          "TemporalText.dateText",
           "TemporalText.daysOfCivil",
+          "TemporalText.isDayInRange"
+        ]
+      }
+    },
+    {
+      "id": "column-temporal-encodings",
+      "level": "proved",
+      "claim": "A DATE HAS ONE TEXT, AND AN INSTANT ONE TEXT PER UNIT — THE SAME TEXT IN EVERY UNIT (Phase 430, over Phase 422's storage; Phase 419's deferred model). `proofs/Temporal.fst` models `TemporalText` clause for clause over `WireCanon`'s character alphabet — `tryDays` / `dateText`, `tryInstant` / `instantText` / `unitOf` / `isCanonicalDate` / `isCanonicalTimestamp` / `isInstantInRange` over `digitsAt`, `datePart`, `fractionPart`, `parseInstant`, `pad` and `pow10`, with `TimeUnit`'s `digits` / `scale` / `ofDigits` / `widens` — reading a text sequentially where production indexes it, and in F*'s unbounded integers where production holds an `int32` day, an integer-valued `float` second and an `int32` fraction (the integer-valued second is the one bridge, the header says why). For every day in range `tryDays (dateText d) == Some d` (`try_days_date_text`); whatever `tryDays` reads back is `dateText` of that day, in range (`date_text_try_days`); and `dateText` is canonical exactly on the range (`date_text_canonical`). For every unit and every pair in range `tryInstant u (instantText u s f) == Some (s, f)` (`try_instant_instant_text`); whatever `tryInstant u` reads back is `instantText u` of the pair, in range (`instant_text_try_instant`); widening a coarser unit into a finer one scales the fraction and writes the SAME text (`widen_keeps_instant`) — one text per instant whatever unit holds it, D143.3 as a theorem; and `unitOf` is the coarsest unit that reads the text, so `Cell.typeOf`'s unit widens into exactly the columns that hold the cell (`unit_of_coarsest`). With a fraction in `[0, scale)` the text is canonical exactly when the second is in range (`instant_text_canonical`); a fraction at or past the scale spells ANOTHER instant's text, which is `Table.validate`'s to refuse first and is why the refinement's agreement rows carry a fraction premise. Measured red with the fraction read at the column's unit without scaling, and with a trailing zero kept in the written fraction.",
+      "phase": "fuaran-core#430",
+      "evidence": {
+        "theorem": "try_instant_instant_text",
+        "model": "proofs/Temporal.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "TemporalText.dateText",
           "TemporalText.instantText",
-          "TemporalText.isDayInRange",
+          "TemporalText.isCanonicalDate",
+          "TemporalText.isCanonicalTimestamp",
           "TemporalText.isInstantInRange",
           "TemporalText.tryDays",
           "TemporalText.tryInstant",
@@ -4207,6 +4211,52 @@
           "TimeUnit.ofDigits",
           "TimeUnit.scale",
           "TimeUnit.widens"
+        ]
+      }
+    },
+    {
+      "id": "column-temporal-order",
+      "level": "proved",
+      "claim": "THE ORDER ON TIMESTAMP TEXT IS CHRONOLOGICAL (Phase 430; `Cell.compare`'s timestamp arm since Phase 422, D143.3). `TemporalText.compareInstants` is modelled arm for arm — two canonical texts compare on their fixed-width `YYYY-MM-DDThh:mm:ss` prefix ordinally and then on their fraction digits ordinally; a text that is not canonical sorts after every canonical one — over an ordinal rank of the alphabet (`ch_rank`: the UTF-16 code of every character but `CPlain`, which the alphabet does not carry and no canonical text puts at a position another canonical text spells differently). For two canonical texts read at one unit, `compareInstants` is the order of the pairs they spell, the second first and then the fraction (`compare_instants_chronological`): ordinal comparison of equal-width digit runs is the order of their values (`cmp_text_digits`, `cmp_pad`), the prefix is such runs around fixed separators and compares as the second through the calendar's monotonicity (`cmp_prefix`), and the fraction digits, trimmed of trailing zeros, compare as the padded fraction does (`cmp_trim`, `cmp_frac_digits`) — which is why `…12.5Z` sorts above `…12.25Z` where ordinal string order would not. Measured red with the fraction digits compared before the prefix, and with the trim dropping a zero ahead of a digit.",
+      "phase": "fuaran-core#430",
+      "evidence": {
+        "theorem": "compare_instants_chronological",
+        "model": "proofs/Temporal.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "TemporalText.compareInstants"
+        ]
+      }
+    },
+    {
+      "id": "column-temporal-dotnet-edge",
+      "level": "tested",
+      "claim": "The .NET edge converts through the integers (Phase 422; the half of the temporal row Phase 430 did not promote, because the model has no host date type — `TemporalText` is FSharp.Core-only and the edge is `#if !FABLE_COMPILER`). `Column.ofDateOnlys` / `tryDateOnly` go through `DayNumber`, `ofDateTimeOffsets` / `tryDateTimeOffset` through `UtcTicks` in integer arithmetic; a tick finer than the column's unit is refused as the `TypeMismatch` naming the finer unit, and a nanosecond with no tick answers `None`. Sampled by the column suite, not proved.",
+      "phase": "fuaran-core#430",
+      "evidence": {
+        "family": "Column temporal integers and timestamp units (Phase 422)",
+        "cases": [
+          "the .NET edge converts DateOnly and DateTimeOffset through the integers, and refuses a tick the unit cannot hold"
+        ],
+        "operations": [
+          "Column.ofDateOnlys",
+          "Column.ofDateTimeOffsets",
+          "Column.tryDateOnly",
+          "Column.tryDateTimeOffset"
+        ]
+      }
+    },
+    {
+      "id": "column-temporal-differential",
+      "level": "tested",
+      "claim": "The extracted temporal model agrees with the shipped `TemporalText` and `TimeUnit` (Phase 430) over the canonical range's two ends and their neighbours, 1,500 drawn day counts across and beyond the range (`dateText`, `isDayInRange`, `tryDays` of the text, `civilOfDays` and `daysOfCivil` back), fixed and corrupted date texts (`tryDays`), per unit the range's ends and 1,500 drawn pairs with fractions at the scale's edges and out of range both ways (`isInstantInRange`, `instantText`, `tryInstant` of the text, `unitOf`), instant texts of every fraction length and the ill-formed shapes — a trailing zero, ten digits, no `Z`, a bad clock (`isCanonicalTimestamp`, `unitOf`, `tryInstant` at every unit) — and 3,000 ordered pairs of canonical texts, equal, a fraction or a second apart, and unrelated (`compareInstants`). The draws are asserted to reach both sides of every range, canonical and non-canonical texts, fractional pairs and every unit. The go-red is a model asked to read every text at the seconds unit, which loses on exactly the draws with a fraction and on no other — `tryInstant`'s unit arm. The model's integers are `bigint` and production's a day `int`, a second an integer-valued `float` and a fraction an `int`, converted at the edge; the drawn days stay inside the zone where production's truncating division and the model's Euclidean one agree, which holds the canonical range with a margin either side.",
+      "phase": "fuaran-core#430",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/Temporal.fst",
+        "cases": [
+          "the temporal oracle agrees with TemporalText over drawn days, texts, instants in every unit and their order",
+          "a temporal oracle that reads every text at the seconds unit loses — on exactly the fractional draws"
         ]
       }
     },

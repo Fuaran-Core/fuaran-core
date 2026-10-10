@@ -10,7 +10,7 @@ the foot is the live list. The count is NOT kept by hand any more (Phase 309: th
 `../proofs.json`, and the `Proofs.Ladder` family fails the leg when it is not the ladder's.
 
 <!-- ladder-summary:begin — generated from ../proofs.json by the Proofs.Ladder family; CORE_APPROVE_LADDER=1 rewrites it -->
-**The ladder, counted:** 318 claims — 230 proved across 30 models, 52 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
+**The ladder, counted:** 322 claims — 233 proved across 31 models, 53 tested, 34 assumed (6 `domain-obligation`, 22 `model-bridge`, 6 `premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400).** A bridge is `permanent` or
@@ -966,7 +966,7 @@ families credit are credited over nested batches as well as flat ones.
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 22 | 0 | 11 | 1 | 0 | 0 | 0 | 10 |
-| `Fuaran.Core.Column` | 119 | 45 | 48 | 3 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.Column` | 119 | 47 | 48 | 3 | 0 | 0 | 0 | 21 |
 | `Fuaran.Core.Conformance` | 151 | 1 | 104 | 2 | 6 | 0 | 0 | 38 |
 | `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
 | `Fuaran.Core.Function` | 142 | 33 | 64 | 5 | 0 | 0 | 0 | 40 |
@@ -984,7 +984,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 43 | 0 | 21 | 3 | 0 | 0 | 0 | 19 |
 | `Fuaran.Core.Wire` | 148 | 10 | 16 | 3 | 2 | 0 | 0 | 117 |
-| **Total** | 1202 | 188 | 434 | 30 | 13 | 0 | 3 | 534 |
+| **Total** | 1202 | 190 | 434 | 30 | 13 | 0 | 3 | 532 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -6352,8 +6352,10 @@ exclusion is deleted. `Table.validate`, `ColumnCodec.encodeJson` / `decodeJson` 
   not be an object.
 
 Two facts about .NET's `Int32` are NAMED HYPOTHESES (`int_text_canonical`, `int_floats_finite`),
-each shown necessary. The calendar (`TemporalText`) is abstract — the theorems need `validate` and
-decode to ask the SAME predicate, not what it computes. The five lenient-ingest arms (an omitted
+each shown necessary. The calendar (`TemporalText`) was abstract — the theorems need `validate` and
+decode to ask the SAME predicate, not what it computes — until theorem 21 modelled it (Phase 430):
+`WireColumn` now opens `Temporal.fst`, a timestamp cell is typed by the coarsest unit its text
+names, and the per-unit decoder reads the text at the column's unit. The five lenient-ingest arms (an omitted
 schema, a bare-array column, an omitted validity mask, an epoch number, a whole-valued float in a
 decimal column) answer `OutOfModel`; the encoder's image never reaches them, and `round_trip`
 concluding `Good` is the proof of that. The string level joins theorem 7 through
@@ -6401,7 +6403,7 @@ and the pool's "outside the normal form" count fell from 355 to 192 at the pinne
 | `column-codec-literal-round-trip-false` | proved | `literal_round_trip_fails_on_column_order` |
 | `column-codec-differential` | tested | the extracted codec beside `Table.validate` and `ColumnCodec` |
 | `column-int-layouts` | assumed (model-bridge, permanent) | `int_text_canonical`, `int_floats_finite` — two facts about `Int32` |
-| `column-codec-abstractions` | assumed (model-bridge, permanent) | the calendar predicate, three reversal loops and the dropped error prose are as the model takes them |
+| `column-codec-abstractions` | assumed (model-bridge, permanent) | three reversal loops and the dropped error prose are as the model takes them (the calendar predicate, until Phase 430) |
 | `parser-number-grammar` | proved | `number_grammar_is_checked_first` |
 
 **Not claimed.** That SHA-256 separates different byte strings — collision resistance, a premise
@@ -6729,8 +6731,14 @@ to speak of; it is Phase 418's, in `STABILITY.md` and in the consumer-runnable l
 every column before and after an operation and names the column whose bytes moved. The ladder carries
 it as the assumed row `column-vector-is-its-contents`, with the element identity (`VectorElements.equal`
 reading every NaN as one value and `-0.0` as `0.0`, where the model's `=` is its carrier's) beside it.
-The temporal encodings — dates and timestamps are canonical text in this slot — move with Phase 422,
-and their model lives in this module when they land.
+The temporal encodings landed with Phase 430 (theorem 21): a `Dates` column holds day counts and a
+`Timestamps` column its unit, whole seconds and an optional fraction vector, the cells are the
+canonical texts `Temporal.fst` writes, and `ofCells` reads them back through it. Two premises came
+with them, both true of every column `validate` accepts (`validate_t_good_wf`): `of_cells_to_cells`
+asks the temporal values in range (`temporal_ok` — out of range, `toCells` renders a text `ofCells`
+refuses), and `validate_agrees` asks a timestamp column's fractions in `[0, scale)` with its fraction
+vector, when held, of the seconds' length (`frac_ok` — a fraction at or past the scale renders as
+ANOTHER instant's canonical text, which the typed clause (e) refuses and the list clause cannot see).
 
 ### The claims ladder, for this theorem
 
@@ -6881,9 +6889,119 @@ JavaScript.
    production's `Ratio` to the model's reduced pair. That every unit `parse` answers is canonical, as a
    theorem: sampled by the differential (the model's `canonical` over every answer), not proved. That
    the vocabulary's every atom under every prefix it takes is admitted: the theorems are stated over
-   the `admitted` predicate, and the differential draws every atom prefixed and bare. The timestamp
-   unit of `ColumnType` (Phase 430). `Schema.diff` / `classify` / `fingerprint` over fields, which
-   theorem 15 never modelled either.
+   the `admitted` predicate, and the differential draws every atom prefixed and bare. `Schema.diff` /
+   `classify` / `fingerprint` over fields, which theorem 15 never modelled either. (The timestamp unit
+   of `ColumnType`, out of reach here, is theorem 21's.)
+
+## Theorem 21 — the temporal encodings: the calendar is a bijection, a date has one text, an instant one text per unit, and the order is chronological; and the unit reaches every model that types a cell (Phase 430)
+
+_(This directory's twenty-first. Phase 422 made a date column `int32` days since 1970-01-01 and a
+timestamp column whole epoch seconds plus a fraction scaled to a `TimeUnit`, with one canonical
+instant text per instant and `Cell.compare` chronological over timestamps; Phase 419 had deferred the
+model of exactly that to it, and Phase 422's worker measured it as a model change across three
+modules rather than a rename. This phase is that change: a fourth column model, `Temporal.fst`, and
+the unit carried through `WireColumn.fst`, `ColumnRefinement.fst` and `Query.fst`.)_
+
+`Temporal.fst` models `src/Fuaran.Core.Column/TemporalText.fs` clause for clause, over the character
+alphabet `WireCanon.fst` models the canonical encoder over (the column models hold a cell's text in
+it): `TimeUnit` with `digits` / `scale` / `ofDigits` / `widens`; the calendar in integers —
+`daysOfCivil` / `civilOfDays`, Hinnant's days-from-civil and civil-from-days era-shifted exactly as
+production shifts them, `isLeap`, `daysIn`, `MinDay` / `MaxDay`; the two canonical texts and their
+readers — `tryDays` / `dateText`, `tryInstant` / `instantText` / `unitOf` / `isCanonicalDate` /
+`isCanonicalTimestamp` over `digitsAt`, `datePart`, `fractionPart`, `parseInstant`, `pad` and
+`pow10`, a text read SEQUENTIALLY where production indexes a string; `isInstantInRange`; and
+`compareInstants`. Its integers are F\*'s unbounded `int` where production holds an `int32` day, an
+integer-valued `float` second and an `int32` fraction — the integer-valued second is the one bridge
+(a float that is not whole is a value no builder makes and `validate` refuses). F\*'s `/` is
+Euclidean and extracts to a truncating `/`; production's own design is that every dividend is
+non-negative on the canonical range, the module keeps it, and writes `instantText`'s one float floor
+as a shifted integer division that is that floor from `0000-01-01` on.
+
+**The four theorems.**
+
+- **The calendar is a bijection** (`civil_valid_days`, `days_civil_days`, `civil_days_civil`,
+  `days_of_civil_mono`, `year_in_range`). `civilOfDays` answers a civil date that exists for EVERY
+  day count, `daysOfCivil` of it is the count, and `civilOfDays (daysOfCivil y m d)` is `{y; m; d}`
+  for every civil date that exists; a later date is a larger count, and the canonical range is
+  exactly `MinDay`..`MaxDay`. The one hard fact — that Hinnant's corrected quotient recovers the year
+  of the era — is proved from the quotient's monotonicity (`g_mono`) and its value at the two ends
+  of each of the 400 years of an era, those 800 values computed by normalisation (`year_ends_ok`):
+  a theorem about 146,097 day counts the solver never searches. The era's own leap day is where a
+  first draft was wrong (`year_base_succ` stops at 398; the 400-year day is the era's, not the year
+  formula's), and the falsifier found it.
+- **A date has one text** (`try_days_date_text`, `date_text_try_days`, `date_text_canonical`): every
+  day in range reads back from `dateText`, whatever `tryDays` reads is `dateText` of that day, and
+  `dateText` is canonical exactly on the range — a negative year pads to a `-` inside the width, a
+  five-digit year leaves a digit where `-` must stand.
+- **An instant has one text per unit, and the same text in every unit** (`try_instant_instant_text`,
+  `instant_text_try_instant`, `widen_keeps_instant`, `unit_of_coarsest`, `instant_text_canonical`):
+  every pair in range reads back at its unit, whatever `tryInstant u` reads is `instantText u` of the
+  pair, widening a coarser unit into a finer one scales the fraction and writes the SAME characters
+  (D143.3 as a theorem), and `unitOf` is the coarsest unit that reads the text, so `Cell.typeOf`'s
+  unit widens into exactly the columns that hold the cell. With a fraction in `[0, scale)` the text
+  is canonical exactly when the second is in range; a fraction past the scale spells another
+  instant's text — `validate`'s to refuse, and the reason theorem 19 gained its fraction premise.
+- **The order is chronological** (`compare_instants_chronological`): for two canonical texts read at
+  one unit, `compareInstants` is the order of the pairs, the second then the fraction — ordinal
+  comparison of equal-width digit runs is the order of their values (`cmp_text_digits`), the
+  fixed-width prefix is such runs around fixed separators and compares as the second through the
+  calendar's monotonicity (`cmp_prefix`), and the fraction digits trimmed of trailing zeros compare
+  as the padded fraction (`cmp_trim`) — which is why `…12.5Z` sorts above `…12.25Z` where ordinal
+  string order would not. The model ranks the alphabet by UTF-16 code for every character but
+  `CPlain`, which the alphabet does not carry; no canonical text puts two different plain
+  characters at one position, so on the arm the theorem is about the rank is production's order.
+
+**The unit reaches every model that types a cell.** `WireColumn.fst`'s `column_type` carries
+`TimestampType u`; `tag` / `of_tag` spell the four tags (`timestamp`, `timestamp_ms`, `_us`, `_ns`,
+`of_tag_inverts_tag` over ten types), `all_types` appends the three sub-second units after
+`DecimalType` as production does, `widens` has the `TimeUnit.widens` arm, `type_of` names the coarsest
+unit of a timestamp's text (`Temporal.unit_of`), `validate`'s clause (e) and the decoder read the
+model's own predicates where the host record used to supply `is_date` / `is_timestamp` (the record
+lost both fields), and `decode_cell` reads a timestamp at the column's unit (`try_instant u`) — so a
+validated timestamp decodes because its coarsest unit widens into the column's
+(`decode_cell_inverts` through `unit_of_coarsest`). Every theorem of theorem 15 re-verified over the
+unit-carrying model unchanged in statement. `ColumnRefinement.fst` holds the typed column as the
+integers (theorem 19 above says what that cost). `Query.fst` restates the unit in its own module (it
+opens nothing), `widens` has the arm, `whereFault` admits a timestamp literal into any column at
+least as fine (`predicate_fault`), and a `Timestamp` cell carries the coarsest unit beside its text —
+the module's convention for a float's carrier, since it models no text; the one price is a premise
+on the capture key's injectivity chain (`units_named`: a timestamp cell's unit is its text's, which
+every cell production builds satisfies and the oracle host computes at the edge).
+
+### The claims ladder, for this theorem
+
+1. **Proved (machine-checked, no admits).** In `Temporal.fst`: `civil_valid_days`,
+   `days_civil_days`, `civil_days_civil`, `days_of_civil_mono`, `year_in_range`,
+   `day_in_range_year`, `try_days_date_text`, `date_text_try_days`, `date_text_canonical`,
+   `try_instant_instant_text`, `instant_text_try_instant`, `widen_keeps_instant`, `unit_of_coarsest`,
+   `instant_text_canonical`, `try_instant_seconds`, `compare_instants_chronological`, with the digit,
+   padding, trimming and ordering lemmas under them. In `WireColumn.fst`: `of_tag_inverts_tag` and
+   `decode_cell_inverts` over the unit, every other theorem re-verified. In `ColumnRefinement.fst`:
+   the four theorems and theorem 19's corollaries over the integer storage, with `temporal_ok` and
+   `frac_ok` where the header says. In `Query.fst`: every theorem over the unit-carrying type, the
+   injectivity chain under `units_named`. Rows **`column-temporal-calendar`**,
+   **`column-temporal-encodings`** (promoted from Phase 422's tested row), **`column-temporal-order`**.
+   Checked by the leg at its flags (`--z3rlimit 40 --quake 3`, `80` scoped to the calendar's three
+   arithmetic theorems), `--report_assumes error` on, no `assume`, no `admit`. Each theorem was
+   measured red under one perturbation, one per prover run — the list, with the lemma each failed
+   at, is in the phase's outcome.
+2. **Tested.** **`column-temporal-differential`** — the two `Proofs.Oracle` cases: the model beside
+   `TemporalText` over the range's ends and 1,500 drawn days, fixed and corrupted date texts, 1,500
+   drawn pairs per the four units with fractions at the scale's edges and out of range, instant
+   texts of every fraction length and the ill-formed shapes, and 3,000 ordered pairs; and the go-red,
+   a model reading every text at the seconds unit, which loses on exactly the fractional draws. The
+   column and query differentials now draw every unit (an instant of a coarser unit in a finer
+   column, an instant finer than its column, temporal text that is not canonical) and cross the
+   typed column as the integers. **`column-temporal-dotnet-edge`** — the `#if !FABLE_COMPILER`
+   half of Phase 422 (`Column.ofDateOnlys` / `ofDateTimeOffsets` / `tryDateOnly` /
+   `tryDateTimeOffset`), which has no model: the column suite's own case.
+3. **Assumed, and stated as such.** Nothing new. The integer-valued second is the bridge the module's
+   header names, inside theorem 19's `column-vector-is-its-contents`; the codec's
+   `column-codec-abstractions` row LOST its calendar clause.
+4. **Not claimed.** `compareInstants` on a text that is not canonical (production falls to ordinal
+   string order, which this alphabet cannot rank for a plain character; no column holds such a text);
+   `civilOfDays` below day `-865565`, where production's truncating division and the model's Euclidean
+   one part (every day the canonical form spells is 146,000 days above it); the .NET edge.
 
 ## Next
 

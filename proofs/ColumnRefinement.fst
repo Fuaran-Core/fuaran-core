@@ -83,8 +83,22 @@
        which check nothing and convert nothing), `Vector`'s own module, and the `float` guard
        `firstUncarriableCell` asks before `JVal.nonFiniteToken` (the token is total on what the
        scan found, so the model asks the host's `finite` once).
-     - THE TEMPORAL ENCODINGS. Dates and timestamps are canonical text in this slot; Phase 422 makes
-       them integers and gives a timestamp a unit, and its model lives in this module when it lands.
+     - THE TEMPORAL ENCODINGS ARE MODELLED SINCE PHASE 430 (Phase 422 made them integers and gave a
+       timestamp a unit): a `Dates` column holds day counts and a `Timestamps` column its unit, its
+       whole epoch seconds and an optional fraction vector — `None` reading as every fraction zero,
+       Phase 422's normal form — and the cell a reader is handed is the canonical text,
+       `Temporal.date_text` / `instant_text`, with `ofCells` reading the text back through
+       `Temporal.try_days` / `try_instant`. What the calendar proves is `Temporal.fst`'s; what this
+       module adds is that the typed column is still the cell-list column THROUGH those texts,
+       which costs the theorems two premises they did not have over text columns: `ofCells` of
+       `toCells` is the column only where its temporal values are in range (`temporal_ok` — out of
+       range, `toCells` renders a text `ofCells` refuses, which is `validate`'s to catch first), and
+       the two validators agree only where a timestamp column's fractions are in `[0, scale)` and
+       its fraction vector, when held, is its seconds' length (`frac_ok`): a fraction at or past the
+       scale renders as ANOTHER instant's canonical text, which the typed clause (e) refuses and the
+       list clause cannot see, and the fraction-length clause has no list counterpart. Both premises
+       hold of every column `validate` accepts (`validate_t_good_wf`), so the round trip and the
+       image theorems stand as they were.
 
    WHY `WireColumn` IS OPENED. For the cell, the column, the table, the host record, the error
    type and the normal form the theorems are stated against — so that the refinement is a statement
@@ -104,6 +118,7 @@ module ColumnRefinement
 #set-options "--ext context_pruning"
 
 open WireCanon
+open Temporal
 open WireColumn
 
 (* ======================================================================================
@@ -132,8 +147,11 @@ type column_data (num flt: eqtype) =
   | Floats     : values:list flt       -> mask:validity -> column_data num flt
   | Bools      : values:list bool      -> mask:validity -> column_data num flt
   | Strs       : values:list (list ch) -> mask:validity -> column_data num flt
-  | Dates      : values:list (list ch) -> mask:validity -> column_data num flt
-  | Timestamps : values:list (list ch) -> mask:validity -> column_data num flt
+  (* Phase 422: days since 1970-01-01, and per unit the whole epoch seconds with an optional
+     fraction vector scaled to the unit (`None`: every fraction zero). The integers are F*'s, read
+     through `toArray` as the other cases are; a second is integer-valued (`Temporal.fst`'s header). *)
+  | Dates      : values:list int -> mask:validity -> column_data num flt
+  | Timestamps : u:time_unit -> values:list int -> fraction:option (list int) -> mask:validity -> column_data num flt
   | Decimals   : values:list (list ch) -> mask:validity -> column_data num flt
 
 (* F#: `ColumnData.Type` — the case. *)
@@ -144,7 +162,7 @@ let data_type (#num #flt: eqtype) (d: column_data num flt) : Tot column_type =
   | Bools _ _ -> BoolType
   | Strs _ _ -> StringType
   | Dates _ _ -> DateType
-  | Timestamps _ _ -> TimestampType
+  | Timestamps u _ _ _ -> TimestampType u
   | Decimals _ _ -> DecimalType
 
 (* F#: `ColumnData.Validity`. *)
@@ -155,7 +173,7 @@ let data_mask (#num #flt: eqtype) (d: column_data num flt) : Tot validity =
   | Bools _ v -> v
   | Strs _ v -> v
   | Dates _ v -> v
-  | Timestamps _ v -> v
+  | Timestamps _ _ _ v -> v
   | Decimals _ v -> v
 
 (* F#: `List.length xs` as a list — the count the extraction cannot carry, written as the shape
@@ -173,7 +191,7 @@ let data_len (#num #flt: eqtype) (d: column_data num flt) : Tot (list unit) =
   | Bools xs _ -> units xs
   | Strs xs _ -> units xs
   | Dates xs _ -> units xs
-  | Timestamps xs _ -> units xs
+  | Timestamps _ xs _ _ -> units xs
   | Decimals xs _ -> units xs
 
 (* The mask is the values' length — what `Table.validate`'s clause (e) names first when it is not
@@ -185,7 +203,7 @@ let data_wf (#num #flt: eqtype) (d: column_data num flt) : Tot bool =
   | Bools xs v -> same_len xs v
   | Strs xs v -> same_len xs v
   | Dates xs v -> same_len xs v
-  | Timestamps xs v -> same_len xs v
+  | Timestamps _ xs _ v -> same_len xs v
   | Decimals xs v -> same_len xs v
 
 (* F#: `Column = { Name; Data }`; `Column.Type` is `Data.Type`. *)
@@ -229,14 +247,36 @@ let rec cells_of (#num #flt: eqtype) (#a: Type) (mk: a -> cell num flt) (xs: lis
        | false :: vt -> Null :: cells_of mk xt vt
        | [] -> Null :: cells_of mk xt [])
 
+(* F#: `ColumnStorage.fractionAt f i` for every row of the seconds — each second beside its
+   fraction, `0` where the column holds no fraction vector and past the vector's end. The pairs
+   are what every temporal walk below reads, so one `cells_of` serves the timestamp column too. *)
+let rec zip_frac (xs fs: list int) : Tot (list (int & int)) (decreases xs) =
+  match xs with
+  | [] -> []
+  | x :: xt ->
+      (match fs with
+       | f :: ft -> (x, f) :: zip_frac xt ft
+       | [] -> (x, 0) :: zip_frac xt [])
+
+let pairs (xs: list int) (f: option (list int)) : Tot (list (int & int)) =
+  match f with
+  | Some fs -> zip_frac xs fs
+  | None -> zip_frac xs []
+
+(* F#: `Column.cell`'s two temporal arms — `Date (TemporalText.dateText xs[i])` and
+   `Timestamp (TemporalText.instantText u xs[i] (fractionAt f i))`. *)
+let date_cell (#num #flt: eqtype) (d: int) : Tot (cell num flt) = Date (date_text d)
+let ts_cell (#num #flt: eqtype) (u: time_unit) (p: int & int) : Tot (cell num flt) =
+  Timestamp (instant_text u (fst p) (snd p))
+
 let to_cells (#num #flt: eqtype) (c: typed_column num flt) : Tot (list (cell num flt)) =
   match c.col_data with
   | Ints xs v -> cells_of Int xs v
   | Floats xs v -> cells_of Float xs v
   | Bools xs v -> cells_of Bool xs v
   | Strs xs v -> cells_of Str xs v
-  | Dates xs v -> cells_of Date xs v
-  | Timestamps xs v -> cells_of Timestamp xs v
+  | Dates xs v -> cells_of date_cell xs v
+  | Timestamps u xs f v -> cells_of (ts_cell u) (pairs xs f) v
   | Decimals xs v -> cells_of Decimal xs v
 
 (* THE REFINEMENT MAP. The typed column as the list column `WireColumn` models: its name, the type
@@ -275,8 +315,8 @@ let cell_at (#num #flt: eqtype) (i: nat) (c: typed_column num flt) : Tot (cell n
      | Floats xs _ -> (match nth xs i with Some x -> Float x | None -> Null)
      | Bools xs _ -> (match nth xs i with Some x -> Bool x | None -> Null)
      | Strs xs _ -> (match nth xs i with Some x -> Str x | None -> Null)
-     | Dates xs _ -> (match nth xs i with Some x -> Date x | None -> Null)
-     | Timestamps xs _ -> (match nth xs i with Some x -> Timestamp x | None -> Null)
+     | Dates xs _ -> (match nth xs i with Some x -> date_cell x | None -> Null)
+     | Timestamps u xs f _ -> (match nth (pairs xs f) i with Some p -> ts_cell u p | None -> Null)
      | Decimals xs _ -> (match nth xs i with Some x -> Decimal x | None -> Null))
 
 (* The indexed read IS the list read: at every row the vector has, `cell i c` is the i-th of
@@ -309,8 +349,8 @@ let cell_at_is_nth_to_cells (#num #flt: eqtype) (c: typed_column num flt) (i: na
   | Floats xs v -> cells_of_nth (Float #num #flt) xs v i
   | Bools xs v -> cells_of_nth (Bool #num #flt) xs v i
   | Strs xs v -> cells_of_nth (Str #num #flt) xs v i
-  | Dates xs v -> cells_of_nth (Date #num #flt) xs v i
-  | Timestamps xs v -> cells_of_nth (Timestamp #num #flt) xs v i
+  | Dates xs v -> cells_of_nth (date_cell #num #flt) xs v i
+  | Timestamps u xs f v -> cells_of_nth (ts_cell #num #flt u) (pairs xs f) v i
   | Decimals xs v -> cells_of_nth (Decimal #num #flt) xs v i
 
 (* ======================================================================================
@@ -325,6 +365,10 @@ type picked (a: Type) =
   | Fits    : v:a -> picked a
   | Absent  : picked a
   | Outside : t:column_type -> picked a
+  (* Phase 422: a `Date` or `Timestamp` whose text is not canonical — the integer storage cannot
+     hold it; `ofCells` refuses it as the `MalformedShape` `Table.validate` named for it before
+     (`notCanonicalDate` / `notCanonicalInstant`). *)
+  | Unreadable : picked a
 
 (* F#: `outside` — `Cell.typeOf c`: `Some t` is the type that does not fit, `None` (only `Null`)
    an absent row. *)
@@ -355,14 +399,20 @@ let pick_str (#num #flt: eqtype) (c: cell num flt) : Tot (picked (list ch)) =
   | Str s -> Fits s
   | _ -> outside c
 
-let pick_date (#num #flt: eqtype) (c: cell num flt) : Tot (picked (list ch)) =
+(* F#: the `DateType` arm — `TemporalText.tryDays s`, `None` refused as `notCanonicalDate`. *)
+let pick_date (#num #flt: eqtype) (c: cell num flt) : Tot (picked int) =
   match c with
-  | Date s -> Fits s
+  | Date s -> (match try_days s with Some d -> Fits d | None -> Unreadable)
   | _ -> outside c
 
-let pick_timestamp (#num #flt: eqtype) (c: cell num flt) : Tot (picked (list ch)) =
+(* F#: the `TimestampType unit` arm — a text that is not canonical refused as `notCanonicalInstant`
+   FIRST, then `TemporalText.tryInstant unit s`, whose `None` (a fraction finer than the unit) is
+   `outside c`: the `TypeMismatch` naming the cell's own, finer, type. *)
+let pick_timestamp (#num #flt: eqtype) (u: time_unit) (c: cell num flt) : Tot (picked (int & int)) =
   match c with
-  | Timestamp s -> Fits s
+  | Timestamp s ->
+      if not (is_canonical_timestamp s) then Unreadable
+      else (match try_instant u s with Some p -> Fits p | None -> outside c)
   | _ -> outside c
 
 let pick_decimal (#num #flt: eqtype) (h: host num flt) (c: cell num flt) : Tot (picked (list ch)) =
@@ -382,6 +432,7 @@ let rec fill (#a: Type) (#num #flt: eqtype) (name: list ch) (ty: column_type) (z
   | c :: t ->
       (match pick c with
        | Outside _ -> Bad (TypeMismatch name ty)
+       | Unreadable -> Bad MalformedShape
        | Fits v ->
            (match fill name ty zero pick t with
             | Good (xs, m) -> Good (v :: xs, true :: m)
@@ -391,7 +442,36 @@ let rec fill (#a: Type) (#num #flt: eqtype) (name: list ch) (ty: column_type) (z
             | Good (xs, m) -> Good (zero :: xs, false :: m)
             | Bad e -> Bad e))
 
-(* F#: `storageOfCells`, arm for arm; the zero of each arm is `absentSlot`'s value. *)
+(* F#: the two arrays the timestamp arm's `fill` writes, read apart. *)
+let rec firsts (ps: list (int & int)) : Tot (list int) =
+  match ps with
+  | [] -> []
+  | (x, _) :: t -> x :: firsts t
+
+let rec seconds (ps: list (int & int)) : Tot (list int) =
+  match ps with
+  | [] -> []
+  | (_, f) :: t -> f :: seconds t
+
+(* F#: `normalFraction`'s scan — is any PRESENT row's fraction non-zero? *)
+let rec any_present_nonzero (fs: list int) (v: validity) : Tot bool (decreases fs) =
+  match fs with
+  | [] -> false
+  | f :: ft ->
+      (match v with
+       | true :: vt -> f <> 0 || any_present_nonzero ft vt
+       | false :: vt -> any_present_nonzero ft vt
+       | [] -> false)
+
+(* F#: `Column.normalFraction` — `None` for a seconds column and wherever no present row has a
+   fraction, else the vector. *)
+let normal_fraction (u: time_unit) (fs: list int) (v: validity) : Tot (option (list int)) =
+  match u with
+  | Seconds -> None
+  | _ -> if not (any_present_nonzero fs v) then None else Some fs
+
+(* F#: `storageOfCells`, arm for arm; the zero of each arm is `absentSlot`'s value — for a timestamp
+   the pair `(0.0, 0)` the `fill` array is created with. *)
 let storage_of_cells (#num #flt: eqtype) (h: host num flt) (name: list ch) (ty: column_type)
                      (cs: list (cell num flt))
   : Tot (res (column_data num flt)) =
@@ -413,12 +493,12 @@ let storage_of_cells (#num #flt: eqtype) (h: host num flt) (name: list ch) (ty: 
        | Good (xs, m) -> Good (Strs xs m)
        | Bad e -> Bad e)
   | DateType ->
-      (match fill name ty [] pick_date cs with
+      (match fill name ty 0 pick_date cs with
        | Good (xs, m) -> Good (Dates xs m)
        | Bad e -> Bad e)
-  | TimestampType ->
-      (match fill name ty [] pick_timestamp cs with
-       | Good (xs, m) -> Good (Timestamps xs m)
+  | TimestampType u ->
+      (match fill name ty (0, 0) (pick_timestamp u) cs with
+       | Good (ps, m) -> Good (Timestamps u (firsts ps) (normal_fraction u (seconds ps) m) m)
        | Bad e -> Bad e)
   | DecimalType ->
       (match fill name ty dec_zero (pick_decimal h) cs with
@@ -448,7 +528,30 @@ let rec eq_at_present (#a: eqtype) (xs ys: list a) (v: validity) : Tot bool (dec
 let present_equal (#a: eqtype) (xs: list a) (vx: validity) (ys: list a) (vy: validity) : Tot bool =
   same_len xs ys && vx = vy && eq_at_present xs ys vx
 
-(* F#: `ColumnData.Equals` — the same case, and `presentEqual` over it. *)
+(* F#: the fractions of a column of `n` rows, materialised — `fractionAt` at every row: the vector's
+   element while it has one, `0` past its end and for `None`. *)
+let rec materialise (n: list unit) (fs: list int) : Tot (list int) (decreases n) =
+  match n with
+  | [] -> []
+  | _ :: nt ->
+      (match fs with
+       | f :: ft -> f :: materialise nt ft
+       | [] -> 0 :: materialise nt [])
+
+let frac_list (n: list unit) (f: option (list int)) : Tot (list int) =
+  match f with
+  | Some fs -> materialise n fs
+  | None -> materialise n []
+
+(* F#: `ColumnStorage.sameFraction n vx fx fy` — the materialised fractions agree at every present
+   row (two `None`s trivially). *)
+let same_fraction (n: list unit) (vx: validity) (fx fy: option (list int)) : Tot bool =
+  match fx, fy with
+  | None, None -> true
+  | _ -> eq_at_present (frac_list n fx) (frac_list n fy) vx
+
+(* F#: `ColumnData.Equals` — the same case, and `presentEqual` over it; a timestamp column also one
+   unit and `sameFraction`. *)
 let data_eq (#num #flt: eqtype) (d e: column_data num flt) : Tot bool =
   match d, e with
   | Ints xs vx, Ints ys vy -> present_equal xs vx ys vy
@@ -456,7 +559,8 @@ let data_eq (#num #flt: eqtype) (d e: column_data num flt) : Tot bool =
   | Bools xs vx, Bools ys vy -> present_equal xs vx ys vy
   | Strs xs vx, Strs ys vy -> present_equal xs vx ys vy
   | Dates xs vx, Dates ys vy -> present_equal xs vx ys vy
-  | Timestamps xs vx, Timestamps ys vy -> present_equal xs vx ys vy
+  | Timestamps ux xs fx vx, Timestamps uy ys fy vy ->
+      ux = uy && present_equal xs vx ys vy && same_fraction (units xs) vx fx fy
   | Decimals xs vx, Decimals ys vy -> present_equal xs vx ys vy
   | _ -> false
 
@@ -486,8 +590,15 @@ let rec first_present_bad (#a: Type) (bad: a -> bool) (xs: list a) (v: validity)
    `not (isCanonical s)` for the three texts. *)
 let not_finite (#num #flt: eqtype) (h: host num flt) (f: flt) : Tot bool = not (h.finite f)
 let not_canonical (s: list ch) : Tot bool = not (is_canonical s)
-let not_date (#num #flt: eqtype) (h: host num flt) (s: list ch) : Tot bool = not (h.is_date s)
-let not_timestamp (#num #flt: eqtype) (h: host num flt) (s: list ch) : Tot bool = not (h.is_timestamp s)
+(* Phase 422: `not (TemporalText.isDayInRange d)` and `not (isInstantInRange u second fraction)`. *)
+let day_out (d: int) : Tot bool = not (is_day_in_range d)
+let instant_out (u: time_unit) (p: int & int) : Tot bool = not (is_instant_in_range u (fst p) (snd p))
+
+(* F#: `fs.Length <> xs.Length` — a fraction vector held that is not the seconds' length. *)
+let frac_ragged (xs: list int) (f: option (list int)) : Tot bool =
+  match f with
+  | Some fs -> not (same_len fs xs)
+  | None -> false
 
 (* F#: `Table.firstUncarriableCell` — a mask that is not the values' length first
    (`LengthMismatch`), then the case's scan at the present rows: an int, bool or string column has
@@ -507,9 +618,10 @@ let first_uncarriable_t (#num #flt: eqtype) (h: host num flt) (c: typed_column n
      | Decimals xs v ->
          if first_present_bad not_canonical xs v then Some MalformedShape else None
      | Dates xs v ->
-         if first_present_bad (not_date h) xs v then Some MalformedShape else None
-     | Timestamps xs v ->
-         if first_present_bad (not_timestamp h) xs v then Some MalformedShape else None)
+         if first_present_bad day_out xs v then Some MalformedShape else None
+     | Timestamps u xs f v ->
+         if frac_ragged xs f then Some MalformedShape
+         else if first_present_bad (instant_out u) (pairs xs f) v then Some MalformedShape else None)
 
 (* F#: `t.Columns |> List.map _.Name`. *)
 let rec t_column_names (#num #flt: eqtype) (cs: list (typed_column num flt))
@@ -619,6 +731,12 @@ let rec validity_json_t (#num #flt: eqtype) (n: list unit) (v: validity)
        | b :: vt -> JBool b :: validity_json_t nt vt
        | [] -> JBool false :: validity_json_t nt [])
 
+(* F#: `columnJson`'s two temporal element writers — `JStr (TemporalText.dateText xs[i])` and
+   `JStr (instantText u xs[i] (fractionAt f i))`. *)
+let date_json (#num #flt: eqtype) (d: int) : Tot (jval num flt) = JStr (date_text d)
+let ts_json (#num #flt: eqtype) (u: time_unit) (p: int & int) : Tot (jval num flt) =
+  JStr (instant_text u (fst p) (snd p))
+
 (* F#: `columnJson`. *)
 let column_json_t (#num #flt: eqtype) (h: host num flt) (c: typed_column num flt)
   : Tot (jval num flt) =
@@ -628,8 +746,8 @@ let column_json_t (#num #flt: eqtype) (h: host num flt) (c: typed_column num flt
      | Floats xs v -> values_json_t h FloatType JFloat xs v
      | Bools xs v -> values_json_t h BoolType JBool xs v
      | Strs xs v -> values_json_t h StringType JStr xs v
-     | Dates xs v -> values_json_t h DateType JStr xs v
-     | Timestamps xs v -> values_json_t h TimestampType JStr xs v
+     | Dates xs v -> values_json_t h DateType date_json xs v
+     | Timestamps u xs f v -> values_json_t h (TimestampType u) (ts_json u) (pairs xs f) v
      | Decimals xs v -> values_json_t h DecimalType JStr xs v) in
   JObj [ (values_key, JArr values);
          (validity_key, JArr (validity_json_t (data_len c.col_data) (col_mask c))) ]
@@ -700,6 +818,20 @@ let rec cells_of_length (#num #flt: eqtype) (#a: Type) (mk: a -> cell num flt) (
        | _ :: vt -> cells_of_length mk xt vt
        | [] -> cells_of_length mk xt [])
 
+[@@ noextract_to "FSharp"]
+let rec zip_frac_length (xs fs: list int)
+  : Lemma (ensures List.Tot.length (zip_frac xs fs) = List.Tot.length xs) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: xt -> (match fs with _ :: ft -> zip_frac_length xt ft | [] -> zip_frac_length xt [])
+
+[@@ noextract_to "FSharp"]
+let pairs_length (xs: list int) (f: option (list int))
+  : Lemma (ensures List.Tot.length (pairs xs f) = List.Tot.length xs) =
+  match f with
+  | Some fs -> zip_frac_length xs fs
+  | None -> zip_frac_length xs []
+
 (* `toCells` has the values' length — the length every clause of `validate` compares. *)
 [@@ noextract_to "FSharp"]
 let to_cells_length (#num #flt: eqtype) (c: typed_column num flt)
@@ -709,8 +841,8 @@ let to_cells_length (#num #flt: eqtype) (c: typed_column num flt)
   | Floats xs v -> cells_of_length (Float #num #flt) xs v; units_length xs
   | Bools xs v -> cells_of_length (Bool #num #flt) xs v; units_length xs
   | Strs xs v -> cells_of_length (Str #num #flt) xs v; units_length xs
-  | Dates xs v -> cells_of_length (Date #num #flt) xs v; units_length xs
-  | Timestamps xs v -> cells_of_length (Timestamp #num #flt) xs v; units_length xs
+  | Dates xs v -> cells_of_length (date_cell #num #flt) xs v; units_length xs
+  | Timestamps u xs f v -> cells_of_length (ts_cell #num #flt u) (pairs xs f) v; pairs_length xs f; units_length xs
   | Decimals xs v -> cells_of_length (Decimal #num #flt) xs v; units_length xs
 
 (* ---- 5b. THEOREM `to_cells_of_cells`: `toCells (ofCells n ty cs)` is `norm_cells ty cs` ----
@@ -724,7 +856,8 @@ let pick_agrees (#a: Type) (#num #flt: eqtype) (h: host num flt) (ty: column_typ
   (match pick c with
    | Fits v -> mk v == norm_cell h ty c
    | Absent -> c == Null
-   | Outside _ -> True)
+   | Outside _ -> True
+   | Unreadable -> True)
 
 [@@ noextract_to "FSharp"]
 let rec fill_cells_of (#a: Type) (#num #flt: eqtype) (h: host num flt) (name: list ch)
@@ -756,18 +889,78 @@ let pick_bool_agrees (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
 let pick_str_agrees (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
   : Lemma (ensures pick_agrees h StringType (pick_str #num #flt) Str c) = ()
 
+(* The two temporal arms: a text that reads to a day or a pair renders back to ITSELF
+   (`Temporal.date_text_try_days`, `instant_text_try_instant`), so the cell `toCells` hands back is
+   the cell `ofCells` was given. *)
 [@@ noextract_to "FSharp"]
 let pick_date_agrees (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
-  : Lemma (ensures pick_agrees h DateType (pick_date #num #flt) Date c) = ()
+  : Lemma (ensures pick_agrees h DateType (pick_date #num #flt) (date_cell #num #flt) c) =
+  match c with
+  | Date s -> (match try_days s with Some d -> date_text_try_days s d | None -> ())
+  | _ -> ()
 
 [@@ noextract_to "FSharp"]
-let pick_timestamp_agrees (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
-  : Lemma (ensures pick_agrees h TimestampType (pick_timestamp #num #flt) Timestamp c) = ()
+let pick_timestamp_agrees (#num #flt: eqtype) (h: host num flt) (u: time_unit) (c: cell num flt)
+  : Lemma (ensures pick_agrees h (TimestampType u) (pick_timestamp #num #flt u) (ts_cell #num #flt u) c) =
+  match c with
+  | Timestamp s ->
+      (match try_instant u s with
+       | Some (sec, f) -> instant_text_try_instant u s sec f
+       | None -> ())
+  | _ -> ()
 
 [@@ noextract_to "FSharp"]
 let pick_decimal_agrees (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
   : Lemma (ensures pick_agrees h DecimalType (pick_decimal h) Decimal c) = ()
 #pop-options
+
+(* The timestamp arm hands its fractions to `normalFraction`, which may drop them to `None`: that
+   reads the same at every present row — a seconds column's pairs carry no fraction (`fill_seconds_zero`:
+   `try_instant Seconds` reads a zero-digit fraction), and a vector no present row sets is zeros there. *)
+[@@ noextract_to "FSharp"]
+let rec fill_seconds_zero (#num #flt: eqtype) (name: list ch) (ty: column_type) (cs: list (cell num flt))
+  : Lemma (ensures (match fill name ty (0, 0) (pick_timestamp #num #flt Seconds) cs with
+                    | Good (ps, m) -> not (any_present_nonzero (seconds ps) m)
+                    | Bad _ -> True))
+          (decreases cs) =
+  match cs with
+  | [] -> ()
+  | c :: t ->
+      fill_seconds_zero name ty t;
+      (match c with
+       | Timestamp s ->
+           (match try_instant Seconds s with
+            | Some (sec, f) -> try_instant_seconds s sec f
+            | None -> ())
+       | _ -> ())
+
+[@@ noextract_to "FSharp"]
+let rec zip_unzip (ps: list (int & int))
+  : Lemma (ensures zip_frac (firsts ps) (seconds ps) == ps) (decreases ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t -> zip_unzip t
+
+[@@ noextract_to "FSharp"]
+let rec cells_of_zero_frac (#num #flt: eqtype) (u: time_unit) (ps: list (int & int)) (m: validity)
+  : Lemma (requires not (any_present_nonzero (seconds ps) m))
+          (ensures cells_of (ts_cell #num #flt u) (zip_frac (firsts ps) []) m == cells_of (ts_cell #num #flt u) ps m)
+          (decreases ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t ->
+      (match m with
+       | _ :: mt -> cells_of_zero_frac #num #flt u t mt
+       | [] -> cells_of_zero_frac #num #flt u t [])
+
+[@@ noextract_to "FSharp"]
+let pairs_normal (#num #flt: eqtype) (u: time_unit) (ps: list (int & int)) (m: validity)
+  : Lemma (requires (u = Seconds ==> not (any_present_nonzero (seconds ps) m)))
+          (ensures cells_of (ts_cell #num #flt u) (pairs (firsts ps) (normal_fraction u (seconds ps) m)) m
+                   == cells_of (ts_cell #num #flt u) ps m) =
+  match normal_fraction u (seconds ps) m with
+  | Some _ -> zip_unzip ps
+  | None -> cells_of_zero_frac #num #flt u ps m
 
 (* THEOREM. When `ofCells n ty cs` builds, its `toCells` are the cells with each widened `Int`
    normalised exactly as decode normalises it — `WireColumn.norm_cells`, the same function. *)
@@ -792,10 +985,13 @@ let to_cells_of_cells (#num #flt: eqtype) (h: host num flt) (name: list ch) (ty:
       fill_cells_of h name ty [] pick_str Str cs
   | DateType ->
       FStar.Classical.forall_intro (pick_date_agrees #num #flt h);
-      fill_cells_of h name ty [] pick_date Date cs
-  | TimestampType ->
-      FStar.Classical.forall_intro (pick_timestamp_agrees #num #flt h);
-      fill_cells_of h name ty [] pick_timestamp Timestamp cs
+      fill_cells_of h name ty 0 pick_date date_cell cs
+  | TimestampType u ->
+      FStar.Classical.forall_intro (pick_timestamp_agrees #num #flt h u);
+      fill_cells_of h name ty (0, 0) (pick_timestamp u) (ts_cell u) cs;
+      (match fill name ty (0, 0) (pick_timestamp u) cs with
+       | Good (ps, m) -> (if u = Seconds then fill_seconds_zero #num #flt name ty cs else ()); pairs_normal #num #flt u ps m
+       | Bad _ -> ())
   | DecimalType ->
       FStar.Classical.forall_intro (pick_decimal_agrees h);
       fill_cells_of h name ty dec_zero (pick_decimal h) Decimal cs
@@ -814,11 +1010,27 @@ let rec all_fit (#num #flt: eqtype) (ty: column_type) (cs: list (cell num flt))
   | [] -> true
   | c :: t -> fits ty c && all_fit ty t
 
-(* Each arm's `pick` answers `Outside` for exactly the cells that do not fit. *)
+(* A temporal text the typed storage can READ (Phase 422): a canonical date in a date column, a
+   canonical instant in a timestamp column; every other cell, and every other column, reads. *)
+let readable_in (#num #flt: eqtype) (ty: column_type) (c: cell num flt) : Tot bool =
+  match ty, c with
+  | DateType, Date s -> is_canonical_date s
+  | TimestampType _, Timestamp s -> is_canonical_timestamp s
+  | _ -> true
+
+let rec all_readable (#num #flt: eqtype) (ty: column_type) (cs: list (cell num flt))
+  : Tot bool (decreases cs) =
+  match cs with
+  | [] -> true
+  | c :: t -> readable_in ty c && all_readable ty t
+
+(* Each arm's `pick` answers `Outside` for exactly the readable cells that do not fit, and
+   `Unreadable` for exactly the cells that do not read. *)
 [@@ noextract_to "FSharp"]
 let pick_outside (#a: Type) (#num #flt: eqtype) (ty: column_type)
                  (pick: cell num flt -> picked a) (c: cell num flt) : prop =
-  Outside? (pick c) <==> not (fits ty c)
+  (Outside? (pick c) <==> (readable_in ty c && not (fits ty c))) /\
+  (Unreadable? (pick c) <==> not (readable_in ty c))
 
 #push-options "--ifuel 2"
 [@@ noextract_to "FSharp"]
@@ -841,9 +1053,14 @@ let pick_str_outside (#num #flt: eqtype) (c: cell num flt)
 let pick_date_outside (#num #flt: eqtype) (c: cell num flt)
   : Lemma (ensures pick_outside DateType (pick_date #num #flt) c) = ()
 
+(* A canonical instant fits the column exactly when its coarsest unit widens into the column's,
+   which is exactly when `try_instant` at the column's unit reads it (`Temporal.unit_of_coarsest`). *)
 [@@ noextract_to "FSharp"]
-let pick_timestamp_outside (#num #flt: eqtype) (c: cell num flt)
-  : Lemma (ensures pick_outside TimestampType (pick_timestamp #num #flt) c) = ()
+let pick_timestamp_outside (#num #flt: eqtype) (u: time_unit) (c: cell num flt)
+  : Lemma (ensures pick_outside (TimestampType u) (pick_timestamp #num #flt u) c) =
+  match c with
+  | Timestamp s -> if is_canonical_timestamp s then unit_of_coarsest u s else ()
+  | _ -> ()
 
 [@@ noextract_to "FSharp"]
 let pick_decimal_outside (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
@@ -854,20 +1071,22 @@ let pick_decimal_outside (#num #flt: eqtype) (h: host num flt) (c: cell num flt)
 let rec fill_good_iff (#a: Type) (#num #flt: eqtype) (name: list ch) (ty: column_type) (zero: a)
                       (pick: cell num flt -> picked a) (cs: list (cell num flt))
   : Lemma (requires (forall (c: cell num flt). pick_outside ty pick c))
-          (ensures (Good? (fill name ty zero pick cs) <==> all_fit ty cs) /\
-                   (not (all_fit ty cs) ==> fill name ty zero pick cs == Bad (TypeMismatch name ty)))
+          (ensures (Good? (fill name ty zero pick cs) <==> (all_fit ty cs && all_readable ty cs)) /\
+                   (all_readable ty cs && not (all_fit ty cs) ==> fill name ty zero pick cs == Bad (TypeMismatch name ty)))
           (decreases cs) =
   match cs with
   | [] -> ()
   | c :: t -> fill_good_iff name ty zero pick t
 
-(* THEOREM. `ofCells n ty cs` builds exactly when every present cell's type widens into `ty`, and
-   refuses otherwise as the `TypeMismatch` naming the column and its type. *)
+(* THEOREM. `ofCells n ty cs` builds exactly when every present cell's type widens into `ty` and
+   every temporal text reads, and refuses otherwise — as the `TypeMismatch` naming the column and
+   its type when every text reads (a text that does not is the `MalformedShape` of the first that
+   does not, in row order, which `fill` decides as production's loop does). *)
 [@@ noextract_to "FSharp"]
 let of_cells_good_iff (#num #flt: eqtype) (h: host num flt) (name: list ch) (ty: column_type)
                       (cs: list (cell num flt))
-  : Lemma (ensures (Good? (of_cells h name ty cs) <==> all_fit ty cs) /\
-                   (not (all_fit ty cs) ==> of_cells h name ty cs == Bad (TypeMismatch name ty))) =
+  : Lemma (ensures (Good? (of_cells h name ty cs) <==> (all_fit ty cs && all_readable ty cs)) /\
+                   (all_readable ty cs && not (all_fit ty cs) ==> of_cells h name ty cs == Bad (TypeMismatch name ty))) =
   match ty with
   | IntType ->
       FStar.Classical.forall_intro (pick_int_outside #num #flt);
@@ -883,21 +1102,21 @@ let of_cells_good_iff (#num #flt: eqtype) (h: host num flt) (name: list ch) (ty:
       fill_good_iff name ty [] pick_str cs
   | DateType ->
       FStar.Classical.forall_intro (pick_date_outside #num #flt);
-      fill_good_iff name ty [] pick_date cs
-  | TimestampType ->
-      FStar.Classical.forall_intro (pick_timestamp_outside #num #flt);
-      fill_good_iff name ty [] pick_timestamp cs
+      fill_good_iff name ty 0 pick_date cs
+  | TimestampType u ->
+      FStar.Classical.forall_intro (pick_timestamp_outside #num #flt u);
+      fill_good_iff name ty (0, 0) (pick_timestamp u) cs
   | DecimalType ->
       FStar.Classical.forall_intro (pick_decimal_outside h);
       fill_good_iff name ty dec_zero (pick_decimal h) cs
 
-(* `WireColumn`'s clause (e) asks `outside` before anything else, so a list column it passes is one
-   every cell of fits. *)
+(* `WireColumn`'s clause (e) asks `outside` before anything else and the canonical form after, so
+   a list column it passes is one every cell of fits and every temporal text of reads. *)
 [@@ noextract_to "FSharp"]
 let rec first_uncarriable_none_fits (#num #flt: eqtype) (h: host num flt) (name: list ch)
                                     (ty: column_type) (cs: list (cell num flt))
   : Lemma (requires None? (first_uncarriable h name ty cs))
-          (ensures all_fit ty cs)
+          (ensures all_fit ty cs /\ all_readable ty cs)
           (decreases cs) =
   match cs with
   | [] -> ()
@@ -928,14 +1147,39 @@ let rec zeroed (#a: eqtype) (zero: a) (xs: list a) (v: validity) : Tot bool (dec
        | false :: vt -> x = zero && zeroed zero xt vt
        | [] -> x = zero && zeroed zero xt [])
 
+(* Every present element satisfies `ok` — the premise the temporal arms need of a column before
+   `ofCells` can read back what `toCells` wrote: a day in range, an instant in range. *)
+let rec all_present (#a: Type) (ok: a -> bool) (xs: list a) (v: validity) : Tot bool (decreases xs) =
+  match xs with
+  | [] -> true
+  | x :: xt ->
+      (match v with
+       | true :: vt -> ok x && all_present ok xt vt
+       | false :: vt -> all_present ok xt vt
+       | [] -> true)
+
+let always (#a: Type) (_: a) : Tot bool = true
+
+[@@ noextract_to "FSharp"]
+let rec all_present_always (#a: Type) (xs: list a) (v: validity)
+  : Lemma (ensures all_present always xs v) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: xt -> (match v with _ :: vt -> all_present_always xt vt | [] -> ())
+
+(* The temporal in-range predicates, as `all_present` asks them. *)
+let instant_in (u: time_unit) (p: int & int) : Tot bool = is_instant_in_range u (fst p) (snd p)
+
 (* For one arm: refilling the cells a case's walk produced gives back the mask and the present
-   elements, and the elements themselves where the absent rows held the zero. *)
+   elements, and the elements themselves where the absent rows held the zero — where every present
+   element is one its `pick` reads back (`ok`), which for a text column is every element and for
+   a temporal column the ones in range. *)
 [@@ noextract_to "FSharp"]
 let rec fill_cells_of_inverts (#a: eqtype) (#num #flt: eqtype) (name: list ch) (ty: column_type)
                               (zero: a) (pick: cell num flt -> picked a) (mk: a -> cell num flt)
-                              (xs: list a) (v: validity)
-  : Lemma (requires same_len xs v /\
-                    (forall (x: a). pick (mk x) == Fits x) /\
+                              (ok: a -> bool) (xs: list a) (v: validity)
+  : Lemma (requires same_len xs v /\ all_present ok xs v /\
+                    (forall (x: a). ok x ==> pick (mk x) == Fits x) /\
                     pick (Null #num #flt) == Absent)
           (ensures (match fill name ty zero pick (cells_of mk xs v) with
                     | Good (ys, m) ->
@@ -944,26 +1188,228 @@ let rec fill_cells_of_inverts (#a: eqtype) (#num #flt: eqtype) (name: list ch) (
                     | Bad _ -> False))
           (decreases xs) =
   match xs, v with
-  | x :: xt, _ :: vt -> fill_cells_of_inverts name ty zero pick mk xt vt
+  | x :: xt, _ :: vt -> fill_cells_of_inverts name ty zero pick mk ok xt vt
   | _ -> ()
 
-(* THEOREM. For every well-formed typed column, `ofCells` of its `toCells` is a column EQUAL to it
-   under `ColumnData.Equals` — one name, one case, one mask, equal at every present row. *)
+(* The two temporal picks read back what the two temporal makers wrote, in range
+   (`Temporal.try_days_date_text`, `try_instant_instant_text`). *)
+[@@ noextract_to "FSharp"]
+let pick_date_reads (#num #flt: eqtype) (d: int)
+  : Lemma (requires is_day_in_range d) (ensures pick_date #num #flt (date_cell d) == Fits d) =
+  try_days_date_text d
+
+[@@ noextract_to "FSharp"]
+let pick_timestamp_reads (#num #flt: eqtype) (u: time_unit) (p: int & int)
+  : Lemma (requires instant_in u p) (ensures pick_timestamp #num #flt u (ts_cell u p) == Fits p) =
+  try_instant_instant_text u (fst p) (snd p)
+
+(* The temporal values of a typed column are in range at every present row — true of every column
+   `validate` accepts and of every column `ofCells` or decode builds. *)
+let temporal_ok (#num #flt: eqtype) (c: typed_column num flt) : Tot bool =
+  match c.col_data with
+  | Dates xs v -> all_present is_day_in_range xs v
+  | Timestamps u xs f v -> all_present (instant_in u) (pairs xs f) v
+  | _ -> true
+
+(* The pairs of a column, read apart, are its seconds and its materialised fractions. *)
+[@@ noextract_to "FSharp"]
+let rec zip_firsts (xs fs: list int) : Lemma (ensures firsts (zip_frac xs fs) == xs) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: xt -> (match fs with _ :: ft -> zip_firsts xt ft | [] -> zip_firsts xt [])
+
+[@@ noextract_to "FSharp"]
+let rec zip_seconds (xs fs: list int)
+  : Lemma (ensures seconds (zip_frac xs fs) == materialise (units xs) fs) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: xt -> (match fs with _ :: ft -> zip_seconds xt ft | [] -> zip_seconds xt [])
+
+[@@ noextract_to "FSharp"]
+let pairs_apart (xs: list int) (f: option (list int))
+  : Lemma (ensures firsts (pairs xs f) == xs /\ seconds (pairs xs f) == frac_list (units xs) f) =
+  match f with
+  | Some fs -> zip_firsts xs fs; zip_seconds xs fs
+  | None -> zip_firsts xs []; zip_seconds xs []
+
+(* `units` of two lists of one length are one list. *)
+[@@ noextract_to "FSharp"]
+let rec units_eq_length (#a #b: Type) (xs: list a) (ys: list b)
+  : Lemma (requires List.Tot.length xs = List.Tot.length ys) (ensures units xs == units ys) (decreases xs) =
+  match xs, ys with
+  | _ :: xt, _ :: yt -> units_eq_length xt yt
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec firsts_length (ps: list (int & int))
+  : Lemma (ensures same_len (firsts ps) ps /\ same_len (seconds ps) ps) (decreases ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t -> firsts_length t
+
+[@@ noextract_to "FSharp"]
+let rec same_len_trans (#a #b #c: Type) (xs: list a) (ys: list b) (zs: list c)
+  : Lemma (requires same_len xs ys /\ same_len ys zs) (ensures same_len xs zs) (decreases xs) =
+  match xs, ys, zs with
+  | _ :: xt, _ :: yt, _ :: zt -> same_len_trans xt yt zt
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec same_len_sym (#a #b: Type) (xs: list a) (ys: list b)
+  : Lemma (requires same_len xs ys) (ensures same_len ys xs) (decreases xs) =
+  match xs, ys with
+  | _ :: xt, _ :: yt -> same_len_sym xt yt
+  | _ -> ()
+
+(* Pairs equal at the present rows have seconds and fractions equal there. *)
+[@@ noextract_to "FSharp"]
+let rec eq_at_present_apart (ps qs: list (int & int)) (v: validity)
+  : Lemma (requires eq_at_present ps qs v)
+          (ensures eq_at_present (firsts ps) (firsts qs) v /\ eq_at_present (seconds ps) (seconds qs) v)
+          (decreases ps) =
+  match ps, qs with
+  | _ :: pt, _ :: qt -> (match v with _ :: vt -> eq_at_present_apart pt qt vt | [] -> ())
+  | _ -> ()
+
+(* `materialise` at the vector's own length is the vector; at any length over no vector, zeros. *)
+[@@ noextract_to "FSharp"]
+let rec materialise_id (n: list unit) (fs: list int)
+  : Lemma (requires same_len fs n) (ensures materialise n fs == fs) (decreases n) =
+  match n, fs with
+  | _ :: nt, _ :: ft -> materialise_id nt ft
+  | _ -> ()
+
+(* The fractions `normalFraction` keeps or drops read the same at every present row as the vector
+   it was handed. *)
+[@@ noextract_to "FSharp"]
+let rec dropped_reads_zero (n: list unit) (fs: list int) (v: validity)
+  : Lemma (requires not (any_present_nonzero fs v) /\ same_len fs n)
+          (ensures eq_at_present (materialise n []) fs v) (decreases n) =
+  match n, fs with
+  | _ :: nt, _ :: ft -> (match v with _ :: vt -> dropped_reads_zero nt ft vt | [] -> ())
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec eq_at_present_trans (#a: eqtype) (xs ys zs: list a) (v: validity)
+  : Lemma (requires same_len xs ys /\ same_len ys zs /\ eq_at_present xs ys v /\ eq_at_present ys zs v)
+          (ensures eq_at_present xs zs v)
+          (decreases xs) =
+  match xs, ys, zs with
+  | _ :: xt, _ :: yt, _ :: zt -> (match v with _ :: vt -> eq_at_present_trans xt yt zt vt | [] -> ())
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec materialise_len (n: list unit) (fs: list int)
+  : Lemma (ensures same_len (materialise n fs) n) (decreases n) =
+  match n with
+  | [] -> ()
+  | _ :: nt -> (match fs with _ :: ft -> materialise_len nt ft | [] -> materialise_len nt [])
+
+[@@ noextract_to "FSharp"]
+let rec eq_at_present_refl (#a: eqtype) (xs: list a) (v: validity)
+  : Lemma (ensures eq_at_present xs xs v) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | _ :: xt -> (match v with _ :: vt -> eq_at_present_refl xt vt | [] -> ())
+
+(* A seconds column's present pairs in range carry a zero fraction. *)
+[@@ noextract_to "FSharp"]
+let rec seconds_in_range_zero (ps: list (int & int)) (v: validity)
+  : Lemma (requires all_present (instant_in Seconds) ps v)
+          (ensures not (any_present_nonzero (seconds ps) v)) (decreases ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t -> (match v with _ :: vt -> seconds_in_range_zero t vt | [] -> ())
+
+(* Lists equal at the present rows have a present non-zero at the same time. *)
+[@@ noextract_to "FSharp"]
+let rec any_present_nonzero_eq (a b: list int) (v: validity)
+  : Lemma (requires same_len a b /\ eq_at_present a b v)
+          (ensures any_present_nonzero a v == any_present_nonzero b v) (decreases a) =
+  match a, b with
+  | _ :: at, _ :: bt -> (match v with _ :: vt -> any_present_nonzero_eq at bt vt | [] -> ())
+  | _ -> ()
+
+(* The rebuilt timestamp column equals the original under `ColumnData.Equals`: one unit, the
+   seconds equal at every present row, the fractions equal there whether kept or dropped. *)
+[@@ noextract_to "FSharp"]
+let rebuilt_timestamps_eq (#num #flt: eqtype) (u: time_unit) (xs: list int) (f: option (list int))
+                          (v: validity) (ps: list (int & int))
+  : Lemma (requires same_len xs v /\ all_present (instant_in u) (pairs xs f) v /\
+                    same_len ps (pairs xs f) /\ eq_at_present ps (pairs xs f) v)
+          (ensures data_eq #num #flt (Timestamps u (firsts ps) (normal_fraction u (seconds ps) v) v)
+                                     (Timestamps u xs f v)) =
+  let n = units xs in
+  pairs_length xs f;
+  pairs_apart xs f;
+  firsts_length ps;
+  eq_at_present_apart ps (pairs xs f) v;
+  (* lengths: firsts ps ~ ps ~ pairs xs f ~ xs *)
+  same_len_trans (firsts ps) ps (pairs xs f);
+  same_len_is_length (pairs xs f) xs;
+  same_len_is_length (firsts ps) (pairs xs f);
+  same_len_is_length (firsts ps) xs;
+  units_eq_length (firsts ps) xs;
+  same_len_trans (seconds ps) ps (pairs xs f);
+  same_len_is_length (seconds ps) (pairs xs f);
+  same_len_is_length (seconds ps) xs;
+  units_length xs;
+  same_len_is_length (seconds ps) n;
+  materialise_id n (seconds ps);
+  (match normal_fraction u (seconds ps) v with
+   | Some _ -> ()
+   | None ->
+       (if u = Seconds then
+          (seconds_in_range_zero (pairs xs f) v;
+           firsts_length (pairs xs f);
+           same_len_is_length (seconds (pairs xs f)) (pairs xs f);
+           same_len_is_length (seconds ps) ps;
+           same_len_is_length ps (pairs xs f);
+           same_len_is_length (seconds ps) (seconds (pairs xs f));
+           any_present_nonzero_eq (seconds ps) (seconds (pairs xs f)) v)
+        else ());
+       (* seconds ps reads zero at present rows, and equals the materialised f there *)
+       dropped_reads_zero n (seconds ps) v;
+       (match f with
+        | None -> eq_at_present_refl (materialise n []) v
+        | Some fs ->
+            materialise_len n [];
+            materialise_len n fs;
+            same_len_sym (materialise n fs) n;
+            same_len_sym (seconds ps) n;
+            same_len_trans (materialise n []) n (seconds ps);
+            same_len_trans (seconds ps) n (materialise n fs);
+            eq_at_present_trans (materialise n []) (seconds ps) (frac_list n f) v))
+
+(* THEOREM. For every well-formed typed column whose temporal values are in range, `ofCells` of its
+   `toCells` is a column EQUAL to it under `ColumnData.Equals` — one name, one case, one mask, equal
+   at every present row, a timestamp column's fractions equal there whether kept or dropped. *)
 #push-options "--ifuel 2"
 [@@ noextract_to "FSharp"]
 let of_cells_to_cells (#num #flt: eqtype) (h: host num flt) (c: typed_column num flt)
-  : Lemma (requires wf c)
+  : Lemma (requires wf c /\ temporal_ok c)
           (ensures (match of_cells h c.col_name (col_type c) (to_cells c) with
                     | Good d -> col_eq d c
                     | Bad _ -> False)) =
   match c.col_data with
-  | Ints xs v -> fill_cells_of_inverts c.col_name IntType h.zero_int (pick_int #num #flt) (Int #num #flt) xs v
-  | Floats xs v -> fill_cells_of_inverts c.col_name FloatType h.zero_float (pick_float h) (Float #num #flt) xs v
-  | Bools xs v -> fill_cells_of_inverts c.col_name BoolType false (pick_bool #num #flt) (Bool #num #flt) xs v
-  | Strs xs v -> fill_cells_of_inverts c.col_name StringType [] (pick_str #num #flt) (Str #num #flt) xs v
-  | Dates xs v -> fill_cells_of_inverts c.col_name DateType [] (pick_date #num #flt) (Date #num #flt) xs v
-  | Timestamps xs v -> fill_cells_of_inverts c.col_name TimestampType [] (pick_timestamp #num #flt) (Timestamp #num #flt) xs v
-  | Decimals xs v -> fill_cells_of_inverts c.col_name DecimalType dec_zero (pick_decimal h) (Decimal #num #flt) xs v
+  | Ints xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name IntType h.zero_int (pick_int #num #flt) (Int #num #flt) always xs v
+  | Floats xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name FloatType h.zero_float (pick_float h) (Float #num #flt) always xs v
+  | Bools xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name BoolType false (pick_bool #num #flt) (Bool #num #flt) always xs v
+  | Strs xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name StringType [] (pick_str #num #flt) (Str #num #flt) always xs v
+  | Dates xs v ->
+      FStar.Classical.forall_intro (FStar.Classical.move_requires (pick_date_reads #num #flt));
+      fill_cells_of_inverts c.col_name DateType 0 (pick_date #num #flt) (date_cell #num #flt) is_day_in_range xs v
+  | Timestamps u xs f v ->
+      FStar.Classical.forall_intro (FStar.Classical.move_requires (pick_timestamp_reads #num #flt u));
+      pairs_length xs f;
+      same_len_is_length (pairs xs f) xs;
+      same_len_is_length xs v;
+      same_len_is_length (pairs xs f) v;
+      fill_cells_of_inverts c.col_name (TimestampType u) (0, 0) (pick_timestamp #num #flt u) (ts_cell #num #flt u) (instant_in u) (pairs xs f) v;
+      (match fill c.col_name (TimestampType u) (0, 0) (pick_timestamp #num #flt u) (cells_of (ts_cell #num #flt u) (pairs xs f) v) with
+       | Good (ps, m) -> rebuilt_timestamps_eq #num #flt u xs f v ps
+       | Bad _ -> ())
+  | Decimals xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name DecimalType dec_zero (pick_decimal h) (Decimal #num #flt) always xs v
 
 (* The absent rows hold the type's zero — `absentSlot`'s value, which is what `ofCells` and decode
    write there. *)
@@ -973,24 +1419,43 @@ let zeroed_col (#num #flt: eqtype) (h: host num flt) (c: typed_column num flt) :
   | Floats xs v -> zeroed h.zero_float xs v
   | Bools xs v -> zeroed false xs v
   | Strs xs v -> zeroed [] xs v
-  | Dates xs v -> zeroed [] xs v
-  | Timestamps xs v -> zeroed [] xs v
+  | Dates xs v -> zeroed 0 xs v
+  | Timestamps _ xs f v -> zeroed (0, 0) (pairs xs f) v
   | Decimals xs v -> zeroed dec_zero xs v
 
-(* THEOREM, the exact form: on a well-formed column whose absent rows hold the zero, `ofCells` of
-   its `toCells` is the column itself. *)
+(* The fraction vector is in Phase 422's normal form: `None` for a seconds column and where no
+   present row has a fraction, else the vector, of the seconds' length — what `ofCells` and decode
+   build through `normalFraction`. *)
+let normal_frac (#num #flt: eqtype) (c: typed_column num flt) : Tot bool =
+  match c.col_data with
+  | Timestamps u xs f v ->
+      (match f with Some fs -> same_len fs xs | None -> true)
+      && f = normal_fraction u (frac_list (units xs) f) v
+  | _ -> true
+
+(* THEOREM, the exact form: on a well-formed column in range whose absent rows hold the zero and
+   whose fraction vector is in its normal form, `ofCells` of its `toCells` is the column itself. *)
 [@@ noextract_to "FSharp"]
 let of_cells_to_cells_exact (#num #flt: eqtype) (h: host num flt) (c: typed_column num flt)
-  : Lemma (requires wf c /\ zeroed_col h c)
+  : Lemma (requires wf c /\ temporal_ok c /\ zeroed_col h c /\ normal_frac c)
           (ensures of_cells h c.col_name (col_type c) (to_cells c) == Good c) =
   match c.col_data with
-  | Ints xs v -> fill_cells_of_inverts c.col_name IntType h.zero_int (pick_int #num #flt) (Int #num #flt) xs v
-  | Floats xs v -> fill_cells_of_inverts c.col_name FloatType h.zero_float (pick_float h) (Float #num #flt) xs v
-  | Bools xs v -> fill_cells_of_inverts c.col_name BoolType false (pick_bool #num #flt) (Bool #num #flt) xs v
-  | Strs xs v -> fill_cells_of_inverts c.col_name StringType [] (pick_str #num #flt) (Str #num #flt) xs v
-  | Dates xs v -> fill_cells_of_inverts c.col_name DateType [] (pick_date #num #flt) (Date #num #flt) xs v
-  | Timestamps xs v -> fill_cells_of_inverts c.col_name TimestampType [] (pick_timestamp #num #flt) (Timestamp #num #flt) xs v
-  | Decimals xs v -> fill_cells_of_inverts c.col_name DecimalType dec_zero (pick_decimal h) (Decimal #num #flt) xs v
+  | Ints xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name IntType h.zero_int (pick_int #num #flt) (Int #num #flt) always xs v
+  | Floats xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name FloatType h.zero_float (pick_float h) (Float #num #flt) always xs v
+  | Bools xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name BoolType false (pick_bool #num #flt) (Bool #num #flt) always xs v
+  | Strs xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name StringType [] (pick_str #num #flt) (Str #num #flt) always xs v
+  | Dates xs v ->
+      FStar.Classical.forall_intro (FStar.Classical.move_requires (pick_date_reads #num #flt));
+      fill_cells_of_inverts c.col_name DateType 0 (pick_date #num #flt) (date_cell #num #flt) is_day_in_range xs v
+  | Timestamps u xs f v ->
+      FStar.Classical.forall_intro (FStar.Classical.move_requires (pick_timestamp_reads #num #flt u));
+      pairs_length xs f;
+      same_len_is_length (pairs xs f) xs;
+      same_len_is_length xs v;
+      same_len_is_length (pairs xs f) v;
+      fill_cells_of_inverts c.col_name (TimestampType u) (0, 0) (pick_timestamp #num #flt u) (ts_cell #num #flt u) (instant_in u) (pairs xs f) v;
+      pairs_apart xs f
+  | Decimals xs v -> all_present_always xs v; fill_cells_of_inverts c.col_name DecimalType dec_zero (pick_decimal h) (Decimal #num #flt) always xs v
 #pop-options
 
 (* Every column `ofCells` builds is well-formed and zeroed — so the exact form covers it. *)
@@ -1005,19 +1470,65 @@ let rec fill_wf_zeroed (#a: eqtype) (#num #flt: eqtype) (name: list ch) (ty: col
   | [] -> ()
   | _ :: t -> fill_wf_zeroed name ty zero pick t
 
+(* Zeros are not a fraction any present row has, and the pairs of a zeroed fill stay zeroed when
+   their fractions are dropped. *)
+[@@ noextract_to "FSharp"]
+let rec any_present_nonzero_zeros (n: list unit) (v: validity)
+  : Lemma (ensures not (any_present_nonzero (materialise n []) v)) (decreases n) =
+  match n with
+  | [] -> ()
+  | _ :: nt -> (match v with _ :: vt -> any_present_nonzero_zeros nt vt | [] -> ())
+
+[@@ noextract_to "FSharp"]
+let rec zeroed_dropped (ps: list (int & int)) (m: validity)
+  : Lemma (requires zeroed (0, 0) ps m) (ensures zeroed (0, 0) (zip_frac (firsts ps) []) m) (decreases ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t -> (match m with _ :: mt -> zeroed_dropped t mt | [] -> zeroed_dropped t [])
+
+(* What the timestamp arm builds from a zeroed fill: a mask of the seconds' length, zeroed pairs
+   whether the fractions were kept or dropped, and a fraction vector in its normal form. *)
+[@@ noextract_to "FSharp"]
+let timestamps_built_normal (u: time_unit) (ps: list (int & int)) (m: validity)
+  : Lemma (requires same_len ps m /\ zeroed (0, 0) ps m)
+          (ensures (let xs = firsts ps in
+                    let nf = normal_fraction u (seconds ps) m in
+                    same_len xs m /\ zeroed (0, 0) (pairs xs nf) m /\
+                    (match nf with Some fs -> same_len fs xs | None -> true) /\
+                    nf == normal_fraction u (frac_list (units xs) nf) m)) =
+  let xs = firsts ps in
+  let n = units xs in
+  firsts_length ps;
+  same_len_trans xs ps m;
+  same_len_is_length (seconds ps) ps;
+  same_len_is_length xs ps;
+  same_len_is_length (seconds ps) xs;
+  units_length xs;
+  same_len_is_length (seconds ps) n;
+  materialise_id n (seconds ps);
+  (match normal_fraction u (seconds ps) m with
+   | Some _ -> zip_unzip ps
+   | None -> zeroed_dropped ps m; any_present_nonzero_zeros n m)
+
+(* Every column `ofCells` builds is well-formed, zeroed and in the fraction normal form — so the
+   exact form covers it (with its temporal values in range, which `ofCells` reads them as). *)
 [@@ noextract_to "FSharp"]
 let of_cells_wf_zeroed (#num #flt: eqtype) (h: host num flt) (name: list ch) (ty: column_type)
                        (cs: list (cell num flt))
   : Lemma (ensures (match of_cells h name ty cs with
-                    | Good c -> wf c /\ zeroed_col h c
+                    | Good c -> wf c /\ zeroed_col h c /\ normal_frac c
                     | Bad _ -> True)) =
   match ty with
   | IntType -> fill_wf_zeroed name ty h.zero_int (pick_int #num #flt) cs
   | FloatType -> fill_wf_zeroed name ty h.zero_float (pick_float h) cs
   | BoolType -> fill_wf_zeroed name ty false (pick_bool #num #flt) cs
   | StringType -> fill_wf_zeroed name ty [] (pick_str #num #flt) cs
-  | DateType -> fill_wf_zeroed name ty [] (pick_date #num #flt) cs
-  | TimestampType -> fill_wf_zeroed name ty [] (pick_timestamp #num #flt) cs
+  | DateType -> fill_wf_zeroed name ty 0 (pick_date #num #flt) cs
+  | TimestampType u ->
+      fill_wf_zeroed name ty (0, 0) (pick_timestamp #num #flt u) cs;
+      (match fill name ty (0, 0) (pick_timestamp #num #flt u) cs with
+       | Good (ps, m) -> timestamps_built_normal u ps m
+       | Bad _ -> ())
   | DecimalType -> fill_wf_zeroed name ty dec_zero (pick_decimal h) cs
 
 (* WELL-FORMEDNESS IS NEEDED, exhibited: a one-element int column with an EMPTY mask reads its one
@@ -1112,11 +1623,13 @@ let rec first_present_bad_never (#a: Type) (xs: list a) (v: validity)
        | _ :: vt -> first_present_bad_never xt vt
        | [] -> first_present_bad_never xt [])
 
+(* Over the present elements that satisfy `ok` — every element for the text columns, the pairs
+   with a fraction in `[0, scale)` for a timestamp column. *)
 [@@ noextract_to "FSharp"]
 let rec first_uncarriable_scan (#a: Type) (#num #flt: eqtype) (h: host num flt) (name: list ch)
                                (ty: column_type) (mk: a -> cell num flt) (bad: a -> bool)
-                               (e: column_error) (xs: list a) (v: validity)
-  : Lemma (requires (forall (x: a). scan_agrees h name ty mk bad e x))
+                               (e: column_error) (ok: a -> bool) (xs: list a) (v: validity)
+  : Lemma (requires (forall (x: a). ok x ==> scan_agrees h name ty mk bad e x) /\ all_present ok xs v)
           (ensures first_uncarriable h name ty (cells_of mk xs v) ==
                    (if first_present_bad bad xs v then Some e else None))
           (decreases xs) =
@@ -1124,9 +1637,9 @@ let rec first_uncarriable_scan (#a: Type) (#num #flt: eqtype) (h: host num flt) 
   | [] -> ()
   | x :: xt ->
       (match v with
-       | true :: vt -> first_uncarriable_scan h name ty mk bad e xt vt
-       | false :: vt -> first_uncarriable_scan h name ty mk bad e xt vt
-       | [] -> first_uncarriable_scan h name ty mk bad e xt []; first_present_bad_nil bad xt)
+       | true :: vt -> first_uncarriable_scan h name ty mk bad e ok xt vt
+       | false :: vt -> first_uncarriable_scan h name ty mk bad e ok xt vt
+       | [] -> first_uncarriable_scan h name ty mk bad e ok xt []; first_present_bad_nil bad xt)
 
 #push-options "--ifuel 2"
 [@@ noextract_to "FSharp"]
@@ -1149,53 +1662,87 @@ let float_scan (#num #flt: eqtype) (h: host num flt) (name: list ch) (x: flt)
 let decimal_scan (#num #flt: eqtype) (h: host num flt) (name: list ch) (x: list ch)
   : Lemma (ensures scan_agrees h name DecimalType (Decimal #num #flt) not_canonical MalformedShape x) = ()
 
+(* The date scan: `date_text` is canonical exactly on the range (`Temporal.date_text_canonical`). *)
 [@@ noextract_to "FSharp"]
-let date_scan (#num #flt: eqtype) (h: host num flt) (name: list ch) (x: list ch)
-  : Lemma (ensures scan_agrees h name DateType (Date #num #flt) (not_date h) MalformedShape x) = ()
+let date_scan (#num #flt: eqtype) (h: host num flt) (name: list ch) (x: int)
+  : Lemma (ensures scan_agrees h name DateType (date_cell #num #flt) day_out MalformedShape x) =
+  date_text_canonical x
 
+(* A fraction in `[0, scale)` — the one premise the timestamp scan needs (header). *)
+let frac_in (u: time_unit) (p: int & int) : Tot bool = 0 <= snd p && snd p < unit_scale u
+
+(* The timestamp scan, for a pair whose fraction is in range: the text is canonical exactly when the
+   second is in range (`Temporal.instant_text_canonical`), and a canonical text's coarsest unit
+   widens into the column's (`try_instant_instant_text`, `unit_of_coarsest`), so the list clause
+   never reads it as outside. *)
 [@@ noextract_to "FSharp"]
-let timestamp_scan (#num #flt: eqtype) (h: host num flt) (name: list ch) (x: list ch)
-  : Lemma (ensures scan_agrees h name TimestampType (Timestamp #num #flt) (not_timestamp h) MalformedShape x) = ()
+let timestamp_scan (#num #flt: eqtype) (h: host num flt) (name: list ch) (u: time_unit) (p: int & int)
+  : Lemma (requires frac_in u p)
+          (ensures scan_agrees h name (TimestampType u) (ts_cell #num #flt u) (instant_out u) MalformedShape p) =
+  instant_text_canonical u (fst p) (snd p);
+  if is_instant_in_range u (fst p) (snd p)
+  then (try_instant_instant_text u (fst p) (snd p);
+        unit_of_coarsest u (instant_text u (fst p) (snd p)))
+  else ()
 #pop-options
+
+(* The two premises of a timestamp column the list model cannot see: its fraction vector, when
+   held, is its seconds' length, and every present fraction is in `[0, scale)`. True of every
+   column clause (e) accepts. *)
+let frac_ok (#num #flt: eqtype) (c: typed_column num flt) : Tot bool =
+  match c.col_data with
+  | Timestamps u xs f v -> not (frac_ragged xs f) && all_present (frac_in u) (pairs xs f) v
+  | _ -> true
+
+let rec all_frac_ok (#num #flt: eqtype) (cs: list (typed_column num flt)) : Tot bool (decreases cs) =
+  match cs with
+  | [] -> true
+  | c :: t -> frac_ok c && all_frac_ok t
 
 (* On a well-formed column the typed scan is the list model's clause (e) — the one arm the list
    model has and the typed scan does not, a cell outside the column's type, is never reached:
    `toCells` writes a cell of the column's own type at every present row. *)
 [@@ noextract_to "FSharp"]
 let first_uncarriable_agree (#num #flt: eqtype) (h: host num flt) (c: typed_column num flt)
-  : Lemma (requires wf c)
+  : Lemma (requires wf c /\ frac_ok c)
           (ensures first_uncarriable h c.col_name (col_type c) (to_cells c) == first_uncarriable_t h c) =
   let n = c.col_name in
   match c.col_data with
   | Ints xs v ->
       FStar.Classical.forall_intro (int_scan h n);
-      first_uncarriable_scan h n IntType Int (never #num) MalformedShape xs v;
+      all_present_always xs v;
+      first_uncarriable_scan h n IntType Int (never #num) MalformedShape always xs v;
       first_present_bad_never xs v
   | Bools xs v ->
       FStar.Classical.forall_intro (bool_scan #num #flt h n);
-      first_uncarriable_scan h n BoolType Bool (never #bool) MalformedShape xs v;
+      all_present_always xs v;
+      first_uncarriable_scan h n BoolType Bool (never #bool) MalformedShape always xs v;
       first_present_bad_never xs v
   | Strs xs v ->
       FStar.Classical.forall_intro (str_scan #num #flt h n);
-      first_uncarriable_scan h n StringType Str (never #(list ch)) MalformedShape xs v;
+      all_present_always xs v;
+      first_uncarriable_scan h n StringType Str (never #(list ch)) MalformedShape always xs v;
       first_present_bad_never xs v
   | Floats xs v ->
       FStar.Classical.forall_intro (float_scan h n);
-      first_uncarriable_scan h n FloatType Float (not_finite h) (NonFiniteFloat n) xs v
+      all_present_always xs v;
+      first_uncarriable_scan h n FloatType Float (not_finite h) (NonFiniteFloat n) always xs v
   | Decimals xs v ->
       FStar.Classical.forall_intro (decimal_scan #num #flt h n);
-      first_uncarriable_scan h n DecimalType Decimal not_canonical MalformedShape xs v
+      all_present_always xs v;
+      first_uncarriable_scan h n DecimalType Decimal not_canonical MalformedShape always xs v
   | Dates xs v ->
       FStar.Classical.forall_intro (date_scan #num #flt h n);
-      first_uncarriable_scan h n DateType Date (not_date h) MalformedShape xs v
-  | Timestamps xs v ->
-      FStar.Classical.forall_intro (timestamp_scan #num #flt h n);
-      first_uncarriable_scan h n TimestampType Timestamp (not_timestamp h) MalformedShape xs v
+      all_present_always xs v;
+      first_uncarriable_scan h n DateType date_cell day_out MalformedShape always xs v
+  | Timestamps u xs f v ->
+      FStar.Classical.forall_intro (FStar.Classical.move_requires (timestamp_scan #num #flt h n u));
+      first_uncarriable_scan h n (TimestampType u) (ts_cell u) (instant_out u) MalformedShape (frac_in u) (pairs xs f) v
 
 [@@ noextract_to "FSharp"]
 let rec find_column_wf (#num #flt: eqtype) (n: list ch) (cs: list (typed_column num flt))
-  : Lemma (requires all_wf cs)
-          (ensures (match t_find_column n cs with Some c -> wf c | None -> True))
+  : Lemma (requires all_wf cs /\ all_frac_ok cs)
+          (ensures (match t_find_column n cs with Some c -> wf c /\ frac_ok c | None -> True))
           (decreases cs) =
   match cs with
   | [] -> ()
@@ -1204,7 +1751,7 @@ let rec find_column_wf (#num #flt: eqtype) (n: list ch) (cs: list (typed_column 
 [@@ noextract_to "FSharp"]
 let rec cells_fault_agree (#num #flt: eqtype) (h: host num flt) (s: list (list ch & column_type))
                           (cs: list (typed_column num flt))
-  : Lemma (requires all_wf cs)
+  : Lemma (requires all_wf cs /\ all_frac_ok cs)
           (ensures cells_fault h s (to_list_columns cs) == t_cells_fault h s cs)
           (decreases s) =
   match s with
@@ -1217,11 +1764,12 @@ let rec cells_fault_agree (#num #flt: eqtype) (h: host num flt) (s: list (list c
        | None -> ());
       cells_fault_agree h rest cs
 
-(* THEOREM. On every typed table whose columns are well-formed, the typed `validate` answers what
-   the list model's `validate` answers of the table's image. *)
+(* THEOREM. On every typed table whose columns are well-formed and whose timestamp fractions are in
+   range, the typed `validate` answers what the list model's `validate` answers of the table's
+   image. *)
 [@@ noextract_to "FSharp"]
 let validate_agrees (#num #flt: eqtype) (h: host num flt) (t: typed_table num flt)
-  : Lemma (requires all_wf t.tcolumns)
+  : Lemma (requires all_wf t.tcolumns /\ all_frac_ok t.tcolumns)
           (ensures validate_t h t == validate h (to_list_table t)) =
   column_names_agree t.tcolumns;
   type_fault_agree t.tschema t.tcolumns;
@@ -1248,17 +1796,33 @@ let rec not_in_nil_mem (names against: list (list ch))
   | [] -> ()
   | n :: rest -> not_in_nil_mem rest against
 
-(* A column found by a schema name passed clause (e), so it is well-formed. *)
+(* A present pair clause (e) accepts has its fraction in range. *)
+[@@ noextract_to "FSharp"]
+let rec in_range_frac_in (u: time_unit) (ps: list (int & int)) (v: validity)
+  : Lemma (requires not (first_present_bad (instant_out u) ps v)) (ensures all_present (frac_in u) ps v)
+          (decreases ps) =
+  match ps with
+  | [] -> ()
+  | _ :: t -> (match v with _ :: vt -> in_range_frac_in u t vt | [] -> ())
+
+(* A column found by a schema name passed clause (e), so it is well-formed, its fraction vector its
+   seconds' length and its fractions in range. *)
 [@@ noextract_to "FSharp"]
 let rec cells_fault_none_wf (#num #flt: eqtype) (h: host num flt) (s: list (list ch & column_type))
                             (cs: list (typed_column num flt)) (n: list ch)
   : Lemma (requires None? (t_cells_fault h s cs) /\ mem n (schema_names s))
-          (ensures (match t_find_column n cs with Some c -> wf c | None -> True))
+          (ensures (match t_find_column n cs with Some c -> wf c /\ frac_ok c | None -> True))
           (decreases s) =
   match s with
   | [] -> ()
   | (m, _) :: rest ->
-      if m = n then ()
+      if m = n then
+        (match t_find_column n cs with
+         | Some c ->
+             (match c.col_data with
+              | Timestamps u xs f v -> if wf c && not (frac_ragged xs f) then in_range_frac_in u (pairs xs f) v else ()
+              | _ -> ())
+         | None -> ())
       else cells_fault_none_wf h rest cs n
 
 (* A column of the list has its name among the list's names. *)
@@ -1286,8 +1850,8 @@ let rec own_name_finds (#num #flt: eqtype) (cs: list (typed_column num flt)) (c:
 
 [@@ noextract_to "FSharp"]
 let rec all_wf_of_each (#num #flt: eqtype) (cs: list (typed_column num flt))
-  : Lemma (requires (forall (c: typed_column num flt). List.Tot.memP c cs ==> wf c))
-          (ensures all_wf cs)
+  : Lemma (requires (forall (c: typed_column num flt). List.Tot.memP c cs ==> wf c /\ frac_ok c))
+          (ensures all_wf cs /\ all_frac_ok cs)
           (decreases cs) =
   match cs with
   | [] -> ()
@@ -1305,19 +1869,20 @@ let validate_t_good (#num #flt: eqtype) (h: host num flt) (t: typed_table num fl
                    None? (t_ragged t.tcolumns) /\
                    None? (t_cells_fault h t.tschema t.tcolumns)) = ()
 
-(* THEOREM. A typed table the typed `validate` accepts has well-formed columns: so the agreement
-   above covers every table either validator accepts, and the map is a bijection there. *)
+(* THEOREM. A typed table the typed `validate` accepts has well-formed columns with their fractions
+   in range: so the agreement above covers every table either validator accepts, and the map is a
+   bijection there. *)
 [@@ noextract_to "FSharp"]
 let validate_t_good_wf (#num #flt: eqtype) (h: host num flt) (t: typed_table num flt)
   : Lemma (requires validate_t h t == Good ())
-          (ensures all_wf t.tcolumns) =
+          (ensures all_wf t.tcolumns /\ all_frac_ok t.tcolumns) =
   let cs = t.tcolumns in
   let s = t.tschema in
   validate_t_good h t;
   first_dup_none [] (t_column_names cs);
   not_in_nil_mem (t_column_names cs) (schema_names s);
   let each (c: typed_column num flt)
-    : Lemma (requires List.Tot.memP c cs) (ensures wf c) =
+    : Lemma (requires List.Tot.memP c cs) (ensures wf c /\ frac_ok c) =
     mem_in_names cs c;
     own_name_finds cs c;
     cells_fault_none_wf h s cs c.col_name in
@@ -1371,11 +1936,11 @@ let bool_wrap (#num #flt: eqtype) (h: host num flt) (x: bool)
 let str_wrap (#num #flt: eqtype) (h: host num flt) (x: list ch)
   : Lemma (ensures wrap_agrees h StringType (Str #num #flt) (JStr #num #flt) x) = ()
 [@@ noextract_to "FSharp"]
-let date_wrap (#num #flt: eqtype) (h: host num flt) (x: list ch)
-  : Lemma (ensures wrap_agrees h DateType (Date #num #flt) (JStr #num #flt) x) = ()
+let date_wrap (#num #flt: eqtype) (h: host num flt) (x: int)
+  : Lemma (ensures wrap_agrees h DateType (date_cell #num #flt) (date_json #num #flt) x) = ()
 [@@ noextract_to "FSharp"]
-let timestamp_wrap (#num #flt: eqtype) (h: host num flt) (x: list ch)
-  : Lemma (ensures wrap_agrees h TimestampType (Timestamp #num #flt) (JStr #num #flt) x) = ()
+let timestamp_wrap (#num #flt: eqtype) (h: host num flt) (u: time_unit) (p: int & int)
+  : Lemma (ensures wrap_agrees h (TimestampType u) (ts_cell #num #flt u) (ts_json #num #flt u) p) = ()
 [@@ noextract_to "FSharp"]
 let decimal_wrap (#num #flt: eqtype) (h: host num flt) (x: list ch)
   : Lemma (ensures wrap_agrees h DecimalType (Decimal #num #flt) (JStr #num #flt) x) = ()
@@ -1405,12 +1970,14 @@ let column_json_agree (#num #flt: eqtype) (h: host num flt) (c: typed_column num
       validity_json_agree #(list ch) #num #flt Str xs v
   | Dates xs v ->
       FStar.Classical.forall_intro (date_wrap #num #flt h);
-      values_json_agree h DateType Date JStr xs v;
-      validity_json_agree #(list ch) #num #flt Date xs v
-  | Timestamps xs v ->
-      FStar.Classical.forall_intro (timestamp_wrap #num #flt h);
-      values_json_agree h TimestampType Timestamp JStr xs v;
-      validity_json_agree #(list ch) #num #flt Timestamp xs v
+      values_json_agree h DateType date_cell date_json xs v;
+      validity_json_agree #int #num #flt date_cell xs v
+  | Timestamps u xs f v ->
+      FStar.Classical.forall_intro (timestamp_wrap #num #flt h u);
+      values_json_agree h (TimestampType u) (ts_cell u) (ts_json u) (pairs xs f) v;
+      validity_json_agree #(int & int) #num #flt (ts_cell u) (pairs xs f) v;
+      pairs_length xs f;
+      units_eq_length (pairs xs f) xs
   | Decimals xs v ->
       FStar.Classical.forall_intro (decimal_wrap #num #flt h);
       values_json_agree h DecimalType Decimal JStr xs v;
@@ -1445,7 +2012,7 @@ let encode_agrees (#num #flt: eqtype) (h: host num flt) (src: typed_source num f
 (* And the guarded entry point, on the tables the two validators agree about. *)
 [@@ noextract_to "FSharp"]
 let try_encode_agrees (#num #flt: eqtype) (h: host num flt) (src: typed_source num flt)
-  : Lemma (requires (match src with TEmbedded t -> all_wf t.tcolumns | TRef _ -> True))
+  : Lemma (requires (match src with TEmbedded t -> all_wf t.tcolumns /\ all_frac_ok t.tcolumns | TRef _ -> True))
           (ensures try_encode_json_t h src == try_encode_json h (to_list_source src)) =
   encode_agrees h src;
   (match src with
@@ -1482,8 +2049,8 @@ let norm_cells_vacuous (#num #flt: eqtype) (h: host num flt) (c: typed_column nu
   | Floats xs v -> norm_cells_fixed h FloatType Float xs v
   | Bools xs v -> norm_cells_fixed h BoolType Bool xs v
   | Strs xs v -> norm_cells_fixed h StringType Str xs v
-  | Dates xs v -> norm_cells_fixed h DateType Date xs v
-  | Timestamps xs v -> norm_cells_fixed h TimestampType Timestamp xs v
+  | Dates xs v -> norm_cells_fixed h DateType date_cell xs v
+  | Timestamps u xs f v -> norm_cells_fixed h (TimestampType u) (ts_cell u) (pairs xs f) v
   | Decimals xs v -> norm_cells_fixed h DecimalType Decimal xs v
 
 (* The normal form of a typed table: one column per schema entry, the table's own column of that
@@ -1562,12 +2129,14 @@ let normal_table_agree (#num #flt: eqtype) (h: host num flt) (t: typed_table num
 
 (* ---- THEOREM 1 OF `WireColumn`, OF THE TYPED COLUMN: decode's image re-validates typed ---- *)
 
-(* A well-formed typed table whose image is what decode answered is one the typed `validate`
-   accepts: `decode_image_is_valid` through `validate_agrees`. *)
+(* A well-formed typed table with its fractions in range whose image is what decode answered is one
+   the typed `validate` accepts: `decode_image_is_valid` through `validate_agrees`. (Production's
+   decode builds every fraction in range, through `tryInstant`; the premise names what the list
+   image cannot carry.) *)
 [@@ noextract_to "FSharp"]
 let typed_decode_image_is_valid (#num #flt: eqtype) (h: host num flt) (el: jval num flt)
                                 (t: typed_table num flt)
-  : Lemma (requires all_wf t.tcolumns /\ decode_json h el == Good (Embedded (to_list_table t)))
+  : Lemma (requires all_wf t.tcolumns /\ all_frac_ok t.tcolumns /\ decode_json h el == Good (Embedded (to_list_table t)))
           (ensures validate_t h t == Good ()) =
   decode_image_is_valid h el (to_list_table t);
   validate_agrees h t
@@ -1784,8 +2353,6 @@ let twin_host : host nat nat = {
   finite = (fun _ -> true);
   zero_int = 0;
   zero_float = 0;
-  is_date = (fun _ -> true);
-  is_timestamp = (fun _ -> true);
 }
 
 noeq type twin = { tname : string; tholds : unit -> bool }
@@ -1824,6 +2391,25 @@ let twins : list twin = [
       && not (same_mask [(); ()] AllValid (Mask [true; true; true]))
       && not (same_mask [(); ()] (Mask [true; false]) AllValid)
       && to_mask [(); ()] AllValid = [true; true]) };
+  { tname = "temporal-columns-render-their-text-and-read-it-back";
+    tholds = (fun () ->
+      let d : typed_column nat nat = { col_name = []; col_data = Dates [0; 20512] [true; true] } in
+      let t : typed_column nat nat =
+        { col_name = []; col_data = Timestamps Milliseconds [45296; 0] (Some [500; 0]) [true; false] } in
+      to_cells d = [Date (date_text 0); Date (date_text 20512)]
+      && of_cells twin_host [] DateType (to_cells d) = Good d
+      && to_cells t = [Timestamp (instant_text Milliseconds 45296 500); Null]
+      && of_cells twin_host [] (TimestampType Milliseconds) (to_cells t) = Good t
+      && of_cells twin_host [] (TimestampType Seconds) (to_cells t) = Bad (TypeMismatch [] (TimestampType Seconds))
+      && of_cells twin_host [] (TimestampType Milliseconds) [Timestamp [CPlain "x"]] = Bad MalformedShape
+      && first_uncarriable_t twin_host ({ col_name = []; col_data = Timestamps Milliseconds [0] (Some [1000]) [true] })
+         = Some MalformedShape) };
+  { tname = "a-dropped-fraction-reads-as-zeros";
+    tholds = (fun () ->
+      data_eq (Timestamps #nat #nat Milliseconds [7] None [true]) (Timestamps Milliseconds [7] (Some [0]) [true])
+      && not (data_eq (Timestamps #nat #nat Milliseconds [7] None [true]) (Timestamps Milliseconds [7] (Some [1]) [true]))
+      && normal_fraction Milliseconds [0; 5] [true; false] = None
+      && normal_fraction Milliseconds [0; 5] [true; true] = Some [0; 5]) };
   { tname = "data-eq-ignores-an-absent-element";
     tholds = (fun () ->
       data_eq (Ints #nat #nat [7; 9] [false; true]) (Ints #nat #nat [0; 9] [false; true])

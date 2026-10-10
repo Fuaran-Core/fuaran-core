@@ -258,15 +258,6 @@
     },
     {
       "members": [
-        "TemporalText.isCanonicalDate",
-        "TemporalText.isCanonicalTimestamp"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "Canonical date and timestamp spelling checks; example-tested at the boundaries.",
-      "standIn": "tests/Fuaran.Core.Tests/ColumnTests.fs"
-    },
-    {
-      "members": [
         "ConfRng.choose",
         "ConfRng.intBelow",
         "ConfRng.next",

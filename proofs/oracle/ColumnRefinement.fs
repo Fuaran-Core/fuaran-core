@@ -7,8 +7,8 @@ type column_data<'num, 'flt> =
 | Floats of Prims.list<'flt> * validity
 | Bools of Prims.list<Prims.bool> * validity
 | Strs of Prims.list<Prims.list<WireCanon.ch>> * validity
-| Dates of Prims.list<Prims.list<WireCanon.ch>> * validity
-| Timestamps of Prims.list<Prims.list<WireCanon.ch>> * validity
+| Dates of Prims.list<Prims.int> * validity
+| Timestamps of Temporal.time_unit * Prims.list<Prims.int> * FStar_Pervasives_Native.option<Prims.list<Prims.int>> * validity
 | Decimals of Prims.list<Prims.list<WireCanon.ch>> * validity
 
 
@@ -118,7 +118,7 @@ let __proj__Dates__item__mask = (fun ( projectee  :  column_data<'num, 'flt> ) -
 
 
 let uu___is_Timestamps = (fun ( projectee  :  column_data<'num, 'flt> ) -> (match (projectee) with
-| Timestamps (values, mask) -> begin
+| Timestamps (u, values, fraction, mask) -> begin
      true
      end
 | uu___ -> begin
@@ -126,14 +126,26 @@ let uu___is_Timestamps = (fun ( projectee  :  column_data<'num, 'flt> ) -> (matc
      end))
 
 
+let __proj__Timestamps__item__u = (fun ( projectee  :  column_data<'num, 'flt> ) -> (match (projectee) with
+| Timestamps (u, values, fraction, mask) -> begin
+     u
+     end))
+
+
 let __proj__Timestamps__item__values = (fun ( projectee  :  column_data<'num, 'flt> ) -> (match (projectee) with
-| Timestamps (values, mask) -> begin
+| Timestamps (u, values, fraction, mask) -> begin
      values
      end))
 
 
+let __proj__Timestamps__item__fraction = (fun ( projectee  :  column_data<'num, 'flt> ) -> (match (projectee) with
+| Timestamps (u, values, fraction, mask) -> begin
+     fraction
+     end))
+
+
 let __proj__Timestamps__item__mask = (fun ( projectee  :  column_data<'num, 'flt> ) -> (match (projectee) with
-| Timestamps (values, mask) -> begin
+| Timestamps (u, values, fraction, mask) -> begin
      mask
      end))
 
@@ -175,8 +187,8 @@ let data_type = (fun ( d  :  column_data<'num, 'flt> ) -> (match (d) with
 | Dates (uu___, uu___1) -> begin
      WireColumn.DateType
      end
-| Timestamps (uu___, uu___1) -> begin
-     WireColumn.TimestampType
+| Timestamps (u, uu___, uu___1, uu___2) -> begin
+     WireColumn.TimestampType (u)
      end
 | Decimals (uu___, uu___1) -> begin
      WireColumn.DecimalType
@@ -199,7 +211,7 @@ let data_mask = (fun ( d  :  column_data<'num, 'flt> ) -> (match (d) with
 | Dates (uu___, v) -> begin
      v
      end
-| Timestamps (uu___, v) -> begin
+| Timestamps (uu___, uu___1, uu___2, v) -> begin
      v
      end
 | Decimals (uu___, v) -> begin
@@ -232,7 +244,7 @@ let data_len = (fun ( d  :  column_data<'num, 'flt> ) -> (match (d) with
 | Dates (xs, uu___) -> begin
      (units xs)
      end
-| Timestamps (xs, uu___) -> begin
+| Timestamps (uu___, xs, uu___1, uu___2) -> begin
      (units xs)
      end
 | Decimals (xs, uu___) -> begin
@@ -256,7 +268,7 @@ let data_wf = (fun ( d  :  column_data<'num, 'flt> ) -> (match (d) with
 | Dates (xs, v) -> begin
      (WireColumn.same_len xs v)
      end
-| Timestamps (xs, v) -> begin
+| Timestamps (uu___, xs, uu___1, v) -> begin
      (WireColumn.same_len xs v)
      end
 | Decimals (xs, v) -> begin
@@ -362,6 +374,36 @@ let rec cells_of = (fun ( mk  :  'a  ->  WireColumn.cell<'num, 'flt> ) ( xs  :  
      end))
 
 
+let rec zip_frac : Prims.list<Prims.int>  ->  Prims.list<Prims.int>  ->  Prims.list<(Prims.int * Prims.int)> = (fun ( xs  :  Prims.list<Prims.int> ) ( fs  :  Prims.list<Prims.int> ) -> (match (xs) with
+| [] -> begin
+     []
+     end
+| (x)::xt -> begin
+     (match (fs) with
+| (f)::ft -> begin
+     (((x), (f)))::(zip_frac xt ft)
+     end
+| [] -> begin
+     (((x), ((Prims.parse_int "0"))))::(zip_frac xt [])
+     end)
+     end))
+
+
+let pairs : Prims.list<Prims.int>  ->  FStar_Pervasives_Native.option<Prims.list<Prims.int>>  ->  Prims.list<(Prims.int * Prims.int)> = (fun ( xs  :  Prims.list<Prims.int> ) ( f  :  FStar_Pervasives_Native.option<Prims.list<Prims.int>> ) -> (match (f) with
+| FStar_Pervasives_Native.Some (fs) -> begin
+     (zip_frac xs fs)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (zip_frac xs [])
+     end))
+
+
+let date_cell = (fun ( d  :  Prims.int ) -> WireColumn.Date ((Temporal.date_text d)))
+
+
+let ts_cell = (fun ( u  :  Temporal.time_unit ) ( p  :  (Prims.int * Prims.int) ) -> WireColumn.Timestamp ((Temporal.instant_text u (FStar_Pervasives_Native.fst p) (FStar_Pervasives_Native.snd p))))
+
+
 let to_cells = (fun ( c  :  typed_column<'num, 'flt> ) -> (match (c.col_data) with
 | Ints (xs, v) -> begin
      (cells_of (fun ( uu___  :  'num ) -> WireColumn.Int (uu___)) xs v)
@@ -376,10 +418,10 @@ let to_cells = (fun ( c  :  typed_column<'num, 'flt> ) -> (match (c.col_data) wi
      (cells_of (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireColumn.Str (uu___)) xs v)
      end
 | Dates (xs, v) -> begin
-     (cells_of (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireColumn.Date (uu___)) xs v)
+     (cells_of date_cell xs v)
      end
-| Timestamps (xs, v) -> begin
-     (cells_of (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireColumn.Timestamp (uu___)) xs v)
+| Timestamps (u, xs, f, v) -> begin
+     (cells_of (ts_cell u) (pairs xs f) v)
      end
 | Decimals (xs, v) -> begin
      (cells_of (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireColumn.Decimal (uu___)) xs v)
@@ -413,6 +455,7 @@ type picked<'a> =
 | Fits of 'a
 | Absent
 | Outside of WireColumn.column_type
+| Unreadable
 
 
 let uu___is_Fits = (fun ( projectee  :  picked<'a> ) -> (match (projectee) with
@@ -451,6 +494,15 @@ let uu___is_Outside = (fun ( projectee  :  picked<'a> ) -> (match (projectee) wi
 let __proj__Outside__item__t = (fun ( projectee  :  picked<'a> ) -> (match (projectee) with
 | Outside (t) -> begin
      t
+     end))
+
+
+let uu___is_Unreadable = (fun ( projectee  :  picked<'a> ) -> (match (projectee) with
+| Unreadable -> begin
+     true
+     end
+| uu___ -> begin
+     false
      end))
 
 
@@ -504,16 +556,33 @@ let pick_str = (fun ( c  :  WireColumn.cell<'num, 'flt> ) -> (match (c) with
 
 let pick_date = (fun ( c  :  WireColumn.cell<'num, 'flt> ) -> (match (c) with
 | WireColumn.Date (s) -> begin
-     Fits (s)
+     (match ((Temporal.try_days s)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     Fits (d)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Unreadable
+     end)
      end
 | uu___ -> begin
      (outside c)
      end))
 
 
-let pick_timestamp = (fun ( c  :  WireColumn.cell<'num, 'flt> ) -> (match (c) with
+let pick_timestamp = (fun ( u  :  Temporal.time_unit ) ( c  :  WireColumn.cell<'num, 'flt> ) -> (match (c) with
 | WireColumn.Timestamp (s) -> begin
-     Fits (s)
+      
+if (not ((Temporal.is_canonical_timestamp s))) then begin
+     Unreadable
+     end else begin
+     (match ((Temporal.try_instant u s)) with
+| FStar_Pervasives_Native.Some (p) -> begin
+     Fits (p)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (outside c)
+     end)
+     end
      end
 | uu___ -> begin
      (outside c)
@@ -541,6 +610,9 @@ let rec fill = (fun ( name  :  Prims.list<WireCanon.ch> ) ( ty  :  WireColumn.co
 | Outside (uu___) -> begin
      WireColumn.Bad (WireColumn.TypeMismatch (name, ty))
      end
+| Unreadable -> begin
+     WireColumn.Bad (WireColumn.MalformedShape)
+     end
 | Fits (v) -> begin
      (match ((fill name ty zero pick t)) with
 | WireColumn.Good (xs, m) -> begin
@@ -559,6 +631,56 @@ let rec fill = (fun ( name  :  Prims.list<WireCanon.ch> ) ( ty  :  WireColumn.co
      WireColumn.Bad (e)
      end)
      end)
+     end))
+
+
+let rec firsts : Prims.list<(Prims.int * Prims.int)>  ->  Prims.list<Prims.int> = (fun ( ps  :  Prims.list<(Prims.int * Prims.int)> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| ((x, uu___))::t -> begin
+     (x)::(firsts t)
+     end))
+
+
+let rec seconds : Prims.list<(Prims.int * Prims.int)>  ->  Prims.list<Prims.int> = (fun ( ps  :  Prims.list<(Prims.int * Prims.int)> ) -> (match (ps) with
+| [] -> begin
+     []
+     end
+| ((uu___, f))::t -> begin
+     (f)::(seconds t)
+     end))
+
+
+let rec any_present_nonzero : Prims.list<Prims.int>  ->  validity  ->  Prims.bool = (fun ( fs  :  Prims.list<Prims.int> ) ( v  :  validity ) -> (match (fs) with
+| [] -> begin
+     false
+     end
+| (f)::ft -> begin
+     (match (v) with
+| (true)::vt -> begin
+     ((Prims.op_Less_Greater f (Prims.parse_int "0")) || (any_present_nonzero ft vt))
+     end
+| (false)::vt -> begin
+     (any_present_nonzero ft vt)
+     end
+| [] -> begin
+     false
+     end)
+     end))
+
+
+let normal_fraction : Temporal.time_unit  ->  Prims.list<Prims.int>  ->  validity  ->  FStar_Pervasives_Native.option<Prims.list<Prims.int>> = (fun ( u  :  Temporal.time_unit ) ( fs  :  Prims.list<Prims.int> ) ( v  :  validity ) -> (match (u) with
+| Temporal.Seconds -> begin
+     FStar_Pervasives_Native.None
+     end
+| uu___ -> begin
+      
+if (not ((any_present_nonzero fs v))) then begin
+     FStar_Pervasives_Native.None
+     end else begin
+     FStar_Pervasives_Native.Some (fs)
+     end
      end))
 
 
@@ -600,7 +722,7 @@ let storage_of_cells = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( name  :  Pri
      end)
      end
 | WireColumn.DateType -> begin
-     (match ((fill name ty [] pick_date cs)) with
+     (match ((fill name ty (Prims.parse_int "0") pick_date cs)) with
 | WireColumn.Good (xs, m) -> begin
      WireColumn.Good (Dates (xs, m))
      end
@@ -608,10 +730,10 @@ let storage_of_cells = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( name  :  Pri
      WireColumn.Bad (e)
      end)
      end
-| WireColumn.TimestampType -> begin
-     (match ((fill name ty [] pick_timestamp cs)) with
-| WireColumn.Good (xs, m) -> begin
-     WireColumn.Good (Timestamps (xs, m))
+| WireColumn.TimestampType (u) -> begin
+     (match ((fill name ty (((Prims.parse_int "0")), ((Prims.parse_int "0"))) (pick_timestamp u) cs)) with
+| WireColumn.Good (ps, m) -> begin
+     WireColumn.Good (Timestamps (u, (firsts ps), (normal_fraction u (seconds ps) m), m))
      end
 | WireColumn.Bad (e) -> begin
      WireColumn.Bad (e)
@@ -658,6 +780,39 @@ let rec eq_at_present = (fun ( xs  :  Prims.list<'a> ) ( ys  :  Prims.list<'a> )
 let present_equal = (fun ( xs  :  Prims.list<'a> ) ( vx  :  validity ) ( ys  :  Prims.list<'a> ) ( vy  :  validity ) -> (((WireColumn.same_len xs ys) && (Prims.op_Equals vx vy)) && (eq_at_present xs ys vx)))
 
 
+let rec materialise : Prims.list<unit>  ->  Prims.list<Prims.int>  ->  Prims.list<Prims.int> = (fun ( n  :  Prims.list<unit> ) ( fs  :  Prims.list<Prims.int> ) -> (match (n) with
+| [] -> begin
+     []
+     end
+| (uu___)::nt -> begin
+     (match (fs) with
+| (f)::ft -> begin
+     (f)::(materialise nt ft)
+     end
+| [] -> begin
+     ((Prims.parse_int "0"))::(materialise nt [])
+     end)
+     end))
+
+
+let frac_list : Prims.list<unit>  ->  FStar_Pervasives_Native.option<Prims.list<Prims.int>>  ->  Prims.list<Prims.int> = (fun ( n  :  Prims.list<unit> ) ( f  :  FStar_Pervasives_Native.option<Prims.list<Prims.int>> ) -> (match (f) with
+| FStar_Pervasives_Native.Some (fs) -> begin
+     (materialise n fs)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (materialise n [])
+     end))
+
+
+let same_fraction : Prims.list<unit>  ->  validity  ->  FStar_Pervasives_Native.option<Prims.list<Prims.int>>  ->  FStar_Pervasives_Native.option<Prims.list<Prims.int>>  ->  Prims.bool = (fun ( n  :  Prims.list<unit> ) ( vx  :  validity ) ( fx  :  FStar_Pervasives_Native.option<Prims.list<Prims.int>> ) ( fy  :  FStar_Pervasives_Native.option<Prims.list<Prims.int>> ) -> (match (((fx), (fy))) with
+| (FStar_Pervasives_Native.None, FStar_Pervasives_Native.None) -> begin
+     true
+     end
+| uu___ -> begin
+     (eq_at_present (frac_list n fx) (frac_list n fy) vx)
+     end))
+
+
 let data_eq = (fun ( d  :  column_data<'num, 'flt> ) ( e  :  column_data<'num, 'flt> ) -> (match (((d), (e))) with
 | (Ints (xs, vx), Ints (ys, vy)) -> begin
      (present_equal xs vx ys vy)
@@ -674,8 +829,8 @@ let data_eq = (fun ( d  :  column_data<'num, 'flt> ) ( e  :  column_data<'num, '
 | (Dates (xs, vx), Dates (ys, vy)) -> begin
      (present_equal xs vx ys vy)
      end
-| (Timestamps (xs, vx), Timestamps (ys, vy)) -> begin
-     (present_equal xs vx ys vy)
+| (Timestamps (ux, xs, fx, vx), Timestamps (uy, ys, fy, vy)) -> begin
+     (((Prims.op_Equals ux uy) && (present_equal xs vx ys vy)) && (same_fraction (units xs) vx fx fy))
      end
 | (Decimals (xs, vx), Decimals (ys, vy)) -> begin
      (present_equal xs vx ys vy)
@@ -717,10 +872,19 @@ let not_finite = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( f  :  'flt ) -> (n
 let not_canonical : Prims.list<WireCanon.ch>  ->  Prims.bool = (fun ( s  :  Prims.list<WireCanon.ch> ) -> (not ((WireColumn.is_canonical s))))
 
 
-let not_date = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( s  :  Prims.list<WireCanon.ch> ) -> (not ((h.is_date s))))
+let day_out : Prims.int  ->  Prims.bool = (fun ( d  :  Prims.int ) -> (not ((Temporal.is_day_in_range d))))
 
 
-let not_timestamp = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( s  :  Prims.list<WireCanon.ch> ) -> (not ((h.is_timestamp s))))
+let instant_out : Temporal.time_unit  ->  (Prims.int * Prims.int)  ->  Prims.bool = (fun ( u  :  Temporal.time_unit ) ( p  :  (Prims.int * Prims.int) ) -> (not ((Temporal.is_instant_in_range u (FStar_Pervasives_Native.fst p) (FStar_Pervasives_Native.snd p)))))
+
+
+let frac_ragged : Prims.list<Prims.int>  ->  FStar_Pervasives_Native.option<Prims.list<Prims.int>>  ->  Prims.bool = (fun ( xs  :  Prims.list<Prims.int> ) ( f  :  FStar_Pervasives_Native.option<Prims.list<Prims.int>> ) -> (match (f) with
+| FStar_Pervasives_Native.Some (fs) -> begin
+     (not ((WireColumn.same_len fs xs)))
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end))
 
 
 let first_uncarriable_t = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( c  :  typed_column<'num, 'flt> ) ->  
@@ -755,18 +919,23 @@ if (first_present_bad not_canonical xs v) then begin
      end
 | Dates (xs, v) -> begin
       
-if (first_present_bad (not_date h) xs v) then begin
+if (first_present_bad day_out xs v) then begin
      FStar_Pervasives_Native.Some (WireColumn.MalformedShape)
      end else begin
      FStar_Pervasives_Native.None
      end
      end
-| Timestamps (xs, v) -> begin
+| Timestamps (u, xs, f, v) -> begin
       
-if (first_present_bad (not_timestamp h) xs v) then begin
+if (frac_ragged xs f) then begin
+     FStar_Pervasives_Native.Some (WireColumn.MalformedShape)
+     end else begin
+      
+if (first_present_bad (instant_out u) (pairs xs f) v) then begin
      FStar_Pervasives_Native.Some (WireColumn.MalformedShape)
      end else begin
      FStar_Pervasives_Native.None
+     end
      end
      end)
      end)
@@ -953,6 +1122,12 @@ let rec validity_json_t = (fun ( n  :  Prims.list<unit> ) ( v  :  validity ) -> 
      end))
 
 
+let date_json = (fun ( d  :  Prims.int ) -> WireCanon.JStr ((Temporal.date_text d)))
+
+
+let ts_json = (fun ( u  :  Temporal.time_unit ) ( p  :  (Prims.int * Prims.int) ) -> WireCanon.JStr ((Temporal.instant_text u (FStar_Pervasives_Native.fst p) (FStar_Pervasives_Native.snd p))))
+
+
 let column_json_t = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( c  :  typed_column<'num, 'flt> ) -> (
 
 let values = (match (c.col_data) with
@@ -969,10 +1144,10 @@ let values = (match (c.col_data) with
      (values_json_t h WireColumn.StringType (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireCanon.JStr (uu___)) xs v)
      end
 | Dates (xs, v) -> begin
-     (values_json_t h WireColumn.DateType (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireCanon.JStr (uu___)) xs v)
+     (values_json_t h WireColumn.DateType date_json xs v)
      end
-| Timestamps (xs, v) -> begin
-     (values_json_t h WireColumn.TimestampType (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireCanon.JStr (uu___)) xs v)
+| Timestamps (u, xs, f, v) -> begin
+     (values_json_t h (WireColumn.TimestampType (u)) (ts_json u) (pairs xs f) v)
      end
 | Decimals (xs, v) -> begin
      (values_json_t h WireColumn.DecimalType (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> WireCanon.JStr (uu___)) xs v)
@@ -1040,6 +1215,27 @@ let rec all_fit = (fun ( ty  :  WireColumn.column_type ) ( cs  :  Prims.list<Wir
      end))
 
 
+let readable_in = (fun ( ty  :  WireColumn.column_type ) ( c  :  WireColumn.cell<'num, 'flt> ) -> (match (((ty), (c))) with
+| (WireColumn.DateType, WireColumn.Date (s)) -> begin
+     (Temporal.is_canonical_date s)
+     end
+| (WireColumn.TimestampType (uu___), WireColumn.Timestamp (s)) -> begin
+     (Temporal.is_canonical_timestamp s)
+     end
+| uu___ -> begin
+     true
+     end))
+
+
+let rec all_readable = (fun ( ty  :  WireColumn.column_type ) ( cs  :  Prims.list<WireColumn.cell<'num, 'flt>> ) -> (match (cs) with
+| [] -> begin
+     true
+     end
+| (c)::t -> begin
+     ((readable_in ty c) && (all_readable ty t))
+     end))
+
+
 let rec zeroed = (fun ( zero  :  'a ) ( xs  :  Prims.list<'a> ) ( v  :  validity ) -> (match (xs) with
 | [] -> begin
      true
@@ -1058,6 +1254,42 @@ let rec zeroed = (fun ( zero  :  'a ) ( xs  :  Prims.list<'a> ) ( v  :  validity
      end))
 
 
+let rec all_present = (fun ( ok  :  'a  ->  Prims.bool ) ( xs  :  Prims.list<'a> ) ( v  :  validity ) -> (match (xs) with
+| [] -> begin
+     true
+     end
+| (x)::xt -> begin
+     (match (v) with
+| (true)::vt -> begin
+     ((ok x) && (all_present ok xt vt))
+     end
+| (false)::vt -> begin
+     (all_present ok xt vt)
+     end
+| [] -> begin
+     true
+     end)
+     end))
+
+
+let always = (fun ( uu___  :  'a ) -> true)
+
+
+let instant_in : Temporal.time_unit  ->  (Prims.int * Prims.int)  ->  Prims.bool = (fun ( u  :  Temporal.time_unit ) ( p  :  (Prims.int * Prims.int) ) -> (Temporal.is_instant_in_range u (FStar_Pervasives_Native.fst p) (FStar_Pervasives_Native.snd p)))
+
+
+let temporal_ok = (fun ( c  :  typed_column<'num, 'flt> ) -> (match (c.col_data) with
+| Dates (xs, v) -> begin
+     (all_present Temporal.is_day_in_range xs v)
+     end
+| Timestamps (u, xs, f, v) -> begin
+     (all_present (instant_in u) (pairs xs f) v)
+     end
+| uu___ -> begin
+     true
+     end))
+
+
 let zeroed_col = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( c  :  typed_column<'num, 'flt> ) -> (match (c.col_data) with
 | Ints (xs, v) -> begin
      (zeroed h.zero_int xs v)
@@ -1072,17 +1304,53 @@ let zeroed_col = (fun ( h  :  WireColumn.host<'num, 'flt> ) ( c  :  typed_column
      (zeroed [] xs v)
      end
 | Dates (xs, v) -> begin
-     (zeroed [] xs v)
+     (zeroed (Prims.parse_int "0") xs v)
      end
-| Timestamps (xs, v) -> begin
-     (zeroed [] xs v)
+| Timestamps (uu___, xs, f, v) -> begin
+     (zeroed (((Prims.parse_int "0")), ((Prims.parse_int "0"))) (pairs xs f) v)
      end
 | Decimals (xs, v) -> begin
      (zeroed WireColumn.dec_zero xs v)
      end))
 
 
+let normal_frac = (fun ( c  :  typed_column<'num, 'flt> ) -> (match (c.col_data) with
+| Timestamps (u, xs, f, v) -> begin
+     ((match (f) with
+| FStar_Pervasives_Native.Some (fs) -> begin
+     (WireColumn.same_len fs xs)
+     end
+| FStar_Pervasives_Native.None -> begin
+     true
+     end) && (Prims.op_Equals f (normal_fraction u (frac_list (units xs) f) v)))
+     end
+| uu___ -> begin
+     true
+     end))
+
+
 let never = (fun ( uu___  :  'a ) -> false)
+
+
+let frac_in : Temporal.time_unit  ->  (Prims.int * Prims.int)  ->  Prims.bool = (fun ( u  :  Temporal.time_unit ) ( p  :  (Prims.int * Prims.int) ) -> (((Prims.parse_int "0") <= (FStar_Pervasives_Native.snd p)) && ((FStar_Pervasives_Native.snd p) < (Temporal.unit_scale u))))
+
+
+let frac_ok = (fun ( c  :  typed_column<'num, 'flt> ) -> (match (c.col_data) with
+| Timestamps (u, xs, f, v) -> begin
+     ((not ((frac_ragged xs f))) && (all_present (frac_in u) (pairs xs f) v))
+     end
+| uu___ -> begin
+     true
+     end))
+
+
+let rec all_frac_ok = (fun ( cs  :  Prims.list<typed_column<'num, 'flt>> ) -> (match (cs) with
+| [] -> begin
+     true
+     end
+| (c)::t -> begin
+     ((frac_ok c) && (all_frac_ok t))
+     end))
 
 
 let rec normal_columns_t = (fun ( s  :  Prims.list<(Prims.list<WireCanon.ch> * WireColumn.column_type)> ) ( cs  :  Prims.list<typed_column<'num, 'flt>> ) -> (match (s) with
@@ -1175,7 +1443,7 @@ let same_mask : Prims.list<unit>  ->  validity_rep  ->  validity_rep  ->  Prims.
      end))
 
 
-let twin_host : WireColumn.host<Prims.nat, Prims.nat> = {WireColumn.to_float = (fun ( i  :  Prims.nat ) -> i); WireColumn.int_text = (fun ( uu___  :  Prims.nat ) -> []); WireColumn.finite = (fun ( uu___  :  Prims.nat ) -> true); WireColumn.zero_int = (Prims.parse_int "0"); WireColumn.zero_float = (Prims.parse_int "0"); WireColumn.is_date = (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> true); WireColumn.is_timestamp = (fun ( uu___  :  Prims.list<WireCanon.ch> ) -> true)}
+let twin_host : WireColumn.host<Prims.nat, Prims.nat> = {WireColumn.to_float = (fun ( i  :  Prims.nat ) -> i); WireColumn.int_text = (fun ( uu___  :  Prims.nat ) -> []); WireColumn.finite = (fun ( uu___  :  Prims.nat ) -> true); WireColumn.zero_int = (Prims.parse_int "0"); WireColumn.zero_float = (Prims.parse_int "0")}
 
 type twin = {tname : Prims.string; tholds : unit  ->  Prims.bool}
 
@@ -1201,7 +1469,13 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "to-cells-reads-the-mask"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_cells {col_name = []; col_data = Ints (((Prims.parse_int "1"))::((Prims.parse_int "2"))::((Prims.parse_int "3"))::[], (true)::(false)::[])}) ((WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Null)::(WireColumn.Null)::[])))})::({tname = "of-cells-widens-an-int-into-a-float-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.FloatType ((WireColumn.Int ((Prims.parse_int "3")))::(WireColumn.Null)::(WireColumn.Float ((Prims.parse_int "4")))::[])) (WireColumn.Good ({col_name = []; col_data = Floats (((Prims.parse_int "3"))::((Prims.parse_int "0"))::((Prims.parse_int "4"))::[], (true)::(false)::(true)::[])}))))})::({tname = "of-cells-refuses-the-first-cell-outside"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.BoolType ((WireColumn.Null)::(WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Bool (true))::[])) (WireColumn.Bad (WireColumn.TypeMismatch ([], WireColumn.BoolType)))))})::({tname = "first-uncarriable-names-the-mask-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_uncarriable_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "1"))::[], [])}) (FStar_Pervasives_Native.Some (WireColumn.LengthMismatch ([])))))})::({tname = "column-json-writes-the-absent-slot-not-the-element"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (column_json_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])}) (WireCanon.JObj ((((WireColumn.values_key), (WireCanon.JArr ((WireCanon.JInt ((Prims.parse_int "0")))::(WireCanon.JInt ((Prims.parse_int "9")))::[]))))::(((WireColumn.validity_key), (WireCanon.JArr ((WireCanon.JBool (false))::(WireCanon.JBool (true))::[]))))::[]))))})::({tname = "of-mask-normalises-an-all-set-mask"; tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (of_mask ((true)::(true)::[])) AllValid) && (Prims.op_Equals (of_mask ((true)::(false)::[])) (Mask ((true)::(false)::[])))) && (Prims.op_Equals (of_mask []) AllValid)))})::({tname = "same-mask-reads-all-valid-as-the-all-true-mask-of-the-length"; tholds = (fun ( uu___  :  unit ) -> ((((same_mask ((())::(())::[]) AllValid (Mask ((true)::(true)::[]))) && (not ((same_mask ((())::(())::[]) AllValid (Mask ((true)::(true)::(true)::[])))))) && (not ((same_mask ((())::(())::[]) (Mask ((true)::(false)::[])) AllValid)))) && (Prims.op_Equals (to_mask ((())::(())::[]) AllValid) ((true)::(true)::[]))))})::({tname = "data-eq-ignores-an-absent-element"; tholds = (fun ( uu___  :  unit ) -> ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (false)::(true)::[]))) && (not ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (true)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (true)::(true)::[])))))))})::[]
+let twins : Prims.list<twin> = ({tname = "to-cells-reads-the-mask"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (to_cells {col_name = []; col_data = Ints (((Prims.parse_int "1"))::((Prims.parse_int "2"))::((Prims.parse_int "3"))::[], (true)::(false)::[])}) ((WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Null)::(WireColumn.Null)::[])))})::({tname = "of-cells-widens-an-int-into-a-float-column"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.FloatType ((WireColumn.Int ((Prims.parse_int "3")))::(WireColumn.Null)::(WireColumn.Float ((Prims.parse_int "4")))::[])) (WireColumn.Good ({col_name = []; col_data = Floats (((Prims.parse_int "3"))::((Prims.parse_int "0"))::((Prims.parse_int "4"))::[], (true)::(false)::(true)::[])}))))})::({tname = "of-cells-refuses-the-first-cell-outside"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_cells twin_host [] WireColumn.BoolType ((WireColumn.Null)::(WireColumn.Int ((Prims.parse_int "1")))::(WireColumn.Bool (true))::[])) (WireColumn.Bad (WireColumn.TypeMismatch ([], WireColumn.BoolType)))))})::({tname = "first-uncarriable-names-the-mask-first"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_uncarriable_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "1"))::[], [])}) (FStar_Pervasives_Native.Some (WireColumn.LengthMismatch ([])))))})::({tname = "column-json-writes-the-absent-slot-not-the-element"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (column_json_t twin_host {col_name = []; col_data = Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])}) (WireCanon.JObj ((((WireColumn.values_key), (WireCanon.JArr ((WireCanon.JInt ((Prims.parse_int "0")))::(WireCanon.JInt ((Prims.parse_int "9")))::[]))))::(((WireColumn.validity_key), (WireCanon.JArr ((WireCanon.JBool (false))::(WireCanon.JBool (true))::[]))))::[]))))})::({tname = "of-mask-normalises-an-all-set-mask"; tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (of_mask ((true)::(true)::[])) AllValid) && (Prims.op_Equals (of_mask ((true)::(false)::[])) (Mask ((true)::(false)::[])))) && (Prims.op_Equals (of_mask []) AllValid)))})::({tname = "same-mask-reads-all-valid-as-the-all-true-mask-of-the-length"; tholds = (fun ( uu___  :  unit ) -> ((((same_mask ((())::(())::[]) AllValid (Mask ((true)::(true)::[]))) && (not ((same_mask ((())::(())::[]) AllValid (Mask ((true)::(true)::(true)::[])))))) && (not ((same_mask ((())::(())::[]) (Mask ((true)::(false)::[])) AllValid)))) && (Prims.op_Equals (to_mask ((())::(())::[]) AllValid) ((true)::(true)::[]))))})::({tname = "temporal-columns-render-their-text-and-read-it-back"; tholds = (fun ( uu___  :  unit ) -> (
+
+let d = {col_name = []; col_data = Dates (((Prims.parse_int "0"))::((Prims.parse_int "20512"))::[], (true)::(true)::[])}
+in (
+
+let t = {col_name = []; col_data = Timestamps (Temporal.Milliseconds, ((Prims.parse_int "45296"))::((Prims.parse_int "0"))::[], FStar_Pervasives_Native.Some (((Prims.parse_int "500"))::((Prims.parse_int "0"))::[]), (true)::(false)::[])}
+in (((((((Prims.op_Equals (to_cells d) ((WireColumn.Date ((Temporal.date_text (Prims.parse_int "0"))))::(WireColumn.Date ((Temporal.date_text (Prims.parse_int "20512"))))::[])) && (Prims.op_Equals (of_cells twin_host [] WireColumn.DateType (to_cells d)) (WireColumn.Good (d)))) && (Prims.op_Equals (to_cells t) ((WireColumn.Timestamp ((Temporal.instant_text Temporal.Milliseconds (Prims.parse_int "45296") (Prims.parse_int "500"))))::(WireColumn.Null)::[]))) && (Prims.op_Equals (of_cells twin_host [] (WireColumn.TimestampType (Temporal.Milliseconds)) (to_cells t)) (WireColumn.Good (t)))) && (Prims.op_Equals (of_cells twin_host [] (WireColumn.TimestampType (Temporal.Seconds)) (to_cells t)) (WireColumn.Bad (WireColumn.TypeMismatch ([], WireColumn.TimestampType (Temporal.Seconds)))))) && (Prims.op_Equals (of_cells twin_host [] (WireColumn.TimestampType (Temporal.Milliseconds)) ((WireColumn.Timestamp ((WireCanon.CPlain ("x"))::[]))::[])) (WireColumn.Bad (WireColumn.MalformedShape)))) && (Prims.op_Equals (first_uncarriable_t twin_host {col_name = []; col_data = Timestamps (Temporal.Milliseconds, ((Prims.parse_int "0"))::[], FStar_Pervasives_Native.Some (((Prims.parse_int "1000"))::[]), (true)::[])}) (FStar_Pervasives_Native.Some (WireColumn.MalformedShape)))))))})::({tname = "a-dropped-fraction-reads-as-zeros"; tholds = (fun ( uu___  :  unit ) -> ((((data_eq (Timestamps (Temporal.Milliseconds, ((Prims.parse_int "7"))::[], FStar_Pervasives_Native.None, (true)::[])) (Timestamps (Temporal.Milliseconds, ((Prims.parse_int "7"))::[], FStar_Pervasives_Native.Some (((Prims.parse_int "0"))::[]), (true)::[]))) && (not ((data_eq (Timestamps (Temporal.Milliseconds, ((Prims.parse_int "7"))::[], FStar_Pervasives_Native.None, (true)::[])) (Timestamps (Temporal.Milliseconds, ((Prims.parse_int "7"))::[], FStar_Pervasives_Native.Some (((Prims.parse_int "1"))::[]), (true)::[])))))) && (Prims.op_Equals (normal_fraction Temporal.Milliseconds (((Prims.parse_int "0"))::((Prims.parse_int "5"))::[]) ((true)::(false)::[])) FStar_Pervasives_Native.None)) && (Prims.op_Equals (normal_fraction Temporal.Milliseconds (((Prims.parse_int "0"))::((Prims.parse_int "5"))::[]) ((true)::(true)::[])) (FStar_Pervasives_Native.Some (((Prims.parse_int "0"))::((Prims.parse_int "5"))::[])))))})::({tname = "data-eq-ignores-an-absent-element"; tholds = (fun ( uu___  :  unit ) -> ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (false)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (false)::(true)::[]))) && (not ((data_eq (Ints (((Prims.parse_int "7"))::((Prims.parse_int "9"))::[], (true)::(true)::[])) (Ints (((Prims.parse_int "0"))::((Prims.parse_int "9"))::[], (true)::(true)::[])))))))})::[]
 
 
 

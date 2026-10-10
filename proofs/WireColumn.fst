@@ -123,12 +123,18 @@
        differential rather than proved here. Section 8 shows each is NECESSARY, not merely
        convenient: a host where one fails is a host where the round trip is an error.
 
-     - THE CALENDAR. `TemporalText.isCanonicalDate` / `isCanonicalTimestamp` are fields of the
-       `host` record, `is_date` and `is_timestamp`, and not modelled: digit arithmetic over a
-       Gregorian calendar is exactly what the theorems do not need. What they need is that
-       `validate` and `decodeCell` ask the SAME predicate of the same text, and that is a fact
-       about which function each calls — which the model reproduces — not about what the function
-       computes.
+     - THE CALENDAR IS MODELLED SINCE PHASE 430, in `Temporal.fst`, which this module opens:
+       `TemporalText.isCanonicalDate` / `isCanonicalTimestamp` / `tryInstant` / `unitOf` are that
+       module's `is_canonical_date` / `is_canonical_timestamp` / `try_instant` / `unit_of` over the
+       same character alphabet, with the calendar's round trips proved there. Until Phase 430 the two
+       predicates were fields of the `host` record (`is_date`, `is_timestamp`), because digit
+       arithmetic over a Gregorian calendar was exactly what the theorems did not need; what moved
+       them into the model is the UNIT (Phase 422): `Cell.typeOf` names a timestamp's coarsest unit
+       from its text, so the cell typing that `validate`'s clause (e) and `ofCells` read cannot be a
+       host field without making every theorem about the typing a theorem about the host. The two
+       theorems still need of it only what they needed before: `validate` and `decodeCell` ask the
+       same predicate of the same text, and a unit's reading is the coarsest unit widened
+       (`Temporal.unit_of_coarsest`), which is what makes a validated timestamp decode.
 
      - THE DECIMAL CANONICALISER IS MODELLED, not abstracted, because it is trimming and no
        arithmetic: `parts`, `render` and `tryCanonical` clause for clause over the character
@@ -183,20 +189,22 @@ module WireColumn
 #set-options "--ext context_pruning"
 
 open WireCanon
+open Temporal
 
 (* ======================================================================================
    1. THE TYPES (F#: `ColumnType`, `Cell`, `Column`, `Schema`, `Table`, `DataSource`,
       `ColumnError`), and what a host computes about a number.
    ====================================================================================== *)
 
-(* F#: `ColumnType`, in declaration order. *)
+(* F#: `ColumnType`, in declaration order. A timestamp type carries its `TimeUnit` (Phase 422;
+   `Temporal.time_unit`). *)
 type column_type =
   | IntType
   | FloatType
   | BoolType
   | StringType
   | DateType
-  | TimestampType
+  | TimestampType : u:time_unit -> column_type
   | DecimalType
 
 (* F#: `Cell`, in declaration order — `Decimal` after `Null`, as production has it so that every
@@ -277,9 +285,6 @@ type host (num flt: eqtype) = {
   (* F#: the literals `0` and `0.0` of `absentSlot`. *)
   zero_int     : num;
   zero_float   : flt;
-  (* F#: `TemporalText.isCanonicalDate` / `isCanonicalTimestamp`. *)
-  is_date      : list ch -> bool;
-  is_timestamp : list ch -> bool;
 }
 
 (* ---- the member names and type tags the codec spells, in `WireCanon`'s alphabet ----
@@ -306,6 +311,12 @@ let values_key : list ch =
 let validity_key : list ch =
   [CPlain "v"; CHexCh HDa; CPlain "l"; CPlain "i"; CHexCh HDd; CPlain "i"; CPlain "t"; CPlain "y"]
 
+(* `timestamp`, the seconds tag and the stem of the three sub-second tags (`timestamp_ms`,
+   `timestamp_us`, `timestamp_ns`; Phase 422). `u` is `CLu` in this alphabet. *)
+let timestamp_tag : list ch =
+  [CPlain "t"; CPlain "i"; CPlain "m"; CHexCh HDe; CPlain "s"; CPlain "t"; CHexCh HDa;
+   CPlain "m"; CPlain "p"]
+
 (* F#: `ColumnType.tag`. *)
 let tag (t: column_type) : Tot (list ch) =
   match t with
@@ -314,15 +325,19 @@ let tag (t: column_type) : Tot (list ch) =
   | BoolType -> [CHexCh HDb; CPlain "o"; CPlain "o"; CPlain "l"]
   | StringType -> [CPlain "s"; CPlain "t"; CPlain "r"; CPlain "i"; CPlain "n"; CPlain "g"]
   | DateType -> [CHexCh HDd; CHexCh HDa; CPlain "t"; CHexCh HDe]
-  | TimestampType ->
-      [CPlain "t"; CPlain "i"; CPlain "m"; CHexCh HDe; CPlain "s"; CPlain "t"; CHexCh HDa;
-       CPlain "m"; CPlain "p"]
+  | TimestampType Seconds -> timestamp_tag
+  | TimestampType Milliseconds -> app timestamp_tag [CPlain "_"; CPlain "m"; CPlain "s"]
+  | TimestampType Microseconds -> app timestamp_tag [CPlain "_"; CLu; CPlain "s"]
+  | TimestampType Nanoseconds -> app timestamp_tag [CPlain "_"; CPlain "n"; CPlain "s"]
   | DecimalType ->
       [CHexCh HDd; CHexCh HDe; CHexCh HDc; CPlain "i"; CPlain "m"; CHexCh HDa; CPlain "l"]
 
-(* F#: `ColumnType.all`, in its order — which is `ofTag`'s search order. *)
+(* F#: `ColumnType.all`, in its order — which is `ofTag`'s search order. The three sub-second
+   timestamp types are APPENDED after `DecimalType` (Phase 422), so the enumeration keeps its
+   earlier prefix in its earlier order. *)
 let all_types : list column_type =
-  [IntType; FloatType; BoolType; StringType; DateType; TimestampType; DecimalType]
+  [IntType; FloatType; BoolType; StringType; DateType; TimestampType Seconds; DecimalType;
+   TimestampType Milliseconds; TimestampType Microseconds; TimestampType Nanoseconds]
 
 (* F#: `List.tryFind (fun t -> tag t = s)`. *)
 let rec find_tag (s: list ch) (ts: list column_type) : Tot (option column_type) (decreases ts) =
@@ -333,11 +348,16 @@ let rec find_tag (s: list ch) (ts: list column_type) : Tot (option column_type) 
 (* F#: `ColumnType.ofTag`. *)
 let of_tag (s: list ch) : Tot (option column_type) = find_tag s all_types
 
-(* F#: `ColumnType.widens`, clause for clause: the identity, `Int -> Float`, `Int -> Decimal`. *)
+(* F#: `ColumnType.widens`, clause for clause: `Int -> Float`, `Int -> Decimal`, a coarser
+   timestamp unit into a finer one (`TimeUnit.widens`, Phase 422), else the identity (production
+   compares `ordinal`s, which is the identity). *)
 let widens (from target: column_type) : Tot bool =
-  from = target
-  || (from = IntType && target = FloatType)
-  || (from = IntType && target = DecimalType)
+  match from, target with
+  | TimestampType a, TimestampType b -> unit_widens a b
+  | _ ->
+      from = target
+      || (from = IntType && target = FloatType)
+      || (from = IntType && target = DecimalType)
 
 (* F#: `Cell.typeOf`. *)
 let type_of (#num #flt: eqtype) (c: cell num flt) : Tot (option column_type) =
@@ -347,7 +367,9 @@ let type_of (#num #flt: eqtype) (c: cell num flt) : Tot (option column_type) =
   | Bool _ -> Some BoolType
   | Str _ -> Some StringType
   | Date _ -> Some DateType
-  | Timestamp _ -> Some TimestampType
+  (* The COARSEST unit holding the instant exactly (Phase 422): seconds with no fraction, and so
+     on; so a timestamp widens into every finer column and a seconds column refuses a fraction. *)
+  | Timestamp s -> Some (TimestampType (unit_of s))
   | Decimal _ -> Some DecimalType
   | Null -> None
 
@@ -633,8 +655,8 @@ let cell_fault (#num #flt: eqtype) (h: host num flt) (cname: list ch) (ty: colum
         (match c with
          | Float f -> if h.finite f then None else Some (NonFiniteFloat cname)
          | Decimal s -> if is_canonical s then None else Some MalformedShape
-         | Date s -> if h.is_date s then None else Some MalformedShape
-         | Timestamp s -> if h.is_timestamp s then None else Some MalformedShape
+         | Date s -> if is_canonical_date s then None else Some MalformedShape
+         | Timestamp s -> if is_canonical_timestamp s then None else Some MalformedShape
          | _ -> None)
 
 (* F#: `firstUncarriableCell` — the first fault in row order. Taken over the column's three fields
@@ -700,7 +722,7 @@ let absent_slot (#num #flt: eqtype) (h: host num flt) (ty: column_type) : Tot (j
   | BoolType -> JBool false
   | StringType -> JStr []
   | DateType -> JStr []
-  | TimestampType -> JStr []
+  | TimestampType _ -> JStr []
   | DecimalType -> JStr dec_zero
 
 (* F#: `cellJson`. An `Int` in a float or decimal column is written as THAT type — the two
@@ -857,11 +879,14 @@ let decode_cell (#num #flt: eqtype) (h: host num flt) (cname: list ch) (ty: colu
        | _ -> Bad (TypeMismatch cname ty))
   | DateType ->
       (match v with
-       | JStr s -> if h.is_date s then Good (Date s) else Bad MalformedShape
+       | JStr s -> if is_canonical_date s then Good (Date s) else Bad MalformedShape
        | _ -> Bad (TypeMismatch cname ty))
-  | TimestampType ->
+  (* F#: `readTimestamp` — the text read IN THE COLUMN'S UNIT (`tryInstant unit s`): a text that is
+     not canonical, and a canonical one whose fraction is finer than the unit holds, are both the
+     `MalformedShape` production spells (the second naming the finer tag; Phase 422, D143.4). *)
+  | TimestampType u ->
       (match v with
-       | JStr s -> if h.is_timestamp s then Good (Timestamp s) else Bad MalformedShape
+       | JStr s -> if Some? (try_instant u s) then Good (Timestamp s) else Bad MalformedShape
        | JInt _ -> Bad OutOfModel
        | JFloat _ -> Bad OutOfModel
        | _ -> Bad (TypeMismatch cname ty))
@@ -1289,7 +1314,12 @@ let rec norm_cells_carriable (#num #flt: eqtype) (h: host num flt) (cn cn': list
 let decode_cell_inverts (#num #flt: eqtype) (h: host num flt) (cn cn': list ch)
                         (ty: column_type) (c: cell num flt)
   : Lemma (requires host_ok h /\ None? (cell_fault h cn ty c) /\ not (Null? c))
-          (ensures decode_cell h cn' ty (cell_json h ty c) == Good (norm_cell h ty c)) = ()
+          (ensures decode_cell h cn' ty (cell_json h ty c) == Good (norm_cell h ty c)) =
+  (* A timestamp `validate` accepted in a column at `u` has a canonical text whose coarsest unit
+     widens into `u`, and that is exactly when `try_instant u` reads it (Phase 430). *)
+  match c, ty with
+  | Timestamp s, TimestampType u -> unit_of_coarsest u s
+  | _ -> ()
 
 [@@ noextract_to "FSharp"]
 let rec values_validity_same_len (#num #flt: eqtype) (h: host num flt) (ty: column_type)
@@ -1471,7 +1501,13 @@ let of_tag_inverts_tag (ty: column_type) : Lemma (ensures of_tag (tag ty) == Som
   | BoolType -> assert_norm (of_tag (tag BoolType) == Some BoolType)
   | StringType -> assert_norm (of_tag (tag StringType) == Some StringType)
   | DateType -> assert_norm (of_tag (tag DateType) == Some DateType)
-  | TimestampType -> assert_norm (of_tag (tag TimestampType) == Some TimestampType)
+  | TimestampType Seconds -> assert_norm (of_tag (tag (TimestampType Seconds)) == Some (TimestampType Seconds))
+  | TimestampType Milliseconds ->
+      assert_norm (of_tag (tag (TimestampType Milliseconds)) == Some (TimestampType Milliseconds))
+  | TimestampType Microseconds ->
+      assert_norm (of_tag (tag (TimestampType Microseconds)) == Some (TimestampType Microseconds))
+  | TimestampType Nanoseconds ->
+      assert_norm (of_tag (tag (TimestampType Nanoseconds)) == Some (TimestampType Nanoseconds))
   | DecimalType -> assert_norm (of_tag (tag DecimalType) == Some DecimalType)
 
 (* The member names one object carries are pairwise different — five facts, each by computation. *)
@@ -2413,7 +2449,8 @@ let float_column_reads_a_whole_token (#num #flt: eqtype) (h: host num flt) (cn: 
      - `decode_field_entry`: a field decode that answers is the entry decode of section 5 with
        metadata on top — the name and type it reads are the ones `decode_schema_entry` reads.
 
-   NOT MODELLED here: the timestamp unit inside `ColumnType` (Phase 422), which is Phase 430's.
+   The timestamp unit inside `ColumnType` (Phase 422) reaches this section through `tag` and
+   `of_tag`, which Phase 430 gave their four timestamp spellings; nothing here reads it otherwise.
    ====================================================================================== *)
 
 (* ---- the member names, in `WireCanon`'s alphabet, as `name_key` and `type_key` are above ---- *)
@@ -3203,6 +3240,26 @@ let twins : list twin = [
     tholds = (fun () -> try_canonical [ CHexCh HD1; CDot ] = None) };
   { tname = "of-tag-reads-int";
     tholds = (fun () -> of_tag [ CPlain "i"; CPlain "n"; CPlain "t" ] = Some IntType) };
+  { tname = "of-tag-reads-the-four-timestamp-tags";
+    tholds = (fun () ->
+      of_tag timestamp_tag = Some (TimestampType Seconds)
+      && of_tag (app timestamp_tag [CPlain "_"; CPlain "m"; CPlain "s"]) = Some (TimestampType Milliseconds)
+      && of_tag (app timestamp_tag [CPlain "_"; CLu; CPlain "s"]) = Some (TimestampType Microseconds)
+      && of_tag (app timestamp_tag [CPlain "_"; CPlain "n"; CPlain "s"]) = Some (TimestampType Nanoseconds)) };
+  { tname = "widens-a-coarser-timestamp-into-a-finer-and-not-back";
+    tholds = (fun () ->
+      widens (TimestampType Seconds) (TimestampType Nanoseconds)
+      && not (widens (TimestampType Milliseconds) (TimestampType Seconds))
+      && widens (TimestampType Microseconds) (TimestampType Microseconds)
+      && not (widens (TimestampType Seconds) DateType)) };
+  { tname = "decode-cell-reads-a-timestamp-in-its-unit";
+    tholds = (fun () ->
+      let h : host int int = { to_float = (fun i -> i); int_text = (fun _ -> []); finite = (fun _ -> true);
+                               zero_int = 0; zero_float = 0 } in
+      let t = instant_text Milliseconds 0 500 in
+      decode_cell h [] (TimestampType Milliseconds) (JStr t) = Good (Timestamp t)
+      && decode_cell h [] (TimestampType Seconds) (JStr t) = Bad MalformedShape
+      && type_of #int #int (Timestamp t) = Some (TimestampType Milliseconds)) };
   { tname = "field-json-plain-is-the-entry";
     tholds = (fun () ->
       field_json #int #int (field_create [CPlain "x"] IntType)

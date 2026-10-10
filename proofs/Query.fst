@@ -73,7 +73,9 @@
        distinct pre-images; `invocation_key_page_injective` extends it to the page token. It is
        proved over a reading of a string as its symbols (`symbols_faithful`, the reading
        `Chain.fst` takes) and states what it needs of the host functions in `key_premises`
-       (section 8b).
+       (section 8b) — and, since Phase 430, over argument lists whose timestamp cells carry the
+       unit their text names (`units_named`, section 8b): the key writes a timestamp's text alone,
+       as production does, and a cell's unit is production's `Cell.typeOf` reading of that text.
      - (Phase 398) the admission: `register` refuses a declaration whose filter names an
        undeclared column, applies `contains` to a column that is not a string, compares with a
        `Null` or with a literal of another type than its column's, or whose order names an
@@ -168,28 +170,51 @@ let rec all_in (l m:list string) : Tot bool =
       `QueryError`.
    ====================================================================================== *)
 
-(* F#: `ColumnType`. *)
+(* F#: `TimeUnit` (Phase 422), restated here as `outcome` is: the module opens nothing. The
+   digits are what `TimeUnit.widens` compares. *)
+type time_unit =
+  | Seconds
+  | Milliseconds
+  | Microseconds
+  | Nanoseconds
+
+(* F#: `TimeUnit.digits`. *)
+let unit_digits (u:time_unit) : Tot int =
+  match u with
+  | Seconds -> 0
+  | Milliseconds -> 3
+  | Microseconds -> 6
+  | Nanoseconds -> 9
+
+(* F#: `TimeUnit.widens` — a coarser unit into a finer one. *)
+let unit_widens (from target:time_unit) : Tot bool = unit_digits from <= unit_digits target
+
+(* F#: `ColumnType`. A timestamp type carries its unit (Phase 422; this model Phase 430). *)
 type column_type =
   | IntType
   | FloatType
   | BoolType
   | StringType
   | DateType
-  | TimestampType
+  | TimestampType : time_unit -> column_type
   | DecimalType
 
 (* F#: `Cell`. A float crosses as an opaque carrier — the seam reads its TYPE and hands the
    carrier to the float renderer, and nothing else. A decimal's carrier is its text, which is
-   what the F# cell holds too: the seam reads it as it stands, exactly as it reads a date's. The
-   F# declares `Decimal` after `Null`, so that the published cases keep their tags; the order of
-   the cases is nothing any clause here reads. *)
+   what the F# cell holds too: the seam reads it as it stands, exactly as it reads a date's. A
+   TIMESTAMP crosses with the unit `Cell.typeOf` names for it beside its text (Phase 430): the
+   coarsest unit that holds its instant, `TemporalText.unitOf` — digit arithmetic over the text
+   this module does not model and `Temporal.fst` does; the seam reads the unit as the cell's type
+   and the text as its payload, and the oracle host computes the unit from the text at the edge.
+   The F# declares `Decimal` after `Null`, so that the published cases keep their tags; the order
+   of the cases is nothing any clause here reads. *)
 type cell =
   | Int       : int -> cell
   | Float     : string -> cell
   | Bool      : bool -> cell
   | Str       : string -> cell
   | Date      : string -> cell
-  | Timestamp : string -> cell
+  | Timestamp : time_unit -> string -> cell
   | Null      : cell
   | Decimal   : string -> cell
 
@@ -279,7 +304,7 @@ let cell_type (c:cell) : Tot (option column_type) =
   | Bool _ -> Some BoolType
   | Str _ -> Some StringType
   | Date _ -> Some DateType
-  | Timestamp _ -> Some TimestampType
+  | Timestamp u _ -> Some (TimestampType u)
   | Decimal _ -> Some DecimalType
   | Null -> None
 
@@ -335,7 +360,7 @@ let cell_tag (c:cell) : Tot string =
   | Bool _ -> "b"
   | Str _ -> "s"
   | Date _ -> "d"
-  | Timestamp _ -> "t"
+  | Timestamp _ _ -> "t"
   | Decimal _ -> "m"
   | Null -> "n"
 
@@ -347,7 +372,7 @@ let cell_payload (rn:renderers) (c:cell) : Tot string =
   | Bool v -> if v then "1" else "0"
   | Str v -> v
   | Date v -> v
-  | Timestamp v -> v
+  | Timestamp _ v -> v
   | Decimal v -> v
   | Null -> ""
 
@@ -435,7 +460,9 @@ let rec param_names (ps:list query_param) : Tot (list string) =
    parameter of type `target` exactly when it widens; until Phase 295 the seam asked type
    equality, refusing an `int` for a `float` parameter the column codec reads it into. *)
 let widens (from target:column_type) : Tot bool =
-  from = target || (from = IntType && target = FloatType) || (from = IntType && target = DecimalType)
+  match from, target with
+  | TimestampType a, TimestampType b -> unit_widens a b
+  | _ -> from = target || (from = IntType && target = FloatType) || (from = IntType && target = DecimalType)
 
 (* F#: `validateParams`'s local `checkArgs` — step 1, in the caller's arg order. *)
 let rec check_args (ps:list query_param) (declared:list string) (a:arguments)
@@ -580,7 +607,14 @@ let predicate_fault (s:list (string & column_type)) (p:predicate) : Tot (option 
       | Some Null -> Some (IllFormedLiteral c null_literal_reason)
       | Some v ->
         match cell_type v with
-        | Some got -> if got = ty then None else Some (PredicateTypeMismatch c ty got)
+        | Some got ->
+          (* A timestamp literal fits any column at least as fine as its own unit (Phase 422:
+             `Cell.typeOf` names the coarsest unit); every other literal is held to its column's
+             exact type — an `Int` on a float column is a mismatch here where `widens` would admit it. *)
+          if (match got, ty with
+              | TimestampType a, TimestampType b -> unit_widens a b
+              | _ -> got = ty)
+          then None else Some (PredicateTypeMismatch c ty got)
         | None -> None
 
 (* F#: `QueryShape.whereFault` — the first predicate's fault, predicates in order. *)
@@ -1224,15 +1258,45 @@ let fields_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:ren
   enc_injective e t (symbols reveal l1) (symbols reveal l2);
   symbols_injective reveal l1 l2
 
-(* A cell's tag and payload determine the cell. *)
-let cell_fields_injective (rn:renderers) (c c':cell)
+(* THE UNIT-NAMED PREMISE (Phase 430). A timestamp cell carries the unit `Cell.typeOf` names for
+   its text — `TemporalText.unitOf`, a reading of the text this module takes as a host function
+   `uo`, as it takes the renderers — and the capture key writes the TEXT alone, as production does.
+   So two cells with one tag and one payload are one cell exactly when their units are the text's:
+   the injectivity chain below carries that as a premise on the argument lists, and every cell
+   production builds satisfies it (the oracle host computes the unit from the text at the edge). *)
+let unit_named (uo:string -> time_unit) (c:cell) : Tot bool =
+  match c with
+  | Timestamp u s -> u = uo s
+  | _ -> true
+
+let rec units_named (uo:string -> time_unit) (a:arguments) : Tot bool =
+  match a with
+  | [] -> true
+  | (_, c) :: t -> unit_named uo c && units_named uo t
+
+let rec insert_units_named (uo:string -> time_unit) (rn:renderers) (x:(string & cell)) (l:arguments)
+  : Lemma (requires unit_named uo (snd x) /\ units_named uo l) (ensures units_named uo (insert_arg rn x l))
+  = match l with
+    | [] -> ()
+    | _ :: t -> insert_units_named uo rn x t
+
+let rec sort_units_named (uo:string -> time_unit) (rn:renderers) (l:arguments)
+  : Lemma (requires units_named uo l) (ensures units_named uo (sort_args rn l))
+  = match l with
+    | [] -> ()
+    | x :: t -> sort_units_named uo rn t; insert_units_named uo rn x (sort_args rn t)
+
+(* A cell's tag and payload determine the cell, among cells whose unit is their text's. *)
+let cell_fields_injective (rn:renderers) (uo:string -> time_unit) (c c':cell)
   : Lemma (requires injective rn.render_int /\ injective rn.render_float /\
+                    unit_named uo c /\ unit_named uo c' /\
                     cell_tag c == cell_tag c' /\ cell_payload rn c == cell_payload rn c')
           (ensures c == c') = ()
 
 (* Three fields per binding, so the flattening is injective. *)
-let rec arg_fields_injective (rn:renderers) (a1 a2:arguments)
+let rec arg_fields_injective (rn:renderers) (uo:string -> time_unit) (a1 a2:arguments)
   : Lemma (requires injective rn.render_int /\ injective rn.render_float /\
+                    units_named uo a1 /\ units_named uo a2 /\
                     arg_fields rn a1 == arg_fields rn a2)
           (ensures a1 == a2) =
   match a1, a2 with
@@ -1240,16 +1304,17 @@ let rec arg_fields_injective (rn:renderers) (a1 a2:arguments)
   | [], _ :: _ -> ()
   | _ :: _, [] -> ()
   | (_, v1) :: t1, (_, v2) :: t2 ->
-    cell_fields_injective rn v1 v2;
-    arg_fields_injective rn t1 t2
+    cell_fields_injective rn uo v1 v2;
+    arg_fields_injective rn uo t1 t2
 
 (* The canonical string is injective on argument lists — any lists, sorted or not. *)
 let canonical_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (a1 a2:arguments)
-  : Lemma (requires key_premises reveal e t rn /\ canonical rn a1 == canonical rn a2)
+  (uo:string -> time_unit) (a1 a2:arguments)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a1 /\ units_named uo a2 /\
+                    canonical rn a1 == canonical rn a2)
           (ensures a1 == a2) =
   fields_injective reveal e t rn (arg_fields rn a1) (arg_fields rn a2);
-  arg_fields_injective rn a1 a2
+  arg_fields_injective rn uo a1 a2
 
 (* ---- Phase 398: the shape fields in front of the bindings ---- *)
 
@@ -1273,13 +1338,13 @@ let arg_fields_not_shape (rn:renderers) (l:arguments) (x:string) (r:list string)
     | (_, v) :: _ -> cell_tag_not_shape v
 
 (* The order triple and the bindings after it determine the order and the bindings. *)
-let order_fields_injective (rn:renderers) (o1 o2:list sort_key) (a1 a2:arguments)
-  : Lemma (requires shape_premises rn /\
+let order_fields_injective (rn:renderers) (uo:string -> time_unit) (o1 o2:list sort_key) (a1 a2:arguments)
+  : Lemma (requires shape_premises rn /\ units_named uo a1 /\ units_named uo a2 /\
                     order_fields rn o1 (arg_fields rn a1) == order_fields rn o2 (arg_fields rn a2))
           (ensures o1 == o2 /\ a1 == a2)
   = match o1, o2 with
-    | [], [] -> arg_fields_injective rn a1 a2
-    | _ :: _, _ :: _ -> arg_fields_injective rn a1 a2
+    | [], [] -> arg_fields_injective rn uo a1 a2
+    | _ :: _, _ :: _ -> arg_fields_injective rn uo a1 a2
     | [], _ :: _ -> arg_fields_not_shape rn a1 "o" (rn.render_order o2 :: arg_fields rn a2)
     | _ :: _, [] -> arg_fields_not_shape rn a2 "o" (rn.render_order o1 :: arg_fields rn a1)
 
@@ -1292,24 +1357,25 @@ let order_fields_not_tag (rn:renderers) (o:list sort_key) (a:arguments) (x:strin
     | _ :: _ -> ()
 
 (* The shape fields and the bindings after them determine the filter, the order and the bindings. *)
-let shape_fields_injective (rn:renderers) (w1 w2:list predicate) (o1 o2:list sort_key)
+let shape_fields_injective (rn:renderers) (uo:string -> time_unit) (w1 w2:list predicate) (o1 o2:list sort_key)
   (a1 a2:arguments)
-  : Lemma (requires shape_premises rn /\
+  : Lemma (requires shape_premises rn /\ units_named uo a1 /\ units_named uo a2 /\
                     shape_fields rn w1 o1 (arg_fields rn a1) == shape_fields rn w2 o2 (arg_fields rn a2))
           (ensures w1 == w2 /\ o1 == o2 /\ a1 == a2)
   = match w1, w2 with
-    | [], [] -> order_fields_injective rn o1 o2 a1 a2
-    | _ :: _, _ :: _ -> order_fields_injective rn o1 o2 a1 a2
+    | [], [] -> order_fields_injective rn uo o1 o2 a1 a2
+    | _ :: _, _ :: _ -> order_fields_injective rn uo o1 o2 a1 a2
     | [], _ :: _ ->
       order_fields_not_tag rn o1 a1 "w" (rn.render_where w2 :: order_fields rn o2 (arg_fields rn a2))
     | _ :: _, [] ->
       order_fields_not_tag rn o2 a2 "w" (rn.render_where w1 :: order_fields rn o1 (arg_fields rn a1))
 
 (* The key fields determine the declaration's filter and order and the argument list. *)
-let key_fields_injective (rn:renderers) (q q':query) (a a':arguments)
-  : Lemma (requires shape_premises rn /\ key_fields rn q a == key_fields rn q' a')
+let key_fields_injective (rn:renderers) (uo:string -> time_unit) (q q':query) (a a':arguments)
+  : Lemma (requires shape_premises rn /\ units_named uo a /\ units_named uo a' /\
+                    key_fields rn q a == key_fields rn q' a')
           (ensures q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\ a == a')
-  = shape_fields_injective rn q.q_where q'.q_where q.q_order_by q'.q_order_by a a'
+  = shape_fields_injective rn uo q.q_where q'.q_where q.q_order_by q'.q_order_by a a'
 
 (* THE FIFTH THEOREM. F#: `Query.invocationKey`'s pre-image (Phase 225; over the declaration's
    filter and order since Phase 398). Two (declaration, argument list) pairs whose pre-images agree
@@ -1321,14 +1387,16 @@ let key_fields_injective (rn:renderers) (q q':query) (a a':arguments)
    there.) Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made
    (`query-renderers-abstract`). *)
 let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (q q':query) (a a':arguments)
-  : Lemma (requires key_premises reveal e t rn /\
+  (uo:string -> time_unit) (q q':query) (a a':arguments)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     canonical_key rn q (sort_args rn a) == canonical_key rn q' (sort_args rn a'))
           (ensures q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
                    sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  sort_units_named uo rn a;
+  sort_units_named uo rn a';
   fields_injective reveal e t rn (key_fields rn q (sort_args rn a)) (key_fields rn q' (sort_args rn a'));
-  key_fields_injective rn q q' (sort_args rn a) (sort_args rn a');
+  key_fields_injective rn uo q q' (sort_args rn a) (sort_args rn a');
   let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
     sort_mem rn a x; sort_mem rn a' x
   in
@@ -1554,12 +1622,13 @@ let key_fields_not_page (rn:renderers) (q:query) (a:arguments) (r:list string)
     | _ :: _ -> ()
 
 (* The page fields determine the token, the declaration's filter and order, and the argument list. *)
-let page_fields_injective (rn:renderers) (t1 t2:option string) (q1 q2:query) (a1 a2:arguments)
-  : Lemma (requires shape_premises rn /\ page_fields rn t1 q1 a1 == page_fields rn t2 q2 a2)
+let page_fields_injective (rn:renderers) (uo:string -> time_unit) (t1 t2:option string) (q1 q2:query) (a1 a2:arguments)
+  : Lemma (requires shape_premises rn /\ units_named uo a1 /\ units_named uo a2 /\
+                    page_fields rn t1 q1 a1 == page_fields rn t2 q2 a2)
           (ensures t1 == t2 /\ q1.q_where == q2.q_where /\ q1.q_order_by == q2.q_order_by /\ a1 == a2)
   = match t1, t2 with
-    | None, None -> key_fields_injective rn q1 q2 a1 a2
-    | Some _, Some _ -> key_fields_injective rn q1 q2 a1 a2
+    | None, None -> key_fields_injective rn uo q1 q2 a1 a2
+    | Some _, Some _ -> key_fields_injective rn uo q1 q2 a1 a2
     | None, Some t ->
       key_fields_not_page rn q1 a1 (t :: key_fields rn q2 a2)
     | Some t, None ->
@@ -1573,14 +1642,16 @@ let page_fields_injective (rn:renderers) (t1 t2:option string) (q1 q2:query) (a1
    `invocation_key_injective` is, on `key_premises`; whether two distinct pre-images HASH apart is a
    claim about FNV-1a and is not made. *)
 let invocation_key_page_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (q q':query) (a a':arguments) (tok tok':option string)
-  : Lemma (requires key_premises reveal e t rn /\
+  (uo:string -> time_unit) (q q':query) (a a':arguments) (tok tok':option string)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a'))
           (ensures tok == tok' /\ q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
                    sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  sort_units_named uo rn a;
+  sort_units_named uo rn a';
   fields_injective reveal e t rn (page_fields rn tok q (sort_args rn a)) (page_fields rn tok' q' (sort_args rn a'));
-  page_fields_injective rn tok tok' q q' (sort_args rn a) (sort_args rn a');
+  page_fields_injective rn uo tok tok' q q' (sort_args rn a) (sort_args rn a');
   let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
     sort_mem rn a x; sort_mem rn a' x
   in
@@ -1589,19 +1660,19 @@ let invocation_key_page_injective (#sym:eqtype) (reveal:string -> list sym) (e t
 (* The law a host reads: distinct tokens give distinct pre-images, whatever the declarations and
    the arguments. *)
 let distinct_tokens_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
-  (rn:renderers) (q q':query) (a a':arguments) (tok tok':option string)
-  : Lemma (requires key_premises reveal e t rn /\ ~(tok == tok'))
+  (rn:renderers) (uo:string -> time_unit) (q q':query) (a a':arguments) (tok tok':option string)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\ ~(tok == tok'))
           (ensures ~(canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a')))
-  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn q q' a a' tok) tok'
+  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn uo q q' a a' tok) tok'
 
 (* Phase 398 — and the same for the shape: a declaration filtered or ordered differently gives a
    distinct pre-image on every page, whatever the arguments and the tokens. *)
 let distinct_shapes_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
-  (rn:renderers) (q q':query) (a a':arguments) (tok tok':option string)
-  : Lemma (requires key_premises reveal e t rn /\
+  (rn:renderers) (uo:string -> time_unit) (q q':query) (a a':arguments) (tok tok':option string)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     ~(q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by))
           (ensures ~(canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a')))
-  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn q q' a a' tok) tok'
+  = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn uo q q' a a' tok) tok'
 
 (* F#: `Query.invokePage` — `invoke`, with the token handed to the resolver. *)
 let invoke_page (#v:Type) (q:query) (a:arguments) (tok:option string)
@@ -1784,6 +1855,21 @@ let twins : list twin = [
         [ ("region", Int 3) ] = Ok ()) };
   { tname = "validate-params-refuses-a-float-for-an-int-param";
     tholds = (fun () -> widens FloatType IntType = false) };
+  { tname = "validate-params-widens-a-seconds-timestamp-into-a-nanoseconds-param";
+    tholds = (fun () ->
+      validate_params
+        ({ twin_query with q_params = [ { p_name = "region"; p_type = TimestampType Nanoseconds; p_required = true } ] })
+        [ ("region", Timestamp Seconds "2026-01-01T00:00:00Z") ] = Ok ()
+      && widens (TimestampType Milliseconds) (TimestampType Seconds) = false) };
+  { tname = "register-admits-a-coarser-timestamp-literal-and-refuses-a-finer";
+    tholds = (fun () ->
+      register ({ twin_query with q_schema = [ ("t", TimestampType Milliseconds) ];
+                                  q_where = [ AtLeast "t" (Timestamp Seconds "2026-01-01T00:00:00Z") ] }) empty
+      = Ok ({ queries = [ { twin_query with q_schema = [ ("t", TimestampType Milliseconds) ];
+                                            q_where = [ AtLeast "t" (Timestamp Seconds "2026-01-01T00:00:00Z") ] } ] })
+      && register ({ twin_query with q_schema = [ ("t", TimestampType Milliseconds) ];
+                                     q_where = [ AtLeast "t" (Timestamp Microseconds "2026-01-01T00:00:00.000001Z") ] }) empty
+         = Error (PredicateTypeMismatch "t" (TimestampType Milliseconds) (TimestampType Microseconds))) };
   { tname = "register-refuses-a-duplicate";
     tholds = (fun () -> register twin_query ({ queries = [ twin_query ] }) = Error (DuplicateQuery "q")) };
   { tname = "register-refuses-a-repeated-parameter-name";

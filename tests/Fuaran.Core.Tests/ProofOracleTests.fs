@@ -70,6 +70,7 @@ let twinRoster: (string * (string * (unit -> bool)) list) list =
       "WireColumn", WireColumn.twins |> List.map (fun t -> t.tname, t.tholds)
       "ColumnRefinement", ColumnRefinement.twins |> List.map (fun t -> t.tname, t.tholds)
       "Unit", ModelUnit.twins |> List.map (fun t -> t.tname, t.tholds)
+      "Temporal", Temporal.twins |> List.map (fun t -> t.tname, t.tholds)
       "Capability", Capability.twins |> List.map (fun t -> t.tname, t.tholds)
       "Propagation", Propagation.twins |> List.map (fun t -> t.tname, t.tholds)
       "Query", Query.twins |> List.map (fun t -> t.tname, t.tholds)
@@ -10018,6 +10019,21 @@ let private propDifferential
 // `List.sortBy fst` compares strings by. A float cell crosses as its round-trip `R` text.
 // ------------------------------------------------------------------------------------------
 
+/// The query model's unit, restated in its own module (Phase 430).
+let private qUnitToModel (u: TimeUnit) : ModelQuery.time_unit =
+    match u with
+    | TimeUnit.Seconds -> ModelQuery.Seconds
+    | TimeUnit.Milliseconds -> ModelQuery.Milliseconds
+    | TimeUnit.Microseconds -> ModelQuery.Microseconds
+    | TimeUnit.Nanoseconds -> ModelQuery.Nanoseconds
+
+let private qUnitOfModel (u: ModelQuery.time_unit) : TimeUnit =
+    match u with
+    | ModelQuery.Seconds -> TimeUnit.Seconds
+    | ModelQuery.Milliseconds -> TimeUnit.Milliseconds
+    | ModelQuery.Microseconds -> TimeUnit.Microseconds
+    | ModelQuery.Nanoseconds -> TimeUnit.Nanoseconds
+
 let private qColToModel (t: ColumnType) : ModelQuery.column_type =
     match t with
     | IntType -> ModelQuery.IntType
@@ -10025,10 +10041,7 @@ let private qColToModel (t: ColumnType) : ModelQuery.column_type =
     | BoolType -> ModelQuery.BoolType
     | StringType -> ModelQuery.StringType
     | DateType -> ModelQuery.DateType
-    | TimestampType TimeUnit.Seconds -> ModelQuery.TimestampType
-    // The query model's column type carries no unit (Phase 419's deferred task 3); the pools below
-    // draw only the seconds unit, which is the model's `TimestampType`.
-    | TimestampType u -> failwithf "the query model has no %A timestamp" u
+    | TimestampType u -> ModelQuery.TimestampType(qUnitToModel u)
     | DecimalType -> ModelQuery.DecimalType
 
 let private qColTag (t: ColumnType) : string =
@@ -10048,7 +10061,7 @@ let private qModelColTag (t: ModelQuery.column_type) : string =
     | ModelQuery.BoolType -> "bool"
     | ModelQuery.StringType -> "string"
     | ModelQuery.DateType -> "date"
-    | ModelQuery.TimestampType -> "timestamp"
+    | ModelQuery.TimestampType u -> ColumnType.tag (TimestampType(qUnitOfModel u))
     | ModelQuery.DecimalType -> "decimal"
 
 let private qCellToModel (c: Cell) : ModelQuery.cell =
@@ -10058,7 +10071,10 @@ let private qCellToModel (c: Cell) : ModelQuery.cell =
     | Cell.Bool v -> ModelQuery.Bool v
     | Cell.Str v -> ModelQuery.Str v
     | Cell.Date v -> ModelQuery.Date v
-    | Cell.Timestamp v -> ModelQuery.Timestamp v
+    // Phase 430: a timestamp crosses with the unit `Cell.typeOf` names for it — the coarsest unit
+    // holding its instant, `TemporalText.unitOf` — beside its text; the model reads the unit as the
+    // cell's type and the text as its payload (its header says why).
+    | Cell.Timestamp v -> ModelQuery.Timestamp(qUnitToModel (TemporalText.unitOf v), v)
     | Cell.Decimal v -> ModelQuery.Decimal v
     | Cell.Null -> ModelQuery.Null
 
@@ -10130,7 +10146,7 @@ let private qCellOfModel (c: ModelQuery.cell) : Cell =
     | ModelQuery.Bool v -> Cell.Bool v
     | ModelQuery.Str v -> Cell.Str v
     | ModelQuery.Date v -> Cell.Date v
-    | ModelQuery.Timestamp v -> Cell.Timestamp v
+    | ModelQuery.Timestamp(_, v) -> Cell.Timestamp v
     | ModelQuery.Decimal v -> Cell.Decimal v
     | ModelQuery.Null -> Cell.Null
 
@@ -10397,7 +10413,10 @@ let private queryTypePool =
       StringType
       DateType
       TimestampType TimeUnit.Seconds
-      DecimalType ]
+      DecimalType
+      TimestampType TimeUnit.Milliseconds
+      TimestampType TimeUnit.Microseconds
+      TimestampType TimeUnit.Nanoseconds ]
 
 /// A present cell of the given type, from a small pool that reaches the key's edges: a negative
 /// and an extreme int, a negative zero and an exponent-form float, a string that SPELLS a binding
@@ -10420,7 +10439,18 @@ let private genCellOf (t: ColumnType) (r: ConfRng.T) : Cell * ConfRng.T =
         let v, r1 = ConfRng.choose [ "2026-09-20"; "1970-01-01" ] r
         Cell.Date v, r1
     | TimestampType _ ->
-        let v, r1 = ConfRng.choose [ "2026-09-20T00:00:00Z"; "1970-01-01T00:00:00Z" ] r
+        // Every unit (Phase 430): a whole second, and a fraction of three, six and nine digits —
+        // so a literal is drawn finer than its column as often as not, which is the where-fault's
+        // widening clause and `validateParams`' timestamp arm.
+        let v, r1 =
+            ConfRng.choose
+                [ "2026-09-20T00:00:00Z"
+                  "1970-01-01T00:00:00Z"
+                  "2026-09-20T00:00:00.5Z"
+                  "2026-09-20T00:00:00.000125Z"
+                  "2026-09-20T00:00:00.000000007Z" ]
+                r
+
         Cell.Timestamp v, r1
     | DecimalType ->
         // A zero, a negative, a fraction a float cannot hold, and one longer than any host decimal.
@@ -11044,20 +11074,26 @@ module private ColumnDiff =
           int_text = fun i -> canonToChs (string i)
           finite = System.Double.IsFinite
           zero_int = 0
-          zero_float = 0.0
-          is_date = fun s -> TemporalText.isCanonicalDate (canonFromChs s)
-          // The model's one timestamp type is the seconds unit (Phase 422 gave production a unit;
-          // the model's is Phase 419's deferred task 3), so its predicate is canonical seconds text.
-          is_timestamp = fun s -> (TemporalText.tryInstant TimeUnit.Seconds (canonFromChs s)).IsSome }
+          zero_float = 0.0 }
 
-    /// The column types the list model spells (Phase 422): `ColumnType.all` before the three
-    /// sub-second units, which it APPENDS — so a draw over this list is the draw it was before them.
-    let modelTypes: ColumnType list =
-        ColumnType.all
-        |> List.filter (fun t ->
-            match t with
-            | TimestampType u -> u = TimeUnit.Seconds
-            | _ -> true)
+    /// The column types the list model spells: since Phase 430 every one of `ColumnType.all`, the
+    /// four timestamp units included (the calendar is `Temporal.fst`'s, no longer a host field).
+    let modelTypes: ColumnType list = ColumnType.all
+
+    /// `TimeUnit` as `Temporal.fst` spells it, and back.
+    let toModelUnit (u: TimeUnit) : Temporal.time_unit =
+        match u with
+        | TimeUnit.Seconds -> Temporal.Seconds
+        | TimeUnit.Milliseconds -> Temporal.Milliseconds
+        | TimeUnit.Microseconds -> Temporal.Microseconds
+        | TimeUnit.Nanoseconds -> Temporal.Nanoseconds
+
+    let ofModelUnit (u: Temporal.time_unit) : TimeUnit =
+        match u with
+        | Temporal.Seconds -> TimeUnit.Seconds
+        | Temporal.Milliseconds -> TimeUnit.Milliseconds
+        | Temporal.Microseconds -> TimeUnit.Microseconds
+        | Temporal.Nanoseconds -> TimeUnit.Nanoseconds
 
     let toModelType (t: ColumnType) : WireColumn.column_type =
         match t with
@@ -11066,10 +11102,7 @@ module private ColumnDiff =
         | BoolType -> WireColumn.BoolType
         | StringType -> WireColumn.StringType
         | DateType -> WireColumn.DateType
-        | TimestampType TimeUnit.Seconds -> WireColumn.TimestampType
-        // `WireColumn`'s column type carries no unit (Phase 419's deferred task 3); every pool here
-        // draws from `modelTypes`, whose one timestamp is the seconds unit.
-        | TimestampType u -> failwithf "the WireColumn model has no %A timestamp" u
+        | TimestampType u -> WireColumn.TimestampType(toModelUnit u)
         | DecimalType -> WireColumn.DecimalType
 
     let ofModelType (t: WireColumn.column_type) : ColumnType =
@@ -11079,8 +11112,36 @@ module private ColumnDiff =
         | WireColumn.BoolType -> BoolType
         | WireColumn.StringType -> StringType
         | WireColumn.DateType -> DateType
-        | WireColumn.TimestampType -> TimestampType TimeUnit.Seconds
+        | WireColumn.TimestampType u -> TimestampType(ofModelUnit u)
         | WireColumn.DecimalType -> DecimalType
+
+    /// A canonical instant for a column at `u`: a whole second, or a fraction of the unit's own
+    /// digits, or of a coarser unit's — every unit at least as coarse as the column's, which is
+    /// every text `ofCells` and decode admit there.
+    let instantFor (draw: int -> int) (u: TimeUnit) : string =
+        let second = sprintf "2026-01-01T00:00:%02d" (draw 60)
+
+        let digits =
+            match draw 4 with
+            | 0 -> 0
+            | 1 -> min 3 (TimeUnit.digits u)
+            | 2 -> min 6 (TimeUnit.digits u)
+            | _ -> TimeUnit.digits u
+
+        if digits = 0 then
+            second + "Z"
+        else
+            // the last digit non-zero, as the canonical form requires
+            let body = String.init (digits - 1) (fun _ -> string (draw 10))
+            second + "." + body + string (1 + draw 9) + "Z"
+
+    /// A canonical instant FINER than a column at `u` holds — `None` for the finest unit.
+    let finerThan (u: TimeUnit) : string option =
+        match u with
+        | TimeUnit.Seconds -> Some "2026-01-01T00:00:00.5Z"
+        | TimeUnit.Milliseconds -> Some "2026-01-01T00:00:00.000125Z"
+        | TimeUnit.Microseconds -> Some "2026-01-01T00:00:00.000000007Z"
+        | TimeUnit.Nanoseconds -> None
 
     let toModelCell (c: Cell) : WireColumn.cell<int, float> =
         match c with
@@ -11305,7 +11366,7 @@ module private ColumnDiff =
                 | BoolType -> Bool(draw 2 = 0)
                 | StringType -> Str texts[draw texts.Length]
                 | DateType -> Date(sprintf "2026-01-%02d" (1 + draw 28))
-                | TimestampType _ -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60))
+                | TimestampType u -> Timestamp(instantFor draw u)
                 | DecimalType ->
                     match draw 3 with
                     | 0 -> Int(draw 50 - 25)
@@ -11575,18 +11636,17 @@ module private RefinementDiff =
             | Floats(xs, _) -> ColumnRefinement.Floats(Vector.toArray xs |> List.ofArray, mask)
             | Bools(xs, _) -> ColumnRefinement.Bools(Vector.toArray xs |> List.ofArray, mask)
             | Strs(xs, _) -> ColumnRefinement.Strs(texts xs, mask)
-            // Phase 422: the integers through their canonical text, the cells' form the model holds.
-            | Dates(xs, _) -> ColumnRefinement.Dates(texts (Vector.map TemporalText.dateText xs), mask)
+            // Phase 430: the integers as the model holds them — the day counts, and per unit the
+            // whole epoch seconds (an integer-valued float, read as the integer it is) with the
+            // fraction vector where the column holds one.
+            | Dates(xs, _) -> ColumnRefinement.Dates(Vector.toArray xs |> List.ofArray |> List.map bigint, mask)
             | Timestamps(u, xs, f, _) ->
-                let fractionAt (i: int) =
-                    match f with
-                    | Some fs -> fs[i]
-                    | None -> 0
-
-                let instants =
-                    Vector.mapi (fun i s -> TemporalText.instantText u s (fractionAt i)) xs
-
-                ColumnRefinement.Timestamps(texts instants, mask)
+                ColumnRefinement.Timestamps(
+                    ColumnDiff.toModelUnit u,
+                    Vector.toArray xs |> List.ofArray |> List.map (fun s -> bigint (int64 s)),
+                    toMOpt (f |> Option.map (fun fs -> Vector.toArray fs |> List.ofArray |> List.map bigint)),
+                    mask
+                )
             | Decimals(xs, _) -> ColumnRefinement.Decimals(texts xs, mask)
 
         ({ col_name = canonToChs c.Name
@@ -11640,22 +11700,33 @@ module private RefinementDiff =
                  else
                      Date(sprintf "2026-01-%02d" (1 + draw 28))),
                 false
-            | TimestampType _ -> Timestamp(sprintf "2026-01-01T00:00:%02dZ" (draw 60)), false
+            | TimestampType u -> Timestamp(ColumnDiff.instantFor draw u), false
             | DecimalType ->
                 match draw 3 with
                 | 0 -> Int(draw 50 - 25), true
                 | 1 -> Decimal "1.50", false
                 | _ -> Decimal(string (draw 2000 - 1000)), false
 
-    /// A present cell of a type that does NOT widen into `ty` — the one `ofCells` refuses.
-    let private outsideOf (ty: ColumnType) : Cell =
+    /// A present cell `ofCells` refuses: one of a type that does NOT widen into `ty`, and for the
+    /// temporal columns (Phase 430) also an instant FINER than the column's unit — refused as the
+    /// `TypeMismatch` naming the finer type — and a text that is not canonical, refused as the
+    /// `MalformedShape` the integer storage cannot hold.
+    let private outsideOf (draw: int -> int) (ty: ColumnType) : Cell =
         match ty with
         | IntType -> Bool true
         | FloatType -> Str "x"
         | BoolType -> Int 1
         | StringType -> Bool false
-        | DateType -> Str "2026-01-01"
-        | TimestampType _ -> Int 5
+        | DateType ->
+            match draw 3 with
+            | 0 -> Str "2026-01-01"
+            | 1 -> Date "2026-02-30"
+            | _ -> Date "nope"
+        | TimestampType u ->
+            match draw 3, ColumnDiff.finerThan u with
+            | 0, Some finer -> Timestamp finer
+            | 1, _ -> Timestamp "2026-01-01T00:00:00.50Z"
+            | _ -> Int 5
         | DecimalType -> Float 1.5
 
     type Tally =
@@ -11809,7 +11880,7 @@ module private RefinementDiff =
             let cells =
                 if wild && rows > 0 && draw 4 = 0 then
                     let at = draw rows
-                    cells |> List.mapi (fun j c -> if j = at then outsideOf ty else c)
+                    cells |> List.mapi (fun j c -> if j = at then outsideOf draw ty else c)
                 else
                     cells
 
@@ -12023,6 +12094,438 @@ module private RefinementDiff =
 // production unit to the model through its canonical text — so a disagreement about a text is a
 // disagreement about `parse`, never about the bridge.
 // ---------------------------------------------------------------------------
+
+// ------------------------------------------------------------------------------------------
+//  Phase 430 — the temporal encodings beside Temporal.fst: `TemporalText` and `TimeUnit` asked of
+//  production and of the extracted model over the same days, texts and instants, in every unit.
+//  The model's integers are `bigint`; production's day is an `int`, its second an integer-valued
+//  `float` and its fraction an `int` — converted at the edge, which is where the width assumption
+//  lives (the ladder's `column-vector-is-its-contents` says the same of the vectors).
+// ------------------------------------------------------------------------------------------
+
+module private TemporalDiff =
+
+    type Tally =
+        {
+            Draws: int
+            Diffs: string list
+            /// Days inside and outside the canonical range; texts canonical and not.
+            InRange: int
+            OutOfRange: int
+            Canonical: int
+            NotCanonical: int
+            /// Instants with a fraction, and the units drawn.
+            Fractional: int
+            Units: Set<string>
+        }
+
+    let empty =
+        { Draws = 0
+          Diffs = []
+          InRange = 0
+          OutOfRange = 0
+          Canonical = 0
+          NotCanonical = 0
+          Fractional = 0
+          Units = Set.empty }
+
+    let private diff (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
+        { t with
+            Diffs =
+                sprintf "%s: %s\n  production: %s\n  the model:  %s" label what prod model
+                :: t.Diffs }
+
+    let private same (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
+        if prod = model then t else diff label what prod model t
+
+    let private showPair (o: (bigint * bigint) option) =
+        match o with
+        | Some(a, b) -> sprintf "Some (%A, %A)" a b
+        | None -> "None"
+
+    let private showOpt (o: 'a option) = sprintf "%A" o
+
+    /// A day count, asked of both: its text, that text read back, the range check, and the
+    /// calendar both ways. Drawn inside the zone where production's truncating division and the
+    /// model's Euclidean one agree (every day from `-865565` on — the shifted dividend is
+    /// non-negative there), which holds the whole canonical range with a margin either side.
+    let probeDay (label: string) (d: int) (t: Tally) : Tally =
+        let t = { t with Draws = t.Draws + 1 }
+        let inRange = TemporalText.isDayInRange d
+
+        let t =
+            if inRange then
+                { t with InRange = t.InRange + 1 }
+            else
+                { t with OutOfRange = t.OutOfRange + 1 }
+
+        let prodText = TemporalText.dateText d
+        let modelText = canonFromChs (Temporal.date_text (bigint d))
+        let t = same label "dateText" prodText modelText t
+
+        let t =
+            same label "isDayInRange" (string inRange) (string (Temporal.is_day_in_range (bigint d))) t
+
+        let t =
+            same
+                label
+                "tryDays (dateText d)"
+                (showOpt (TemporalText.tryDays prodText))
+                (showOpt (ofMOpt (Temporal.try_days (canonToChs prodText)) |> Option.map int))
+                t
+
+        let c = TemporalText.civilOfDays d
+        let mc = Temporal.civil_of_days (bigint d)
+
+        let t =
+            same
+                label
+                "civilOfDays"
+                (sprintf "%d-%d-%d" c.Year c.Month c.Day)
+                (sprintf "%A-%A-%A" mc.year mc.month mc.day)
+                t
+
+        same
+            label
+            "daysOfCivil (civilOfDays d)"
+            (string (TemporalText.daysOfCivil c.Year c.Month c.Day))
+            (string (Temporal.days_of_civil (bigint c.Year) (bigint c.Month) (bigint c.Day)))
+            t
+
+    /// A date text, asked of both: read to a day, or refused.
+    let probeDateText (label: string) (s: string) (t: Tally) : Tally =
+        let t = { t with Draws = t.Draws + 1 }
+        let prod = TemporalText.tryDays s
+        let model = ofMOpt (Temporal.try_days (canonToChs s)) |> Option.map int
+
+        let t =
+            if prod.IsSome then
+                { t with Canonical = t.Canonical + 1 }
+            else
+                { t with
+                    NotCanonical = t.NotCanonical + 1 }
+
+        same label (sprintf "tryDays %A" s) (showOpt prod) (showOpt model) t
+
+    /// A pair at a unit, asked of both: the range check, and in range its text, the text read back
+    /// at the unit, and the coarsest unit of the text.
+    let probeInstant (label: string) (u: TimeUnit) (second: float) (fraction: int) (t: Tally) : Tally =
+        let mu = ColumnDiff.toModelUnit u
+
+        let t =
+            { t with
+                Draws = t.Draws + 1
+                Units = t.Units.Add(ColumnType.tag (TimestampType u))
+                Fractional = t.Fractional + (if fraction <> 0 then 1 else 0) }
+
+        let inRange = TemporalText.isInstantInRange u second fraction
+
+        let t =
+            same
+                label
+                "isInstantInRange"
+                (string inRange)
+                (string (Temporal.is_instant_in_range mu (bigint (int64 second)) (bigint fraction)))
+                t
+
+        if not inRange then
+            { t with OutOfRange = t.OutOfRange + 1 }
+        else
+            let t = { t with InRange = t.InRange + 1 }
+            let prodText = TemporalText.instantText u second fraction
+
+            let modelText =
+                canonFromChs (Temporal.instant_text mu (bigint (int64 second)) (bigint fraction))
+
+            let t = same label "instantText" prodText modelText t
+
+            let t =
+                same
+                    label
+                    "tryInstant u (instantText u s f)"
+                    (showOpt (
+                        TemporalText.tryInstant u prodText
+                        |> Option.map (fun (s, f) -> bigint (int64 s), bigint f)
+                    ))
+                    (showPair (ofMOpt (Temporal.try_instant mu (canonToChs prodText))))
+                    t
+
+            same
+                label
+                "unitOf"
+                (ColumnType.tag (TimestampType(TemporalText.unitOf prodText)))
+                (ColumnType.tag (TimestampType(ColumnDiff.ofModelUnit (Temporal.unit_of (canonToChs prodText)))))
+                t
+
+    /// An instant text, asked of both at every unit: read to a pair or refused, canonical or not,
+    /// and its coarsest unit.
+    let probeInstantText (label: string) (s: string) (t: Tally) : Tally =
+        let t = { t with Draws = t.Draws + 1 }
+        let canonical = TemporalText.isCanonicalTimestamp s
+
+        let t =
+            if canonical then
+                { t with Canonical = t.Canonical + 1 }
+            else
+                { t with
+                    NotCanonical = t.NotCanonical + 1 }
+
+        let t =
+            same
+                label
+                (sprintf "isCanonicalTimestamp %A" s)
+                (string canonical)
+                (string (Temporal.is_canonical_timestamp (canonToChs s)))
+                t
+
+        let t =
+            same
+                label
+                (sprintf "unitOf %A" s)
+                (ColumnType.tag (TimestampType(TemporalText.unitOf s)))
+                (ColumnType.tag (TimestampType(ColumnDiff.ofModelUnit (Temporal.unit_of (canonToChs s)))))
+                t
+
+        [ TimeUnit.Seconds
+          TimeUnit.Milliseconds
+          TimeUnit.Microseconds
+          TimeUnit.Nanoseconds ]
+        |> List.fold
+            (fun t u ->
+                same
+                    label
+                    (sprintf "tryInstant %s %A" (ColumnType.tag (TimestampType u)) s)
+                    (showOpt (
+                        TemporalText.tryInstant u s
+                        |> Option.map (fun (sec, f) -> bigint (int64 sec), bigint f)
+                    ))
+                    (showPair (ofMOpt (Temporal.try_instant (ColumnDiff.toModelUnit u) (canonToChs s))))
+                    t)
+            t
+
+    /// Two texts, asked of both: THE order.
+    let probeCompare (label: string) (a: string) (b: string) (t: Tally) : Tally =
+        let t = { t with Draws = t.Draws + 1 }
+
+        same
+            label
+            (sprintf "compareInstants %A %A" a b)
+            (string (TemporalText.compareInstants a b))
+            (string (Temporal.compare_instants (canonToChs a) (canonToChs b)))
+            t
+
+    let private units =
+        [| TimeUnit.Seconds
+           TimeUnit.Milliseconds
+           TimeUnit.Microseconds
+           TimeUnit.Nanoseconds |]
+
+    /// The drawn pools: days across and beyond the range, texts canonical and corrupted, pairs in
+    /// every unit at the range's ends and inside it, instant texts of every fraction length (and
+    /// the ill-formed ones: a trailing zero, ten digits, no `Z`), and pairs of texts to order.
+    /// The generator's draw reads the seed's HIGH bits: the low bits of this linear congruence cycle
+    /// with a period of a few steps, so a `draw 4` followed by three more draws and another `draw 4`
+    /// would answer in lockstep — which is how a first draft drew twenty fractional pairs in 1,500.
+    let private drawFrom (r: int ref) (n: int) =
+        r.Value <- nextCanonSeed r.Value
+        (r.Value >>> 9) % n
+
+    let generated (seed: int) (trials: int) : Tally =
+        let r = ref seed
+        let draw (n: int) = drawFrom r n
+
+        let span = TemporalText.MaxDay - TemporalText.MinDay
+        let mutable t = empty
+
+        // the ends and their neighbours, then the drawn days
+        for d in
+            [ TemporalText.MinDay
+              TemporalText.MaxDay
+              TemporalText.MinDay - 1
+              TemporalText.MaxDay + 1
+              0
+              -1
+              -719468
+              -146097 ] do
+            t <- probeDay "the fixed days" d t
+
+        for i in 1..trials do
+            let d =
+                match draw 6 with
+                | 0 -> TemporalText.MinDay - 1 - draw 3000
+                | 1 -> TemporalText.MaxDay + 1 + draw 3000
+                | _ -> TemporalText.MinDay + draw span
+
+            t <- probeDay (sprintf "generated seed=%d day=%d" seed i) d t
+
+        // date texts: a canonical one, and the corruptions
+        let dateTexts =
+            [ "2026-02-28"
+              "2026-02-30"
+              "2024-02-29"
+              "2023-02-29"
+              "0000-01-01"
+              "9999-12-31"
+              "10000-01-01"
+              "999-12-31"
+              "2026-2-28"
+              "2026/02/28"
+              "2026-13-01"
+              "2026-00-10"
+              "2026-01-00"
+              "-026-01-01"
+              ""
+              "nope" ]
+
+        for s in dateTexts do
+            t <- probeDateText "the fixed date texts" s t
+
+        for i in 1..trials do
+            let d = TemporalText.MinDay + draw span
+            let text = TemporalText.dateText d
+
+            let text =
+                match draw 5 with
+                | 0 -> text.Substring(0, 9)
+                | 1 -> text + "Z"
+                | 2 -> text.Replace('-', ':')
+                | _ -> text
+
+            t <- probeDateText (sprintf "generated seed=%d date-text=%d" seed i) text t
+
+        // pairs per unit: the ends, inside, and out of range both ways
+        for u in units do
+            let scale = TimeUnit.scale u
+
+            for second, fraction in
+                [ TemporalText.minSecond, 0
+                  TemporalText.maxSecond, scale - 1
+                  TemporalText.minSecond - 1.0, 0
+                  TemporalText.maxSecond + 1.0, 0
+                  0.0, scale - 1
+                  0.0, scale
+                  0.0, -1
+                  86399.0, 1 ] do
+                t <- probeInstant (sprintf "the fixed pairs %s" (ColumnType.tag (TimestampType u))) u second fraction t
+
+        for i in 1..trials do
+            let u = units[draw units.Length]
+            let scale = TimeUnit.scale u
+            let day = TemporalText.MinDay + draw span
+            let second = float day * 86400.0 + float (draw 86400)
+
+            let fraction =
+                match draw 4 with
+                | 0 -> 0
+                | 1 -> draw scale
+                | 2 -> (draw 1000) * (scale / 1000)
+                | _ -> scale - 1 - draw (min scale 50)
+
+            t <- probeInstant (sprintf "generated seed=%d pair=%d" seed i) u second fraction t
+
+        // instant texts: every fraction length, and the ill-formed shapes
+        let instantTexts =
+            [ "2026-06-22T17:00:00Z"
+              "2026-06-22T17:00:00.5Z"
+              "2026-06-22T17:00:00.05Z"
+              "2026-06-22T17:00:00.005Z"
+              "2026-06-22T17:00:00.0005Z"
+              "2026-06-22T17:00:00.123456Z"
+              "2026-06-22T17:00:00.1234567Z"
+              "2026-06-22T17:00:00.123456789Z"
+              "2026-06-22T17:00:00.1234567890Z"
+              "2026-06-22T17:00:00.50Z"
+              "2026-06-22T17:00:00.0Z"
+              "2026-06-22T17:00:00.Z"
+              "2026-06-22T17:00:00"
+              "2026-06-22T24:00:00Z"
+              "2026-06-22T17:60:00Z"
+              "2026-06-22T17:00:60Z"
+              "2026-06-22 17:00:00Z"
+              "2026-02-30T00:00:00Z"
+              "0000-01-01T00:00:00Z"
+              "9999-12-31T23:59:59.999999999Z"
+              "2026-06-22T17:00:00.5"
+              "" ]
+
+        for s in instantTexts do
+            t <- probeInstantText "the fixed instant texts" s t
+
+        let canonicalDraw () =
+            let u = units[draw units.Length]
+            let day = TemporalText.MinDay + draw span
+            let second = float day * 86400.0 + float (draw 86400)
+            let fraction = if draw 3 = 0 then 0 else draw (TimeUnit.scale u)
+            TemporalText.instantText u second fraction
+
+        for i in 1..trials do
+            let text = canonicalDraw ()
+
+            let text =
+                match draw 6 with
+                | 0 -> text.Substring(0, text.Length - 1)
+                | 1 -> text.Replace("Z", "0Z")
+                | 2 -> text.Replace('T', ' ')
+                | _ -> text
+
+            t <- probeInstantText (sprintf "generated seed=%d instant-text=%d" seed i) text t
+
+        // the order: canonical pairs, close pairs (one second, one fraction apart), and equal ones
+        for i in 1..trials do
+            let a = canonicalDraw ()
+
+            let b =
+                match draw 4 with
+                | 0 -> a
+                | 1 ->
+                    (match TemporalText.tryInstant TimeUnit.Nanoseconds a with
+                     | Some(sec, f) ->
+                         let f' = if f = 0 then 1 else f - 1
+                         TemporalText.instantText TimeUnit.Nanoseconds sec f'
+                     | None -> a)
+                | 2 ->
+                    (match TemporalText.tryInstant TimeUnit.Nanoseconds a with
+                     | Some(sec, f) when sec < TemporalText.maxSecond ->
+                         TemporalText.instantText TimeUnit.Nanoseconds (sec + 1.0) f
+                     | _ -> a)
+                | _ -> canonicalDraw ()
+
+            t <- probeCompare (sprintf "generated seed=%d order=%d" seed i) a b t
+            t <- probeCompare (sprintf "generated seed=%d order=%d reversed" seed i) b a t
+
+        t
+
+    /// The go-red: a model asked to read every text AT THE SECONDS UNIT loses on exactly the texts
+    /// with a fraction — what `try_instant`'s unit arm is for.
+    let secondsOnly (seed: int) (trials: int) : int * int =
+        let r = ref seed
+        let draw (n: int) = drawFrom r n
+
+        let span = TemporalText.MaxDay - TemporalText.MinDay
+        let mutable lost = 0
+        let mutable fractional = 0
+
+        for _ in 1..trials do
+            let u = units[draw units.Length]
+            let day = TemporalText.MinDay + draw span
+            let second = float day * 86400.0 + float (draw 86400)
+            let scale = TimeUnit.scale u
+            let fraction = if scale = 1 || draw 2 = 0 then 0 else 1 + draw (scale - 1)
+            let text = TemporalText.instantText u second fraction
+
+            let prod =
+                TemporalText.tryInstant u text
+                |> Option.map (fun (s, f) -> bigint (int64 s), bigint f)
+
+            let model = ofMOpt (Temporal.try_instant Temporal.Seconds (canonToChs text))
+
+            if fraction <> 0 then
+                fractional <- fractional + 1
+
+            if showOpt prod <> showPair model then
+                lost <- lost + 1
+
+        lost, fractional
 
 module private UnitDiff =
 
@@ -18315,8 +18818,10 @@ let proofOracleTests =
               // Two pools of drawn cell lists. The first holds only cells the column's type can
               // hold (nulls and widened `Int`s included), so every draw builds; the second also
               // plants a present cell of a type the column cannot hold, which `ofCells` refuses.
-              let fitting = onBigStack (fun () -> RefinementDiff.generated 4191 1500 false)
-              let wild = onBigStack (fun () -> RefinementDiff.generated 4192 1500 true)
+              // 2,200 draws since Phase 430: the pool draws ten column types where it drew seven,
+              // and the adequacy floors below are counts, not shares.
+              let fitting = onBigStack (fun () -> RefinementDiff.generated 4191 2200 false)
+              let wild = onBigStack (fun () -> RefinementDiff.generated 4192 2200 true)
 
               for (name, t) in [ "the fitting pool", fitting; "the wild pool", wild ] do
                   Expect.isEmpty
@@ -18337,7 +18842,12 @@ let proofOracleTests =
               Expect.isGreaterThan fitting.Widened 150 (sprintf "draws holding a widened Int (%d)" fitting.Widened)
               Expect.isGreaterThan fitting.WithNull 400 (sprintf "draws holding a Null (%d)" fitting.WithNull)
               Expect.isGreaterThan wild.Refused 150 (sprintf "the wild pool reached ofCells' refusal (%d)" wild.Refused)
-              Expect.equal wild.Classes (Set.singleton "TypeMismatch") "and the refusal is the one class ofCells has"
+
+              Expect.equal
+                  wild.Classes
+                  (Set.ofList [ "TypeMismatch"; "MalformedShape" ])
+                  "and the refusals are the two classes ofCells has: a cell outside the type (an instant finer than its unit included), and temporal text it cannot hold"
+
               Expect.isGreaterThan wild.Built 800 (sprintf "the wild pool still builds (%d)" wild.Built)
 
           testCase
@@ -18372,12 +18882,41 @@ let proofOracleTests =
               // `ofCells` normalises a widened `Int` at construction. It loses on every built draw
               // holding an `Int` in a float or decimal column and on no other — `to_cells_of_cells`
               // says the right-hand side is `norm_cells`, which moves exactly those cells.
-              let t = onBigStack (fun () -> RefinementDiff.generated 4191 1500 false)
+              let t = onBigStack (fun () -> RefinementDiff.generated 4191 2200 false)
 
               Expect.isEmpty t.Diffs (sprintf "the pool is the clean one above:\n%s" (renderCanonDiffs t.Diffs))
               Expect.isGreaterThan t.Widened 150 "the pool holds widened draws"
               Expect.isGreaterThan (t.Built - t.Widened) 500 "and draws with nothing to widen"
               Expect.equal t.LiteralLost t.Widened "the literal bridge lost on the widened draws, and on no other"
+
+          // ---- Phase 430: the temporal encodings beside Temporal.fst ----
+
+          testCase
+              "the temporal oracle agrees with TemporalText over drawn days, texts, instants in every unit and their order"
+          <| fun _ ->
+              let t = TemporalDiff.generated 4301 1500
+
+              Expect.isEmpty
+                  t.Diffs
+                  (sprintf "the temporal oracle disagreed with production:\n%s" (renderCanonDiffs t.Diffs))
+
+              // adequacy: both sides of every range and every unit were reached
+              Expect.isGreaterThan t.InRange 2000 (sprintf "days and pairs in range (%d)" t.InRange)
+              Expect.isGreaterThan t.OutOfRange 300 (sprintf "days and pairs out of range (%d)" t.OutOfRange)
+              Expect.isGreaterThan t.Canonical 1000 (sprintf "canonical texts (%d)" t.Canonical)
+              Expect.isGreaterThan t.NotCanonical 500 (sprintf "texts that are not canonical (%d)" t.NotCanonical)
+              Expect.isGreaterThan t.Fractional 800 (sprintf "pairs with a fraction (%d)" t.Fractional)
+
+              Expect.equal
+                  t.Units
+                  (Set.ofList [ "timestamp"; "timestamp_ms"; "timestamp_us"; "timestamp_ns" ])
+                  "every unit was drawn"
+
+          testCase "a temporal oracle that reads every text at the seconds unit loses — on exactly the fractional draws"
+          <| fun _ ->
+              let lost, fractional = TemporalDiff.secondsOnly 4302 1200
+              Expect.isGreaterThan fractional 400 "the pool holds fractional instants"
+              Expect.equal lost fractional "the seconds-only reading lost on the fractional draws, and on no other"
 
           // ---- Phase 428: the unit algebra beside Unit.fst, the field codec beside WireColumn.fst §10 ----
 
@@ -19347,7 +19886,9 @@ let proofOracleTests =
               // its key moves where production's does not. If either ever passes, that half of the
               // comparison has stopped reaching the clause and the green run above certifies
               // nothing about it.
-              let forgetful = queryDifferential (queryToModelWith false) queryRenderers 1871 80
+              // 200 draws since Phase 430: the pool draws every timestamp unit, and a required param
+              // refused as a type mismatch never reaches the step the forgetful bridge drops.
+              let forgetful = queryDifferential (queryToModelWith false) queryRenderers 1871 200
               Expect.isNonEmpty forgetful.QDiffs "a bridge that forgets `Required` MUST disagree with production"
 
               Expect.isTrue

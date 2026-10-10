@@ -5,7 +5,7 @@ type column_type =
 | BoolType
 | StringType
 | DateType
-| TimestampType
+| TimestampType of Temporal.time_unit
 | DecimalType
 
 
@@ -55,11 +55,17 @@ let uu___is_DateType : column_type  ->  Prims.bool = (fun ( projectee  :  column
 
 
 let uu___is_TimestampType : column_type  ->  Prims.bool = (fun ( projectee  :  column_type ) -> (match (projectee) with
-| TimestampType -> begin
+| TimestampType (u) -> begin
      true
      end
 | uu___ -> begin
      false
+     end))
+
+
+let __proj__TimestampType__item__u : column_type  ->  Temporal.time_unit = (fun ( projectee  :  column_type ) -> (match (projectee) with
+| TimestampType (u) -> begin
+     u
      end))
 
 
@@ -523,48 +529,36 @@ let __proj__Bad__item__e = (fun ( projectee  :  res<'a> ) -> (match (projectee) 
      e
      end))
 
-type host<'num, 'flt> = {to_float : 'num  ->  'flt; int_text : 'num  ->  Prims.list<WireCanon.ch>; finite : 'flt  ->  Prims.bool; zero_int : 'num; zero_float : 'flt; is_date : Prims.list<WireCanon.ch>  ->  Prims.bool; is_timestamp : Prims.list<WireCanon.ch>  ->  Prims.bool}
+type host<'num, 'flt> = {to_float : 'num  ->  'flt; int_text : 'num  ->  Prims.list<WireCanon.ch>; finite : 'flt  ->  Prims.bool; zero_int : 'num; zero_float : 'flt}
 
 
 let __proj__Mkhost__item__to_float = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
+| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float} -> begin
      to_float
      end))
 
 
 let __proj__Mkhost__item__int_text = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
+| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float} -> begin
      int_text
      end))
 
 
 let __proj__Mkhost__item__finite = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
+| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float} -> begin
      finite
      end))
 
 
 let __proj__Mkhost__item__zero_int = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
+| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float} -> begin
      zero_int
      end))
 
 
 let __proj__Mkhost__item__zero_float = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
+| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float} -> begin
      zero_float
-     end))
-
-
-let __proj__Mkhost__item__is_date = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
-     is_date
-     end))
-
-
-let __proj__Mkhost__item__is_timestamp = (fun ( projectee  :  host<'num, 'flt> ) -> (match (projectee) with
-| {to_float = to_float; int_text = int_text; finite = finite; zero_int = zero_int; zero_float = zero_float; is_date = is_date; is_timestamp = is_timestamp} -> begin
-     is_timestamp
      end))
 
 
@@ -589,6 +583,9 @@ let values_key : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("v"))::(WireCanon
 let validity_key : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("v"))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CPlain ("l"))::(WireCanon.CPlain ("i"))::(WireCanon.CHexCh (WireCanon.HDd))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("t"))::(WireCanon.CPlain ("y"))::[]
 
 
+let timestamp_tag : Prims.list<WireCanon.ch> = (WireCanon.CPlain ("t"))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("m"))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CPlain ("s"))::(WireCanon.CPlain ("t"))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("p"))::[]
+
+
 let tag : column_type  ->  Prims.list<WireCanon.ch> = (fun ( t  :  column_type ) -> (match (t) with
 | IntType -> begin
      (WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[]
@@ -605,15 +602,24 @@ let tag : column_type  ->  Prims.list<WireCanon.ch> = (fun ( t  :  column_type )
 | DateType -> begin
      (WireCanon.CHexCh (WireCanon.HDd))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CPlain ("t"))::(WireCanon.CHexCh (WireCanon.HDe))::[]
      end
-| TimestampType -> begin
-     (WireCanon.CPlain ("t"))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("m"))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CPlain ("s"))::(WireCanon.CPlain ("t"))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("p"))::[]
+| TimestampType (Temporal.Seconds) -> begin
+     timestamp_tag
+     end
+| TimestampType (Temporal.Milliseconds) -> begin
+     (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("s"))::[]))
+     end
+| TimestampType (Temporal.Microseconds) -> begin
+     (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CLu)::(WireCanon.CPlain ("s"))::[]))
+     end
+| TimestampType (Temporal.Nanoseconds) -> begin
+     (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("s"))::[]))
      end
 | DecimalType -> begin
      (WireCanon.CHexCh (WireCanon.HDd))::(WireCanon.CHexCh (WireCanon.HDe))::(WireCanon.CHexCh (WireCanon.HDc))::(WireCanon.CPlain ("i"))::(WireCanon.CPlain ("m"))::(WireCanon.CHexCh (WireCanon.HDa))::(WireCanon.CPlain ("l"))::[]
      end))
 
 
-let all_types : Prims.list<column_type> = (IntType)::(FloatType)::(BoolType)::(StringType)::(DateType)::(TimestampType)::(DecimalType)::[]
+let all_types : Prims.list<column_type> = (IntType)::(FloatType)::(BoolType)::(StringType)::(DateType)::(TimestampType (Temporal.Seconds))::(DecimalType)::(TimestampType (Temporal.Milliseconds))::(TimestampType (Temporal.Microseconds))::(TimestampType (Temporal.Nanoseconds))::[]
 
 
 let rec find_tag : Prims.list<WireCanon.ch>  ->  Prims.list<column_type>  ->  FStar_Pervasives_Native.option<column_type> = (fun ( s  :  Prims.list<WireCanon.ch> ) ( ts  :  Prims.list<column_type> ) -> (match (ts) with
@@ -633,7 +639,13 @@ if (Prims.op_Equals (tag t) s) then begin
 let of_tag : Prims.list<WireCanon.ch>  ->  FStar_Pervasives_Native.option<column_type> = (fun ( s  :  Prims.list<WireCanon.ch> ) -> (find_tag s all_types))
 
 
-let widens : column_type  ->  column_type  ->  Prims.bool = (fun ( from  :  column_type ) ( target  :  column_type ) -> (((Prims.op_Equals from target) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target FloatType))) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target DecimalType))))
+let widens : column_type  ->  column_type  ->  Prims.bool = (fun ( from  :  column_type ) ( target  :  column_type ) -> (match (((from), (target))) with
+| (TimestampType (a), TimestampType (b)) -> begin
+     (Temporal.unit_widens a b)
+     end
+| uu___ -> begin
+     (((Prims.op_Equals from target) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target FloatType))) || ((Prims.op_Equals from IntType) && (Prims.op_Equals target DecimalType)))
+     end))
 
 
 let type_of = (fun ( c  :  cell<'num, 'flt> ) -> (match (c) with
@@ -652,8 +664,8 @@ let type_of = (fun ( c  :  cell<'num, 'flt> ) -> (match (c) with
 | Date (uu___) -> begin
      FStar_Pervasives_Native.Some (DateType)
      end
-| Timestamp (uu___) -> begin
-     FStar_Pervasives_Native.Some (TimestampType)
+| Timestamp (s) -> begin
+     FStar_Pervasives_Native.Some (TimestampType ((Temporal.unit_of s)))
      end
 | Decimal (uu___) -> begin
      FStar_Pervasives_Native.Some (DecimalType)
@@ -1036,7 +1048,7 @@ if (is_canonical s) then begin
      end
 | Date (s) -> begin
       
-if (h.is_date s) then begin
+if (Temporal.is_canonical_date s) then begin
      FStar_Pervasives_Native.None
      end else begin
      FStar_Pervasives_Native.Some (MalformedShape)
@@ -1044,7 +1056,7 @@ if (h.is_date s) then begin
      end
 | Timestamp (s) -> begin
       
-if (h.is_timestamp s) then begin
+if (Temporal.is_canonical_timestamp s) then begin
      FStar_Pervasives_Native.None
      end else begin
      FStar_Pervasives_Native.Some (MalformedShape)
@@ -1170,7 +1182,7 @@ let absent_slot = (fun ( h  :  host<'num, 'flt> ) ( ty  :  column_type ) -> (mat
 | DateType -> begin
      WireCanon.JStr ([])
      end
-| TimestampType -> begin
+| TimestampType (uu___) -> begin
      WireCanon.JStr ([])
      end
 | DecimalType -> begin
@@ -1392,7 +1404,7 @@ let decode_cell = (fun ( h  :  host<'num, 'flt> ) ( cname  :  Prims.list<WireCan
      (match (v) with
 | WireCanon.JStr (s) -> begin
       
-if (h.is_date s) then begin
+if (Temporal.is_canonical_date s) then begin
      Good (Date (s))
      end else begin
      Bad (MalformedShape)
@@ -1402,11 +1414,17 @@ if (h.is_date s) then begin
      Bad (TypeMismatch (cname, ty))
      end)
      end
-| TimestampType -> begin
+| TimestampType (u) -> begin
      (match (v) with
 | WireCanon.JStr (s) -> begin
       
-if (h.is_timestamp s) then begin
+if (match ((Temporal.try_instant u s)) with
+| FStar_Pervasives_Native.Some (v1) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) then begin
      Good (Timestamp (s))
      end else begin
      Bad (MalformedShape)
@@ -2867,7 +2885,13 @@ let rec twins_hold : Prims.list<twin>  ->  Prims.bool = (fun ( l  :  Prims.list<
      end))
 
 
-let twins : Prims.list<twin> = ({tname = "try-canonical-trims-zeros"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({tname = "try-canonical-refuses-a-bare-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({tname = "of-tag-reads-int"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::({tname = "field-json-plain-is-the-entry"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field_json (field_create ((WireCanon.CPlain ("x"))::[]) IntType)) (WireCanon.JObj ((((name_key), (WireCanon.JStr ((WireCanon.CPlain ("x"))::[]))))::(((type_key), (WireCanon.JStr ((tag IntType)))))::[]))))})::({tname = "decode-field-reads-a-unit-back"; tholds = (fun ( uu___  :  unit ) -> (
+let twins : Prims.list<twin> = ({tname = "try-canonical-trims-zeros"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD0))::(WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::(WireCanon.CHexCh (WireCanon.HD0))::[])) (FStar_Pervasives_Native.Some ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::(WireCanon.CHexCh (WireCanon.HD5))::[]))))})::({tname = "try-canonical-refuses-a-bare-point"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (try_canonical ((WireCanon.CHexCh (WireCanon.HD1))::(WireCanon.CDot)::[])) FStar_Pervasives_Native.None))})::({tname = "of-tag-reads-int"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (of_tag ((WireCanon.CPlain ("i"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("t"))::[])) (FStar_Pervasives_Native.Some (IntType))))})::({tname = "of-tag-reads-the-four-timestamp-tags"; tholds = (fun ( uu___  :  unit ) -> ((((Prims.op_Equals (of_tag timestamp_tag) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Seconds)))) && (Prims.op_Equals (of_tag (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("m"))::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Milliseconds))))) && (Prims.op_Equals (of_tag (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CLu)::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Microseconds))))) && (Prims.op_Equals (of_tag (WireCanon.app timestamp_tag ((WireCanon.CPlain ("_"))::(WireCanon.CPlain ("n"))::(WireCanon.CPlain ("s"))::[]))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Nanoseconds))))))})::({tname = "widens-a-coarser-timestamp-into-a-finer-and-not-back"; tholds = (fun ( uu___  :  unit ) -> ((((widens (TimestampType (Temporal.Seconds)) (TimestampType (Temporal.Nanoseconds))) && (not ((widens (TimestampType (Temporal.Milliseconds)) (TimestampType (Temporal.Seconds)))))) && (widens (TimestampType (Temporal.Microseconds)) (TimestampType (Temporal.Microseconds)))) && (not ((widens (TimestampType (Temporal.Seconds)) DateType)))))})::({tname = "decode-cell-reads-a-timestamp-in-its-unit"; tholds = (fun ( uu___  :  unit ) -> (
+
+let h = {to_float = (fun ( i  :  Prims.int ) -> i); int_text = (fun ( uu___1  :  Prims.int ) -> []); finite = (fun ( uu___1  :  Prims.int ) -> true); zero_int = (Prims.parse_int "0"); zero_float = (Prims.parse_int "0")}
+in (
+
+let t = (Temporal.instant_text Temporal.Milliseconds (Prims.parse_int "0") (Prims.parse_int "500"))
+in (((Prims.op_Equals (decode_cell h [] (TimestampType (Temporal.Milliseconds)) (WireCanon.JStr (t))) (Good (Timestamp (t)))) && (Prims.op_Equals (decode_cell h [] (TimestampType (Temporal.Seconds)) (WireCanon.JStr (t))) (Bad (MalformedShape)))) && (Prims.op_Equals (type_of (Timestamp (t))) (FStar_Pervasives_Native.Some (TimestampType (Temporal.Milliseconds))))))))})::({tname = "field-json-plain-is-the-entry"; tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (field_json (field_create ((WireCanon.CPlain ("x"))::[]) IntType)) (WireCanon.JObj ((((name_key), (WireCanon.JStr ((WireCanon.CPlain ("x"))::[]))))::(((type_key), (WireCanon.JStr ((tag IntType)))))::[]))))})::({tname = "decode-field-reads-a-unit-back"; tholds = (fun ( uu___  :  unit ) -> (
 
 let f = (with_label ((WireCanon.CPlain ("s"))::[]) (with_unit Unit.km_per_h (field_create ((WireCanon.CPlain ("v"))::[]) FloatType)))
 in (Prims.op_Equals (decode_field (field_json f)) (Good (f)))))})::[]

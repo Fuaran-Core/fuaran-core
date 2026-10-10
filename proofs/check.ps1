@@ -102,6 +102,14 @@ $ErrorActionPreference = 'Stop'
 #                the conversion factor proved multiplicative over the merge and exact under the gcd.
 #                Opens nothing; it precedes `WireColumn`, whose field codec (Phase 427) carries a unit's
 #                text through it.
+#   Temporal   — Phase 430, the TEMPORAL ENCODINGS: `TimeUnit` and `TemporalText.fs` clause for
+#                clause — the calendar in integers (`daysOfCivil` / `civilOfDays`), the canonical date
+#                and instant texts with their readers (`tryDays` / `dateText`, `tryInstant` /
+#                `instantText` / `unitOf`), the range checks and `compareInstants` — with the
+#                calendar proved a bijection, each text proved to read back to the one value that
+#                wrote it in every unit, the widening proved to keep the text, and the text order
+#                proved chronological. Opens `WireCanon` for the character alphabet, so it follows
+#                it; it precedes `WireColumn`, whose cell typing and per-unit decoder read it.
 #   WireColumn — Phase 306, the COLUMNAR CODEC: `Table.validate`, `ColumnCodec.encodeJson` /
 #                `decodeJson` / `tryEncode` and the decimal canonicaliser, clause for clause at the
 #                `JVal`, with the codec's image proved to lie inside what `validate` accepts and
@@ -211,7 +219,7 @@ $ErrorActionPreference = 'Stop'
 # family (`../tests/Fuaran.Core.Tests/ProofsLadderTests.fs`, `parseModules`), which matches
 # `^\$modules\s*=\s*@\(...\)` against this file — so it stays one literal line in this file, which
 # is where a reader looks for it anyway.
-$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement')
+$modules = @('DagFold', 'WireDecode', 'TreeOps', 'Skeleton', 'Chain', 'JsonParse', 'Preservation', 'TreeDiff', 'Limits', 'Utf8', 'WireCanon', 'WireVersioning', 'Unit', 'Temporal', 'WireColumn', 'Vocabulary', 'VocabularyProofs', 'DocVocabulary', 'DocVocabularyProofs', 'ScoreVocabulary', 'ScoreVocabularyProofs', 'Capability', 'Propagation', 'Query', 'Arbitrate', 'DecimalText', 'Normalize', 'VocabularyVectors', 'PropagationOps', 'TreeFrame', 'ColumnRefinement')
 
 # Phase 173 — the generated files are about the CERTIFICATION SET, and that is why the theorems
 # are committed now when Phase 150 could not commit them.
